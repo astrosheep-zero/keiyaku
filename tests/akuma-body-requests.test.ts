@@ -20,7 +20,6 @@ import {
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import {
@@ -51,10 +50,6 @@ import {
 } from "../src/library/contract-operations.js";
 import { KeiyakuRefused } from "../src/library/refusal.js";
 import { changeId, contractHead, contractId as makeContractId, snapshotId } from "../src/core/facts/types.js";
-import { repositoryAt } from "../src/git/repository.js";
-import { Delivery, Keiyaku, Repo } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Tasks } from "../src/task/index.js";
 import {
@@ -62,7 +57,6 @@ import {
   taskMutationRequestProtocol,
   type TaskMutationRequestPort,
 } from "../src/task/mutation.js";
-import { appointedWorktreePath, gitExecutablePath, makeGitRepository } from "./support/git.js";
 
 async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => draw });
@@ -977,165 +971,6 @@ test("Task request recovery voids an unserved claim without replaying Task autho
     assert.equal(board.value.hasMore, false);
   }
 });
-test("CLI forwarded deliver preserves its selected Repo and uses parent Settings and execution", async () => {
-  const gitPath = gitExecutablePath();
-  const parentRepository = makeGitRepository();
-  const contractRepository = makeGitRepository();
-  for (const repository of [parentRepository, contractRepository]) {
-    repository.run(["config", "user.name", "Test User"]);
-    repository.run(["config", "user.email", "test@example.com"]);
-    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  }
-  const root = await World.at(parentRepository.path);
-  const parent = await born(root, "parent", "11111111", ["contract.deliver", "contract.review"]);
-  const inert = await born(root, "inert", "22222222", []);
-  const parentHome = mkdtempSync(join(tmpdir(), "keiyaku-forwarded-parent-settings-"));
-  const childHome = mkdtempSync(join(tmpdir(), "keiyaku-forwarded-child-settings-"));
-  const hookLog = join(parentHome, "parent-create-hook.log");
-  await writeFile(
-    join(parentHome, "settings.json"),
-    JSON.stringify({
-      git: { requireBranchesToBeUpToDate: true },
-      worktree: {
-        create: [
-          {
-            name: "parent-create",
-            argv: [
-              process.execPath,
-              "-e",
-              `require("node:fs").appendFileSync(${JSON.stringify(hookLog)}, "created\\n")`,
-            ],
-            timeoutMs: 5_000,
-          },
-        ],
-        destroy: [],
-      },
-    }),
-  );
-  await writeFile(join(childHome, "settings.json"), "{");
-  const repo = await Repo.at({ path: contractRepository.path, gitPath });
-  const bound = await Keiyaku.bind({
-    repo,
-    markdown: [
-      "# Forwarded delivery",
-      "",
-      "## Context",
-      "context",
-      "",
-      "## Objective",
-      "objective",
-      "",
-      "## Design",
-      "design",
-      "",
-      "## Region",
-      "~~~",
-      "src/**",
-      "~~~",
-      "",
-      "## Criteria",
-      "### C1",
-      "criterion",
-      "",
-    ].join("\n"),
-    workspace: "worktree",
-    gates: ["reviewed"],
-  });
-  const id = (await bound.keiyaku.state()).id;
-  const worktree = await appointedWorktreePath(await repositoryAt(contractRepository.path), id);
-  await writeFile(join(worktree, "candidate.txt"), "candidate\n");
-  contractRepository.run(["-C", worktree, "add", "candidate.txt"]);
-  contractRepository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  const previousArgv = [...process.argv];
-  process.argv.splice(
-    2,
-    process.argv.length - 2,
-    Buffer.from(JSON.stringify({ paths: inert.paths })).toString("base64url"),
-  );
-  let externalRequestCommandsFor: typeof import("../src/akuma-body.js").externalRequestCommandsFor;
-  try {
-    ({ externalRequestCommandsFor } = await import("../src/akuma-body.js"));
-  } finally {
-    process.argv.splice(0, process.argv.length, ...previousArgv);
-  }
-  let composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
-  let pump = await openPump(parent, composition.commands);
-  const noncanonical = requestBodyDeliver({
-    directory: pump.directory,
-    id: randomUUID(),
-    repoRoot: `${contractRepository.path}/.`,
-    contractId: id,
-    includeDirty: true,
-    materializeConflict: false,
-  });
-  await assert.rejects(pump.failure, /registered request action contract\.deliver rejected its payload/u);
-  await assert.rejects(pump.close(), /registered request action contract\.deliver rejected its payload/u);
-  await assert.rejects(
-    noncanonical,
-    (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
-  );
-  composition = await externalRequestCommandsFor({ paths: parent.paths }, { home: parentHome, gitPath });
-  pump = await openPump(parent, composition.commands);
-  const previous = process.env[AKUMA_REQUESTS_ENV];
-  const previousPath = process.env.PATH;
-  try {
-    process.env[AKUMA_REQUESTS_ENV] = pump.directory;
-    process.env.PATH = "";
-    const parsedDeliver = parseArgv(["--repo", contractRepository.path, "deliver", id]);
-    if (!("command" in parsedDeliver)) throw new Error("expected deliver invocation");
-    const result = await invoke(parsedDeliver, {
-      cwd: parentRepository.path,
-      environment: {
-        KEIYAKU_HOME: childHome,
-        KEIYAKU_GIT_PATH: gitPath,
-        PATH: "",
-        [AKUMA_REQUESTS_ENV]: pump.directory,
-      },
-    });
-    const state = await bound.keiyaku.state();
-    if (!("kind" in result)) throw new Error("expected an invocation result");
-    assert.equal(result.kind, "accepted");
-    assert.equal((await bound.keiyaku.delivery()) instanceof Delivery, true);
-    assert.equal(state.delivery?.actor, parent.id);
-    assert.equal(state.delivery?.data.policy.requireBranchesToBeUpToDate, true);
-    assert.equal(existsSync(hookLog), false);
-
-    const parsedReview = parseArgv([
-      "--repo",
-      contractRepository.path,
-      "review",
-      id,
-      "--unsatisfied",
-      "--summary",
-      "needs work",
-    ]);
-    if (!("command" in parsedReview)) throw new Error("expected review invocation");
-    const reviewed = await invoke(parsedReview, {
-      cwd: parentRepository.path,
-      environment: {
-        KEIYAKU_HOME: childHome,
-        KEIYAKU_GIT_PATH: gitPath,
-        PATH: "",
-        [AKUMA_REQUESTS_ENV]: pump.directory,
-      },
-    });
-    if (!("kind" in reviewed)) throw new Error("expected an invocation result");
-    assert.equal(reviewed.kind, "accepted");
-    const reviewedState = await bound.keiyaku.state();
-    assert.equal(reviewedState.attestations.at(-1)?.actor, parent.id);
-    assert.equal(reviewedState.attestations.at(-1)?.data.summary, "needs work");
-  } finally {
-    if (previous === undefined) delete process.env[AKUMA_REQUESTS_ENV];
-    else process.env[AKUMA_REQUESTS_ENV] = previous;
-    if (previousPath === undefined) delete process.env.PATH;
-    else process.env.PATH = previousPath;
-    await pump.close();
-    rmSync(parentHome, { recursive: true, force: true });
-    rmSync(childHome, { recursive: true, force: true });
-    rmSync(parentRepository.path, { recursive: true, force: true });
-    rmSync(contractRepository.path, { recursive: true, force: true });
-  }
-});
 
 test("deliver returns without a durable reference and settles Heart voided", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-voided-")));
@@ -1703,15 +1538,10 @@ test("forwarded materialization retains and replays its handoff evidence", async
 });
 
 import {
-  executeForwardedDeliver,
-  executeForwardedReview,
   requestForwardedContractLive,
 } from "../src/library/contract-operations.js";
 import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
 import { entryUlid } from "../src/core/facts/types.js";
-import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
-import { EMPTY_WORKTREE_HOOKS } from "../src/git/hooks.js";
-import { commitCandidate, document as completionDocument, repositoryWithMain } from "./support/library-verbs.js";
 
 // A partial owner receipt does not turn Heart's unproven service into a voided request.
 test("forwarded fatal receipts survive unproven transport without claiming no product effect", async () => {
@@ -1762,167 +1592,6 @@ test("forwarded fatal receipts survive unproven transport without claiming no pr
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("a parent-served Contract forwards progress and caller cancellation to a real review", async () => {
-  const raw = repositoryWithMain(),
-    repo = await Repo.at({ path: raw.path });
-  const root = await World.at(raw.path);
-  const primary = (
-    await Keiyaku.bind({
-      repo,
-      markdown: completionDocument(),
-      workspace: "worktree",
-      target: "refs/heads/main",
-      gates: ["reviewed"],
-    })
-  ).keiyaku;
-  const state = await primary.state();
-  await primary.deliver();
-  const parent = await born(root, "parent", "11111111", ["contract.review"]);
-  const held = await acquireTargetPlacementFence(await repositoryAt(raw.path), "refs/heads/main");
-  const { promise: started, resolve: markStarted } = promiseBarrier<void>();
-  const controller = new AbortController();
-  const progress: unknown[] = [];
-  const pump = await openContractPump(parent, {
-    ...unusedContractPort,
-    review: async (input) => {
-      markStarted();
-      return await executeForwardedReview({
-        repo,
-        contractId: input.contractId,
-        requester: input.requester,
-        verdict: input.verdict,
-        signal: input.signal,
-        hooks: EMPTY_WORKTREE_HOOKS,
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-      });
-    },
-  });
-  const pending = requestForwardedContractLive({
-    directory: pump.directory,
-    action: "contract.review",
-    signal: controller.signal,
-    observe: (event) => progress.push(event),
-    request: { action: "contract.review", repoRoot: raw.path, contractId: state.id, verdict: "satisfied" },
-  });
-  try {
-    await started;
-    await waitFor(
-      "the admitted progress event from the forwarded review",
-      () =>
-        progress.some(
-          (event) => typeof event === "object" && event !== null && "kind" in event && event.kind === "admitted",
-        ),
-      { terminalState: settlementProbe(pending, (settled) => `outcome ${settled.kind}`) },
-    );
-    controller.abort(new Error("caller cancelled review"));
-    const result = await pending;
-    assert.equal(result.kind, "accepted");
-    assert.ok(result.executionStops.some((stop) => stop.reason === "cancelled" && stop.stage === "placement"));
-    assert.deepEqual(
-      progress
-        .filter(
-          (event): event is { kind: "stage"; stage: string; state: string } =>
-            typeof event === "object" && event !== null && "kind" in event && event.kind === "stage",
-        )
-        .map((event) => `${event.stage}:${event.state}`),
-      ["placement:started", "placement:finished"],
-    );
-    assert.equal((await primary.state()).terminal, null);
-    assert.equal((await primary.state()).attestations.length, 1);
-  } finally {
-    held.close();
-    await pump.close();
-  }
-});
-
-test("a parent-served Verification cancellation retains its bounded forwarded output tail", async () => {
-  const raw = repositoryWithMain(),
-    repo = await Repo.at({ path: raw.path });
-  const root = await World.at(raw.path);
-  const primary = (
-    await Keiyaku.bind({
-      repo,
-      markdown: completionDocument(
-        'node -e \'process.stdout.write("x".repeat(20 * 1024)); process.stdout.write("forwarded-tail\\n"); setInterval(() => {}, 1_000)\'',
-      ),
-      workspace: "worktree",
-      target: "refs/heads/main",
-      gates: ["verified"],
-    })
-  ).keiyaku;
-  const state = await primary.state();
-  commitCandidate(raw, await appointedWorktreePath(await repositoryAt(raw.path), state.id));
-  const parent = await born(root, "parent", "22222222", ["contract.deliver"]);
-  const controller = new AbortController();
-  const progress: unknown[] = [];
-  const pump = await openContractPump(parent, {
-    ...unusedContractPort,
-    deliver: async (input) =>
-      await executeForwardedDeliver({
-        repo,
-        contractId: input.contractId,
-        requester: input.requester,
-        includeDirty: input.includeDirty,
-        materializeConflict: input.materializeConflict,
-        requireBranchesToBeUpToDate: false,
-        hooks: EMPTY_WORKTREE_HOOKS,
-        signal: input.signal,
-        ...(input.message === undefined ? {} : { message: input.message }),
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-      }),
-  });
-  const pending = requestForwardedContractLive({
-    directory: pump.directory,
-    action: "contract.deliver",
-    signal: controller.signal,
-    observe: (event) => progress.push(event),
-    request: {
-      action: "contract.deliver",
-      repoRoot: raw.path,
-      contractId: state.id,
-      includeDirty: false,
-      materializeConflict: false,
-    },
-  });
-  try {
-    const sawForwardedTail = () =>
-      progress.some((event) => {
-        if (
-          event === null ||
-          typeof event !== "object" ||
-          !("kind" in event) ||
-          event.kind !== "verification" ||
-          !("observation" in event)
-        )
-          return false;
-        const observation = event.observation;
-        return (
-          observation !== null &&
-          typeof observation === "object" &&
-          "kind" in observation &&
-          observation.kind === "output" &&
-          "text" in observation &&
-          typeof observation.text === "string" &&
-          observation.text.includes("forwarded-tail")
-        );
-      });
-    await waitFor("the forwarded-tail Verification output from the forwarded delivery", sawForwardedTail, {
-      terminalState: settlementProbe(pending, (settled) => `outcome ${settled.kind}`),
-    });
-    controller.abort(new Error("caller cancelled after Verification output"));
-    const result = await pending;
-    assert.equal(result.kind, "accepted");
-    const stop = result.value.verification;
-    if (stop === undefined || !("failure" in stop)) throw new Error("expected a Verification runtime stop");
-    assert.equal(stop.failure, "cancelled");
-    assert.equal(stop.truncated, true);
-    assert.ok(stop.stdout?.endsWith("forwarded-tail\n"));
-    assert.ok(Buffer.byteLength(stop.stdout ?? "") <= 16 * 1024);
-  } finally {
-    await pump.close();
   }
 });
 

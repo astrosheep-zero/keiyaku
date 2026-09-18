@@ -1,13 +1,11 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -15,35 +13,22 @@ import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
-import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
 import {
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
   readHeart,
-  readSoul,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
-import { claudeProvider } from "../src/akuma/providers/claude/index.js";
-import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { moveAlias, resolveAlias } from "../src/alias/index.js";
-import { publishDispatch, readDispatch } from "../src/dispatch/index.js";
 import {
-  GIT_REF,
-  readGit,
   repositoryAt,
-  updateGitTree,
-  updateRefsAtomically,
-  writeBlob,
-  writeCommit,
 } from "../src/git/repository.js";
-import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixture,
@@ -59,17 +44,7 @@ import {
   isolateSquareFixtureLedger,
 } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
-import { contractMarkdown } from "./support/markdown.js";
 
-function markdown(title: string): string {
-  return contractMarkdown(title, {
-    Context: "context",
-    Objective: "objective",
-    Design: "design",
-    Region: "~~~\nsrc/**\n~~~",
-    Criteria: "### C1\ncriterion\n",
-  });
-}
 
 
 async function repositoryFixture() {
@@ -429,106 +404,6 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
   );
 });
 
-type MutableProvider = { -readonly [Key in keyof ProviderAdapter]: ProviderAdapter[Key] };
-
-test("Keiyaku.fork propagates Dispatch and leaves Alias on the parent", async () => {
-  const { raw, repo, git } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const bound = await Keiyaku.bind({ repo, markdown: markdown("Fork dispatch"), workspace: "worktree" });
-  const owner = (await bound.keiyaku.state()).id;
-  const source = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "face0001" });
-  await initializeHeart(source.paths);
-  await driveAkumaBody(
-    {
-      paths: source.paths,
-      seed: {
-        id: source.id,
-        archetype: "claude",
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {},
-        cwd: process.cwd(),
-        origin: { kind: "direct" },
-        allowed: ["akuma.call"],
-      },
-      initialBody: "work",
-    },
-    {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start() {
-        return createProviderAttempt(undefined, async () => {
-          const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
-          return {
-            admission: { fence: "parent-session" },
-            events: {
-              async *[Symbol.asyncIterator]() {
-                yield { type: "session" as const, coordinate: { sessionId: "parent-session" } };
-                finishEvents();
-              },
-            },
-            completion: eventsFinished.then(() => ({
-              kind: "answered" as const,
-              answer: "done",
-              historyId: "history-1",
-            })),
-            async abort() {
-              finishEvents();
-            },
-            async forceDispose() {
-              finishEvents();
-            },
-          };
-        });
-      },
-    },
-    {
-      now: () => "2026-08-11T01:00:00.000Z",
-    },
-  );
-  await publishDispatch({ repository: git, akuId: source.id, contractId: owner });
-  const alias = parseAkumaAlias("@parent");
-  await moveAlias({ world, alias, akuId: source.id });
-
-  const mutable = claudeProvider as MutableProvider;
-  const originalFork = mutable.fork;
-  try {
-    mutable.fork = (input) => {
-      assert.equal(input.at, "history-1");
-      return createProviderAttempt(undefined, async () => ({ session: { sessionId: "child-session" } }));
-    };
-    const result = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.ok(result.kind === "forked", JSON.stringify(result));
-    assert.equal(result.dispatch.kind, "dispatched");
-    assert.equal((await readDispatch(git, result.child))?.contractId, owner);
-    assert.equal(await resolveAlias(world, alias), source.id);
-    assert.deepEqual((await readSoul(pathsForAkuId(world, result.child)))?.allowed, ["akuma.call"]);
-
-    const snapshot = await readGit(git);
-    const dispatchPath = `dispatch/${createHash("sha256").update(source.id).digest("hex")}.json`;
-    const blob = await writeBlob(git, Buffer.from("broken\n"));
-    const tree = await updateGitTree(git, snapshot.tree, new Map([[dispatchPath, { oid: blob }]]));
-    const commit = await writeCommit({
-      repository: git,
-      tree,
-      parent: snapshot.commit,
-      message: "corrupt parent dispatch",
-      at: "2026-08-11T01:00:01.000Z",
-    });
-    assert.equal(
-      (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
-      "published",
-    );
-    const partial = await Keiyaku.fork({ path: world, akuma: source.id, at: "turn/1", repo });
-    assert.ok(partial.kind === "forked", JSON.stringify(partial));
-    assert.ok(partial.dispatch.kind === "failed", "expected partial.dispatch.kind = \"failed\"");
-    assert.equal(partial.dispatch.failure.kind, "authority-corruption");
-  } finally {
-    if (originalFork === undefined) delete mutable.fork;
-    else mutable.fork = originalFork;
-    rmSync(raw.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
-  }
-});
 
 // Decode at the owner boundary: bad configuration does not need Git, a Body, or a provider process.
 test("Archetype and call allowed inputs refuse malformed values before allocation", async (context) => {

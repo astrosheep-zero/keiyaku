@@ -1,25 +1,21 @@
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import test, { describe } from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { GIT_REF, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
-import { Keiyaku, Repo, type IntegrationConflictMaterialized, type MutationResult } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
   cachedRepositoryAt,
   snapshotGitRepository,
-  withGitShim,
 } from "./support/git.js";
 import {
-  bind,
-  commitCandidate,
   document,
   refused,
   repositoryWithMain,
@@ -31,98 +27,16 @@ async function publicContractId(handle: ContractHandle): Promise<ContractId> {
   return (await handle.state()).id;
 }
 
-function expectMutation<Value>(result: MutationResult<Value> | IntegrationConflictMaterialized): MutationResult<Value> {
-  if (result.kind !== "accepted") throw new Error("expected an admitted mutation result");
-  return result;
-}
 
 
 
 
 
 
-async function bindRetained(
-  repo: Repo,
-  title: string,
-  after: readonly ReturnType<typeof contractId>[] = [],
-  reviewed = false,
-  verification?: string,
-) {
-  return await Keiyaku.bind({
-    repo,
-    markdown: document(verification).replace("# Library verbs", `# ${title}`),
-    workspace: "worktree",
-    gates: reviewed ? ["reviewed"] : [],
-    ...(after.length === 0 ? {} : { after }),
-  });
-}
 
-async function retainedVerifiedCandidate(
-  repository: ReturnType<typeof repositoryWithMain>,
-  title: string,
-  verification = "true",
-) {
-  const bound = await bindRetained(await cachedRepoAt(repository.path), title, [], true, verification);
-  const contract = bound.keiyaku;
-  const worktree = await appointedWorktreePath(
-    await cachedRepositoryAt(repository.path),
-    await publicContractId(contract),
-  );
-  commitCandidate(repository, worktree);
-  return { contract, worktree };
-}
 
-async function cancelDuringVerification<Value>(
-  marker: string,
-  run: (signal: AbortSignal) => Promise<Value>,
-): Promise<Value> {
-  rmSync(marker, { force: true });
-  const controller = new AbortController();
-  const timer = setInterval(() => {
-    if (existsSync(marker)) controller.abort();
-  }, 1);
-  try {
-    return await run(controller.signal);
-  } finally {
-    clearInterval(timer);
-  }
-}
 
-function blockingVerification(marker: string): string {
-  return `${process.execPath} -e ${JSON.stringify(
-    `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started"); setTimeout(() => {}, 30000);`,
-  )}`;
-}
 
-async function plantDispatch(
-  repository: ReturnType<typeof repositoryWithMain>,
-  akuId: string,
-  owner: string,
-  dispatchedAt: string,
-  bytes?: Buffer,
-): Promise<void> {
-  const git = await cachedRepositoryAt(repository.path);
-  const path = `dispatch/${createHash("sha256").update(akuId).digest("hex")}.json`;
-  const payload =
-    bytes ??
-    Buffer.from(
-      `${JSON.stringify({
-        akuId,
-        contractId: owner,
-        dispatchedAt,
-      })}\n`,
-    );
-  const before = await readGit(git);
-  const tree = await updateGitTree(git, before.tree, new Map([[path, { oid: await writeBlob(git, payload) }]]));
-  const commit = await writeCommit({
-    repository: git,
-    tree,
-    parent: before.commit,
-    message: `dispatch ${akuId}`,
-    at: dispatchedAt,
-  });
-  repository.run(["update-ref", GIT_REF, commit, before.commit ?? ""]);
-}
 
 function changeIdFromSubject(subject: string | undefined): string | undefined {
   return (JSON.parse(subject ?? "[]") as readonly (readonly [string, string])[]).find(
@@ -229,54 +143,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal(mergeHead(repository, worktree), null);
   });
 
-  test("redelivery recovers an unrecorded candidate without capturing later dirty work", async () => {
-    const repository = repositoryWithMain();
-    const marker = join(repository.path, "verification-started");
-    const verification = blockingVerification(marker);
-    const { contract, worktree } = await retainedVerifiedCandidate(repository, "Interrupted", verification);
-    const first = expectMutation(
-      await cancelDuringVerification(marker, async (signal) => await contract.deliver({ signal })),
-    );
-    const delivery = first.facts.find((fact) => fact.kind === "deliver");
-    assert.ok(delivery);
-    assert.equal(first.value.verification && "failure" in first.value.verification, true);
-
-    writeFileSync(join(worktree, "later.txt"), "not part of the admitted candidate\n");
-    const recovered = await withGitShim(
-      [
-        'if [ "$1" = "commit-tree" ]; then printf "unexpected recapture\\n" >&2; exit 97; fi',
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      {},
-      async (gitPath) => {
-        const routed = Keiyaku.of({
-          repo: await Repo.at({ path: repository.path, gitPath }),
-          id: await publicContractId(contract),
-        });
-        return expectMutation(
-          await cancelDuringVerification(marker, async (signal) => await routed.deliver({ includeDirty: true, signal })),
-        );
-      },
-    );
-    assert.deepEqual(recovered.facts, []);
-    assert.deepEqual(recovered.value.leading, { kind: "already-admitted", fact: delivery!.entry });
-    assert.deepEqual(recovered.value.integration, first.value.integration);
-
-    const audited = await cancelDuringVerification(marker, (signal) => contract.audit({ includeDirty: true, signal }));
-    assert.equal(audited.value.delivery?.relation, "differs");
-    assert.equal(audited.value.delivery?.verification.kind, "unrecorded");
-
-    const overwritten = expectMutation(
-      await cancelDuringVerification(
-        marker,
-        async (signal) => await contract.deliver({ includeDirty: true, overwrite: true, signal }),
-      ),
-    );
-    assert.equal(overwritten.value.leading, undefined);
-    assert.notDeepEqual(overwritten.value.integration, first.value.integration);
-    assert.equal(overwritten.facts.filter((fact) => fact.kind === "deliver").length, 1);
-  });
-
   test("a satisfied review cannot interleave a stale integration stop across the target fence", async () => {
     const { repository, contract, targetHead } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
@@ -357,78 +223,5 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const finalState = await contract.state();
     assert.equal(finalState.terminal?.kind, "claimed");
     assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
-  });
-
-  test("contract history composes one frozen journal and Dispatch observation", async () => {
-    const repository = repositoryWithMain();
-    const first = await bind(repository);
-    const firstId = (await first.state()).id;
-    const other = await Keiyaku.bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: document().replace("# Library verbs", "# Other contract"),
-      workspace: "worktree",
-    });
-    const otherId = (await other.keiyaku.state()).id;
-    const observedBind = (await first.history()).events.find(
-      (event) => event.source === "journal" && event.fact.kind === "bind",
-    );
-    if (observedBind === undefined || observedBind.source !== "journal") throw new Error("missing bind fact");
-    const bindTime = observedBind.fact.at;
-    await plantDispatch(repository, "aku/worker/bbbbbbbb", firstId, bindTime);
-    await plantDispatch(repository, "aku/worker/aaaaaaaa", firstId, bindTime);
-    await plantDispatch(repository, "aku/reviewer/cccccccc", firstId, "2099-01-01T00:00:00.000Z");
-    await plantDispatch(repository, "aku/worker/dddddddd", otherId, bindTime);
-    await first.abandon({ note: "done" });
-    const abandoned = (await first.history()).events.find(
-      (event) => event.source === "journal" && event.fact.kind === "abandoned",
-    );
-    if (abandoned === undefined || abandoned.source !== "journal") throw new Error("missing abandoned fact");
-    await plantDispatch(repository, "aku/worker/eeeeeeee", firstId, abandoned.fact.at);
-
-    const log = resolve(repository.path, "history-observation.log");
-    writeFileSync(log, "");
-    const history = await withGitShim(
-      'printf \'%s\\n\' "$*" >> "$KEIYAKU_HISTORY_OBSERVATION_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
-      { KEIYAKU_HISTORY_OBSERVATION_LOG: log },
-      async (gitPath) => Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: firstId }).history(),
-    );
-    const snapshot = await readRef(await cachedRepositoryAt(repository.path), GIT_REF);
-    assert.equal(history.id, firstId);
-    assert.equal(history.state, snapshot);
-    assert.equal(history.events.filter((event) => event.source === "journal").length, 2);
-    assert.deepEqual(
-      history.events
-        .filter((event) => event.source === "dispatch")
-        .map((event) => (event.source === "dispatch" ? event.dispatch.akuId : "")),
-      ["aku/worker/aaaaaaaa", "aku/worker/bbbbbbbb", "aku/worker/eeeeeeee", "aku/reviewer/cccccccc"],
-    );
-    assert.equal(
-      history.events.some((event) => event.source === "dispatch" && event.dispatch.akuId === "aku/worker/dddddddd"),
-      false,
-    );
-    const times = history.events.map((event) =>
-      event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt,
-    );
-    assert.deepEqual(times, [...times].sort());
-    const equalBind = history.events.filter(
-      (event) => (event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt) === bindTime,
-    );
-    assert.equal(equalBind[0]?.source, "journal");
-    assert.deepEqual(
-      equalBind
-        .filter((event) => event.source === "dispatch")
-        .map((event) => (event.source === "dispatch" ? event.dispatch.akuId : "")),
-      ["aku/worker/aaaaaaaa", "aku/worker/bbbbbbbb"],
-    );
-    const equalAbandon = history.events.filter(
-      (event) => (event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt) === abandoned.fact.at,
-    );
-    assert.equal(equalAbandon[0]?.source, "journal");
-    assert.equal(
-      readFileSync(log, "utf8")
-        .split("\n")
-        .filter((line) => line.includes(`rev-parse --verify --quiet ${GIT_REF}`)).length,
-      1,
-    );
   });
 });

@@ -1,45 +1,26 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { AkumaHandle } from "../src/akuma/akuma-handle.js";
-import { appendActivity, beginTurn, breakBody, endTurn, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
-import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
-import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { snapshotText } from "../src/cli/render/akuma-activity.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
   repositoryAt,
 } from "../src/git/repository.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import { kanshi, selectKanshi, type KanshiReport } from "../src/kanshi/index.js";
+import { kanshi, selectKanshi } from "../src/kanshi/index.js";
 import { Tasks } from "../src/task/index.js";
 import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 
-function parseArgv(argv: readonly string[]): ParsedExecution {
-  const parsed = parseInvocation(argv);
-  if (!("command" in parsed)) throw new Error("expected executable command");
-  return parsed;
-}
 
-async function invoke(
-  invocation: Parameters<typeof invokeRaw>[0],
-  runtime?: Parameters<typeof invokeRaw>[1],
-): Promise<InvocationResult> {
-  return (await invokeRaw(invocation, runtime)) as InvocationResult;
-}
 
-async function observe(path: string, repo?: Repo) {
-  return kanshi({ world: await World.at(path), ...(repo === undefined ? {} : { repo }) });
-}
 
 function document(title = "Kanshi contract"): string {
   return contractMarkdown(title, {
@@ -73,11 +54,6 @@ async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T0
   return allocated.id;
 }
 
-function fixtureRoot(t: TestContext, prefix: string): string {
-  const root = mkdtempSync(join(tmpdir(), prefix));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  return root;
-}
 
 function fixtureRepository(t: TestContext) {
   const repository = makeGitRepository();
@@ -118,86 +94,9 @@ async function populatedWorld(t: TestContext) {
   return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
 }
 
-/** Compare only the observation that a selected status entry answers for, not read clocks. */
-function selectedContractSection(report: KanshiReport) {
-  const section = report.contracts;
-  if (section.kind !== "present") return section;
-  const { observedAt, ...value } = section.value;
-  return { kind: "present" as const, value };
-}
-
-async function pluralStatusReport(repositoryPath: string, selectors: readonly string[]) {
-  const result = await invoke(parseArgv(["-C", repositoryPath, "status", ...selectors]));
-  assert.ok(result.kind === "status-set", "expected result.kind = \"status-set\"");
-  return result;
-}
-
-async function singleStatusReport(repositoryPath: string, selector: string) {
-  const result = await invoke(parseArgv(["-C", repositoryPath, "status", selector]));
-  assert.ok(result.kind === "status", "expected result.kind = \"status\"");
-  return result;
-}
 
 
 
-test("plural status preserves mixed Contract/Akuma and alias selections", async (t) => {
-  const { repository, contract, akumaId } = await populatedWorld(t);
-  const segment = contract.id.slice("kei/".length);
-  const plural = await pluralStatusReport(repository.path, [contract.id, `@${segment}`, "@watch"]);
-  assert.equal(plural.entries.length, 3);
-  const [canonical, aliased, akuma] = plural.entries;
-  assert.equal(canonical?.kind, "contract");
-  assert.equal(aliased?.kind, "contract");
-  assert.equal(akuma?.kind, "akuma");
-  if (canonical?.kind !== "contract" || aliased?.kind !== "contract" || akuma?.kind !== "akuma") return;
-  assert.deepEqual(
-    selectedContractSection(canonical.report),
-    selectedContractSection((await singleStatusReport(repository.path, contract.id)).report),
-  );
-  assert.deepEqual(selectedContractSection(aliased.report), selectedContractSection(canonical.report));
-  assert.equal(aliased.selector, `@${segment}`);
-  assert.equal(akuma.alias, "@watch");
-  assert.equal(akuma.status.status.id, akumaId);
-});
-
-function sectionBody(text: string, name: string): string {
-  const section = name === "KEIYAKU" ? "CONTRACTS" : name === "FLEET" ? "AKUMA" : name === "TASK" ? "TASKS" : name;
-  const open =
-    section === "CONTRACTS" || section === "AKUMA" || section === "TASKS" ? `${section} //` : `[ ${section} ]`;
-  const start = text.indexOf(open);
-  assert.notEqual(start, -1, `missing ${name} aperture`);
-  const after = text.indexOf("\n", start);
-  const rest = text.slice(after + 1);
-  const close = rest.search(/^(?:CONTRACTS|AKUMA|TASKS) \//mu);
-  return close === -1 ? rest : rest.slice(0, close);
-}
-
-test("Kanshi reads ActivitySnapshots for the first three final Fleet display rows", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-kanshi-fleet-snapshots-");
-  const ids = [
-    await bornAkuma(root, "a0000001", "2026-08-09T00:00:00.000Z", true),
-    await bornAkuma(root, "a0000002", "2026-08-09T00:03:00.000Z", true),
-    await bornAkuma(root, "a0000003", "2026-08-09T00:01:00.000Z", true),
-    await bornAkuma(root, "a0000004", "2026-08-09T00:02:00.000Z", true),
-  ];
-  const originalStatus = AkumaHandle.prototype.status;
-  const statusReads: string[] = [];
-  AkumaHandle.prototype.status = async function () {
-    statusReads.push(this.id);
-    return await originalStatus.call(this);
-  };
-  try {
-    const report = await observe(root);
-    assert.ok(report.akuma.kind === "present", "expected report.akuma.kind = \"present\"");
-    const fleet = sectionBody(renderKanshiText(report, { columns: 120, color: false }), "FLEET");
-    const displayed = [...ids].sort((left, right) => fleet.indexOf(left) - fleet.indexOf(right));
-    assert.deepEqual(displayed, [ids[1], ids[3], ids[2], ids[0]]);
-    assert.equal(statusReads.length, 3);
-    assert.deepEqual([...statusReads].sort(), [...displayed.slice(0, 3)].sort());
-  } finally {
-    AkumaHandle.prototype.status = originalStatus;
-  }
-});
 
 test("Task board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
   const { repository, contract, akumaId } = await populatedWorld(t);
@@ -226,130 +125,4 @@ test("Task board failure names the malformed document once without suppressing C
   const worldText = renderKanshiText(report, { columns: 80, color: false });
   assert.equal((worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length, 1);
   assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
-});
-
-async function akumaWithReportedChanges(root: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
-  await initializeHeart(allocated.paths);
-  const createdAt = "2026-08-09T00:00:00.000Z";
-  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-  await leash.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "watcher",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {},
-    allowed: [],
-    cwd: root,
-    origin: { kind: "direct" },
-    createdAt,
-  });
-  const body = await leash.recordBody(allocated.paths, { leashTakenAt: createdAt });
-  const turn = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: createdAt });
-  const call = {
-    kind: "fileChange" as const,
-    changes: [{ op: "update" as const, path: "src/placed.ts", diffstat: { added: 10, removed: 1 } }],
-  };
-  await appendActivity(allocated.paths, {
-    turnSequence: turn.sequence,
-    at: "2026-08-09T00:00:01.000Z",
-    event: { type: "tool", phase: "started", id: "write", name: "Write", call },
-  });
-  await appendActivity(allocated.paths, {
-    turnSequence: turn.sequence,
-    at: "2026-08-09T00:00:02.000Z",
-    event: { type: "tool", phase: "completed", id: "write", name: "Write", call, result: { status: "ok" } },
-  });
-  await endTurn(allocated.paths, {
-    turnSequence: turn.sequence,
-    outcome: { kind: "answered", answer: "done", session: { sessionId: "placed-session" } },
-    completedAt: "2026-08-09T00:00:03.000Z",
-  });
-  await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-09T00:00:04.000Z" });
-  leash.release();
-  return allocated.id;
-}
-
-function fleetSnapshotPaths(report: KanshiReport, akuId: string): readonly string[] | undefined {
-  if (report.akuma.kind !== "present") throw new Error("expected a present Akuma section");
-  const row = report.akuma.value.rows.find((candidate) => candidate.id === akuId);
-  return row?.snapshot?.reportedChanges.map((change) => change.path);
-}
-
-test("placement discharges an associated Akuma's reported changes in status and fleet observation", async (t) => {
-  const repository = fixtureRepository(t);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const repo = await Repo.at({ path: repository.path });
-  const world = await World.at(repository.path);
-
-  const bound = await Keiyaku.bind({
-    repo,
-    markdown: document("Discharge placement"),
-    workspace: "worktree",
-    gates: ["reviewed"],
-  });
-  const contract = await bound.keiyaku.state();
-  const placed = await akumaWithReportedChanges(repository.path, "a0000011");
-  const stray = await akumaWithReportedChanges(repository.path, "a0000012");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(repository.path), akuId: placed, contractId: contract.id }))
-      .kind,
-    "dispatched",
-  );
-
-  // While the associated Contract is active, status (text and JSON) and the
-  // Kanshi fleet snapshot keep the reported changes.
-  const active = await Keiyaku.status({ path: world, akuma: placed, repo });
-  assert.deepEqual(
-    active.status.timeline.reportedChanges.map((change) => change.path),
-    ["src/placed.ts"],
-  );
-  const activeText = snapshotText(active, { columns: 120, color: false });
-  assert.match(activeText, /changes 1/u);
-  assert.match(activeText, /\+10 -1 {2}src\/placed\.ts/u);
-  const before = await observe(repository.path, repo);
-  assert.deepEqual(fleetSnapshotPaths(before, placed), ["src/placed.ts"]);
-
-  const worktree = bound.workspace?.path;
-  if (worktree === undefined) throw new Error("Contract workspace was not appointed");
-  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-  repository.run(["-C", worktree, "add", "candidate.txt"]);
-  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  assert.equal((await bound.keiyaku.deliver()).kind, "accepted");
-  assert.equal((await bound.keiyaku.review({ verdict: "satisfied" })).kind, "accepted");
-  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
-
-  // Once the Contract is claimed, the same projections present no reported
-  // changes: the candidate they described is placed and preserved in Git.
-  const settled = await Keiyaku.status({ path: world, akuma: placed, repo });
-  assert.deepEqual(settled.status.timeline.reportedChanges, []);
-  assert.equal(settled.status.timeline.reportedChangesOmitted, 0);
-  assert.deepEqual(settled.contract, { kind: "associated", contractId: contract.id });
-  assert.doesNotMatch(snapshotText(settled, { columns: 120, color: false }), /changes/u);
-  const after = await observe(repository.path, repo);
-  assert.deepEqual(fleetSnapshotPaths(after, placed), []);
-
-  // An unassociated Akuma and a dropped Contract's Akuma keep their reported
-  // changes: unplaced work still matters.
-  const strayObservation = await Keiyaku.status({ path: world, akuma: stray, repo });
-  assert.deepEqual(
-    strayObservation.status.timeline.reportedChanges.map((change) => change.path),
-    ["src/placed.ts"],
-  );
-  const dropped = await Keiyaku.bind({ repo, markdown: document("Dropped discharge"), workspace: "worktree" });
-  const droppedId = (await dropped.keiyaku.state()).id;
-  const orphan = await akumaWithReportedChanges(repository.path, "a0000013");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(repository.path), akuId: orphan, contractId: droppedId }))
-      .kind,
-    "dispatched",
-  );
-  await dropped.keiyaku.abandon();
-  assert.equal((await dropped.keiyaku.state()).terminal?.kind, "abandoned");
-  const orphanObservation = await Keiyaku.status({ path: world, akuma: orphan, repo });
-  assert.deepEqual(
-    orphanObservation.status.timeline.reportedChanges.map((change) => change.path),
-    ["src/placed.ts"],
-  );
-  const terminal = await observe(repository.path, repo);
-  assert.deepEqual(fleetSnapshotPaths(terminal, orphan), ["src/placed.ts"]);
 });

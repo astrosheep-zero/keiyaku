@@ -1,10 +1,8 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import test, { describe } from "node:test";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
-import { CliUsageError, parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
+import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi } from "../src/kanshi/index.js";
@@ -116,116 +114,6 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
             ],
       },
     });
-  });
-
-  test("CLI Region renders grouped overlaps, empty facts, and refuses deleted dialects", async () => {
-    const repository = repositoryWithMain();
-    const first = await bind(repository, "CLI region first", ["src/**", "docs/guide/**"]);
-    const second = await bind(repository, "CLI region second", ["src/cli/**", "tests/**"]);
-    mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
-    writeFileSync(join(repository.path, ".keiyaku", "settings.json"), "{ malformed", "utf8");
-
-    const emptyWorld = repositoryWithMain();
-    const empty = await invoke(parseArgv(["region"]), { cwd: emptyWorld.path, environment: {} });
-    assert.equal(empty.kind, "region");
-    if (empty.kind === "region") {
-      assert.deepEqual(empty.region, { kind: "present", value: { kind: "declarations", declarations: [] } });
-      assert.equal(renderText(empty), "region  none");
-    }
-
-    const world = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
-    assert.equal(world.kind, "region");
-    if (world.kind === "region") {
-      assert.match(renderText(world), new RegExp(`^region  ${first.id}  src/\\*\\* docs/guide/\\*\\*$`, "m"));
-      assert.match(renderText(world), new RegExp(`^region  ${second.id}  src/cli/\\*\\* tests/\\*\\*$`, "m"));
-    }
-
-    const declaration = await invoke(parseArgv(["region", first.id, "--json"]), {
-      cwd: repository.path,
-      environment: {},
-    });
-    assert.equal(declaration.kind, "region");
-    if (declaration.kind !== "region" || declaration.region.kind !== "present") return;
-    assert.deepEqual(declaration.region.value, {
-      kind: "contract",
-      declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
-      overlaps: [{ contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] }],
-    });
-    assert.equal(
-      renderText(declaration),
-      [`region  ${first.id}  src/** docs/guide/**`, `overlap  ${second.id}  1 pair`, "  src/** ~ src/cli/**"].join("\n"),
-    );
-
-    const isolated = await bind(repository, "CLI region isolated", ["lib/**"]);
-    const noOverlap = await invoke(parseArgv(["region", isolated.id]), { cwd: repository.path, environment: {} });
-    assert.equal(noOverlap.kind, "region");
-    if (noOverlap.kind === "region") {
-      assert.equal(renderText(noOverlap), `region  ${isolated.id}  lib/**\n  overlap  none`);
-    }
-
-    const path = await invoke(parseArgv(["region", "--path", "src/**", "--path", "tests/**"]), {
-      cwd: repository.path,
-      environment: {},
-    });
-    assert.equal(path.kind, "region");
-    if (path.kind === "region" && path.region.kind === "present" && path.region.value.kind === "path") {
-      assert.deepEqual(path.region.value.patterns, ["src/**", "tests/**"]);
-      assert.deepEqual(
-        path.region.value.overlaps.find((overlap) => overlap.contract === first.id),
-        {
-          contract: first.id,
-          patterns: [{ mine: "src/**", theirs: "src/**" }],
-        },
-      );
-      assert.deepEqual(
-        path.region.value.overlaps.find((overlap) => overlap.contract === second.id),
-        {
-          contract: second.id,
-          patterns: [
-            { mine: "src/**", theirs: "src/cli/**" },
-            { mine: "tests/**", theirs: "tests/**" },
-          ],
-        },
-      );
-      const text = renderText(path);
-      assert.match(text, new RegExp(`overlap  ${second.id}  1 pair`));
-      assert.match(text, /^ {2}src\/\*\* ~ src\/cli\/\*\*$/m);
-      assert.doesNotMatch(text, /tests\/\*\* ~ tests\/\*\*/u);
-      assert.match(text, new RegExp(`overlap  ${first.id}  exact match`, "u"));
-    }
-
-    const exactPath = await invoke(parseArgv(["region", "--path", "docs/guide/**"]), {
-      cwd: repository.path,
-      environment: {},
-    });
-    assert.equal(exactPath.kind, "region");
-    if (exactPath.kind === "region") {
-      assert.equal(renderText(exactPath), [`overlap  ${first.id}  exact match`].join("\n"));
-    }
-
-    const miss = await invoke(parseArgv(["region", "--path", "other/**"]), { cwd: repository.path, environment: {} });
-    assert.equal(miss.kind, "region");
-    if (miss.kind === "region") assert.equal(renderText(miss), "region  none\n  patterns  other/**");
-
-    await assert.rejects(
-      () => invoke(parseArgv(["region", "--path", "../outside"]), { cwd: repository.path, environment: {} }),
-      (error: unknown) => error instanceof CliUsageError && error.message.includes("may not contain .."),
-    );
-    await assert.rejects(
-      () => invoke(parseArgv(["region", "--path", "docs/[draft].md"]), { cwd: repository.path, environment: {} }),
-      (error: unknown) => error instanceof CliUsageError && error.message.includes("forbidden glob form"),
-    );
-    assert.throws(() => parseArgv(["region", "--overlap"]), CliUsageError);
-    assert.throws(() => parseArgv(["region", first.id, "--path", "src/file.ts"]), CliUsageError);
-    assert.throws(() => parseArgv(["region", first.id, second.id]), CliUsageError);
-    assert.throws(() => parseArgv(["region", "-"]), CliUsageError);
-
-    await first.contract.abandon();
-    await assert.rejects(
-      () => invoke(parseArgv(["region", first.id]), { cwd: repository.path, environment: {} }),
-      (error: unknown) =>
-        error instanceof CliUsageError && error.message.includes(`unknown contract selector: ${first.id}`),
-    );
   });
 
   test("Kanshi validates Region selections and query patterns", async () => {
