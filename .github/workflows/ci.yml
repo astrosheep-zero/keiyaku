@@ -1,4 +1,4 @@
-name: Test diet paired benchmark 61
+name: Test diet paired benchmark 62
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
         run: |
           git checkout --detach bc1b478d8738d546e32e73790ab53565dc7cffc0
           npm run build >/dev/null
-          git checkout --detach e2fee07341ed283854c23da3115653549d202ad5
+          git checkout --detach 432fac59e4d6dac41618b0750860a15e4179f88f
           npm run build >/dev/null
       - name: Run paired benchmark
         run: |
@@ -41,7 +41,7 @@ jobs:
           import json, pathlib, re, statistics, subprocess, time
           out=pathlib.Path('/tmp/bench')
           base='bc1b478d8738d546e32e73790ab53565dc7cffc0'
-          cand='e2fee07341ed283854c23da3115653549d202ad5'
+          cand='432fac59e4d6dac41618b0750860a15e4179f88f'
           rows=[]
           order=[('baseline',1),('candidate',1),('candidate',2),('baseline',2),('baseline',3),('candidate',3)]
           for label,trial in order:
@@ -74,6 +74,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: paired-benchmark-61
+          name: paired-benchmark-62
           path: /tmp/bench/
           retention-days: 7
