@@ -54,17 +54,14 @@ jobs:
       - name: Run repository verification
         run: npm test
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
+      - name: Run packaged CLI end-to-end test against the verified build
+        run: npm run test:e2e:built
 
       - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck
 
       - name: Lint source, scripts, and tests
         run: npm run lint
-
-      - name: Build
-        run: npm run build
 
       - name: Check patch whitespace
         run: git diff --check
@@ -101,8 +98,8 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Run packaged CLI end-to-end test
-        run: npm run test:e2e
+      - name: Run packaged CLI end-to-end test against the verified build
+        run: npm run test:e2e:built
 
       - name: Typecheck source, scripts, and scoped semantic tests
         run: npm run test:typecheck
