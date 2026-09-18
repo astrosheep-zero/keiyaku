@@ -15,9 +15,8 @@ import {
 } from "../src/akuma/index.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { readTell, readTurn, recordTell } from "../src/akuma/heart/index.js";
+import { readTell, recordTell } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
@@ -130,7 +129,6 @@ test("Akuma.birth has no prompt and select is synchronous", async (context) => {
 import {
   answering,
   bornWorld,
-  fixtureAttempt,
   fixtureRuntime,
   installTellRuntime,
   settleFixtureBodies,
@@ -193,122 +191,54 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
   }
 });
 
-test("schema tell on a running Body is busy unless interrupt is set", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-busy-"));
+test("schema tell routes admission and preserves typed refusals without launching a Body", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-api-routing-");
+  const akuma = Akuma.select(await World.at(root), "aku/claude/a1000006");
   const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  let release: (() => void) | undefined;
-  let body: Promise<unknown> | undefined;
-  let successorBody: Promise<unknown> | undefined;
-  try {
-    const { allocated, akuma } = await bornWorld(root, "a1000006");
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let abortObserved = false;
-    const hanging: ProviderAdapter = fixtureAdapter(async () => ({
-      admission: { fence: "api-hang" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "api-predecessor" } };
-          await held;
-        },
-      },
-      completion: held.then(() => ({ kind: "answered" as const, answer: '{"ok":true}', historyId: "hang" })),
-      async abort() {
-        abortObserved = true;
-      },
-    }));
-    await recordTell(allocated.paths, {
-      kind: "tell",
-      id: "seed",
-      body: "start",
-      recordedAt: "2026-08-10T00:00:01.000Z",
-    });
-    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
-    await waitForSeedBinding(allocated.paths, body);
-    await assert.rejects(akuma.tell("structured", { schema }), AkumaBusyError);
-    const successor: ProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start(input) {
-        return fixtureAttempt(input, async () => ({
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
-          async abort() {},
-        }));
-      },
-      resume(input) {
-        return fixtureAttempt(input, async () => ({
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "api-successor" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "successor" }),
-          async abort() {},
-        }));
-      },
-    };
-    const runtime = {
-      async spawn(paths: typeof allocated.paths): Promise<OwnedProcess> {
-        successorBody = driveAkumaBody({ paths }, successor, { now: () => "2026-08-10T00:00:03.000Z" });
-        return {
-          pid: 0,
-          exited: successorBody.then(() => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } })),
-          async terminate() {},
-          release() {},
-        };
-      },
-    };
-    const originalInterrupt = AkumaHandle.prototype.interrupt;
-    AkumaHandle.prototype.interrupt = function (body, options) {
-      return originalInterrupt.call(this, body, { ...options, runtime });
-    };
-    try {
-      const interrupting = akuma.tell("structured", { schema, interrupt: true });
-      await waitForCondition(
-        "the predecessor provider abort callback that releases the held completion",
-        () => abortObserved,
-        {
-          terminalState: settlementProbe(
-            interrupting,
-            (settled) =>
-              `the interrupt Tell settled with decoded ${JSON.stringify(settled)} before the predecessor provider aborted`,
-          ),
-        },
-      );
-      release?.();
-      release = undefined;
-      await assert.rejects(interrupting, AkumaDecodeError);
-      const tell = (await akuma.history()).rows.find((row) => row.kind === "tell" && row.text === "structured");
-      assert.equal(tell?.kind, "tell");
-      if (tell?.kind === "tell") {
-        const fact = await readTell(allocated.paths, tell.tellId);
-        assert.notEqual(fact?.binding, undefined);
-        if (fact?.binding !== undefined) {
-          const turn = await readTurn(allocated.paths, fact.binding.turnSequence);
-          const outcome = turn?.end?.outcome;
-          assert.equal(outcome?.kind, "invalid-output");
-          if (outcome?.kind === "invalid-output") assert.equal(outcome.answer, "not-json");
-        }
-      }
-    } finally {
-      AkumaHandle.prototype.interrupt = originalInterrupt;
-    }
-    await body;
-    await successorBody;
-    await akuma.idle();
-  } finally {
-    release?.();
-    await body?.catch(() => undefined);
-    await successorBody?.catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
+  const busy = new AkumaBusyError();
+  const tells: Parameters<AkumaHandle["tell"]>[] = [];
+  const interrupts: Parameters<AkumaHandle["interrupt"]>[] = [];
+  context.mock.method(AkumaHandle.prototype, "tell", async (...args: Parameters<AkumaHandle["tell"]>) => {
+    tells.push(args);
+    throw busy;
+  });
+  context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
+    interrupts.push(args);
+    return { kind: "unavailable", evidence: "hung" } as const;
+  });
+
+  // The API owns routing/translation; Heart and control suites own real busy/leash behavior.
+  await assert.rejects(akuma.tell("default", { schema }), (error) => error === busy);
+  await assert.rejects(
+    akuma.tell("explicit", { schema, interrupt: false, initiator: "api-caller" }),
+    (error) => error === busy,
+  );
+  assert.equal(interrupts.length, 0);
+  assert.equal(tells.length, 2);
+  for (const [index, args] of tells.entries()) {
+    assert.equal(args[0], index === 0 ? "default" : "explicit");
+    assert.match(args[1]!, /^[0-9a-f-]{36}$/u);
+    assert.deepEqual(args.slice(2), [
+      undefined,
+      undefined,
+      { schemaJson: schemaJsonText(schema), ...(index === 0 ? {} : { initiator: "api-caller" }) },
+    ]);
   }
+  await assert.rejects(akuma.tell("interrupt", { schema, interrupt: true, initiator: "api-caller" }), {
+    name: "AkumaProviderError",
+    message: "schema interrupt unavailable: hung",
+  });
+  assert.equal(tells.length, 2);
+  assert.equal(interrupts.length, 1);
+  const [body, options] = interrupts[0]!;
+  assert.equal(body, "interrupt");
+  assert.match(options!.tellId!, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(options, {
+    tellId: options!.tellId,
+    schemaJson: schemaJsonText(schema),
+    initiator: "api-caller",
+  });
+  assert.equal(new Set([...tells.map((args) => args[1]), options!.tellId]).size, 3);
 });
 
 test("idle resolves the settling life with the final status", async () => {
