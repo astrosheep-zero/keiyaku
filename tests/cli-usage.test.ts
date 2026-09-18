@@ -82,8 +82,7 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     spawnSync(
       process.execPath,
       [
-        "--import",
-        "tsx",
+        ...(import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"]),
         fileURLToPath(
           new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../src/cli/index.ts", import.meta.url),
         ),

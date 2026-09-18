@@ -7,7 +7,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { createProcessLifecycle } from "../src/runtime/proc/lifecycle.js";
 import { LineRpcProcess } from "../src/runtime/proc/line-rpc.js";
@@ -1299,7 +1298,7 @@ test("release lets the parent reach beforeExit while the detached child continue
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-owned-process-before-exit-"));
   const childPidPath = join(root, "child-pid");
   try {
-    const runtime = pathToFileURL(join(process.cwd(), "src/runtime/proc/run.ts")).href;
+    const runtime = new URL("../src/runtime/proc/run.js", import.meta.url).href;
     const script = [
       `import { spawnDetachedProcess } from ${JSON.stringify(runtime)};`,
       `const owned = await spawnDetachedProcess({ argv: [process.execPath, "-e", ${JSON.stringify(`require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setTimeout(() => {}, 1000)`)}], cwd: ${JSON.stringify(root)}, log: ${JSON.stringify(join(root, "stdio.log"))} });`,
@@ -1309,7 +1308,7 @@ test("release lets the parent reach beforeExit while the detached child continue
     const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
     delete env.FORCE_COLOR;
     const outcome = await runProcess(
-      input([process.execPath, "--import", "tsx", "--input-type=module", "-e", script], { env }),
+      input([process.execPath, ...(import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"]), "--input-type=module", "-e", script], { env }),
     );
     assert.deepEqual(outcome, { kind: "terminal", code: 0, stdout: "before-exit\n", stderr: "", truncated: false });
   } finally {

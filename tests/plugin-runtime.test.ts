@@ -551,7 +551,7 @@ test("completed plugin emissions leave no timeout keeping their process alive", 
   `;
   const output = execFileSync(
     process.execPath,
-    ["--import", import.meta.resolve("tsx"), "--input-type=module", "--eval", source],
+    [...(import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")]), "--input-type=module", "--eval", source],
     { encoding: "utf8", timeout: 10_000 },
   );
   assert.deepEqual(JSON.parse(output), []);

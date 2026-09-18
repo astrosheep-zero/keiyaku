@@ -124,8 +124,9 @@ function declarationsOf(
   return [...grouped.values()];
 }
 
-function languageService(root: string, sources: readonly ModelSource[]): ts.LanguageService {
-  const contents = new Map(sources.map((input) => [path.resolve(root, input.path), input.source]));
+function languageService(root: string) {
+  const contents = new Map<string, string>();
+  let revision = 0;
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2023,
     module: ts.ModuleKind.NodeNext,
@@ -138,17 +139,27 @@ function languageService(root: string, sources: readonly ModelSource[]): ts.Lang
     getCompilationSettings: () => options,
     getCurrentDirectory: () => root,
     getDefaultLibFileName: (compilerOptions) => ts.getDefaultLibFilePath(compilerOptions),
+    getProjectVersion: () => String(revision),
     getScriptFileNames: () => [...contents.keys()],
     getScriptSnapshot: (fileName) => {
       const source = contents.get(path.resolve(fileName)) ?? ts.sys.readFile(fileName);
       return source === undefined ? undefined : ts.ScriptSnapshot.fromString(source);
     },
-    getScriptVersion: () => "0",
+    getScriptVersion: (fileName) => (contents.has(path.resolve(fileName)) ? String(revision) : "0"),
     fileExists: (fileName) => contents.has(path.resolve(fileName)) || ts.sys.fileExists(fileName),
     readFile: (fileName) => contents.get(path.resolve(fileName)) ?? ts.sys.readFile(fileName),
     readDirectory: ts.sys.readDirectory,
   };
-  return ts.createLanguageService(host);
+  return {
+    service: ts.createLanguageService(host),
+    replace(sources: readonly ModelSource[]) {
+      contents.clear();
+      for (const input of sources) contents.set(path.resolve(root, input.path), input.source);
+      // Every candidate snapshot invalidates its source files. Only unchanged
+      // compiler libraries are reusable; no model-impact result is cached.
+      revision += 1;
+    },
+  };
 }
 
 function nodeAt(sourceFile: ts.SourceFile, position: number): ts.Node {
@@ -251,10 +262,15 @@ function referenceUsages(
   );
 }
 
-function analyzeSnapshot(sources: readonly ModelSource[], policy: ModelImpactPolicy): SnapshotAnalysis {
+function analyzeSnapshot(
+  sources: readonly ModelSource[],
+  policy: ModelImpactPolicy,
+  runtime: ReturnType<typeof languageService>,
+): SnapshotAnalysis {
   const root = path.resolve("/virtual-keiyaku-model-impact");
   const normalizedSources = sources.map((input) => ({ path: normalized(input.path), source: input.source }));
-  const service = languageService(root, normalizedSources);
+  runtime.replace(normalizedSources);
+  const { service } = runtime;
   const program = service.getProgram();
   if (!program) return { fields: new Map() };
   const fields = new Map<string, Readonly<{ declaration: FieldDeclaration; usages: readonly FieldUsage[] }>>();
@@ -266,7 +282,6 @@ function analyzeSnapshot(sources: readonly ModelSource[], policy: ModelImpactPol
       fields.set(declaration.key, { declaration, usages: referenceUsages(service, root, declaration, policy) });
     }
   }
-  service.dispose();
   return { fields };
 }
 
@@ -282,27 +297,32 @@ export function analyzeModelImpact(
   labels: Readonly<{ base: string; head: string }>,
   policy: ModelImpactPolicy,
 ): ModelImpactReport {
-  const before = analyzeSnapshot(base, policy);
-  const after = analyzeSnapshot(head, policy);
-  const keys = [...new Set([...before.fields.keys(), ...after.fields.keys()])].sort();
-  const fields: FieldImpact[] = [];
-  for (const key of keys) {
-    const oldField = before.fields.get(key);
-    const newField = after.fields.get(key);
-    if (oldField?.declaration.signature === newField?.declaration.signature) continue;
-    const declaration = newField?.declaration ?? oldField!.declaration;
-    const usages = [...(oldField?.usages ?? []), ...(newField?.usages ?? [])];
-    fields.push({
-      key,
-      file: declaration.file,
-      model: declaration.model,
-      field: declaration.field,
-      change: oldField ? (newField ? "changed" : "removed") : "added",
-      ...(oldField ? { before: snapshot(oldField)! } : {}),
-      ...(newField ? { after: snapshot(newField)! } : {}),
-      owners: [...new Set(usages.filter((usage) => usage.kind !== "declaration").map((usage) => usage.owner))].sort(),
-      files: [...new Set(usages.filter((usage) => usage.kind !== "declaration").map((usage) => usage.file))].sort(),
-    });
+  const runtime = languageService(path.resolve("/virtual-keiyaku-model-impact"));
+  try {
+    const before = analyzeSnapshot(base, policy, runtime);
+    const after = analyzeSnapshot(head, policy, runtime);
+    const keys = [...new Set([...before.fields.keys(), ...after.fields.keys()])].sort();
+    const fields: FieldImpact[] = [];
+    for (const key of keys) {
+      const oldField = before.fields.get(key);
+      const newField = after.fields.get(key);
+      if (oldField?.declaration.signature === newField?.declaration.signature) continue;
+      const declaration = newField?.declaration ?? oldField!.declaration;
+      const usages = [...(oldField?.usages ?? []), ...(newField?.usages ?? [])];
+      fields.push({
+        key,
+        file: declaration.file,
+        model: declaration.model,
+        field: declaration.field,
+        change: oldField ? (newField ? "changed" : "removed") : "added",
+        ...(oldField ? { before: snapshot(oldField)! } : {}),
+        ...(newField ? { after: snapshot(newField)! } : {}),
+        owners: [...new Set(usages.filter((usage) => usage.kind !== "declaration").map((usage) => usage.owner))].sort(),
+        files: [...new Set(usages.filter((usage) => usage.kind !== "declaration").map((usage) => usage.file))].sort(),
+      });
+    }
+    return { base: labels.base, head: labels.head, fields };
+  } finally {
+    runtime.service.dispose();
   }
-  return { base: labels.base, head: labels.head, fields };
 }

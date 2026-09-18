@@ -7,8 +7,20 @@ function source(path: string, value: string): ModelSource {
   return { path, source: value };
 }
 
-test("model impact reports semantic field reach across owners without failing on fan-out", () => {
+test("model impact tracks owner usages, inherited aliases and replaced source roots", () => {
+  const inherited = (type: string, optional: string) =>
+    source(
+      "src/core/facts/inherited.ts",
+      [
+        `interface Shared<T> { readonly delivery${optional}: T }`,
+        `export interface ContractState extends Shared<${type}> {}`,
+        `export type ContractAlias = Shared<${type}>;`,
+        'export type Label = "open" | "done";',
+      ].join("\n"),
+    );
   const base = [
+    source("src/core/facts/deleted.ts", "export interface Deleted { retired: string }"),
+    inherited("string", ""),
     source("src/core/facts/types.ts", "export type ContractState = { delivery: string }"),
     source(
       "src/core/facts/fold.ts",
@@ -16,6 +28,8 @@ test("model impact reports semantic field reach across owners without failing on
     ),
   ];
   const head = [
+    source("src/core/facts/added.ts", "export interface Added { fresh: number }"),
+    inherited("number", "?"),
     source("src/core/facts/types.ts", "export type ContractState = { delivery?: number }"),
     source(
       "src/core/facts/fold.ts",
@@ -31,43 +45,27 @@ test("model impact reports semantic field reach across owners without failing on
     ),
   ];
   const report = analyzeModelImpact(base, head, { base: "base", head: "head" }, MODEL_IMPACT_POLICY);
-  assert.equal(report.fields.length, 1);
-  assert.equal(report.fields[0]?.change, "changed");
-  assert.deepEqual(report.fields[0]?.owners, ["cli", "core/facts"]);
   assert.deepEqual(
-    new Set(report.fields[0]?.after?.usages.map((usage) => usage.kind)),
+    report.fields.map((field) => [field.model, field.change]),
+    [
+      ["Added", "added"],
+      ["Deleted", "removed"],
+      ["ContractAlias", "changed"],
+      ["ContractState", "changed"],
+      ["ContractState", "changed"],
+    ],
+  );
+  assert.equal(report.fields[0]?.before, undefined);
+  assert.equal(report.fields[1]?.after, undefined);
+  const inheritedFields = report.fields.filter((field) => field.file === "src/core/facts/inherited.ts");
+  assert.equal(inheritedFields.length, 2);
+  assert.ok(inheritedFields.every((field) => field.before?.signature === "readonly string"));
+  assert.ok(inheritedFields.every((field) => field.after?.signature === "readonly optional number"));
+  const changed = report.fields.find((field) => field.file === "src/core/facts/types.ts");
+  assert.ok(changed);
+  assert.deepEqual(changed.owners, ["cli", "core/facts"]);
+  assert.deepEqual(
+    new Set(changed.after?.usages.map((usage) => usage.kind)),
     new Set(["construct", "declaration", "destructure", "read", "write"]),
   );
-});
-
-test("model impact resolves inherited and aliased exported model fields", () => {
-  const base = [
-    source(
-      "src/core/facts/types.ts",
-      [
-        "interface Shared<T> { readonly delivery: T }",
-        "export interface ContractState extends Shared<string> {}",
-        "export type ContractAlias = Shared<string>;",
-        'export type Label = "open" | "done";',
-      ].join("\n"),
-    ),
-  ];
-  const head = [
-    source(
-      "src/core/facts/types.ts",
-      [
-        "interface Shared<T> { readonly delivery?: T }",
-        "export interface ContractState extends Shared<number> {}",
-        "export type ContractAlias = Shared<number>;",
-        'export type Label = "open" | "done";',
-      ].join("\n"),
-    ),
-  ];
-  const report = analyzeModelImpact(base, head, { base: "base", head: "head" }, MODEL_IMPACT_POLICY);
-  assert.deepEqual(
-    report.fields.map((field) => field.model),
-    ["ContractAlias", "ContractState"],
-  );
-  assert.ok(report.fields.every((field) => field.change === "changed"));
-  assert.ok(report.fields.every((field) => field.after?.signature === "readonly optional number"));
 });

@@ -210,8 +210,8 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     `const input = JSON.parse(Buffer.from(${JSON.stringify(input)}, "base64url").toString("utf8"));`,
     "await runCreateHooks(input.worktree, input.hooks);",
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const caller = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", callerSource], {
+  const loader = import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")];
+  const caller = spawn(process.execPath, [...loader, "--input-type=module", "-e", callerSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
@@ -278,8 +278,8 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
     `const scratch = await materializeScratchCandidate(await repositoryAt(${JSON.stringify(repository.path)}), ${JSON.stringify(snapshot)});`,
     `writeFileSync(${JSON.stringify(pathFile)}, scratch.cwd);`,
   ].join(" ");
-  const loader = import.meta.resolve("tsx");
-  const child = spawn(process.execPath, ["--import", loader, "--input-type=module", "-e", childSource], {
+  const loader = import.meta.url.endsWith(".js") ? [] : ["--import", import.meta.resolve("tsx")];
+  const child = spawn(process.execPath, [...loader, "--input-type=module", "-e", childSource], {
     cwd: process.cwd(),
     stdio: ["ignore", "ignore", "pipe"],
   });
