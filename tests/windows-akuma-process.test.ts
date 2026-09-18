@@ -127,15 +127,22 @@ test("retained launch returns the target pid and release leaves it alive", async
       argv: [
         process.execPath,
         "-e",
-        `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`,
+        [
+          'const fs = require("node:fs");',
+          `fs.writeFileSync(${JSON.stringify(`${pidFile}.pending`)}, String(process.pid));`,
+          `fs.renameSync(${JSON.stringify(`${pidFile}.pending`)}, ${JSON.stringify(pidFile)});`,
+          'setInterval(() => {}, 1000);',
+        ].join("\n"),
       ],
       cwd: root,
       log,
     });
     assert.ok(Number.isSafeInteger(owned.pid) && owned.pid > 0);
+    // Keep cleanup custody even when the independent child receipt is malformed.
+    pid = owned.pid;
     owned.release();
-    pid = Number.parseInt(await waitForFile(pidFile), 10);
-    assert.equal(pid, owned.pid);
+    const receiptPid = Number(await waitForFile(pidFile));
+    assert.equal(receiptPid, pid);
     process.kill(pid, 0);
     await new Promise((resolve) => setTimeout(resolve, 100));
     process.kill(pid, 0);

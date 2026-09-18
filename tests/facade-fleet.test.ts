@@ -308,8 +308,8 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
   let template: Parameters<typeof initializeHeart>[0] | undefined;
-  // Physical pruning needs more than one page, not 501 real databases.
-  const oldCount = 50;
+  // Pagination limits are asserted at the owner below; physical pruning needs a small mixed catalogue.
+  const oldCount = PAGE_POOL_SIZE;
   try {
     const oldIds = [];
     for (let index = 0; index < oldCount; index += 1) {
@@ -324,7 +324,7 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       } catch {}
     }
     const recent = await Promise.all(
-      Array.from({ length: 11 }, async (_, index) => {
+      Array.from({ length: 3 }, async (_, index) => {
         const source = await answered(root, "worker", `a00000${index.toString(16).padStart(2, "0")}`);
         await appendActivity(source.paths, {
           turnSequence: 1,
@@ -340,11 +340,9 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       return originalPrepare.apply(this, args);
     };
     const world = Akuma.of(await World.at(root));
-    const page = await world.list({ limit: 10 });
+    const page = await world.list({ limit: 2 });
     const pagePrepares = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
-    const defaultPage = await world.list();
-    const maximumPage = await world.list({ limit: 500 });
     prepareCalls = 0;
     DatabaseSync.prototype.prepare = function (...args) {
       prepareCalls += 1;
@@ -368,7 +366,7 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
     assert.deepEqual(completeGlob.ids, [...oldIds, ...recent.map((source) => source.id)].sort());
     assert.deepEqual(
       page.rows.map((row) => row.id),
-      reference.slice(0, 10),
+      reference.slice(0, 2),
     );
     assert.equal(page.hasMore, true);
     assert.deepEqual(
@@ -376,17 +374,10 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       recent
         .slice()
         .reverse()
-        .slice(0, 10)
+        .slice(0, 2)
         .map((row) => row.id),
     );
     assert.ok(pagePrepares < completePrepares, `pruned page ${pagePrepares} must read less than complete ${completePrepares}`);
-    assert.equal(defaultPage.rows.length, 50);
-    assert.equal(defaultPage.hasMore, true);
-    assert.deepEqual(
-      maximumPage.rows.map((row) => row.id),
-      reference,
-    );
-    assert.equal(maximumPage.hasMore, false);
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;
     rmSync(root, { recursive: true, force: true });
