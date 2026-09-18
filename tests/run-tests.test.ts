@@ -607,3 +607,29 @@ test("native test compilation transforms syntax, maps original sources, and reje
   writeFileSync(source, "export const broken: = ;");
   assert.notEqual(compile().status, 0, "invalid input must not silently produce executable tests");
 });
+
+
+
+test("sweep cost hints order work without selecting, mutating or dropping files", async () => {
+  const { orderSweepEntries } = await import(pathToFileURL(resolve(root, "scripts/test-plan.mjs")).href) as {
+    orderSweepEntries<T extends { file: string; size: number }>(entries: readonly T[]): T[];
+  };
+  const entries = [
+    { file: "tests/cli-render.test.ts", size: 70_000 },
+    { file: "tests/package-consumers.test.ts", size: 3_000 },
+    { file: "new-large.test.ts", size: 1_000 },
+    { file: "new-small.test.ts", size: 10 },
+  ];
+  const before = [...entries];
+  const ordered = orderSweepEntries(entries);
+  assert.deepEqual(entries, before, "planning must not mutate the caller's selection");
+  assert.equal(ordered.length, entries.length);
+  assert.deepEqual(new Set(ordered), new Set(entries), "every selected entry survives by identity");
+  assert.ok(ordered.indexOf(entries[1]!) < ordered.indexOf(entries[0]!), "short expensive work starts first");
+  assert.ok(ordered.indexOf(entries[2]!) < ordered.indexOf(entries[3]!), "unknown work keeps the size fallback");
+  const windows = entries.map((entry) => ({ ...entry, file: entry.file.replaceAll("/", "\\") }));
+  assert.deepEqual(orderSweepEntries(windows).map((entry) => entry.file.replaceAll("\\", "/")), ordered.map((entry) => entry.file));
+  const ties = [{ file: "b", size: 1 }, { file: "a", size: 1 }];
+  assert.deepEqual(orderSweepEntries(ties).map((entry) => entry.file), ["a", "b"]);
+  assert.deepEqual(orderSweepEntries([]), []);
+});
