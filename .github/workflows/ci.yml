@@ -1,4 +1,4 @@
-name: Publish cross-product test scope reduction
+name: Publish minimal real test fixtures
 on:
   push:
     branches: [test-diet/publish-api-boundary-20260918]
@@ -16,17 +16,16 @@ jobs:
         run: |
           python3 - <<'PY'
           import hashlib, pathlib
-          data = pathlib.Path('.test-audit/batch14-edits.json').read_bytes()
-          data = data.replace(b'../src/cli/parse.js\\",\\n', b'../src/cli/parse.js\\";\\n')
-          assert hashlib.sha256(data).hexdigest() == '0d33a9126e86ca3632c80669f59e6b79b8ecf852d94dd655422d5e35f1eafac8'
-          pathlib.Path('/tmp/batch14-edits.json').write_bytes(data)
+          data = pathlib.Path('.test-audit/batch15-edits.json').read_bytes()
+          assert hashlib.sha256(data).hexdigest() == '61592a449546b76ba9d4dfa913e0e5eab546d6fb1716be3e42ed88735bb6ce99'
+          pathlib.Path('/tmp/batch15-edits.json').write_bytes(data)
           PY
       - name: Publish exact checked tree
         run: |
-          git checkout --detach 819bfc9b86297589077171eae7e54a06a5dcee44
+          git checkout --detach 28899b020d91354f0ac8a68833bf589728104e3c
           python3 - <<'PY'
           import json, pathlib
-          for name, pieces in json.loads(pathlib.Path('/tmp/batch14-edits.json').read_text()).items():
+          for name, pieces in json.loads(pathlib.Path('/tmp/batch15-edits.json').read_text()).items():
               path = pathlib.Path(name)
               assert name.startswith('tests/') and '..' not in path.parts
               old = path.read_text().splitlines(keepends=True)
@@ -34,10 +33,10 @@ jobs:
           PY
           git add tests
           git diff --cached --check
-          test "$(git write-tree)" = fbec36f82993a3e2654196945fef9b516fb1f39c
+          test "$(git write-tree)" = 605472b88c2fcda45232d2f425e45519697fd746
           git config user.name 'Keiyaku Test Maintenance'
           git config user.email 'keiyaku-ci@example.invalid'
-          git commit -m 'test: retire costly cross-product overlays and their dead fixtures'
-          test -z "$(git ls-remote --heads origin refs/heads/test-diet/14-prune-cross-product-overlays)"
-          git push origin HEAD:refs/heads/test-diet/14-prune-cross-product-overlays
+          git commit -m 'test: right-size catalogue and publication fixtures and publish atomic pid receipts'
+          test -z "$(git ls-remote --heads origin refs/heads/test-diet/15-minimal-real-fixtures)"
+          git push origin HEAD:refs/heads/test-diet/15-minimal-real-fixtures
           git rev-parse HEAD HEAD^{tree}
