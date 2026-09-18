@@ -49,7 +49,7 @@ if (explicitMode && supplied.length > 1) {
     if (mode === "release") {
       process.exitCode = await runReleasePlan((name) =>
         name === "tests"
-          ? run(process.execPath, ["scripts/run-tests.mjs", "--compiled", "--test-concurrency=8"], name, environment)
+          ? run(process.execPath, ["scripts/run-tests.mjs", "--compiled", "--test-concurrency=10"], name, environment)
           : run("npm", ["run", name], name, environment),
       );
     } else {
