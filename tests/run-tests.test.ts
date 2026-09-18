@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 type TestManifestsModule = {
   TEST_MANIFESTS: {
@@ -279,7 +279,9 @@ test("native test compilation transforms syntax, maps original sources, and reje
   const encoded = readFileSync(output, "utf8").match(/sourceMappingURL=data:application\/json[^,]*;base64,([^\s]+)/u)?.[1];
   assert.ok(encoded, "compiled tests must retain original-source diagnostics");
   const map = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as { sources: string[] };
-  assert.deepEqual(map.sources, [pathToFileURL(source).href]);
+  // The compiler reports the canonical filesystem spelling of its working
+  // directory, which is not necessarily the spelling /tmp was handed to us as.
+  assert.deepEqual(map.sources.map((entry) => realpathSync(fileURLToPath(entry))), [realpathSync(source)]);
   writeFileSync(source, "export const broken: = ;");
   assert.notEqual(compile().status, 0, "invalid input must not silently produce executable tests");
 });
