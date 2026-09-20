@@ -181,7 +181,7 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
   const rounds: (readonly WaitObservedAkuma[])[] = [];
   const selected: (readonly WaitSelectedAkuma[])[] = [];
-  await waitAkuma(
+  const result = await waitAkuma(
     {
       path: world,
       akuma: [worker.id],
@@ -202,8 +202,10 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.equal(rounds.length, 1);
   const [single] = rounds[0]!;
   assert.equal(single?.status.id, worker.id);
+  assert.ok(single?.rows !== undefined && single.rows.length > 0, "the live callback receives its complete activity companion");
   assert.equal(single?.alias, "@observed");
   assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
+  assert.equal("rows" in result.observations[0]!, false, "the final public wait result discards the live companion");
 });
 
 test("facade ls reads exactly one selected identity directory", async (t) => {

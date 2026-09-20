@@ -26,7 +26,7 @@ import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { World } from "../src/world.js";
-import { bornStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
+import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
@@ -188,6 +188,27 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
         (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
       ),
     );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("a live status observation pairs its bounded status with the same complete projected frontier", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt, call: "live frontier" });
+    const input = { aperture: "monitoring" as const, ordinaryBudget: 0 };
+    const observed = await readLiveStatus(value.root, id, input);
+    const facts = await readStatusFacts(paths, input);
+    const ledger = projectTurns(facts);
+    assert.deepEqual(observed.status.timeline, selectSnapshot(ledger, input).snapshot, "status keeps its bounded public shape");
+    assert.deepEqual(observed.rows, ledger.rows, "the callback companion is the complete projection of that frontier");
+    assert.equal("rows" in observed.status, false, "the public status itself carries no companion field");
   } finally {
     leash.release();
     value.close();

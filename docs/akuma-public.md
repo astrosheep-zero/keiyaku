@@ -27,6 +27,12 @@ recently changed files. Repeated edits to one path become one summary with
 accumulated known diffstat and the latest event identity; omitted counts refer
 to files, not events. They are never a file ledger or fact.
 
+A live observing command may receive, beside that bounded status and only for
+its still-open callback, the complete retained semantic frontier from the same
+fact read and Turn projection. That transient companion preserves final forms
+that a later bounded status no longer selects, including rows of a newly idle
+Turn. It neither widens a status nor enters a public wait or call result.
+
 For an open Turn, the public timeline projector selects and retains its opening
 input as current work independently of the ordinary-detail budget. Its retained
 call wins; only without that call, the earliest retained settled Tell delivered

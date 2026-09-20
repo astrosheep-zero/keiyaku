@@ -44,6 +44,8 @@ type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
 type RenderRow = ActivityRow | Extract<FleetTimelineEntry, { kind: "row" }>["row"];
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = FleetTimeline;
+type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows?: readonly ActivityRow[] }>;
+type ActivityInput = RenderedSnapshot | RenderedActivity;
 type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
 type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
@@ -307,12 +309,23 @@ function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntr
 }
 
 /** The public projection names the current-Turn boundary when it is retained. */
-function currentTurnBoundary(snapshot: RenderedSnapshot): CurrentTurnBoundary | undefined {
+function activityInput(input: ActivityInput): RenderedActivity {
+  return "snapshot" in input ? input : { snapshot: input };
+}
+
+function companionRows(activity: RenderedActivity): readonly RenderRow[] {
+  if (activity.rows !== undefined) return activity.rows;
+  return orderedSnapshotEntries(activity.snapshot).flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+}
+
+function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | undefined {
+  const snapshot = activity.snapshot;
   if (snapshot.kind !== "open" || snapshot.openingSequence === undefined) return undefined;
-  const entry = snapshot.entries.find(
-    (candidate) => candidate.kind === "row" && candidate.row.sequence === snapshot.openingSequence,
-  );
-  return entry?.kind === "row" ? { row: entry.row, turnSequence: snapshot.turn.turnSequence } : undefined;
+  const row = companionRows(activity).find((candidate) => candidate.sequence === snapshot.openingSequence);
+  if (row === undefined) return undefined;
+  // The projector selects a typed opening: its call or delivered launch Tell.
+  if (row.kind !== "call" && !(row.kind === "tell" && row.state === "told")) return undefined;
+  return { row, turnSequence: snapshot.turn.turnSequence };
 }
 
 /** Open status hides internal thought narration without selecting a second activity window. */
@@ -352,29 +365,11 @@ export function snapshotActivityLines(
   return latest === undefined ? [] : groupedEntries([latest], context);
 }
 
-/**
- * One status' timeline without its conclusion: the newest open entry is still
- * moving, and an idle outcome is the command's final result rather than a
- * settled row.
- */
-function settledTimeline(snapshot: RenderedSnapshot): RenderedSnapshot {
-  switch (snapshot.kind) {
-    case "unborn":
-      return snapshot;
-    case "open":
-      return { ...snapshot, entries: snapshot.entries.slice(0, -1) };
-    case "idle": {
-      const { outcome: _outcome, ...rest } = snapshot;
-      return { ...rest, entries: snapshot.entries };
-    }
-  }
-}
-
 /** One command's append-only activity view, with a baseline and a final tail flush. */
-export type ActivityStream = ((snapshot: RenderedSnapshot) => readonly string[]) &
+export type ActivityStream = ((input: ActivityInput) => readonly string[]) &
   Readonly<{
-    /** Seed the sequence cursor without spending the command's live evidence budget. */
-    seed: (snapshot: RenderedSnapshot) => readonly string[];
+    /** Establish a wait baseline without spending the command's live tool budget. */
+    seed: (input: ActivityInput) => readonly string[];
     /** Emit the deferred tail exactly once before the command's conclusion. */
     flush: () => readonly string[];
   }>;
@@ -382,17 +377,70 @@ export type ActivityStream = ((snapshot: RenderedSnapshot) => readonly string[])
 type DeferredActivityEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 
 type ActivityStreamState = {
-  newestSequence: number | undefined;
+  newestSettledSequence: number | undefined;
+  mutableSequences: Set<number>;
   previousClock: string | undefined;
   renderedBoundaries: Set<number>;
   openingTools: number;
   deferred: DeferredActivityEntry[];
 };
 
-function settledRows(snapshot: RenderedSnapshot): readonly RenderRow[] {
-  return orderedSnapshotEntries(settledTimeline(snapshot)).flatMap((entry) =>
-    entry.kind === "row" ? [entry.row] : [],
-  );
+function isSettledStreamRow(row: RenderRow): boolean {
+  if (row.kind === "turn" || row.kind === "outcome") return false;
+  if (row.kind === "tell") return row.state === "told";
+  return row.kind !== "tool" || (row.state !== "active" && row.state !== "unsettled");
+}
+
+/** A pending Tell or active tool retains its sequence when it later becomes eligible. */
+function isMutableStreamRow(row: RenderRow): boolean {
+  return (row.kind === "tell" && row.state === "pending") || (row.kind === "tool" && row.state === "active");
+}
+
+function settledRows(activity: RenderedActivity): readonly RenderRow[] {
+  if (activity.rows === undefined) {
+    const snapshot = activity.snapshot;
+    const entries =
+      snapshot.kind === "open"
+        ? snapshot.entries.slice(0, -1)
+        : snapshot.kind === "idle"
+          ? snapshot.entries
+          : snapshot.entries;
+    return entries.flatMap((entry) => (entry.kind === "row" && isSettledStreamRow(entry.row) ? [entry.row] : []));
+  }
+  return companionRows(activity).filter(isSettledStreamRow);
+}
+
+function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
+  for (const row of companionRows(activity)) if (isMutableStreamRow(row)) state.mutableSequences.add(row.sequence);
+}
+
+/** A seeded wait counts its skipped settled companion evidence after its typed opening. */
+function baselineOmissionCount(activity: RenderedActivity, boundary: CurrentTurnBoundary): number {
+  if (activity.rows === undefined) return baselineSnapshotOmissionCount(activity.snapshot, boundary);
+  let afterBoundary = false;
+  let count = 0;
+  for (const row of activity.rows) {
+    if (!afterBoundary) {
+      if (row.sequence === boundary.row.sequence) afterBoundary = true;
+      continue;
+    }
+    if (isSettledStreamRow(row)) count += 1;
+  }
+  return count;
+}
+
+function baselineSnapshotOmissionCount(snapshot: RenderedSnapshot, boundary: CurrentTurnBoundary): number {
+  let afterBoundary = false;
+  let count = 0;
+  for (const entry of orderedSnapshotEntries(snapshot)) {
+    if (!afterBoundary) {
+      if (entry.kind === "row" && entry.row.sequence === boundary.row.sequence) afterBoundary = true;
+      continue;
+    }
+    if (entry.kind === "gap") count += entry.count;
+    else if (isSettledStreamRow(entry.row)) count += 1;
+  }
+  return count;
 }
 
 function renderStreamRow(
@@ -459,12 +507,12 @@ function flushSafeActivityPrefix(
 
 function renderCurrentTurnBoundary(
   state: ActivityStreamState,
-  snapshot: RenderedSnapshot,
+  activity: RenderedActivity,
   lines: string[],
   context: TextRenderContext,
   layout: RowLayout,
 ): CurrentTurnBoundary | undefined {
-  const boundary = currentTurnBoundary(snapshot);
+  const boundary = currentTurnBoundary(activity);
   if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
     state.renderedBoundaries.add(boundary.turnSequence);
     if (boundary.row.kind !== "thought") renderStreamRow(state, boundary.row, lines, context, layout);
@@ -474,19 +522,35 @@ function renderCurrentTurnBoundary(
 
 function observeActivitySnapshot(
   state: ActivityStreamState,
-  snapshot: RenderedSnapshot,
+  input: ActivityInput,
   context: TextRenderContext,
   layout: RowLayout,
 ): readonly string[] {
+  const activity = activityInput(input);
   const lines: string[] = [];
-  const boundary = renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
-  const observedRows = settledRows(snapshot)
-    .filter((row) => row !== boundary?.row)
-    .filter((row) => state.newestSequence === undefined || row.sequence > state.newestSequence);
+  const boundary = currentTurnBoundary(activity);
+  rememberMutableRows(state, activity);
+  // A row newly selected as this Turn's typed opening must still respect the
+  // settled cursor, even if its earlier pending form was remembered as mutable.
+  if (boundary !== undefined) state.mutableSequences.delete(boundary.row.sequence);
+  const observedRows = settledRows(activity)
+    .filter(
+      (row) =>
+        boundary === undefined ||
+        !state.renderedBoundaries.has(boundary.turnSequence) ||
+        row.sequence !== boundary.row.sequence,
+    )
+    .filter(
+      (row) =>
+        state.mutableSequences.has(row.sequence) ||
+        state.newestSettledSequence === undefined ||
+        row.sequence > state.newestSettledSequence,
+    );
   if (observedRows.length === 0) return lines;
-  state.newestSequence = observedRows.reduce(
+  for (const row of observedRows) state.mutableSequences.delete(row.sequence);
+  state.newestSettledSequence = observedRows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
-    state.newestSequence ?? observedRows[0]!.sequence,
+    state.newestSettledSequence ?? observedRows[0]!.sequence,
   );
   const rows = observedRows.filter((row) => row.kind !== "thought");
   for (const row of rows) {
@@ -532,22 +596,30 @@ function flushActivityTail(
  */
 export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
   const state: ActivityStreamState = {
-    newestSequence: undefined,
+    newestSettledSequence: undefined,
+    mutableSequences: new Set(),
     previousClock: undefined,
     renderedBoundaries: new Set(),
     openingTools: 0,
     deferred: [],
   };
-  const seed = (snapshot: RenderedSnapshot): readonly string[] => {
+  const seed = (input: ActivityInput): readonly string[] => {
+    const activity = activityInput(input);
     const lines: string[] = [];
-    renderCurrentTurnBoundary(state, snapshot, lines, context, layout);
-    const rows = settledRows(snapshot);
+    const boundary = currentTurnBoundary(activity);
+    const unseenBoundary = boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence);
+    if (unseenBoundary) {
+      renderCurrentTurnBoundary(state, activity, lines, context, layout);
+      const omitted = baselineOmissionCount(activity, boundary!);
+      if (omitted > 0) lines.push(layout.marker(omitted));
+    }
+    rememberMutableRows(state, activity);
+    const rows = settledRows(activity);
     if (rows.length > 0)
-      state.newestSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
+      state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
     return lines;
   };
-  const observe = (snapshot: RenderedSnapshot): readonly string[] =>
-    observeActivitySnapshot(state, snapshot, context, layout);
+  const observe = (input: ActivityInput): readonly string[] => observeActivitySnapshot(state, input, context, layout);
   const flush = (): readonly string[] => flushActivityTail(state, context, layout);
   return Object.assign(observe, { seed, flush });
 }
@@ -690,10 +762,10 @@ function observeWaitRound(
       lines.push(...snapshotHeading(sole.status.id, sole.alias, sole.contract));
     }
   }
-  for (const { status } of round) {
+  for (const { status, rows } of round) {
     const known = state.streams.get(status.id);
     if (known !== undefined) {
-      lines.push(...known(status.timeline));
+      lines.push(...known({ snapshot: status.timeline, ...(rows === undefined ? {} : { rows }) }));
     } else {
       // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
       const stream = activityStream(
@@ -703,8 +775,8 @@ function observeWaitRound(
           : plainLayout(),
       );
       state.streams.set(status.id, stream);
-      // A wait starts at the current settled frontier: its backlog is neither evidence nor budget.
-      lines.push(...stream.seed(status.timeline));
+      // Seed marks skipped retained evidence without spending this command's live tool budget.
+      lines.push(...stream.seed({ snapshot: status.timeline, ...(rows === undefined ? {} : { rows }) }));
     }
     if (!state.settledAt.has(status.id) && defaultWaitComplete(status))
       state.settledAt.set(status.id, settleMoment(status) ?? now());
@@ -828,7 +900,9 @@ export type ObservedCallHead = Readonly<{
 }>;
 
 export type CallObservationStream = Readonly<{
-  observe: (status: AkumaStatus) => readonly string[];
+  observe: (
+    observation: AkumaStatus | Readonly<{ status: AkumaStatus; rows?: readonly ActivityRow[] }>,
+  ) => readonly string[];
   conclude: (observation: CallObservation) => string;
   opened: () => boolean;
 }>;
@@ -859,10 +933,13 @@ export function callObservationStream(
     opened = true;
     lines.push(...snapshotHeading(head.id, head.alias, head.contract), ...head.facts);
   };
-  const observe = (status: AkumaStatus): readonly string[] => {
+  const observe = (
+    observation: AkumaStatus | Readonly<{ status: AkumaStatus; rows?: readonly ActivityRow[] }>,
+  ): readonly string[] => {
     const lines: string[] = [];
     open(lines);
-    lines.push(...stream(status.timeline));
+    const live = "status" in observation ? observation : { status: observation };
+    lines.push(...stream({ snapshot: live.status.timeline, ...(live.rows === undefined ? {} : { rows: live.rows }) }));
     return lines;
   };
   const conclude = (observation: CallObservation): string => {

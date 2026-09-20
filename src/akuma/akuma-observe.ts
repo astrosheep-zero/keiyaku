@@ -18,6 +18,7 @@ import {
   selectHistory,
   selectSnapshot,
   type ActivityHistory,
+  type ActivityRow,
   type ActivitySnapshot,
 } from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -84,11 +85,18 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
 
 export type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
 
-export async function bornStatus(
+/**
+ * The internal live-observation companion for one status frontier.  It is not
+ * part of status or any returned facade result: viewers receive it only while
+ * an observation loop is still streaming.
+ */
+export type LiveStatusObservation = BudgetedStatusObservation & Readonly<{ rows: readonly ActivityRow[] }>;
+
+async function bornLiveStatus(
   paths: AkumaPaths,
   expected: AkuId,
   input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
-): Promise<BudgetedStatusObservation> {
+): Promise<LiveStatusObservation> {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
   const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => readLifeSnapshot(paths));
@@ -97,7 +105,8 @@ export async function bornStatus(
     snapshot.latestSession?.provider === soul.provider.name &&
     (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
   const facts = await readStatusFacts(paths, input);
-  const selected = selectSnapshot(projectTurns(facts), {
+  const ledger = projectTurns(facts);
+  const selected = selectSnapshot(ledger, {
     aperture: input.aperture,
     budget: ordinarySnapshotBudget(input.ordinaryBudget),
     ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
@@ -112,7 +121,17 @@ export async function bornStatus(
       timeline: selected.snapshot,
     },
     ordinarySelected: selected.ordinaryCount,
+    rows: ledger.rows,
   };
+}
+
+export async function bornStatus(
+  paths: AkumaPaths,
+  expected: AkuId,
+  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
+): Promise<BudgetedStatusObservation> {
+  const { rows: _rows, ...status } = await bornLiveStatus(paths, expected, input);
+  return status;
 }
 
 export async function readBudgetedStatus(
@@ -121,6 +140,14 @@ export async function readBudgetedStatus(
   input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
 ): Promise<BudgetedStatusObservation> {
   return await bornStatus(pathsForAkuId(worldPath, id), id, input);
+}
+
+export async function readLiveStatus(
+  worldPath: WorldRoot,
+  id: AkuId,
+  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
+): Promise<LiveStatusObservation> {
+  return await bornLiveStatus(pathsForAkuId(worldPath, id), id, input);
 }
 
 function complete(life: AkumaStatus["life"], pending: boolean): boolean {
@@ -198,17 +225,17 @@ export async function waitForObservation<T>(
 export async function observeAkumaStatus(
   worldPath: WorldRoot,
   expected: AkuId,
-  input: Readonly<{ timeoutMs: number; signal?: AbortSignal; observe: (status: AkumaStatus) => void }>,
+  input: Readonly<{ timeoutMs: number; signal?: AbortSignal; observe: (status: LiveStatusObservation) => void }>,
 ): Promise<Readonly<{ reason: WaitReason; status: AkumaStatus }>> {
   const paths = pathsForAkuId(worldPath, expected);
   const waited = await waitForObservation({
     timeoutMs: input.timeoutMs,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
-    observe: async () => (await bornStatus(paths, expected, { aperture: "monitoring" })).status,
-    complete: defaultWaitComplete,
+    observe: async () => await bornLiveStatus(paths, expected, { aperture: "monitoring" }),
+    complete: (observation) => defaultWaitComplete(observation.status),
     onObserve: input.observe,
   });
-  return { reason: waited.reason, status: waited.value };
+  return { reason: waited.reason, status: waited.value.status };
 }
 
 export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {

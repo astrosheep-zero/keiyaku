@@ -176,16 +176,26 @@ A wait reports the same kind of progress. It announces no birth and streams
 eligible newly settled `say`, `note`, `call`, `tell`, and tool rows once in
 retained sequence order on the progress channel through the same renderer. Text
 live call and wait activity never contains thought narration; history retains
-requested thought and tool activity through its own projection. An open full snapshot keeps its retained boundary and bounded selected
+requested thought and tool activity through its own projection. An ordinary
+observing call begins at an empty cursor and leaves retained activity in that
+durable order. A wait establishes its command-lifetime baseline at its first
+observation. When that open observation carries its typed retained current-Turn
+opening, the wait displays that opening once, then one opaque omission marking
+all retained settled companion evidence after it through the baseline. The
+opening itself, pending Tells, active work, Turn structure, and outcomes do not
+enlarge that count; a skipped thought contributes only its one opaque member.
+Without that displayed opening, a wait makes no baseline
+continuity claim, and an already idle wait replays no activity. The baseline
+omission and any later bounded-tool omission remain separate spans. An open full snapshot keeps its retained boundary and bounded selected
 activity in its original evidence order; it does not select another activity
 window. An idle full status instead
 retains its activity and outcome as settled evidence, including its answer or
 failure diagnostic. Adjacent omitted spans render as one cumulative omission,
 while visible activity keeps separate spans distinct. For a current open
-attempt, default live activity first renders one retained boundary: the initial
+attempt, wait seeding first renders one retained boundary: the initial
 commission, or the settled wake that started the attempt. A Tell delivered to
 an already pursuing Body is ordinary activity, and absence of either durable
-boundary produces no synthetic row.
+boundary produces no synthetic row or omission.
 The Turn outcome is the closing result, never a streamed activity row; an
 answered closing result is labeled `answer`, never `say`. That channel also
 carries the closing conclusion, while stdout
