@@ -217,10 +217,9 @@ export async function waitForObservation<T>(
 
 /**
  * Successive status observations of one already born Akuma until its
- * observation window closes. Every status observed while the window is open is
- * reported to `observe`; the window's last status is returned. A window that is
- * already closed, or an Akuma already at its completion judgment, reports
- * nothing and returns the current status.
+ * observation window closes. Every acquired observation is reported to
+ * `observe` before completion or deadline judgment, including the first
+ * already-complete observation; the last status is returned.
  */
 export async function observeAkumaStatus(
   worldPath: WorldRoot,

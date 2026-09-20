@@ -15,9 +15,7 @@ import {
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
-import { parseAkumaStatus, type AkumaStatus, type OutcomeRow } from "../src/akuma/akuma.js";
-import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
-import type { TimelineFact } from "../src/akuma/heart/index.js";
+import { parseAkumaStatus, type ActivityRow, type AkumaStatus, type OutcomeRow } from "../src/akuma/akuma.js";
 import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
 import type { DispatchAssociation } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
@@ -37,7 +35,6 @@ import {
   AKUMA_ACTIVITY_AT,
   type ActivityToolCall,
 } from "./support/kanshi-activity.js";
-import { activityFact, turnEndFact } from "./support/akuma-fixtures.js";
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
@@ -52,12 +49,26 @@ function clockAt(at: number): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/** Rows carried by a live observation; focused renderer fixtures need no second projection. */
+function activityRows(timeline: AkumaStatus["timeline"]): readonly ActivityRow[] {
+  return timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+}
+
+function live(status: AkumaStatus, rows: readonly ActivityRow[] = activityRows(status.timeline)) {
+  return { status, rows };
+}
+
+function liveActivity(snapshot: AkumaStatus["timeline"], rows: readonly ActivityRow[] = activityRows(snapshot)) {
+  return { snapshot, rows };
+}
+
 /** One observed Akuma as the wait's observation seam reports it: status plus identity facts. */
 function observed(
   status: AkumaStatus,
   facts: Readonly<{ alias?: AkumaAlias; contract: DispatchAssociation }> = { contract: { kind: "none" } },
+  rows: readonly ActivityRow[] = activityRows(status.timeline),
 ): WaitObservedAkuma {
-  return { status, ...facts };
+  return { status, rows, ...facts };
 }
 
 test("Akuma call help omits the caller readonly flag", () => {
@@ -1443,7 +1454,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   assert.match(snapshotActivityLines(initial, context, { latest: true }).join("\n"), /still-running/u);
 
   const live = activityStream(context);
-  const liveRows = [...live(initial), ...live(initial), ...live.flush()].join("\n");
+  const liveRows = [...live(liveActivity(initial)), ...live(liveActivity(initial)), ...live.flush()].join("\n");
   assert.match(liveRows, /^\d{2}:\d{2} │ call +initial commission/mu);
   assert.ok(liveRows.indexOf("initial commission") < liveRows.indexOf("after-boundary"));
   assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
@@ -1510,435 +1521,58 @@ test("current attempt boundaries consume the projection opening identity", () =>
   });
   const activity = snapshotRow(completedTool(2, "bash", { kind: "run", command: "after-opening" }));
   const namedSnapshot = { ...openAkumaSnapshot([named, activity]), openingSequence: 1 };
-  const seeded = activityStream(context).seed(namedSnapshot).join("\n");
+  const seeded = activityStream(context).seed(liveActivity(namedSnapshot)).join("\n");
   assert.match(seeded, /named opening/u);
   assert.doesNotMatch(seeded, /after-opening/u);
   assert.match(seeded, /⋮ 1 omitted/u, "a seeded opening marks its skipped settled successor");
   assert.equal((seeded.match(/named opening/gu) ?? []).length, 1);
 
-  assert.deepEqual(activityStream(context).seed(openAkumaSnapshot([named, activity])), []);
+  assert.deepEqual(activityStream(context).seed(liveActivity(openAkumaSnapshot([named, activity]))), []);
 });
 
-test("seeded waits mark their retained baseline without exposing its hidden members", () => {
-  const opening = snapshotRow({
-    kind: "call" as const,
+test("live companion preserves one evicted mutable row across a wait baseline", () => {
+  const id = "aku/worker/abcd0103";
+  const opening: ActivityRow = {
+    kind: "call",
     sequence: 1,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
-    text: "baseline opening",
-  });
-  const pending = snapshotRow({
-    kind: "tell" as const,
+    text: "companion opening",
+  };
+  const mutable = activeTool(3, "bash", { kind: "run", command: "mutable tool" });
+  const baseline: ActivityRow = {
+    kind: "note",
     sequence: 5,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: "tell/pending-baseline",
-    text: "pending baseline Tell",
-    state: "pending" as const,
-    deliveries: [],
-  });
-  const baseline = {
-    ...openAkumaSnapshot([
-      opening,
-      { kind: "gap" as const, count: 3 },
-      snapshotRow({ kind: "thought" as const, sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden thought" }),
-      snapshotRow({ kind: "note" as const, sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "skipped note" }),
-      pending,
-      snapshotRow(completedTool(6, "bash", { kind: "run", command: "skipped tool" })),
-      snapshotRow(activeTool(7, "bash", { kind: "run", command: "active baseline tool" })),
-    ]),
-    openingSequence: 1,
-  };
-  const status = (id: string, timeline = baseline) => parseAkumaStatus({ id, life: "running", allowed: [], timeline });
-
-  const single = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
-  const singleText = single.observe([observed(status("aku/worker/abcd0103"))]).join("\n");
-  assert.ok(singleText.indexOf("baseline opening") < singleText.indexOf("⋮ 6 omitted"));
-  assert.equal((singleText.match(/⋮ 6 omitted/gu) ?? []).length, 1, "one aggregate baseline omission");
-  for (const hidden of ["hidden thought", "skipped note", "pending baseline Tell", "skipped tool", "active baseline tool"])
-    assert.doesNotMatch(singleText, new RegExp(hidden, "u"));
-  assert.doesNotMatch(singleText, /think/u, "live text never identifies thought");
-
-  const later = {
-    ...openAkumaSnapshot([
-      ...baseline.entries,
-      snapshotRow({ kind: "said" as const, sequence: 8, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "later say" }),
-      snapshotRow({
-        kind: "tell" as const,
-        sequence: 9,
-        at: AKUMA_ACTIVITY_AT,
-        tellId: "tell/later",
-        text: "later Tell",
-        state: "told" as const,
-        deliveries: [{ route: "live" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-      }),
-      snapshotRow({ kind: "note" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "later note" }),
-      snapshotRow({ kind: "call" as const, sequence: 11, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "later call" }),
-      snapshotRow(completedTool(12, "bash", { kind: "run", command: "later tool" })),
-      snapshotRow(activeTool(13, "bash", { kind: "run", command: "later active" })),
-    ]),
-    openingSequence: 1,
-  };
-  const laterText = single.observe([observed(status("aku/worker/abcd0103", later))]).join("\n");
-  const laterRows = ["later say", "later Tell", "later note", "later call", "later tool"];
-  for (const row of laterRows) assert.equal((laterText.match(new RegExp(row, "gu")) ?? []).length, 1, `${row} streams once`);
-  assert.deepEqual(single.observe([observed(status("aku/worker/abcd0103", later))]), [], "a repeated round replays nothing");
-  assert.doesNotMatch(laterText, /baseline opening|later active/u);
-
-  const firstAlias = parseAkumaAlias("@first");
-  const secondAlias = parseAkumaAlias("@second");
-  const plural = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
-  plural.select([
-    { id: "aku/worker/abcd0104", alias: firstAlias },
-    { id: "aku/worker/abcd0105", alias: secondAlias },
-  ]);
-  const pluralText = plural
-    .observe([
-      observed(status("aku/worker/abcd0104"), { alias: firstAlias, contract: { kind: "none" } }),
-      observed(status("aku/worker/abcd0105"), { alias: secondAlias, contract: { kind: "none" } }),
-    ])
-    .join("\n");
-  assert.equal((pluralText.match(/⋮ 6 omitted/gu) ?? []).length, 2, "each seeded target owns one opaque baseline");
-  assert.match(pluralText, /@first +⋮ 6 omitted/u);
-  assert.match(pluralText, /@second +⋮ 6 omitted/u);
-});
-
-test("mutable projected rows cross a settled command frontier exactly once", () => {
-  const at = (second: number) => `2026-01-01T10:00:${String(second).padStart(2, "0")}.000Z`;
-  const snapshot = (facts: readonly TimelineFact[]) => {
-    const selected = selectSnapshot(projectTurns(facts), { aperture: "monitoring" }).snapshot;
-    assert.equal(selected.kind, "open");
-    return selected;
-  };
-  const turn: Extract<TimelineFact, { kind: "turn-start" }> = {
-    kind: "turn-start",
-    sequence: 1,
-    bodySequence: 1,
-    startedAt: at(1),
-  };
-  const opening: Extract<TimelineFact, { kind: "call" }> = {
-    kind: "call",
-    sequence: 2,
-    turnSequence: 1,
-    at: at(2),
-    body: "projected opening",
-  };
-  const frontierNote = activityFact(4, 1, at(4), { type: "note", text: "settled frontier" });
-  const frontierActive = activityFact(5, 1, at(5), {
-    type: "tool",
-    phase: "started",
-    id: "frontier",
-    name: "Bash",
-    call: { kind: "run", command: "frontier active" },
-  });
-
-  const activeTool = activityFact(3, 1, at(3), {
-    type: "tool",
-    phase: "started",
-    id: "mutable-tool",
-    name: "Bash",
-    call: { kind: "run", command: "mutable completed tool" },
-  });
-  const activeFacts: readonly TimelineFact[] = [turn, opening, activeTool, frontierNote, frontierActive];
-  const activeId = "aku/worker/abcd0109";
-  const wait = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
-  const seeded = wait
-    .observe([observed(parseAkumaStatus({ id: activeId, life: "running", allowed: [], timeline: snapshot(activeFacts) }))])
-    .join("\n");
-  assert.match(seeded, /projected opening/u);
-  assert.match(seeded, /⋮ 1 omitted/u, "only the settled sequence four belongs to the baseline");
-  assert.doesNotMatch(seeded, /mutable completed tool/u);
-
-  const completedActive = snapshot([
-    ...activeFacts,
-    activityFact(6, 1, at(6), {
-      type: "tool",
-      phase: "completed",
-      id: "mutable-tool",
-      name: "Bash",
-      call: { kind: "run", command: "mutable completed tool" },
-      result: { status: "ok" },
-    }),
-  ]);
-  const activeStatus = parseAkumaStatus({ id: activeId, life: "running", allowed: [], timeline: completedActive });
-  const activeText = wait.observe([observed(activeStatus)]).join("\n");
-  assert.match(activeText, /mutable completed tool/u, "completion retains sequence three but still streams");
-  assert.deepEqual(wait.observe([observed(activeStatus)]), [], "the completed tool is unique");
-
-  const pendingTell: Extract<TimelineFact, { kind: "tell" }> = {
-    kind: "tell",
-    sequence: 3,
-    id: "tell/mutable",
-    body: "mutable told Tell",
-    recordedAt: at(3),
-    state: "pending",
-    deliveries: [],
-  };
-  const pendingFacts: readonly TimelineFact[] = [turn, opening, pendingTell, frontierNote, frontierActive];
-  const callId = "aku/worker/abcd0110";
-  const call = callObservationStream(
-    { columns: 120, color: false },
-    { id: callId, contract: { kind: "none" }, facts: [] },
-    { now: () => 0 },
-  );
-  const pendingText = call
-    .observe(parseAkumaStatus({ id: callId, life: "running", allowed: [], timeline: snapshot(pendingFacts) }))
-    .join("\n");
-  assert.match(pendingText, /settled frontier/u, "the cursor advances beyond the pending Tell");
-  assert.doesNotMatch(pendingText, /mutable told Tell|omitted/u);
-
-  const toldTell: Extract<TimelineFact, { kind: "tell" }> = {
-    ...pendingTell,
-    state: "told",
-    deliveries: [{ route: "live", turnSequence: 1, deliveredAt: at(6) }],
-  };
-  const toldStatus = parseAkumaStatus({
-    id: callId,
-    life: "running",
-    allowed: [],
-    timeline: snapshot([turn, opening, toldTell, frontierNote, frontierActive]),
-  });
-  const toldText = call.observe(toldStatus).join("\n");
-  assert.match(toldText, /mutable told Tell/u, "a told Tell crosses the same settled frontier once");
-  assert.deepEqual(call.observe(toldStatus), [], "the told Tell is unique");
-});
-
-test("live companions retain evicted mutable rows and final idle activity without widening status", () => {
-  const at = (second: number) => `2026-01-01T10:02:${String(second).padStart(2, "0")}.000Z`;
-  const id = "aku/worker/abcd0120";
-  const turn: Extract<TimelineFact, { kind: "turn-start" }> = {
-    kind: "turn-start",
-    sequence: 1,
-    bodySequence: 1,
-    startedAt: at(1),
-  };
-  const opening: Extract<TimelineFact, { kind: "call" }> = {
-    kind: "call",
-    sequence: 2,
-    turnSequence: 1,
-    at: at(2),
-    body: "companion opening",
-  };
-  const active = activityFact(3, 1, at(3), {
-    type: "tool",
-    phase: "started",
-    id: "evicted-tool",
-    name: "Bash",
-    call: { kind: "run", command: "mutable companion tool" },
-  });
-  const narration = [
-    activityFact(4, 1, at(4), { type: "thought", text: "hidden companion thought" }),
-    ...[5, 6, 7].map((sequence) =>
-      activityFact(sequence, 1, at(sequence), { type: "note", text: `settled ${sequence}` }),
-    ),
-  ];
-  const pending: Extract<TimelineFact, { kind: "tell" }> = {
-    kind: "tell",
-    sequence: 8,
-    id: "tell/pending-companion",
-    body: "pending companion Tell",
-    recordedAt: at(8),
-    state: "pending",
-    deliveries: [],
-  };
-  const sentinel = activityFact(9, 1, at(9), {
-    type: "tool",
-    phase: "started",
-    id: "sentinel",
-    name: "Bash",
-    call: { kind: "run", command: "still active" },
-  });
-  const complete = activityFact(10, 1, at(10), {
-    type: "tool",
-    phase: "completed",
-    id: "evicted-tool",
-    name: "Bash",
-    call: { kind: "run", command: "mutable companion tool" },
-    result: { status: "ok" },
-  });
-  const initialFacts: readonly TimelineFact[] = [turn, opening, active, ...narration, pending, sentinel];
-  const closedFacts: readonly TimelineFact[] = [
-    ...initialFacts,
-    complete,
-    activityFact(11, 1, at(11), { type: "note", text: "closing companion note" }),
-    turnEndFact(12, 1, at(12), { kind: "answered", answer: "done", session: { sessionId: "companion" } }),
-  ];
-  const live = (facts: readonly TimelineFact[], life: "running" | "asleep") => {
-    const ledger = projectTurns(facts);
-    return {
-      status: parseAkumaStatus({
-        id,
-        life,
-        allowed: [],
-        timeline: selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } }).snapshot,
-      }),
-      rows: ledger.rows,
-    };
-  };
-  const initial = live(initialFacts, "running");
-  const settled = live([...initialFacts, complete], "running");
-  const closed = live(closedFacts, "asleep");
-  assert.ok(
-    settled.status.timeline.entries.some((entry) => entry.kind === "gap"),
-    "the bounded public snapshot may evict the settled mutable row",
-  );
-
-  const call = callObservationStream({ columns: 120, color: false }, { id, contract: { kind: "none" }, facts: [] });
-  call.observe(initial);
-  const callClosed = call.observe(closed).join("\n");
-  assert.match(callClosed, /mutable companion tool/u);
-  assert.deepEqual(call.observe(closed), [], "the evicted final form streams once");
-
-  const wait = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
-  const seeded = wait.observe([{ ...initial, contract: { kind: "none" } }]).join("\n");
-  assert.match(seeded, /companion opening/u);
-  assert.match(seeded, /⋮ 4 omitted/u, "the seeded baseline counts only settled companion narration");
-  assert.doesNotMatch(seeded, /hidden companion thought|pending companion Tell/u, "seed never exposes skipped thought or pending Tell");
-  const waitClosed = wait.observe([{ ...closed, contract: { kind: "none" } }]).join("\n");
-  assert.match(waitClosed, /mutable companion tool/u, "the final closed Turn is still available to the live wait");
-  assert.match(waitClosed, /closing companion note/u, "idle observation retains final semantic activity");
-  assert.deepEqual(wait.observe([{ ...closed, contract: { kind: "none" } }]), [], "a closed companion replays nothing");
-});
-
-test("a delayed launch Tell never reopens an advanced call or seeded wait stream", () => {
-  const at = (second: number) => `2026-01-01T10:01:${String(second).padStart(2, "0")}.000Z`;
-  const snapshot = (facts: readonly TimelineFact[]) => {
-    const selected = selectSnapshot(projectTurns(facts), { aperture: "monitoring" }).snapshot;
-    assert.equal(selected.kind, "open");
-    return selected;
-  };
-  const turn: Extract<TimelineFact, { kind: "turn-start" }> = {
-    kind: "turn-start",
-    sequence: 1,
-    bodySequence: 1,
-    startedAt: at(1),
-  };
-  const pendingTell: Extract<TimelineFact, { kind: "tell" }> = {
-    kind: "tell",
-    sequence: 2,
-    id: "tell/delayed-launch",
-    body: "late launch opening",
-    recordedAt: at(2),
-    state: "pending",
-    deliveries: [],
-  };
-  const settledNote = activityFact(3, 1, at(3), { type: "note", text: "advanced settled note" });
-  const active = activityFact(4, 1, at(4), {
-    type: "tool",
-    phase: "started",
-    id: "still-active",
-    name: "Bash",
-    call: { kind: "run", command: "still active" },
-  });
-  const baseline = snapshot([turn, pendingTell, settledNote, active]);
-  assert.equal(baseline.openingSequence, undefined, "a pending Tell is not a typed opening");
-
-  const launchedTell: Extract<TimelineFact, { kind: "tell" }> = {
-    ...pendingTell,
-    state: "told",
-    deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: at(5) }],
-  };
-  const launched = snapshot([turn, launchedTell, settledNote, active]);
-  assert.equal(launched.openingSequence, 2, "the projector later selects the delivered launch Tell");
-
-  const context = { columns: 120, color: false } as const;
-  const callId = "aku/worker/abcd0111";
-  const call = callObservationStream(
-    context,
-    { id: callId, contract: { kind: "none" }, facts: [] },
-    { now: () => 0 },
-  );
-  const baselineStatus = parseAkumaStatus({ id: callId, life: "running", allowed: [], timeline: baseline });
-  assert.match(call.observe(baselineStatus).join("\n"), /advanced settled note/u, "the call cursor passes sequence three");
-  const launchedStatus = parseAkumaStatus({ id: callId, life: "running", allowed: [], timeline: launched });
-  assert.deepEqual(call.observe(launchedStatus), [], "a late opening cannot replay below the call cursor");
-
-  const waitId = "aku/worker/abcd0112";
-  const wait = waitObservationStream(context, { now: () => 0 });
-  const seeded = wait
-    .observe([
-      observed(parseAkumaStatus({ id: waitId, life: "running", allowed: [], timeline: baseline })),
-    ])
-    .join("\n");
-  assert.doesNotMatch(seeded, /late launch opening|omitted/u, "a wait without an opening has no continuity marker");
-  const lateWait = wait.observe([
-    observed(parseAkumaStatus({ id: waitId, life: "running", allowed: [], timeline: launched })),
-  ]);
-  assert.deepEqual(lateWait, [], "a late launch opening cannot add a wait row or marker");
-});
-
-test("wait seeding stays quiet without an opening and keeps later tool omission separate", () => {
-  const context = { columns: 120, color: false } as const;
-  const opening = snapshotRow({
-    kind: "call" as const,
-    sequence: 1,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
-    text: "tool-gap opening",
-  });
-  const initial = {
-    ...openAkumaSnapshot([
-      opening,
-      { kind: "gap" as const, count: 3 },
-      snapshotRow({ kind: "thought" as const, sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "opaque thought" }),
-      snapshotRow({ kind: "note" as const, sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "opaque note" }),
-      snapshotRow(completedTool(5, "bash", { kind: "run", command: "opaque tool" })),
-      snapshotRow(activeTool(6, "bash", { kind: "run", command: "baseline active" })),
-    ]),
+    text: "baseline note",
+  };
+  const sentinel = activeTool(6, "bash", { kind: "run", command: "still active" });
+  const initialTimeline = {
+    ...openAkumaSnapshot([snapshotRow(opening), snapshotRow(mutable), snapshotRow(baseline), snapshotRow(sentinel)]),
     openingSequence: 1,
   };
-  const id = "aku/worker/abcd0106";
-  const wait = waitObservationStream(context, { now: () => 0 });
-  const first = wait.observe([observed(parseAkumaStatus({ id, life: "running", allowed: [], timeline: initial }))]).join("\n");
-  assert.match(first, /⋮ 6 omitted/u);
+  const initialStatus = parseAkumaStatus({ id, life: "running", allowed: [], timeline: initialTimeline });
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  const seeded = stream.observe([
+    observed(initialStatus, { contract: { kind: "none" } }, [opening, mutable, baseline, sentinel]),
+  ]);
+  assert.match(seeded.join("\n"), /companion opening[\s\S]*⋮ 1 omitted/u);
+  assert.doesNotMatch(seeded.join("\n"), /baseline note|mutable tool/u);
 
-  const later = {
-    ...openAkumaSnapshot([
-      ...initial.entries,
-      ...Array.from({ length: 10 }, (_, index) =>
-        snapshotRow(completedTool(index + 7, "bash", { kind: "run", command: `later-${index + 7}` })),
-      ),
-      snapshotRow(activeTool(17, "bash", { kind: "run", command: "later-active" })),
-    ]),
-    openingSequence: 1,
+  const completed = completedTool(3, "bash", { kind: "run", command: "mutable tool" });
+  const fresh: ActivityRow = {
+    kind: "note",
+    sequence: 7,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "fresh note",
   };
-  const laterStatus = parseAkumaStatus({ id, life: "running", allowed: [], timeline: later });
-  const text = [
-    first,
-    ...wait.observe([observed(laterStatus)]),
-    wait.conclude({
-      reason: "deadline",
-      observations: [{ status: laterStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
-      unobserved: [],
-    }),
-  ].join("\n");
-  assert.ok(text.indexOf("⋮ 6 omitted") < text.indexOf("$ later-7"));
-  assert.ok(text.indexOf("$ later-9") < text.indexOf("⋮ 5 omitted"));
-  assert.equal((text.match(/⋮ 6 omitted/gu) ?? []).length, 1);
-  assert.equal((text.match(/⋮ 5 omitted/gu) ?? []).length, 1);
-
-  const boundaryOnly = activityStream(context)
-    .seed({ ...openAkumaSnapshot([opening]), openingSequence: 1 })
-    .join("\n");
-  assert.match(boundaryOnly, /tool-gap opening/u);
-  assert.doesNotMatch(boundaryOnly, /omitted/u, "an opening without skipped evidence needs no marker");
-
-  const noOpening = waitObservationStream(context, { now: () => 0 });
-  const noOpeningText = noOpening
-    .observe([
-      observed(
-        parseAkumaStatus({
-          id: "aku/worker/abcd0107",
-          life: "running",
-          allowed: [],
-          timeline: openAkumaSnapshot([opening, snapshotRow(activeTool(2, "bash", { kind: "run", command: "unopened" }))]),
-        }),
-      ),
-    ])
-    .join("\n");
-  assert.doesNotMatch(noOpeningText, /tool-gap opening|omitted/u, "no typed opening means no continuity marker");
-  const idle = waitObservationStream(context, { now: () => 0 });
-  const idleText = idle.observe([observed(parseAkumaStatus({ id: "aku/worker/abcd0108", life: "asleep", allowed: [], timeline: idleAkumaSnapshot([snapshotRow(completedTool(1, "bash", { kind: "run", command: "old idle tool" }))]) }))]).join("\n");
-  assert.doesNotMatch(idleText, /old idle tool|omitted/u, "an already idle wait remains frame-only");
+  const laterStatus = parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: idleAkumaSnapshot([]) });
+  const later = observed(laterStatus, { contract: { kind: "none" } }, [opening, completed, baseline, fresh]);
+  const text = stream.observe([later]).join("\n");
+  assert.match(text, /mutable tool[\s\S]*fresh note/u);
+  assert.deepEqual(stream.observe([later]), []);
 });
 
 test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {
@@ -1963,10 +1597,10 @@ test("narrative selection is partition-invariant and repeated pending snapshots 
     let seen = 0;
     const lines = partitions.flatMap((count) => {
       seen += count;
-      return stream(idleAkumaSnapshot(rows.slice(0, seen)));
+      return stream(liveActivity(idleAkumaSnapshot(rows.slice(0, seen))));
     });
     assert.deepEqual(
-      stream(idleAkumaSnapshot(rows.slice(0, seen))),
+      stream(liveActivity(idleAkumaSnapshot(rows.slice(0, seen)))),
       [],
       "an identical pending snapshot replays nothing",
     );
@@ -1999,13 +1633,15 @@ test("a live activity stream skips thoughts while advancing its sequence cursor"
     snapshotRow(completedTool(6, "bash", { kind: "run", command: "tool-sentinel" })),
   ];
   const stream = activityStream({ columns: 120, color: false });
-  stream.seed(openAkumaSnapshot([]));
-  const initial = stream(idleAkumaSnapshot(rows.slice(0, 1), answeredOutcome(1, "outcome-sentinel")));
+  stream.seed(liveActivity(openAkumaSnapshot([])));
+  const initial = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 1), answeredOutcome(1, "outcome-sentinel"))));
   assert.match(initial.join("\n"), /say-sentinel/u, "eligible predecessors still stream");
   const thoughtOnly = idleAkumaSnapshot(rows.slice(0, 2), answeredOutcome(1, "outcome-sentinel"));
-  assert.deepEqual(stream(thoughtOnly), [], "a thought-only update advances the durable cursor");
+  assert.deepEqual(stream(liveActivity(thoughtOnly)), [], "a thought-only update advances the durable cursor");
   const updated = idleAkumaSnapshot(rows, answeredOutcome(1, "outcome-sentinel"));
-  const text = [...initial, ...stream(updated), ...stream(updated), ...stream.flush()].join("\n");
+  const text = [...initial, ...stream(liveActivity(updated)), ...stream(liveActivity(updated)), ...stream.flush()].join(
+    "\n",
+  );
   for (const sentinel of ["say-sentinel", "note-sentinel", "call-sentinel", "tell-sentinel", "tool-sentinel"])
     assert.equal((text.match(new RegExp(sentinel, "gu")) ?? []).length, 1, `${sentinel} streams once`);
   assert.doesNotMatch(text, /think-sentinel/u, "thought narration is never live evidence");
@@ -2030,7 +1666,7 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
     tool(12),
   ];
   const stream = activityStream({ columns: 120, color: false });
-  const text = [...stream(idleAkumaSnapshot(rows)), ...stream.flush()].join("\n");
+  const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
   for (const sequence of [1, 3, 4, 11, 12]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
   for (const sequence of [6, 7, 8, 10]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
   assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 1, "only four eligible tools are omitted");
@@ -2572,12 +2208,14 @@ test("a streamed observing call opens one framed head and never replays a settle
   const tool = (sequence: number, command: string) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
   const headLines = [`${id} (@scout)`, "└─ kei/demo"];
-  const opening = stream.observe(running([tool(1, "first")]));
+  const opening = stream.observe(
+    live(running([snapshotRow(activeTool(1, "bash", { kind: "run", command: "first" }))])),
+  );
   assert.deepEqual(opening, [...headLines, frameRule(headLines)], "the head opens once before any row");
   assert.doesNotMatch(opening.join("\n"), /cwd|✓ run/u);
-  const growing = running([tool(1, "first"), tool(2, "second")]);
-  const text = stream.observe(growing).join("\n");
-  assert.deepEqual(stream.observe(growing), [], "a settled row never streams twice");
+  const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
+  const text = stream.observe(live(growing)).join("\n");
+  assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
   assert.match(text, /✓ run +\$ first/u);
   assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
 
@@ -2591,47 +2229,6 @@ test("a streamed observing call opens one framed head and never replays a settle
   const conclusion = stream.conclude({ kind: "observed", reason: "completed", status: answered });
   assert.equal(conclusion, `${clockAt(settledAtMs)} ✓ answered — 4s`);
   assert.doesNotMatch(conclusion, /the answer|└─ kei\/demo|@scout/u, "no head or answer replay");
-});
-
-test("an observing call streams retained rows in order without wait seeding", () => {
-  const id = "aku/worker/abcd0032";
-  const head = { id, contract: { kind: "none" as const }, facts: [] };
-  const stream = callObservationStream({ columns: 120, color: false }, head, { now: () => 0 });
-  const laterEvidence = snapshotRow({
-    kind: "note" as const,
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "already retained evidence",
-  });
-  const opening = snapshotRow({
-    kind: "call" as const,
-    sequence: 1,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "late projected opening",
-  });
-  const first = parseAkumaStatus({
-    id,
-    life: "running",
-    allowed: [],
-    timeline: openAkumaSnapshot([laterEvidence, snapshotRow(activeTool(3, "bash", { kind: "run", command: "open" }))]),
-  });
-  const firstText = stream.observe(first).join("\n");
-  assert.match(firstText, /already retained evidence/u);
-  assert.doesNotMatch(firstText, /omitted|late projected opening/u);
-
-  const later = parseAkumaStatus({
-    id,
-    life: "running",
-    allowed: [],
-    timeline: { ...openAkumaSnapshot([opening, laterEvidence, snapshotRow(activeTool(3, "bash", { kind: "run", command: "open" }))]), openingSequence: 1 },
-  });
-  assert.doesNotMatch(
-    stream.observe(later).join("\n"),
-    /late projected opening/u,
-    "an opening first projected after newer evidence is never late-appended",
-  );
 });
 
 test("a streamed observing call concludes truthfully when its stream never opened", () => {

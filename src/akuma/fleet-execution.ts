@@ -1,6 +1,6 @@
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
-import { readBudgetedStatus, readLiveStatus, waitForObservation, type LiveStatusObservation } from "./akuma-observe.js";
+import { readLiveStatus, waitForObservation, type LiveStatusObservation } from "./akuma-observe.js";
 import type { ActivityRow } from "./projection.js";
 import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./dispatch-association.js";
 import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
@@ -26,8 +26,7 @@ function observationDiagnostic(error: unknown): string {
 const SHARED_ORDINARY_BUDGET = 30;
 
 type WaitRound = Readonly<{
-  statuses: readonly AkumaStatus[];
-  live: readonly LiveStatusObservation[];
+  observations: readonly LiveStatusObservation[];
   unobserved: readonly AkumaUnobserved[];
 }>;
 
@@ -42,50 +41,34 @@ function akumaOnlyObservation(status: AkumaStatus) {
 async function observeWaitRound(
   path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
-  live: boolean,
   signal?: AbortSignal,
 ): Promise<WaitRound> {
   signal?.throwIfAborted();
   if (ids.length <= 1) {
-    if (live) {
-      const observations = await Promise.all(
-        ids.map(async (id) => await readLiveStatus(path, id, { aperture: "monitoring" })),
-      );
-      return { statuses: observations.map((observation) => observation.status), live: observations, unobserved: [] };
-    }
-    return {
-      statuses: await Promise.all(ids.map(async (id) => await source(path).selectHandle({ id }).status())),
-      live: [],
-      unobserved: [],
-    };
+    const observations = await Promise.all(
+      ids.map(async (id) => await readLiveStatus(path, id, { aperture: "monitoring" })),
+    );
+    return { observations, unobserved: [] };
   }
   let remaining = SHARED_ORDINARY_BUDGET;
-  const statuses: AkumaStatus[] = [];
   const observations: LiveStatusObservation[] = [];
   const unobserved: AkumaUnobserved[] = [];
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
-      if (live) {
-        const observed = await readLiveStatus(path, id, { aperture: "monitoring", ordinaryBudget: remaining });
-        statuses.push(observed.status);
-        observations.push(observed);
-        remaining -= observed.ordinarySelected;
-        continue;
-      }
-      const observed = await readBudgetedStatus(path, id, { aperture: "monitoring", ordinaryBudget: remaining });
-      statuses.push(observed.status);
+      const observed = await readLiveStatus(path, id, { aperture: "monitoring", ordinaryBudget: remaining });
+      observations.push(observed);
       remaining -= observed.ordinarySelected;
     } catch (error) {
       if (error instanceof AkumaNotBornError) throw error;
       unobserved.push({ id, diagnostic: observationDiagnostic(error) });
     }
   }
-  return { statuses, live: observations, unobserved };
+  return { observations, unobserved };
 }
 
 function roundComplete(round: WaitRound, completion: "any" | "all"): boolean {
-  const settled = round.statuses.map(defaultWaitComplete);
+  const settled = round.observations.map((observation) => defaultWaitComplete(observation.status));
   return (
     settled.length > 0 &&
     (completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean))
@@ -100,7 +83,7 @@ export type WaitIdentityFacts = Readonly<{
 }>;
 
 /** One observed Akuma as a live wait viewer sees it: its status plus its identity facts. */
-export type WaitObservedAkuma = Readonly<{ status: AkumaStatus; rows?: readonly ActivityRow[] }> & WaitIdentityFacts;
+export type WaitObservedAkuma = Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }> & WaitIdentityFacts;
 
 /** One selected Akuma's frozen identity, resolved before the first observation round. */
 export type WaitSelectedAkuma = Readonly<{ id: AkumaStatus["id"] }> & WaitIdentityFacts;
@@ -123,7 +106,7 @@ export type WaitExecutionInput = Readonly<{
   selectionOrder?: readonly AkumaStatus["id"][];
   /** Reports the frozen selected set before the first round, so a viewer can fix its layout. */
   onSelected?: (selected: readonly WaitSelectedAkuma[]) => void;
-  /** Reports every observation round to a live viewer; absent keeps the cheap completion probe. */
+  /** Reports every observation round to a live viewer. */
   observe?: (observed: readonly WaitObservedAkuma[]) => void;
 }>;
 
@@ -166,37 +149,33 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   const observeRound = async (round: WaitRound): Promise<void> => {
     if (input.observe === undefined) return;
     const observed: WaitObservedAkuma[] = [];
-    const liveById = new Map(round.live.map((observation) => [observation.status.id, observation.rows]));
-    for (const status of round.statuses) {
+    for (const observation of round.observations) {
       input.signal?.throwIfAborted();
+      const { status, rows } = observation;
       let known = facts.get(status.id);
       if (known === undefined && input.identity !== undefined) {
         known = await input.identity(status.id);
         facts.set(status.id, known);
       }
       if (known === undefined) {
-        observed.push({
-          status,
-          ...(liveById.has(status.id) ? { rows: liveById.get(status.id)! } : {}),
-          contract: NO_DISPATCH_ASSOCIATION,
-        });
+        observed.push({ status, rows, contract: NO_DISPATCH_ASSOCIATION });
         continue;
       }
-      observed.push({ status, ...(liveById.has(status.id) ? { rows: liveById.get(status.id)! } : {}), ...known });
+      observed.push({ status, rows, ...known });
     }
     input.observe(observed);
   };
   const waited = await waitForObservation({
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
-    observe: async () => await observeWaitRound(input.path, input.ids, input.observe !== undefined, input.signal),
+    observe: async () => await observeWaitRound(input.path, input.ids, input.signal),
     complete: (round) => roundComplete(round, input.completion),
     onObserve: async (round) => await observeRound(round),
   });
   return fleetResultSchemas.wait.parse({
     mode: input.completion,
     reason: waited.reason,
-    observations: waited.value.statuses.map(akumaOnlyObservation),
+    observations: waited.value.observations.map((observation) => akumaOnlyObservation(observation.status)),
     unobserved: waited.value.unobserved,
   });
 }

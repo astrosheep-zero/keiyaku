@@ -44,8 +44,7 @@ type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
 type RenderRow = ActivityRow | Extract<FleetTimelineEntry, { kind: "row" }>["row"];
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = FleetTimeline;
-type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows?: readonly ActivityRow[] }>;
-type ActivityInput = RenderedSnapshot | RenderedActivity;
+type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
 type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
 type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
@@ -308,20 +307,10 @@ function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntr
   return entries;
 }
 
-/** The public projection names the current-Turn boundary when it is retained. */
-function activityInput(input: ActivityInput): RenderedActivity {
-  return "snapshot" in input ? input : { snapshot: input };
-}
-
-function companionRows(activity: RenderedActivity): readonly RenderRow[] {
-  if (activity.rows !== undefined) return activity.rows;
-  return orderedSnapshotEntries(activity.snapshot).flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-}
-
 function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | undefined {
   const snapshot = activity.snapshot;
   if (snapshot.kind !== "open" || snapshot.openingSequence === undefined) return undefined;
-  const row = companionRows(activity).find((candidate) => candidate.sequence === snapshot.openingSequence);
+  const row = activity.rows.find((candidate) => candidate.sequence === snapshot.openingSequence);
   if (row === undefined) return undefined;
   // The projector selects a typed opening: its call or delivered launch Tell.
   if (row.kind !== "call" && !(row.kind === "tell" && row.state === "told")) return undefined;
@@ -366,10 +355,10 @@ export function snapshotActivityLines(
 }
 
 /** One command's append-only activity view, with a baseline and a final tail flush. */
-export type ActivityStream = ((input: ActivityInput) => readonly string[]) &
+export type ActivityStream = ((activity: RenderedActivity) => readonly string[]) &
   Readonly<{
     /** Establish a wait baseline without spending the command's live tool budget. */
-    seed: (input: ActivityInput) => readonly string[];
+    seed: (activity: RenderedActivity) => readonly string[];
     /** Emit the deferred tail exactly once before the command's conclusion. */
     flush: () => readonly string[];
   }>;
@@ -397,26 +386,15 @@ function isMutableStreamRow(row: RenderRow): boolean {
 }
 
 function settledRows(activity: RenderedActivity): readonly RenderRow[] {
-  if (activity.rows === undefined) {
-    const snapshot = activity.snapshot;
-    const entries =
-      snapshot.kind === "open"
-        ? snapshot.entries.slice(0, -1)
-        : snapshot.kind === "idle"
-          ? snapshot.entries
-          : snapshot.entries;
-    return entries.flatMap((entry) => (entry.kind === "row" && isSettledStreamRow(entry.row) ? [entry.row] : []));
-  }
-  return companionRows(activity).filter(isSettledStreamRow);
+  return activity.rows.filter(isSettledStreamRow);
 }
 
 function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
-  for (const row of companionRows(activity)) if (isMutableStreamRow(row)) state.mutableSequences.add(row.sequence);
+  for (const row of activity.rows) if (isMutableStreamRow(row)) state.mutableSequences.add(row.sequence);
 }
 
 /** A seeded wait counts its skipped settled companion evidence after its typed opening. */
 function baselineOmissionCount(activity: RenderedActivity, boundary: CurrentTurnBoundary): number {
-  if (activity.rows === undefined) return baselineSnapshotOmissionCount(activity.snapshot, boundary);
   let afterBoundary = false;
   let count = 0;
   for (const row of activity.rows) {
@@ -425,20 +403,6 @@ function baselineOmissionCount(activity: RenderedActivity, boundary: CurrentTurn
       continue;
     }
     if (isSettledStreamRow(row)) count += 1;
-  }
-  return count;
-}
-
-function baselineSnapshotOmissionCount(snapshot: RenderedSnapshot, boundary: CurrentTurnBoundary): number {
-  let afterBoundary = false;
-  let count = 0;
-  for (const entry of orderedSnapshotEntries(snapshot)) {
-    if (!afterBoundary) {
-      if (entry.kind === "row" && entry.row.sequence === boundary.row.sequence) afterBoundary = true;
-      continue;
-    }
-    if (entry.kind === "gap") count += entry.count;
-    else if (isSettledStreamRow(entry.row)) count += 1;
   }
   return count;
 }
@@ -522,11 +486,10 @@ function renderCurrentTurnBoundary(
 
 function observeActivitySnapshot(
   state: ActivityStreamState,
-  input: ActivityInput,
+  activity: RenderedActivity,
   context: TextRenderContext,
   layout: RowLayout,
 ): readonly string[] {
-  const activity = activityInput(input);
   const lines: string[] = [];
   const boundary = currentTurnBoundary(activity);
   rememberMutableRows(state, activity);
@@ -603,8 +566,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     openingTools: 0,
     deferred: [],
   };
-  const seed = (input: ActivityInput): readonly string[] => {
-    const activity = activityInput(input);
+  const seed = (activity: RenderedActivity): readonly string[] => {
     const lines: string[] = [];
     const boundary = currentTurnBoundary(activity);
     const unseenBoundary = boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence);
@@ -619,7 +581,8 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
     return lines;
   };
-  const observe = (input: ActivityInput): readonly string[] => observeActivitySnapshot(state, input, context, layout);
+  const observe = (activity: RenderedActivity): readonly string[] =>
+    observeActivitySnapshot(state, activity, context, layout);
   const flush = (): readonly string[] => flushActivityTail(state, context, layout);
   return Object.assign(observe, { seed, flush });
 }
@@ -765,7 +728,7 @@ function observeWaitRound(
   for (const { status, rows } of round) {
     const known = state.streams.get(status.id);
     if (known !== undefined) {
-      lines.push(...known({ snapshot: status.timeline, ...(rows === undefined ? {} : { rows }) }));
+      lines.push(...known({ snapshot: status.timeline, rows }));
     } else {
       // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
       const stream = activityStream(
@@ -776,7 +739,7 @@ function observeWaitRound(
       );
       state.streams.set(status.id, stream);
       // Seed marks skipped retained evidence without spending this command's live tool budget.
-      lines.push(...stream.seed({ snapshot: status.timeline, ...(rows === undefined ? {} : { rows }) }));
+      lines.push(...stream.seed({ snapshot: status.timeline, rows }));
     }
     if (!state.settledAt.has(status.id) && defaultWaitComplete(status))
       state.settledAt.set(status.id, settleMoment(status) ?? now());
@@ -820,12 +783,6 @@ function concludeWaitStream(
   now: () => number,
 ): string {
   const tail: string[] = [];
-  // The returned observation can be newer than the final callback. Advance every known stream
-  // before flushing it, while still flushing members that became unobserved at the end.
-  for (const observation of result.observations) {
-    const stream = state.streams.get(observation.status.id);
-    if (stream !== undefined) tail.push(...stream(observation.status.timeline));
-  }
   for (const stream of state.streams.values()) tail.push(...stream.flush());
 
   const end = now();
@@ -900,9 +857,7 @@ export type ObservedCallHead = Readonly<{
 }>;
 
 export type CallObservationStream = Readonly<{
-  observe: (
-    observation: AkumaStatus | Readonly<{ status: AkumaStatus; rows?: readonly ActivityRow[] }>,
-  ) => readonly string[];
+  observe: (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>) => readonly string[];
   conclude: (observation: CallObservation) => string;
   opened: () => boolean;
 }>;
@@ -933,19 +888,15 @@ export function callObservationStream(
     opened = true;
     lines.push(...snapshotHeading(head.id, head.alias, head.contract), ...head.facts);
   };
-  const observe = (
-    observation: AkumaStatus | Readonly<{ status: AkumaStatus; rows?: readonly ActivityRow[] }>,
-  ): readonly string[] => {
+  const observe = (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>): readonly string[] => {
     const lines: string[] = [];
     open(lines);
-    const live = "status" in observation ? observation : { status: observation };
-    lines.push(...stream({ snapshot: live.status.timeline, ...(live.rows === undefined ? {} : { rows: live.rows }) }));
+    lines.push(...stream({ snapshot: observation.status.timeline, rows: observation.rows }));
     return lines;
   };
   const conclude = (observation: CallObservation): string => {
     const lines: string[] = [];
     open(lines);
-    if (observation.kind === "observed") lines.push(...stream(observation.status.timeline));
     lines.push(...stream.flush());
     if (observation.kind === "failed") {
       lines.push(`! error ${safeText(observation.failure.diagnostic)}`);
