@@ -4,12 +4,15 @@ import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./sta
 
 const LIVE_OUTPUT_BYTES = 4 * 1024;
 
-function boundedUtf8Prefix(value: string): Readonly<{ text: string; truncated: boolean }> {
+function boundedUtf8Prefix(
+  value: string,
+  maximumBytes = LIVE_OUTPUT_BYTES,
+): Readonly<{ text: string; truncated: boolean }> {
   let bytes = 0;
   let text = "";
   for (const character of value) {
     const size = Buffer.byteLength(character);
-    if (bytes + size > LIVE_OUTPUT_BYTES) return { text, truncated: true };
+    if (bytes + size > maximumBytes) return { text, truncated: true };
     bytes += size;
     text += character;
   }
@@ -59,6 +62,90 @@ function outputLines(
   ];
 }
 
+type LiveOutputStream = "stdout" | "stderr";
+
+type LiveOutputState = {
+  bytes: number;
+  truncated: boolean;
+  pending: string;
+  prefix: "  " | "    ";
+};
+
+class VerificationLiveOutput {
+  private readonly streams = new Map<LiveOutputStream, LiveOutputState>();
+  private activeStream: LiveOutputStream | undefined;
+
+  reset(): void {
+    this.streams.clear();
+    this.activeStream = undefined;
+  }
+
+  lines(
+    observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"] & Readonly<{ kind: "output" }>,
+    context: TextRenderContext,
+  ): readonly string[] {
+    const stream = observation.stream;
+    const lines = this.flushOtherStreams(stream, context);
+    const previous = this.streams.get(stream);
+    const state = previous ?? ({ bytes: 0, truncated: false, pending: "", prefix: "  " } satisfies LiveOutputState);
+    if (this.activeStream !== stream) {
+      state.prefix = "  ";
+      lines.push(stream);
+      this.activeStream = stream;
+    }
+    this.streams.set(stream, state);
+    if (state.truncated) return lines;
+
+    const output = boundedUtf8Prefix(observation.text, LIVE_OUTPUT_BYTES - state.bytes);
+    state.bytes += Buffer.byteLength(output.text);
+    state.pending += output.text;
+    lines.push(...this.drainCompleteLines(state, context));
+    this.streams.set(stream, state);
+
+    if (output.truncated) {
+      lines.push(...this.drainPartialLine(state, context));
+      state.truncated = true;
+      lines.push("  [live output truncated]");
+    }
+    return lines;
+  }
+
+  finish(context: TextRenderContext): readonly string[] {
+    const lines: string[] = [];
+    for (const state of this.streams.values()) lines.push(...this.drainPartialLine(state, context));
+    this.streams.clear();
+    this.activeStream = undefined;
+    return lines;
+  }
+
+  private flushOtherStreams(stream: LiveOutputStream, context: TextRenderContext): string[] {
+    const lines: string[] = [];
+    for (const [otherStream, state] of this.streams)
+      if (otherStream !== stream) lines.push(...this.drainPartialLine(state, context));
+    return lines;
+  }
+
+  private drainCompleteLines(state: LiveOutputState, context: TextRenderContext): readonly string[] {
+    const lines: string[] = [];
+    for (;;) {
+      const newline = state.pending.indexOf("\n");
+      if (newline < 0) break;
+      const line = state.pending.slice(0, newline);
+      state.pending = state.pending.slice(newline + 1);
+      lines.push(...renderOpaqueBlock(line, state.prefix, context.columns));
+      state.prefix = "    ";
+    }
+    return lines;
+  }
+
+  private drainPartialLine(state: LiveOutputState, context: TextRenderContext): readonly string[] {
+    if (state.pending.length === 0) return [];
+    const lines = renderOpaqueBlock(state.pending, state.prefix, context.columns);
+    state.pending = "";
+    return lines;
+  }
+}
+
 /** Sparse rendering for consumers that do not own a live stream. */
 export function executionProgressLines(event: ExecutionEvent, context: TextRenderContext): readonly string[] {
   switch (event.kind) {
@@ -93,6 +180,7 @@ export class ExecutionProgressRenderer {
   private declarationFailed = false;
   private phaseFailed = false;
   private phaseUnknown = false;
+  private readonly liveOutput = new VerificationLiveOutput();
 
   constructor(private readonly input: ExecutionProgressOptions) {
     this.status = new StatusLine(input.stream, input);
@@ -121,16 +209,19 @@ export class ExecutionProgressRenderer {
   private async consumeVerification(event: Extract<ExecutionEvent, { kind: "verification" }>): Promise<void> {
     const observation = event.observation;
     if (observation.kind === "output") {
-      await this.write(outputLines(observation, this.input.context));
+      await this.write(this.liveOutput.lines(observation, this.input.context));
       return;
     }
     if (observation.state === "started") {
+      await this.write(this.liveOutput.finish(this.input.context));
+      this.liveOutput.reset();
       this.verificationStartedAt ??= (this.input.now ?? (() => performance.now()))();
       if (this.status.isTTY)
         this.status.show((duration) => `verify  ● ${phaseDetail(observation)} · ${elapsed(duration)}`);
       else await this.write([phaseStartLine(observation)]);
       return;
     }
+    await this.write(this.liveOutput.finish(this.input.context));
     const mark = phaseMark(observation.outcome);
     this.phaseFailed ||= mark === "×";
     this.phaseUnknown ||= mark === "?";
@@ -146,6 +237,7 @@ export class ExecutionProgressRenderer {
   }
 
   private write(lines: readonly string[]): Promise<void> {
+    if (lines.length === 0) return Promise.resolve();
     if (this.status.isTTY) {
       this.status.writeBlock(lines);
       return Promise.resolve();

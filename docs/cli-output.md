@@ -162,7 +162,15 @@ terminal, progress is one status line refreshed in place — current phase, unit
 and ticking elapsed — with bounded output blocks appended beneath it; the
 ticking elapsed is the only liveness evidence, and a quiet interval never
 claims that a command is hung or alive. Off a terminal, progress degrades to
-sparse phase-boundary lines without repeated coordinates. Terminal cancellation
+sparse phase-boundary lines without repeated coordinates. Within each started
+Verification phase, same-stream chunk boundaries are not presentation
+boundaries: complete logical output lines are emitted as soon as their newline
+arrives, while only an incomplete final line remains buffered across chunks.
+Each contiguous stream run is labeled once; a stream switch is a presentation
+boundary and labels the next run. Each phase/stream keeps one cumulative 4 KiB
+UTF-8-safe display budget across runs, with one indented truncation fact when
+that budget is exceeded. The stream state resets at the next phase start.
+Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt and
 cleanup boundary instead of replacing that result with an early CLI exit.
 
