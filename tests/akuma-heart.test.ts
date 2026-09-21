@@ -36,7 +36,7 @@ import {
   probeLeash,
   pauseRequested,
   readHeart,
-  readForkPoint, readTell, readRequest,
+  readForkPoint, readLatestTurnForBody, readTell, readRequest,
   recordSession,
   recordTell as heartRecordTell,
   recordTellDeliveries,
@@ -301,6 +301,46 @@ test("tell admission shares activity order and delivery witnesses fold without m
   }
 });
 
+test("latest admitted Turn attribution is scoped to the exact Body", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const firstBody = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    const firstTurn = await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: value.soul.createdAt,
+      initiator: "Alice",
+    });
+    assert.equal((await readLatestTurnForBody(value.allocated.paths, firstBody.sequence))?.sequence, firstTurn.sequence);
+    assert.equal((await readLatestTurnForBody(value.allocated.paths, firstBody.sequence))?.initiator, "Alice");
+    await beginTurn(value.allocated.paths, {
+      bodySequence: firstBody.sequence,
+      startedAt: "2026-08-08T00:00:01.000Z",
+    });
+    assert.equal((await readLatestTurnForBody(value.allocated.paths, firstBody.sequence))?.initiator, undefined);
+
+    await breakBody(value.allocated.paths, {
+      sequence: firstBody.sequence,
+      end: "broke-off",
+      at: "2026-08-08T00:00:02.000Z",
+    });
+    leash.release();
+    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const secondBody = await successor.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:03.000Z" });
+    await beginTurn(value.allocated.paths, {
+      bodySequence: secondBody.sequence,
+      startedAt: "2026-08-08T00:00:03.000Z",
+      initiator: "Bob",
+    });
+    assert.equal((await readLatestTurnForBody(value.allocated.paths, firstBody.sequence))?.initiator, undefined);
+    assert.equal((await readLatestTurnForBody(value.allocated.paths, secondBody.sequence))?.initiator, "Bob");
+    assert.equal(await readLatestTurnForBody(value.allocated.paths, 999), null);
+    successor.release();
+  } finally {
+    value.close();
+  }
+});
 test("runtime resolution re-resolves a displaced record and refuses with the stale path and remedy", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-stale-runtime-");
   const bin = join(root, "bin");

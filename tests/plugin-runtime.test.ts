@@ -132,6 +132,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
     await runtime.emit({
       kind: "akuma.turn-outcome",
       akumaId: "aku/example",
+      bodySequence: 1,
       turnSequence: 2,
       outcome: { kind: "answered", text: "done" },
       contractId: "kei/example",
@@ -192,6 +193,7 @@ test("plugin activation stages handlers and isolates import and activation failu
     await runtime.emit({
       kind: "akuma.turn-outcome",
       akumaId: "aku/example",
+      bodySequence: 1,
       turnSequence: 1,
       outcome: { kind: "failed", reason: "no" },
     });

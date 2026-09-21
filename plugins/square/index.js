@@ -57,6 +57,32 @@ function calledExpression(signal) {
     const source = signal.callerAkumaId;
     return `${[source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ")}\n${DUPLICATE_HINT}`;
 }
+function bodyNotificationKey(signal) {
+    return JSON.stringify([signal.akumaId, signal.bodySequence]);
+}
+function bodyEndExpression(signal) {
+    const header = [
+        signal.akumaId,
+        `body/${signal.bodySequence}`,
+        signal.initiator === undefined ? undefined : `(@${signal.initiator})`,
+        signal.contractId,
+    ]
+        .filter((value) => value !== undefined)
+        .join(" ");
+    const diagnostic = signal.diagnostic === undefined ? "" : `: ${signal.diagnostic}`;
+    return `${header}\n× interrupted: ${signal.end}${diagnostic}\n${DUPLICATE_HINT}`;
+}
+function serializeBodyNotification(notifications, signal, operation) {
+    const key = bodyNotificationKey(signal);
+    let state = notifications.get(key);
+    if (state === undefined) {
+        state = { tail: Promise.resolve(), failedRecipients: new Set() };
+        notifications.set(key, state);
+    }
+    const result = state.tail.then(() => operation(state));
+    state.tail = result.then(() => undefined, () => undefined);
+    return result;
+}
 const plugin = {
     manifest: {
         id: "square",
@@ -68,6 +94,39 @@ const plugin = {
         const environment = squareEnvironment(process.env);
         const ledger = hostLedger(environment);
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
+        const bodyNotifications = new Map();
+        const expressTurnOutcome = async (signal, cancellation) => {
+            cancellation?.throwIfAborted();
+            const square = await openSquare(path, environment, ledger, wakeTransport);
+            try {
+                cancellation?.throwIfAborted();
+                const joined = await square.implicitJoin(signal.akumaId);
+                if (joined.state === "done" || joined.participant === undefined)
+                    return false;
+                cancellation?.throwIfAborted();
+                await joined.participant.express(outcomeExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
+                return true;
+            }
+            finally {
+                await square.close();
+            }
+        };
+        const expressBodyEnd = async (signal, cancellation) => {
+            cancellation?.throwIfAborted();
+            const square = await openSquare(path, environment, ledger, wakeTransport);
+            try {
+                cancellation?.throwIfAborted();
+                const joined = await square.implicitJoin(signal.akumaId);
+                if (joined.state === "done" || joined.participant === undefined)
+                    return false;
+                cancellation?.throwIfAborted();
+                await joined.participant.express(bodyEndExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
+                return true;
+            }
+            finally {
+                await square.close();
+            }
+        };
         let caller;
         try {
             caller = squareAssignedParticipantName(environment);
@@ -98,17 +157,32 @@ const plugin = {
                         await square.close();
                     }
                 },
-                async "akuma.turn-outcome"(signal) {
-                    const square = await openSquare(path, environment, ledger, wakeTransport);
-                    try {
-                        const joined = await square.implicitJoin(signal.akumaId);
-                        if (joined.state === "done" || joined.participant === undefined)
+                async "akuma.turn-outcome"(signal, cancellation) {
+                    await serializeBodyNotification(bodyNotifications, signal, async (state) => {
+                        const expressed = await expressTurnOutcome(signal, cancellation);
+                        if (signal.outcome.kind !== "failed" || !expressed)
                             return;
-                        await joined.participant.express(outcomeExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
-                    }
-                    finally {
-                        await square.close();
-                    }
+                        // A late express may resolve after this handler lost authority; without a
+                        // revalidation it would suppress an authorized Body-end notice it never owned.
+                        cancellation?.throwIfAborted();
+                        state.failedRecipients.add(signal.initiator);
+                    });
+                },
+                async "akuma.body-ended"(signal, cancellation) {
+                    const key = bodyNotificationKey(signal);
+                    await serializeBodyNotification(bodyNotifications, signal, async (state) => {
+                        try {
+                            if (signal.end === "exited" || signal.end === "put-down")
+                                return;
+                            if (state.failedRecipients.has(signal.initiator))
+                                return;
+                            await expressBodyEnd(signal, cancellation);
+                        }
+                        finally {
+                            if (bodyNotifications.get(key) === state)
+                                bodyNotifications.delete(key);
+                        }
+                    });
                 },
             },
         };

@@ -98,6 +98,37 @@ function configureTurnOutcomePlugins(root: string): void {
   );
 }
 
+type BodyEndPluginRecorder = {
+  signals: PluginSignal[];
+  observe(signal: PluginSignal): Promise<void> | void;
+};
+
+const bodyEndPluginGlobal = globalThis as typeof globalThis & {
+  __keiyakuBodyEndPluginRecorder?: BodyEndPluginRecorder;
+};
+
+/** Observe the producer's emitted Body-end signals without disturbing the Turn recorder. */
+function configureBodyEndPlugins(root: string): void {
+  const plugins = join(root, "plugins");
+  mkdirSync(plugins, { recursive: true });
+  writeFileSync(
+    join(plugins, "body-observer.mjs"),
+    [
+      "export default {",
+      '  manifest: { id: "body-observer", apiVersion: 1 },',
+      "  activate() {",
+      '    return { signals: { "akuma.body-ended": (signal) => globalThis.__keiyakuBodyEndPluginRecorder?.observe(signal) } };',
+      "  },",
+      "};",
+    ].join("\n"),
+  );
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { "body-observer": { package: "./plugins/body-observer.mjs" } } }),
+  );
+}
+
 
 const PARENT_HARNESS_ENVIRONMENT = {
   CLAUDE_CODE_SESSION_ID: "parent-claude",
@@ -461,6 +492,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         signal: {
           kind: "akuma.turn-outcome",
           akumaId: allocated.id,
+          bodySequence: 1,
           turnSequence: 1,
           outcome: { kind: "answered", text: "done" },
           initiator: "Alice",
@@ -511,6 +543,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       signal: {
         kind: "akuma.turn-outcome",
         akumaId: allocated.id,
+        bodySequence: 2,
         turnSequence: sequences[1],
         outcome: { kind: "answered", text: "adjusted" },
         initiator: "Bob",
@@ -583,6 +616,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
         signal: {
           kind: "akuma.turn-outcome",
           akumaId: allocated.id,
+          bodySequence: 1,
           turnSequence: 1,
           outcome: { kind: "failed", reason: "provider failed" },
         },
@@ -591,6 +625,74 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
     ]);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("body-ended plugins attribute only the exact Body's latest admitted Turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-body-end-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "b0d1e2f3" });
+    await initializeHeart(allocated.paths);
+    configureBodyEndPlugins(root);
+    const recorder: BodyEndPluginRecorder = {
+      signals: [],
+      observe(signal) {
+        this.signals.push(signal);
+      },
+    };
+    bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder = recorder;
+
+    await driveAkumaBody(
+      claudeBodyLaunch(allocated, root, "first", { initiator: "Alice" }),
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "body-one" } }],
+        result: { kind: "answered", answer: "one", historyId: "history-one" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    await driveAkumaBody(
+      claudeBodyLaunch(allocated, root, "second", { initiator: "Bob" }),
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "body-two" } }],
+        result: { kind: "answered", answer: "two", historyId: "history-two" },
+      }),
+      { now: () => "2026-08-08T00:00:01.000Z" },
+    );
+    await driveAkumaBody(
+      claudeBodyLaunch(allocated, root, "third"),
+      adapter({
+        starts: [],
+        events: [{ type: "session", coordinate: { sessionId: "body-three" } }],
+        result: { kind: "answered", answer: "three", historyId: "history-three" },
+      }),
+      { now: () => "2026-08-08T00:00:02.000Z" },
+    );
+
+    // A Body that never admits a Turn carries no attribution even though its launch named one.
+    // The recipe resumes the predecessor session, and this adapter has no resume path, so the
+    // Body breaks off before any Turn is admitted.
+    await driveAkumaBody(
+      claudeBodyLaunch(allocated, root, "fourth", { initiator: "Carol" }),
+      {
+        admitOptions: (options) => ({ kind: "admitted", options }),
+        async start() {
+          throw new Error("start must not be reached before a Turn exists");
+        },
+      },
+      { now: () => "2026-08-08T00:00:03.000Z" },
+    );
+
+    assert.deepEqual(recorder.signals, [
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", initiator: "Alice" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", initiator: "Bob" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "broke-off" },
+    ]);
+  } finally {
+    delete bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });

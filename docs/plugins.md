@@ -110,4 +110,11 @@ Every Body that reaches a durable terminal state emits `akuma.body-ended` after
 that Body fact is durable. The signal identifies the Akuma and Body sequence
 and carries the terminal reason, including hung custody. It observes that Body
 only; a successor may already be running when the signal is delivered, and the
-signal does not redefine it as an Akuma-wide idle notification.
+signal does not redefine it as an Akuma-wide idle notification. When a Body-end
+observer needs to name the latest admitted input, it may use only the optional
+initiator of the latest admitted Turn belonging to that exact Body. A missing
+Turn or an unattributed latest Turn remains unaddressed; an earlier Turn,
+process environment, and launch context are not fallback owners. Square's
+interruption notice is best-effort and may suppress a same-recipient failed
+Turn notice within one process activation, but it creates no durable receipt or
+replay guarantee.

@@ -463,6 +463,17 @@ export function answeredTurnFact(database: DatabaseSync, turnSequence: number): 
   return row === undefined ? null : decodeTurnRow(row);
 }
 
+export function latestTurnFactForBody(database: DatabaseSync, bodySequence: number): TurnFact | null {
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, started_at, end_sequence, outcome, history_id,
+    session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at
+    FROM turns WHERE body_sequence = ? ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get(bodySequence) as TurnRow | undefined;
+  return row === undefined ? null : decodeTurnRow(row);
+}
+
 export function turnFact(database: DatabaseSync, turnSequence: number): TurnFact | null {
   const row = database
     .prepare(

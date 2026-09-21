@@ -21,6 +21,7 @@ export type PluginSignalMap = Readonly<{
   }>;
   "akuma.turn-outcome": Readonly<{
     akumaId: string;
+    bodySequence: number;
     turnSequence: number;
     initiator?: string;
     outcome: PluginOutcome;
@@ -30,6 +31,7 @@ export type PluginSignalMap = Readonly<{
     akumaId: string;
     bodySequence: number;
     end: PluginBodyEnd;
+    initiator?: string;
     diagnostic?: string;
     contractId?: string;
   }>;

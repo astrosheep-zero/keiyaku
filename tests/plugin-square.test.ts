@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { Square } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
+import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
+import { deferred as promiseBarrier } from "./support/process.js";
 
 const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
 
@@ -41,6 +43,40 @@ async function expressions(
   } finally {
     await square.close();
   }
+}
+
+function squareContains(root: string, text: string): boolean {
+  try {
+    return readFileSync(squarePath(root), "utf8").includes(text);
+  } catch {
+    return false;
+  }
+}
+
+async function joinedSquareSession(
+  root: string,
+  initiators: readonly string[] = ["Alice", "Bob"],
+): Promise<
+  Readonly<{
+    instance: Awaited<ReturnType<typeof squarePlugin.activate>>;
+    turn: NonNullable<PluginHooks["akuma.turn-outcome"]>;
+    bodyEnd: NonNullable<PluginHooks["akuma.body-ended"]>;
+  }>
+> {
+  mkdirSync(join(root, ".square"), { recursive: true });
+  const instance = await squarePlugin.activate({
+    world: root as WorldRoot,
+    config: undefined,
+    writablePath: () => join(root, ".square"),
+  });
+  const turn = instance.signals?.["akuma.turn-outcome"];
+  const bodyEnd = instance.signals?.["akuma.body-ended"];
+  assert.ok(turn);
+  assert.ok(bodyEnd);
+  for (const initiator of initiators) {
+    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
+  }
+  return { instance, turn, bodyEnd };
 }
 
 test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
@@ -96,7 +132,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
-    assert.equal(instance.signals?.["akuma.body-ended"], undefined);
+    assert.ok(instance.signals?.["akuma.body-ended"]);
     const called = instance.signals?.["akuma.called"];
     assert.ok(called);
     await called({
@@ -122,6 +158,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     await handler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
+      bodySequence: 1,
       turnSequence: 1,
       initiator: "Alice",
       outcome: { kind: "answered", text: "done" },
@@ -130,6 +167,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     await handler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/answered",
+      bodySequence: 1,
       turnSequence: 2,
       initiator: "Bob",
       outcome: { kind: "answered", text: "adjusted" },
@@ -181,13 +219,14 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     const fallbackHandler = fallback.signals?.["akuma.turn-outcome"];
     assert.ok(fallbackHandler);
-    assert.equal(fallback.signals?.["akuma.body-ended"], undefined);
+    assert.ok(fallback.signals?.["akuma.body-ended"]);
     const externalCalled = fallback.signals?.["akuma.called"];
     assert.ok(externalCalled);
     await externalCalled({ kind: "akuma.called", akumaId: "aku/external" });
     await fallbackHandler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/failed",
+      bodySequence: 1,
       turnSequence: 3,
       outcome: { kind: "failed", reason: "provider failed" },
     });
@@ -226,6 +265,392 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
   }
 });
 
+test("the Square plugin reports abnormal Bodies without replacing Turn alerts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-body-end-"));
+  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME };
+  try {
+    mkdirSync(join(root, ".square"), { recursive: true });
+    const instance = await squarePlugin.activate({
+      world: root as WorldRoot,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    const turn = instance.signals?.["akuma.turn-outcome"];
+    const bodyEnd = instance.signals?.["akuma.body-ended"];
+    assert.ok(turn);
+    assert.ok(bodyEnd);
+    for (const initiator of ["Alice", "Bob"]) {
+      await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
+    }
+
+    await turn({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/same",
+      bodySequence: 1,
+      turnSequence: 1,
+      initiator: "Alice",
+      outcome: { kind: "failed", reason: "failed first" },
+    });
+    await bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/same",
+      bodySequence: 1,
+      end: "broke-off",
+      initiator: "Alice",
+      diagnostic: "provider stopped",
+    });
+
+    await turn({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/answered",
+      bodySequence: 2,
+      turnSequence: 2,
+      initiator: "Alice",
+      outcome: { kind: "answered", text: "done" },
+    });
+    await bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/answered",
+      bodySequence: 2,
+      end: "hung",
+      initiator: "Alice",
+      diagnostic: "provider custody remained live",
+    });
+
+    await turn({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/different",
+      bodySequence: 3,
+      turnSequence: 3,
+      initiator: "Alice",
+      outcome: { kind: "failed", reason: "failed for Alice" },
+    });
+    await bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/different",
+      bodySequence: 3,
+      end: "broke-off",
+      initiator: "Bob",
+      diagnostic: "different recipient",
+    });
+    await bodyEnd({ kind: "akuma.body-ended", akumaId: "aku/silent", bodySequence: 4, end: "exited" });
+    await bodyEnd({ kind: "akuma.body-ended", akumaId: "aku/silent", bodySequence: 5, end: "put-down" });
+
+    assert.deepEqual(await expressions(squarePath(root)), [
+      {
+        actor: "aku/same",
+        body: "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/answered",
+        body: "aku/answered turn/2 (@Alice)\n✓ came back\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/answered",
+        body: "aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/different",
+        body: "aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+      {
+        actor: "aku/different",
+        body: "aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.",
+        mentions: ["Bob"],
+      },
+    ]);
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent same-Body signals serialize while independent Bodies stay independent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-serialize-"));
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const { turn, bodyEnd } = await joinedSquareSession(root);
+
+    // The failed Turn is registered first on the same (akumaId, bodySequence) key, so the
+    // Body-end operation is queued behind it and observes the recorded recipient.
+    const failed = turn({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/same",
+      bodySequence: 1,
+      turnSequence: 1,
+      initiator: "Alice",
+      outcome: { kind: "failed", reason: "failed first" },
+    });
+    const interrupted = bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/same",
+      bodySequence: 1,
+      end: "broke-off",
+      initiator: "Alice",
+      diagnostic: "provider stopped",
+    });
+    await Promise.all([failed, interrupted]);
+    assert.deepEqual(await expressions(squarePath(root)), [
+      {
+        actor: "aku/same",
+        body: "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.",
+        mentions: ["Alice"],
+      },
+    ]);
+
+    // Distinct Bodies share no queue: the answered Body still reports its interruption even
+    // while the failed Body's notice remains suppressed.
+    await Promise.all([
+      turn({
+        kind: "akuma.turn-outcome",
+        akumaId: "aku/failed-body",
+        bodySequence: 1,
+        turnSequence: 1,
+        initiator: "Alice",
+        outcome: { kind: "failed", reason: "failed elsewhere" },
+      }),
+      turn({
+        kind: "akuma.turn-outcome",
+        akumaId: "aku/answered-body",
+        bodySequence: 1,
+        turnSequence: 1,
+        initiator: "Bob",
+        outcome: { kind: "answered", text: "done" },
+      }),
+    ]);
+    await Promise.all([
+      bodyEnd({
+        kind: "akuma.body-ended",
+        akumaId: "aku/failed-body",
+        bodySequence: 1,
+        end: "broke-off",
+        initiator: "Alice",
+      }),
+      bodyEnd({
+        kind: "akuma.body-ended",
+        akumaId: "aku/answered-body",
+        bodySequence: 1,
+        end: "hung",
+        initiator: "Bob",
+      }),
+    ]);
+    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
+    assert.equal(bodies.some((body) => body.startsWith("aku/failed-body body/1")), false);
+    assert.equal(bodies.filter((body) => body.startsWith("aku/answered-body body/1")).length, 1);
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("distinct Body notifications overlap instead of serializing globally", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-overlap-"));
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const { turn } = await joinedSquareSession(root);
+    const parkedId = "aku/parked-body";
+    const { promise: parked, resolve: markParked } = promiseBarrier<void>();
+    const { promise: released, resolve: release } = promiseBarrier<void>();
+
+    // Hold only the parked Body's Square expression; a global notification queue would keep the
+    // live Body's operation behind it, while per-Body serialization lets the live Body settle.
+    const originalImplicitJoin = Square.prototype.implicitJoin;
+    Square.prototype.implicitJoin = async function (
+      name: string,
+    ): Promise<Awaited<ReturnType<typeof originalImplicitJoin>>> {
+      const joined = await originalImplicitJoin.call(this, name);
+      if (name !== parkedId || joined.participant === undefined) return joined;
+      const express = joined.participant.express.bind(joined.participant);
+      return {
+        ...joined,
+        participant: {
+          ...joined.participant,
+          express: async (...arguments_: Parameters<typeof express>) => {
+            markParked();
+            await released;
+            return await express(...arguments_);
+          },
+        },
+      };
+    };
+    try {
+      const parkedTurn = Promise.resolve(
+        turn({
+          kind: "akuma.turn-outcome",
+          akumaId: parkedId,
+          bodySequence: 1,
+          turnSequence: 1,
+          initiator: "Alice",
+          outcome: { kind: "failed", reason: "parked failure" },
+        }),
+      );
+      await parked;
+      const liveTurn = Promise.resolve(
+        turn({
+          kind: "akuma.turn-outcome",
+          akumaId: "aku/live-body",
+          bodySequence: 1,
+          turnSequence: 1,
+          initiator: "Bob",
+          outcome: { kind: "answered", text: "live" },
+        }),
+      );
+      await liveTurn;
+      const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
+      assert.equal(bodies.some((body) => body.startsWith("aku/live-body turn/1 (@Bob)")), true);
+      assert.equal(bodies.some((body) => body.startsWith("aku/parked-body turn/1")), false);
+      release();
+      await parkedTurn;
+      assert.equal(squareContains(root, "aku/parked-body turn/1"), true);
+    } finally {
+      Square.prototype.implicitJoin = originalImplicitJoin;
+    }
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a rejected failed-Turn send never pre-marks the Body as notified", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-rejected-"));
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const { instance, turn, bodyEnd } = await joinedSquareSession(root, ["Alice"]);
+    await assert.rejects(
+      Promise.resolve(
+        turn({
+          kind: "akuma.turn-outcome",
+          akumaId: "aku/rejected",
+          bodySequence: 1,
+          turnSequence: 1,
+          initiator: "Ghost",
+          outcome: { kind: "failed", reason: "unknown recipient" },
+        }),
+      ),
+    );
+    // Ghost becomes reachable only after the failed send already rejected; the same-recipient
+    // Body notice must still be attempted rather than silently suppressed.
+    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Ghost" });
+    await bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/rejected",
+      bodySequence: 1,
+      end: "broke-off",
+      initiator: "Ghost",
+      diagnostic: "route established late",
+    });
+    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
+    assert.equal(
+      bodies.some((body) => body.startsWith("aku/rejected body/1 (@Ghost)")),
+      true,
+    );
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancellation revokes queued and late Body notification authority", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-authority-"));
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    const { turn, bodyEnd } = await joinedSquareSession(root);
+
+    // A Body-end queued behind a pending Turn is abandoned once its authority is cancelled,
+    // even though the earlier Turn itself already sent its notice.
+    const answered = turn({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/queued",
+      bodySequence: 1,
+      turnSequence: 1,
+      initiator: "Alice",
+      outcome: { kind: "answered", text: "done" },
+    });
+    const controller = new AbortController();
+    const queued = Promise.resolve(
+      bodyEnd(
+        {
+          kind: "akuma.body-ended",
+          akumaId: "aku/queued",
+          bodySequence: 1,
+          end: "hung",
+          initiator: "Alice",
+        },
+        controller.signal,
+      ),
+    );
+    controller.abort();
+    await answered;
+    await assert.rejects(queued);
+    assert.equal(squareContains(root, "aku/queued body/1"), false);
+
+    // An express that merely resolves after its handler lost authority must not record a
+    // suppression that hides the Body notice.
+    const lateAuthority = {
+      throwIfAborted() {
+        if (squareContains(root, "× late failure")) throw new Error("handler authority expired");
+      },
+    } as unknown as AbortSignal;
+    await assert.rejects(
+      Promise.resolve(
+        turn(
+          {
+            kind: "akuma.turn-outcome",
+            akumaId: "aku/late",
+            bodySequence: 1,
+            turnSequence: 1,
+            initiator: "Alice",
+            outcome: { kind: "failed", reason: "late failure" },
+          },
+          lateAuthority,
+        ),
+      ),
+    );
+    await bodyEnd({
+      kind: "akuma.body-ended",
+      akumaId: "aku/late",
+      bodySequence: 1,
+      end: "broke-off",
+      initiator: "Alice",
+      diagnostic: "after timeout",
+    });
+    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
+    assert.equal(bodies.some((body) => body.startsWith("aku/late turn/1")), true);
+    assert.equal(bodies.some((body) => body.startsWith("aku/late body/1 (@Alice)")), true);
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Turn mentions follow the signal initiator, never the Body environment", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-square-initiator-"));
   const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME };
@@ -252,6 +677,7 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
       await handler({
         kind: "akuma.turn-outcome",
         akumaId: "aku/worker",
+        bodySequence: 1,
         turnSequence: index + 1,
         ...(initiator === undefined ? {} : { initiator }),
         outcome: { kind: "failed", reason: "fixture failure" },

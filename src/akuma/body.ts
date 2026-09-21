@@ -18,6 +18,7 @@ import {
   probeLeash,
   projectTell,
   readHeart,
+  readLatestTurnForBody,
   readOpenBoundTurns,
   readOpenPendingTellDisposition,
   readTell,
@@ -433,7 +434,8 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
   return {
     async emit(turnSequence: number, outcome: CommittedOutcome): Promise<void> {
       try {
-        const initiator = (await readTurn(launch.paths, turnSequence))?.initiator;
+        const turn = await readTurn(launch.paths, turnSequence);
+        if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
@@ -444,8 +446,9 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
           {
             kind: "akuma.turn-outcome",
             akumaId: soul.id,
+            bodySequence: turn.bodySequence,
             turnSequence,
-            ...(initiator === undefined ? {} : { initiator }),
+            ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
             outcome:
               outcome.outcome === "answered"
                 ? { kind: "answered", text: outcome.answer }
@@ -472,6 +475,7 @@ function bodyEndEmitter(
   return (bodySequence, end, diagnostic) =>
     (async () => {
       try {
+        const initiator = (await readLatestTurnForBody(launch.paths, bodySequence))?.initiator;
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
@@ -483,6 +487,7 @@ function bodyEndEmitter(
             akumaId: soul.id,
             bodySequence,
             end,
+            ...(initiator === undefined ? {} : { initiator }),
             ...(diagnostic === undefined ? {} : { diagnostic }),
             ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
           },

@@ -34,6 +34,7 @@ import {
   latestBodyFact,
   latestKillFact,
   latestSessionFact,
+  latestTurnFactForBody,
   lastAnsweredTurnFact,
   pauseFact,
   sessionFactForCoordinate,
@@ -442,6 +443,10 @@ export async function failOpenBoundTurns(
 
 export async function readTurn(paths: AkumaPaths, sequence: number): Promise<TurnFact | null> {
   return await withReadOnlyHeart(paths, (heart) => turnFact(heart, sequence));
+}
+
+export async function readLatestTurnForBody(paths: AkumaPaths, bodySequence: number): Promise<TurnFact | null> {
+  return await withReadOnlyHeart(paths, (heart) => latestTurnFactForBody(heart, bodySequence));
 }
 
 export async function endTurn(
