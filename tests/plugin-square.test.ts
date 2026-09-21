@@ -29,7 +29,6 @@ function restoreEnvironment(values: Readonly<Record<string, string | undefined>>
     else process.env[name] = value;
   }
 }
-
 async function expressions(
   path: string,
 ): Promise<readonly Readonly<{ actor: string; body: string; mentions: readonly string[] }>[]> {
@@ -45,45 +44,89 @@ async function expressions(
   }
 }
 
-function squareContains(root: string, text: string): boolean {
-  try {
-    return readFileSync(squarePath(root), "utf8").includes(text);
-  } catch {
-    return false;
-  }
-}
+type BodyEndDetails = Omit<Parameters<NonNullable<PluginHooks["akuma.body-ended"]>>[0], "kind">;
+type CapturedExpression = Readonly<{ actor: string; body: string; mentions: readonly string[] }>;
+type HeldExpression = Readonly<{ sent: Promise<void>; release: () => void }>;
 
-async function joinedSquareSession(
-  root: string,
-  initiators: readonly string[] = ["Alice", "Bob"],
-): Promise<
-  Readonly<{
-    instance: Awaited<ReturnType<typeof squarePlugin.activate>>;
-    turn: NonNullable<PluginHooks["akuma.turn-outcome"]>;
-    bodyEnd: NonNullable<PluginHooks["akuma.body-ended"]>;
-  }>
-> {
-  mkdirSync(join(root, ".square"), { recursive: true });
-  const instance = await squarePlugin.activate({
-    world: root as WorldRoot,
-    config: undefined,
-    writablePath: () => join(root, ".square"),
-  });
-  const turn = instance.signals?.["akuma.turn-outcome"];
-  const bodyEnd = instance.signals?.["akuma.body-ended"];
-  assert.ok(turn);
-  assert.ok(bodyEnd);
-  for (const initiator of initiators) {
-    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
+const captured = (actor: string, body: string, mentions: readonly string[] = []): CapturedExpression => ({ actor, body, mentions });
+const optionalInitiator = (initiator: string | undefined): { initiator?: string } => (initiator === undefined ? {} : { initiator });
+const optionalDiagnostic = (diagnostic: string | undefined): { diagnostic?: string } => (diagnostic === undefined ? {} : { diagnostic });
+async function withHeldSquareExpression<T>(
+  akumaId: string,
+  callback: (barrier: HeldExpression) => Promise<T>,
+  holdAfterSend = true,
+): Promise<T> {
+  const originalImplicitJoin = Square.prototype.implicitJoin;
+  const { promise: sent, resolve: markSent } = promiseBarrier<void>();
+  const { promise: released, resolve: release } = promiseBarrier<void>();
+  Square.prototype.implicitJoin = async function (name: string) {
+    const joined = await originalImplicitJoin.call(this, name);
+    if (name !== akumaId || joined.participant === undefined) return joined;
+    const express = joined.participant.express.bind(joined.participant);
+    return {
+      ...joined,
+      participant: {
+        ...joined.participant,
+        express: async (...arguments_: Parameters<typeof express>) => {
+          if (!holdAfterSend) {
+            markSent();
+            await released;
+          }
+          const result = await express(...arguments_);
+          if (holdAfterSend) {
+            markSent();
+            await released;
+          }
+          return result;
+        },
+      },
+    };
+  };
+  try {
+    return await callback({ sent, release });
+  } finally {
+    release();
+    Square.prototype.implicitJoin = originalImplicitJoin;
   }
-  return { instance, turn, bodyEnd };
 }
+type SquareNotificationFixture = Readonly<{
+  admit(initiator: string): Promise<void>;
+  failedTurn(
+    akumaId: string,
+    bodySequence: number,
+    turnSequence: number,
+    initiator: string | undefined,
+    reason: string,
+    cancellation?: AbortSignal,
+  ): Promise<void>;
+  answeredTurn(
+    akumaId: string,
+    bodySequence: number,
+    turnSequence: number,
+    initiator: string | undefined,
+    text: string,
+    cancellation?: AbortSignal,
+  ): Promise<void>;
+  bodyEnd(
+    akumaId: string,
+    bodySequence: number,
+    end: BodyEndDetails["end"],
+    initiator?: string,
+    diagnostic?: string,
+    cancellation?: AbortSignal,
+  ): Promise<void>;
+  expressions(): Promise<readonly CapturedExpression[]>;
+  bodies(): Promise<readonly string[]>;
+  withHeldExpression<T>(
+    akumaId: string,
+    callback: (barrier: HeldExpression) => Promise<T>,
+    holdAfterSend?: boolean,
+  ): Promise<T>;
+}>;
 
 async function withSquareNotificationFixture<T>(
   name: string,
-  callback: (
-    fixture: Readonly<{ root: string } & Awaited<ReturnType<typeof joinedSquareSession>>>,
-  ) => Promise<T>,
+  callback: (fixture: SquareNotificationFixture) => Promise<T>,
   initiators?: readonly string[],
 ): Promise<T> {
   const root = mkdtempSync(join(tmpdir(), `keiyaku-square-${name}-`));
@@ -93,9 +136,71 @@ async function withSquareNotificationFixture<T>(
     SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
   };
   try {
+    mkdirSync(join(root, ".square"), { recursive: true });
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    return await callback({ root, ...(await joinedSquareSession(root, initiators)) });
+    const instance = await squarePlugin.activate({
+      world: root as WorldRoot,
+      config: undefined,
+      writablePath: () => join(root, ".square"),
+    });
+    const turn = instance.signals?.["akuma.turn-outcome"];
+    const bodyEnd = instance.signals?.["akuma.body-ended"];
+    const initiating = instance.signals?.["akuma.initiating"];
+    assert.ok(turn);
+    assert.ok(bodyEnd);
+    assert.ok(initiating);
+    const fixture: SquareNotificationFixture = {
+      async admit(initiator) {
+        await initiating({ kind: "akuma.initiating", initiator });
+      },
+      async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation) {
+        await turn(
+          {
+            kind: "akuma.turn-outcome",
+            akumaId,
+            bodySequence,
+            turnSequence,
+            ...optionalInitiator(initiator),
+            outcome: { kind: "failed", reason },
+          },
+          cancellation,
+        );
+      },
+      async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation) {
+        await turn(
+          {
+            kind: "akuma.turn-outcome",
+            akumaId,
+            bodySequence,
+            turnSequence,
+            ...optionalInitiator(initiator),
+            outcome: { kind: "answered", text },
+          },
+          cancellation,
+        );
+      },
+      async bodyEnd(akumaId, bodySequence, end, initiator, diagnostic, cancellation) {
+        await bodyEnd(
+          {
+            kind: "akuma.body-ended",
+            akumaId,
+            bodySequence,
+            end,
+            ...optionalInitiator(initiator),
+            ...optionalDiagnostic(diagnostic),
+          },
+          cancellation,
+        );
+      },
+      expressions: () => expressions(squarePath(root)),
+      async bodies() {
+        return (await expressions(squarePath(root))).map(({ body }) => body);
+      },
+      withHeldExpression: withHeldSquareExpression,
+    };
+    for (const initiator of initiators ?? ["Alice", "Bob"]) await fixture.admit(initiator);
+    return await callback(fixture);
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });
@@ -289,300 +394,95 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
 });
 
 test("the Square plugin reports abnormal Bodies without replacing Turn alerts", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-body-end-"));
-  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME };
-  try {
-    mkdirSync(join(root, ".square"), { recursive: true });
-    const instance = await squarePlugin.activate({
-      world: root as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
-    const turn = instance.signals?.["akuma.turn-outcome"];
-    const bodyEnd = instance.signals?.["akuma.body-ended"];
-    assert.ok(turn);
-    assert.ok(bodyEnd);
-    for (const initiator of ["Alice", "Bob"]) {
-      await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
-    }
-
-    await turn({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/same",
-      bodySequence: 1,
-      turnSequence: 1,
-      initiator: "Alice",
-      outcome: { kind: "failed", reason: "failed first" },
-    });
-    await bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/same",
-      bodySequence: 1,
-      end: "broke-off",
-      initiator: "Alice",
-      diagnostic: "provider stopped",
-    });
-
-    await turn({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/answered",
-      bodySequence: 2,
-      turnSequence: 2,
-      initiator: "Alice",
-      outcome: { kind: "answered", text: "done" },
-    });
-    await bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/answered",
-      bodySequence: 2,
-      end: "hung",
-      initiator: "Alice",
-      diagnostic: "provider custody remained live",
-    });
-
-    await turn({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/different",
-      bodySequence: 3,
-      turnSequence: 3,
-      initiator: "Alice",
-      outcome: { kind: "failed", reason: "failed for Alice" },
-    });
-    await bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/different",
-      bodySequence: 3,
-      end: "broke-off",
-      initiator: "Bob",
-      diagnostic: "different recipient",
-    });
-    await bodyEnd({ kind: "akuma.body-ended", akumaId: "aku/silent", bodySequence: 4, end: "exited" });
-    await bodyEnd({ kind: "akuma.body-ended", akumaId: "aku/silent", bodySequence: 5, end: "put-down" });
-
-    assert.deepEqual(await expressions(squarePath(root)), [
-      {
-        actor: "aku/same",
-        body: "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/answered",
-        body: "aku/answered turn/2 (@Alice)\n✓ came back\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/answered",
-        body: "aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/different",
-        body: "aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/different",
-        body: "aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.",
-        mentions: ["Bob"],
-      },
-    ]);
-  } finally {
-    restoreEnvironment(prior);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("concurrent same-Body signals serialize while independent Bodies stay independent", async () => {
-  await withSquareNotificationFixture("serialize", async ({ root, turn, bodyEnd }) => {
-
-    // The failed Turn is registered first on the same (akumaId, bodySequence) key, so the
-    // Body-end operation is queued behind it and observes the recorded recipient.
-    const failed = turn({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/same",
-      bodySequence: 1,
-      turnSequence: 1,
-      initiator: "Alice",
-      outcome: { kind: "failed", reason: "failed first" },
-    });
-    const interrupted = bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/same",
-      bodySequence: 1,
-      end: "broke-off",
-      initiator: "Alice",
-      diagnostic: "provider stopped",
-    });
-    await Promise.all([failed, interrupted]);
-    assert.deepEqual(await expressions(squarePath(root)), [
-      {
-        actor: "aku/same",
-        body: "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
+  await withSquareNotificationFixture("body-end", async (fixture) => {
+    await fixture.failedTurn("aku/same", 1, 1, "Alice", "failed first");
+    await fixture.bodyEnd("aku/same", 1, "broke-off", "Alice", "provider stopped");
+    await fixture.answeredTurn("aku/answered", 2, 2, "Alice", "done");
+    await fixture.bodyEnd("aku/answered", 2, "hung", "Alice", "provider custody remained live");
+    await fixture.failedTurn("aku/different", 3, 3, "Alice", "failed for Alice");
+    await fixture.bodyEnd("aku/different", 3, "broke-off", "Bob", "different recipient");
+    await fixture.bodyEnd("aku/silent", 4, "exited");
+    await fixture.bodyEnd("aku/silent", 5, "put-down");
+    assert.deepEqual(await fixture.expressions(), [
+      captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/answered", "aku/answered turn/2 (@Alice)\n✓ came back\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/answered", "aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/different", "aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/different", "aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
     ]);
   });
 });
 
-test("distinct Body notifications overlap instead of serializing globally", async () => {
-  await withSquareNotificationFixture("overlap", async ({ root, turn }) => {
-    const parkedId = "aku/parked-body";
-    const { promise: parked, resolve: markParked } = promiseBarrier<void>();
-    const { promise: released, resolve: release } = promiseBarrier<void>();
-
-    // Hold only the parked Body's Square expression; a global notification queue would keep the
-    // live Body's operation behind it, while per-Body serialization lets the live Body settle.
-    const originalImplicitJoin = Square.prototype.implicitJoin;
-    Square.prototype.implicitJoin = async function (
-      name: string,
-    ): Promise<Awaited<ReturnType<typeof originalImplicitJoin>>> {
-      const joined = await originalImplicitJoin.call(this, name);
-      if (name !== parkedId || joined.participant === undefined) return joined;
-      const express = joined.participant.express.bind(joined.participant);
-      return {
-        ...joined,
-        participant: {
-          ...joined.participant,
-          express: async (...arguments_: Parameters<typeof express>) => {
-            markParked();
-            await released;
-            return await express(...arguments_);
-          },
-        },
-      };
-    };
-    try {
-      const parkedTurn = Promise.resolve(
-        turn({
-          kind: "akuma.turn-outcome",
-          akumaId: parkedId,
-          bodySequence: 1,
-          turnSequence: 1,
-          initiator: "Alice",
-          outcome: { kind: "failed", reason: "parked failure" },
-        }),
-      );
-      await parked;
-      const liveTurn = Promise.resolve(
-        turn({
-          kind: "akuma.turn-outcome",
-          akumaId: "aku/live-body",
-          bodySequence: 1,
-          turnSequence: 1,
-          initiator: "Bob",
-          outcome: { kind: "answered", text: "live" },
-        }),
-      );
-      await liveTurn;
-      const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
-      assert.equal(bodies.some((body) => body.startsWith("aku/live-body turn/1 (@Bob)")), true);
-      assert.equal(bodies.some((body) => body.startsWith("aku/parked-body turn/1")), false);
+test("same-Body notifications serialize while distinct Bodies overlap", async () => {
+  await withSquareNotificationFixture("serialize", async (fixture) => {
+    const failedExpression = captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]);
+    await fixture.withHeldExpression("aku/same", async ({ sent, release }) => {
+      const failed = fixture.failedTurn("aku/same", 1, 1, "Alice", "failed first");
+      await sent;
+      const interrupted = fixture.bodyEnd("aku/same", 1, "broke-off", "Alice", "provider stopped");
+      assert.equal(await Promise.race([interrupted.then(() => true), Promise.resolve(false)]), false);
+      assert.deepEqual(await fixture.expressions(), [failedExpression]);
       release();
-      await parkedTurn;
-      assert.equal(squareContains(root, "aku/parked-body turn/1"), true);
-    } finally {
-      Square.prototype.implicitJoin = originalImplicitJoin;
-    }
+      await Promise.all([failed, interrupted]);
+      assert.deepEqual(await fixture.expressions(), [failedExpression]);
+    });
+  });
+  await withSquareNotificationFixture("overlap", async (fixture) => {
+    const liveExpression = captured("aku/live-body", "aku/live-body turn/1 (@Bob)\n✓ came back\nignore if you have already seen this.", ["Bob"]);
+    const parkedExpression = captured("aku/parked-body", "aku/parked-body turn/1 (@Alice)\n× parked failure\nignore if you have already seen this.", ["Alice"]);
+    await fixture.withHeldExpression("aku/parked-body", async ({ sent, release }) => {
+      const parked = fixture.failedTurn("aku/parked-body", 1, 1, "Alice", "parked failure");
+      await sent;
+      await fixture.answeredTurn("aku/live-body", 1, 1, "Bob", "live");
+      assert.deepEqual(await fixture.expressions(), [liveExpression]);
+      release();
+      await parked;
+      assert.deepEqual(await fixture.expressions(), [liveExpression, parkedExpression]);
+    }, false);
   });
 });
 
-test("a rejected failed-Turn send never pre-marks the Body as notified", async () => {
-  await withSquareNotificationFixture("rejected", async ({ root, instance, turn, bodyEnd }) => {
-    await assert.rejects(
-      Promise.resolve(
-        turn({
-          kind: "akuma.turn-outcome",
-          akumaId: "aku/rejected",
-          bodySequence: 1,
-          turnSequence: 1,
-          initiator: "Ghost",
-          outcome: { kind: "failed", reason: "unknown recipient" },
-        }),
-      ),
-    );
-    // Ghost becomes reachable only after the failed send already rejected; the same-recipient
-    // Body notice must still be attempted rather than silently suppressed.
-    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Ghost" });
-    await bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/rejected",
-      bodySequence: 1,
-      end: "broke-off",
-      initiator: "Ghost",
-      diagnostic: "route established late",
-    });
-    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
-    assert.equal(
-      bodies.some((body) => body.startsWith("aku/rejected body/1 (@Ghost)")),
-      true,
-    );
-  }, ["Alice"]);
-});
+test("Square notification authority survives rejection and cancellation boundaries", async () => {
+  await withSquareNotificationFixture(
+    "rejected",
+    async (fixture) => {
+      await assert.rejects(fixture.failedTurn("aku/rejected", 1, 1, "Ghost", "unknown recipient"));
+      // Ghost becomes reachable only after the failed send already rejected; the same-recipient
+      // Body notice must still be attempted rather than silently suppressed.
+      await fixture.admit("Ghost");
+      await fixture.bodyEnd("aku/rejected", 1, "broke-off", "Ghost", "route established late");
+      assert.deepEqual(await fixture.expressions(), [
+        captured("aku/rejected", "aku/rejected body/1 (@Ghost)\n× interrupted: broke-off: route established late\nignore if you have already seen this.", ["Ghost"]),
+      ]);
+    },
+    ["Alice"],
+  );
 
-test("cancellation revokes queued and late Body notification authority", async () => {
-  await withSquareNotificationFixture("authority", async ({ root, turn, bodyEnd }) => {
-
-    // A Body-end queued behind a pending Turn is abandoned once its authority is cancelled,
-    // even though the earlier Turn itself already sent its notice.
-    const answered = turn({
-      kind: "akuma.turn-outcome",
-      akumaId: "aku/queued",
-      bodySequence: 1,
-      turnSequence: 1,
-      initiator: "Alice",
-      outcome: { kind: "answered", text: "done" },
+  await withSquareNotificationFixture("authority", async (fixture) => {
+    await fixture.withHeldExpression("aku/queued", async ({ sent, release }) => {
+      const answered = fixture.answeredTurn("aku/queued", 1, 1, "Alice", "done");
+      await sent;
+      const controller = new AbortController();
+      const queued = fixture.bodyEnd("aku/queued", 1, "hung", "Alice", undefined, controller.signal);
+      controller.abort();
+      release();
+      await answered;
+      await assert.rejects(queued);
+      assert.equal((await fixture.bodies()).some((body) => body.startsWith("aku/queued body/1")), false);
     });
-    const controller = new AbortController();
-    const queued = Promise.resolve(
-      bodyEnd(
-        {
-          kind: "akuma.body-ended",
-          akumaId: "aku/queued",
-          bodySequence: 1,
-          end: "hung",
-          initiator: "Alice",
-        },
-        controller.signal,
-      ),
-    );
-    controller.abort();
-    await answered;
-    await assert.rejects(queued);
-    assert.equal(squareContains(root, "aku/queued body/1"), false);
-
-    // An express that merely resolves after its handler lost authority must not record a
-    // suppression that hides the Body notice.
-    const lateAuthority = {
-      throwIfAborted() {
-        if (squareContains(root, "× late failure")) throw new Error("handler authority expired");
-      },
-    } as unknown as AbortSignal;
-    await assert.rejects(
-      Promise.resolve(
-        turn(
-          {
-            kind: "akuma.turn-outcome",
-            akumaId: "aku/late",
-            bodySequence: 1,
-            turnSequence: 1,
-            initiator: "Alice",
-            outcome: { kind: "failed", reason: "late failure" },
-          },
-          lateAuthority,
-        ),
-      ),
-    );
-    await bodyEnd({
-      kind: "akuma.body-ended",
-      akumaId: "aku/late",
-      bodySequence: 1,
-      end: "broke-off",
-      initiator: "Alice",
-      diagnostic: "after timeout",
+    await fixture.withHeldExpression("aku/late", async ({ sent, release }) => {
+      const controller = new AbortController();
+      const late = fixture.failedTurn("aku/late", 1, 1, "Alice", "late failure", controller.signal);
+      await sent;
+      controller.abort();
+      release();
+      await assert.rejects(late);
     });
-    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
-    assert.equal(bodies.some((body) => body.startsWith("aku/late turn/1")), true);
-    assert.equal(bodies.some((body) => body.startsWith("aku/late body/1 (@Alice)")), true);
+    await fixture.bodyEnd("aku/late", 1, "broke-off", "Alice", "after timeout");
+    assert.deepEqual((await fixture.expressions()).filter(({ actor }) => actor === "aku/late"), [
+      captured("aku/late", "aku/late turn/1 (@Alice)\n× late failure\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/late", "aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
+    ]);
   });
 });
 
