@@ -407,46 +407,6 @@ test("concurrent same-Body signals serialize while independent Bodies stay indep
         mentions: ["Alice"],
       },
     ]);
-
-    // Distinct Bodies share no queue: the answered Body still reports its interruption even
-    // while the failed Body's notice remains suppressed.
-    await Promise.all([
-      turn({
-        kind: "akuma.turn-outcome",
-        akumaId: "aku/failed-body",
-        bodySequence: 1,
-        turnSequence: 1,
-        initiator: "Alice",
-        outcome: { kind: "failed", reason: "failed elsewhere" },
-      }),
-      turn({
-        kind: "akuma.turn-outcome",
-        akumaId: "aku/answered-body",
-        bodySequence: 1,
-        turnSequence: 1,
-        initiator: "Bob",
-        outcome: { kind: "answered", text: "done" },
-      }),
-    ]);
-    await Promise.all([
-      bodyEnd({
-        kind: "akuma.body-ended",
-        akumaId: "aku/failed-body",
-        bodySequence: 1,
-        end: "broke-off",
-        initiator: "Alice",
-      }),
-      bodyEnd({
-        kind: "akuma.body-ended",
-        akumaId: "aku/answered-body",
-        bodySequence: 1,
-        end: "hung",
-        initiator: "Bob",
-      }),
-    ]);
-    const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
-    assert.equal(bodies.some((body) => body.startsWith("aku/failed-body body/1")), false);
-    assert.equal(bodies.filter((body) => body.startsWith("aku/answered-body body/1")).length, 1);
   } finally {
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });

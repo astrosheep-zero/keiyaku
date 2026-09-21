@@ -6,20 +6,40 @@ import { normalizeToolCommand } from "./akuma-tool-command.js";
 type FleetTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
 type ToolRow = Extract<ActivityRow | SnapshotRow | FleetTimelineRow, { kind: "tool" }>;
 
-/**
- * One generic tool row's argument preview at the width its own row leaves free.
- * A listed common tool keeps its structural summary; any other name shows its
- * compact retained JSON, dropping trailing whole fields before cutting a value.
- */
-export function toolText(row: ToolRow, columns: number): string {
+/** The bounded body of a generic tool row, including its terminal diagnostic. */
+export function toolContent(row: ToolRow, columns: number): string {
   const input = row.call.kind === "other" ? row.call.input : undefined;
-  if (input === undefined) return truncateDisplayText(genericOtherText(row).text, columns);
-  const common = commonOtherText(row);
-  if (common !== undefined) return truncateDisplayText(common, columns);
-  if (input.json === "{}") return "";
-  if (input.truncated) return truncateDisplayText(`${input.json}…`, columns);
-  const value = jsonObject(input.json);
-  return value === undefined ? truncateDisplayText(input.json, columns) : objectFieldsText(value, columns);
+  const diagnostic = toolDiagnostic(row);
+  const width = Math.max(0, columns - displayColumns(diagnostic));
+  let text: string;
+  if (input === undefined) {
+    text = genericOtherText(row).text;
+  } else {
+    const common = commonOtherText(row);
+    if (common !== undefined) text = common;
+    else if (input.json === "{}") text = "";
+    else if (input.truncated) text = `${input.json}…`;
+    else {
+      const value = jsonObject(input.json);
+      text = value === undefined ? input.json : objectFieldsText(value, width);
+    }
+  }
+  return `${truncateDisplayText(text, width)}${diagnostic}`;
+}
+
+export function toolLabel(row: ToolRow): string {
+  switch (row.call.kind) {
+    case "run":
+      return "run";
+    case "read":
+      return "read";
+    case "search":
+      return searchLabel(row.call.scope);
+    case "fileChange":
+      return fileChange(row.call, row.state).label;
+    case "other":
+      return row.name;
+  }
 }
 
 /** The trailing failure, duration, or message clause one settled tool row carries, otherwise the empty string. */

@@ -11,7 +11,7 @@ import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
-import { toolDiagnostic, toolRepr, toolText } from "./akuma-tool.js";
+import { toolContent, toolLabel, toolRepr } from "./akuma-tool.js";
 import {
   displayColumns,
   renderBoundedTextBlock,
@@ -109,7 +109,7 @@ function label(row: RenderRow): string {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "answer" : "error";
   if (row.kind === "turn") return "call";
   if (row.kind !== "tool") return row.kind;
-  return toolRepr(row).label;
+  return toolLabel(row);
 }
 
 function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
@@ -143,6 +143,7 @@ function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle
       : { text: row.outcome.diagnostic, lines: 2 };
   if (row.kind === "turn") return { text: "", lines: 1 };
   if (row.kind !== "tool") return { text: "", lines: 1 };
+  if (row.call.kind === "other") return { text: "", lines: 1 };
   const repr = toolRepr(row);
   return {
     text: repr.text,
@@ -262,12 +263,9 @@ type RowRenderOptions = Readonly<{
   inFlightSay?: boolean;
 }>;
 
-/** The body one row prints: a generic tool row re-derives its argument preview at this row's width
- * while keeping the same failure, duration, or message clause any other tool row appends. */
 function rowBody(row: RenderRow, text: string, columns: number): string {
   if (row.kind !== "tool" || row.call.kind !== "other") return text;
-  const diagnostic = toolDiagnostic(row);
-  return `${toolText(row, Math.max(0, columns - displayColumns(diagnostic)))}${diagnostic}`;
+  return toolContent(row, columns);
 }
 
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {

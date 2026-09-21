@@ -95,38 +95,24 @@ const plugin = {
         const ledger = hostLedger(environment);
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         const bodyNotifications = new Map();
-        const expressTurnOutcome = async (signal, cancellation) => {
+        const expressAsAkuma = async (akumaId, expression, initiator, cancellation) => {
             cancellation?.throwIfAborted();
             const square = await openSquare(path, environment, ledger, wakeTransport);
             try {
                 cancellation?.throwIfAborted();
-                const joined = await square.implicitJoin(signal.akumaId);
+                const joined = await square.implicitJoin(akumaId);
                 if (joined.state === "done" || joined.participant === undefined)
                     return false;
                 cancellation?.throwIfAborted();
-                await joined.participant.express(outcomeExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
+                await joined.participant.express(expression, initiator === undefined ? {} : { mentions: [initiator] });
                 return true;
             }
             finally {
                 await square.close();
             }
         };
-        const expressBodyEnd = async (signal, cancellation) => {
-            cancellation?.throwIfAborted();
-            const square = await openSquare(path, environment, ledger, wakeTransport);
-            try {
-                cancellation?.throwIfAborted();
-                const joined = await square.implicitJoin(signal.akumaId);
-                if (joined.state === "done" || joined.participant === undefined)
-                    return false;
-                cancellation?.throwIfAborted();
-                await joined.participant.express(bodyEndExpression(signal), signal.initiator === undefined ? {} : { mentions: [signal.initiator] });
-                return true;
-            }
-            finally {
-                await square.close();
-            }
-        };
+        const expressTurnOutcome = (signal, cancellation) => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.initiator, cancellation);
+        const expressBodyEnd = (signal, cancellation) => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), signal.initiator, cancellation);
         let caller;
         try {
             caller = squareAssignedParticipantName(environment);

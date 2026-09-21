@@ -133,46 +133,33 @@ const plugin: KeiyakuPlugin = {
     const ledger = hostLedger(environment);
     const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
     const bodyNotifications = new Map<string, BodyNotificationState>();
-    const expressTurnOutcome = async (
+    const expressAsAkuma = async (
+      akumaId: string,
+      expression: string,
+      initiator: string | undefined,
+      cancellation?: AbortSignal,
+    ): Promise<boolean> => {
+      cancellation?.throwIfAborted();
+      const square = await openSquare(path, environment, ledger, wakeTransport);
+      try {
+        cancellation?.throwIfAborted();
+        const joined = await square.implicitJoin(akumaId);
+        if (joined.state === "done" || joined.participant === undefined) return false;
+        cancellation?.throwIfAborted();
+        await joined.participant.express(expression, initiator === undefined ? {} : { mentions: [initiator] });
+        return true;
+      } finally {
+        await square.close();
+      }
+    };
+    const expressTurnOutcome = (
       signal: PluginSignalMap["akuma.turn-outcome"],
       cancellation?: AbortSignal,
-    ): Promise<boolean> => {
-      cancellation?.throwIfAborted();
-      const square = await openSquare(path, environment, ledger, wakeTransport);
-      try {
-        cancellation?.throwIfAborted();
-        const joined = await square.implicitJoin(signal.akumaId);
-        if (joined.state === "done" || joined.participant === undefined) return false;
-        cancellation?.throwIfAborted();
-        await joined.participant.express(
-          outcomeExpression(signal),
-          signal.initiator === undefined ? {} : { mentions: [signal.initiator] },
-        );
-        return true;
-      } finally {
-        await square.close();
-      }
-    };
-    const expressBodyEnd = async (
+    ): Promise<boolean> => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.initiator, cancellation);
+    const expressBodyEnd = (
       signal: PluginSignalMap["akuma.body-ended"],
       cancellation?: AbortSignal,
-    ): Promise<boolean> => {
-      cancellation?.throwIfAborted();
-      const square = await openSquare(path, environment, ledger, wakeTransport);
-      try {
-        cancellation?.throwIfAborted();
-        const joined = await square.implicitJoin(signal.akumaId);
-        if (joined.state === "done" || joined.participant === undefined) return false;
-        cancellation?.throwIfAborted();
-        await joined.participant.express(
-          bodyEndExpression(signal),
-          signal.initiator === undefined ? {} : { mentions: [signal.initiator] },
-        );
-        return true;
-      } finally {
-        await square.close();
-      }
-    };
+    ): Promise<boolean> => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), signal.initiator, cancellation);
     let caller: string | undefined;
     try {
       caller = squareAssignedParticipantName(environment);

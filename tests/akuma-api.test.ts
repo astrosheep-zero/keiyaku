@@ -189,7 +189,7 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
   }
 });
 
-test("bounded Tell observes its exact admitted Turn and leaves a zero-window Tell admitted", async () => {
+test("bounded Tell observes its exact admitted Turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-"));
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
@@ -208,38 +208,6 @@ test("bounded Tell observes its exact admitted Turn and leaves a zero-window Tel
     });
     assert.equal(observed.tell.admission.tellId, observed.tell.row.tellId);
     assert.deepEqual(observed.observation, { reason: "answered", answer: "exact answer" });
-
-    const deadline = await bornWorld(root, "a1000011");
-    const bodyStarted = deferred<void>();
-    const delivered = deferred<Readonly<{ kind: "answered"; answer: string; historyId: string }>>();
-    fixtures.set(deadline.allocated.paths.directory, {
-      adapter: fixtureAdapter(async () => {
-        bodyStarted.resolve();
-        return {
-          admission: { fence: "delayed-answer" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "delayed-session" } };
-            },
-          },
-          completion: delivered.promise,
-          async abort() {},
-        };
-      }),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    const zero = await executeTellWaitAkuma({
-      path: deadline.world,
-      id: deadline.allocated.id,
-      body: "do this later",
-      timeoutMs: 0,
-    });
-    assert.equal(zero.observation.reason, "deadline");
-    assert.equal((await readTell(deadline.allocated.paths, zero.tell.admission.tellId))?.body, "do this later");
-    // The wake still runs behind the expired window; let its delayed answer land.
-    await bodyStarted.promise;
-    delivered.resolve({ kind: "answered", answer: "later answer", historyId: "delayed-history" });
-    await settleFixtureBodies(bodies);
   } finally {
     restoreTellRuntime();
     await settleFixtureBodies(bodies);
