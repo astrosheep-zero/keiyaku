@@ -11,7 +11,7 @@ import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
-import { toolContent, toolLabel, toolRepr } from "./akuma-tool.js";
+import { toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import {
   displayColumns,
   renderBoundedTextBlock,
@@ -100,7 +100,7 @@ function clock(at: string): string {
     : "unknown";
 }
 
-function label(row: RenderRow): string {
+function label(row: RenderRow, tool?: ToolRepr): string {
   if (row.kind === "said") return "say";
   if (row.kind === "thought") return "think";
   if (row.kind === "note") return "note";
@@ -109,7 +109,7 @@ function label(row: RenderRow): string {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "answer" : "error";
   if (row.kind === "turn") return "call";
   if (row.kind !== "tool") return row.kind;
-  return toolLabel(row);
+  return tool!.label;
 }
 
 function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
@@ -124,7 +124,10 @@ function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
   return "│";
 }
 
-function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
+function rowText(
+  row: RenderRow,
+  tool?: ToolRepr,
+): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
   if (
     row.kind === "said" ||
     row.kind === "thought" ||
@@ -144,7 +147,7 @@ function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle
   if (row.kind === "turn") return { text: "", lines: 1 };
   if (row.kind !== "tool") return { text: "", lines: 1 };
   if (row.call.kind === "other") return { text: "", lines: 1 };
-  const repr = toolRepr(row);
+  const repr = tool!;
   return {
     text: repr.text,
     lines: 1,
@@ -259,6 +262,7 @@ type RowRenderOptions = Readonly<{
   history: boolean;
   first: string;
   continuation: string;
+  tool?: ToolRepr | undefined;
   singleLine?: boolean;
   inFlightSay?: boolean;
 }>;
@@ -269,8 +273,8 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
 }
 
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
-  const { history, first, continuation, singleLine = false, inFlightSay = false } = options;
-  const value = rowText(row);
+  const { history, first, continuation, tool, singleLine = false, inFlightSay = false } = options;
+  const value = rowText(row, tool);
   const quoted = quotedBody(row);
   if (singleLine) {
     const openQuote = row.kind === "said" && inFlightSay;
@@ -315,11 +319,13 @@ function groupedEntries(
     const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
+    const tool = row.kind === "tool" ? toolRepr(row) : undefined;
     lines.push(
       ...renderRow(row, context, {
         history,
-        first: layout.head(changed ? at : undefined, mark(row), label(row), row, context.columns),
+        first: layout.head(changed ? at : undefined, mark(row), label(row, tool), row, context.columns),
         continuation: layout.continuation(),
+        tool,
         singleLine: layout.singleLine === true,
       }),
     );
@@ -484,11 +490,19 @@ function renderStreamRow(
   const at = clock(row.at);
   const previousClock = layout.clock?.previous ?? state.previousClock;
   const changed = previousClock === undefined || at !== previousClock;
+  const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   lines.push(
     ...renderRow(row, context, {
       history: false,
-      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row), row, context.columns),
+      first: layout.head(
+        changed ? at : undefined,
+        inFlightSay ? "⧖" : mark(row),
+        label(row, tool),
+        row,
+        context.columns,
+      ),
       continuation: layout.continuation(),
+      tool,
       singleLine: layout.singleLine === true,
       inFlightSay,
     }),

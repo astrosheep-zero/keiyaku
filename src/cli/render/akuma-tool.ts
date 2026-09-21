@@ -13,7 +13,7 @@ export function toolContent(row: ToolRow, columns: number): string {
   const width = Math.max(0, columns - displayColumns(diagnostic));
   let text: string;
   if (input === undefined) {
-    text = genericOtherText(row).text;
+    text = "";
   } else {
     const common = commonOtherText(row);
     if (common !== undefined) text = common;
@@ -28,18 +28,7 @@ export function toolContent(row: ToolRow, columns: number): string {
 }
 
 export function toolLabel(row: ToolRow): string {
-  switch (row.call.kind) {
-    case "run":
-      return "run";
-    case "read":
-      return "read";
-    case "search":
-      return searchLabel(row.call.scope);
-    case "fileChange":
-      return fileChange(row.call, row.state).label;
-    case "other":
-      return row.name;
-  }
+  return toolCore(row).label;
 }
 
 /** The trailing failure, duration, or message clause one settled tool row carries, otherwise the empty string. */
@@ -85,6 +74,8 @@ export type ToolRepr = Readonly<{
   overflow?: "middle-ellipsis";
   suffix?: string;
 }>;
+
+type ToolCore = Omit<ToolRepr, "suffix">;
 
 function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -178,13 +169,7 @@ function commonOtherText(row: ToolRow): string | undefined {
   return undefined;
 }
 
-function genericOtherText(row: ToolRow): ToolRepr {
-  const input = row.call.kind === "other" ? row.call.input : undefined;
-  const common = commonOtherText(row);
-  return { label: row.name, text: common ?? (input !== undefined && input.json !== "{}" ? input.json : "") };
-}
-
-function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolRepr {
+function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolCore {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files" };
   const label =
@@ -204,30 +189,30 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
   return { label, text: `${subject} — +${totals.added} -${totals.removed}` };
 }
 
-/** Pure provider-neutral tool presentation; it performs no activity selection. */
-export function toolRepr(row: ToolRow): ToolRepr {
-  let core: ToolRepr;
+/** One provider-neutral core owns every tool-kind label and non-generic body. */
+function toolCore(row: ToolRow): ToolCore {
   switch (row.call.kind) {
     case "run":
-      core = {
+      return {
         label: "run",
         text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`,
         overflow: "middle-ellipsis",
       };
-      break;
     case "read":
-      core = { label: "read", text: readText(row.call) };
-      break;
+      return { label: "read", text: readText(row.call) };
     case "search":
-      core = { label: searchLabel(row.call.scope), text: searchText(row.call) };
-      break;
+      return { label: searchLabel(row.call.scope), text: searchText(row.call) };
     case "fileChange":
-      core = fileChange(row.call, row.state);
-      break;
+      return fileChange(row.call, row.state);
     case "other":
-      core = genericOtherText(row);
-      break;
+      return { label: row.name, text: "" };
   }
+}
+
+/** Pure provider-neutral tool presentation; it performs no activity selection. */
+export function toolRepr(row: ToolRow): ToolRepr {
+  const core = toolCore(row);
+  if (row.call.kind === "other") return core;
   const suffix = result(row);
   if (suffix === undefined) return core;
   return core.overflow === "middle-ellipsis"
