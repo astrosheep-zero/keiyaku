@@ -1140,7 +1140,7 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     roster.slice(-bounded.length),
     bounded.map((line) => `  ${line}`),
   );
-  assert.match(roster.at(-1)!, /✓ run            \$ npm test -- tests\/cli-render\.test\.ts/u);
+  assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
@@ -1256,10 +1256,42 @@ test("generic tool rows preserve name, width, and grapheme behavior", () => {
     assert.ok(line.includes(family), "a ZWJ family stays whole");
     assert.doesNotMatch(line, /\uFFFD/u, "ZWJ is never replaced by a replacement character");
   }
-  assert.equal(lines[6]!.indexOf("{"), 23, "a short name keeps the fixed 14-cell action column");
+  assert.equal(lines[6]!.indexOf("{"), 16, "a name longer than six cells uses its own action width");
   assert.ok(lines[7]!.includes("a_very_long_tool_name_here"), "an over-long name stays complete");
   assert.ok(lines[7]!.endsWith("…"), "args truncate before the name does");
   assert.ok(lines[8]!.includes("🙂") && lines[8]!.endsWith("…"), "a truncated emoji argument stays grapheme-safe");
+});
+
+test("activity rows share one six-cell default action column in plain and plural layouts", () => {
+  const note = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "payload" } as const;
+  const plainNote = snapshotActivityLines(openAkumaSnapshot([snapshotRow(note)]), { columns: 80, color: false })[0]!;
+  const plainTool = genericLines([[1, "tool", preview({ value: 1 })]], 80)[0]!;
+  assert.equal(plainNote.indexOf("payload"), plainTool.indexOf("{"), "plain rows share the default action column");
+
+  const first = "aku/worker/abcd0050";
+  const second = "aku/worker/abcd0051";
+  const baseline = (id: string) => parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const noted = parseAkumaStatus({
+    id: first,
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([snapshotRow(note)]),
+  });
+  const tooled = parseAkumaStatus({
+    id: second,
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([snapshotRow(genericTool(1, "tool", preview({ value: 1 })))]),
+  });
+  const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
+  stream.select([{ id: first }, { id: second }]);
+  stream.observe([observed(baseline(first)), observed(baseline(second))]);
+  const pluralRows = stream.observe([observed(noted), observed(tooled)]);
+  const pluralNote = pluralRows.find((line) => line.includes("payload"));
+  const pluralTool = pluralRows.find((line) => line.includes('{"value":1}'));
+  assert.ok(pluralNote, "plural narrative row is present");
+  assert.ok(pluralTool, "plural tool row is present");
+  assert.equal(pluralNote.indexOf("payload"), pluralTool.indexOf("{"), "plural rows share the default action column");
 });
 
 test("a plural wait aligns generic tool rows under one source column", () => {
@@ -1297,7 +1329,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /⧖ run            \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /⧖ run    \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -1307,7 +1339,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(failedRoster, /! run            \$ npm test — exit 1/u);
+  assert.match(failedRoster, /! run    \$ npm test — exit 1/u);
 
   const truncated = openAkumaSnapshot([
     snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
@@ -1446,7 +1478,7 @@ test("status renders selected activity evidence while preserving history and com
       1,
       `selected ${command} renders once`,
     );
-  assert.match(statusText, /⧖ run            \$ c9/u, "the active final tool remains visible");
+  assert.match(statusText, /⧖ run    \$ c9/u, "the active final tool remains visible");
   assert.doesNotMatch(statusText, /omitted/u, "status does not re-fold the selected tool evidence");
   assert.ok(statusText.indexOf("$ c4") < statusText.indexOf("between"));
   assert.ok(statusText.indexOf("between") < statusText.indexOf("$ c5"));

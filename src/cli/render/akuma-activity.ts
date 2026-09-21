@@ -25,7 +25,6 @@ import {
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
-const TOOL_VERB_WIDTH = 14;
 
 /**
  * The one blessed ruler: a run of U+2500 exactly as wide as the frame head's
@@ -156,14 +155,14 @@ function rowText(
   };
 }
 
-function eventPrefix(glyph: string, verb: string, time: string | undefined, columns: number, row: RenderRow): string {
+function eventPrefix(glyph: string, verb: string, time: string | undefined, columns: number): string {
   const gutter = time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH);
-  return actionCell(`${gutter} ${glyph}`, verb, row, columns);
+  return actionCell(`${gutter} ${glyph}`, verb, columns);
 }
 
-/** The action column one row spends: a fixed short cell, or the name's own width when longer. */
-function verbColumn(verb: string, row: RenderRow): number {
-  return row.kind === "tool" ? Math.max(TOOL_VERB_WIDTH, displayColumns(verb)) : VERB_WIDTH;
+/** The action column one row spends: six cells by default, or the name's own width when longer. */
+function verbColumn(verb: string): number {
+  return Math.max(VERB_WIDTH, displayColumns(verb));
 }
 
 /**
@@ -171,10 +170,10 @@ function verbColumn(verb: string, row: RenderRow): number {
  * remaining columns truncates grapheme-safely, spending every column the row
  * leaves after the separator so an exact-fit name stays whole and args trim first.
  */
-function actionCell(head: string, verb: string, row: RenderRow, columns: number): string {
+function actionCell(head: string, verb: string, columns: number): string {
   const prefix = `${head} `;
   const available = Math.max(0, columns - displayColumns(prefix) - 1);
-  const width = Math.min(verbColumn(verb, row), available);
+  const width = Math.min(verbColumn(verb), available);
   return `${prefix}${padToDisplay(truncateDisplayText(verb, width), width)} `;
 }
 
@@ -194,7 +193,7 @@ function padToDisplay(text: string, width: number): string {
  * source column a plural wait aligns across its selected set.
  */
 type RowLayout = Readonly<{
-  head: (time: string | undefined, glyph: string, verb: string, row: RenderRow, columns: number) => string;
+  head: (time: string | undefined, glyph: string, verb: string, columns: number) => string;
   continuation: () => string;
   marker: (count: number) => string;
   /** A plural wait shares one minute clock across all of its attributed rows. */
@@ -205,7 +204,7 @@ type RowLayout = Readonly<{
 
 function plainLayout(): RowLayout {
   return {
-    head: (time, glyph, verb, row, columns) => eventPrefix(glyph, verb, time, columns, row),
+    head: (time, glyph, verb, columns) => eventPrefix(glyph, verb, time, columns),
     continuation: continuationPrefix,
     marker: (count) => `${" ".repeat(TIME_WIDTH)} ⋮ ${count} omitted`,
   };
@@ -214,11 +213,10 @@ function plainLayout(): RowLayout {
 function sourceLayout(source: string, width: () => number, clock: { previous?: string }): RowLayout {
   const gutter = (): string => `${" ".repeat(TIME_WIDTH)} ${padToDisplay(source, width())} `;
   return {
-    head: (time, glyph, verb, row, columns) =>
+    head: (time, glyph, verb, columns) =>
       actionCell(
         `${time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH)} ${padToDisplay(source, width())} ${glyph}`,
         verb,
-        row,
         columns,
       ),
     // Continuations blank the time and source columns and align under the mark.
@@ -323,7 +321,7 @@ function groupedEntries(
     lines.push(
       ...renderRow(row, context, {
         history,
-        first: layout.head(changed ? at : undefined, mark(row), label(row, tool), row, context.columns),
+        first: layout.head(changed ? at : undefined, mark(row), label(row, tool), context.columns),
         continuation: layout.continuation(),
         tool,
         singleLine: layout.singleLine === true,
@@ -498,7 +496,6 @@ function renderStreamRow(
         changed ? at : undefined,
         inFlightSay ? "⧖" : mark(row),
         label(row, tool),
-        row,
         context.columns,
       ),
       continuation: layout.continuation(),
