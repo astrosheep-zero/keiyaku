@@ -86,6 +86,9 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
   return { json: JSON.stringify(value), truncated };
 }
 
+type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
+const genericLines = (rows: readonly GenericFixture[], columns: number) =>
+  snapshotActivityLines(openAkumaSnapshot(rows.map(([sequence, name, input]) => snapshotRow(genericTool(sequence, name, input)))), { columns, color: false });
 /** One observed Akuma as the wait's observation seam reports it: status plus identity facts. */
 function observed(
   status: AkumaStatus,
@@ -1179,20 +1182,13 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
   assert.match(roster, /✓ custom-tool/u);
 });
 
-test("generic tool rows show compact unknown JSON and listed common summaries", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(genericTool(1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } }))),
-    snapshotRow(genericTool(2, "mystery", preview({}))),
-    snapshotRow(genericTool(3, "silent")),
-    snapshotRow(genericTool(4, "notes_read", preview({ address: "project/notes.md", offset_chars: 12, limit_chars: 400 }))),
-    snapshotRow(genericTool(5, "notes_read", preview({ path: "legacy.md" }))),
-    snapshotRow(genericTool(6, "history_read", preview({ item_id: "item-9", window_id: "win-2", offset_chars: 0, limit_chars: 50 }))),
-    snapshotRow(genericTool(7, "history_list", preview({ role: "assistant", recent_first: false, limit: 20 }))),
-    snapshotRow(genericTool(8, "history_list", preview({ role: "user" }))),
-    snapshotRow(genericTool(9, "get_context_remaining", preview({}))),
-    snapshotRow(genericTool(10, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true })),
-  ]);
-  const lines = snapshotActivityLines(snapshot, { columns: 200, color: false });
+test("generic tool rows preserve semantic and common summaries", () => {
+  const lines = genericLines([
+    [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })], [2, "mystery", preview({})],
+    [3, "silent"], [4, "notes_read", preview({ address: "project/notes.md", offset_chars: 12, limit_chars: 400 })], [5, "notes_read", preview({ path: "legacy.md" })],
+    [6, "history_read", preview({ item_id: "item-9", window_id: "win-2", offset_chars: 0, limit_chars: 50 })], [7, "history_list", preview({ role: "assistant", recent_first: false, limit: 20 })],
+    [8, "history_list", preview({ role: "user" })], [9, "get_context_remaining", preview({})], [10, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
+  ], 200);
   const text = lines.join("\n");
   assert.match(text, /future_tool\s+\{"alpha":1,"beta":"x","gamma":\{"delta":\[true,null\]\}\}/u, "nested compact JSON keeps types and order");
   assert.match(text, /notes_read\s+project\/notes\.md · from 12 · 400 chars/u);
@@ -1210,139 +1206,66 @@ test("generic tool rows show compact unknown JSON and listed common summaries", 
     );
 });
 
-test("generic tool rows drop trailing whole fields before cutting a value", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(genericTool(1, "future_tool", preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }))),
-    snapshotRow(genericTool(2, "future_tool", preview({ data: "x".repeat(400) }))),
-  ]);
-  const lines = snapshotActivityLines(snapshot, { columns: 40, color: false });
-  assert.ok(
-    lines.some((line) => /future_tool\s+\{"a":1\} \+5 fields$/u.test(line)),
-    "leading whole fields survive with an explicit trailing-field count",
-  );
-  assert.ok(
-    lines.some((line) => /future_tool\s+\{"data":"x+…$/u.test(line)),
-    "a first value too large becomes one visibly truncated prefix",
-  );
+test("generic tool rows preserve whole-field and indivisible-value omission", () => {
+  const cases = [
+    { columns: 40, name: "future_tool", input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }), expected: /future_tool\s+\{"a":1\} \+5 fields$/u, absent: undefined, message: "leading whole fields survive with an explicit trailing-field count" },
+    { columns: 40, name: "future_tool", input: preview({ data: "x".repeat(400) }), expected: /future_tool\s+\{"data":"x+…$/u, absent: undefined, message: "a first value too large becomes one visibly truncated prefix" },
+    { columns: 30, name: "ft", input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }), expected: /…$/u, absent: /"f":6/u, message: "an unfittable field count still shows omission" },
+    { columns: 24, name: "ft", input: preview({ data: "x".repeat(400) }), expected: /…$/u, absent: undefined, message: "an indivisible value truncates visibly" },
+  ] as const;
+  for (const { columns, name, input, expected, absent, message } of cases) {
+    const line = genericLines([[1, name, input]], columns)[0]!;
+    assert.match(line, expected, message);
+    if (absent) assert.doesNotMatch(line, absent, "trailing fields are never silently present");
+  }
 });
 
-test("generic tool rows keep failure diagnostics beside their argument preview", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(
-      completedTool(
-        1,
-        "future_tool",
-        { kind: "other", display: "future_tool", input: preview({ alpha: 1 }) },
-        { status: "error", message: "refused" },
-      ),
-    ),
-    snapshotRow(
-      completedTool(
-        2,
-        "future_tool",
-        { kind: "other", display: "future_tool", input: preview({}) },
-        { status: "error", exitCode: 7 },
-      ),
-    ),
-  ]);
-  const lines = snapshotActivityLines(snapshot, { columns: 200, color: false });
-  assert.ok(
-    lines.some((line) => /\{"alpha":1\} — error · refused$/u.test(line)),
-    "argument evidence and its failure stay together: " + lines.join("\n"),
-  );
-  assert.ok(
-    lines.some((line) => /future_tool\s+— exit 7$/u.test(line)),
-    "an empty argument object never swallows failure evidence: " + lines.join("\n"),
-  );
+test("generic tool rows keep failure diagnostics beside argument previews", () => {
+  const lines = snapshotActivityLines(openAkumaSnapshot([
+    snapshotRow(completedTool(1, "future_tool", { kind: "other", display: "future_tool", input: preview({ alpha: 1 }) }, { status: "error", message: "refused" })),
+    snapshotRow(completedTool(2, "future_tool", { kind: "other", display: "future_tool", input: preview({}) }, { status: "error", exitCode: 7 })),
+  ]), { columns: 200, color: false });
+  for (const [pattern, message] of [
+    [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
+    [/future_tool\s+— exit 7$/u, "an empty argument object never swallows failure evidence"],
+  ] as const) assert.ok(lines.some((line) => pattern.test(line)), `${message}: ${lines.join("\n")}`);
   assert.doesNotMatch(lines.join("\n"), / — ok/u);
-  const legacy = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(
-        completedTool(1, "mystery", { kind: "other", display: "Mystery Tool" }, { status: "error", message: "refused" }),
-      ),
-    ]),
-    { columns: 120, color: false },
-  ).join("\n");
+  const legacy = snapshotActivityLines(openAkumaSnapshot([
+    snapshotRow(completedTool(1, "mystery", { kind: "other", display: "Mystery Tool" }, { status: "error", message: "refused" })),
+  ]), { columns: 120, color: false }).join("\n");
   assert.match(legacy, /mystery\s+— error · refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
 
-test("a narrow complete-object preview keeps its omission visible", () => {
-  const several = openAkumaSnapshot([
-    snapshotRow(genericTool(1, "ft", preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }))),
-  ]);
-  const omitted = snapshotActivityLines(several, { columns: 30, color: false })[0]!;
-  assert.ok(omitted.endsWith("…"), "an unfittable field count still shows omission: " + omitted);
-  assert.doesNotMatch(omitted, /"f":6/u, "trailing fields are never silently present");
-
-  const dense = openAkumaSnapshot([snapshotRow(genericTool(2, "ft", preview({ data: "x".repeat(400) })))]);
-  const truncated = snapshotActivityLines(dense, { columns: 24, color: false })[0]!;
-  assert.ok(truncated.endsWith("…"), "an indivisible value truncates visibly: " + truncated);
-});
-
-test("a tool name wider than the viewport stays grapheme-bounded", () => {
-  const lines = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(genericTool(1, "n".repeat(120), preview({ a: 1 }))),
-      snapshotRow(genericTool(2, "🙂".repeat(60), preview({ a: 1 }))),
-      snapshotRow(genericTool(3, "n".repeat(120))),
-    ]),
-    { columns: 80, color: false },
-  );
-  assert.equal(lines.length, 3, "one rendered line per tool row");
-  for (const line of lines) assert.ok(displayColumns(line) <= 80, "a row never exceeds the viewport: " + line);
+test("generic tool rows preserve name, width, and grapheme behavior", () => {
+  const exact = "e".repeat(71);
+  const family = "👨‍👩‍👧‍👦";
+  const lines = genericLines([
+    [1, "n".repeat(120), preview({ a: 1 })], [2, "🙂".repeat(60), preview({ a: 1 })], [3, "n".repeat(120)], [4, exact, preview({ a: 1 })],
+    [5, family + family, preview({ a: 1 })], [6, family.repeat(60), preview({ a: 1 })], [7, "ok_tool", preview({ path: "a" })], [8, "a_very_long_tool_name_here", preview({ arguments: "y".repeat(200) })],
+    [9, "wide_tool", preview({ text: "🙂".repeat(30) })],
+  ], 80);
+  assert.equal(lines.length, 9, "one rendered line per generic tool row");
+  for (const line of lines) assert.ok(displayColumns(line) <= 80, `one line within 80 columns: ${line}`);
   assert.ok(lines[0]!.includes("…"), "an over-wide name truncates visibly");
   assert.ok(lines[1]!.includes("🙂"), "a wide name keeps whole graphemes");
   assert.doesNotMatch(lines[1]!, /\uFFFD/u, "no grapheme is split into a replacement");
-});
-
-test("an exactly fitting tool name stays whole and trims its arguments", () => {
-  const exact = "e".repeat(71);
-  const line = snapshotActivityLines(
-    openAkumaSnapshot([snapshotRow(genericTool(1, exact, preview({ a: 1 })))]),
-    { columns: 80, color: false },
-  )[0]!;
-  assert.ok(line.includes(exact), "an exact-fit name is not truncated: " + line);
-  assert.doesNotMatch(line, /\{/u, "its arguments trim away entirely");
-  assert.ok(displayColumns(line) <= 80, "the row stays within the viewport");
-});
-
-test("a joined emoji tool name keeps its ZWJ graphemes", () => {
-  const family = "👨‍👩‍👧‍👦";
-  const lines = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(genericTool(1, family + family, preview({ a: 1 }))),
-      snapshotRow(genericTool(2, family.repeat(60), preview({ a: 1 }))),
-    ]),
-    { columns: 80, color: false },
-  );
-  assert.ok(lines[0]!.includes(family), "a fitting ZWJ family stays whole");
-  assert.ok(lines[1]!.includes(family), "a truncated ZWJ row keeps whole clusters");
-  for (const line of lines) {
+  assert.ok(lines[3]!.includes(exact), "an exact-fit name is not truncated");
+  assert.doesNotMatch(lines[3]!, /\{/u, "its arguments trim away entirely");
+  for (const line of lines.slice(4, 6)) {
+    assert.ok(line.includes(family), "a ZWJ family stays whole");
     assert.doesNotMatch(line, /\uFFFD/u, "ZWJ is never replaced by a replacement character");
-    assert.ok(displayColumns(line) <= 80, "the row stays within the viewport");
   }
-});
-
-test("generic tool rows keep one line, a fixed short-name column, and full long names", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(genericTool(1, "ok_tool", preview({ path: "a" }))),
-    snapshotRow(genericTool(2, "a_very_long_tool_name_here", preview({ arguments: "y".repeat(200) }))),
-    snapshotRow(genericTool(3, "wide_tool", preview({ text: "🙂".repeat(30) }))),
-  ]);
-  const lines = snapshotActivityLines(snapshot, { columns: 80, color: false });
-  assert.equal(lines.length, 3, "one rendered line per generic tool row");
-  for (const line of lines) assert.ok(displayColumns(line) <= 80, `one line within 80 columns: ${line}`);
-  const [short, full, wide] = lines as [string, string, string];
-  assert.equal(short.indexOf("{"), 23, "a short name keeps the fixed 14-cell action column");
-  assert.ok(full.includes("a_very_long_tool_name_here"), "an over-long name stays complete");
-  assert.ok(full.endsWith("…"), "args truncate before the name does");
-  assert.ok(wide.includes("🙂") && wide.endsWith("…"), "a truncated emoji argument stays grapheme-safe");
+  assert.equal(lines[6]!.indexOf("{"), 23, "a short name keeps the fixed 14-cell action column");
+  assert.ok(lines[7]!.includes("a_very_long_tool_name_here"), "an over-long name stays complete");
+  assert.ok(lines[7]!.endsWith("…"), "args truncate before the name does");
+  assert.ok(lines[8]!.includes("🙂") && lines[8]!.endsWith("…"), "a truncated emoji argument stays grapheme-safe");
 });
 
 test("a plural wait aligns generic tool rows under one source column", () => {
-  const first = "aku/worker/abcd0050";
-  const second = "aku/worker/abcd0051";
+  const targets = [
+    { id: "aku/worker/abcd0050", alias: "@first", body: "alpha" }, { id: "aku/worker/abcd0051", alias: "@second", body: "beta" },
+  ] as const;
   const baseline = (id: string) =>
     parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
   const noticed = (id: string, body: string) =>
@@ -1355,12 +1278,9 @@ test("a plural wait aligns generic tool rows under one source column", () => {
       ]),
     });
   const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
-  stream.select([
-    { id: first, alias: "@first" },
-    { id: second, alias: "@second" },
-  ]);
-  stream.observe([observed(baseline(first)), observed(baseline(second))]);
-  const lines = stream.observe([observed(noticed(first, "alpha")), observed(noticed(second, "beta"))]);
+  stream.select(targets.map(({ id, alias }) => ({ id, alias })));
+  stream.observe(targets.map(({ id }) => observed(baseline(id))));
+  const lines = stream.observe(targets.map(({ id, body }) => observed(noticed(id, body))));
   const rows = lines.filter((line) => line.includes("future_tool"));
   assert.equal(rows.length, 2, "one attributed row per source");
   assert.equal(new Set(rows.map((line) => line.indexOf("✓"))).size, 1, "the mark and source column stay aligned");
