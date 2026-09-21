@@ -57,7 +57,7 @@ function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result
   return attempt.result;
 }
 
-test("generic tool input admission preserves empty objects, types, order, and byte-bounded Unicode", () => {
+test("generic tool input admission and event codecs preserve bounded evidence", () => {
   assert.deepEqual(otherToolCall("future", {}), {
     kind: "other",
     display: "future",
@@ -74,9 +74,7 @@ test("generic tool input admission preserves empty objects, types, order, and by
   assert.equal(oversized.truncated, true);
   assert.ok(new TextEncoder().encode(oversized.json).length <= 16_384);
   assert.equal([...oversized.json].at(-1), "😀");
-});
 
-test("encoded generic argument previews round-trip while legacy name-only narration still decodes", () => {
   const event: AgentEvent = {
     type: "tool",
     phase: "started",
@@ -101,9 +99,7 @@ test("encoded generic argument previews round-trip while legacy name-only narrat
     truncated: true,
     call: { kind: "other", display: "future_tool", input: { json: '{"value":"x', truncated: true } },
   };
-  const surrendered = decodeAgentEvent(encodeAgentEvent(truncated));
-  assert.equal(surrendered.type, "tool");
-  assert.equal(surrendered.type === "tool" ? surrendered.call.kind === "other" && surrendered.call.input?.truncated : false, true, "an explicit capture truncation survives the round-trip");
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent(truncated)), truncated);
 });
 
 /** Drain one synchronous channel's already-queued events without a live waiter. */
@@ -114,201 +110,120 @@ async function drainChannel(channel: AgentEventChannel): Promise<readonly AgentE
   return events;
 }
 
+function acpToolUpdate(
+  sessionUpdate: "tool_call" | "tool_call_update",
+  toolCallId: string,
+  rawInput?: unknown,
+): acp.SessionUpdate {
+  return {
+    sessionUpdate,
+    toolCallId,
+    ...(sessionUpdate === "tool_call"
+      ? { title: "future", name: "future_tool", kind: "other", status: "in_progress" }
+      : { status: "completed" }),
+    ...(rawInput === undefined ? {} : { rawInput }),
+  } as acp.SessionUpdate;
+}
+
+function opencodeToolPart(status: string, input?: unknown) {
+  return {
+    type: "message.part.updated",
+    properties: { part: { type: "tool", callID: "oc-1", tool: "future_tool", sessionID: "session-1", state: { status, ...(input === undefined ? {} : { input }) } } },
+  };
+}
+
+function toolPreview(events: readonly AgentEvent[]) { const event = events.at(-1); return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined; }
+
+async function claudeToolCall(input: unknown) {
+  const state: ClaudeObservationState = { tools: new Map() };
+  const channel = new AgentEventChannel();
+  const block = input === undefined ? { type: "tool_use", id: "bash-1", name: "Bash" } : { type: "tool_use", id: "bash-1", name: "Bash", input };
+  emitClaudeMessage({ type: "assistant", uuid: "assistant-1", session_id: "session-claude", parent_tool_use_id: null, message: { content: [block] } } as unknown as SDKMessage, channel, state);
+  const [event] = await drainChannel(channel);
+  return event?.type === "tool" ? event.call : undefined;
+}
+
 test("native adapters admit structured unknown arguments into one bounded generic call", async () => {
   const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
   const piArgs = { alpha: 1, nested: { ok: true } };
-  const [piStart] = translatePiEvent(
-    { type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs },
-    piState,
-  );
+  const [piStart] = translatePiEvent({ type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs }, piState);
   const piCall = { kind: "other", display: "future_tool", input: { json: JSON.stringify(piArgs), truncated: false } };
   assert.deepEqual(piStart, { type: "tool", phase: "started", id: "pi-1", name: "future_tool", call: piCall });
-  const [piEnd] = translatePiEvent(
-    { type: "tool_execution_end", toolCallId: "pi-1", toolName: "future_tool", isError: false, result: { secret: true } },
-    piState,
-  );
-  assert.deepEqual(
-    piEnd,
-    { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } },
-    "a completion reuses its correlated start and never carries result bytes",
-  );
+  const [piEnd] = translatePiEvent({ type: "tool_execution_end", toolCallId: "pi-1", toolName: "future_tool", isError: false, result: { secret: true } }, piState);
+  assert.deepEqual(piEnd, { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } }, "a completion reuses its correlated start and never carries result bytes");
 
-  const acpStart = mapAcpUpdate(
-    {
-      sessionUpdate: "tool_call",
-      toolCallId: "acp-1",
-      title: "future",
-      name: "future_tool",
-      kind: "other",
-      status: "in_progress",
-      rawInput: { alpha: 1 },
-    },
-    EMPTY_ACP_EVENT_STATE,
-  );
-  const acpCall = { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } };
-  assert.deepEqual(acpStart.events, [{ type: "tool", phase: "started", id: "acp-1", name: "future_tool", call: acpCall }]);
-  const acpEnd = mapAcpUpdate({ sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed" }, acpStart.state);
-  assert.deepEqual(
-    acpEnd.events,
-    [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call: acpCall, result: { status: "ok" } }],
-    "an acknowledging update without arguments inherits its correlated start",
-  );
+  const call = { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } };
+  const acpStart = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }), EMPTY_ACP_EVENT_STATE);
+  assert.deepEqual(acpStart.events, [{ type: "tool", phase: "started", id: "acp-1", name: "future_tool", call }]);
+  const acpEnd = mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1"), acpStart.state);
+  assert.deepEqual(acpEnd.events, [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call, result: { status: "ok" } }], "an acknowledging update without arguments inherits its correlated start");
 
   const claudeState: ClaudeObservationState = { tools: new Map() };
   const claudeChannel = new AgentEventChannel();
-  emitClaudeMessage(
-    {
-      type: "assistant",
-      uuid: "assistant-1",
-      session_id: "session-claude",
-      parent_tool_use_id: null,
-      message: { content: [{ type: "tool_use", id: "claude-1", name: "future_tool", input: { alpha: 1 } }] },
-    } as unknown as SDKMessage,
-    claudeChannel,
-    claudeState,
-  );
-  emitClaudeMessage(
-    {
-      type: "user",
-      message: { content: [{ type: "tool_result", tool_use_id: "claude-1", is_error: false }] },
-    } as unknown as SDKMessage,
-    claudeChannel,
-    claudeState,
-  );
+  emitClaudeMessage({ type: "assistant", uuid: "assistant-1", session_id: "session-claude", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "claude-1", name: "future_tool", input: { alpha: 1 } }] } } as unknown as SDKMessage, claudeChannel, claudeState);
+  emitClaudeMessage({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "claude-1", is_error: false }] } } as unknown as SDKMessage, claudeChannel, claudeState);
   assert.deepEqual(await drainChannel(claudeChannel), [
-    { type: "tool", phase: "started", id: "claude-1", name: "future_tool", call: acpCall },
-    { type: "tool", phase: "completed", id: "claude-1", name: "future_tool", call: acpCall, result: { status: "ok" } },
+    { type: "tool", phase: "started", id: "claude-1", name: "future_tool", call },
+    { type: "tool", phase: "completed", id: "claude-1", name: "future_tool", call, result: { status: "ok" } },
   ]);
 
   const opencodeState = createEventState("session-1");
   const opencodeEvents: AgentEvent[] = [];
   const emitter = { emit: (mapped: AgentEvent): void => void opencodeEvents.push(mapped) };
-  const part = (state: Record<string, unknown>) => ({
-    type: "message.part.updated",
-    properties: { part: { type: "tool", callID: "oc-1", tool: "future_tool", sessionID: "session-1", state } },
-  });
-  mapEvent(part({ status: "running", input: { alpha: 1 } }), emitter, opencodeState);
-  mapEvent(part({ status: "completed" }), emitter, opencodeState);
-  assert.deepEqual(
-    opencodeEvents,
-    [
-      { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call: acpCall },
-      { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call: acpCall, result: { status: "ok" } },
-    ],
-    "an OpenCode completion without input inherits its correlated start",
-  );
+  mapEvent(opencodeToolPart("running", { alpha: 1 }), emitter, opencodeState);
+  mapEvent(opencodeToolPart("completed"), emitter, opencodeState);
+  assert.deepEqual(opencodeEvents, [
+    { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call },
+    { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call, result: { status: "ok" } },
+  ], "an OpenCode completion without input inherits its correlated start");
 });
 
 test("Claude keeps supplied scalar, null, empty-object, and absent Bash input distinct", async () => {
-  const callFor = async (input: unknown) => {
-    const state: ClaudeObservationState = { tools: new Map() };
-    const channel = new AgentEventChannel();
-    const block =
-      input === undefined
-        ? { type: "tool_use", id: "bash-1", name: "Bash" }
-        : { type: "tool_use", id: "bash-1", name: "Bash", input };
-    emitClaudeMessage(
-      {
-        type: "assistant",
-        uuid: "assistant-1",
-        session_id: "session-claude",
-        parent_tool_use_id: null,
-        message: { content: [block] },
-      } as unknown as SDKMessage,
-      channel,
-      state,
-    );
-    const [event] = await drainChannel(channel);
-    assert.equal(event?.type, "tool");
-    return event?.type === "tool" ? event.call : undefined;
-  };
-  assert.deepEqual(await callFor({ command: "npm test" }), { kind: "run", command: "npm test" });
-  assert.deepEqual(await callFor({ description: "x" }), {
+  assert.deepEqual(await claudeToolCall({ command: "npm test" }), { kind: "run", command: "npm test" });
+  assert.deepEqual(await claudeToolCall({ description: "x" }), {
     kind: "other",
     display: "Bash",
     input: { json: '{"description":"x"}', truncated: false },
   });
-  assert.deepEqual(await callFor({}), { kind: "other", display: "Bash", input: { json: "{}", truncated: false } });
-  assert.deepEqual(await callFor(null), { kind: "other", display: "Bash", input: { json: "null", truncated: false } });
-  assert.deepEqual(await callFor("run it"), {
+  assert.deepEqual(await claudeToolCall({}), { kind: "other", display: "Bash", input: { json: "{}", truncated: false } });
+  assert.deepEqual(await claudeToolCall(null), { kind: "other", display: "Bash", input: { json: "null", truncated: false } });
+  assert.deepEqual(await claudeToolCall("run it"), {
     kind: "other",
     display: "Bash",
     input: { json: '"run it"', truncated: false },
   });
-  assert.deepEqual(await callFor(42), { kind: "other", display: "Bash", input: { json: "42", truncated: false } });
-  assert.deepEqual(await callFor(undefined), { kind: "other", display: "Bash" });
+  assert.deepEqual(await claudeToolCall(42), { kind: "other", display: "Bash", input: { json: "42", truncated: false } });
+  assert.deepEqual(await claudeToolCall(undefined), { kind: "other", display: "Bash" });
 });
 
 test("a correlated start's admitted preview survives empty and conflicting completion input", () => {
-  const acpPreview = (events: readonly AgentEvent[]) => {
-    const event = events[0];
-    return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined;
-  };
-  const acpStart = mapAcpUpdate(
-    {
-      sessionUpdate: "tool_call",
-      toolCallId: "acp-1",
-      title: "future",
-      name: "future_tool",
-      kind: "other",
-      status: "in_progress",
-      rawInput: { alpha: 1 },
-    },
-    EMPTY_ACP_EVENT_STATE,
-  );
+  const acpStart = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }), EMPTY_ACP_EVENT_STATE);
   const started = { json: '{"alpha":1}', truncated: false };
-  for (const rawInput of [{}, { beta: 2 }, null]) {
-    const completion = mapAcpUpdate(
-      { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed", rawInput },
-      acpStart.state,
+  for (const rawInput of [{}, { beta: 2 }, null])
+    assert.deepEqual(
+      toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1", rawInput), acpStart.state).events),
+      started,
+      "ACP keeps the start preview for " + JSON.stringify(rawInput),
     );
-    assert.deepEqual(acpPreview(completion.events), started, "ACP keeps the start preview for " + JSON.stringify(rawInput));
-  }
-  const acpAbsent = mapAcpUpdate(
-    { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed" },
-    acpStart.state,
+  assert.deepEqual(
+    toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1"), acpStart.state).events),
+    started,
+    "ACP keeps the start preview when the update omits input",
   );
-  assert.deepEqual(acpPreview(acpAbsent.events), started, "ACP keeps the start preview when the update omits input");
-  const acpBare = mapAcpUpdate(
-    { sessionUpdate: "tool_call", toolCallId: "acp-2", title: "future", name: "future_tool", kind: "other", status: "in_progress" },
-    EMPTY_ACP_EVENT_STATE,
+  const acpBare = mapAcpUpdate(acpToolUpdate("tool_call", "acp-2"), EMPTY_ACP_EVENT_STATE);
+  assert.deepEqual(
+    toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-2", { gamma: 3 }), acpBare.state).events),
+    { json: '{"gamma":3}', truncated: false },
+    "ACP adopts the first supplied evidence",
   );
-  const acpSupplied = mapAcpUpdate(
-    { sessionUpdate: "tool_call_update", toolCallId: "acp-2", status: "completed", rawInput: { gamma: 3 } },
-    acpBare.state,
-  );
-  assert.deepEqual(acpPreview(acpSupplied.events), { json: '{"gamma":3}', truncated: false }, "ACP adopts the first supplied evidence");
 
-  const opencodeEvents = (
-    state: ReturnType<typeof createEventState>,
-    input: unknown,
-    status: string,
-  ): readonly AgentEvent[] => {
-    const events: AgentEvent[] = [];
-    mapEvent(
-      {
-        type: "message.part.updated",
-        properties: {
-          part: {
-            type: "tool",
-            callID: "oc-1",
-            tool: "future_tool",
-            sessionID: "session-1",
-            state: { status, ...(input === undefined ? {} : { input }) },
-          },
-        },
-      },
-      { emit: (event: AgentEvent) => void events.push(event) },
-      state,
-    );
-    return events;
-  };
   const opencodePreview = (startInput: unknown, completionInput: unknown) => {
     const state = createEventState("session-1");
-    opencodeEvents(state, startInput, "running");
-    const events = opencodeEvents(state, completionInput, "completed");
-    const event = events.at(-1);
-    return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined;
+    const events: AgentEvent[] = [];
+    const emitter = { emit: (event: AgentEvent) => void events.push(event) };
+    mapEvent(opencodeToolPart("running", startInput), emitter, state);
+    mapEvent(opencodeToolPart("completed", completionInput), emitter, state);
+    return toolPreview(events);
   };
   for (const completionInput of [{}, { beta: 2 }, undefined])
     assert.deepEqual(
