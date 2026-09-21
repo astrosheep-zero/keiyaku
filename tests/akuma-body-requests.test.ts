@@ -34,14 +34,16 @@ import {
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
-import { waitAkuma, tellAkuma, killAkuma } from "../src/library/fleet.js";
+import { type ProviderAdapter } from "../src/akuma/provider.js";
+import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { waitAkuma, tellAkuma, tellWaitAkuma, killAkuma } from "../src/library/fleet.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,
   fleetRequestCommands,
   type FleetRequestPort,
 } from "../src/akuma/fleet-request.js";
-import { isTellResult, type AkumaTellResult } from "../src/akuma/fleet-observation.js";
+import { isTellResult, isTellWaitResult, type AkumaTellResult } from "../src/akuma/fleet-observation.js";
 import {
   contractRequestCommand,
   contractRequestProtocol,
@@ -182,6 +184,21 @@ async function requestBodyTell(input: Readonly<{ directory: string; id?: string;
     ...input,
     command,
     value: { action: "akuma.tell", target: input.target, body: input.body },
+  });
+}
+
+async function requestBodyTellWait(
+  input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; timeoutMs: number }>,
+) {
+  return await requestBodyCommand({
+    ...input,
+    command: fleetRequestProtocol("akuma.tell-wait"),
+    value: {
+      action: "akuma.tell-wait",
+      target: input.target,
+      body: input.body,
+      timeoutMs: input.timeoutMs,
+    },
   });
 }
 
@@ -1394,6 +1411,151 @@ test("transport rejects malformed target sets and foreign World coordinates befo
   } finally {
     if (!closed) await pump.close().catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bounded forwarded Tell admits once under the request identity", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-")));
+  const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
+  const target = "aku/worker/22222222" as AkuId;
+  let calls = 0;
+  const pump = await openFleetPump(parent, {
+    ...unusedFleetPort,
+    tellWait: async (input) => {
+      calls += 1;
+      return {
+        akuma: input.target,
+        tell: {
+          admission: { fact: "recorded", tellId: input.tellId },
+          row: {
+            kind: "tell",
+            sequence: 1,
+            at: input.recordedAt,
+            tellId: input.tellId,
+            text: input.body,
+            state: "pending",
+            deliveries: [],
+          },
+          wake: { kind: "held" },
+        },
+        observation: { reason: "deadline" },
+      };
+    },
+  });
+  try {
+    const id = randomUUID();
+    const outcomes = await Promise.all(
+      [1, 2].map(async () => await requestBodyTellWait({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 })),
+    );
+    const returned = outcomes.find((value) => value.kind === "returned");
+    assert.equal(returned?.kind, "returned");
+    if (returned?.kind === "returned") {
+      assert.equal(isTellWaitResult(returned.result), true);
+      if (!isTellWaitResult(returned.result)) throw new Error("expected a waited Tell result");
+      assert.equal(returned.result.tell.admission.tellId, id);
+      assert.deepEqual(returned.result.observation, { reason: "deadline" });
+    }
+    assert.equal(calls, 1);
+    assert.deepEqual(
+      outcomes.find((value) => value.kind === "reference"),
+      { kind: "reference", reference: { action: "akuma.tell-wait", target, tellId: id } },
+    );
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a real delayed direct-parent waited Tell observes its exact answer", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-real-")));
+  const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
+  const target = await born(root, "worker", "33333333");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const started = promiseBarrier<void>();
+  const finish = promiseBarrier<Readonly<{ kind: "answered"; answer: string; historyId: string }>>();
+  fixtures.set(target.paths.directory, {
+    adapter: fixtureAdapter(async () => ({
+      admission: { fence: "delayed-direct-parent" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "delayed-direct-parent" } };
+          started.resolve();
+        },
+      },
+      completion: finish.promise,
+      async abort() {},
+    })),
+    now: "2026-08-18T00:00:02.000Z",
+  });
+  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  const pump = await openFleetPump(parent, fleetRequestPort(root));
+  try {
+    const pending = requestBodyTellWait({
+      directory: pump.directory,
+      target: target.id,
+      body: "delayed direct",
+      timeoutMs: 10_000,
+    });
+    await started.promise;
+    finish.resolve({ kind: "answered", answer: "delayed direct answer", historyId: "delayed-direct-history" });
+    const outcome = await pending;
+    assert.equal(outcome.kind, "returned");
+    if (outcome.kind !== "returned") throw new Error("expected a returned waited Tell result");
+    assert.equal(isTellWaitResult(outcome.result), true);
+    if (!isTellWaitResult(outcome.result)) throw new Error("expected a waited Tell result");
+    assert.deepEqual(outcome.result.observation, { reason: "answered", answer: "delayed direct answer" });
+    assert.equal((await readHeart(target.paths)).pending.length, 0);
+  } finally {
+    restoreTellRuntime();
+    await pump.close();
+    await settleFixtureBodies(bodies);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the waited-Tell facade forwards to a serving parent when the caller World lacks the target", async () => {
+  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-facade-")));
+  const callerRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-caller-")));
+  const parent = await born(parentRoot, "parent", "11111111", ["akuma.tell"]);
+  const target = await born(parentRoot, "worker", "44444444");
+  const bodies: Promise<unknown>[] = [];
+  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const started = promiseBarrier<void>();
+  const finish = promiseBarrier<Readonly<{ kind: "answered"; answer: string; historyId: string }>>();
+  fixtures.set(target.paths.directory, {
+    adapter: fixtureAdapter(async () => ({
+      admission: { fence: "facade-direct-parent" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "facade-direct-parent" } };
+          started.resolve();
+        },
+      },
+      completion: finish.promise,
+      async abort() {},
+    })),
+    now: "2026-08-18T00:00:03.000Z",
+  });
+  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  const pump = await openFleetPump(parent, fleetRequestPort(parentRoot));
+  try {
+    const pending = tellWaitAkuma(
+      { path: callerRoot, akuma: target.id, body: "facade delayed", timeoutMs: 10_000 },
+      bodyRequestExecutionContext(pump.directory),
+    );
+    await started.promise;
+    finish.resolve({ kind: "answered", answer: "facade delayed answer", historyId: "facade-direct-history" });
+    const result = await pending;
+    assert.deepEqual(result.observation, { reason: "answered", answer: "facade delayed answer" });
+    assert.equal(result.tell.row.text, "facade delayed");
+    assert.equal((await readHeart(target.paths)).pending.length, 0);
+  } finally {
+    restoreTellRuntime();
+    await pump.close();
+    await settleFixtureBodies(bodies);
+    rmSync(parentRoot, { recursive: true, force: true });
+    rmSync(callerRoot, { recursive: true, force: true });
   }
 });
 

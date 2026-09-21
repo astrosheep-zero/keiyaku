@@ -22,17 +22,19 @@ import {
   type Repo,
 } from "../../index.js";
 import { callObservationStream, waitObservationStream, type WaitSelectedIdentity } from "../render/akuma-activity.js";
-import { callObservationHead } from "../render/akuma.js";
+import { callObservationHead, waitedTellProgress } from "../render/akuma.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
-import { killAkuma, tellAkuma, waitAkuma } from "../../library/fleet.js";
+import { killAkuma, tellAkuma, tellWaitAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { addressAkuma } from "../../library/address.js";
 import { executionChannel } from "../../akuma/requests.js";
+import { AkumaDecodeError } from "../../akuma/akuma-errors.js";
 import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
+import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
 
 export type AkumaInvocationResult =
   | Readonly<{
@@ -57,6 +59,7 @@ export type AkumaInvocationResult =
     }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "tell"; mode: "wait"; result: AkumaTellWaitResult; body: string; alias?: string }>
   | Readonly<{
       kind: "akuma";
       action: "tell";
@@ -288,11 +291,70 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
   return { initiator };
 }
 
+function decodeWaitedTellSchema(result: AkumaTellWaitResult, schema: Schema<unknown>): AkumaTellWaitResult {
+  if (result.observation.reason !== "answered") return result;
+  if (typeof result.observation.answer !== "string") {
+    throw new AkumaDecodeError("Answer is not valid JSON", String(result.observation.answer));
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.observation.answer);
+  } catch (error) {
+    throw new AkumaDecodeError(
+      error instanceof Error ? error.message : "Answer is not valid JSON",
+      result.observation.answer,
+    );
+  }
+  try {
+    return { ...result, observation: { reason: "answered", answer: schema.decode(parsed) } };
+  } catch (error) {
+    throw new AkumaDecodeError(
+      error instanceof Error ? error.message : "Answer failed schema decode",
+      result.observation.answer,
+    );
+  }
+}
+
+async function invokeWaitedTell(
+  command: Extract<InvokedAkumaCommand, { command: "tell" }> & Readonly<{ timeoutMs: number }>,
+  input: InvokeInput,
+  body: string,
+): Promise<AkumaInvocationResult> {
+  const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const result = await tellWaitAkuma(
+    {
+      ...(await inputInitiator(input)),
+      path: input.path,
+      akuma: command.akuma,
+      body,
+      timeoutMs: command.timeoutMs,
+      ...(schema === undefined ? {} : { schema }),
+      ...(command.interrupt ? { interrupt: true } : {}),
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    },
+    input.execution ?? localExecutionContext(),
+  );
+  const rendered = schema === undefined ? result : decodeWaitedTellSchema(result, schema);
+  const alias = inputAlias(command.akuma);
+  if (command.output === "text") writeProgress(waitedTellProgress(rendered, alias, resultContext()));
+  return {
+    kind: "akuma",
+    action: "tell",
+    mode: "wait",
+    result: rendered,
+    body,
+    ...(alias === undefined ? {} : { alias }),
+  };
+}
+
 async function invokeTell(
   command: Extract<InvokedAkumaCommand, { command: "tell" }>,
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
   const body = await promptBody(command, input);
+  if (command.timeoutMs !== undefined)
+    return await invokeWaitedTell(command as typeof command & { timeoutMs: number }, input, body);
   if (command.schema !== undefined) {
     const schema = await schemaFromFile(command.schema);
     const channel = executionChannel(input.execution);

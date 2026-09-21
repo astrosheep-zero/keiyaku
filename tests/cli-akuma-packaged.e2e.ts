@@ -127,18 +127,25 @@ function ruleFor(...headLines: readonly string[]): string {
   return "─".repeat(headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0));
 }
 
-/** Assert one plural wait's aggregate frame head opens the progress stream in caller order. */
-function assertAggregateHead(stderr: string, labels: readonly string[]): void {
-  const rule = ruleFor(...labels);
+/** Assert one plural wait's aggregate frame maps caller-ordered aliases to identity tags. */
+function assertAggregateHead(stderr: string, aliases: readonly [string, string]): readonly [string, string] {
   const lines = stderr.split("\n");
-  const head = lines.slice(0, labels.length);
-  assert.deepEqual(head, labels, `the aggregate head names the selected set in caller order:\n${stderr}`);
-  assert.equal(lines[labels.length], rule, `one rule closes the aggregate head:\n${stderr}`);
+  const head = lines.slice(0, aliases.length);
+  const tags = head.map((line, index) => {
+    const match = /^([0-9a-f]{4,}) (.+)$/u.exec(line);
+    assert.notEqual(match, null, `an aggregate head line maps a tag to its source:\n${stderr}`);
+    assert.equal(match![2], aliases[index], `the aggregate head names the selected set in caller order:\n${stderr}`);
+    return match![1]!;
+  });
+  assert.equal(new Set(tags).size, tags.length, `each selected target has a distinct tag:\n${stderr}`);
+  const rule = ruleFor(...head);
+  assert.equal(lines[aliases.length], rule, `one rule closes the aggregate head:\n${stderr}`);
   assert.equal(
     stderr.match(new RegExp(`^${rule}$`, "gmu"))?.length,
     1,
     `exactly one aggregate frame rule:\n${stderr}`,
   );
+  return [tags[0]!, tags[1]!];
 }
 
 /** The display column at which the first occurrence of one mark starts. */
@@ -149,8 +156,8 @@ function markColumn(line: string, mark: string): number {
 }
 
 /** Ascending message numbers rendered in one attributed source's rows. */
-function attributedAttemptNumbers(stderr: string, alias: string): readonly number[] {
-  return [...stderr.matchAll(new RegExp(`^.*${alias} +\\S+ +say +“attempt (\\d+)”`, "gmu"))].map((match) =>
+function attributedAttemptNumbers(stderr: string, tag: string): readonly number[] {
+  return [...stderr.matchAll(new RegExp(`^.*${tag} +\\S+ +say +"attempt (\\d+)`, "gmu"))].map((match) =>
     Number(match[1]!),
   );
 }
@@ -251,24 +258,34 @@ test("packaged plural waits attribute activity and close every target", { timeou
     });
     assert.equal(any.code, 0, any.stderr);
     assert.equal(any.stdout, "", "an --any plural wait writes no stdout");
-    assertAggregateHead(any.stderr, ["@notes", "@slow"]);
+    const [anyNotesTag, anySlowTag] = assertAggregateHead(any.stderr, ["@notes", "@slow"]);
     assert.doesNotMatch(
       any.stderr,
       /aku\/(?:worker|slowcoach)\/[0-9a-f]{8} \(@/u,
       `no per-target identity frame follows the aggregate head:\n${any.stderr}`,
     );
-    assert.match(any.stderr, /@notes +│ say/u, `--any attributed an activity row to its source:\n${any.stderr}`);
+    assert.match(
+      any.stderr,
+      new RegExp(`${anyNotesTag} +│ (?:call|say)`, "mu"),
+      `--any attributed a settled activity row to its source:\n${any.stderr}`,
+    );
     assert.doesNotMatch(any.stderr, /retry note/u, "--any omits thought narration");
-    assert.match(any.stderr, /@slow +✓ answered — /u, "--any scored the answered target");
-    assert.match(any.stderr, /@notes +● still running — waited \d+s/u, "--any scored the running target");
+    assert.match(any.stderr, new RegExp(`${anySlowTag} +✓ answered — `, "mu"), "--any scored the answered target");
+    assert.match(
+      any.stderr,
+      new RegExp(`${anyNotesTag} +● still running — waited \\d+s`, "mu"),
+      "--any scored the running target",
+    );
     const anyLines = any.stderr.split("\n");
-    const anyScore = anyLines.find((line) => /@notes +● still running — waited /u.test(line))!;
-    const anyRows = anyLines.filter((line) => /@notes +│ /u.test(line));
+    const anyScore =
+      anyLines.find((line) => new RegExp(`${anyNotesTag} +● still running — waited `, "u").test(line)) ??
+      assert.fail(`--any has its running conclusion:\n${any.stderr}`);
+    const anyRows = anyLines.filter((line) => new RegExp(`${anyNotesTag} +│ `, "u").test(line));
     assert.ok(anyRows.length >= 1, `--any streamed attributed rows:\n${any.stderr}`);
     for (const row of anyRows) {
       assert.equal(markColumn(row, "│"), markColumn(anyScore, "●"), `rows share the scoreboard mark column:\n${any.stderr}`);
     }
-    const anyAttempts = attributedAttemptNumbers(any.stderr, "@notes");
+    const anyAttempts = attributedAttemptNumbers(any.stderr, anySlowTag);
     assert.ok(anyAttempts.length >= 1, `--any streamed messages for its source:\n${any.stderr}`);
     assert.equal(new Set(anyAttempts).size, anyAttempts.length, "no settled message streams twice");
     assert.deepEqual(anyAttempts, [...anyAttempts].sort((left, right) => left - right), "messages stream in order");
@@ -280,19 +297,29 @@ test("packaged plural waits attribute activity and close every target", { timeou
     });
     assert.equal(all.code, 0, all.stderr);
     assert.equal(all.stdout, "", "an --all plural wait writes no stdout");
-    assertAggregateHead(all.stderr, ["@notes", "@done"]);
+    const [allNotesTag, allDoneTag] = assertAggregateHead(all.stderr, ["@notes", "@done"]);
     assert.doesNotMatch(
       all.stderr,
       /aku\/(?:worker|finisher)\/[0-9a-f]{8} \(@/u,
       `no per-target identity frame follows the aggregate head:\n${all.stderr}`,
     );
-    assert.match(all.stderr, /@notes +│ say/u, `--all attributed an activity row to its source:\n${all.stderr}`);
+    assert.match(
+      all.stderr,
+      new RegExp(`${allNotesTag} +│ (?:call|say)`, "mu"),
+      `--all attributed a settled activity row to its source:\n${all.stderr}`,
+    );
     assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
-    assert.match(all.stderr, /@done +✓ answered$/mu, "--all scored the already settled target without inventing a duration");
-    assert.match(all.stderr, /@notes +● still running — waited 2s/u, "--all scored the running target");
+    assert.match(all.stderr, new RegExp(`${allDoneTag} +✓ answered$`, "mu"), "--all scored the already settled target without inventing a duration");
+    assert.match(
+      all.stderr,
+      new RegExp(`${allNotesTag} +● still running — waited 2s`, "mu"),
+      "--all scored the running target",
+    );
     const allLines = all.stderr.split("\n");
-    const allScore = allLines.find((line) => /@notes +● still running — waited /u.test(line))!;
-    for (const row of allLines.filter((line) => /@notes +│ /u.test(line))) {
+    const allScore =
+      allLines.find((line) => new RegExp(`${allNotesTag} +● still running — waited `, "u").test(line)) ??
+      assert.fail(`--all has its running conclusion:\n${all.stderr}`);
+    for (const row of allLines.filter((line) => new RegExp(`${allNotesTag} +│ `, "u").test(line))) {
       assert.equal(markColumn(row, "│"), markColumn(allScore, "●"), `rows share the scoreboard mark column:\n${all.stderr}`);
     }
     assert.equal(all.stderr.match(/✓ answered/gu)?.length, 1, "every target closes exactly once");

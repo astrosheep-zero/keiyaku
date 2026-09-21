@@ -4,7 +4,7 @@ import type { ParsedCommand } from "../parse.js";
 import { parseAkumaStatus } from "../../akuma/akuma.js";
 import {
   DEFAULT_CONTEXT,
-  akumaRawAnswer,
+  akumaRawAnswer as akumaActivityRawAnswer,
   associatedIdentity,
   historyText,
   killResultText,
@@ -15,9 +15,46 @@ import {
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
+import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
-export { akumaRawAnswer } from "./akuma-activity.js";
+export function waitedTellProgress(
+  result: AkumaTellWaitResult,
+  alias: string | undefined,
+  context: TextRenderContext,
+): string {
+  const receipt = tellText(
+    {
+      kind: "akuma",
+      action: "tell",
+      mode: "ordinary",
+      result: { akuma: result.akuma, tell: result.tell },
+      body: "",
+      ...(alias === undefined ? {} : { alias }),
+    },
+    context,
+  );
+  const conclusion =
+    result.observation.reason === "answered"
+      ? "✓ answered"
+      : result.observation.reason === "failed"
+        ? `! failed · ${safeText(result.observation.diagnostic)}`
+        : result.observation.reason === "unanswered"
+          ? "○ unanswered"
+          : "⧖ deadline";
+  return `${receipt}\n${conclusion}`;
+}
+
+function waitedTellRawAnswer(result: Extract<AkumaInvocationResult, { action: "tell"; mode: "wait" }>): string {
+  if (result.result.observation.reason !== "answered") return "";
+  const answer = result.result.observation.answer;
+  return typeof answer === "string" ? answer : JSON.stringify(answer);
+}
+
+export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
+  if (result.action === "tell" && result.mode === "wait") return waitedTellRawAnswer(result);
+  return akumaActivityRawAnswer(result);
+}
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
   if (stage.kind === "none") return [];
@@ -114,6 +151,7 @@ export function renderAkumaText(
     case "wait":
       return waitText(result, context);
     case "tell":
+      if (result.mode === "wait") return "";
       return result.mode === "ordinary"
         ? tellText(result, context)
         : mutationObservationStageText(result.result.id, result.result.observation, context, {
@@ -164,6 +202,7 @@ function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>
 }
 function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
   if (result.mode === "schema") return 0;
+  if (result.mode === "wait") return result.result.observation.reason === "failed" ? 2 : 0;
   return result.mode === "ordinary"
     ? result.result.tell.wake.kind === "failed"
       ? 2

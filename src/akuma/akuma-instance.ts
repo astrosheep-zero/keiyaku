@@ -9,7 +9,7 @@ import type { AkumaStatus } from "./akuma.js";
 import type { InterruptReceipt, KillEvidence } from "./akuma.js";
 import { bornStatus, defaultWaitComplete, waitForObservation, type WaitReason } from "./akuma-observe.js";
 import { loadArchetype } from "./archetype.js";
-import { activitySlice, readTell, readTurn, type TellFact, type TurnOutcome } from "./heart/index.js";
+import { activitySlice, type TurnOutcome } from "./heart/index.js";
 import { parseAkuId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { birthAkuma, launchAkuma } from "./publication.js";
 import { projectTurns, selectHistory, type ActivityHistory } from "./projection.js";
@@ -130,24 +130,9 @@ function outcomeError(outcome: TurnOutcome): never {
   throw new AkumaProviderError("Akuma answered without a value");
 }
 
-async function boundOutcome(paths: AkumaPaths, tell: TellFact): Promise<TurnOutcome | null> {
-  if (tell.binding === undefined) return null;
-  const turn = await readTurn(paths, tell.binding.turnSequence);
-  return turn?.end?.outcome ?? null;
-}
-
-async function awaitTellOutcome(paths: AkumaPaths, tellId: string, signal?: AbortSignal): Promise<TurnOutcome> {
-  const waited = await waitForObservation({
-    ...(signal === undefined ? {} : { signal }),
-    observe: async () => {
-      const tell = await readTell(paths, tellId);
-      if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-      const outcome = await boundOutcome(paths, tell);
-      return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
-    },
-    complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
-  });
-  if (waited.value.outcome !== null) return waited.value.outcome;
+async function awaitTellOutcome(handle: AkumaHandle, tellId: string, signal?: AbortSignal): Promise<TurnOutcome> {
+  const observed = await handle.tellOutcome(tellId, signal === undefined ? {} : { signal });
+  if (observed.outcome !== null) return observed.outcome;
   throw new AkumaProviderError(`recorded Tell ${tellId} reached a terminal delivery without a Turn binding`);
 }
 
@@ -239,7 +224,7 @@ export class Akuma {
             ...(schemaOptions.initiator === undefined ? {} : { initiator: schemaOptions.initiator }),
             ...(signal === undefined ? {} : { signal }),
           });
-    const outcome = await awaitTellOutcome(this.paths, recorded.tellId, signal);
+    const outcome = await awaitTellOutcome(new AkumaHandle(this.id, this.root), recorded.tellId, signal);
     if (outcome.kind !== "answered") outcomeError(outcome);
     if (schema === undefined) return outcome.answer;
     const raw = outcome.answerJson ?? outcome.answer;

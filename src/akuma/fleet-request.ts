@@ -12,9 +12,11 @@ import {
   fleetResultSchemas,
   isKillResult,
   isTellResult,
+  isTellWaitResult,
   isWaitResult,
   type AkumaKillResult,
   type AkumaTellResult,
+  type AkumaTellWaitResult,
   type AkumaWaitResult,
 } from "./fleet-observation.js";
 import { z } from "zod";
@@ -56,6 +58,17 @@ const tellAnswerRequestSchema = z
   })
   .strict()
   .transform((request) => ({ action: "akuma.tell-answer" as const, ...request }));
+const tellWaitRequestSchema = z
+  .object({
+    target: akumaIdSchema,
+    body: z.string(),
+    timeoutMs: z.number().int().nonnegative(),
+    schemaJson: nonblankTextSchema.optional(),
+    initiator: nonblankTextSchema.optional(),
+    interrupt: z.boolean().optional(),
+  })
+  .strict()
+  .transform((request) => ({ action: "akuma.tell-wait" as const, ...request }));
 const killRequestSchema = z
   .object({ targets: fleetTargetsSchema })
   .strict()
@@ -63,6 +76,9 @@ const killRequestSchema = z
 const waitServiceSchema = z.object({ action: z.literal("akuma.wait") }).strict();
 const tellServiceSchema = z
   .object({ action: z.literal("akuma.tell"), target: akumaIdSchema, tellId: nonblankTextSchema })
+  .strict();
+const tellWaitServiceSchema = z
+  .object({ action: z.literal("akuma.tell-wait"), target: akumaIdSchema, tellId: nonblankTextSchema })
   .strict();
 const killServiceSchema = z
   .object({
@@ -112,10 +128,12 @@ export type FleetRequest =
   | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
   | z.infer<typeof tellRequestSchema>
   | z.infer<typeof tellAnswerRequestSchema>
+  | z.infer<typeof tellWaitRequestSchema>
   | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
 export type FleetService =
   | z.infer<typeof waitServiceSchema>
   | z.infer<typeof tellServiceSchema>
+  | z.infer<typeof tellWaitServiceSchema>
   | (Omit<z.infer<typeof killServiceSchema>, "results"> &
       Readonly<{ results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>);
 
@@ -148,6 +166,19 @@ export type FleetRequestPort = Readonly<{
       signal: AbortSignal;
     }>,
   ): Promise<unknown>;
+  tellWait?(
+    input: Readonly<{
+      target: AkumaStatus["id"];
+      body: string;
+      tellId: string;
+      recordedAt: string;
+      timeoutMs: number;
+      schemaJson?: string;
+      initiator?: string;
+      interrupt?: boolean;
+      signal: AbortSignal;
+    }>,
+  ): Promise<AkumaTellWaitResult>;
   kill(
     input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>,
   ): Promise<
@@ -164,7 +195,9 @@ function decodeFleetRequest(action: FleetRequest["action"], value: unknown): Fle
         ? tellRequestSchema
         : action === "akuma.tell-answer"
           ? tellAnswerRequestSchema
-          : killRequestSchema;
+          : action === "akuma.tell-wait"
+            ? tellWaitRequestSchema
+            : killRequestSchema;
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
@@ -175,7 +208,9 @@ function decodeFleetService(action: FleetRequest["action"], value: unknown): Fle
       ? waitServiceSchema
       : action === "akuma.tell" || action === "akuma.tell-answer"
         ? tellServiceSchema
-        : killServiceSchema;
+        : action === "akuma.tell-wait"
+          ? tellWaitServiceSchema
+          : killServiceSchema;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error("malformed stored Fleet service evidence");
   return parsed.data;
@@ -188,7 +223,9 @@ function decodedFleetResult(action: FleetRequest["action"], value: unknown): unk
       ? fleetResultSchemas.wait
       : action === "akuma.tell"
         ? fleetResultSchemas.tell
-        : fleetResultSchemas.kill;
+        : action === "akuma.tell-wait"
+          ? fleetResultSchemas.tellWait
+          : fleetResultSchemas.kill;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
   return parsed.data;
@@ -213,7 +250,8 @@ export function fleetRequestProtocol(
     decodeReference: (reference) => decodeFleetService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||
-      ((action === "akuma.tell" || action === "akuma.tell-answer") && allowed.includes("akuma.tell")) ||
+      ((action === "akuma.tell" || action === "akuma.tell-answer" || action === "akuma.tell-wait") &&
+        allowed.includes("akuma.tell")) ||
       (action === "akuma.kill" && allowed.includes("akuma.kill")),
   };
 }
@@ -262,6 +300,23 @@ export function fleetRequestCommand(
           service: { action: "akuma.tell", target: request.target, tellId: facts.id },
         };
       }
+      if (request.action === "akuma.tell-wait") {
+        if (port.tellWait === undefined) throw new Error("bounded Tell Fleet port is unavailable");
+        return {
+          result: await port.tellWait({
+            target: request.target,
+            body: request.body,
+            tellId: facts.id,
+            recordedAt: facts.admittedAt,
+            timeoutMs: request.timeoutMs,
+            ...(request.schemaJson === undefined ? {} : { schemaJson: request.schemaJson }),
+            ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
+            ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
+            signal: facts.signal,
+          }),
+          service: { action: request.action, target: request.target, tellId: facts.id },
+        };
+      }
       const result = await port.kill({ targets: request.targets, signal: facts.signal });
       if ("result" in result)
         return { result: result.result, service: { action: request.action, results: result.service } };
@@ -275,11 +330,14 @@ export function fleetRequestCommand(
 
 export function fleetRequestCommands(
   port: FleetRequestPort,
-): Readonly<Record<"akuma.wait" | "akuma.tell" | "akuma.tell-answer" | "akuma.kill", ErasedRequestCommand>> {
+): Readonly<
+  Record<"akuma.wait" | "akuma.tell" | "akuma.tell-answer" | "akuma.tell-wait" | "akuma.kill", ErasedRequestCommand>
+> {
   return {
     "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait", port)),
     "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell", port)),
     "akuma.tell-answer": eraseRequestCommand(fleetRequestCommand("akuma.tell-answer", port)),
+    "akuma.tell-wait": eraseRequestCommand(fleetRequestCommand("akuma.tell-wait", port)),
     "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill", port)),
   };
 }
@@ -330,15 +388,20 @@ function forwardedFleetCommandResult(
 ): AkumaTellResult;
 function forwardedFleetCommandResult(
   response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+  action: "akuma.tell-wait",
+): AkumaTellWaitResult;
+function forwardedFleetCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
   action: "akuma.kill",
 ): AkumaKillResult;
 function forwardedFleetCommandResult(
   response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
   action: FleetRequest["action"],
-): AkumaWaitResult | AkumaTellResult | AkumaKillResult {
+): AkumaWaitResult | AkumaTellResult | AkumaTellWaitResult | AkumaKillResult {
   if (response.kind === "returned") {
     if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
     if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
+    if (action === "akuma.tell-wait" && isTellWaitResult(response.result)) return response.result;
     if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
     throw new Error(`transport integrity: request Fleet ${action} returned an invalid live result`);
   }
@@ -389,6 +452,35 @@ export async function requestForwardedFleetTell(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   return forwardedFleetCommandResult(response, "akuma.tell");
+}
+
+export async function requestForwardedFleetTellWait(
+  input: Readonly<{
+    directory: string;
+    target: AkumaStatus["id"];
+    body: string;
+    timeoutMs: number;
+    schema?: Schema<unknown>;
+    initiator?: string;
+    interrupt?: boolean;
+    signal?: AbortSignal;
+  }>,
+): Promise<AkumaTellWaitResult> {
+  const response = await requestBodyCommand({
+    directory: input.directory,
+    command: fleetRequestProtocol("akuma.tell-wait"),
+    value: {
+      action: "akuma.tell-wait",
+      target: input.target,
+      body: input.body,
+      timeoutMs: input.timeoutMs,
+      ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
+    },
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  return forwardedFleetCommandResult(response, "akuma.tell-wait");
 }
 
 export async function requestForwardedFleetKill(

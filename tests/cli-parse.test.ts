@@ -245,6 +245,28 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
+test("tell parses optional exact-answer wait windows", () => {
+  assert.deepEqual(command(["tell", "@worker", "--wait", "0ms", "continue"]), {
+    command: "tell",
+    akuma: "@worker",
+    interrupt: false,
+    timeoutMs: 0,
+    prompt: { kind: "argument", value: "continue" },
+    output: "text",
+  });
+  assert.deepEqual(command(["tell", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
+    command: "tell",
+    akuma: "aku/worker/1234abcd",
+    interrupt: false,
+    schema: "answer.json",
+    timeoutMs: 300_000,
+    prompt: { kind: "argument", value: "continue" },
+    output: "text",
+  });
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "later", "continue"]), /integer duration/u);
+});
+
 test("exact-one source selection and nonblank argv fail at parse", () => {
   const cases: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
     [["review", "--satisfied"], /review requires exactly one of --summary <text> or stdin '-'/],

@@ -98,11 +98,26 @@ export function fixtureRuntime(
 
 export function installTellRuntime(runtime: TellWakeRuntime): () => void {
   const originalTell = AkumaHandle.prototype.tell;
-  AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, schemaJson) {
-    return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, schemaJson);
+  const originalAdmitTell = AkumaHandle.prototype.admitTell;
+  const originalInterrupt = AkumaHandle.prototype.interrupt;
+  const originalAdmitInterrupt = AkumaHandle.prototype.admitInterrupt;
+  AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, options) {
+    return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
+  };
+  AkumaHandle.prototype.admitTell = function (body, tellId, recordedAt, existingRuntime, options) {
+    return originalAdmitTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
+  };
+  AkumaHandle.prototype.interrupt = function (body, options) {
+    return originalInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
+  };
+  AkumaHandle.prototype.admitInterrupt = function (body, options) {
+    return originalAdmitInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
   };
   return () => {
     AkumaHandle.prototype.tell = originalTell;
+    AkumaHandle.prototype.admitTell = originalAdmitTell;
+    AkumaHandle.prototype.interrupt = originalInterrupt;
+    AkumaHandle.prototype.admitInterrupt = originalAdmitInterrupt;
   };
 }
 

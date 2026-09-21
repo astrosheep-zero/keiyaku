@@ -14,9 +14,15 @@ import { executionChannel, localExecutionContext, type ExecutionContext } from "
 import {
   requestForwardedFleetKill,
   requestForwardedFleetTell,
+  requestForwardedFleetTellWait,
   requestForwardedFleetWait,
 } from "../akuma/fleet-request.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "../akuma/fleet-execution.js";
+import {
+  executeKillAkuma,
+  executeTellAkuma,
+  executeTellWaitAkuma,
+  executeWaitAkuma,
+} from "../akuma/fleet-execution.js";
 import type { WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
@@ -24,6 +30,7 @@ import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
+import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { WorldRoot } from "../world.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
@@ -34,6 +41,7 @@ import {
   type AkumaObservation,
   type AkumaObservationStage,
   type AkumaTellResult,
+  type AkumaTellWaitResult,
   type AkumaWaitResult,
 } from "../akuma/fleet-observation.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -47,6 +55,15 @@ export type AkumaWaitInput = AkumaSetAddressInput &
   }>;
 
 export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
+export type AkumaTellWaitInput = AkumaAddressInput &
+  Readonly<{
+    body: string;
+    timeoutMs: number;
+    schema?: Schema<unknown>;
+    interrupt?: boolean;
+    initiator?: string;
+    signal?: AbortSignal;
+  }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type { CreatedTaskObservation } from "../task/created-observation.js";
 export type { DispatchAssociation } from "../dispatch/association.js";
@@ -428,6 +445,55 @@ export async function tellAkuma(
     path: addressed.path,
     id: addressed.id,
     body: values.body,
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+  });
+}
+
+export async function tellWaitAkuma(
+  input: AkumaTellWaitInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<AkumaTellWaitResult> {
+  const values = requireInput(input, "Keiyaku tell wait input");
+  for (const key of Object.keys(values)) {
+    if (!["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal"].includes(key)) {
+      throw new TypeError(`Keiyaku tell wait input has unknown field: ${key}`);
+    }
+  }
+  if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  if (
+    typeof values.timeoutMs !== "number" ||
+    !Number.isFinite(values.timeoutMs) ||
+    !Number.isInteger(values.timeoutMs) ||
+    values.timeoutMs < 0
+  ) {
+    throw new TypeError("timeoutMs must be a nonnegative finite millisecond duration");
+  }
+  if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
+    throw new TypeError("interrupt must be a boolean");
+  const callerSignal = signal(values.signal);
+  const channel = executionChannel(execution);
+  // Route before proving the target locally: a forwarded Tell is resolved by its serving parent.
+  const addressed = await addressAkuma(directAddress(values), { proveBorn: channel.kind !== "body-request" });
+  if (channel.kind === "body-request") {
+    return await requestForwardedFleetTellWait({
+      directory: channel.directory,
+      target: addressed.id,
+      body: values.body,
+      timeoutMs: values.timeoutMs,
+      ...(input.schema === undefined ? {} : { schema: input.schema }),
+      ...(input.interrupt === true ? { interrupt: true } : {}),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+    });
+  }
+  return await executeTellWaitAkuma({
+    path: addressed.path,
+    id: addressed.id,
+    body: values.body,
+    timeoutMs: values.timeoutMs,
+    ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
+    ...(input.interrupt === true ? { interrupt: true } : {}),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });

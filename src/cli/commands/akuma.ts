@@ -29,7 +29,7 @@ export type ParsedAkumaCommand = Output &
         Prompted)
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-    | (Readonly<{ command: "tell"; interrupt: boolean; schema?: string }> & Addressed & Prompted)
+    | (Readonly<{ command: "tell"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
     | (Readonly<{ command: "history"; last: boolean; id?: string; before?: number; since?: number; limit?: number }> &
         Addressed)
     | Readonly<{ command: "history"; contract: string }>
@@ -101,13 +101,14 @@ const AKUMA_COMMAND_SPECS = {
   tell: {
     arity: 1,
     stdin: true,
-    flags: { interrupt: "boolean", schema: "value", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] (<prompt> | -)",
+    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
+    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
     purpose: "Send one prompt to an existing Akuma and wake it.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the current Body before recording the prompt and waking its successor.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
+      "--wait observes this exact Tell for the supplied duration after it is admitted.",
     ].join("\n"),
   },
   history: {
@@ -364,6 +365,7 @@ function parseTell(
     akuma: validateDirect(subject, fail),
     interrupt: flags.interrupt === true,
     ...(schema === undefined ? {} : { schema }),
+    ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
     prompt,
     output,
   };

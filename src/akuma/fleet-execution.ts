@@ -1,4 +1,5 @@
-import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus } from "./akuma.js";
+import { AkumaDecodeError, AkumaProviderError } from "./akuma-errors.js";
+import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus, type TellResult } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
 import { readLiveStatus, waitForObservation, type LiveStatusObservation } from "./akuma-observe.js";
 import type { ActivityRow } from "./projection.js";
@@ -11,6 +12,7 @@ import {
   parseAkumaObservation,
   type AkumaKillResult,
   type AkumaTellResult,
+  type AkumaTellWaitResult,
   type AkumaUnobserved,
   type AkumaWaitResult,
 } from "./fleet-observation.js";
@@ -202,6 +204,56 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     akuma: input.id,
     tell,
   });
+}
+
+export async function executeTellWaitAkuma(
+  input: TellExecutionInput & Readonly<{ timeoutMs: number; schemaJson?: string; interrupt?: boolean }>,
+): Promise<AkumaTellWaitResult> {
+  input.signal?.throwIfAborted();
+  const handle = source(input.path).selectHandle({ id: input.id });
+  const admission =
+    input.interrupt === true
+      ? await handle.admitInterrupt(input.body, {
+          ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+          ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+          ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        })
+      : await handle.admitTell(input.body, input.tellId, input.recordedAt, undefined, {
+          ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+          ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
+        });
+  if (admission.kind === "unavailable")
+    throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+  if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
+  // The wake runs behind the window; a settled wake is preferred, otherwise the
+  // receipt reports the admitted Tell as it stands when the window closes.
+  let settled: TellResult | undefined;
+  void admission.wake.then(
+    (receipt) => {
+      settled = receipt;
+    },
+    () => undefined,
+  );
+  const observed = await handle.tellOutcome(admission.tell.id, {
+    timeoutMs: input.timeoutMs,
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  const observation =
+    observed.outcome === null
+      ? observed.reason === "deadline"
+        ? { reason: "deadline" as const }
+        : { reason: "unanswered" as const }
+      : observed.outcome.kind === "answered"
+        ? { reason: "answered" as const, answer: observed.outcome.answerJson ?? observed.outcome.answer }
+        : observed.outcome.kind === "failed"
+          ? { reason: "failed" as const, diagnostic: observed.outcome.diagnostic }
+          : (() => {
+              throw new AkumaDecodeError(observed.outcome.diagnostic, observed.outcome.answer);
+            })();
+  const tell = settled ?? (await handle.admittedReceipt(admission.tell.id));
+  return fleetResultSchemas.tellWait.parse({ akuma: input.id, tell, observation });
 }
 
 export type KillExecutionInput = Readonly<{

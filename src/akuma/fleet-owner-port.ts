@@ -2,7 +2,7 @@ import type { AkumaStatus } from "./akuma.js";
 import { AkumaObservationError, AkumaNotBornError } from "./akuma-errors.js";
 import { Akuma as PublicAkuma } from "./akuma-instance.js";
 import { probeBornAkuma } from "./akuma-probe.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./fleet-execution.js";
+import { executeKillAkuma, executeTellAkuma, executeTellWaitAkuma, executeWaitAkuma } from "./fleet-execution.js";
 import type { FleetRequestPort } from "./fleet-request.js";
 import { Schema } from "./schema.js";
 import type { WorldRoot } from "../world.js";
@@ -50,6 +50,21 @@ export function fleetRequestPort(world: WorldRoot): FleetRequestPort {
         tellId: input.tellId,
         recordedAt: input.recordedAt,
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        signal: input.signal,
+      });
+    },
+    tellWait: async (input) => {
+      await addressable(input.target);
+      return await executeTellWaitAkuma({
+        path: world,
+        id: input.target,
+        body: input.body,
+        tellId: input.tellId,
+        recordedAt: input.recordedAt,
+        timeoutMs: input.timeoutMs,
+        ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
         signal: input.signal,
       });
     },

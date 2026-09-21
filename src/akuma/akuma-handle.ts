@@ -8,12 +8,17 @@ import {
   readKill,
   readLastAnsweredTurn,
   readSoul,
+  readTell,
+  readTurn,
   recordTell,
   requestPause,
   requestStop,
+  projectTell,
   type KillEvidence,
   type ResumeCoordinate,
   type SessionFact,
+  type TellFact,
+  type TurnOutcome,
 } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
 import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
@@ -27,7 +32,7 @@ import {
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
-import { AkumaNotBornError } from "./akuma-errors.js";
+import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import {
   bornStatus,
   defaultWaitComplete,
@@ -112,6 +117,19 @@ export async function killAkumaWithRecovery(
     if (recover !== undefined) void recover(paths).catch(() => undefined);
   }
 }
+
+export type TellAdmission =
+  | Readonly<{ kind: "not-born" }>
+  | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>;
+
+export type InterruptAdmission =
+  | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>
+  | Readonly<{
+      kind: "admitted";
+      tell: TellFact;
+      putDown: "was-idle" | "self-aborted";
+      wake: Promise<TellResult>;
+    }>;
 
 export class AkumaHandle {
   readonly [CALL_EXECUTION]?: AkumaCallExecution;
@@ -208,6 +226,23 @@ export class AkumaHandle {
     runtime?: TellWakeRuntime,
     options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
   ): Promise<TellResult> {
+    const admitted = await this.admitTell(body, tellId, recordedAt, runtime, options);
+    if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
+    return await admitted.wake;
+  }
+
+  /**
+   * Record one Tell and start its wake without waiting for delivery. A bounded
+   * caller starts its own deadline at this admission boundary while the wake
+   * continues in the background; the unbounded public Tell awaits `wake`.
+   */
+  async admitTell(
+    body: string,
+    tellId: string = randomUUID(),
+    recordedAt = new Date().toISOString(),
+    runtime?: TellWakeRuntime,
+    options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
+  ): Promise<TellAdmission> {
     const { schemaJson, initiator, signal } = options;
     const admitted = await recordTell(this.paths, {
       kind: "tell",
@@ -217,8 +252,58 @@ export class AkumaHandle {
       ...(initiator === undefined ? {} : { initiator }),
       ...(schemaJson === undefined ? {} : { schemaJson }),
     });
-    if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-    return await wakeRecordedTell(this.paths, admitted.tell.id, runtime, signal);
+    if (admitted.kind === "not-born") return admitted;
+    return {
+      kind: "admitted",
+      tell: admitted.tell,
+      wake: wakeRecordedTell(this.paths, admitted.tell.id, runtime, signal),
+    };
+  }
+
+  /**
+   * The admitted Tell's receipt as it stands now. A bounded caller that stops
+   * waiting before the wake settles reports this honest instant rather than a
+   * delivery that has not happened yet.
+   */
+  async admittedReceipt(tellId: string): Promise<TellResult> {
+    const tell = await readTell(this.paths, tellId);
+    if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
+    const latestBody = (await readHeart(this.paths)).latestBody;
+    return {
+      admission: { tellId, fact: "recorded" },
+      row: projectTell(tell),
+      wake:
+        tell.state === "told" || tell.binding !== undefined
+          ? { kind: "told" }
+          : latestBody !== null && latestBody.end === undefined && latestBody.hung === undefined
+            ? { kind: "pursuing", bodySequence: latestBody.sequence }
+            : { kind: "held" },
+    };
+  }
+
+  /** Observe the exact admitted Tell's bound Turn without substituting Akuma-wide idleness. */
+  async tellOutcome(
+    tellId: string,
+    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
+  ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null }>> {
+    const waited = await waitForObservation({
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      observe: async () => {
+        const tell = await readTell(this.paths, tellId);
+        if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
+        const outcome = await this.boundTellOutcome(tell);
+        return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
+      },
+      complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
+    });
+    return { reason: waited.reason, outcome: waited.value.outcome };
+  }
+
+  private async boundTellOutcome(tell: TellFact): Promise<TurnOutcome | null> {
+    if (tell.binding === undefined) return null;
+    const turn = await readTurn(this.paths, tell.binding.turnSequence);
+    return turn?.end?.outcome ?? null;
   }
 
   async interrupt(
@@ -231,6 +316,25 @@ export class AkumaHandle {
       runtime?: TellWakeRuntime;
     }> = {},
   ): Promise<InterruptReceipt> {
+    const admitted = await this.admitInterrupt(body, options);
+    if (admitted.kind === "unavailable") return admitted;
+    return { kind: "interrupted", putDown: admitted.putDown, tell: await admitted.wake };
+  }
+
+  /**
+   * Settle the predecessor and record the interrupt Tell, returning at the
+   * admission boundary so a bounded caller owns the wake wait.
+   */
+  async admitInterrupt(
+    body: string,
+    options: Readonly<{
+      tellId?: string;
+      schemaJson?: string;
+      initiator?: string;
+      signal?: AbortSignal;
+      runtime?: TellWakeRuntime;
+    }> = {},
+  ): Promise<InterruptAdmission> {
     const request = await requestPause(this.paths, new Date().toISOString(), options.signal);
     if (request.kind === "not-born") {
       throw new AkumaNotBornError(this.id);
@@ -244,7 +348,7 @@ export class AkumaHandle {
       leash = waited;
       putDown = "self-aborted";
     }
-    let recorded: Readonly<{ kind: "recorded"; tellId: string }>;
+    let recorded: TellFact;
     try {
       options.signal?.throwIfAborted();
 
@@ -270,14 +374,15 @@ export class AkumaHandle {
         ...(options.schemaJson === undefined ? {} : { schemaJson: options.schemaJson }),
       });
       if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-      recorded = { kind: "recorded", tellId: admitted.tell.id };
+      recorded = admitted.tell;
     } finally {
       leash.release();
     }
     return {
-      kind: "interrupted",
+      kind: "admitted",
+      tell: recorded,
       putDown,
-      tell: await wakeRecordedTell(this.paths, recorded.tellId, options.runtime, options.signal),
+      wake: wakeRecordedTell(this.paths, recorded.id, options.runtime, options.signal),
     };
   }
 

@@ -38,6 +38,7 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
+  assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
   assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
   assert.match(renderAkumaHelp("call"), /Default actions: .*contract\.deliver.*task\.update/u);

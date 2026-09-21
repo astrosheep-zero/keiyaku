@@ -184,7 +184,14 @@ A wait reports the same kind of progress. It announces no birth and streams
 eligible newly settled `say`, `note`, `call`, `tell`, and tool rows once in
 retained sequence order on the progress channel through the same renderer. Text
 live call and wait activity never contains thought narration; history retains
-requested thought and tool activity through its own projection. An ordinary
+requested thought and tool activity through its own projection. An explicitly
+bounded Tell observation instead begins only after Tell admission and follows
+that admitted Tell's durable binding to its own terminal Turn. Its progress
+channel retains the admission receipt and one truthful conclusion, while stdout
+carries the exact answer only when one was observed; a deadline or terminal
+non-answer does not fabricate output or reinterpret Akuma-wide idle as an
+answer. JSON keeps that one complete observation envelope without progress.
+An ordinary
 observing call begins at an empty cursor and leaves retained activity in that
 durable order. A wait establishes its command-lifetime baseline at its first
 observation. When that open observation carries its typed retained current-Turn

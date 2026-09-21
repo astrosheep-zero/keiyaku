@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAkumaStatus, type ActivityRow, type AkumaStatus } from "../src/akuma/akuma.js";
-import { akumaMark } from "../src/cli/render/kanshi-akuma.js";
 import {
   associatedIdentity,
   DEFAULT_CONTEXT,
@@ -11,6 +10,8 @@ import {
   waitObservationStream,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
+import { akumaRawAnswer, renderAkumaJson, waitedTellProgress } from "../src/cli/render/akuma.js";
+import { akumaMark } from "../src/cli/render/kanshi-akuma.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -73,6 +74,35 @@ test("Akuma observation failures name the target and reason without carrier word
       `× Akuma observation failed  ${second} — permission denied`,
     ].join("\n"),
   );
+});
+
+test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {
+  const result = {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    mode: "wait" as const,
+    body: "continue",
+    result: {
+      akuma: "aku/worker/deadbeef",
+      tell: {
+        admission: { fact: "recorded" as const, tellId: "tell-id" },
+        row: {
+          kind: "tell" as const,
+          sequence: 1,
+          at: AKUMA_ACTIVITY_AT,
+          tellId: "tell-id",
+          text: "continue",
+          state: "told" as const,
+          deliveries: [],
+        },
+        wake: { kind: "told" as const },
+      },
+      observation: { reason: "answered" as const, answer: "exact answer" },
+    },
+  };
+  assert.equal(akumaRawAnswer(result), "exact answer");
+  assert.match(waitedTellProgress(result.result, undefined, { columns: 80, color: false }), /✓ answered$/u);
+  assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
 });
 
 test("Akuma presentation uses the settled six-mark vocabulary", () => {
