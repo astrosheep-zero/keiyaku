@@ -17,6 +17,7 @@ import {
   renderBoundedTextBlock,
   safeText,
   takeDisplayColumns,
+  truncateDisplayText,
   truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
@@ -174,6 +175,10 @@ type RowLayout = Readonly<{
   head: (time: string | undefined, glyph: string, verb: string) => string;
   continuation: () => string;
   marker: (count: number) => string;
+  /** A plural wait shares one minute clock across all of its attributed rows. */
+  clock?: { previous?: string };
+  /** Plural wait rows spend their full remaining width on one terminal line. */
+  singleLine?: true;
 }>;
 
 function plainLayout(): RowLayout {
@@ -184,7 +189,7 @@ function plainLayout(): RowLayout {
   };
 }
 
-function sourceLayout(source: string, width: () => number): RowLayout {
+function sourceLayout(source: string, width: () => number, clock: { previous?: string }): RowLayout {
   const gutter = (): string => `${" ".repeat(TIME_WIDTH)} ${padToDisplay(source, width())} `;
   return {
     head: (time, glyph, verb) =>
@@ -192,6 +197,8 @@ function sourceLayout(source: string, width: () => number): RowLayout {
     // Continuations blank the time and source columns and align under the mark.
     continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
     marker: (count) => `${gutter()}⋮ ${count} omitted`,
+    clock,
+    singleLine: true,
   };
 }
 
@@ -224,15 +231,24 @@ function renderMiddleEllipsis(first: string, text: string, suffix: string, colum
   return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
 }
 
-function renderRow(
-  row: RenderRow,
-  context: TextRenderContext,
-  history: boolean,
-  first: string,
-  continuation: string,
-): readonly string[] {
+type RowRenderOptions = Readonly<{
+  history: boolean;
+  first: string;
+  continuation: string;
+  singleLine?: boolean;
+  inFlightSay?: boolean;
+}>;
+
+function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
+  const { history, first, continuation, singleLine = false, inFlightSay = false } = options;
   const value = rowText(row);
   const quoted = quotedBody(row);
+  if (singleLine) {
+    const openQuote = row.kind === "said" && inFlightSay;
+    const quoteWidth = quoted ? (openQuote ? 1 : 2) : 0;
+    const text = truncateDisplayText(value.text, Math.max(0, context.columns - displayColumns(first) - quoteWidth));
+    return quoted ? [`${first}"${text}${openQuote ? "" : '"'}`] : [`${first}${text}`];
+  }
   const quoteWidth = quoted ? 2 : 0;
   if (value.middle === true) {
     return [renderMiddleEllipsis(first, value.text, value.suffix ?? "", context.columns - quoteWidth)];
@@ -264,13 +280,12 @@ function groupedEntries(
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
     lines.push(
-      ...renderRow(
-        row,
-        context,
+      ...renderRow(row, context, {
         history,
-        layout.head(changed ? at : undefined, mark(row), label(row)),
-        layout.continuation(),
-      ),
+        first: layout.head(changed ? at : undefined, mark(row), label(row)),
+        continuation: layout.continuation(),
+        singleLine: layout.singleLine === true,
+      }),
     );
     previousClock = at;
   }
@@ -363,7 +378,9 @@ export type ActivityStream = ((activity: RenderedActivity) => readonly string[])
     flush: () => readonly string[];
   }>;
 
-type DeferredActivityEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
+type DeferredActivityEntry =
+  | Readonly<{ kind: "gap"; count: number }>
+  | Readonly<{ kind: "row"; row: RenderRow; inFlightSay: boolean }>;
 
 type ActivityStreamState = {
   newestSettledSequence: number | undefined;
@@ -415,25 +432,37 @@ function baselineOmissionCount(activity: RenderedActivity, boundary: CurrentTurn
   return count;
 }
 
+type StreamRowRenderOptions = Readonly<{
+  context: TextRenderContext;
+  layout: RowLayout;
+  inFlightSay?: boolean;
+}>;
+
 function renderStreamRow(
   state: ActivityStreamState,
   row: RenderRow,
   lines: string[],
-  context: TextRenderContext,
-  layout: RowLayout,
+  options: StreamRowRenderOptions,
 ): void {
+  const { context, layout, inFlightSay = false } = options;
   const at = clock(row.at);
-  const changed = state.previousClock === undefined || at !== state.previousClock;
+  const previousClock = layout.clock?.previous ?? state.previousClock;
+  const changed = previousClock === undefined || at !== previousClock;
   lines.push(
-    ...renderRow(
-      row,
-      context,
-      false,
-      layout.head(changed ? at : undefined, mark(row), label(row)),
-      layout.continuation(),
-    ),
+    ...renderRow(row, context, {
+      history: false,
+      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row)),
+      continuation: layout.continuation(),
+      singleLine: layout.singleLine === true,
+      inFlightSay,
+    }),
   );
-  state.previousClock = at;
+  if (layout.clock !== undefined) layout.clock.previous = at;
+  else state.previousClock = at;
+}
+
+function inFlightSay(activity: RenderedActivity, row: RenderRow): boolean {
+  return activity.snapshot.kind === "open" && row.kind === "said";
 }
 
 function coalesceDeferredGaps(state: ActivityStreamState): void {
@@ -467,7 +496,7 @@ function flushSafeActivityPrefix(
     if (first === undefined || (first.kind === "row" && isBoundedStreamTool(first.row))) return;
     if (first.kind === "row") {
       state.deferred.shift();
-      renderStreamRow(state, first.row, lines, context, layout);
+      renderStreamRow(state, first.row, lines, { context, layout, inFlightSay: first.inFlightSay });
       continue;
     }
     const next = state.deferred[1];
@@ -487,7 +516,7 @@ function renderCurrentTurnBoundary(
   const boundary = currentTurnBoundary(activity);
   if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
     state.renderedBoundaries.add(boundary.turnSequence);
-    if (boundary.row.kind !== "thought") renderStreamRow(state, boundary.row, lines, context, layout);
+    if (boundary.row.kind !== "thought") renderStreamRow(state, boundary.row, lines, { context, layout });
   }
   return boundary;
 }
@@ -527,14 +556,14 @@ function observeActivitySnapshot(
   for (const row of rows) {
     if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
-      renderStreamRow(state, row, lines, context, layout);
+      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
     }
     if (!isBoundedStreamTool(row) && state.deferred.length === 0) {
-      renderStreamRow(state, row, lines, context, layout);
+      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
     }
-    state.deferred.push({ kind: "row", row });
+    state.deferred.push({ kind: "row", row, inFlightSay: inFlightSay(activity, row) });
     if (isBoundedStreamTool(row)) {
       const pendingTools = state.deferred.filter(
         (entry) => entry.kind === "row" && isBoundedStreamTool(entry.row),
@@ -554,7 +583,7 @@ function flushActivityTail(
   const lines: string[] = [];
   for (const entry of state.deferred) {
     if (entry.kind === "gap") lines.push(layout.marker(entry.count));
-    else renderStreamRow(state, entry.row, lines, context, layout);
+    else renderStreamRow(state, entry.row, lines, { context, layout, inFlightSay: entry.inFlightSay });
   }
   state.deferred = [];
   return lines;
@@ -662,10 +691,15 @@ function durationText(durationMs: number): string {
 
 type WaitObservationStreamState = {
   streams: Map<string, ActivityStream>;
+  /** Full frozen source labels are used only in the aggregate head. */
   sources: Map<string, string>;
+  /** Compact identity tags attribute plural rows, diagnostics, and conclusions. */
+  tags: Map<string, string>;
   contracts: Map<string, DispatchAssociation>;
   settledAt: Map<string, number>;
   sourceWidth: number;
+  /** The plural stream's timestamp blanking spans every source. */
+  clock: { previous?: string };
   /** Whether this wait observes a plural selected set; undefined until a selection or first round fixes it. */
   plural: boolean | undefined;
   headerEmitted: boolean;
@@ -676,13 +710,53 @@ function createWaitObservationState(): WaitObservationStreamState {
   return {
     streams: new Map<string, ActivityStream>(),
     sources: new Map<string, string>(),
+    tags: new Map<string, string>(),
     contracts: new Map<string, DispatchAssociation>(),
     settledAt: new Map<string, number>(),
     sourceWidth: 0,
+    clock: {},
     plural: undefined,
     headerEmitted: false,
     observed: false,
   };
+}
+
+function shortestUniquePrefix(value: string, values: readonly string[]): string | undefined {
+  for (let length = 4; length <= value.length; length += 1) {
+    const tag = value.slice(0, length);
+    if (values.filter((candidate) => candidate.slice(0, length) === tag).length === 1) return tag;
+  }
+  return undefined;
+}
+
+function shortestUniqueSegmentSuffix(id: string, ids: readonly string[]): string | undefined {
+  const segments = id.split("/");
+  for (let start = segments.length - 2; start >= 0; start -= 1) {
+    const tag = segments.slice(start).join("/");
+    if (ids.filter((candidate) => candidate.endsWith(`/${tag}`) || candidate === tag).length === 1) return tag;
+  }
+  return undefined;
+}
+
+function waitIdentityTag(id: string, ids: readonly string[]): string {
+  const finals = ids.map((candidate) => candidate.slice(candidate.lastIndexOf("/") + 1));
+  const index = ids.indexOf(id);
+  const own = finals[index];
+  if (own === undefined) return id;
+  return (
+    shortestUniquePrefix(own, finals) ?? shortestUniqueSegmentSuffix(id, ids) ?? shortestUniquePrefix(id, ids) ?? id
+  );
+}
+
+/** The selected set fixes identity tags before its first attributed row. */
+function freezeWaitTags(state: WaitObservationStreamState): void {
+  const ids = [...state.sources.keys()];
+  state.tags = new Map(ids.map((id) => [id, waitIdentityTag(id, ids)]));
+  state.sourceWidth = Math.max(0, ...Array.from(state.tags.values(), displayColumns));
+}
+
+function sourceTag(state: WaitObservationStreamState, id: string): string {
+  return state.tags.get(id) ?? waitIdentityTag(id, [...state.sources.keys()]);
 }
 
 /** Register one selected or newly observed source; the set freezes the column before the first row. */
@@ -696,7 +770,6 @@ function registerWaitSource(
   const label = alias ?? id;
   state.sources.set(id, label);
   if (contract !== undefined) state.contracts.set(id, contract);
-  if (!state.headerEmitted) state.sourceWidth = Math.max(state.sourceWidth, displayColumns(label));
 }
 
 /**
@@ -708,7 +781,8 @@ function registerWaitSource(
 function aggregateHeading(state: WaitObservationStreamState): readonly string[] {
   const head = [...state.sources].map(([id, label]) => {
     const contractId = associatedContractId(state.contracts.get(id) ?? { kind: "none" });
-    return contractId === undefined ? label : `${label} · ${contractId}`;
+    const named = `${sourceTag(state, id)} ${label}`;
+    return contractId === undefined ? named : `${named} · ${contractId}`;
   });
   return [...head, frameRule(head)];
 }
@@ -722,6 +796,7 @@ function observeWaitRound(
   state.observed = true;
   // Establish the whole round's sources before any row so widths stay aligned within it.
   for (const member of round) registerWaitSource(state, member.status.id, member.alias, member.contract);
+  if (!state.headerEmitted) freezeWaitTags(state);
   const lines: string[] = [];
   // The observation subject opens once: an aggregate head for a plural set, the observed
   // identity frame for a single target. Every later round only appends attributed rows.
@@ -744,7 +819,7 @@ function observeWaitRound(
       const stream = activityStream(
         context,
         state.plural === true
-          ? sourceLayout(state.sources.get(status.id) ?? status.id, () => state.sourceWidth)
+          ? sourceLayout(sourceTag(state, status.id), () => state.sourceWidth, state.clock)
           : plainLayout(),
       );
       state.streams.set(status.id, stream);
@@ -796,6 +871,10 @@ function concludeWaitStream(
   for (const stream of state.streams.values()) tail.push(...stream.flush());
 
   const end = now();
+  for (const observation of result.observations)
+    registerWaitSource(state, observation.status.id, undefined, observation.contract);
+  for (const member of result.unobserved) registerWaitSource(state, member.id, undefined);
+  if (!state.headerEmitted) freezeWaitTags(state);
   const order = orderedWaitIds(state, result);
   const multi = order.length > 1;
   const observationById = new Map<string, AkumaObservation>(
@@ -805,7 +884,7 @@ function concludeWaitStream(
     result.unobserved.map((member) => [member.id, member]),
   );
   // A multi-target scoreboard names the frozen source label; a single target keeps the bare diagnostic.
-  const label = (id: string): string => (multi ? (state.sources.get(id) ?? id) : id);
+  const label = (id: string): string => (multi ? sourceTag(state, id) : id);
   const unobservedLines = order
     .filter((id) => unobservedById.has(id))
     .map((id) => unobservedText(label(id), unobservedById.get(id)!.diagnostic));
@@ -816,7 +895,7 @@ function concludeWaitStream(
     const complete = defaultWaitComplete(status);
     const at = complete ? (state.settledAt.get(id) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
-    const target = multi ? ` ${padToDisplay(state.sources.get(id) ?? id, state.sourceWidth)}` : "";
+    const target = multi ? ` ${padToDisplay(sourceTag(state, id), state.sourceWidth)}` : "";
     return [`${clockFromMs(at)}${target} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`];
   });
   const answeredSingle =
@@ -851,6 +930,7 @@ export function waitObservationStream(
   const select = (selected: readonly WaitSelectedIdentity[]): void => {
     for (const member of selected) registerWaitSource(state, member.id, member.alias, member.contract);
     state.plural ??= selected.length > 1;
+    freezeWaitTags(state);
   };
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
     observeWaitRound(state, round, context, now);
@@ -1131,23 +1211,19 @@ export function waitText(
   const end = Date.now();
   const startedAt = result.startedAt ?? end;
   const order: string[] = [];
-  const labels = new Map<string, string>();
-  const remember = (id: string, frozenAlias?: string): void => {
-    if (labels.has(id)) return;
-    labels.set(id, frozenAlias ?? id);
-    order.push(id);
+  const remember = (id: string): void => {
+    if (!order.includes(id)) order.push(id);
   };
-  for (const member of result.selection ?? []) remember(member.id, member.alias);
+  for (const member of result.selection ?? []) remember(member.id);
   for (const observation of observations) remember(observation.status.id);
   for (const member of unobserved) remember(member.id);
-  const label = (id: string): string => labels.get(id) ?? id;
   const observationById = new Map<string, AkumaObservation>(
     observations.map((observation) => [observation.status.id, observation]),
   );
   const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
     unobserved.map((member) => [member.id, member]),
   );
-  const sourceWidth = order.reduce((width, id) => Math.max(width, displayColumns(label(id))), 0);
+  const sourceWidth = Math.max(0, ...order.map((id) => displayColumns(waitIdentityTag(id, order))));
   const blocks = [
     ...order.flatMap((id) => {
       const observation = observationById.get(id);
@@ -1160,7 +1236,7 @@ export function waitText(
       ? [
           order
             .filter((id) => unobservedById.has(id))
-            .map((id) => unobservedText(label(id), unobservedById.get(id)!.diagnostic))
+            .map((id) => unobservedText(waitIdentityTag(id, order), unobservedById.get(id)!.diagnostic))
             .join("\n"),
         ]
       : []),
@@ -1173,7 +1249,7 @@ export function waitText(
     const at = complete ? (settleMoment(status) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
     return [
-      `${clockFromMs(at)} ${padToDisplay(label(id), sourceWidth)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`,
+      `${clockFromMs(at)} ${padToDisplay(waitIdentityTag(id, order), sourceWidth)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`,
     ];
   });
   return rows.length > 0 ? [...blocks, rows.join("\n")].join("\n\n") : blocks.join("\n\n");

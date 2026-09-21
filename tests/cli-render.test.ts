@@ -1919,7 +1919,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   const scoreboard = stream.conclude(conclusion);
   assert.equal(
     scoreboard,
-    `\n${clockAt(settledAtMs)} @scout-a            ✓ answered — 3m12s\n${clockAt(settledAtMs + 8_000)} ${second} ● still running — waited 3m20s`,
+    `\n${clockAt(settledAtMs)} abcd0006 ✓ answered — 3m12s\n${clockAt(settledAtMs + 8_000)} abcd0007 ● still running — waited 3m20s`,
   );
   assert.doesNotMatch(scoreboard, /of \d+ done/u);
 
@@ -1947,7 +1947,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   assert.match(multiLines.at(-1)!, /● still running — waited \d+/u, "an unfinished row carries the elapsed wait");
   assert.match(
     multiLines.at(-2)!,
-    new RegExp(`^${clockAt(settledAtMs)} @scout-a +✓ answered — 3m12s$`, "u"),
+    new RegExp(`^${clockAt(settledAtMs)} abcd0006 ✓ answered — 3m12s$`, "u"),
     "the scoreboard shares the streamed grammar and order",
   );
 });
@@ -1963,7 +1963,7 @@ test("a plural aggregate head reads its selected set as one line per target with
     { id: first, alias: parseAkumaAlias("@a"), contract: association },
     { id: second, contract: { kind: "none" } },
   ]);
-  const head = ["@a · kei/alpha", second];
+  const head = [`abcd0040 @a · kei/alpha`, `abcd0041 ${second}`];
   const opening = stream.observe([observed(running(first), { alias: parseAkumaAlias("@a"), contract: association })]);
   assert.deepEqual(
     opening,
@@ -1971,7 +1971,7 @@ test("a plural aggregate head reads its selected set as one line per target with
     "each target keeps one line, association inline, under one rule",
   );
   assert.doesNotMatch(opening.join("\n"), /└─/u, "the plural head is a list, not stacked title cards");
-  assert.ok(opening.includes(second), "an unassociated target carries no dangling separator");
+  assert.ok(opening.includes(`abcd0041 ${second}`), "an unassociated target carries no dangling separator");
 });
 
 test("conclusion durations assert real waiting", () => {
@@ -2123,7 +2123,7 @@ test("an any-mode completion receipt keeps an incomplete peer pending in both wa
   }
 });
 
-test("unobserved diagnostics use the frozen label in streamed and non-streamed plural waits", () => {
+test("unobserved diagnostics use the identity tag in streamed and non-streamed plural waits", () => {
   const id = parseAkumaStatus({
     id: "aku/worker/abcd0045",
     life: "running",
@@ -2142,8 +2142,8 @@ test("unobserved diagnostics use the frozen label in streamed and non-streamed p
     observations: [],
     unobserved: [{ id, diagnostic: "window lost" }],
   });
-  assert.match(streamed, /^! @gone unobserved: window lost$/mu, "the streamed diagnostic names the frozen alias");
-  assert.doesNotMatch(streamed, new RegExp(`${id} unobserved`, "u"));
+  assert.match(streamed, /^! abcd0045 unobserved: window lost$/mu, "the streamed diagnostic names the identity tag");
+  assert.doesNotMatch(streamed, /@gone|aku\/worker\/abcd0045/u);
 
   const nonStreamed = waitText(
     {
@@ -2164,10 +2164,10 @@ test("unobserved diagnostics use the frozen label in streamed and non-streamed p
   );
   assert.match(
     nonStreamed,
-    /^! @gone unobserved: window lost$/mu,
-    "the non-streamed diagnostic names the frozen alias",
+    /^! abcd0045 unobserved: window lost$/mu,
+    "the non-streamed diagnostic names the identity tag",
   );
-  assert.doesNotMatch(nonStreamed, new RegExp(`${id} unobserved`, "u"));
+  assert.doesNotMatch(nonStreamed, /@gone|aku\/worker\/abcd0045/u);
   const answered = parseAkumaStatus({
     id: other,
     life: "asleep",
