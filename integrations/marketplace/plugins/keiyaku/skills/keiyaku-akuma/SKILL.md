@@ -44,10 +44,11 @@ to that invocation directory. Without `--workdir`, an unassociated call uses
 the invocation cwd, while a `--contract` call uses its appointed worktree.
 
 Repeated `--allowed` values add actions to the selected Akuma's defaults; they
-never narrow them. An omitted Archetype default permits the complete action
-vocabulary, while an explicit empty default permits none. A nested call can use
-only actions permitted by its direct parent Soul. Use `status <aku/...|@alias>`
-to inspect the born worker's frozen effective actions.
+never narrow them. An omitted Archetype permits `akuma.*`, every `task.*`,
+`contract.audit`, and `contract.deliver`; `contract.review` requires an explicit
+Archetype or call-time grant. An explicit empty default permits none. A nested
+call can use only actions permitted by its direct parent Soul. Use `status
+<aku/...|@alias>` to inspect the born worker's frozen effective actions.
 
 ## Answer Schemas
 

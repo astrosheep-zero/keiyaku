@@ -40,7 +40,11 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
   assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
+  assert.match(renderAkumaHelp("call"), /Default actions: .*contract\.deliver.*task\.update/u);
+  assert.doesNotMatch(renderAkumaHelp("call").match(/Default actions: .*/u)?.[0] ?? "", /contract\.review/u);
   assert.match(renderContractHelp("bind"), /stdin is Contract Markdown/u);
+  assert.match(renderContractHelp("bind"), /existing owner modules\/entry points.*critical ordering/u);
+  assert.match(renderContractHelp("bind"), /narrowest justified intended writes for this approach/u);
   const settingsHelp = renderContractHelp("settings");
   assert.match(settingsHelp, /^Akuma definitions are Markdown files, one per name:$/mu);
   assert.match(settingsHelp, /^  user      ~\/\.keiyaku\/akuma\/<name>\.md$/mu);

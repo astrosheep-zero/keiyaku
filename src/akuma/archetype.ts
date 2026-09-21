@@ -13,7 +13,7 @@ import {
   type ReadonlyRestraint,
 } from "./provider-recipe.js";
 import { resolveProviderExecution } from "./providers/index.js";
-import { effectiveAllowedActions, type AllowedActions } from "./allowed.js";
+import { DEFAULT_ALLOWED_ACTIONS, decodeAllowedActions, type AllowedActions } from "./allowed.js";
 
 type LocalArchetype = Readonly<{
   name: string;
@@ -217,7 +217,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
   const sandbox = archetypeEnum(values, "sandbox", ["full-access"] as const);
   const description = archetypeField(values, "description");
   const allowedPresent = "allowed" in values;
-  const allowed = allowedPresent ? effectiveAllowedActions(values.allowed) : undefined;
+  const allowed = allowedPresent ? decodeAllowedActions(values.allowed) : undefined;
   const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
   return {
     ...(base === undefined ? {} : { base }),
@@ -269,7 +269,7 @@ function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetyp
   const provider = local.provider ?? base?.provider;
   if (provider === undefined) throw new TypeError("Akuma provider must be a nonblank string");
   const options = decodeProviderOptions({ ...(base?.options ?? {}), ...local.options });
-  const allowed = local.allowedPresent ? local.allowed! : (base?.allowed ?? effectiveAllowedActions(undefined));
+  const allowed = local.allowedPresent ? local.allowed! : (base?.allowed ?? DEFAULT_ALLOWED_ACTIONS);
   return Object.freeze({
     name: local.name,
     path: local.path,

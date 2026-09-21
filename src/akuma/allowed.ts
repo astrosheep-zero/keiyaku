@@ -1,10 +1,10 @@
 import { TASK_MUTATION_ACTIONS } from "../task/mutation.js";
 import { z } from "zod";
 
+const AKUMA_MUTATION_ACTIONS = Object.freeze(["akuma.call", "akuma.kill", "akuma.tell"] as const);
+
 export const ALLOWED_ACTIONS = Object.freeze([
-  "akuma.call",
-  "akuma.kill",
-  "akuma.tell",
+  ...AKUMA_MUTATION_ACTIONS,
   "contract.audit",
   "contract.deliver",
   "contract.review",
@@ -13,6 +13,13 @@ export const ALLOWED_ACTIONS = Object.freeze([
 
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
 export type AllowedActions = readonly AllowedAction[];
+
+export const DEFAULT_ALLOWED_ACTIONS: AllowedActions = Object.freeze([
+  ...AKUMA_MUTATION_ACTIONS,
+  "contract.audit",
+  "contract.deliver",
+  ...TASK_MUTATION_ACTIONS,
+]);
 
 const ALLOWED_ACTION_SET: ReadonlySet<string> = new Set(ALLOWED_ACTIONS);
 
@@ -41,7 +48,7 @@ export const allowedActionsSchema = z.array(z.enum(ALLOWED_ACTIONS)).transform((
   }
 });
 
-export function effectiveAllowedActions(value: unknown): AllowedActions {
+export function historicalAllowedActions(value: unknown): AllowedActions {
   return value === undefined ? ALLOWED_ACTIONS : decodeAllowedActions(value);
 }
 

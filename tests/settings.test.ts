@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "../src/library/keiyaku.js";
+import { ALLOWED_ACTIONS, DEFAULT_ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { loadArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
@@ -193,6 +194,50 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
       JSON.stringify({ providers: { local: { kind: "pi", env: { A: "x" } } } }),
     );
     await assert.rejects(loadNamed(value, "pi-worker"), /env injection not supported for provider pi/u);
+  } finally {
+    value.close();
+  }
+});
+
+test("Archetype omission uses the delegation baseline while explicit allowed sets remain exact", async () => {
+  const value = fixture();
+  try {
+    assert.deepEqual(DEFAULT_ALLOWED_ACTIONS, [
+      "akuma.call",
+      "akuma.kill",
+      "akuma.tell",
+      "contract.audit",
+      "contract.deliver",
+      "task.add",
+      "task.addDocument",
+      "task.compose",
+      "task.done",
+      "task.drop",
+      "task.hold",
+      "task.resume",
+      "task.start",
+      "task.stop",
+      "task.update",
+    ]);
+    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: codex-app-server\n---\n");
+    assert.deepEqual((await loadNamed(value, "worker")).allowed, DEFAULT_ALLOWED_ACTIONS);
+    assert.equal((await loadNamed(value, "worker")).allowed.includes("contract.review"), false);
+
+    writeFileSync(
+      join(value.home, "akuma", "full.md"),
+      `---\nprovider: codex-app-server\nallowed:\n${ALLOWED_ACTIONS.map((action) => `  - ${action}\n`).join("")}---\n`,
+    );
+    assert.deepEqual((await loadNamed(value, "full")).allowed, ALLOWED_ACTIONS);
+
+    writeFileSync(
+      join(value.home, "akuma", "reviewer.md"),
+      "---\nprovider: codex-app-server\nallowed:\n  - contract.review\n---\n",
+    );
+    writeFileSync(join(value.home, "akuma", "reviewer-child.md"), "---\nbase: reviewer\n---\n");
+    assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, ["contract.review"]);
+
+    writeFileSync(join(value.home, "akuma", "reviewer-child.md"), "---\nbase: reviewer\nallowed: []\n---\n");
+    assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, []);
   } finally {
     value.close();
   }

@@ -19,10 +19,10 @@ resolve.
 
 The author pins every public, high-level fact: surfaces, semantics, persisted
 shapes, the observable acceptance boundary. Private decomposition, helper
-names, and control flow belong to the Deliverer — and that freedom comes from
-the author genuinely not caring, never from the author not deciding. Criteria
-are observable accept/reject observations a Reviewer can judge without asking
-the author anything further.
+names, and equivalent control flow belong to the Deliverer — and that freedom
+comes from the author genuinely not caring, never from the author not deciding.
+Criteria are observable accept/reject observations a Reviewer can judge without
+asking the author anything further.
 
 ## Author And Bind
 
@@ -47,22 +47,24 @@ fulfillment.>
 
 ## Design
 <The closed decisions. A statement belongs here exactly when a test-green
-candidate could still violate it: which module owns the change; the exact
-public surface — each type with its fields, each verb with its success,
-refusal, and error arms and their reason words; the persisted format; which
-way data flows and where it commits or refuses; which parallel shapes are
-forbidden. Helper names and equivalent control flow do not belong here —
-they are the worker's.>
+candidate could still violate it: existing owner modules and entry points,
+what is reused or changed, the implementation approach, critical ordering, the
+exact public surface — each type with its fields, each verb with its success,
+refusal, and error arms and their reason words; the persisted format; which way
+data flows and where it commits or refuses; which parallel shapes are
+forbidden. Unresolved architectural choices are settled before binding. Private
+helper names and equivalent control flow remain the Deliverer's freedom.>
 
 ```text
 <pseudocode — only where ordering matters>
 ```
 
 ## Region
-<one intended write pattern per line — planning evidence for overlap
- detection, never ownership or the exact diff. Narrow enough that overlap is a
- real signal; directory patterns end with `/`. Fenced lines, list items, and
- bare lines are equivalent and union.>
+<one intended write pattern per line — the narrowest justified intended
+writes for this approach, not every potentially involved file. Planning evidence
+for overlap detection, never ownership or the exact diff. No broad directory
+fallback or redundant parent/child patterns; directory patterns end with `/`.
+Fenced lines, list items, and bare lines are equivalent and union.>
 
 ## Criteria
 ### <one observable condition>

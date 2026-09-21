@@ -1303,6 +1303,14 @@ test("soul codec hard-fails invalid known members", () => {
 
 
 
+test("historical Soul omission retains the complete vocabulary", () => {
+  const historical = { ...codecSoul() } as Record<string, unknown>;
+  delete historical.allowed;
+  assert.deepEqual(decodeSoul(historical).allowed, ALLOWED_ACTIONS);
+});
+
+
+
 
 function seedClosedHistoryActivity(paths: Parameters<typeof readHeart>[0], turnSequence: number, count: number): void {
   const database = new DatabaseSync(paths.heart);

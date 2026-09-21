@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseAkuId, type AkuId } from "../identity.js";
 import { decodeProviderOptions, decodeProviderRecipe, decodeReadonlyRestraint } from "../provider-recipe.js";
 import type { AkumaOrigin, Soul, SoulRow } from "./facts.js";
-import { effectiveAllowedActions } from "../allowed.js";
+import { historicalAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -71,7 +71,7 @@ function validateSoul(value: unknown): Soul {
     ...(restraint === undefined ? {} : { readonly: restraint }),
     cwd: nonblank(soul.cwd, "cwd"),
     origin: decodeOrigin(soul.origin),
-    allowed: effectiveAllowedActions(soul.allowed),
+    allowed: historicalAllowedActions(soul.allowed),
     createdAt: nonblank(soul.createdAt, "createdAt"),
   };
 }

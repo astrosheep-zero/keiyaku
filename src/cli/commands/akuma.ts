@@ -2,7 +2,12 @@ import { CliUsageError, commandGuide, isBlankInput, usageLine, type CliUsageGuid
 import { parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
-import { ALLOWED_ACTIONS, decodeAllowedActions, type AllowedActions } from "../../akuma/allowed.js";
+import {
+  ALLOWED_ACTIONS,
+  DEFAULT_ALLOWED_ACTIONS,
+  decodeAllowedActions,
+  type AllowedActions,
+} from "../../akuma/allowed.js";
 import { parsePublicHistoryId } from "../../akuma/identity.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
@@ -69,8 +74,9 @@ const AKUMA_COMMAND_SPECS = {
       "Without --workdir, a Contract call uses its appointed worktree; an unassociated call uses the invocation cwd.",
       "--alias assigns the world-local @name selector to the born Akuma.",
       `Legal actions: ${ALLOWED_ACTIONS.join(", ")}.`,
+      `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
       "Repeated --allowed adds actions to the selected Akuma's defaults; it never narrows them.",
-      "An omitted Archetype default permits every legal action; an explicit empty default permits none.",
+      "An omitted Archetype uses the default actions above; an explicit empty default permits none.",
       "A nested birth is clipped to its direct parent's frozen actions. status <aku/...|@alias> shows the born effective set.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
       "With --contract, Dispatch succeeds first. If @name exists, the alias then moves.",

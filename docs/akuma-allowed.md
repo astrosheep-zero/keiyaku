@@ -6,10 +6,12 @@ authorization system; exact member names belong to public declarations and help.
 
 ## Frozen Permission
 
-An Archetype may declare a complete default set. Its omission means the current
-complete vocabulary, while an explicit empty set means none. Call-time additions
-can add to that default but never clear it. A nested birth clips the resulting
-set to its authenticated direct parent only; it never walks an ancestor chain.
+An Archetype may declare a complete default set. Its omission grants the
+ordinary delegation baseline: Akuma management, every Task mutation, and
+Contract audit and delivery. Independent Contract review remains an explicit
+grant. An explicit empty set means none. Call-time additions can add to that
+default but never clear it. A nested birth clips the resulting set to its
+authenticated direct parent only; it never walks an ancestor chain.
 
 When an Archetype uses a load-time base, omission of `allowed` inherits the
 base set. An explicit empty list or explicit list replaces the base set
