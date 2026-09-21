@@ -389,6 +389,14 @@ function settledRows(activity: RenderedActivity): readonly RenderRow[] {
   return activity.rows.filter(isSettledStreamRow);
 }
 
+function isProtectedStreamRow(row: RenderRow): boolean {
+  return row.kind === "said" || (row.kind === "tool" && row.call.kind === "fileChange");
+}
+
+function isBoundedStreamTool(row: RenderRow): boolean {
+  return row.kind === "tool" && !isProtectedStreamRow(row);
+}
+
 function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
   for (const row of activity.rows) if (isMutableStreamRow(row)) state.mutableSequences.add(row.sequence);
 }
@@ -441,7 +449,7 @@ function coalesceDeferredGaps(state: ActivityStreamState): void {
 }
 
 function omitOldestDeferredTool(state: ActivityStreamState): void {
-  const index = state.deferred.findIndex((entry) => entry.kind === "row" && entry.row.kind === "tool");
+  const index = state.deferred.findIndex((entry) => entry.kind === "row" && isBoundedStreamTool(entry.row));
   if (index === -1) throw new Error("activity tail lost its pending tool");
   state.deferred[index] = { kind: "gap", count: 1 };
   coalesceDeferredGaps(state);
@@ -456,14 +464,14 @@ function flushSafeActivityPrefix(
 ): void {
   for (;;) {
     const first = state.deferred[0];
-    if (first === undefined || (first.kind === "row" && first.row.kind === "tool")) return;
+    if (first === undefined || (first.kind === "row" && isBoundedStreamTool(first.row))) return;
     if (first.kind === "row") {
       state.deferred.shift();
       renderStreamRow(state, first.row, lines, context, layout);
       continue;
     }
     const next = state.deferred[1];
-    if (next === undefined || (next.kind === "row" && next.row.kind === "tool")) return;
+    if (next === undefined || (next.kind === "row" && isBoundedStreamTool(next.row))) return;
     state.deferred.shift();
     lines.push(layout.marker(first.count));
   }
@@ -517,18 +525,20 @@ function observeActivitySnapshot(
   );
   const rows = observedRows.filter((row) => row.kind !== "thought");
   for (const row of rows) {
-    if (row.kind === "tool" && state.openingTools < OPENING_TOOL_BUDGET) {
+    if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
       renderStreamRow(state, row, lines, context, layout);
       continue;
     }
-    if (row.kind !== "tool" && state.deferred.length === 0) {
+    if (!isBoundedStreamTool(row) && state.deferred.length === 0) {
       renderStreamRow(state, row, lines, context, layout);
       continue;
     }
     state.deferred.push({ kind: "row", row });
-    if (row.kind === "tool") {
-      const pendingTools = state.deferred.filter((entry) => entry.kind === "row" && entry.row.kind === "tool").length;
+    if (isBoundedStreamTool(row)) {
+      const pendingTools = state.deferred.filter(
+        (entry) => entry.kind === "row" && isBoundedStreamTool(entry.row),
+      ).length;
       if (pendingTools > RECENT_TOOL_BUDGET) omitOldestDeferredTool(state);
     }
     flushSafeActivityPrefix(state, lines, context, layout);

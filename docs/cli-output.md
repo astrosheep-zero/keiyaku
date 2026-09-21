@@ -196,6 +196,12 @@ attempt, wait seeding first renders one retained boundary: the initial
 commission, or the settled wake that started the attempt. A Tell delivered to
 an already pursuing Body is ordinary activity, and absence of either durable
 boundary produces no synthetic row or omission.
+In an open current Turn, every settled say and typed file-change activity row
+is protected in both the status snapshot and the live stream: neither the
+ordinary status budget nor live tool-tail omission may remove it. Other
+narrative and ordinary tools keep their existing budgets. Protection follows
+typed activity meaning rather than inferred paths, diffstats, or filesystem
+state, and individual previews remain independently bounded.
 The Turn outcome is the closing result, never a streamed activity row; an
 answered closing result is labeled `answer`, never `say`. That channel also
 carries the closing conclusion, while stdout
@@ -206,7 +212,8 @@ never re-renders a settled row. Its bounded eligible observed tool evidence is
 a command-lifetime per-Akuma view: opening evidence streams live, while recent
 evidence waits until the observation ends so the stream can retain the actual
 end of the command; intermediate tool evidence is represented by counted
-omission markers.
+omission markers. Typed file-change activity streams with narrative rather than
+consuming that bounded tool capacity, while retaining its observed outcome.
 Narrative remains in its original order around that deferred evidence.
 A single-target wait's stream opens with that Akuma's identity frame before
 any row — carrying the alias currently addressing it and the Contract

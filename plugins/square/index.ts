@@ -16,7 +16,7 @@ type SquareEnvironment = NodeJS.ProcessEnv &
 
 const DUPLICATE_HINT = "ignore if you have already seen this.";
 
-function squareEnvironment(environment: NodeJS.ProcessEnv, path: string): SquareEnvironment {
+function squareEnvironment(environment: NodeJS.ProcessEnv): SquareEnvironment {
   const ledgerRoot = environment.SQUARE_REGISTRY === undefined ? undefined : dirname(environment.SQUARE_REGISTRY);
   return {
     ...environment,
@@ -25,7 +25,7 @@ function squareEnvironment(environment: NodeJS.ProcessEnv, path: string): Square
     SQUARE_HOST_LEDGER_LOCAL:
       environment.SQUARE_HOST_LEDGER_LOCAL ??
       ledgerRoot ??
-      join(environment.PWD ?? dirname(path), ".square", "host-ledger"),
+      join(environment.PWD ?? process.cwd(), ".square", "host-ledger"),
   } as SquareEnvironment;
 }
 
@@ -88,7 +88,7 @@ const plugin: KeiyakuPlugin = {
   },
   async activate(context) {
     const path = join(context.writablePath("square"), "KEIYAKU.square");
-    const environment = squareEnvironment(process.env, path);
+    const environment = squareEnvironment(process.env);
     const ledger = hostLedger(environment);
     const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
     let caller: string | undefined;

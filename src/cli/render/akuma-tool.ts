@@ -65,7 +65,7 @@ function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string 
   ].join(" · ");
 }
 
-function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): ToolRepr {
+function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolRepr {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files" };
   const label =
@@ -73,7 +73,8 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>): Too
   const subject =
     call.changes.length === 1 ? oneLine(first.path) : `${call.changes.length} files · ${oneLine(first.path)} ...`;
   const complete = call.changes.every((change) => change.diffstat !== undefined);
-  if (!complete) return { label, text: subject };
+  if (!complete && (state === "active" || state === "unsettled")) return { label, text: subject };
+  if (!complete) return { label, text: `${subject} — +? -?` };
   const totals = call.changes.reduce(
     (sum, change) => ({
       added: sum.added + change.diffstat!.added,
@@ -102,7 +103,7 @@ export function toolRepr(row: ToolRow): ToolRepr {
       core = { label: searchLabel(row.call.scope), text: searchText(row.call) };
       break;
     case "fileChange":
-      core = fileChange(row.call);
+      core = fileChange(row.call, row.state);
       break;
     case "other":
       core = { label: "use", text: oneLine(row.call.display || row.name) };

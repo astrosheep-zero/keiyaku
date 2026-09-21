@@ -147,6 +147,13 @@ function isActiveTool(row: ActivityRow): boolean {
   return row.kind === "tool" && row.state === "active";
 }
 
+function isProtectedCurrentTurnActivity(row: ActivityRow): boolean {
+  return (
+    row.kind === "said" ||
+    (row.kind === "tool" && row.call.kind === "fileChange" && row.state !== "active" && row.state !== "unsettled")
+  );
+}
+
 function isSettledTellDeliveredTo(row: ActivityRow, turnSequence: number): row is TellRow {
   return (
     row.kind === "tell" &&
@@ -205,6 +212,7 @@ export function selectSnapshot(
     const opening = openingInput(ledger);
     const pinSet = new Set<ActivityRow>([
       ...window.filter(isActiveTool),
+      ...window.filter(isProtectedCurrentTurnActivity),
       ...pins,
       ...(opening === undefined ? [] : [opening]),
     ]);

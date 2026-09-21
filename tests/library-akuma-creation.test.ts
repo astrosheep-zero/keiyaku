@@ -111,6 +111,15 @@ function slowEmptyPublicationBody() {
   };
 }
 
+async function assertBirthSettledAtTell(world: WorldRoot, akumaId: string): Promise<void> {
+  const paths = pathsForAkuId(world, parseAkuId(akumaId).id);
+  const heart = await readHeart(paths);
+  assert.equal(heart.latestBody?.end, "exited");
+  const leash = await HeldAkumaLeash.try(paths);
+  assert.notEqual(leash, null, "schema Tell must observe the released birth leash");
+  leash?.release();
+}
+
 test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -136,6 +145,7 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
     return status;
   });
   t.mock.method(PublicAkuma.prototype, "tell", async function (this: PublicAkuma, ...args: Parameters<typeof tell>) {
+    await assertBirthSettledAtTell(world, this.id);
     assert.equal(birthSettled, true, "schema Tell must await the prompt-free birth Body");
     return await tell.apply(this, args);
   });
@@ -232,6 +242,7 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
     assert.deepEqual(result.observation.kind, "observed");
     if (result.observation.kind === "observed") assert.equal(result.observation.reason, "deadline");
     assert.equal(result.schemaAnswer, undefined);
+    assert.deepEqual((await readHeart(pathsForAkuId(world, parseAkuId(held.id).id))).pending, []);
     assert.equal((await readHeart(pathsForAkuId(world, parseAkuId(held.id).id))).latestBody?.end, undefined);
     operationFailed = false;
   } finally {
@@ -247,6 +258,68 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
       if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
     } finally {
       restoreEmptyPublicationBarrier();
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
+
+test("schema Keiyaku.call skips Tell after a non-asleep terminal birth", async (t) => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const schema = Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let akumaId: string | undefined;
+  let tellCalls = 0;
+  let operationFailed = true;
+  t.mock.method(AkumaHandle.prototype, "wait", async function (this: AkumaHandle) {
+    return {
+      id: this.id,
+      life: "killed",
+      allowed: [],
+      timeline: { kind: "idle", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
+    } as never;
+  });
+  t.mock.method(PublicAkuma.prototype, "tell", async function () {
+    tellCalls += 1;
+    throw new Error("schema Tell must not be admitted after a terminal birth");
+  });
+  try {
+    const result = await Keiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "terminal-birth-schema-call",
+      cwd: world,
+      ...configured.placement,
+      mode: "detach",
+      schema,
+    });
+    akumaId = result.akuma;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(result.observation.kind, "detached");
+    assert.equal(tellCalls, 0);
+    assert.deepEqual((await readHeart(pathsForAkuId(world, parseAkuId(result.akuma).id))).pending, []);
+    operationFailed = false;
+  } finally {
+    try {
+      if (akumaId !== undefined)
+        await PublicAkuma.select(world, akumaId)
+          .kill()
+          .catch(() => undefined);
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();
     }

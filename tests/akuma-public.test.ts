@@ -40,7 +40,7 @@ import {
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaPaths, akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
@@ -589,8 +589,8 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
   assert.equal(zero.snapshot.kind, "open");
   if (zero.snapshot.kind === "open") {
     assert.equal(zero.snapshot.openingSequence, 5);
-    assert.deepEqual(snapshotSequences(zero.snapshot), [5, "gap:6"]);
-    assert.equal(zero.snapshot.omitted, 6);
+    assert.deepEqual(snapshotSequences(zero.snapshot), [5, 6, "gap:2", 9, "gap:2"]);
+    assert.equal(zero.snapshot.omitted, 4);
   }
   assert.equal(zero.ordinaryCount, 0);
 
@@ -601,7 +601,37 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
     assert.equal(snapshotSequences(defaultBudget.snapshot).filter((sequence) => sequence === 5).length, 1);
     assert.equal(snapshotSequences(defaultBudget.snapshot).includes(2), false);
   }
-  assert.equal(defaultBudget.ordinaryCount, 5);
+  assert.equal(defaultBudget.ordinaryCount, 4);
+});
+
+test("open snapshots protect every settled say and file change at zero budget", () => {
+  const completedTool = (sequence: number, id: string, call: ToolCall) =>
+    activityFact(sequence, 1, `2026-08-10T00:00:${String(sequence).padStart(2, "0")}.000Z`, {
+      type: "tool",
+      phase: "completed",
+      id,
+      name: "tool",
+      call,
+      result: { status: "ok" },
+    });
+  const ledger = projectTurns([
+    { kind: "turn-start" as const, sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
+    { kind: "call" as const, sequence: 2, turnSequence: 1, at: "2026-08-10T00:00:02.000Z", body: "current" },
+    completedTool(3, "ordinary-1", { kind: "run", command: "ordinary-1" }),
+    activityFact(4, 1, "2026-08-10T00:00:04.000Z", { type: "assistant", text: "say one" }),
+    completedTool(5, "file-1", { kind: "fileChange", changes: [{ op: "update", path: "src/one.ts" }] }),
+    completedTool(6, "ordinary-2", { kind: "run", command: "ordinary-2" }),
+    activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "assistant", text: "say two" }),
+    completedTool(8, "file-2", { kind: "fileChange", changes: [{ op: "update", path: "src/two.ts" }] }),
+  ]);
+  const selected = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
+
+  assert.equal(selected.snapshot.kind, "open");
+  if (selected.snapshot.kind === "open") {
+    assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, 5, "gap:1", 7, 8]);
+    assert.equal(selected.snapshot.omitted, 2);
+  }
+  assert.equal(selected.ordinaryCount, 0);
 });
 
 test("open snapshots select the retained launch Tell only without a current-Turn call", () => {
@@ -658,7 +688,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
   assert.equal(launch.snapshot.kind, "open");
   if (launch.snapshot.kind === "open") {
     assert.equal(launch.snapshot.openingSequence, 1);
-    assert.deepEqual(snapshotSequences(launch.snapshot), [1, "gap:4"]);
+    assert.deepEqual(snapshotSequences(launch.snapshot), [1, "gap:1", 5, "gap:2"]);
     assert.equal(launch.snapshot.entries.filter((entry) => entry.kind === "row" && entry.row.sequence === 1).length, 1);
     assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 6), false);
     assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 7), false);
@@ -728,12 +758,13 @@ test("opening input composes with existing actionable and receipt pins without a
   assert.equal(monitoring.snapshot.kind, "open");
   if (monitoring.snapshot.kind === "open") {
     assert.equal(monitoring.snapshot.openingSequence, 1);
-    assert.deepEqual(snapshotSequences(monitoring.snapshot), [1, "gap:2", 5, 6, "gap:1"]);
+    assert.deepEqual(snapshotSequences(monitoring.snapshot), [1, 3, "gap:1", 5, 6, "gap:1"]);
   }
   assert.equal(monitoring.ordinaryCount, 0);
   const budgeted = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1, voice: 0 } });
   assert.equal(budgeted.snapshot.kind, "open");
-  if (budgeted.snapshot.kind === "open") assert.deepEqual(snapshotSequences(budgeted.snapshot), [1, "gap:2", 5, 6, 7]);
+  if (budgeted.snapshot.kind === "open")
+    assert.deepEqual(snapshotSequences(budgeted.snapshot), [1, 3, "gap:1", 5, 6, 7]);
   assert.equal(budgeted.ordinaryCount, 1);
   const receipt = selectSnapshot(ledger, {
     aperture: "receipt",
@@ -743,7 +774,7 @@ test("opening input composes with existing actionable and receipt pins without a
   assert.equal(receipt.kind, "open");
   if (receipt.kind === "open") {
     assert.equal(receipt.openingSequence, 1);
-    assert.deepEqual(snapshotSequences(receipt), [1, "gap:2", 5, 7]);
+    assert.deepEqual(snapshotSequences(receipt), [1, 3, "gap:1", 5, 7]);
     assert.equal(receipt.entries.filter((entry) => entry.kind === "row" && entry.row.sequence === 1).length, 1);
   }
 });
@@ -1022,8 +1053,8 @@ test("reported file changes keep the newest five independently of ordinary omiss
   assert.equal(view.reportedChanges.at(-1)?.op, "update");
   assert.equal(view.reportedChanges.at(-1)?.diffstat, undefined);
   assert.equal(view.reportedChangesOmitted, 2);
-  assert.equal(view.omitted, 5);
-  assert.deepEqual(view.entries, [{ kind: "gap", count: 5 }]);
+  assert.equal(view.omitted, 3);
+  assert.deepEqual(snapshotSequences(view), [2, "gap:1", 5, "gap:2"]);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {

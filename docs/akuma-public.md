@@ -45,10 +45,13 @@ content or delivery metadata.
 
 The ordinary current-work window is the open Turn's call and provider activity
 along with its retained settled delivered Tells, all in durable sequence order.
-Only the selected opening input and the existing active, pending, and
-receipt-specific evidence remain pins; a later or unrelated settled Tell gains
-no global status privilege. Its omission gaps therefore describe only that
-current window, never an earlier Turn or unrelated Tell.
+Every settled say and typed file-change activity row in that current Turn is
+also protected from the ordinary status budget. Only the selected opening
+input and the existing active, pending, and receipt-specific evidence add their
+own pins; a later or unrelated settled Tell gains no global status privilege.
+Its omission gaps therefore describe only that current window, never an earlier
+Turn or unrelated Tell. Protection is derived from retained activity meaning,
+not inferred paths, diffstats, or filesystem state.
 
 Placement discharges reported changes at the observation composition. While the
 Akuma's dispatch-associated Contract is active, a composed status surfaces them

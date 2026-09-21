@@ -2,14 +2,14 @@ import { createDefaultWakeTransport, createHostLedgerPort, Square, squareAssigne
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
-function squareEnvironment(environment, path) {
+function squareEnvironment(environment) {
     const ledgerRoot = environment.SQUARE_REGISTRY === undefined ? undefined : dirname(environment.SQUARE_REGISTRY);
     return {
         ...environment,
         SQUARE_HOST_LEDGER_USER: environment.SQUARE_HOST_LEDGER_USER ?? ledgerRoot ?? join(homedir(), ".square", "host-ledger"),
         SQUARE_HOST_LEDGER_LOCAL: environment.SQUARE_HOST_LEDGER_LOCAL ??
             ledgerRoot ??
-            join(environment.PWD ?? dirname(path), ".square", "host-ledger"),
+            join(environment.PWD ?? process.cwd(), ".square", "host-ledger"),
     };
 }
 function hostLedger(environment) {
@@ -65,7 +65,7 @@ const plugin = {
     },
     async activate(context) {
         const path = join(context.writablePath("square"), "KEIYAKU.square");
-        const environment = squareEnvironment(process.env, path);
+        const environment = squareEnvironment(process.env);
         const ledger = hostLedger(environment);
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         let caller;

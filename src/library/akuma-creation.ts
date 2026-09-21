@@ -542,7 +542,8 @@ async function publishCall(born: BornCall, execution: ExecutionContext): Promise
         ...(born.signal === undefined ? {} : { signal: born.signal }),
       })
       .then(async (initial) => {
-        if (!defaultWaitComplete(initial) || (deadline !== undefined && remaining() <= 0)) return undefined;
+        if (initial.life !== "asleep" || !defaultWaitComplete(initial) || (deadline !== undefined && remaining() <= 0))
+          return undefined;
         const signal = schemaSignal();
         try {
           return execution.channel.kind === "body-request"

@@ -258,8 +258,24 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
       });
     }
     assert.deepEqual(
-      (await expressions(squarePath(root))).map(({ mentions }) => mentions),
-      [["Alice"], ["Bob"], []],
+      await expressions(squarePath(root)),
+      [
+        {
+          actor: "aku/worker",
+          body: "aku/worker turn/1 (@Alice)\n× fixture failure\nignore if you have already seen this.",
+          mentions: ["Alice"],
+        },
+        {
+          actor: "aku/worker",
+          body: "aku/worker turn/2 (@Bob)\n× fixture failure\nignore if you have already seen this.",
+          mentions: ["Bob"],
+        },
+        {
+          actor: "aku/worker",
+          body: "aku/worker turn/3\n× fixture failure\nignore if you have already seen this.",
+          mentions: [],
+        },
+      ],
     );
   } finally {
     restoreEnvironment(prior);
@@ -267,10 +283,11 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
   }
 });
 
-test("the Square plugin keeps its default local ledger under PWD rather than World", async () => {
+test("the Square plugin uses the submitting cwd without PWD and honors a local-ledger override", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-square-pwd-"));
   const world = join(root, "world");
   const cwd = join(root, "execution");
+  const priorCwd = process.cwd();
   const prior = {
     PWD: process.env.PWD,
     SQUARE_REGISTRY: process.env.SQUARE_REGISTRY,
@@ -281,10 +298,11 @@ test("the Square plugin keeps its default local ledger under PWD rather than Wor
   try {
     mkdirSync(join(world, ".square"), { recursive: true });
     mkdirSync(cwd);
-    process.env.PWD = cwd;
+    process.chdir(cwd);
+    delete process.env.PWD;
     delete process.env.SQUARE_REGISTRY;
     delete process.env.SQUARE_HOST_LEDGER_LOCAL;
-    process.env.SQUARE_PARTICIPANT_NAME = "fixture-pwd";
+    process.env.SQUARE_PARTICIPANT_NAME = "fixture-no-pwd";
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
     const instance = await squarePlugin.activate({
       world: world as unknown as WorldRoot,
@@ -299,11 +317,30 @@ test("the Square plugin keeps its default local ledger under PWD rather than Wor
     });
     const presence = join(cwd, ".square", "host-ledger", "presence.ndjsonl");
     assert.equal(existsSync(presence), true);
-    assert.match(readFileSync(presence, "utf8"), /fixture-pwd/u);
-    assert.equal(existsSync(join(world, ".square", "host-ledger")), false);
+    assert.match(readFileSync(presence, "utf8"), /fixture-no-pwd/u);
+    assert.equal(existsSync(join(world, ".square", ".square", "host-ledger")), false);
     assert.equal(existsSync(squarePath(world)), true);
     assert.equal(existsSync(squarePath(cwd)), false);
+
+    const override = join(root, "override-ledger");
+    process.env.SQUARE_HOST_LEDGER_LOCAL = override;
+    process.env.SQUARE_PARTICIPANT_NAME = "fixture-override";
+    const overridden = await squarePlugin.activate({
+      world: world as unknown as WorldRoot,
+      config: undefined,
+      writablePath: () => join(world, ".square"),
+    });
+    const overrideHandler = overridden.signals?.["akuma.called"];
+    assert.ok(overrideHandler);
+    await overrideHandler({
+      kind: "akuma.called",
+      akumaId: "aku/override-local",
+    });
+    const overridePresence = join(override, "presence.ndjsonl");
+    assert.equal(existsSync(overridePresence), true);
+    assert.match(readFileSync(overridePresence, "utf8"), /fixture-override/u);
   } finally {
+    process.chdir(priorCwd);
     restoreEnvironment(prior);
     rmSync(root, { recursive: true, force: true });
   }

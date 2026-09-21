@@ -15,7 +15,13 @@ import {
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
-import { parseAkumaStatus, type ActivityRow, type AkumaStatus, type OutcomeRow } from "../src/akuma/akuma.js";
+import {
+  parseAkumaStatus,
+  type ActivityRow,
+  type AkumaStatus,
+  type CompletedToolRow,
+  type OutcomeRow,
+} from "../src/akuma/akuma.js";
 import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
 import type { DispatchAssociation } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
@@ -1117,6 +1123,32 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
+test("settled file changes retain exact stats or show unknown stats", () => {
+  const snapshot = openAkumaSnapshot([
+    snapshotRow(
+      completedTool(1, "edit", {
+        kind: "fileChange",
+        changes: [{ op: "update", path: "src/exact.ts", diffstat: { added: 2, removed: 1 } }],
+      }),
+    ),
+    snapshotRow(completedTool(2, "write", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] })),
+    snapshotRow(
+      completedTool(3, "edit", {
+        kind: "fileChange",
+        changes: [
+          { op: "update", path: "src/known.ts", diffstat: { added: 3, removed: 2 } },
+          { op: "update", path: "src/unknown.ts" },
+        ],
+      }),
+    ),
+  ]);
+  const lines = snapshotActivityLines(snapshot, { columns: 120, color: false });
+
+  assert.ok(lines.some((line) => line.includes("src/exact.ts — +2 -1")));
+  assert.ok(lines.some((line) => line.includes("src/unknown.ts — +? -?")));
+  assert.ok(lines.some((line) => line.includes("2 files · src/known.ts ... — +? -?")));
+});
+
 test("World roster keeps the honest fallback for unknown tool calls", () => {
   const snapshot = openAkumaSnapshot([
     snapshotRow(completedTool(1, "mystery", { kind: "other", display: "Mystery Tool" })),
@@ -1671,6 +1703,48 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
   for (const sequence of [6, 7, 8, 10]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
   assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 1, "only four eligible tools are omitted");
   assert.doesNotMatch(text, /hidden-[123]/u);
+});
+
+test("file changes stream through a crowded live tool tail without spending its budget", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
+  const fileChange = (sequence: number, path: string, state: CompletedToolRow["state"] = { status: "ok" }) =>
+    snapshotRow(completedTool(sequence, "edit", { kind: "fileChange", changes: [{ op: "update", path }] }, state));
+  const say = (sequence: number, text: string) =>
+    snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
+  const rows = [
+    tool(1),
+    tool(2),
+    tool(3),
+    say(4, "say-one"),
+    fileChange(5, "src/first.ts"),
+    tool(6),
+    say(7, "say-two"),
+    fileChange(8, "src/second.ts", { status: "error", message: "refused" }),
+    tool(9),
+    say(10, "say-three"),
+    fileChange(11, "src/third.ts"),
+    tool(12),
+    tool(13),
+  ];
+  const stream = activityStream({ columns: 120, color: false });
+  const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
+  const assertEvidenceOrder = (expected: readonly string[]): void => {
+    let previous = -1;
+    for (const evidence of expected) {
+      const index = text.indexOf(evidence);
+      assert.ok(index > previous, `${evidence} follows its projected predecessor:\n${text}`);
+      assert.equal(text.split(evidence).length - 1, 1, `${evidence} renders once:\n${text}`);
+      previous = index;
+    }
+  };
+
+  assertEvidenceOrder(["src/first.ts", "src/second.ts", "src/third.ts"]);
+  assertEvidenceOrder(["say-one", "say-two", "say-three"]);
+  assert.match(text, /src\/second\.ts — \+\? -\? — error · refused/u);
+  for (const sequence of [1, 2, 3, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  for (const sequence of [6, 9]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.equal((text.match(/⋮ 1 omitted/gu) ?? []).length, 2);
 });
 
 test("a plural wait gives each target its own whole-command tool budget", () => {
