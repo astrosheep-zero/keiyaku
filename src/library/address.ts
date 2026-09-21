@@ -1,8 +1,7 @@
 /** @architectureCompositionRoot */
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
-import { probeBornAkuma } from "../akuma/akuma-probe.js";
-import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
+import { akumaAddressability, requireBornAkuma } from "../akuma/akuma-probe.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";
@@ -26,23 +25,6 @@ export type AkumaAddressInput = Readonly<{
   akuma: string;
   repo?: Repo;
 }>;
-
-/**
- * Local addressing proves the selected Akuma is born. A forwarded request
- * leaves that proof to the parent, whose Fleet owns the answer, so its caller
- * resolves coordinates without reading this process's Heart files.
- */
-export type AkumaAddressOptions = Readonly<{ proveBorn?: boolean }>;
-
-async function requireBorn(path: WorldRoot, id: AkuId): Promise<void> {
-  let born: boolean;
-  try {
-    born = await probeBornAkuma(path, id);
-  } catch (error) {
-    throw new AkumaObservationError(id, error instanceof Error ? error.message : String(error));
-  }
-  if (!born) throw new AkumaNotBornError(id);
-}
 
 export type AkumaSetAddressInput = Readonly<{
   path: WorldRoot;
@@ -162,15 +144,17 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias });
 }
 
-export async function addressAkuma(
-  input: UncheckedAkumaAddressInput,
-  options: AkumaAddressOptions = {},
-): Promise<
-  Readonly<{
-    path: WorldRoot;
-    id: AkuId;
-  }>
-> {
+type AddressedAkuma = Readonly<{
+  path: WorldRoot;
+  id: AkuId;
+}>;
+
+/**
+ * Resolves one selector to a complete identity without proving it born. The
+ * caller is a forwarding boundary: the parent Fleet answers for the target, so
+ * this process must not read its own Heart files to decide.
+ */
+export async function resolveAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
@@ -180,8 +164,17 @@ export async function addressAkuma(
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
   const id = await directId(path, nonblank(values.akuma, "akuma"));
-  if (options.proveBorn !== false) await requireBorn(path, id);
   return { path, id };
+}
+
+/**
+ * Resolves one selector against this World, where a local caller is answered
+ * for the target's birth by the one addressability normalization.
+ */
+export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
+  const addressed = await resolveAkuma(input);
+  await requireBornAkuma(addressed.path, addressed.id);
+  return addressed;
 }
 
 type ParsedSetSelector =
@@ -238,12 +231,9 @@ function addSelectorIds(
 }
 
 async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolean> {
-  try {
-    return await probeBornAkuma(path, id);
-  } catch {
-    // A dispatched physical member remains selected when its Heart cannot be read.
-    return true;
-  }
+  // A dispatched physical member stays selected when its Heart cannot be read:
+  // the World, not this reader, remains the authority on its membership.
+  return (await akumaAddressability(path, id)).kind !== "absent";
 }
 
 async function refuseForeignContractMembers(
@@ -258,18 +248,23 @@ async function refuseForeignContractMembers(
   if (foreign.length > 0) throw new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: foreign, world: path });
 }
 
-export async function addressAkumaSet(
-  input: UncheckedAkumaAddressInput,
-  options: AkumaAddressOptions = {},
-): Promise<
-  Readonly<{
-    path: WorldRoot;
-    /** The complete selected set in canonical order. */
-    ids: readonly AkuId[];
-    /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
-    orderedIds: readonly AkuId[];
-  }>
-> {
+type ResolvedAkumaSet = Readonly<{
+  path: WorldRoot;
+  /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
+  orderedIds: readonly AkuId[];
+  /** The canonical order of the selected set. */
+  ids: readonly AkuId[];
+  contractMembers: ReadonlySet<AkuId>;
+  explicit: ReadonlySet<AkuId>;
+}>;
+
+function canonicalAkumaOrder(selected: ReadonlySet<AkuId>): readonly AkuId[] {
+  const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
+  return ids;
+}
+
+async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<ResolvedAkumaSet> {
   const values = requireInput(input, "Akuma set address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
@@ -297,12 +292,26 @@ export async function addressAkumaSet(
   const explicit = new Set<AkuId>();
   const sources = { fleetIds, aliases, dispatches };
   for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
-  if (options.proveBorn !== false) {
-    for (const id of explicit) await requireBorn(path, id);
-  }
-  const orderedIds = [...selected];
-  const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
-  if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
-  await refuseForeignContractMembers(path, ids, contractMembers);
-  return { path, ids, orderedIds };
+  return { path, orderedIds: [...selected], ids: canonicalAkumaOrder(selected), contractMembers, explicit };
+}
+
+/**
+ * Resolves a selector set to complete identities without proving any born. The
+ * caller is a forwarding boundary, the parent Fleet owns the answer, and no
+ * member's Heart is read here.
+ */
+export async function resolveAkumaSet(
+  input: UncheckedAkumaAddressInput,
+): Promise<Readonly<{ path: WorldRoot; ids: readonly AkuId[]; orderedIds: readonly AkuId[] }>> {
+  const resolved = await readAkumaSet(input);
+  return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds };
+}
+
+export async function addressAkumaSet(
+  input: UncheckedAkumaAddressInput,
+): Promise<Readonly<{ path: WorldRoot; ids: readonly AkuId[]; orderedIds: readonly AkuId[] }>> {
+  const resolved = await readAkumaSet(input);
+  for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id);
+  await refuseForeignContractMembers(resolved.path, resolved.ids, resolved.contractMembers);
+  return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds };
 }

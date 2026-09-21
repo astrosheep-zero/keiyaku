@@ -32,7 +32,14 @@ import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { WorldRoot } from "../world.js";
-import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
+import {
+  addressAkuma,
+  addressAkumaSet,
+  resolveAkuma,
+  resolveAkumaSet,
+  type AkumaAddressInput,
+  type AkumaSetAddressInput,
+} from "./address.js";
 import { requireInput } from "./input.js";
 import {
   fleetResultSchemas,
@@ -378,7 +385,6 @@ export async function waitAkuma(
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
-  const addressed = await addressAkumaSet(setAddress(values), { proveBorn: channel.kind !== "body-request" });
   const repo = values.repo as Repo | undefined;
   const mode = {
     completion: selected,
@@ -386,9 +392,14 @@ export async function waitAkuma(
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     ...(repo === undefined ? {} : { repo }),
   };
-  return channel.kind === "body-request"
-    ? await forwardedWait(addressed, { ...mode, directory: channel.directory })
-    : await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) });
+  if (channel.kind === "body-request") {
+    // A forwarded operation resolves coordinates without proving birth: the
+    // parent Fleet owns the target, so this process never probes locally.
+    const addressed = await resolveAkumaSet(setAddress(values));
+    return await forwardedWait(addressed, { ...mode, directory: channel.directory });
+  }
+  const addressed = await addressAkumaSet(setAddress(values));
+  return await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) });
 }
 
 export async function killAkuma(
@@ -403,14 +414,15 @@ export async function killAkuma(
   }
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
-  const addressed = await addressAkumaSet(setAddress(values), { proveBorn: channel.kind !== "body-request" });
   if (channel.kind === "body-request") {
+    const addressed = await resolveAkumaSet(setAddress(values));
     return await requestForwardedFleetKill({
       directory: channel.directory,
       targets: addressed.orderedIds,
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
   }
+  const addressed = await addressAkumaSet(setAddress(values));
   return await executeKillAkuma({
     path: addressed.path,
     ids: addressed.orderedIds,
@@ -431,8 +443,8 @@ export async function tellAkuma(
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
-  const addressed = await addressAkuma(directAddress(values), { proveBorn: channel.kind !== "body-request" });
   if (channel.kind === "body-request") {
+    const addressed = await resolveAkuma(directAddress(values));
     return await requestForwardedFleetTell({
       directory: channel.directory,
       target: addressed.id,
@@ -441,6 +453,7 @@ export async function tellAkuma(
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
   }
+  const addressed = await addressAkuma(directAddress(values));
   return await executeTellAkuma({
     path: addressed.path,
     id: addressed.id,
@@ -473,9 +486,10 @@ export async function tellWaitAkuma(
     throw new TypeError("interrupt must be a boolean");
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
-  // Route before proving the target locally: a forwarded Tell is resolved by its serving parent.
-  const addressed = await addressAkuma(directAddress(values), { proveBorn: channel.kind !== "body-request" });
   if (channel.kind === "body-request") {
+    // A forwarded Tell is resolved by its serving parent, so this process must
+    // not prove the target against its own Heart files.
+    const addressed = await resolveAkuma(directAddress(values));
     return await requestForwardedFleetTellWait({
       directory: channel.directory,
       target: addressed.id,
@@ -487,6 +501,7 @@ export async function tellWaitAkuma(
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
   }
+  const addressed = await addressAkuma(directAddress(values));
   return await executeTellWaitAkuma({
     path: addressed.path,
     id: addressed.id,

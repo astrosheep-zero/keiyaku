@@ -30,7 +30,7 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { killAkuma, tellAkuma, tellWaitAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
-import { addressAkuma } from "../../library/address.js";
+import { addressAkuma, resolveAkuma } from "../../library/address.js";
 import { executionChannel } from "../../akuma/requests.js";
 import { AkumaDecodeError } from "../../akuma/akuma-errors.js";
 import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
@@ -358,14 +358,14 @@ async function invokeTell(
   if (command.schema !== undefined) {
     const schema = await schemaFromFile(command.schema);
     const channel = executionChannel(input.execution);
-    const addressed = await addressAkuma(
-      {
-        path: input.path,
-        akuma: command.akuma,
-        ...(input.repo === undefined ? {} : { repo: input.repo }),
-      },
-      { proveBorn: channel.kind !== "body-request" },
-    );
+    const values = {
+      path: input.path,
+      akuma: command.akuma,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+    };
+    // A forwarded answer lets the parent Fleet prove the target, so it resolves
+    // coordinates here and never reads this process's own Heart files.
+    const addressed = channel.kind === "body-request" ? await resolveAkuma(values) : await addressAkuma(values);
     const initiator = await inputInitiator(input);
     const answer =
       channel.kind === "body-request"

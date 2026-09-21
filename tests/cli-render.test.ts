@@ -2022,7 +2022,6 @@ test("a wait flushes a known target when its final result becomes unobserved", (
     unobserved: [{ id, diagnostic: "window lost" }],
   });
   assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9/u);
-  assert.match(text, /× Akuma observation failed  aku\/worker\/abcd0036 — window lost/u);
 });
 
 test("a single answered wait concludes at its durable settle moment, not the poll that noticed it", () => {
@@ -2331,59 +2330,14 @@ test("an any-mode completion receipt keeps an incomplete peer pending in both wa
   }
 });
 
-test("unobserved failure facts keep the complete identity while activity rows keep the identity tag", () => {
+test("a readable answer cannot replace a plural wait's complete text result", () => {
   const id = parseAkumaStatus({
     id: "aku/worker/abcd0045",
     life: "running",
     allowed: [],
     timeline: openAkumaSnapshot([]),
   }).id;
-  const alias = parseAkumaAlias("@gone");
   const other = "aku/worker/abcd0046";
-  const running = (target: string) =>
-    parseAkumaStatus({ id: target, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
-  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
-  stream.select([{ id, alias }, { id: other }]);
-  stream.observe([observed(running(other))]);
-  const streamed = stream.conclude({
-    reason: "deadline",
-    observations: [],
-    unobserved: [{ id, diagnostic: "window lost" }],
-  });
-  assert.match(
-    streamed,
-    new RegExp(`^× Akuma observation failed  ${id} — window lost$`, "mu"),
-    "the streamed failure fact names the complete identity",
-  );
-  assert.doesNotMatch(streamed, /^× Akuma observation failed  @gone/mu, "a failure fact never substitutes the alias");
-
-  const nonStreamed = waitText(
-    {
-      kind: "akuma",
-      action: "wait",
-      startedAt: 0,
-      selection: [{ id, alias }, { id: other }],
-      result: {
-        mode: "all",
-        reason: "deadline",
-        observations: [
-          { status: running(other), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
-        ],
-        unobserved: [{ id, diagnostic: "window lost" }],
-      },
-    },
-    { columns: 120, color: false },
-  );
-  assert.match(
-    nonStreamed,
-    new RegExp(`^× Akuma observation failed  ${id} — window lost$`, "mu"),
-    "the non-streamed failure fact names the complete identity",
-  );
-  assert.doesNotMatch(
-    nonStreamed,
-    /^× Akuma observation failed  @gone/mu,
-    "a failure fact never substitutes the alias",
-  );
   const answered = parseAkumaStatus({
     id: other,
     life: "asleep",

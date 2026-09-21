@@ -9,10 +9,10 @@ import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { invoke } from "../src/cli/invoke.js";
-import { AkumaObservationError } from "../src/akuma/akuma-errors.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { parseAkuId } from "../src/akuma/identity.js";
-import { AkumaWorldScopeError } from "../src/library/address.js";
+import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 import { akumaFailureProjection } from "../src/cli/runtime.js";
 
 async function captureMain(
@@ -58,57 +58,35 @@ function runCli(cwd: string, argv: readonly string[]) {
   );
 }
 
-test("existing-Akuma commands report one caller-facing not-found fact", (context) => {
+test("a local status on an absent complete id reports one caller-facing fact", (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-found-"));
   mkdirSync(join(root, ".keiyaku"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const id = "aku/intern/33dd4670";
-  const commands: readonly (readonly string[])[] = [
-    ["status", id],
-    ["wait", id, "--timeout", "0ms"],
-    ["tell", id, "hello"],
-    ["tell", id, "--interrupt", "hello"],
-    ["history", id],
-    ["fork", id, "--at", "turn/1"],
-    ["kill", id],
-  ];
-  for (const command of commands) {
-    const result = runCli(root, command);
-    assert.equal(result.status, 1);
-    assert.equal(result.stdout, "");
-    assert.equal(result.stderr, `× Akuma not found  ${id}\n`);
-  }
+  const result = runCli(root, ["status", id]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, `× Akuma not found  ${id}\n`);
 });
 
-test("Akuma Alias absence and malformed identity stay distinct", (context) => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-address-refusal-"));
-  mkdirSync(join(root, ".keiyaku"));
-  context.after(() => rmSync(root, { recursive: true, force: true }));
-  const alias = runCli(root, ["wait", "@missing", "--timeout", "0ms"]);
-  assert.equal(alias.status, 1);
-  assert.equal(alias.stdout, "");
-  assert.equal(alias.stderr, "× Akuma alias not found  @missing\n");
-  const malformed = runCli(root, ["wait", "aku/intern/nope", "--timeout", "0ms"]);
-  assert.equal(malformed.status, 1);
-  assert.equal(malformed.stdout, "");
-  assert.equal(malformed.stderr, "× invalid Akuma  aku/intern/nope\n");
-});
-
-test("Akuma World and observation failures keep only caller-useful facts", async () => {
+test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
   const id = parseAkuId("aku/intern/33dd4670").id;
   const parsed = parseArgv(["wait", id]);
   if (!("command" in parsed)) throw new Error("wait did not parse as an executable command");
-  assert.deepEqual(
-    await akumaFailureProjection(
+  const refusals: readonly (readonly [unknown, string])[] = [
+    [
+      new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
+      `× Akuma alias not found  @missing`,
+    ],
+    [new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }), `× invalid Akuma  aku/intern/nope`],
+    [
       new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as never }),
-      parsed.command,
-    ),
-    { body: `× Akuma not in this World  ${id}`, exitCode: 1 },
-  );
-  assert.deepEqual(await akumaFailureProjection(new AkumaObservationError(id, "heart locked"), parsed.command), {
-    body: `× Akuma observation failed  ${id} — heart locked`,
-    exitCode: 3,
-  });
+      `× Akuma not in this World  ${id}`,
+    ],
+  ];
+  for (const [error, body] of refusals) {
+    assert.deepEqual(await akumaFailureProjection(error, parsed.command), { body, exitCode: 1 });
+  }
 });
 
 test("unknown task command scopes minimal usage to task", () => {

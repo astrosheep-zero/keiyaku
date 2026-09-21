@@ -17,6 +17,7 @@ import {
   initializeHeart,
   readHeart,
   readRequest,
+  stopRequested,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
@@ -36,7 +37,7 @@ import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
-import { waitAkuma, tellAkuma, tellWaitAkuma, killAkuma } from "../src/library/fleet.js";
+import { waitAkuma, tellAkuma, tellWaitAkuma } from "../src/library/fleet.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,
@@ -1304,59 +1305,100 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
   }
 });
 
-test("a forwarded Fleet refusal keeps the parent's typed selection failure", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-")));
-  const parent = await born(root, "parent", "43434343");
+test("a plural forwarded kill refuses before it requests any member's kill", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-partial-effect-")));
+  const parent = await born(root, "parent", "46464646");
+  const target = await born(root, "worker", "abcd0046");
+  // A killable member: without its Body a kill would record nothing anyway, so
+  // this is what makes the test able to catch an operation that ran too early.
+  const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
+  await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   const absent = "aku/intern/33dd4670" as AkuId;
   const pump = await openFleetPump(parent, fleetRequestPort(root));
-  const named = (error: unknown): boolean => error instanceof AkumaNotBornError && error.id === absent;
+  const id = randomUUID();
   try {
     await assert.rejects(
-      waitAkuma({ path: root, akuma: [absent] }, bodyRequestExecutionContext(pump.directory)),
-      named,
+      requestBodyKill({ directory: pump.directory, id, targets: [target.id, absent] }),
+      (error: unknown) => error instanceof AkumaNotBornError && error.id === absent,
     );
-    await assert.rejects(
-      tellAkuma({ path: root, akuma: absent, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
-      named,
-    );
-    await assert.rejects(
-      killAkuma({ path: root, akuma: [absent] }, bodyRequestExecutionContext(pump.directory)),
-      named,
-    );
+    // The whole operation refused, so the request truthfully claims no effect
+    // and the killable member was never asked to stop.
+    assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+    assert.equal(await stopRequested(target.paths), false);
   } finally {
+    targetLeash.release();
     await pump.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("a forwarded Fleet request keeps an unreadable target's reason", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-unreadable-")));
-  const parent = await born(root, "parent", "45454545");
-  const target = await born(root, "worker", "abcd0045");
-  await writeFile(target.paths.heart, "this is not a database\n");
-  const pump = await openFleetPump(parent, fleetRequestPort(root));
-  const named = (error: unknown): boolean => {
-    assert.ok(error instanceof AkumaObservationError);
-    assert.equal(error.id, target.id);
-    assert.notEqual(error.diagnostic, "");
-    return true;
-  };
+test("a forwarded operation answers from the parent World without reading the child's Hearts", async () => {
+  const parentWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-parent-")));
+  const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-child-")));
+  const parent = await born(parentWorld, "parent", "43434343");
+  const target = await born(parentWorld, "worker", "abcd0043");
+  const local = await born(childWorld, "worker", "abcd0043");
+  await writeFile(local.paths.heart, "this is not a database\n");
+  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
   try {
-    await assert.rejects(
-      waitAkuma({ path: root, akuma: [target.id] }, bodyRequestExecutionContext(pump.directory)),
-      named,
+    // The child's own Heart is unreadable here: a local probe would fail this.
+    const result = await waitAkuma(
+      { path: childWorld, akuma: [target.id], timeoutMs: 0 },
+      bodyRequestExecutionContext(pump.directory),
     );
-    await assert.rejects(
-      tellAkuma({ path: root, akuma: target.id, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
-      named,
-    );
-    await assert.rejects(
-      killAkuma({ path: root, akuma: [target.id] }, bodyRequestExecutionContext(pump.directory)),
-      named,
+    assert.deepEqual(
+      result.observations.map((observation) => observation.status.id),
+      [target.id],
     );
   } finally {
     await pump.close();
-    rmSync(root, { recursive: true, force: true });
+    rmSync(parentWorld, { recursive: true, force: true });
+    rmSync(childWorld, { recursive: true, force: true });
+  }
+});
+
+test("a forwarded refusal keeps the parent's answer over the child's local birth", async () => {
+  const parentWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-parent-")));
+  const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-child-")));
+  const parent = await born(parentWorld, "parent", "44434343");
+  const local = await born(childWorld, "intern", "33dd4670");
+  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
+  try {
+    // The target is born only in the child's World, so a locally proved
+    // operation would succeed instead of answering as the parent does.
+    await assert.rejects(
+      waitAkuma({ path: childWorld, akuma: [local.id] }, bodyRequestExecutionContext(pump.directory)),
+      (error: unknown) => error instanceof AkumaNotBornError && error.id === local.id,
+    );
+  } finally {
+    await pump.close();
+    rmSync(parentWorld, { recursive: true, force: true });
+    rmSync(childWorld, { recursive: true, force: true });
+  }
+});
+
+test("a forwarded observation failure keeps the parent's reason", async () => {
+  const parentWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-unreadable-parent-")));
+  const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-unreadable-child-")));
+  const parent = await born(parentWorld, "parent", "45454545");
+  const target = await born(childWorld, "worker", "abcd0045");
+  const mirrored = await born(parentWorld, "worker", "abcd0045");
+  await writeFile(mirrored.paths.heart, "this is not a database\n");
+  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
+  try {
+    await assert.rejects(
+      tellAkuma({ path: childWorld, akuma: target.id, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
+      (error: unknown) => {
+        assert.ok(error instanceof AkumaObservationError);
+        assert.equal(error.id, target.id);
+        assert.notEqual(error.diagnostic, "");
+        return true;
+      },
+    );
+  } finally {
+    await pump.close();
+    rmSync(parentWorld, { recursive: true, force: true });
+    rmSync(childWorld, { recursive: true, force: true });
   }
 });
 
@@ -1445,7 +1487,10 @@ test("bounded forwarded Tell admits once under the request identity", async () =
   try {
     const id = randomUUID();
     const outcomes = await Promise.all(
-      [1, 2].map(async () => await requestBodyTellWait({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 })),
+      [1, 2].map(
+        async () =>
+          await requestBodyTellWait({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 }),
+      ),
     );
     const returned = outcomes.find((value) => value.kind === "returned");
     assert.equal(returned?.kind, "returned");
