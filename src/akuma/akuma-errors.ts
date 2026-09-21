@@ -9,6 +9,17 @@ export class AkumaNotBornError extends Error {
   }
 }
 
+export class AkumaObservationError extends Error {
+  readonly kind = "akuma-observation";
+  constructor(
+    readonly id: AkuId,
+    readonly diagnostic: string,
+  ) {
+    super(`Akuma ${id} observation failed: ${diagnostic}`);
+    this.name = "AkumaObservationError";
+  }
+}
+
 export class AkumaDecodeError extends Error {
   readonly kind = "akuma-decode";
   constructor(

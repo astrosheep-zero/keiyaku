@@ -2,6 +2,7 @@
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { probeBornAkuma } from "../akuma/akuma-probe.js";
+import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";
@@ -26,6 +27,23 @@ export type AkumaAddressInput = Readonly<{
   repo?: Repo;
 }>;
 
+/**
+ * Local addressing proves the selected Akuma is born. A forwarded request
+ * leaves that proof to the parent, whose Fleet owns the answer, so its caller
+ * resolves coordinates without reading this process's Heart files.
+ */
+export type AkumaAddressOptions = Readonly<{ proveBorn?: boolean }>;
+
+async function requireBorn(path: WorldRoot, id: AkuId): Promise<void> {
+  let born: boolean;
+  try {
+    born = await probeBornAkuma(path, id);
+  } catch (error) {
+    throw new AkumaObservationError(id, error instanceof Error ? error.message : String(error));
+  }
+  if (!born) throw new AkumaNotBornError(id);
+}
+
 export type AkumaSetAddressInput = Readonly<{
   path: WorldRoot;
   akuma: readonly string[];
@@ -44,6 +62,21 @@ export type AkumaWorldScopeRefusal = Readonly<{
   world: WorldRoot;
 }>;
 
+export type AkumaAddressRefusal =
+  | Readonly<{ kind: "akuma-alias-not-found"; alias: AkumaAlias }>
+  | Readonly<{ kind: "invalid-akuma"; selector: string }>;
+
+export class AkumaAddressError extends Error {
+  constructor(readonly refusal: AkumaAddressRefusal) {
+    super(
+      refusal.kind === "akuma-alias-not-found"
+        ? `unknown Akuma alias: ${refusal.alias}`
+        : `invalid Akuma: ${refusal.selector}`,
+    );
+    this.name = "AkumaAddressError";
+  }
+}
+
 export class AkumaWorldScopeError extends TypeError {
   readonly refusal: AkumaWorldScopeRefusal;
 
@@ -59,14 +92,32 @@ function nonblank(value: unknown, label: string): string {
   return value;
 }
 
+function parseAddressAlias(selector: string): AkumaAlias {
+  try {
+    return parseAkumaAlias(selector);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new AkumaAddressError({ kind: "invalid-akuma", selector });
+  }
+}
+
+function parseAddressId(selector: string): ReturnType<typeof parseAkuId> {
+  try {
+    return parseAkuId(selector);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new AkumaAddressError({ kind: "invalid-akuma", selector });
+  }
+}
+
 async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
   if (selector.startsWith("@")) {
-    const alias = parseAkumaAlias(selector);
+    const alias = parseAddressAlias(selector);
     const resolved = (await readAliases(path)).find((binding) => binding.alias === alias)?.akuId ?? null;
-    if (resolved === null) throw new TypeError(`unknown Akuma alias: ${alias}`);
+    if (resolved === null) throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias });
     return resolved;
   }
-  return parseAkuId(selector).id;
+  return parseAddressId(selector).id;
 }
 
 export type NamedAddress =
@@ -82,8 +133,8 @@ export type NamedAddressInput = Readonly<{
 export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   const selector = nonblank(input.selector, "selector");
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
-  if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAkuId(selector).id };
-  const alias = parseAkumaAlias(selector);
+  if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAddressId(selector).id };
+  const alias = parseAddressAlias(selector);
   const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter(
     (row) =>
       row.disposition === "active" &&
@@ -108,10 +159,13 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   if (input.aliases.kind === "failed") {
     throw new TypeError("cannot resolve a named selector while Alias authority is failed");
   }
-  throw new TypeError(`unknown selector: ${selector}`);
+  throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias });
 }
 
-export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<
+export async function addressAkuma(
+  input: UncheckedAkumaAddressInput,
+  options: AkumaAddressOptions = {},
+): Promise<
   Readonly<{
     path: WorldRoot;
     id: AkuId;
@@ -125,7 +179,9 @@ export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<
   }
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
-  return { path, id: await directId(path, nonblank(values.akuma, "akuma")) };
+  const id = await directId(path, nonblank(values.akuma, "akuma"));
+  if (options.proveBorn !== false) await requireBorn(path, id);
+  return { path, id };
 }
 
 type ParsedSetSelector =
@@ -139,8 +195,8 @@ function parseSetSelector(raw: string): ParsedSetSelector {
   const selector = nonblank(raw, "akuma selector");
   if (selector.startsWith("kei/")) return { kind: "contract", value: contractId(selector) };
   if (selector.includes("*")) return { kind: "glob", value: parseAkumaGlob(selector) };
-  if (selector.startsWith("@")) return { kind: "alias", value: parseAkumaAlias(selector) };
-  return { kind: "direct", value: parseAkuId(selector).id };
+  if (selector.startsWith("@")) return { kind: "alias", value: parseAddressAlias(selector) };
+  return { kind: "direct", value: parseAddressId(selector).id };
 }
 
 function hasSelectorKind(selectors: readonly ParsedSetSelector[], kind: ParsedSetSelector["kind"]): boolean {
@@ -156,6 +212,7 @@ function addSelectorIds(
   }>,
   selected: Set<AkuId>,
   contractMembers: Set<AkuId>,
+  explicit: Set<AkuId>,
 ): void {
   if (selector.kind === "contract") {
     for (const dispatch of sources.dispatches) {
@@ -171,11 +228,13 @@ function addSelectorIds(
   }
   if (selector.kind === "alias") {
     const id = sources.aliases.get(selector.value);
-    if (id === undefined) throw new TypeError(`unknown Akuma alias: ${selector.value}`);
+    if (id === undefined) throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias: selector.value });
     selected.add(id);
+    explicit.add(id);
     return;
   }
   selected.add(selector.value);
+  explicit.add(selector.value);
 }
 
 async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolean> {
@@ -199,7 +258,10 @@ async function refuseForeignContractMembers(
   if (foreign.length > 0) throw new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: foreign, world: path });
 }
 
-export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promise<
+export async function addressAkumaSet(
+  input: UncheckedAkumaAddressInput,
+  options: AkumaAddressOptions = {},
+): Promise<
   Readonly<{
     path: WorldRoot;
     /** The complete selected set in canonical order. */
@@ -232,8 +294,12 @@ export async function addressAkumaSet(input: UncheckedAkumaAddressInput): Promis
     : [];
   const selected = new Set<AkuId>();
   const contractMembers = new Set<AkuId>();
+  const explicit = new Set<AkuId>();
   const sources = { fleetIds, aliases, dispatches };
-  for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers);
+  for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
+  if (options.proveBorn !== false) {
+    for (const id of explicit) await requireBorn(path, id);
+  }
   const orderedIds = [...selected];
   const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");

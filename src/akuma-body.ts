@@ -1,10 +1,8 @@
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
-import { executeKillAkuma, executeTellAkuma, executeWaitAkuma } from "./akuma/fleet-execution.js";
-import { Akuma as PublicAkuma } from "./akuma/akuma-instance.js";
-import { Schema } from "./akuma/schema.js";
-import { fleetRequestCommands, type FleetRequestPort } from "./akuma/fleet-request.js";
+import { fleetRequestPort } from "./akuma/fleet-owner-port.js";
+import { fleetRequestCommands } from "./akuma/fleet-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
 import {
   contractRequestCommands,
@@ -78,40 +76,6 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
         ...(input.summary === undefined ? {} : { summary: input.summary }),
         hooks: worktreeHooksFrom({ settings: configuration }),
       });
-    },
-  };
-}
-
-function fleetRequestPort(world: Awaited<ReturnType<typeof World.prove>>): FleetRequestPort {
-  return {
-    wait: async (input) =>
-      await executeWaitAkuma({
-        path: world,
-        ids: input.targets,
-        completion: input.completion,
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        signal: input.signal,
-      }),
-    tell: async (input) =>
-      await executeTellAkuma({
-        path: world,
-        id: input.target,
-        body: input.body,
-        tellId: input.tellId,
-        recordedAt: input.recordedAt,
-        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-        signal: input.signal,
-      }),
-    tellAnswer: async (input) =>
-      await PublicAkuma.select(world, input.target).tell(input.body, {
-        schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
-        ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
-        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-        signal: input.signal,
-      }),
-    kill: async (input) => {
-      const result = await executeKillAkuma({ path: world, ids: input.targets, signal: input.signal });
-      return result;
     },
   };
 }

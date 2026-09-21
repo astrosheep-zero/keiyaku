@@ -8,6 +8,7 @@ import {
   readBudgetedStatus,
   withoutReportedChanges,
 } from "../akuma/akuma.js";
+import { AkumaObservationError } from "../akuma/akuma-errors.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
@@ -91,6 +92,11 @@ function source(path: WorldRoot): ReturnType<typeof createAkumaProduct> {
 
 function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function observationError(id: AkumaStatus["id"], error: unknown): Error {
+  if (error instanceof AkumaNotBornError || error instanceof AkumaObservationError) return error;
+  return new AkumaObservationError(id, observationDiagnostic(error));
 }
 
 async function dispatchAssociation(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<DispatchAssociation> {
@@ -267,11 +273,77 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
 
 export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
-  return await observeAkuma(
-    await source(addressed.path).selectHandle({ id: addressed.id }).status(),
+  try {
+    return await observeAkuma(
+      await source(addressed.path).selectHandle({ id: addressed.id }).status(),
+      addressed.path,
+      input.repo,
+    );
+  } catch (error) {
+    throw observationError(addressed.id, error);
+  }
+}
+
+function completionMode(value: unknown): "any" | "all" {
+  // An omitted mode is any: a plural wait returns when any selected Akuma is complete.
+  if (value === undefined) return "any";
+  if (value !== "any" && value !== "all") throw new TypeError("completion must be any or all");
+  return value;
+}
+
+async function forwardedWait(
+  addressed: Awaited<ReturnType<typeof addressAkumaSet>>,
+  input: Readonly<{
+    directory: string;
+    completion: "any" | "all";
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    repo?: Repo;
+  }>,
+): Promise<AkumaWaitResult> {
+  return await attachWaitAssociations(
     addressed.path,
     input.repo,
+    await requestForwardedFleetWait({
+      directory: input.directory,
+      targets: addressed.orderedIds,
+      completion: input.completion,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
   );
+}
+
+async function localWait(
+  addressed: Awaited<ReturnType<typeof addressAkumaSet>>,
+  input: Readonly<{
+    completion: "any" | "all";
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    repo?: Repo;
+    observer?: WaitObserver;
+  }>,
+): Promise<AkumaWaitResult> {
+  try {
+    return await attachWaitAssociations(
+      addressed.path,
+      input.repo,
+      await executeWaitAkuma({
+        path: addressed.path,
+        ids: addressed.orderedIds,
+        completion: input.completion,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        identity: waitIdentityFacts(addressed.path, input.repo),
+        selectionOrder: addressed.orderedIds,
+        ...(input.observer?.selected === undefined ? {} : { onSelected: input.observer.selected }),
+        ...(input.observer?.observe === undefined ? {} : { observe: input.observer.observe }),
+      }),
+    );
+  } catch (error) {
+    if (input.signal?.aborted === true || addressed.orderedIds.length !== 1) throw error;
+    throw observationError(addressed.orderedIds[0]!, error);
+  }
 }
 
 export async function waitAkuma(
@@ -285,45 +357,21 @@ export async function waitAkuma(
       throw new TypeError(`Keiyaku.wait input has unknown field: ${key}`);
     }
   }
-  const addressed = await addressAkumaSet(setAddress(values));
-  const completion = values.completion;
-  if (completion !== undefined && completion !== "any" && completion !== "all") {
-    throw new TypeError("completion must be any or all");
-  }
-  // An omitted mode is any: a plural wait returns when any selected Akuma is complete.
-  const selected = completion ?? "any";
+  const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
+  const addressed = await addressAkumaSet(setAddress(values), { proveBorn: channel.kind !== "body-request" });
   const repo = values.repo as Repo | undefined;
-  if (channel.kind === "body-request") {
-    return await attachWaitAssociations(
-      addressed.path,
-      repo,
-      await requestForwardedFleetWait({
-        directory: channel.directory,
-        targets: addressed.orderedIds,
-        completion: selected,
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
-        ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-      }),
-    );
-  }
-  return await attachWaitAssociations(
-    addressed.path,
-    repo,
-    await executeWaitAkuma({
-      path: addressed.path,
-      ids: addressed.orderedIds,
-      completion: selected,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-      identity: waitIdentityFacts(addressed.path, repo),
-      selectionOrder: addressed.orderedIds,
-      ...(observer?.selected === undefined ? {} : { onSelected: observer.selected }),
-      ...(observer?.observe === undefined ? {} : { observe: observer.observe }),
-    }),
-  );
+  const mode = {
+    completion: selected,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+    ...(repo === undefined ? {} : { repo }),
+  };
+  return channel.kind === "body-request"
+    ? await forwardedWait(addressed, { ...mode, directory: channel.directory })
+    : await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) });
 }
 
 export async function killAkuma(
@@ -337,8 +385,8 @@ export async function killAkuma(
     }
   }
   const callerSignal = signal(values.signal);
-  const addressed = await addressAkumaSet(setAddress(values));
   const channel = executionChannel(execution);
+  const addressed = await addressAkumaSet(setAddress(values), { proveBorn: channel.kind !== "body-request" });
   if (channel.kind === "body-request") {
     return await requestForwardedFleetKill({
       directory: channel.directory,
@@ -365,8 +413,8 @@ export async function tellAkuma(
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   const callerSignal = signal(values.signal);
-  const addressed = await addressAkuma(directAddress(values));
   const channel = executionChannel(execution);
+  const addressed = await addressAkuma(directAddress(values), { proveBorn: channel.kind !== "body-request" });
   if (channel.kind === "body-request") {
     return await requestForwardedFleetTell({
       directory: channel.directory,
@@ -425,24 +473,28 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
   const values = requireInput(input, "Keiyaku.history input");
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path).selectHandle({ id: addressed.id });
-  const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
-  if (values.last === true) {
-    const answer = await handle.lastAnswer();
-    return answer.kind === "answer"
-      ? { kind: "last", id: addressed.id, answer: answer.answer, contract }
-      : { kind: "no-answer", id: addressed.id, contract };
+  try {
+    const handle = source(addressed.path).selectHandle({ id: addressed.id });
+    const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
+    if (values.last === true) {
+      const answer = await handle.lastAnswer();
+      return answer.kind === "answer"
+        ? { kind: "last", id: addressed.id, answer: answer.answer, contract }
+        : { kind: "no-answer", id: addressed.id, contract };
+    }
+    const history = await handle.history({
+      ...(values.id === undefined ? {} : { id: values.id as string }),
+      ...(values.before === undefined ? {} : { before: values.before as number }),
+      ...(values.since === undefined ? {} : { since: values.since as number }),
+      ...(values.limit === undefined ? {} : { limit: values.limit as number }),
+    });
+    if (values.id !== undefined) {
+      if ("kind" in history && history.kind === "exact")
+        return { kind: "exact", id: addressed.id, outcome: history.outcome, contract };
+      return { kind: "unknown-history", id: addressed.id, historyId: values.id as string, contract };
+    }
+    return { kind: "history", id: addressed.id, history: history as ActivityHistory, contract };
+  } catch (error) {
+    throw observationError(addressed.id, error);
   }
-  const history = await handle.history({
-    ...(values.id === undefined ? {} : { id: values.id as string }),
-    ...(values.before === undefined ? {} : { before: values.before as number }),
-    ...(values.since === undefined ? {} : { since: values.since as number }),
-    ...(values.limit === undefined ? {} : { limit: values.limit as number }),
-  });
-  if (values.id !== undefined) {
-    if ("kind" in history && history.kind === "exact")
-      return { kind: "exact", id: addressed.id, outcome: history.outcome, contract };
-    return { kind: "unknown-history", id: addressed.id, historyId: values.id as string, contract };
-  }
-  return { kind: "history", id: addressed.id, history: history as ActivityHistory, contract };
 }

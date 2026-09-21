@@ -20,7 +20,7 @@ import {
 import { z } from "zod";
 import type { Schema } from "./schema.js";
 import { schemaJsonText } from "./schema.js";
-import { AkumaDecodeError } from "./akuma-errors.js";
+import { AkumaDecodeError, AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const fleetTargetsSchema = z
@@ -70,6 +70,43 @@ const killServiceSchema = z
     results: z.array(z.object({ id: akumaIdSchema, evidence: fleetResultSchemas.killEvidence }).strict()),
   })
   .strict();
+
+/**
+ * A forwarded Fleet request leaves selection and observation to the parent, so
+ * the parent's typed refusal is the only evidence the child can classify on.
+ * Transporting it is the codec's own duty: an unencoded failure reaches the
+ * caller as an anonymous request error and loses the identity it names.
+ *
+ * The transport voids a begun request only when the encoded failure proves no
+ * product effect. A refused selection or an unreadable observation never
+ * reached an action, so Fleet proves that through the same refusal envelope
+ * the Contract codec uses; a genuinely failed action stays unencoded and
+ * keeps its existing anonymous classification.
+ */
+const fleetRefusalSchema = z.union([
+  z.object({ kind: z.literal("akuma-not-born"), id: akumaIdSchema }).strict(),
+  z.object({ kind: z.literal("akuma-observation"), id: akumaIdSchema, diagnostic: z.string() }).strict(),
+]);
+const fleetLiveFailureSchema = z.object({ kind: z.literal("refused"), failure: fleetRefusalSchema }).strict();
+
+export function encodeFleetLiveFailure(error: unknown): unknown | null {
+  const failure =
+    error instanceof AkumaNotBornError
+      ? { kind: "akuma-not-born" as const, id: error.id }
+      : error instanceof AkumaObservationError
+        ? { kind: "akuma-observation" as const, id: error.id, diagnostic: error.diagnostic }
+        : null;
+  return failure === null ? null : { kind: "refused", failure };
+}
+
+export function decodeFleetLiveFailure(value: unknown): Error | null {
+  const parsed = fleetLiveFailureSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const failure = parsed.data.failure;
+  return failure.kind === "akuma-not-born"
+    ? new AkumaNotBornError(failure.id as AkumaStatus["id"])
+    : new AkumaObservationError(failure.id as AkumaStatus["id"], failure.diagnostic);
+}
 
 export type FleetRequest =
   | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
@@ -171,6 +208,8 @@ export function fleetRequestProtocol(
     decodeRequest: (payload) => decodeFleetRequest(action, payload),
     encodeResult: (result) => result,
     decodeResult: (result) => decodedFleetResult(action, result),
+    encodeFailure: encodeFleetLiveFailure,
+    decodeFailure: decodeFleetLiveFailure,
     decodeReference: (reference) => decodeFleetService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||

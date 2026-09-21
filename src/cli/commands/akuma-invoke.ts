@@ -295,13 +295,16 @@ async function invokeTell(
   const body = await promptBody(command, input);
   if (command.schema !== undefined) {
     const schema = await schemaFromFile(command.schema);
-    const addressed = await addressAkuma({
-      path: input.path,
-      akuma: command.akuma,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-    });
-    const initiator = await inputInitiator(input);
     const channel = executionChannel(input.execution);
+    const addressed = await addressAkuma(
+      {
+        path: input.path,
+        akuma: command.akuma,
+        ...(input.repo === undefined ? {} : { repo: input.repo }),
+      },
+      { proveBorn: channel.kind !== "body-request" },
+    );
+    const initiator = await inputInitiator(input);
     const answer =
       channel.kind === "body-request"
         ? await requestForwardedFleetTellAnswer({

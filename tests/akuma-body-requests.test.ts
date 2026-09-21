@@ -21,6 +21,8 @@ import {
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
+import { AkumaNotBornError, AkumaObservationError } from "../src/akuma/akuma-errors.js";
+import { fleetRequestPort } from "../src/akuma/fleet-owner-port.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import {
   atomicJson,
@@ -30,11 +32,9 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
-import {
-  REQUEST_PROGRESS_WINDOW
-} from "../src/akuma/request-observation.js";
+import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
-import { waitAkuma } from "../src/library/fleet.js";
+import { waitAkuma, tellAkuma, killAkuma } from "../src/library/fleet.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,
@@ -403,7 +403,13 @@ test("Fleet owner codecs reject malformed live and service payloads", () => {
   };
   assert.deepEqual(fleetRequestProtocol("akuma.wait").decodeResult(forwarded), forwarded);
   assert.throws(
-    () => fleetRequestProtocol("akuma.wait").decodeResult({ mode: "all", reason: "completed", observations: [], unobserved: [{}] }),
+    () =>
+      fleetRequestProtocol("akuma.wait").decodeResult({
+        mode: "all",
+        reason: "completed",
+        observations: [],
+        unobserved: [{}],
+      }),
     /invalid live result for akuma\.wait/u,
   );
   assert.throws(
@@ -786,14 +792,17 @@ test("a noncanonical routed call fails the pump before child allocation", async 
   const root = await World.at(temporaryDirectory(context, "keiyaku-call-world-proof-"));
   const parent = await born(root, "parent", "11111111");
   let spawns = 0;
-  const pump = await openPump(parent, akumaCallRequestCommands({
+  const pump = await openPump(
+    parent,
+    akumaCallRequestCommands({
       world: root,
       paths: parent.paths,
       parent: parent.soul,
       spawn: async () => {
         spawns += 1;
       },
-    }));
+    }),
+  );
   const id = randomUUID();
   const request = requestBodyCall({
     directory: pump.directory,
@@ -821,7 +830,9 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
   const root = await World.at(temporaryDirectory(context, "keiyaku-call-invalid-recipe-"));
   const parent = await born(root, "parent", "11111111");
   let spawnCalls = 0;
-  const pump = await openPump(parent, akumaCallRequestCommands({
+  const pump = await openPump(
+    parent,
+    akumaCallRequestCommands({
       world: root,
       paths: parent.paths,
       parent: parent.soul,
@@ -829,7 +840,8 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
         spawnCalls += 1;
         throw new Error("invalid recipe must not spawn");
       },
-    }));
+    }),
+  );
   const id = randomUUID();
   const request = requestBodyCall({
     directory: pump.directory,
@@ -1275,6 +1287,62 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
   }
 });
 
+test("a forwarded Fleet refusal keeps the parent's typed selection failure", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-")));
+  const parent = await born(root, "parent", "43434343");
+  const absent = "aku/intern/33dd4670" as AkuId;
+  const pump = await openFleetPump(parent, fleetRequestPort(root));
+  const named = (error: unknown): boolean => error instanceof AkumaNotBornError && error.id === absent;
+  try {
+    await assert.rejects(
+      waitAkuma({ path: root, akuma: [absent] }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+    await assert.rejects(
+      tellAkuma({ path: root, akuma: absent, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+    await assert.rejects(
+      killAkuma({ path: root, akuma: [absent] }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a forwarded Fleet request keeps an unreadable target's reason", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-unreadable-")));
+  const parent = await born(root, "parent", "45454545");
+  const target = await born(root, "worker", "abcd0045");
+  await writeFile(target.paths.heart, "this is not a database\n");
+  const pump = await openFleetPump(parent, fleetRequestPort(root));
+  const named = (error: unknown): boolean => {
+    assert.ok(error instanceof AkumaObservationError);
+    assert.equal(error.id, target.id);
+    assert.notEqual(error.diagnostic, "");
+    return true;
+  };
+  try {
+    await assert.rejects(
+      waitAkuma({ path: root, akuma: [target.id] }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+    await assert.rejects(
+      tellAkuma({ path: root, akuma: target.id, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+    await assert.rejects(
+      killAkuma({ path: root, akuma: [target.id] }, bodyRequestExecutionContext(pump.directory)),
+      named,
+    );
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("transport rejects malformed target sets and foreign World coordinates before Heart", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-malformed-")));
   const parent = await born(root, "parent", "11111111");
@@ -1531,9 +1599,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
   }
 });
 
-import {
-  requestForwardedContractLive,
-} from "../src/library/contract-operations.js";
+import { requestForwardedContractLive } from "../src/library/contract-operations.js";
 import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
 import { entryUlid } from "../src/core/facts/types.js";
 

@@ -1,5 +1,4 @@
 import { CliUsageError, commandGuide, isBlankInput, usageLine, type CliUsageGuide } from "../usage.js";
-import { parseAkuId } from "../../akuma/identity.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 import {
@@ -235,13 +234,9 @@ function positiveIndex(raw: FlagValue, option: string, fail: (message: string) =
   return value;
 }
 
-function validateDirect(value: string, fail: (message: string) => never): string {
-  try {
-    if (value.startsWith("@")) parseAkumaAlias(value);
-    else parseAkuId(value);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : "invalid Akuma selector");
-  }
+function validateDirect(value: string, _fail: (message: string) => never): string {
+  // Address validation belongs to the operation boundary so callers receive
+  // the compact Akuma refusal instead of a generic usage page.
   return value;
 }
 

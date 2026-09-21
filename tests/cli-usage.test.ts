@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,11 @@ import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { invoke } from "../src/cli/invoke.js";
+import { AkumaObservationError } from "../src/akuma/akuma-errors.js";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { parseAkuId } from "../src/akuma/identity.js";
+import { AkumaWorldScopeError } from "../src/library/address.js";
+import { akumaFailureProjection } from "../src/cli/runtime.js";
 
 async function captureMain(
   argv: readonly string[],
@@ -32,6 +37,79 @@ async function captureMain(
     process.stderr.write = writeStderr;
   }
 }
+
+function runCli(cwd: string, argv: readonly string[]) {
+  // A caller inside an Akuma Body carries AKUMA_REQUESTS and would forward the
+  // operation to its parent; this suite asserts the local addressing result.
+  const environment = { ...process.env };
+  delete environment[AKUMA_REQUESTS_ENV];
+  return spawnSync(
+    process.execPath,
+    [
+      ...(import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"]),
+      fileURLToPath(
+        new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../src/cli/index.ts", import.meta.url),
+      ),
+      "-C",
+      cwd,
+      ...argv,
+    ],
+    { encoding: "utf8", env: environment },
+  );
+}
+
+test("existing-Akuma commands report one caller-facing not-found fact", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-found-"));
+  mkdirSync(join(root, ".keiyaku"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const id = "aku/intern/33dd4670";
+  const commands: readonly (readonly string[])[] = [
+    ["status", id],
+    ["wait", id, "--timeout", "0ms"],
+    ["tell", id, "hello"],
+    ["tell", id, "--interrupt", "hello"],
+    ["history", id],
+    ["fork", id, "--at", "turn/1"],
+    ["kill", id],
+  ];
+  for (const command of commands) {
+    const result = runCli(root, command);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, `× Akuma not found  ${id}\n`);
+  }
+});
+
+test("Akuma Alias absence and malformed identity stay distinct", (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-address-refusal-"));
+  mkdirSync(join(root, ".keiyaku"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const alias = runCli(root, ["wait", "@missing", "--timeout", "0ms"]);
+  assert.equal(alias.status, 1);
+  assert.equal(alias.stdout, "");
+  assert.equal(alias.stderr, "× Akuma alias not found  @missing\n");
+  const malformed = runCli(root, ["wait", "aku/intern/nope", "--timeout", "0ms"]);
+  assert.equal(malformed.status, 1);
+  assert.equal(malformed.stdout, "");
+  assert.equal(malformed.stderr, "× invalid Akuma  aku/intern/nope\n");
+});
+
+test("Akuma World and observation failures keep only caller-useful facts", async () => {
+  const id = parseAkuId("aku/intern/33dd4670").id;
+  const parsed = parseArgv(["wait", id]);
+  if (!("command" in parsed)) throw new Error("wait did not parse as an executable command");
+  assert.deepEqual(
+    await akumaFailureProjection(
+      new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as never }),
+      parsed.command,
+    ),
+    { body: `× Akuma not in this World  ${id}`, exitCode: 1 },
+  );
+  assert.deepEqual(await akumaFailureProjection(new AkumaObservationError(id, "heart locked"), parsed.command), {
+    body: `× Akuma observation failed  ${id} — heart locked`,
+    exitCode: 3,
+  });
+});
 
 test("unknown task command scopes minimal usage to task", () => {
   assert.throws(

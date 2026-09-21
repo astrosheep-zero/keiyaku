@@ -117,6 +117,14 @@ the law already blesses. Task dispositions render as words — `in progress`,
 `on hold`, and every other de-dashed disposition — wherever task rows appear,
 in the task view, Kanshi, and the catalog.
 
+Known Akuma selection conditions render as one compact caller fact naming the
+coordinate and the useful absence, malformed-address, Alias, or World relation;
+they do not expose Heart birth terminology, observation carrier words, generic
+command wrappers, or field labels. A failure to observe an established Akuma
+keeps its reason with that identity. These pre-operation refusals remain
+distinct from provider, lifecycle, and action failures after the target has
+been established, whose owned evidence and outcome classification stay intact.
+
 Detached call receipts foreground the complete Akuma identity with any alias
 as a parenthetical supplement. Compact resource rows name the associated
 Contract and the actual execution directory; the invocation World is not an
@@ -227,13 +235,14 @@ nothing after its label when it does not, closed by one rule; no per-target
 identity frame follows it during observation. A tag is the shortest unique prefix, of at least four characters, from the final segment of each selected
 Akuma identity. When final-segment prefixes collide, its tag extends to the shortest distinguishing path-segment
 suffix of its complete identity; only when that cannot distinguish it does the shortest unique prefix of the complete
-identity apply. One target keeps its tag across the head, rows, diagnostics, and conclusion scoreboard. The wait ends with one conclusion row per observed Akuma, attributed by its
+identity apply. One target keeps its tag across the head, activity rows, and conclusion scoreboard. The wait ends with one conclusion row per observed Akuma, attributed by its
 tag the same way the activity above it is, so an unfinished wait replays no
 activity snapshot; the first row of a multi-target scoreboard opens a new
 paragraph. A plural wait identifies the source of every semantic activity row
 in a consistently aligned source column using that tag, resolved from the
-observation seam rather than a renderer reading of the world. An unobserved
-diagnostic names its target by the same tag. Across the rendered plural stream,
+observation seam rather than a renderer reading of the world. A failure fact for
+an unobserved member is not an attributed activity row: it keeps that member's
+complete Akuma identity, so it never substitutes the tag or alias. Across the rendered plural stream,
 its timestamp prints only when the minute changes regardless of source,
 preserving the time column while blank. Every plural activity row occupies one terminal line: excess content truncates with one trailing
 ellipsis, with quoted previews retaining their closing quote unless an

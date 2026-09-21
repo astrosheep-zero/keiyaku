@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAkumaStatus, type ActivityRow, type AkumaStatus } from "../src/akuma/akuma.js";
-import { waitObservationStream } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/kanshi-akuma.js";
+import {
+  associatedIdentity,
+  DEFAULT_CONTEXT,
+  frameRule,
+  mutationObservationStageText,
+  snapshotHeading,
+  waitObservationStream,
+  waitText,
+} from "../src/cli/render/akuma-activity.js";
+import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
@@ -34,6 +43,37 @@ function settled(id: string, rows: readonly Extract<ActivityRow, { kind: "said" 
 function observed(status: AkumaStatus, rows: readonly ActivityRow[]) {
   return { status, rows, contract: { kind: "none" as const } };
 }
+
+test("Akuma observation failures name the target and reason without carrier words", () => {
+  const first = parseAkuId("aku/worker/abcd0102").id;
+  const second = parseAkuId("aku/intern/33dd4670").id;
+  assert.equal(
+    mutationObservationStageText(first, { kind: "unobserved", diagnostic: "heart locked" }, DEFAULT_CONTEXT),
+    `× Akuma observation failed  ${first} — heart locked`,
+  );
+  assert.equal(
+    waitText(
+      {
+        kind: "akuma",
+        action: "wait",
+        result: {
+          mode: "all",
+          reason: "deadline",
+          observations: [],
+          unobserved: [
+            { id: first, diagnostic: "heart locked" },
+            { id: second, diagnostic: "permission denied" },
+          ],
+        },
+      },
+      DEFAULT_CONTEXT,
+    ),
+    [
+      `× Akuma observation failed  ${first} — heart locked`,
+      `× Akuma observation failed  ${second} — permission denied`,
+    ].join("\n"),
+  );
+});
 
 test("Akuma presentation uses the settled six-mark vocabulary", () => {
   assert.equal(akumaMark("killed"), "×");

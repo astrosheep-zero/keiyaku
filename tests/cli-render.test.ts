@@ -1814,7 +1814,7 @@ test("a wait flushes a known target when its final result becomes unobserved", (
     unobserved: [{ id, diagnostic: "window lost" }],
   });
   assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9/u);
-  assert.match(text, /unobserved: window lost/u);
+  assert.match(text, /× Akuma observation failed  aku\/worker\/abcd0036 — window lost/u);
 });
 
 test("a single answered wait concludes at its durable settle moment, not the poll that noticed it", () => {
@@ -2123,7 +2123,7 @@ test("an any-mode completion receipt keeps an incomplete peer pending in both wa
   }
 });
 
-test("unobserved diagnostics use the identity tag in streamed and non-streamed plural waits", () => {
+test("unobserved failure facts keep the complete identity while activity rows keep the identity tag", () => {
   const id = parseAkumaStatus({
     id: "aku/worker/abcd0045",
     life: "running",
@@ -2142,8 +2142,12 @@ test("unobserved diagnostics use the identity tag in streamed and non-streamed p
     observations: [],
     unobserved: [{ id, diagnostic: "window lost" }],
   });
-  assert.match(streamed, /^! abcd0045 unobserved: window lost$/mu, "the streamed diagnostic names the identity tag");
-  assert.doesNotMatch(streamed, /@gone|aku\/worker\/abcd0045/u);
+  assert.match(
+    streamed,
+    new RegExp(`^× Akuma observation failed  ${id} — window lost$`, "mu"),
+    "the streamed failure fact names the complete identity",
+  );
+  assert.doesNotMatch(streamed, /^× Akuma observation failed  @gone/mu, "a failure fact never substitutes the alias");
 
   const nonStreamed = waitText(
     {
@@ -2164,10 +2168,14 @@ test("unobserved diagnostics use the identity tag in streamed and non-streamed p
   );
   assert.match(
     nonStreamed,
-    /^! abcd0045 unobserved: window lost$/mu,
-    "the non-streamed diagnostic names the identity tag",
+    new RegExp(`^× Akuma observation failed  ${id} — window lost$`, "mu"),
+    "the non-streamed failure fact names the complete identity",
   );
-  assert.doesNotMatch(nonStreamed, /@gone|aku\/worker\/abcd0045/u);
+  assert.doesNotMatch(
+    nonStreamed,
+    /^× Akuma observation failed  @gone/mu,
+    "a failure fact never substitutes the alias",
+  );
   const answered = parseAkumaStatus({
     id: other,
     life: "asleep",

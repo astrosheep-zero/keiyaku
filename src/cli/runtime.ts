@@ -163,23 +163,47 @@ async function writeResult(command: ParsedCommand, result: unknown): Promise<num
   return invocationExitCode(contractResult);
 }
 
-function writeWorldScopeRefusal(
-  error: Readonly<{ refusal: { kind: string; world: string; ids: readonly string[] } }>,
+type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
+
+export async function akumaFailureProjection(
+  error: unknown,
   command: ParsedCommand,
-): number {
-  const guide = usageGuideForCommand(command);
-  const body =
-    command.output === "json"
-      ? JSON.stringify(error.refusal)
-      : [
-          `× selector  ${error.refusal.kind}`,
-          `  world  ${safeText(error.refusal.world)}`,
-          ...error.refusal.ids.map((id) => `  given  ${safeText(id)}`),
-          `  accepts  ${guide.accepts}`,
-          `  help  ${guide.help}`,
-        ].join("\n");
-  writeCliStream(process.stderr, body);
-  return 1;
+): Promise<AkumaFailureProjection | undefined> {
+  const [{ AkumaNotBornError, AkumaObservationError }, { AkumaAddressError, AkumaWorldScopeError }] = await Promise.all(
+    [import("../akuma/akuma-errors.js"), import("../library/address.js")],
+  );
+  if (error instanceof AkumaNotBornError) {
+    return {
+      body: command.output === "json" ? error.message : `× Akuma not found  ${safeText(error.id)}`,
+      exitCode: 1,
+    };
+  }
+  if (error instanceof AkumaAddressError) {
+    const body =
+      error.refusal.kind === "akuma-alias-not-found"
+        ? `× Akuma alias not found  ${safeText(error.refusal.alias)}`
+        : `× invalid Akuma  ${safeText(error.refusal.selector)}`;
+    return { body: command.output === "json" ? error.message : body, exitCode: 1 };
+  }
+  if (error instanceof AkumaWorldScopeError) {
+    return {
+      body:
+        command.output === "json"
+          ? JSON.stringify(error.refusal)
+          : error.refusal.ids.map((id) => `× Akuma not in this World  ${safeText(id)}`).join("\n"),
+      exitCode: 1,
+    };
+  }
+  if (error instanceof AkumaObservationError) {
+    return {
+      body:
+        command.output === "json"
+          ? error.message
+          : `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`,
+      exitCode: 3,
+    };
+  }
+  return undefined;
 }
 
 async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
@@ -232,9 +256,10 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
       );
       return 3;
     }
-    if (command.command !== "install") {
-      const { AkumaWorldScopeError } = await import("../library/address.js");
-      if (error instanceof AkumaWorldScopeError) return writeWorldScopeRefusal(error, command);
+    const akumaFailure = await akumaFailureProjection(error, command);
+    if (akumaFailure !== undefined) {
+      writeCliStream(process.stderr, akumaFailure.body);
+      return akumaFailure.exitCode;
     }
     if (command.command === "bind") {
       const { BindDraftError } = await import("./draft.js");

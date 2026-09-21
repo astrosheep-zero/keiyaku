@@ -81,7 +81,7 @@ function contractFacts(contract: DispatchAssociation): readonly string[] {
 }
 
 function unobservedText(id: string, diagnostic: string): string {
-  return `! ${id} unobserved: ${safeText(diagnostic)}`;
+  return `× Akuma observation failed  ${safeText(id)} — ${safeText(diagnostic)}`;
 }
 
 function lifeLabel(life: AkumaObservation["status"]["life"]): string {
@@ -883,11 +883,10 @@ function concludeWaitStream(
   const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
     result.unobserved.map((member) => [member.id, member]),
   );
-  // A multi-target scoreboard names the frozen source label; a single target keeps the bare diagnostic.
-  const label = (id: string): string => (multi ? sourceTag(state, id) : id);
+  // A failure fact keeps the complete identity even where the scoreboard attributes a target by its identity tag.
   const unobservedLines = order
     .filter((id) => unobservedById.has(id))
-    .map((id) => unobservedText(label(id), unobservedById.get(id)!.diagnostic));
+    .map((id) => unobservedText(id, unobservedById.get(id)!.diagnostic));
   const conclusions = order.flatMap((id) => {
     const observation = observationById.get(id);
     if (observation === undefined) return [];
@@ -1236,7 +1235,7 @@ export function waitText(
       ? [
           order
             .filter((id) => unobservedById.has(id))
-            .map((id) => unobservedText(waitIdentityTag(id, order), unobservedById.get(id)!.diagnostic))
+            .map((id) => unobservedText(id, unobservedById.get(id)!.diagnostic))
             .join("\n"),
         ]
       : []),
