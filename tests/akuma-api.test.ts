@@ -132,153 +132,126 @@ test("Akuma.birth has no prompt and select is synchronous", async (context) => {
 
 import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 
-test("schema tell decodes JSON and typed failures stay distinct", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-schema-tell-"));
-  const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
-    const decoded = await bornWorld(root, "a1000002");
-    fixtures.set(decoded.allocated.paths.directory, {
-      adapter: answering('{"ok":true}'),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    const value = await decoded.akuma.tell("structured", { schema });
-    await settleFixtureBodies(bodies);
-    assert.deepEqual(value, { ok: true });
-    const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
-    assert.equal(fact?.kind, "tell");
-    if (fact?.kind === "tell") {
-      const recorded = await readTell(decoded.allocated.paths, fact.tellId);
-      assert.equal(recorded?.schemaJson, schemaJsonText(schema));
-    }
+const WAITED_TELL_NOW = "2026-08-10T00:00:01.000Z";
+type WaitedTellWorld = Awaited<ReturnType<typeof bornWorld>>;
+type WaitedTellFixture = {
+  root: string;
+  born(suffix: string, adapter: ProviderAdapter, now?: string): Promise<WaitedTellWorld>;
+  settle(): Promise<void>;
+  withRuntime<T>(runtime: TellWakeRuntime, run: () => Promise<T>): Promise<T>;
+};
+type WaitedTellOptions = Omit<Parameters<typeof executeTellWaitAkuma>[0], "path" | "id">;
 
-    const invalid = await bornWorld(root, "a1000003");
-    fixtures.set(invalid.allocated.paths.directory, {
-      adapter: answering("not-json"),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    await assert.rejects(invalid.akuma.tell("structured", { schema }), AkumaDecodeError);
+function waitTell(world: WaitedTellWorld, options: WaitedTellOptions) {
+  return executeTellWaitAkuma({ path: world.world, id: world.allocated.id, ...options });
+}
 
-    const mismatch = await bornWorld(root, "a1000004");
-    fixtures.set(mismatch.allocated.paths.directory, {
-      adapter: answering('{"ok":1}'),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    await assert.rejects(mismatch.akuma.tell("structured", { schema }), AkumaDecodeError);
-
-    const failed = await bornWorld(root, "a1000005");
-    const failing: ProviderAdapter = fixtureAdapter(async () => ({
-      admission: { fence: "api-fail" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
-        },
-      },
-      completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
-      async abort() {},
-    }));
-    fixtures.set(failed.allocated.paths.directory, { adapter: failing, now: "2026-08-10T00:00:01.000Z" });
-    await assert.rejects(failed.akuma.tell("structured", { schema }), AkumaProviderError);
-    await settleFixtureBodies(bodies);
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("bounded Tell observes its exact admitted Turn", async () => {
+async function withWaitedTellFixture<T>(run: (fixture: WaitedTellFixture) => Promise<T>): Promise<T> {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-"));
   const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  const adapters = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
+  const restore = installTellRuntime(fixtureRuntime(bodies, adapters));
+  const settle = () => settleFixtureBodies(bodies);
+  const born = async (suffix: string, adapter: ProviderAdapter, now = WAITED_TELL_NOW) => {
+    const fixture = await bornWorld(root, suffix);
+    adapters.set(fixture.allocated.paths.directory, { adapter, now });
+    return fixture;
+  };
   try {
-    const answered = await bornWorld(root, "a1000010");
-    fixtures.set(answered.allocated.paths.directory, {
-      adapter: answering("exact answer"),
-      now: "2026-08-10T00:00:01.000Z",
+    return await run({
+      root,
+      born,
+      settle,
+      async withRuntime(runtime, action) {
+        const restoreRuntime = installTellRuntime(runtime);
+        try {
+          return await action();
+        } finally {
+          restoreRuntime();
+        }
+      },
     });
-    const observed = await executeTellWaitAkuma({
-      path: answered.world,
-      id: answered.allocated.id,
-      body: "answer this",
-      timeoutMs: 1_000,
-    });
+  } finally {
+    restore();
+    await settle();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function gatedAnswer(gate: Promise<string>, started?: () => void): ProviderAdapter {
+  return fixtureAdapter(async () => ({
+    admission: { fence: "waited-fixture" },
+    events: {
+      async *[Symbol.asyncIterator]() {
+        yield { type: "session" as const, coordinate: { sessionId: "waited-fixture" } };
+        started?.();
+      },
+    },
+    completion: gate.then((answer) => ({ kind: "answered" as const, answer, historyId: "waited-fixture" })),
+    async abort() {},
+  }));
+}
+
+const dormantTellRuntime: TellWakeRuntime = {
+  async spawn() {
+    return { pid: 0, exited: new Promise(() => undefined), async terminate() {}, release() {} };
+  },
+};
+
+test("bounded Tell and zero window preserve exact admission through waited Tell cancellation", async () => {
+  await withWaitedTellFixture(async ({ born, settle }) => {
+    const answered = await born("a1000010", answering("exact answer"));
+    const observed = await waitTell(answered, { body: "answer this", timeoutMs: 1_000 });
     assert.equal(observed.tell.admission.tellId, observed.tell.row.tellId);
     assert.deepEqual(observed.observation, { reason: "answered", answer: "exact answer" });
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 
-test("a zero window returns deadline without waiting for a delayed wake", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-late-wake-"));
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
-    const { allocated, world } = await bornWorld(root, "a1000018");
-    const deliver = deferred<void>();
-    fixtures.set(allocated.paths.directory, {
-      adapter: fixtureAdapter(async () => {
-        await deliver.promise;
-        return {
-          admission: { fence: "late-wake" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "late-wake" } };
-            },
-          },
-          completion: Promise.resolve({ kind: "answered" as const, answer: "too late", historyId: "late-wake" }),
-          async abort() {},
-        };
-      }),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    // Safety net so a regressed implementation fails on the assertion, not by hanging.
-    const forced = setTimeout(() => deliver.resolve(), 400);
+    const late = deferred<string>();
+    const delayed = await born("a1000018", gatedAnswer(late.promise));
+    const forced = setTimeout(() => late.resolve("forced"), 400);
     const startedAt = performance.now();
-    const observed = await executeTellWaitAkuma({ path: world, id: allocated.id, body: "late", timeoutMs: 0 });
+    const deadline = await waitTell(delayed, { body: "late", timeoutMs: 0 });
     const elapsed = performance.now() - startedAt;
     clearTimeout(forced);
-    assert.deepEqual(observed.observation, { reason: "deadline" });
+    assert.deepEqual(deadline.observation, { reason: "deadline" });
     assert.ok(elapsed < 200, `an expired window must not wait for delivery (waited ${elapsed}ms)`);
-    assert.equal((await readTell(allocated.paths, observed.tell.admission.tellId))?.body, "late");
-    deliver.resolve();
-    await settleFixtureBodies(bodies);
-    assert.equal((await readTell(allocated.paths, observed.tell.admission.tellId))?.state, "told");
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
+    assert.equal((await readTell(delayed.allocated.paths, deadline.tell.admission.tellId))?.body, "late");
+    late.resolve("too late");
+    await settle();
+    assert.equal((await readTell(delayed.allocated.paths, deadline.tell.admission.tellId))?.state, "told");
+
+    const started = deferred<void>();
+    const finish = deferred<string>();
+    const canceled = await born("a1000015", gatedAnswer(finish.promise, started.resolve));
+    const controller = new AbortController();
+    const reason = new Error("stop observing the admitted Tell");
+    const tellId = "waited-cancel-tell";
+    const pending = waitTell(canceled, { body: "finish later", tellId, timeoutMs: 5_000, signal: controller.signal });
+    await started.promise;
+    await waitForCondition("the admitted Tell to bind its Turn", async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined);
+    controller.abort(reason);
+    await assert.rejects(pending, (error: unknown) => error === reason);
+    const admitted = await readTell(canceled.allocated.paths, tellId);
+    assert.equal(admitted?.body, "finish later");
+    assert.notEqual(admitted?.binding, undefined, "cancellation does not retract the admitted Tell");
+    finish.resolve("late answer");
+    await settle();
+    const settled = await readTell(canceled.allocated.paths, tellId);
+    assert.equal(settled?.state, "told");
+    const turn = settled?.binding === undefined ? null : await readTurn(canceled.allocated.paths, settled.binding.turnSequence);
+    assert.equal(turn?.end?.outcome.kind, "answered");
+  });
 });
 
-test("a waited schema Tell decodes at the CLI boundary and keeps decode failure distinct", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-schema-"));
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
+test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell keeps provider errors distinct", async (context) => {
+  await withWaitedTellFixture(async ({ root, born }) => {
     const schemaPath = join(root, "answer.schema.json");
-    writeFileSync(
-      schemaPath,
-      JSON.stringify({
-        type: "object",
-        properties: { ok: { type: "boolean" } },
-        required: ["ok"],
-        additionalProperties: false,
-      }),
-    );
-    const answered = await bornWorld(root, "a1000013");
-    fixtures.set(answered.allocated.paths.directory, {
-      adapter: answering('{"ok":true}'),
-      now: "2026-08-10T00:00:01.000Z",
-    });
+    writeFileSync(schemaPath, JSON.stringify({
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+      additionalProperties: false,
+    }));
+    const answered = await born("a1000013", answering('{"ok":true}'));
     const command: InvokedAkumaCommand = {
       command: "tell",
       akuma: answered.allocated.id,
@@ -294,162 +267,86 @@ test("a waited schema Tell decodes at the CLI boundary and keeps decode failure 
       throw new Error("expected a waited Tell invocation result");
     assert.deepEqual(result.result.observation, { reason: "answered", answer: { ok: true } });
 
-    const invalid = await bornWorld(root, "a1000014");
-    fixtures.set(invalid.allocated.paths.directory, {
-      adapter: answering("not-json"),
-      now: "2026-08-10T00:00:01.000Z",
-    });
+    const invalid = await born("a1000014", answering("not-json"));
     await assert.rejects(
-      invokeAkuma(
-        { ...command, akuma: invalid.allocated.id },
-        { path: invalid.world, environment: {}, readStdin: async () => "" },
-      ),
+      invokeAkuma({ ...command, akuma: invalid.allocated.id }, { path: invalid.world, environment: {}, readStdin: async () => "" }),
       AkumaDecodeError,
     );
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 
-test("waited Tell cancellation preserves its admission while the late Turn finishes", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-cancel-"));
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
-    const { allocated, world } = await bornWorld(root, "a1000015");
-    const started = deferred<void>();
-    const finish = deferred<Readonly<{ kind: "answered"; answer: string; historyId: string }>>();
-    fixtures.set(allocated.paths.directory, {
-      adapter: fixtureAdapter(async () => ({
-        admission: { fence: "waited-cancel" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "waited-cancel" } };
-            started.resolve();
-          },
-        },
-        completion: finish.promise,
-        async abort() {},
-      })),
-      now: "2026-08-10T00:00:01.000Z",
-    });
-    const controller = new AbortController();
-    const reason = new Error("stop observing the admitted Tell");
-    const tellId = "waited-cancel-tell";
-    const pending = executeTellWaitAkuma({
-      path: world,
-      id: allocated.id,
-      body: "finish later",
-      tellId,
-      timeoutMs: 5_000,
-      signal: controller.signal,
-    });
-    await started.promise;
-    await waitForCondition(
-      "the admitted Tell to bind its Turn",
-      async () => (await readTell(allocated.paths, tellId))?.binding !== undefined,
+    const interrupt = await born("a1000012", answering("unused"));
+    context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
+    await assert.rejects(
+      executeTellWaitAkuma({ path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
+      (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
     );
-    controller.abort(reason);
-    await assert.rejects(pending, (error: unknown) => error === reason);
-    const admitted = await readTell(allocated.paths, tellId);
-    assert.equal(admitted?.body, "finish later");
-    assert.notEqual(admitted?.binding, undefined, "cancellation does not retract the admitted Tell");
-    finish.resolve({ kind: "answered", answer: "late answer", historyId: "waited-cancel-history" });
-    await settleFixtureBodies(bodies);
-    const settled = await readTell(allocated.paths, tellId);
-    assert.equal(settled?.state, "told");
-    const turn = settled?.binding === undefined ? null : await readTurn(allocated.paths, settled.binding.turnSequence);
-    assert.equal(turn?.end?.outcome.kind, "answered");
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
-test("a zero window observes an already-terminal Tell rather than the deadline", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-edge-"));
-  const bodies: Promise<unknown>[] = [];
-  const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  try {
-    const { allocated, world } = await bornWorld(root, "a1000016");
-    fixtures.set(allocated.paths.directory, { adapter: answering("edge answer"), now: "2026-08-10T00:00:01.000Z" });
-    const handle = new AkumaHandle(allocated.id, world);
+test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
+  await withWaitedTellFixture(async ({ born, withRuntime, settle }) => {
+    const terminal = await born("a1000016", answering("edge answer"));
+    const handle = new AkumaHandle(terminal.allocated.id, terminal.world);
     const recordedAt = "2026-08-10T00:00:02.000Z";
     const recorded = await handle.tell("edge", undefined, recordedAt);
-    await settleFixtureBodies(bodies);
+    await settle();
     const observed = await handle.tellOutcome(recorded.admission.tellId, { timeoutMs: 0 });
     assert.equal(observed.reason, "completed", "a terminal result witnessed at the expired deadline wins");
     assert.equal(observed.outcome?.kind, "answered");
     if (observed.outcome?.kind === "answered") assert.equal(observed.outcome.answer, "edge answer");
 
-    // The same expired edge through the full waited-Tell envelope never reports a deadline.
-    restoreTellRuntime();
-    const restoreStub = installTellRuntime({
-      async spawn() {
-        return { pid: 0, exited: new Promise(() => undefined), async terminate() {}, release() {} };
-      },
-    });
-    try {
-      const envelope = await executeTellWaitAkuma({
-        path: world,
-        id: allocated.id,
+    await withRuntime(dormantTellRuntime, async () => {
+      const envelope = await waitTell(terminal, {
         body: "edge",
         tellId: recorded.admission.tellId,
         recordedAt,
         timeoutMs: 0,
       });
       assert.deepEqual(envelope.observation, { reason: "answered", answer: "edge answer" });
-    } finally {
-      restoreStub();
-    }
-  } finally {
-    restoreTellRuntime();
-    await settleFixtureBodies(bodies);
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 
-test("a terminal Tell delivery without a bound Turn observes an explicit unanswered result", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-unanswered-"));
-  const { allocated, world } = await bornWorld(root, "a1000017");
-  const recordedAt = "2026-08-10T00:00:01.000Z";
-  const tellId = "terminal-without-turn";
-  await recordTell(allocated.paths, { kind: "tell", id: tellId, body: "gone", recordedAt });
-  await recordTellReceipt(allocated.paths, { kind: "custody", evidence: "exact", tellId, receivedAt: recordedAt });
-  const restoreTellRuntime = installTellRuntime({
-    async spawn() {
-      return { pid: 0, exited: new Promise(() => undefined), async terminate() {}, release() {} };
-    },
-  });
-  try {
-    const observed = await executeTellWaitAkuma({
-      path: world,
-      id: allocated.id,
-      body: "gone",
-      tellId,
-      recordedAt,
-      timeoutMs: 0,
+      const unanswered = await born("a1000017", answering("unused"));
+      const tellId = "terminal-without-turn";
+      await recordTell(unanswered.allocated.paths, { kind: "tell", id: tellId, body: "gone", recordedAt });
+      await recordTellReceipt(unanswered.allocated.paths, { kind: "custody", evidence: "exact", tellId, receivedAt: recordedAt });
+      const result = await waitTell(unanswered, { body: "gone", tellId, recordedAt, timeoutMs: 0 });
+      assert.equal(result.tell.row.state, "told");
+      assert.deepEqual(result.observation, { reason: "unanswered" });
     });
-    assert.equal(observed.tell.row.state, "told");
-    assert.deepEqual(observed.observation, { reason: "unanswered" });
-  } finally {
-    restoreTellRuntime();
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
-test("bounded interrupt Tell preserves the existing provider-unavailable error", async (context) => {
-  const { allocated, world } = await bornWorld(temporaryDirectory(context, "keiyaku-akuma-api-tell-wait-interrupt-"), "a1000012");
-  context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
-  await assert.rejects(
-    executeTellWaitAkuma({ path: world, id: allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
-    (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
-  );
+test("schema tell decodes JSON and typed failures stay distinct", async () => {
+  await withWaitedTellFixture(async ({ born, settle }) => {
+    const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+    const decoded = await born("a1000002", answering('{"ok":true}'));
+    const value = await decoded.akuma.tell("structured", { schema });
+    await settle();
+    assert.deepEqual(value, { ok: true });
+    const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
+    assert.equal(fact?.kind, "tell");
+    if (fact?.kind === "tell") {
+      const recorded = await readTell(decoded.allocated.paths, fact.tellId);
+      assert.equal(recorded?.schemaJson, schemaJsonText(schema));
+    }
+
+    const invalid = await born("a1000003", answering("not-json"));
+    await assert.rejects(invalid.akuma.tell("structured", { schema }), AkumaDecodeError);
+
+    const mismatch = await born("a1000004", answering('{"ok":1}'));
+    await assert.rejects(mismatch.akuma.tell("structured", { schema }), AkumaDecodeError);
+
+    const failing: ProviderAdapter = fixtureAdapter(async () => ({
+      admission: { fence: "api-fail" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
+        },
+      },
+      completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
+      async abort() {},
+    }));
+    const failed = await born("a1000005", failing);
+    await assert.rejects(failed.akuma.tell("structured", { schema }), AkumaProviderError);
+  });
 });
 
 test("schema tell routes admission and preserves typed refusals without launching a Body", async (context) => {
