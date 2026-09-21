@@ -354,7 +354,7 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   );
   const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
   const text = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(text, /✓ run            \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
+  assert.match(text, /✓ run    \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
   assert.doesNotMatch(text, /activity "|\bdocument\b|please|next|then/u);
   assert.doesNotMatch(text, /──|tasks \d|changes \d|came back|STILL RUNNING|killed/u);
   for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))

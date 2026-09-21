@@ -492,12 +492,7 @@ function renderStreamRow(
   lines.push(
     ...renderRow(row, context, {
       history: false,
-      first: layout.head(
-        changed ? at : undefined,
-        inFlightSay ? "⧖" : mark(row),
-        label(row, tool),
-        context.columns,
-      ),
+      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row, tool), context.columns),
       continuation: layout.continuation(),
       tool,
       singleLine: layout.singleLine === true,
