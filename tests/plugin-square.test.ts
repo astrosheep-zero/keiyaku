@@ -79,6 +79,29 @@ async function joinedSquareSession(
   return { instance, turn, bodyEnd };
 }
 
+async function withSquareNotificationFixture<T>(
+  name: string,
+  callback: (
+    fixture: Readonly<{ root: string } & Awaited<ReturnType<typeof joinedSquareSession>>>,
+  ) => Promise<T>,
+  initiators?: readonly string[],
+): Promise<T> {
+  const root = mkdtempSync(join(tmpdir(), `keiyaku-square-${name}-`));
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
+    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+  };
+  try {
+    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
+    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    return await callback({ root, ...(await joinedSquareSession(root, initiators)) });
+  } finally {
+    restoreEnvironment(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
   const ambient = ambientSessionIdentity();
@@ -370,16 +393,7 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
 });
 
 test("concurrent same-Body signals serialize while independent Bodies stay independent", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-serialize-"));
-  const prior = {
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
-  };
-  try {
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const { turn, bodyEnd } = await joinedSquareSession(root);
+  await withSquareNotificationFixture("serialize", async ({ root, turn, bodyEnd }) => {
 
     // The failed Turn is registered first on the same (akumaId, bodySequence) key, so the
     // Body-end operation is queued behind it and observes the recorded recipient.
@@ -407,23 +421,11 @@ test("concurrent same-Body signals serialize while independent Bodies stay indep
         mentions: ["Alice"],
       },
     ]);
-  } finally {
-    restoreEnvironment(prior);
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test("distinct Body notifications overlap instead of serializing globally", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-overlap-"));
-  const prior = {
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
-  };
-  try {
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const { turn } = await joinedSquareSession(root);
+  await withSquareNotificationFixture("overlap", async ({ root, turn }) => {
     const parkedId = "aku/parked-body";
     const { promise: parked, resolve: markParked } = promiseBarrier<void>();
     const { promise: released, resolve: release } = promiseBarrier<void>();
@@ -481,23 +483,11 @@ test("distinct Body notifications overlap instead of serializing globally", asyn
     } finally {
       Square.prototype.implicitJoin = originalImplicitJoin;
     }
-  } finally {
-    restoreEnvironment(prior);
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test("a rejected failed-Turn send never pre-marks the Body as notified", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-rejected-"));
-  const prior = {
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
-  };
-  try {
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const { instance, turn, bodyEnd } = await joinedSquareSession(root, ["Alice"]);
+  await withSquareNotificationFixture("rejected", async ({ root, instance, turn, bodyEnd }) => {
     await assert.rejects(
       Promise.resolve(
         turn({
@@ -526,23 +516,11 @@ test("a rejected failed-Turn send never pre-marks the Body as notified", async (
       bodies.some((body) => body.startsWith("aku/rejected body/1 (@Ghost)")),
       true,
     );
-  } finally {
-    restoreEnvironment(prior);
-    rmSync(root, { recursive: true, force: true });
-  }
+  }, ["Alice"]);
 });
 
 test("cancellation revokes queued and late Body notification authority", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-authority-"));
-  const prior = {
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
-  };
-  try {
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const { turn, bodyEnd } = await joinedSquareSession(root);
+  await withSquareNotificationFixture("authority", async ({ root, turn, bodyEnd }) => {
 
     // A Body-end queued behind a pending Turn is abandoned once its authority is cancelled,
     // even though the earlier Turn itself already sent its notice.
@@ -605,10 +583,7 @@ test("cancellation revokes queued and late Body notification authority", async (
     const bodies = (await expressions(squarePath(root))).map(({ body }) => body);
     assert.equal(bodies.some((body) => body.startsWith("aku/late turn/1")), true);
     assert.equal(bodies.some((body) => body.startsWith("aku/late body/1 (@Alice)")), true);
-  } finally {
-    restoreEnvironment(prior);
-    rmSync(root, { recursive: true, force: true });
-  }
+  });
 });
 
 test("Turn mentions follow the signal initiator, never the Body environment", async () => {
