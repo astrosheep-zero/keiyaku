@@ -19,19 +19,29 @@ workspace coordinate is a separate fact for the caller to use.
 Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions
 between success, substantive refusal, retryable conflict, absent authority,
-and operational failure. Contract text labels tender and target integration as `tender commit` and `integration commit`, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody out of ordinary text, and retains typed fields in JSON. A completed placement
-reads like Git movement, identically for a review and a deliver that placed
-the candidate: the title states the verdict or delivery and the Contract, one
-movement row states the reference the placement advanced as `old..new  ref`,
-satisfied Verification adds one fact row `verification satisfied · on <sha>`
-naming the commit the verdict ran against — placement made that commit the
-reference's new head, so the two rows share one sha — and the final lifecycle
-state is one explicit `claimed` row. Receipt, status, and history render that
-verified commit with one `verification satisfied · on <sha>` vocabulary;
-status falls back to the bare verdict only when the recorded subject names no
-snapshot. Verification mode words never appear in ordinary receipt text and
-stay in JSON and `history`. A deliver that did not complete placement keeps
-its tender and content-identity rows and its current diagnostic shape.
+and operational failure. Contract text labels tender and construction/history
+integration as `tender commit` and `integration commit`, patch-id as `content
+identity (not commit)`, keeps ContractHead and journal blob custody out of
+ordinary text, and retains typed fields in JSON. In status, catalogue, and
+Kanshi candidate presentations, a delivery-backed row names its integrated
+object as `integration result  <sha>` and keeps its predecessor and other
+candidate facts. Recorded verification folds into that line only when its
+snapshot is the same; otherwise it remains an independent
+`verification <verdict> · snapshot <sha>` or bare `verification <verdict>`
+fact. A row without a delivery association keeps `candidate  none` and shows
+recorded verification independently.
+
+A completed placement reads like Git movement, identically for a review and a
+deliver that placed the candidate: the title states the verdict or delivery
+and the Contract, one movement row states the reference the placement
+advanced as `old..new  ref`, satisfied Verification adds one fact row
+`integration result  <sha> · verification satisfied` naming the integrated
+object, and the final lifecycle state is one explicit `claimed` row. Audit
+candidate output and Contract history retain `integration commit` for their
+construction or durable fact history. Verification mode words never appear
+in ordinary receipt text and stay in JSON and `history`. A deliver that did
+not complete placement keeps its tender and content-identity rows and its
+current diagnostic shape.
 
 Ordinary fact rows state labeled human facts. No verb receipt states its own
 recording with a `journal` row, and no ordinary receipt text carries a

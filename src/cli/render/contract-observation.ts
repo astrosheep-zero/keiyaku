@@ -29,8 +29,33 @@ export function candidateFact(delivery: ContractRow["delivery"]): string {
 export function verificationFact(status: ContractRow["verification"]): string | undefined {
   if (status === undefined) return undefined;
   if (status.kind === "recorded")
-    return `verification ${status.verdict}${status.snapshot === undefined ? "" : ` · on ${shortGitId(status.snapshot)}`}`;
+    return `verification ${status.verdict}${status.snapshot === undefined ? "" : ` · snapshot ${shortGitId(status.snapshot)}`}`;
   return `verification ${status.kind}`;
+}
+
+export function candidateIntegrationFacts(
+  delivery: ContractRow["delivery"],
+  verification: ContractRow["verification"],
+  abbreviations: ReadonlyMap<string, string>,
+): readonly string[] {
+  const verificationLine = verificationFact(verification);
+  if (delivery === null) {
+    return [candidateFact(delivery), ...(verificationLine === undefined ? [] : [verificationLine])];
+  }
+  const integration = displayGitId(delivery.integration.snapshot, abbreviations);
+  const foldedVerification =
+    verification?.kind === "recorded" && verification.snapshot === delivery.integration.snapshot
+      ? ` · verification ${verification.verdict}`
+      : "";
+  return [
+    candidateFact(delivery),
+    `tender commit  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
+    `integration result  ${integration}${foldedVerification}`,
+    `predecessor  ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
+    `method  ${delivery.method}`,
+    `content identity (not commit)  ${delivery.integration.changeId}`,
+    ...(foldedVerification.length === 0 && verificationLine !== undefined ? [verificationLine] : []),
+  ];
 }
 
 export function afterWording(edge: ContractAfterEdge): string {

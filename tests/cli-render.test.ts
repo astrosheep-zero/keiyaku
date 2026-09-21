@@ -360,10 +360,12 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     ],
   });
   assert.doesNotMatch(delivered, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(delivered, /^  candidate  present\n  target  none$/mu);
+  assert.match(
+    delivered,
+    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-selected-contract\n  verification unrecorded\n  target  none$/mu,
+  );
   assert.match(delivered, /^  verification unrecorded$/mu);
   assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
-  assert.doesNotMatch(delivered, /tender |integration /u);
 
   const expected = snapshotId("b".repeat(40));
   const observed = snapshotId("c".repeat(40));
@@ -387,7 +389,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   });
   assert.match(
     moved,
-    /^  candidate  present\n  target  main @ ccccccc · behind 0\n  lag worktree  \/repo\/\.keiyaku\/wt\/catalog\n  target moved  bbbbbbb -> ccccccc$/mu,
+    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-target-moved\n  target  main @ ccccccc · behind 0\n  lag worktree  \/repo\/\.keiyaku\/wt\/catalog\n  target moved  bbbbbbb -> ccccccc$/mu,
   );
 
   const disappeared = renderCatalogText({
@@ -410,7 +412,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   });
   assert.match(
     disappeared,
-    /^  candidate  present\n  target  main · head absent · behind unknown\n  target moved  bbbbbbb -> absent$/mu,
+    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-target-null\n  target  main · head absent · behind unknown\n  target moved  bbbbbbb -> absent$/mu,
   );
 });
 
@@ -436,7 +438,7 @@ function catalogRow(verification?: ContractRow["verification"]): ContractRow {
   };
 }
 
-test("recorded verification names the commit the verdict covers", () => {
+test("recorded verification names the snapshot the verdict covers", () => {
   const integration = snapshotId("4".repeat(40));
   const catalog: Catalog = {
     kind: "contracts",
@@ -448,14 +450,14 @@ test("recorded verification names the commit the verdict covers", () => {
     ],
     hasMore: false,
   };
-  assert.match(renderCatalogText(catalog), /^  verification satisfied · on 4444444$/mu);
+  assert.match(renderCatalogText(catalog), /^  verification satisfied · snapshot 4444444$/mu);
 
   const bare = renderCatalogText({
     ...catalog,
     rows: [catalogRow({ kind: "recorded", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" })],
   });
   assert.match(bare, /^  verification unsatisfied$/mu);
-  assert.doesNotMatch(bare, / · on /u);
+  assert.doesNotMatch(bare, / · snapshot /u);
 });
 
 test("every verb receipt states facts without journal rows or entry ids", () => {
@@ -897,7 +899,7 @@ test("deliver projects a ran Verification completion", () => {
     [
       "✓ delivered  kei/completion",
       "  target  3333333..4444444  refs/heads/main",
-      "  verification  satisfied  · on 4444444",
+      "  integration result  4444444 · verification satisfied",
       "● claimed",
     ].join("\n"),
   );

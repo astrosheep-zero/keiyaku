@@ -2,11 +2,10 @@ import type { Catalog, ContractRow } from "../../index.js";
 import {
   abbreviateGitIds,
   afterWording,
-  candidateFact,
+  candidateIntegrationFacts,
   dependentWording,
   gateFact,
   gitIdsInRow,
-  verificationFact,
   targetFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
@@ -87,10 +86,9 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${candidateFact(row.delivery)}`,
+      ...candidateIntegrationFacts(row.delivery, row.verification, abbreviations).map((fact) => `  ${safeText(fact)}`),
       ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
       ...[],
-      ...(verificationFact(row.verification) === undefined ? [] : [`  ${verificationFact(row.verification)}`]),
       ...row.after.map((edge) => `  ${afterWording(edge)}`),
       ...(row.dependents.length === 0 ? [] : [`  dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
       ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),

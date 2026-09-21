@@ -228,9 +228,9 @@ function shortGitId(value: string): string {
 /**
  * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
  * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
- * state. Satisfied Verification adds one fact row naming the commit the verdict ran against; placement made that
- * commit the reference's new head, so the two rows share one sha. Verification mode words stay in JSON and
- * `history`, never in ordinary receipt text. A completion without an advanced reference states no movement.
+ * state. Satisfied Verification adds one fact row naming the integrated result; placement made that commit the
+ * reference's new head, so the movement and integrated-result rows share one sha. Verification mode words stay in
+ * JSON and `history`, never in ordinary receipt text. A completion without an advanced reference states no movement.
  * Journal ULIDs stay in JSON and `history`, never in ordinary receipt text.
  */
 function completedPlacementLines(
@@ -256,8 +256,8 @@ function completedPlacementLines(
     receiptRow(
       lines,
       " ",
-      "verification",
-      [{ text: "satisfied" }, { text: `· on ${shortGitId(completion.integration)}` }],
+      "integration result",
+      [{ text: `${shortGitId(completion.integration)} · verification satisfied` }],
       columns,
     );
   }

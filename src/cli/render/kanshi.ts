@@ -2,13 +2,12 @@ import type { ContractKanshiRow, KanshiReport, TaskKanshiRow } from "../../kansh
 import {
   abbreviateGitIds,
   afterWording,
-  candidateFact,
+  candidateIntegrationFacts,
   dependentWording,
   displayGitId,
   gateFact,
   gitIdsInRow,
   mergeSummary,
-  verificationFact,
   targetFacts,
 } from "./contract-observation.js";
 import {
@@ -208,7 +207,13 @@ function renderSelectedContractRow(
       : []),
   ]);
   lines.push(...semanticBlock("gates", gateFacts, context));
-  lines.push(...semanticBlock("candidate/integration", candidateFacts(row, abbreviations), context));
+  lines.push(
+    ...semanticBlock(
+      "candidate/integration",
+      candidateIntegrationFacts(row.delivery, row.verification, abbreviations),
+      context,
+    ),
+  );
   lines.push(...semanticBlock("target", targetFacts(row, abbreviations), context));
   const workspaceFacts = [workspaceState(row)];
   if (
@@ -233,36 +238,21 @@ function renderSelectedContractRow(
   return lines;
 }
 
-function candidateFacts(row: ContractKanshiRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  const verification = verificationFact(row.verification);
-  if (row.delivery === null)
-    return [candidateFact(row.delivery), ...(verification === undefined ? [] : [verification])];
-  const delivery = row.delivery;
-  return [
-    candidateFact(delivery),
-    `tender commit  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
-    `integration commit  ${displayGitId(delivery.integration.snapshot, abbreviations)} · predecessor ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
-    `method  ${delivery.method}`,
-    `content identity (not commit)  ${delivery.integration.changeId}`,
-    ...(verification === undefined ? [] : [verification]),
-  ];
-}
-
 function renderWorldContractRow(
   row: ContractKanshiRow,
   report: KanshiReport,
   context: TextRenderContext,
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
+  const abbreviations = gitAbbreviations(report);
   const contractFacts = [
-    candidateFact(row.delivery),
-    ...targetFacts(row, gitAbbreviations(report)),
+    ...candidateIntegrationFacts(row.delivery, row.verification, abbreviations),
+    ...targetFacts(row, abbreviations),
     ...[],
     ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
     ...row.after.map(afterWording),
     ...(row.dependents.length === 0 ? [] : [`dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
     ...row.gates.reports.map(gateFact),
-    ...(verificationFact(row.verification) === undefined ? [] : [verificationFact(row.verification)!]),
   ];
   const linkedFacts = [
     ...(row.holder.kind === "held" ? [linkedTask(report, row.holder.taskId)] : []),
