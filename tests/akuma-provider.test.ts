@@ -12,6 +12,10 @@ import {
   AKUMA_REQUESTS_ENV,
   AGENT_EVENT_QUEUE_LIMIT,
   createProviderAttempt,
+  boundedToolInput,
+  otherToolCall,
+  decodeAgentEvent,
+  encodeAgentEvent,
   AgentEventChannel,
   noteEvent,
   type AgentEvent,
@@ -30,6 +34,9 @@ import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
+import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/providers/claude/events.js";
+import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
+import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 import { waitForCondition } from "./support/process.js";
 
@@ -49,6 +56,272 @@ function freshInput(
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
   return attempt.result;
 }
+
+test("generic tool input admission preserves empty objects, types, order, and byte-bounded Unicode", () => {
+  assert.deepEqual(otherToolCall("future", {}), {
+    kind: "other",
+    display: "future",
+    input: { json: "{}", truncated: false },
+  });
+  assert.deepEqual(otherToolCall("future"), { kind: "other", display: "future" });
+  const supplied = { text: "é😀", count: 2, nested: { ok: true } };
+  assert.deepEqual(otherToolCall("future", supplied).input, {
+    json: JSON.stringify(supplied),
+    truncated: false,
+  });
+  const oversized = boundedToolInput({ value: "😀".repeat(20_000) });
+  assert.ok(oversized);
+  assert.equal(oversized.truncated, true);
+  assert.ok(new TextEncoder().encode(oversized.json).length <= 16_384);
+  assert.equal([...oversized.json].at(-1), "😀");
+});
+
+test("encoded generic argument previews round-trip while legacy name-only narration still decodes", () => {
+  const event: AgentEvent = {
+    type: "tool",
+    phase: "started",
+    id: "t1",
+    name: "future_tool",
+    call: { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } },
+  };
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent(event)), event);
+  const legacy: AgentEvent = {
+    type: "tool",
+    phase: "started",
+    id: "t2",
+    name: "future_tool",
+    call: { kind: "other", display: "future_tool" },
+  };
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent(legacy)), legacy);
+  const truncated: AgentEvent = {
+    type: "tool",
+    phase: "started",
+    id: "t3",
+    name: "future_tool",
+    truncated: true,
+    call: { kind: "other", display: "future_tool", input: { json: '{"value":"x', truncated: true } },
+  };
+  const surrendered = decodeAgentEvent(encodeAgentEvent(truncated));
+  assert.equal(surrendered.type, "tool");
+  assert.equal(surrendered.type === "tool" ? surrendered.call.kind === "other" && surrendered.call.input?.truncated : false, true, "an explicit capture truncation survives the round-trip");
+});
+
+/** Drain one synchronous channel's already-queued events without a live waiter. */
+async function drainChannel(channel: AgentEventChannel): Promise<readonly AgentEvent[]> {
+  channel.end();
+  const events: AgentEvent[] = [];
+  for await (const event of channel) events.push(event);
+  return events;
+}
+
+test("native adapters admit structured unknown arguments into one bounded generic call", async () => {
+  const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const piArgs = { alpha: 1, nested: { ok: true } };
+  const [piStart] = translatePiEvent(
+    { type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs },
+    piState,
+  );
+  const piCall = { kind: "other", display: "future_tool", input: { json: JSON.stringify(piArgs), truncated: false } };
+  assert.deepEqual(piStart, { type: "tool", phase: "started", id: "pi-1", name: "future_tool", call: piCall });
+  const [piEnd] = translatePiEvent(
+    { type: "tool_execution_end", toolCallId: "pi-1", toolName: "future_tool", isError: false, result: { secret: true } },
+    piState,
+  );
+  assert.deepEqual(
+    piEnd,
+    { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } },
+    "a completion reuses its correlated start and never carries result bytes",
+  );
+
+  const acpStart = mapAcpUpdate(
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "acp-1",
+      title: "future",
+      name: "future_tool",
+      kind: "other",
+      status: "in_progress",
+      rawInput: { alpha: 1 },
+    },
+    EMPTY_ACP_EVENT_STATE,
+  );
+  const acpCall = { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } };
+  assert.deepEqual(acpStart.events, [{ type: "tool", phase: "started", id: "acp-1", name: "future_tool", call: acpCall }]);
+  const acpEnd = mapAcpUpdate({ sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed" }, acpStart.state);
+  assert.deepEqual(
+    acpEnd.events,
+    [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call: acpCall, result: { status: "ok" } }],
+    "an acknowledging update without arguments inherits its correlated start",
+  );
+
+  const claudeState: ClaudeObservationState = { tools: new Map() };
+  const claudeChannel = new AgentEventChannel();
+  emitClaudeMessage(
+    {
+      type: "assistant",
+      uuid: "assistant-1",
+      session_id: "session-claude",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "claude-1", name: "future_tool", input: { alpha: 1 } }] },
+    } as unknown as SDKMessage,
+    claudeChannel,
+    claudeState,
+  );
+  emitClaudeMessage(
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "claude-1", is_error: false }] },
+    } as unknown as SDKMessage,
+    claudeChannel,
+    claudeState,
+  );
+  assert.deepEqual(await drainChannel(claudeChannel), [
+    { type: "tool", phase: "started", id: "claude-1", name: "future_tool", call: acpCall },
+    { type: "tool", phase: "completed", id: "claude-1", name: "future_tool", call: acpCall, result: { status: "ok" } },
+  ]);
+
+  const opencodeState = createEventState("session-1");
+  const opencodeEvents: AgentEvent[] = [];
+  const emitter = { emit: (mapped: AgentEvent): void => void opencodeEvents.push(mapped) };
+  const part = (state: Record<string, unknown>) => ({
+    type: "message.part.updated",
+    properties: { part: { type: "tool", callID: "oc-1", tool: "future_tool", sessionID: "session-1", state } },
+  });
+  mapEvent(part({ status: "running", input: { alpha: 1 } }), emitter, opencodeState);
+  mapEvent(part({ status: "completed" }), emitter, opencodeState);
+  assert.deepEqual(
+    opencodeEvents,
+    [
+      { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call: acpCall },
+      { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call: acpCall, result: { status: "ok" } },
+    ],
+    "an OpenCode completion without input inherits its correlated start",
+  );
+});
+
+test("Claude keeps supplied scalar, null, empty-object, and absent Bash input distinct", async () => {
+  const callFor = async (input: unknown) => {
+    const state: ClaudeObservationState = { tools: new Map() };
+    const channel = new AgentEventChannel();
+    const block =
+      input === undefined
+        ? { type: "tool_use", id: "bash-1", name: "Bash" }
+        : { type: "tool_use", id: "bash-1", name: "Bash", input };
+    emitClaudeMessage(
+      {
+        type: "assistant",
+        uuid: "assistant-1",
+        session_id: "session-claude",
+        parent_tool_use_id: null,
+        message: { content: [block] },
+      } as unknown as SDKMessage,
+      channel,
+      state,
+    );
+    const [event] = await drainChannel(channel);
+    assert.equal(event?.type, "tool");
+    return event?.type === "tool" ? event.call : undefined;
+  };
+  assert.deepEqual(await callFor({ command: "npm test" }), { kind: "run", command: "npm test" });
+  assert.deepEqual(await callFor({ description: "x" }), {
+    kind: "other",
+    display: "Bash",
+    input: { json: '{"description":"x"}', truncated: false },
+  });
+  assert.deepEqual(await callFor({}), { kind: "other", display: "Bash", input: { json: "{}", truncated: false } });
+  assert.deepEqual(await callFor(null), { kind: "other", display: "Bash", input: { json: "null", truncated: false } });
+  assert.deepEqual(await callFor("run it"), {
+    kind: "other",
+    display: "Bash",
+    input: { json: '"run it"', truncated: false },
+  });
+  assert.deepEqual(await callFor(42), { kind: "other", display: "Bash", input: { json: "42", truncated: false } });
+  assert.deepEqual(await callFor(undefined), { kind: "other", display: "Bash" });
+});
+
+test("a correlated start's admitted preview survives empty and conflicting completion input", () => {
+  const acpPreview = (events: readonly AgentEvent[]) => {
+    const event = events[0];
+    return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined;
+  };
+  const acpStart = mapAcpUpdate(
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: "acp-1",
+      title: "future",
+      name: "future_tool",
+      kind: "other",
+      status: "in_progress",
+      rawInput: { alpha: 1 },
+    },
+    EMPTY_ACP_EVENT_STATE,
+  );
+  const started = { json: '{"alpha":1}', truncated: false };
+  for (const rawInput of [{}, { beta: 2 }, null]) {
+    const completion = mapAcpUpdate(
+      { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed", rawInput },
+      acpStart.state,
+    );
+    assert.deepEqual(acpPreview(completion.events), started, "ACP keeps the start preview for " + JSON.stringify(rawInput));
+  }
+  const acpAbsent = mapAcpUpdate(
+    { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed" },
+    acpStart.state,
+  );
+  assert.deepEqual(acpPreview(acpAbsent.events), started, "ACP keeps the start preview when the update omits input");
+  const acpBare = mapAcpUpdate(
+    { sessionUpdate: "tool_call", toolCallId: "acp-2", title: "future", name: "future_tool", kind: "other", status: "in_progress" },
+    EMPTY_ACP_EVENT_STATE,
+  );
+  const acpSupplied = mapAcpUpdate(
+    { sessionUpdate: "tool_call_update", toolCallId: "acp-2", status: "completed", rawInput: { gamma: 3 } },
+    acpBare.state,
+  );
+  assert.deepEqual(acpPreview(acpSupplied.events), { json: '{"gamma":3}', truncated: false }, "ACP adopts the first supplied evidence");
+
+  const opencodeEvents = (
+    state: ReturnType<typeof createEventState>,
+    input: unknown,
+    status: string,
+  ): readonly AgentEvent[] => {
+    const events: AgentEvent[] = [];
+    mapEvent(
+      {
+        type: "message.part.updated",
+        properties: {
+          part: {
+            type: "tool",
+            callID: "oc-1",
+            tool: "future_tool",
+            sessionID: "session-1",
+            state: { status, ...(input === undefined ? {} : { input }) },
+          },
+        },
+      },
+      { emit: (event: AgentEvent) => void events.push(event) },
+      state,
+    );
+    return events;
+  };
+  const opencodePreview = (startInput: unknown, completionInput: unknown) => {
+    const state = createEventState("session-1");
+    opencodeEvents(state, startInput, "running");
+    const events = opencodeEvents(state, completionInput, "completed");
+    const event = events.at(-1);
+    return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined;
+  };
+  for (const completionInput of [{}, { beta: 2 }, undefined])
+    assert.deepEqual(
+      opencodePreview({ alpha: 1 }, completionInput),
+      started,
+      "OpenCode keeps the start preview for " + JSON.stringify(completionInput),
+    );
+  assert.deepEqual(
+    opencodePreview(undefined, { gamma: 3 }),
+    { json: '{"gamma":3}', truncated: false },
+    "OpenCode adopts the first supplied evidence",
+  );
+});
 
 test("AgentEventChannel bounds reconstructible activity while retaining session and error events", async () => {
   const channel = new AgentEventChannel();

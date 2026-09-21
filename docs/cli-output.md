@@ -89,7 +89,10 @@ values remain explicit. Compact grouping and narrow-terminal layouts remain
 useful where they preserve scanning density and ownership; uniformity alone
 does not justify expanding every fact into a separate row. Activity summaries
 retain the concrete work observed, rather than substituting a broad category
-for useful command, path, or text evidence. Gate evidence retains its compact
+for useful command, path, or text evidence. A generic tool row names the actual
+tool observed and keeps a bounded argument preview; short names share one fixed
+action column, arguments trim before a name, omitted trailing fields are named,
+and a partial capture truncates visibly. Gate evidence retains its compact
 visual state notation alongside each declared gate's identity; stale evidence
 remains explicitly named.
 Task owns Task facts and [cli-task.md](cli-task.md) owns their

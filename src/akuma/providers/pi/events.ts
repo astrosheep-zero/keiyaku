@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { noteEvent, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 type Disposition = "drop" | "message" | "note" | "tool-end" | "tool-start";
@@ -120,7 +120,8 @@ function toolCall(name: string, args: unknown): ToolCall {
     runCall(name, value) ??
     readCall(name, value) ??
     searchCall(name, value) ??
-    fileChangeCall(name, value) ?? { kind: "other", display: name }
+    fileChangeCall(name, value) ??
+    otherToolCall(name, args)
   );
 }
 
@@ -157,7 +158,7 @@ function translateToolEnd(
   const started = state.tools.get(event.toolCallId);
   state.tools.delete(event.toolCallId);
   const name = started?.name ?? event.toolName;
-  const call = started?.call ?? { kind: "other", display: name };
+  const call = started?.call ?? otherToolCall(name);
   return [
     {
       type: "tool",

@@ -39,6 +39,19 @@ history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
 
+A generic native tool invocation may contribute one bounded compact preview of
+the structured arguments it actually supplied. That preview is narration, not
+execution authority: it never carries tool output, results, deltas, or a raw
+native envelope, and it preserves the supplied values, types, and order without
+fabricating defaults. Supplied arguments that exceed the narration bound keep an
+explicit truncation fact cut at a complete code-point boundary. Missing
+arguments stay absent, and explicitly empty arguments remain distinguishable
+from absence rather than collapsing into it. An acknowledging or completion
+event reuses the preview its correlated start admitted; an adapter whose native
+protocol supplies no structured invocation arguments keeps a name-only
+fallback. Existing known structural tool normalization is unchanged, and old
+name-only narration keeps its former presentation.
+
 Provider context compaction is retained as bounded narration when the native
 adapter reports it. Compaction is execution housekeeping, not a Turn failure,
 retry, or lifecycle transition; a compaction error may be narrated separately

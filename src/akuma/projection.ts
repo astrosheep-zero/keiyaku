@@ -15,6 +15,7 @@ const fileChangeSchema = z
     diffstat: diffstatSchema.optional(),
   })
   .strict();
+const toolInputSchema = z.object({ json: z.string(), truncated: z.boolean() }).strict();
 const toolCallSchema = z.union([
   z.object({ kind: z.literal("run"), command: z.string() }).strict(),
   z
@@ -35,7 +36,7 @@ const toolCallSchema = z.union([
     })
     .strict(),
   z.object({ kind: z.literal("fileChange"), changes: z.array(fileChangeSchema).readonly() }).strict(),
-  z.object({ kind: z.literal("other"), display: z.string() }).strict(),
+  z.object({ kind: z.literal("other"), display: z.string(), input: toolInputSchema.optional() }).strict(),
 ]);
 const toolResultSchema = z
   .object({ status: z.enum(["ok", "error"]), message: z.string().optional(), exitCode: z.number().int().optional() })

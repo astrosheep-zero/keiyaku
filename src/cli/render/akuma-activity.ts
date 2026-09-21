@@ -11,7 +11,7 @@ import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
-import { toolRepr } from "./akuma-tool.js";
+import { toolDiagnostic, toolRepr, toolText } from "./akuma-tool.js";
 import {
   displayColumns,
   renderBoundedTextBlock,
@@ -25,6 +25,7 @@ import {
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
+const TOOL_VERB_WIDTH = 14;
 
 /**
  * The one blessed ruler: a run of U+2500 exactly as wide as the frame head's
@@ -145,19 +146,36 @@ function rowText(row: RenderRow): Readonly<{ text: string; lines: number; middle
   const repr = toolRepr(row);
   return {
     text: repr.text,
-    lines: 2,
+    lines: 1,
     ...(repr.overflow === "middle-ellipsis" ? { middle: true as const } : {}),
     ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }),
   };
 }
 
-function eventPrefix(glyph: string, verb: string, time?: string): string {
+function eventPrefix(glyph: string, verb: string, time: string | undefined, columns: number, row: RenderRow): string {
   const gutter = time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH);
-  return `${gutter} ${glyph} ${verb.padEnd(VERB_WIDTH)} `;
+  return actionCell(`${gutter} ${glyph}`, verb, row, columns);
+}
+
+/** The action column one row spends: a fixed short cell, or the name's own width when longer. */
+function verbColumn(verb: string, row: RenderRow): number {
+  return row.kind === "tool" ? Math.max(TOOL_VERB_WIDTH, displayColumns(verb)) : VERB_WIDTH;
+}
+
+/**
+ * Attach the action cell after one row prefix. A name wider than the row's
+ * remaining columns truncates grapheme-safely, spending every column the row
+ * leaves after the separator so an exact-fit name stays whole and args trim first.
+ */
+function actionCell(head: string, verb: string, row: RenderRow, columns: number): string {
+  const prefix = `${head} `;
+  const available = Math.max(0, columns - displayColumns(prefix) - 1);
+  const width = Math.min(verbColumn(verb, row), available);
+  return `${prefix}${padToDisplay(truncateDisplayText(verb, width), width)} `;
 }
 
 function continuationPrefix(): string {
-  return eventPrefix("│", "");
+  return " ".repeat(TIME_WIDTH) + " │ " + " ".repeat(VERB_WIDTH) + " ";
 }
 
 /** Pad to a terminal-column width; raw string length is never the measuring stick. */
@@ -172,7 +190,7 @@ function padToDisplay(text: string, width: number): string {
  * source column a plural wait aligns across its selected set.
  */
 type RowLayout = Readonly<{
-  head: (time: string | undefined, glyph: string, verb: string) => string;
+  head: (time: string | undefined, glyph: string, verb: string, row: RenderRow, columns: number) => string;
   continuation: () => string;
   marker: (count: number) => string;
   /** A plural wait shares one minute clock across all of its attributed rows. */
@@ -183,7 +201,7 @@ type RowLayout = Readonly<{
 
 function plainLayout(): RowLayout {
   return {
-    head: (time, glyph, verb) => eventPrefix(glyph, verb, time),
+    head: (time, glyph, verb, row, columns) => eventPrefix(glyph, verb, time, columns, row),
     continuation: continuationPrefix,
     marker: (count) => `${" ".repeat(TIME_WIDTH)} ⋮ ${count} omitted`,
   };
@@ -192,8 +210,13 @@ function plainLayout(): RowLayout {
 function sourceLayout(source: string, width: () => number, clock: { previous?: string }): RowLayout {
   const gutter = (): string => `${" ".repeat(TIME_WIDTH)} ${padToDisplay(source, width())} `;
   return {
-    head: (time, glyph, verb) =>
-      `${time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH)} ${padToDisplay(source, width())} ${glyph} ${verb.padEnd(VERB_WIDTH)} `,
+    head: (time, glyph, verb, row, columns) =>
+      actionCell(
+        `${time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH)} ${padToDisplay(source, width())} ${glyph}`,
+        verb,
+        row,
+        columns,
+      ),
     // Continuations blank the time and source columns and align under the mark.
     continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
     marker: (count) => `${gutter()}⋮ ${count} omitted`,
@@ -239,6 +262,14 @@ type RowRenderOptions = Readonly<{
   inFlightSay?: boolean;
 }>;
 
+/** The body one row prints: a generic tool row re-derives its argument preview at this row's width
+ * while keeping the same failure, duration, or message clause any other tool row appends. */
+function rowBody(row: RenderRow, text: string, columns: number): string {
+  if (row.kind !== "tool" || row.call.kind !== "other") return text;
+  const diagnostic = toolDiagnostic(row);
+  return `${toolText(row, Math.max(0, columns - displayColumns(diagnostic)))}${diagnostic}`;
+}
+
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
   const { history, first, continuation, singleLine = false, inFlightSay = false } = options;
   const value = rowText(row);
@@ -246,14 +277,21 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
   if (singleLine) {
     const openQuote = row.kind === "said" && inFlightSay;
     const quoteWidth = quoted ? (openQuote ? 1 : 2) : 0;
-    const text = truncateDisplayText(value.text, Math.max(0, context.columns - displayColumns(first) - quoteWidth));
-    return quoted ? [`${first}"${text}${openQuote ? "" : '"'}`] : [`${first}${text}`];
+    const remaining = context.columns - displayColumns(first) - quoteWidth;
+    const bodyText = rowBody(row, value.text, remaining);
+    const text = truncateDisplayText(bodyText, Math.max(0, remaining));
+    if (!quoted) return [text.length === 0 ? first.trimEnd() : `${first}${text}`];
+    return [`${first}"${text}${openQuote ? "" : '"'}`];
   }
   const quoteWidth = quoted ? 2 : 0;
   if (value.middle === true) {
     return [renderMiddleEllipsis(first, value.text, value.suffix ?? "", context.columns - quoteWidth)];
   }
-  const lines = renderBoundedTextBlock(value.text, {
+  const remaining = context.columns - quoteWidth - displayColumns(first);
+  // A name that already fills its row spends the width whole; its arguments trim away entirely.
+  if (remaining <= 0) return [first.trimEnd()];
+  const bodyText = rowBody(row, value.text, remaining - displayColumns(value.suffix ?? ""));
+  const lines = renderBoundedTextBlock(bodyText, {
     first,
     continuation,
     columns: context.columns - quoteWidth,
@@ -282,7 +320,7 @@ function groupedEntries(
     lines.push(
       ...renderRow(row, context, {
         history,
-        first: layout.head(changed ? at : undefined, mark(row), label(row)),
+        first: layout.head(changed ? at : undefined, mark(row), label(row), row, context.columns),
         continuation: layout.continuation(),
         singleLine: layout.singleLine === true,
       }),
@@ -451,7 +489,7 @@ function renderStreamRow(
   lines.push(
     ...renderRow(row, context, {
       history: false,
-      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row)),
+      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row), row, context.columns),
       continuation: layout.continuation(),
       singleLine: layout.singleLine === true,
       inFlightSay,

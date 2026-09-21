@@ -1,5 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventChannel, noteEvent, unknownEvent, type ToolCall } from "../../provider.js";
+import { AgentEventChannel, noteEvent, otherToolCall, unknownEvent, type ToolCall } from "../../provider.js";
 
 type ClaudeMessageType = SDKMessage["type"];
 type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
@@ -127,10 +127,10 @@ const CLAUDE_SYSTEM_NOTES = {
   worker_shutting_down: (message) => `Worker stopping: ${nonblank(message.reason) ?? "unknown reason"}`,
 } satisfies Partial<Record<ClaudeSystemSubtype, (message: Readonly<Record<string, unknown>>) => string>>;
 
-function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
+function runCall(name: string, value: Readonly<Record<string, unknown>>, input: unknown): ToolCall | undefined {
   if (name !== "Bash") return undefined;
   const command = nonblank(value.command);
-  return command === undefined ? { kind: "other", display: name } : { kind: "run", command };
+  return command === undefined ? otherToolCall(name, input) : { kind: "run", command };
 }
 
 function readCall(
@@ -220,13 +220,11 @@ function structuredFileChange(name: string, result: unknown): ToolCall | undefin
 
 function toolCall(name: string, input: unknown): ToolCall {
   const value = object(input) ?? {};
-  const run = runCall(name, value);
+  const run = runCall(name, value, input);
   if (run !== undefined) return run;
   const path = startedPath(name, value);
   return (
-    readCall(name, path, value) ??
-    searchCall(name, value) ??
-    fileChangeCall(name, path) ?? { kind: "other", display: name }
+    readCall(name, path, value) ?? searchCall(name, value) ?? fileChangeCall(name, path) ?? otherToolCall(name, input)
   );
 }
 

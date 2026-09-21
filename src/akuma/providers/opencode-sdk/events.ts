@@ -1,4 +1,4 @@
-import { noteEvent, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
+import { noteEvent, otherToolCall, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 
 type Emitter = { emit(event: AgentEvent): void };
@@ -141,6 +141,10 @@ function applyPatchCall(metadata: Record<string, unknown> | undefined): ToolCall
 function strongerCall(previous: ToolCall | undefined, next: ToolCall | undefined): ToolCall | undefined {
   if (next === undefined) return previous;
   if (previous?.kind === "fileChange" && next.kind !== "fileChange") return previous;
+  // The correlated start's admitted preview is authority: a later update never
+  // overwrites it, empty or conflicting, while a start without one adopts supplied evidence.
+  if (next.kind === "other" && previous?.kind === "other" && previous.input !== undefined)
+    return { ...next, input: previous.input };
   return next;
 }
 
@@ -185,10 +189,10 @@ function callFor(name: string, input: unknown, metadata?: unknown): ToolCall | u
   if (lower === "bash" || lower === "shell") return runCall(lower, value);
   if (lower === "read") return readCall(lower, value);
   if (lower === "grep" || lower === "glob" || lower === "search") return searchCall(lower, value);
-  if (lower === "edit") return editCall(value, meta) ?? { kind: "other", display: name };
-  if (lower === "write") return writeCall(value, meta) ?? { kind: "other", display: name };
-  if (lower === "apply_patch") return applyPatchCall(meta) ?? { kind: "other", display: name };
-  return { kind: "other", display: name };
+  if (lower === "edit") return editCall(value, meta) ?? otherToolCall(name, input);
+  if (lower === "write") return writeCall(value, meta) ?? otherToolCall(name, input);
+  if (lower === "apply_patch") return applyPatchCall(meta) ?? otherToolCall(name, input);
+  return otherToolCall(name, input);
 }
 function belongs(part: Part, state: State): boolean {
   return state.sessionId === undefined || part.sessionID === state.sessionId;

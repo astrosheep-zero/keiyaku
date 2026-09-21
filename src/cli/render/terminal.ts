@@ -158,7 +158,10 @@ export function quotedText(value: string): string {
 }
 
 export function safeText(value: string): string {
-  return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (/\s/u.test(character) ? " " : "�"));
+  return value.replaceAll(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) =>
+    // ZWJ and ZWNJ are legitimate joiners that carry a grapheme cluster's shape; they move no cursor.
+    character === "\u200c" || character === "\u200d" ? character : /\s/u.test(character) ? " " : "�",
+  );
 }
 
 type CheckoutNotFollowable = Readonly<{

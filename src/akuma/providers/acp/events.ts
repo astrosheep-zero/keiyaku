@@ -1,5 +1,5 @@
 import type { SessionUpdate, ToolCallLocation } from "@agentclientprotocol/sdk";
-import { noteEvent, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
 
 type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
 
@@ -67,8 +67,8 @@ function positiveLine(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
 }
 
-function otherCall(name: string): ToolCall {
-  return { kind: "other", display: name };
+function otherCall(name: string, input?: unknown): ToolCall {
+  return otherToolCall(name, input);
 }
 
 function locationFact(locations: readonly ToolCallLocation[] | null | undefined): {
@@ -89,7 +89,7 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
   const location = locationFact(update.locations);
   if (update.kind === "read") {
     return location.path === undefined
-      ? otherCall(name)
+      ? otherCall(name, update.rawInput)
       : {
           kind: "read",
           path: location.path,
@@ -99,11 +99,11 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
   const input = object(update.rawInput);
   if (update.kind === "execute") {
     const command = nonblank(input?.command);
-    return command === undefined ? otherCall(name) : { kind: "run", command };
+    return command === undefined ? otherCall(name, update.rawInput) : { kind: "run", command };
   }
   if (update.kind === "search") {
     const query = nonblank(input?.query);
-    if (query === undefined) return otherCall(name);
+    if (query === undefined) return otherCall(name, update.rawInput);
     const path = nonblank(input?.path);
     const glob = nonblank(input?.glob);
     const scope = input?.scope;
@@ -116,7 +116,7 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
       ...(glob === undefined ? {} : { glob }),
     };
   }
-  return otherCall(name);
+  return otherCall(name, update.rawInput);
 }
 
 function strongest(previous: ToolCall | undefined, next: ToolCall): ToolCall {
@@ -132,7 +132,14 @@ function observeTool(
   const name = nonblank(update.name) ?? nonblank(update.title) ?? previous?.name ?? "ACP tool";
   const standard = standardCall(update, name);
   const dialect = standard.kind === "other" ? interpret?.(update) : undefined;
-  return { name, call: strongest(previous?.call, dialect ?? standard) };
+  const call = strongest(previous?.call, dialect ?? standard);
+  if (call.kind !== "other") return { name, call };
+  // The correlated start's admitted preview is authority: a later update never
+  // overwrites it, empty or not, while a start without one adopts first supplied evidence.
+  const started = previous?.call.kind === "other" ? previous.call.input : undefined;
+  const supplied = standard.kind === "other" ? standard.input : undefined;
+  const input = started ?? supplied;
+  return { name, call: input === undefined ? call : { kind: "other", display: call.display, input } };
 }
 
 export function mapAcpUpdate(

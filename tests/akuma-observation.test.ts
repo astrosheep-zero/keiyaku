@@ -303,6 +303,53 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
   }
 });
 
+test("a retained unknown tool call keeps its bounded argument preview through projection", async () => {
+  const value = await fixture();
+  const { paths } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+    const at = (tick: number) => new Date(Date.parse(value.soul.createdAt) + tick * 1_000).toISOString();
+    const args = { alpha: 1, nested: { ok: true } };
+    const started = translatePiEvent(
+      { type: "tool_execution_start", toolCallId: "future-1", toolName: "future_tool", args },
+      state,
+    );
+    const completed = translatePiEvent(
+      {
+        type: "tool_execution_end",
+        toolCallId: "future-1",
+        toolName: "future_tool",
+        isError: false,
+        result: { content: [{ type: "text", text: "secret output" }] },
+      },
+      state,
+    );
+    await appendActivity(paths, { turnSequence: turn.sequence, at: at(1), event: started[0]! });
+    await appendActivity(paths, { turnSequence: turn.sequence, at: at(2), event: completed[0]! });
+
+    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), { aperture: "monitoring" })
+      .snapshot;
+    const calls = snapshot.entries.flatMap((entry) =>
+      entry.kind === "row" && entry.row.kind === "tool" ? [entry.row.call] : [],
+    );
+    assert.deepEqual(calls, [
+      {
+        kind: "other",
+        display: "future_tool",
+        input: { json: JSON.stringify(args), truncated: false },
+      },
+    ]);
+    assert.doesNotMatch(JSON.stringify(calls), /secret output/u, "a tool result body never enters the preview");
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
 test("status reads retain delivered frontier Tells without a global told substitution", async () => {
   const value = await fixture();
   const { paths, id } = value.allocated;

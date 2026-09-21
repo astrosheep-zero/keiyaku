@@ -31,8 +31,11 @@ resume claim. An answered Turn may retain an exact provider fork point; failure
 and an answer without such a point remain non-forkable.
 
 Activity is bounded retained provider narration, not a raw payload log or a
-recovery authority. Compaction retains open work, pending tells, and required
-structure, while old closed groups can become permanently unavailable. An open
+recovery authority. Where a native adapter admitted a bounded preview of a
+generic tool's structured invocation arguments, Heart retains and projects that
+narration with the same bound, and older name-only activity decoding and
+presentation remain unchanged. Compaction retains open work, pending tells, and
+required structure, while old closed groups can become permanently unavailable. An open
 pending-Tell disposition retains its frozen Tell identities and the delivery
 structure needed to prove them, including Tells already witnessed as told.
 Proof consumption and release of those dependencies are one Heart mutation.

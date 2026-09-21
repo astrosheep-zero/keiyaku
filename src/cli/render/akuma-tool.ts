@@ -1,9 +1,63 @@
 import type { ActivityRow, SnapshotRow } from "../../akuma/akuma.js";
 import type { AkumaObservation } from "../../index.js";
+import { displayColumns, truncateDisplayText } from "./terminal.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
 
 type FleetTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
 type ToolRow = Extract<ActivityRow | SnapshotRow | FleetTimelineRow, { kind: "tool" }>;
+
+/**
+ * One generic tool row's argument preview at the width its own row leaves free.
+ * A listed common tool keeps its structural summary; any other name shows its
+ * compact retained JSON, dropping trailing whole fields before cutting a value.
+ */
+export function toolText(row: ToolRow, columns: number): string {
+  const input = row.call.kind === "other" ? row.call.input : undefined;
+  if (input === undefined) return truncateDisplayText(genericOtherText(row).text, columns);
+  const common = commonOtherText(row);
+  if (common !== undefined) return truncateDisplayText(common, columns);
+  if (input.json === "{}") return "";
+  if (input.truncated) return truncateDisplayText(`${input.json}…`, columns);
+  const value = jsonObject(input.json);
+  return value === undefined ? truncateDisplayText(input.json, columns) : objectFieldsText(value, columns);
+}
+
+/** The trailing failure, duration, or message clause one settled tool row carries, otherwise the empty string. */
+export function toolDiagnostic(row: ToolRow): string {
+  const suffix = result(row);
+  return suffix === undefined ? "" : ` — ${suffix}`;
+}
+
+function jsonObject(json: string): Readonly<Record<string, unknown>> | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+/**
+ * Retain leading whole fields that fit and name the trailing omit count. When
+ * even that marker cannot fit, keep the first field or the object's own prefix
+ * with a visible ellipsis, never a silently complete-looking value.
+ */
+function objectFieldsText(value: Readonly<Record<string, unknown>>, columns: number): string {
+  const fields = Object.entries(value).map(([key, field]) => `${JSON.stringify(key)}:${JSON.stringify(field)}`);
+  if (fields.length === 0) return "";
+  const full = `{${fields.join(",")}}`;
+  if (displayColumns(full) <= columns) return full;
+  for (let count = fields.length - 1; count >= 1; count -= 1) {
+    const candidate = `{${fields.slice(0, count).join(",")}} +${fields.length - count} fields`;
+    if (displayColumns(candidate) <= columns) return candidate;
+  }
+  const first = fields[0]!;
+  if (fields.length > 1 && displayColumns(first) <= columns) return `${first}…`;
+  return truncateDisplayText(full, columns);
+}
 
 export type ToolRepr = Readonly<{
   label: string;
@@ -35,7 +89,7 @@ function result(row: ToolRow): string | undefined {
       : row.state.status;
   const parts = [
     ...(row.call.kind === "run" && row.durationMs !== undefined ? [duration(row.durationMs)] : []),
-    ...(row.call.kind === "fileChange" && disposition === "ok" ? [] : [disposition]),
+    ...(disposition === "ok" ? [] : [disposition]),
     ...(row.state.message === undefined ? [] : [oneLine(row.state.message)]),
   ];
   return parts.length === 0 ? undefined : parts.join(" · ");
@@ -63,6 +117,51 @@ function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string 
     ...(call.path === undefined ? [] : [oneLine(call.path)]),
     ...(call.glob === undefined ? [] : [oneLine(call.glob)]),
   ].join(" · ");
+}
+
+function inputObject(row: ToolRow): Readonly<Record<string, unknown>> | undefined {
+  if (row.call.kind !== "other" || row.call.input?.truncated === true) return undefined;
+  return jsonObject(row.call.input?.json ?? "");
+}
+
+function suppliedSlice(value: Readonly<Record<string, unknown>>): string {
+  const offset = typeof value.offset_chars === "number" ? `from ${value.offset_chars}` : "";
+  const limit = typeof value.limit_chars === "number" ? `${value.limit_chars} chars` : "";
+  return [offset, limit].filter(Boolean).join(" · ");
+}
+
+function commonOtherText(row: ToolRow): string | undefined {
+  const input = inputObject(row);
+  if (input === undefined) return undefined;
+  if (row.name === "get_context_remaining") return undefined;
+  if (row.name === "notes_read") {
+    const address =
+      typeof input.address === "string" ? input.address : typeof input.path === "string" ? input.path : undefined;
+    return [address, suppliedSlice(input)]
+      .filter((value): value is string => value !== undefined && value !== "")
+      .join(" · ");
+  }
+  if (row.name === "history_read") {
+    const item = typeof input.item_id === "string" ? input.item_id : undefined;
+    const window = typeof input.window_id === "string" ? input.window_id : undefined;
+    return [item, window, suppliedSlice(input)]
+      .filter((value): value is string => value !== undefined && value !== "")
+      .join(" · ");
+  }
+  if (row.name === "history_list") {
+    const role = typeof input.role === "string" ? `role ${input.role}` : undefined;
+    const order =
+      input.recent_first === true ? "newest first" : input.recent_first === false ? "oldest first" : undefined;
+    const limit = typeof input.limit === "number" ? `${input.limit} rows` : undefined;
+    return [role, order, limit].filter((value): value is string => value !== undefined).join(" · ");
+  }
+  return undefined;
+}
+
+function genericOtherText(row: ToolRow): ToolRepr {
+  const input = row.call.kind === "other" ? row.call.input : undefined;
+  const common = commonOtherText(row);
+  return { label: row.name, text: common ?? (input !== undefined && input.json !== "{}" ? input.json : "") };
 }
 
 function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolRepr {
@@ -106,7 +205,7 @@ export function toolRepr(row: ToolRow): ToolRepr {
       core = fileChange(row.call, row.state);
       break;
     case "other":
-      core = { label: "use", text: oneLine(row.call.display || row.name) };
+      core = genericOtherText(row);
       break;
   }
   const suffix = result(row);

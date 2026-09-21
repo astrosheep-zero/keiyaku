@@ -12,6 +12,8 @@ export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
 export type SearchScope = "content" | "files" | "web";
 
+export type ToolInput = Readonly<{ json: string; truncated: boolean }>;
+
 export type ToolCall =
   | Readonly<{ kind: "run"; command: string }>
   | Readonly<{ kind: "read"; path: string; offset?: number; limit?: number }>
@@ -30,7 +32,7 @@ export type ToolCall =
         diffstat?: Readonly<{ added: number; removed: number }>;
       }>[];
     }>
-  | Readonly<{ kind: "other"; display: string }>;
+  | Readonly<{ kind: "other"; display: string; input?: ToolInput }>;
 
 export type ToolResult = Readonly<{
   status: "ok" | "error";
@@ -165,8 +167,17 @@ function decodeFileChangeCall(call: Readonly<Record<string, unknown>>): ToolCall
   return changes.every((change) => change !== null) ? { kind: "fileChange", changes } : null;
 }
 
+function decodeToolInput(value: unknown): ToolInput | null | undefined {
+  if (value === undefined) return undefined;
+  const input = object(value);
+  if (input === null || typeof input.json !== "string" || typeof input.truncated !== "boolean") return null;
+  return { json: input.json, truncated: input.truncated };
+}
+
 function decodeOtherCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  return typeof call.display === "string" ? { kind: "other", display: call.display } : null;
+  if (typeof call.display !== "string") return null;
+  const input = decodeToolInput(call.input);
+  return input === null ? null : { kind: "other", display: call.display, ...(input === undefined ? {} : { input }) };
 }
 
 function decodeToolCall(value: unknown): ToolCall | null {
@@ -298,11 +309,23 @@ function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated:
         },
         truncated: call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
       };
-    case "other":
+    case "other": {
+      const input = call.input;
+      const display = boundedEventText(call.display);
+      const bounded = input === undefined ? undefined : boundedToolInputJson(input.json);
       return {
-        value: { kind: call.kind, display: boundedEventText(call.display) },
-        truncated: call.display.length > AGENT_EVENT_TEXT_LIMIT,
+        value: {
+          kind: call.kind,
+          display,
+          ...(bounded === undefined || input === undefined
+            ? {}
+            : { input: { json: bounded.value, truncated: input.truncated || bounded.truncated } }),
+        },
+        truncated:
+          call.display.length > AGENT_EVENT_TEXT_LIMIT ||
+          (input !== undefined && (input.truncated || bounded?.truncated === true)),
       };
+    }
     default:
       return call satisfies never;
   }
@@ -374,6 +397,44 @@ export function encodeAgentEvent(event: AgentEvent): unknown {
     default:
       return event satisfies never;
   }
+}
+
+/**
+ * Admit only a compact JSON view of structured tool invocation input.  This
+ * deliberately receives adapter start evidence, never result or delta bodies.
+ */
+export function boundedToolInput(input: unknown): ToolInput | undefined {
+  if (input === undefined) return undefined;
+  let json: string;
+  try {
+    const encoded = JSON.stringify(input);
+    if (encoded === undefined) return undefined;
+    json = encoded;
+  } catch {
+    return undefined;
+  }
+  const bounded = boundedToolInputJson(json);
+  return { json: bounded.value, truncated: bounded.truncated };
+}
+
+/** Build one generic call from the provider's structured invocation evidence. */
+export function otherToolCall(display: string, input?: unknown): Extract<ToolCall, { kind: "other" }> {
+  const preview = boundedToolInput(input);
+  return { kind: "other", display, ...(preview === undefined ? {} : { input: preview }) };
+}
+
+function boundedToolInputJson(value: string): Readonly<{ value: string; truncated: boolean }> {
+  if (new TextEncoder().encode(value).length <= AGENT_EVENT_TEXT_LIMIT) return { value, truncated: false };
+  let bytes = 0;
+  let prefix = "";
+  const encoder = new TextEncoder();
+  for (const codePoint of value) {
+    const length = encoder.encode(codePoint).length;
+    if (bytes + length > AGENT_EVENT_TEXT_LIMIT) break;
+    prefix += codePoint;
+    bytes += length;
+  }
+  return { value: prefix, truncated: true };
 }
 
 export function boundedEventText(value: string): string {
