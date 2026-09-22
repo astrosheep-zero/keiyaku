@@ -62,7 +62,18 @@ test("global coordinates are independent of command position", () => {
   });
   assert.deepEqual(parseArgv(["call", "worker", "--workdir", "work", "body"]), {
     workdir: "work",
-    command: { command: "call", archetype: "worker", mode: "wait", prompt: { kind: "argument", value: "body" }, output: "text" },
+    command: { command: "call", archetype: "worker", mode: "detach", prompt: { kind: "argument", value: "body" }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["call", "worker", "--contract", "kei/example", "--workdir", "work", "body"]), {
+    workdir: "work",
+    command: {
+      command: "call",
+      archetype: "worker",
+      contract: "kei/example",
+      mode: "detach",
+      prompt: { kind: "argument", value: "body" },
+      output: "text",
+    },
   });
   assert.throws(() => parseArgv(["status", "--repo"]), /--repo requires a path/u);
   assert.throws(() => parseArgv(["--repo", "/one", "status", "--repo", "/two"]), /--repo may appear only once/u);

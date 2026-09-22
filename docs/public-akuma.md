@@ -25,10 +25,11 @@ provider fork capability.
 Caller-selected World, Contract, execution directory, readonly restriction, and
 allowed-action additions are validated before birth. World proof happens once at
 the outer boundary. Cwd selection is explicit and rejects an invalid selected
-source rather than silently falling through; workspace appointment remains a
-Contract workspace concern unless the caller selected an execution directory.
-Birth restrictions only add constraints and freeze in Soul. Exact public
-inputs, result fields, and timeout defaults belong to declarations and help.
+source rather than silently falling through; Contract association never supplies
+or displaces an execution directory, so only an explicit selection or the
+effective invocation directory determines it. Birth restrictions only add
+constraints and freeze in Soul. Exact public inputs, result fields, and timeout
+defaults belong to declarations and help.
 
 Plugin activation and delivery are external observation, not an Akuma creation
 or facade integration stage. Their absence or failure neither alters birth nor

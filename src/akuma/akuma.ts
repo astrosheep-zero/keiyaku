@@ -44,6 +44,7 @@ export const akumaStatusSchema = z
   .object({
     id: akumaIdSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
+    cwd: z.string().optional(),
     allowed: allowedActionsSchema,
     readonly: readonlySchema.optional(),
     timeline: activitySnapshotSchema,

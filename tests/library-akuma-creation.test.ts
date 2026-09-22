@@ -1,19 +1,23 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
-import { finishBodyIfIdle, HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
+import { finishBodyIfIdle, HeldAkumaLeash, initializeHeart, readHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { repositoryAt } from "../src/git/repository.js";
+import { invoke } from "../src/cli/invoke.js";
+import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
+import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixture,
@@ -25,6 +29,13 @@ import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
 import { AkumaComposition as Akuma, AkumaHandle, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { makeGitRepository } from "./support/git.js";
+import { contractMarkdown } from "./support/markdown.js";
+
+function executable(argv: readonly string[]): ParsedExecution {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected executable command");
+  return parsed;
+}
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
@@ -156,6 +167,7 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
       body: "schema-call",
       cwd: world,
       ...configured.placement,
+      mode: "wait",
       schema,
     });
     void pending.catch(() => undefined);
@@ -231,6 +243,7 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
       body: "zero-budget-after-birth",
       cwd: world,
       ...configured.placement,
+      mode: "wait",
       schema,
       timeoutMs: 0,
     });
@@ -349,6 +362,7 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
       body: "forwarded-schema-call",
       cwd: world,
       ...configured.placement,
+      mode: "wait",
       schema,
     });
     const body = await slow.started;
@@ -414,6 +428,7 @@ test("forwarded schema Keiyaku.call's deadline cancels its held birth Body reque
       body: "forwarded-deadline-before-birth-body-settles",
       cwd: world,
       ...configured.placement,
+      mode: "wait",
       schema,
       timeoutMs: 20,
     });
@@ -464,6 +479,7 @@ test("schema Keiyaku.call spends its one deadline through a delayed schema answe
       body: "schema-deadline",
       cwd: world,
       ...configured.placement,
+      mode: "wait",
       schema,
       timeoutMs: 5_000,
     });
@@ -539,6 +555,82 @@ async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequest
   });
   return { pump, leash };
 }
+
+test("Contract association never selects the Akuma execution workdir", async (t) => {
+  const { raw, repo, git } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let operationFailed = true;
+  let bound: Awaited<ReturnType<typeof Keiyaku.bind>> | undefined;
+  const environment = { ...process.env };
+  delete environment[AKUMA_REQUESTS_ENV];
+  try {
+    bound = await Keiyaku.bind({
+      repo,
+      markdown: contractMarkdown("Akuma execution placement", {
+        Context: "A Contract association and a call execution directory are separate inputs.",
+        Objective: "Contract association never selects the Akuma execution workdir.",
+        Design: "Keep association in Dispatch and placement in the explicit execution directory.",
+        Region: "```\nsrc/**\n```",
+        Criteria: "### Placement\nThe invocation directory stands without an explicit workdir.",
+      }),
+      workspace: "worktree",
+      hooks: { create: [], destroy: [] },
+    });
+    const managedId = (await bound.keiyaku.state()).id;
+    const appointment = await readManagedWorktreeAppointment(git, managedId);
+    assert.ok(appointment.kind === "appointed", "expected appointment.kind = 'appointed'");
+    if (appointment.kind !== "appointed") return;
+
+    const invocationCwd = realpathSync(raw.path);
+    const implicit = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
+      cwd: raw.path,
+      environment: { ...environment, KEIYAKU_HOME: configured.home },
+      readStdin: async () => "implicit placement",
+    });
+    assert.ok("kind" in implicit && implicit.kind === "akuma" && implicit.action === "call");
+    if (!("kind" in implicit) || implicit.kind !== "akuma" || implicit.action !== "call") return;
+    assert.deepEqual(implicit.result.execution, { cwd: invocationCwd, source: "input" });
+    assert.notEqual(implicit.result.execution.cwd, appointment.path);
+    assert.equal(implicit.result.dispatch.kind, "dispatched");
+    if (implicit.result.dispatch.kind === "dispatched")
+      assert.equal(implicit.result.dispatch.dispatch.contractId, managedId);
+    assert.equal((await readSoul(pathsForAkuId(world, implicit.result.akuma)))?.cwd, invocationCwd);
+
+    const explicitDir = join(raw.path, "explicit-workdir");
+    mkdirSync(explicitDir);
+    const explicit = await invoke(
+      executable(["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir", "-"]),
+      {
+        cwd: raw.path,
+        environment: { ...environment, KEIYAKU_HOME: configured.home },
+        readStdin: async () => "explicit placement",
+      },
+    );
+    assert.ok("kind" in explicit && explicit.kind === "akuma" && explicit.action === "call");
+    if (!("kind" in explicit) || explicit.kind !== "akuma" || explicit.action !== "call") return;
+    assert.deepEqual(explicit.result.execution, { cwd: realpathSync(explicitDir), source: "input" });
+    assert.equal(explicit.result.dispatch.kind, "dispatched");
+    operationFailed = false;
+  } finally {
+    try {
+      await bound?.keiyaku.abandon({ hooks: { create: [], destroy: [] } }).catch(() => undefined);
+      const cleanup = await cleanupSpawnCapableFixture({
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+      });
+      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+    } finally {
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
 
 test("package-root World inputs reject a forged JavaScript coordinate before effects", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-library-world-proof-"));

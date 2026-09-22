@@ -181,6 +181,8 @@ export const CONTRACT_COMMAND_SPECS = {
     flags: { json: "boolean" },
     usage: "status [<contract>|@name|<aku/...>]...",
     purpose: "Read the world status board or one or more Contract and Akuma projections.",
+    details:
+      "An Akuma projection reports that Akuma's frozen execution workdir; --contract associates a Contract without selecting one.",
   },
   show: {
     positional: "optional",

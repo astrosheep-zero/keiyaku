@@ -67,9 +67,9 @@ const AKUMA_COMMAND_SPECS = {
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "Default: return after birth without waiting for the first answer. Explicit --wait observes the first work for that duration.",
-      "--contract dispatches the born Akuma to that Contract.",
+      "--contract associates the born Akuma with that Contract for Dispatch; it never selects a workdir.",
       "--workdir selects the execution directory; a relative path is relative to the invocation cwd.",
-      "Without --workdir, a Contract call uses its appointed worktree; an unassociated call uses the invocation cwd.",
+      "Without --workdir, the call uses the invocation cwd whether or not --contract is present.",
       "--alias assigns the world-local @name selector to the born Akuma.",
       `Legal actions: ${ALLOWED_ACTIONS.join(", ")}.`,
       `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,

@@ -15,7 +15,7 @@ alias such as `@reviewer` is a shorter, world-local name.
 ## Call a new Akuma
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)
 ```
 
 The prompt is the new Akuma's first prompt. Give it as one argument, or use
@@ -27,8 +27,8 @@ initial work. `--wait` only bounds this command; it never stops the Akuma.
 Useful options:
 
 - `--alias @name` assigns a reusable world-local selector; an existing alias moves to this Akuma.
-- `--contract <kei/...>` associates the Akuma with a Contract.
-- `--workdir <path>` chooses its execution directory.
+- `--contract <kei/...>` associates the Akuma with a Contract; it never selects an execution directory.
+- `--workdir <path>` chooses its execution directory; without it the call uses the invocation cwd.
 - `--allowed <product.action>` adds actions subject to the Akuma's restrictions.
 - `--schema <file>` requests a structured answer described by a JSON Schema.
 
@@ -92,7 +92,7 @@ wait          observe existing Akumas
 
 ```bash
 keiyaku status                         # current Akuma fleet
-keiyaku status <aku/...|@alias>        # one Akuma
+keiyaku status <aku/...|@alias>        # one Akuma, including its execution workdir
 keiyaku ls aku/                        # names available to call
 keiyaku ls aku/<akuma>/                # existing workers from one name
 keiyaku ls "aku/*/*"                   # existing workers across names

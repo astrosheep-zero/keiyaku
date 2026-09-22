@@ -36,7 +36,7 @@ keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 ```
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)
 keiyaku -C <repo> wait <akuma-selector>... [--any | --all]
 keiyaku -C <repo> tell <aku/...|@alias> (<prompt> | -)
 ```
@@ -44,8 +44,8 @@ keiyaku -C <repo> tell <aku/...|@alias> (<prompt> | -)
 `-C` selects the invocation cwd and therefore the World. `--repo <path>` only
 selects the Contract repository; it never retargets that World. `call
 --workdir <path>` selects execution cwd (relative to the effective invocation
-cwd). Without it, a Contract call uses its appointed worktree and an
-unassociated call uses the invocation cwd.
+cwd). Without it, the call uses the invocation cwd; `--contract` associates a
+Contract without selecting an execution directory.
 
 Repeated `--allowed` values add actions to the selected Akuma's defaults. A
 nested call can use only actions permitted by its direct parent Soul.

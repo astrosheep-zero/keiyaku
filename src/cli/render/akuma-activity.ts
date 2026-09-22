@@ -1135,6 +1135,7 @@ function snapshotCore(
 ): Readonly<{ activity: readonly string[]; lines: readonly string[] }> {
   const activity = snapshotActivityLines(view.status.timeline, context);
   const facts = [
+    ...(view.status.cwd === undefined ? [] : [`cwd  ${safeText(view.status.cwd)}`]),
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
     ...(view.status.readonly?.enforcement === "none" ? [`! ${safeText(view.status.readonly.diagnostic)}`] : []),
     ...contractFacts(view.contract),

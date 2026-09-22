@@ -115,6 +115,7 @@ async function bornLiveStatus(
     status: {
       id: soul.id,
       life: currentLife,
+      cwd: soul.cwd,
       allowed: soul.allowed,
       ...(soul.readonly === undefined ? {} : { readonly: soul.readonly }),
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),

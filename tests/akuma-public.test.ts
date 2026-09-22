@@ -1304,6 +1304,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.deepEqual(listed.pending, []);
   const status = await handle.status();
   assert.equal(status.life, "asleep");
+  assert.equal(status.cwd, root, "status reports the Akuma's frozen execution workdir");
   assert.equal("archetype" in status, false);
   assert.equal("description" in status, false);
   assert.equal("pending" in status, false);

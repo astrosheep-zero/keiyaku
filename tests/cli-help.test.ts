@@ -41,6 +41,9 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
   assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
+  assert.match(renderAkumaHelp("call"), /--contract associates .*never selects a workdir/u);
+  assert.match(renderAkumaHelp("call"), /uses the invocation cwd whether or not --contract is present/u);
+  assert.match(renderContractHelp("status"), /execution workdir/u);
   assert.match(renderAkumaHelp("call"), /Default actions: .*contract\.deliver.*task\.update/u);
   assert.doesNotMatch(renderAkumaHelp("call").match(/Default actions: .*/u)?.[0] ?? "", /contract\.review/u);
   assert.match(renderContractHelp("bind"), /stdin is Contract Markdown/u);

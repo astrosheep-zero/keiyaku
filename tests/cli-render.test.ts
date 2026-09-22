@@ -45,7 +45,7 @@ import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv, renderHelp } from "../src/cli/parse.js";
-import { renderAkumaText } from "../src/cli/render/akuma.js";
+import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -1381,6 +1381,27 @@ test("a sleeping worker reports its return as a status life footer, not an outco
   );
   assert.match(returned, /^✓ answered aku\/worker\/abcd0001$/mu, "an outcome surface uses an outcome verb");
   assert.doesNotMatch(returned, /came back/u, "the life label survives only in a status footer");
+});
+
+test("status text and JSON report the Akuma execution workdir", () => {
+  const id = "aku/worker/abcd0009";
+  const status = parseAkumaStatus({
+    id,
+    life: "running",
+    cwd: "/work/tree",
+    allowed: [],
+    timeline: openAkumaSnapshot([]),
+  });
+  const invocation = parseArgv(["status", id]);
+  assert.ok("command" in invocation);
+  const result: Extract<AkumaInvocationResult, { action: "status" }> = {
+    kind: "akuma",
+    action: "status",
+    status: { status, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+  };
+  assert.match(renderAkumaText(invocation.command, result), /^cwd {2}\/work\/tree$/mu);
+  const json = JSON.parse(renderAkumaJson(result)) as { status: { cwd?: string } };
+  assert.equal(json.status.cwd, "/work/tree");
 });
 
 test("status renders selected activity evidence while preserving history and compact selection", () => {

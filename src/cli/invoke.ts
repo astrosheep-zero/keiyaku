@@ -440,7 +440,7 @@ async function callExecutionCwd(input: Readonly<{ command: InvokedAkumaCommand; 
       `workdir is not an existing directory: ${input.workdir}`,
     );
   }
-  return input.command.contract === undefined ? input.cwd : undefined;
+  return input.cwd;
 }
 
 async function invokeParsedAkuma(

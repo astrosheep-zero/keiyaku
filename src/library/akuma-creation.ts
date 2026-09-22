@@ -11,7 +11,6 @@ import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } fr
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { emitCalledPluginSignal } from "../plugin/akuma-signals.js";
-import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
@@ -22,7 +21,7 @@ import { localExecutionContext, type ExecutionContext } from "../akuma/requests.
 import { callReadonly, canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
-import { KeiyakuRefused, type Keiyaku } from "./contract.js";
+import { type Keiyaku } from "./contract.js";
 import { seatForKeiyaku } from "./contract-handle.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -73,7 +72,7 @@ export type CallResult = Readonly<{
   readonly?: ReadonlyRestraint;
   execution: Readonly<{
     cwd: string;
-    source: "input" | "contract-worktree" | "caller" | "process" | "world";
+    source: "input" | "caller" | "process" | "world";
   }>;
   dispatch: DispatchStage;
   alias: AliasStage;
@@ -319,54 +318,12 @@ async function forkDispatchStage(
   }
 }
 
-function unavailableWorkspace(contractId: ContractId, detail: string): Error {
-  return new Error(`Contract workspace is unavailable: ${contractId} ${detail}`);
-}
-
-async function currentManagedContract(contract: Keiyaku, contractId: ContractId) {
-  let state: Awaited<ReturnType<Keiyaku["state"]>>;
-  try {
-    state = await contract.state();
-  } catch (error) {
-    if (error instanceof Error && error.message === `contract does not exist: ${contractId}`) {
-      throw new KeiyakuRefused({ kind: "contract-missing", contractId });
-    }
-    throw error;
-  }
-  if (state.terminal !== null) throw new KeiyakuRefused({ kind: "terminal", contractId: state.id });
-  return state;
-}
-
-async function resolveCallExecution(
-  input: Readonly<{
-    path: WorldRoot;
-    cwd?: string;
-    contract?: Keiyaku;
-  }>,
-): Promise<CallExecution | undefined> {
-  if (input.cwd !== undefined) {
-    return {
-      cwd: await canonicalBirthCwd(input.cwd),
-      source: "input",
-    };
-  }
-  if (input.contract !== undefined) {
-    const seat = seatForKeiyaku(input.contract);
-    if (seat === null) throw new TypeError("contract must be a Keiyaku");
-    const state = await currentManagedContract(input.contract, seat.id);
-    const appointment = await readManagedWorktreeAppointment(seat.scope, state.id);
-    if (appointment.kind === "unappointed") {
-      throw unavailableWorkspace(state.id, "is unappointed; use reconcile");
-    }
-    if (appointment.kind === "failed") {
-      throw new Error(`${appointment.diagnostic}; use reconcile`);
-    }
-    return {
-      cwd: await canonicalBirthCwd(appointment.path, `Contract workspace is unavailable: ${appointment.path}`),
-      source: "contract-worktree",
-    };
-  }
-  return undefined;
+async function resolveCallExecution(input: Readonly<{ cwd?: string }>): Promise<CallExecution | undefined> {
+  if (input.cwd === undefined) return undefined;
+  return {
+    cwd: await canonicalBirthCwd(input.cwd),
+    source: "input",
+  };
 }
 
 async function resolveAliasStage(
@@ -479,11 +436,7 @@ function schemaTell(input: ParsedCallInput): BornCall["schemaTell"] {
 
 async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
   const parsed = await parseCallInput(input);
-  const execution = await resolveCallExecution({
-    path: parsed.path,
-    ...(parsed.cwd === undefined ? {} : { cwd: parsed.cwd }),
-    ...(parsed.seat === undefined ? {} : { contract: parsed.values.contract as Keiyaku }),
-  });
+  const execution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
   const world = akumaWorld(parsed.path, parsed.home, parsed.settings, context);
   const { born, akuma } = await admitCall({
     path: parsed.path,

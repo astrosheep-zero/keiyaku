@@ -1,100 +1,104 @@
 ---
 name: keiyaku-task
 description: >-
-  Use for task management: organizing work of three or more steps and
-  tracking it as it progresses.
+  Must read when using Tasks for durable work planning, decomposition, or
+  dependencies.
 ---
 
 # Keiyaku Task
 
-## What A Task Is Not
+A Task is durable planning memory. It records work, decomposition, and
+relationships that must remain after the current conversation. Task is an
+independent product; it is not a Contract, Arc, Akuma, permission, acceptance
+boundary, or fulfillment lifecycle.
 
-A Task remembers a plan: what is intended, what depends on what, what was
-decided about sequence. It grants nothing — no acceptance, no permission, no
-scope, no fulfillment loop. Whoever holds a Contract's loop uses Tasks when the
-plan is worth remembering and skips them when it is not; nothing binds Tasks to
-Arcs, Contracts, or Akuma as a package.
+## 1. When To Use A Task
 
-## Lifecycle
+Use a Task when the plan or dependency must outlive the current conversation.
+Skip it when the work is small and no durable planning memory is needed.
 
-```text
-open -> in_progress -> done | drop
-  |          |
-  +-> on_hold <-+
-```
+- Use a `kei` for one independently acceptable outcome.
+- Use an Arc for a chapter inside one `kei`.
+- Use a Task for decomposition or dependency memory.
+- Do not create a Task just to mirror a `kei`.
 
-Use `ready` for open tasks whose `needs` are terminal. `blocked` reports open
-or in-progress tasks with unresolved needs. `on_hold` appears in neither view.
-Both `done` and `drop` release dependents. `doctor` diagnoses the complete
-world and never repairs it.
+A Task may exist without a Contract. Associating a Task with a `kei` does not
+transfer the Contract's holder, acceptance, or lifecycle to the Task.
 
-## Common Commands
+## 2. Relationships And Parallel Work
+
+Parallel work is the default. Independent Tasks may start and progress in
+parallel.
+
+Use the relationships for their actual meanings:
+
+- `needs` means this Task must wait for another Task to become terminal.
+- `parent` groups decomposition; it does not create a dependency.
+- `supersedes` points to work replaced by this Task.
+- `relates` records a connection without affecting readiness.
+
+Only `needs` orders work. Do not add it because Tasks touch the same Region or
+because one Task is related to another. A terminal Task releases its dependents.
+An `on_hold` Task is deliberately paused; it is neither ready nor blocked.
+
+## 3. Task Commands
+
+Create and inspect Tasks:
 
 ```bash
-keiyaku task add "title"
-keiyaku task add "title" --priority 1 --needs <task-id>
-keiyaku task add --namespace <ns> -
+keiyaku task add "<title>"
+keiyaku task add "<title>" --priority 1 --needs <task-id>
 keiyaku task show <task-id>
 keiyaku task ls
-keiyaku task ls --closed
-keiyaku task ls --all --world
 keiyaku task ready
 keiyaku task blocked
 keiyaku task tree <task-id>
 keiyaku task doctor
 ```
 
-`ls`, `ready`, and `blocked` use the current namespace; add `--world` to
-observe the complete Task world. `show`, `tree`, `update`, and lifecycle
-commands require a complete TaskId and never infer namespace.
+Use complete Task IDs for targeted commands. `ls`, `ready`, and `blocked` use
+the current namespace; use `--world` to inspect the complete Task world.
 
-## Mutations
+Change lifecycle state:
 
 ```bash
 keiyaku task start <task-id>...
 keiyaku task stop <task-id>
-keiyaku task hold <task-id>
+keiyaku task hold <task-id>...
 keiyaku task resume <task-id>
 keiyaku task done <task-id>...
-keiyaku task drop <task-id>... [--note <text>]
-keiyaku task update <task-id> --title <text>
-keiyaku task context [<namespace>]
+keiyaku task drop <task-id>... --note "<reason>"
 ```
 
-Relations are explicit facts: `needs` orders work, `parent` groups it,
-`supersedes` navigates replacement, and `relates` does not affect readiness.
-`task start` accepts one or more complete TaskIds. A single ID keeps the
-single-mutation result; multiple IDs use the ordered batch result, continue
-after per-Task refusals, and preserve retry-over-refusal exit precedence.
+Use `done` when the Task is complete. Use `drop` when it will not be done.
+Both terminal states release dependent Tasks. Use `hold` for a deliberate pause,
+not for an unresolved dependency; unresolved `needs` appear in `blocked`.
 
-## Batch Create Or Modify
-
-Use `task compose -` to create and modify multiple Tasks in one planning
-document. Its input grammar is documented by the Task CLI owner:
+Update a Task without changing its lifecycle:
 
 ```bash
-keiyaku task compose - <<'EOF'
-ns=feature
-
-+ Parent
-as = parent
-state = in_progress
-pri = 0
-body <<BODY
-Parent body.
-BODY
-
-+ Child
-parent = ^parent
-needs = @task/existing
-EOF
+keiyaku task update <task-id> --title "<title>"
+keiyaku task update <task-id> --body "<body>"
+keiyaku task update <task-id> --needs <task-id>
 ```
 
-Use `--plan` to inspect aliases, admission order, and body byte previews without
-writing. New `+ Title` nodes may declare `state = open|in_progress|on_hold|done|drop`
-as their initial state; omitted state is `open`. Existing `@task/...` nodes cannot
-declare state. Aliases are nonempty single-line tokens containing neither
-Unicode whitespace nor comma; references use `^alias`. Compose does not change
-the lifecycle state of pre-existing Tasks. Each changed Task is admitted
-independently; an incomplete result returns a reusable draft for the remaining
-batch and preserves each new node's declared state.
+Use `task compose -` when several Tasks and their relationships should be
+planned or admitted together. Use `--plan` to inspect the composition without
+writing it.
+
+## 4. After Creating A Task
+
+Read the returned Task identity. Then:
+
+1. Start ready work.
+2. Run independent Tasks in parallel.
+3. Add or remove relationships when the plan changes.
+4. Hold work that is deliberately paused.
+5. Mark completed work `done`, or mark abandoned work `drop` with a reason.
+6. Use `ready`, `blocked`, `tree`, or `doctor` to rebuild the current view.
+
+Task records planning memory. It does not perform the work, claim acceptance,
+assign a holder, or decide what a Contract may accept.
+
+Read `keiyaku-bind` for Contract authoring and `keiyaku-workflow` for Contract
+lifecycle.
