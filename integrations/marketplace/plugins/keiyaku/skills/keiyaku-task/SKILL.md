@@ -27,8 +27,8 @@ transfer the Contract's holder, acceptance, or lifecycle to the Task.
 
 ## 2. Relationships And Parallel Work
 
-Parallel work is the default. Independent Tasks may start and progress in
-parallel.
+Independent Tasks may start and progress in parallel when their dependencies
+allow it.
 
 Use the relationships for their actual meanings:
 
