@@ -520,6 +520,63 @@ test("request progress includes the final snapshot published between progress an
   }
 });
 
+test("request pump discards an enumerated request only when its read reports ENOENT", async (t) => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-enumeration-race-")));
+  const parent = await born(root, "parent", "24681357");
+  const pump = await openFleetPump(parent, unusedFleetPort);
+  const requestPath = join(pump.directory, `${randomUUID()}.request.json`);
+  const originalRead = fsPromises.readFile;
+  const { promise: readStarted, resolve: started } = promiseBarrier<void>();
+  const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+    const path = String(args[0]);
+    if (path === requestPath) {
+      await fsPromises.rm(path, { force: true });
+      started();
+      throw Object.assign(new Error("request disappeared"), { code: "ENOENT" });
+    }
+    return originalRead(...args);
+  });
+  syncBuiltinESMExports();
+  let closed = false;
+  try {
+    await writeFile(requestPath, "not read\n");
+    await readStarted;
+    assert.equal(existsSync(requestPath), false);
+    await pump.close();
+    closed = true;
+  } finally {
+    if (!closed) await pump.close().catch(() => undefined);
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("request pump propagates permission errors while reading an enumerated request", async (t) => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-read-error-")));
+  const parent = await born(root, "parent", "13572468");
+  const pump = await openFleetPump(parent, unusedFleetPort);
+  const requestPath = join(pump.directory, `${randomUUID()}.request.json`);
+  const originalRead = fsPromises.readFile;
+  const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+    if (String(args[0]) === requestPath) throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+    return originalRead(...args);
+  });
+  syncBuiltinESMExports();
+  let closed = false;
+  try {
+    await writeFile(requestPath, "not read\n");
+    await assert.rejects(pump.failure, (error: unknown) => (error as NodeJS.ErrnoException).code === "EACCES");
+    await assert.rejects(pump.close(), (error: unknown) => (error as NodeJS.ErrnoException).code === "EACCES");
+    closed = true;
+  } finally {
+    if (!closed) await pump.close().catch(() => undefined);
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("request progress consumers receive the sequence-derived retained-window gap", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-gap-")));
   const parent = await born(root, "parent", "65432109");

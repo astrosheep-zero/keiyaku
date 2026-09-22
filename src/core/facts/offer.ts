@@ -1,8 +1,7 @@
-import type { ContractHead, ContractId, JournalEntry, SnapshotId } from "./types.js";
+import type { ContractId, JournalEntry, SnapshotId } from "./types.js";
 
 export type ContractJournalAppend = Readonly<{
   readonly contractId: ContractId;
-  readonly expectedHead: ContractHead | null;
   readonly entries: readonly JournalEntry[];
 }>;
 

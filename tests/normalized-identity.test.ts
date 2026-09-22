@@ -29,6 +29,26 @@ test("identity coordinates preserve family ownership without importing another f
   assert.throws(() => identityCoordinate({ family: "task", segments: [""] }), /nonempty segments/u);
 });
 
+test("identity coordinates reject dot path segments", () => {
+  for (const segment of [".", ".."]) {
+    assert.throws(
+      () => identityCoordinate({ family: "task", segments: [segment] }),
+      /nonempty segments/u,
+    );
+    assert.throws(
+      () => identitySegments({ family: "task", value: `task/${segment}` }),
+      /invalid segment/u,
+    );
+  }
+});
+
+test("contract identities reject dot path segments", () => {
+  for (const segment of [".", ".."]) {
+    assert.throws(() => contractIdFromSegment(segment), /nonempty segments/u);
+    assert.throws(() => contractId(`kei/${segment}`), /kei\/<contract-segment>/u);
+  }
+});
+
 test("identity normalization retains words and complete emoji graphemes", () => {
   assert.equal(normalizeIdentityStem({ source: "  修复 REVIEW 👩‍💻 / 🇨🇳 证据  " }), "修复-review-👩‍💻-🇨🇳-证据");
 });

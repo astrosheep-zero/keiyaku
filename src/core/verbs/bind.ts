@@ -52,5 +52,5 @@ export function decideBind<Failure>({
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data,
   };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: null, entries: [bind] }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: id, entries: [bind] }] } };
 }

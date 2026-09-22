@@ -135,7 +135,7 @@ export function decidePlacement({
   return {
     kind: "offer",
     offer: {
-      facts: [{ contractId: id, expectedHead: current.head, entries: [claimed] }],
+      facts: [{ contractId: id, entries: [claimed] }],
       ...(current.coordinates.target === undefined
         ? {}
         : {

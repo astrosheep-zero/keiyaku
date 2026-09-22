@@ -1,4 +1,6 @@
 import { decodeJournal, encodeEntry } from "../core/facts/codec.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { foldJournal } from "../core/facts/fold.js";
 import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
 import type { GitAdmissionSnapshot } from "./observe.js";
 import {
@@ -104,6 +106,21 @@ async function buildOffer(
   const changes = new Map<string, TreeChange>();
   const heads: Record<string, ContractHead> = {};
 
+  const candidates = appends.map((append) => {
+    const current = readCanonicalJournal(admission, append.contractId);
+    let journal = current.bytes;
+    for (const entry of append.entries) journal = Buffer.concat([journal, Buffer.from(encodeEntry(entry))]);
+    const entries = decodeJournal(journal.toString("utf8"));
+    const foreign = entries.find((entry) => entry.contract !== append.contractId);
+    if (foreign !== undefined) {
+      throw new AuthorityCorruptionError(
+        `candidate journal entry belongs to ${foreign.contract}, not ${append.contractId}`,
+      );
+    }
+    const state = foldJournal(append.contractId, entries);
+    return { append, current, journal, state };
+  });
+
   if (snapshot.commit === null) {
     changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
   }
@@ -116,13 +133,10 @@ async function buildOffer(
     });
   }
 
-  for (const append of appends) {
-    const current = readCanonicalJournal(admission, append.contractId);
-    let journal = current.bytes;
-    for (const entry of append.entries) journal = Buffer.concat([journal, Buffer.from(encodeEntry(entry))]);
+  for (const candidate of candidates) {
+    const { append, current, journal, state } = candidate;
     const blob = await writeBlob(repository, journal);
-    const entries = decodeJournal(journal.toString("utf8"));
-    const terminal = entries.some((entry) => entry.kind === "claimed" || entry.kind === "abandoned");
+    const terminal = state.terminal !== null;
     const destination = contractJournalPath(append.contractId, terminal ? "terminal" : "active");
     if (current.path !== null && current.path !== destination) changes.set(current.path, null);
     changes.set(destination, { oid: blob, mode: "100644", type: "blob" });

@@ -48,6 +48,6 @@ export function decideAttestation<Failure>({
   };
   return {
     kind: "offer",
-    offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [attestation] }] },
+    offer: { facts: [{ contractId: input.contractId, entries: [attestation] }] },
   };
 }

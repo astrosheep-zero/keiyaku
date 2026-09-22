@@ -5,7 +5,7 @@ function prefix(family: IdentityFamily): string {
 }
 
 function validSegment(segment: string): boolean {
-  return segment.length > 0 && !/[\/\s\p{Cc}]/u.test(segment);
+  return segment.length > 0 && segment !== "." && segment !== ".." && !/[\/\s\p{Cc}]/u.test(segment);
 }
 
 export function identityCoordinate(

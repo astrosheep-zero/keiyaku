@@ -76,7 +76,14 @@ export class BodyRequestPump {
         const transportId = name.slice(0, -".request.json".length);
         if (this.handled.has(transportId)) continue;
         const path = join(this.directory, name);
-        const claim = decodeEnvelope(await readFile(path, "utf8"), transportId);
+        let serialized: string;
+        try {
+          serialized = await readFile(path, "utf8");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          continue;
+        }
+        const claim = decodeEnvelope(serialized, transportId);
         if (claim === null) {
           await rm(path, { force: true });
           this.handled.add(transportId);

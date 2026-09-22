@@ -22,6 +22,7 @@ import { observeBindCoordinates, observeContractWorld, observeContractsForAdmiss
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { runGit } from "../src/git/process.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { decideAbandon } from "../src/core/verbs/abandon.js";
 import { bindOperation as rawBindOperation } from "../src/protocol/bind.js";
 import { amendOperation as rawAmendOperation } from "../src/protocol/amend.js";
 import {
@@ -363,6 +364,88 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(after.paths.has("test/winner.txt"), true);
     assert.equal(after.paths.has("test/loser.txt"), false);
     assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.oid);
+  });
+
+  test("rejects a foreign-contract journal entry before publication", async () => {
+    const repository = repositoryWithHead();
+    const bound = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: contractBody(),
+      workspace: "worktree",
+    });
+    const id = (await bound.keiyaku.state()).id;
+    const foreign = contractId("kei/foreign-admission-entry");
+    const git = await repositoryAt(repository.path);
+    const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
+    const decision = decideAbandon({
+      input: { contractId: id, at: "2026-08-06T00:00:00Z" },
+      attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
+      observation: observation.decision,
+    });
+    assert.ok(decision.kind === "offer", "expected decision.kind = \"offer\"");
+    const append = decision.offer.facts[0]!;
+    const foreignEntry = { ...append.entries[0]!, contract: foreign };
+    const before = await readGit(git);
+
+    await assert.rejects(
+      () =>
+        admit(
+          git,
+          { ...decision.offer, facts: [{ ...append, entries: [foreignEntry] }] },
+          observation.admission,
+        ),
+      (error: unknown) =>
+        error instanceof AuthorityCorruptionError &&
+        error.message === `candidate journal entry belongs to ${foreign}, not ${id}`,
+    );
+
+    const after = await readGit(git);
+    assert.equal(after.commit, before.commit);
+    assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.paths.get(contractJournalPath(id))?.oid);
+    assert.equal(after.paths.has(contractJournalPath(id, "terminal")), false);
+  });
+
+  test("classifies the candidate journal from its folded terminal state", async () => {
+    const repository = repositoryWithHead();
+    const bound = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: contractBody(),
+      workspace: "worktree",
+    });
+    const id = (await bound.keiyaku.state()).id;
+    const git = await repositoryAt(repository.path);
+
+    const activeObservation = await withGitDecodeChannel(git, (channel) =>
+      observeContractsForAdmissionAt(git, channel, [id]),
+    );
+    const activeDecision = decideArc({
+      input: {
+        contractId: id,
+        at: "2026-08-06T00:00:00Z",
+        data: { title: "Remain active", objective: "Classify folded state", brief: "Keep the journal active." },
+      },
+      attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
+      observation: activeObservation.decision,
+    });
+    assert.ok(activeDecision.kind === "offer", "expected activeDecision.kind = \"offer\"");
+    assert.equal((await admit(git, activeDecision.offer, activeObservation.admission)).kind, "accepted");
+    const afterActive = await readGit(git);
+    assert.equal(afterActive.paths.has(contractJournalPath(id, "active")), true);
+    assert.equal(afterActive.paths.has(contractJournalPath(id, "terminal")), false);
+
+    const terminalObservation = await withGitDecodeChannel(git, (channel) =>
+      observeContractsForAdmissionAt(git, channel, [id]),
+    );
+    const terminalDecision = decideAbandon({
+      input: { contractId: id, at: "2026-08-06T00:00:01Z" },
+      attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW")] },
+      observation: terminalObservation.decision,
+    });
+    assert.ok(terminalDecision.kind === "offer", "expected terminalDecision.kind = \"offer\"");
+    assert.equal((await admit(git, terminalDecision.offer, terminalObservation.admission)).kind, "accepted");
+    const afterTerminal = await readGit(git);
+    assert.equal(afterTerminal.paths.has(contractJournalPath(id, "active")), false);
+    assert.equal(afterTerminal.paths.has(contractJournalPath(id, "terminal")), true);
   });
 
   test("bind reobserves and atomically asserts target coordinates after Git movement", async () => {

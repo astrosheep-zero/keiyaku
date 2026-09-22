@@ -83,5 +83,5 @@ export function decideAmend<Failure>({
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data,
   };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.head, entries: [entry] }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: id, entries: [entry] }] } };
 }

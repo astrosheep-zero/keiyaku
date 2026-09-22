@@ -41,5 +41,5 @@ export function decideAbandon({
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data: input.note === undefined ? {} : { note: input.note },
   };
-  return { kind: "offer", offer: { facts: [{ contractId: id, expectedHead: current.head, entries: [abandoned] }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: id, entries: [abandoned] }] } };
 }

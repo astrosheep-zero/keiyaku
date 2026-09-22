@@ -63,5 +63,5 @@ export function decideDeliver<Failure>({
     data: input.preparation.data,
   };
   entries.push(deliver);
-  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, entries }] } };
 }

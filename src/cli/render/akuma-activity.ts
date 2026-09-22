@@ -202,11 +202,15 @@ type RowLayout = Readonly<{
   singleLine?: true;
 }>;
 
+function timelineMarker(text: string): string {
+  return `${" ".repeat(TIME_WIDTH)} ⋮ ${text}`;
+}
+
 function plainLayout(): RowLayout {
   return {
     head: (time, glyph, verb, columns) => eventPrefix(glyph, verb, time, columns),
     continuation: continuationPrefix,
-    marker: (count) => `${" ".repeat(TIME_WIDTH)} ⋮ ${count} omitted`,
+    marker: (count) => timelineMarker(`${count} omitted`),
   };
 }
 
@@ -1312,7 +1316,13 @@ export function historyText(
   const rows = groupedRows(result.history.rows, context, true);
   const paging =
     result.history.omitted > 0
-      ? [`  ⋮ ${result.history.omitted} earlier turns · showing last ${result.history.rows.length}`]
+      ? [
+          timelineMarker(
+            result.history.hasLater
+              ? `${result.history.omitted} later events · showing first ${result.history.rows.length}`
+              : `${result.history.omitted} earlier events · showing last ${result.history.rows.length}`,
+          ),
+        ]
       : [];
   return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract), ...paging, ...rows].join("\n");
 }

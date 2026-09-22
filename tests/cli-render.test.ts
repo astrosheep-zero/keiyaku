@@ -1545,8 +1545,8 @@ test("status renders selected activity evidence while preserving history and com
   assert.ok("command" in historyInvocation);
   const history = {
     rows: focusedEntries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : [])),
-    omitted: 0,
-    hasEarlier: false,
+    omitted: 55,
+    hasEarlier: true,
     hasLater: false,
     historyLost: false,
     lowestRetained: 1,
@@ -1561,6 +1561,8 @@ test("status renders selected activity evidence while preserving history and com
     historyResult: { kind: "history", id: status.id, history, contract: { kind: "none" } },
   });
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
+  assert.match(historyText, /      ⋮ 55 earlier events · showing last 12/u);
+  assert.doesNotMatch(historyText, /earlier turns/u);
   for (const command of ["c4", "c5", "c6", "c7"])
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });

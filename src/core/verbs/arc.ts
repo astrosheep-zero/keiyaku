@@ -48,6 +48,6 @@ export function decideArc({ input, attempt, observation }: DecideInput<ArcInput>
   };
   return {
     kind: "offer",
-    offer: { facts: [{ contractId: id, expectedHead: current.head, entries: [arc] }] },
+    offer: { facts: [{ contractId: id, entries: [arc] }] },
   };
 }

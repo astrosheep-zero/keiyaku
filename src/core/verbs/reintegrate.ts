@@ -36,6 +36,6 @@ export function decideReintegrate<Failure>({
   };
   return {
     kind: "offer",
-    offer: { facts: [{ contractId: input.contractId, expectedHead: state.head, entries: [reintegrated] }] },
+    offer: { facts: [{ contractId: input.contractId, entries: [reintegrated] }] },
   };
 }
