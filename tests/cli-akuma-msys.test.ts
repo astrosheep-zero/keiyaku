@@ -48,7 +48,10 @@ test("call defaults to detached birth and rejects removed detach flags", () => {
   });
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
-  assert.match(renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } })), /cwd/u);
+  const text = renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }));
+  assert.match(text, /cwd/u);
+  assert.ok(text.split("\n").includes(`  cwd  ${world}`));
+  assert.doesNotMatch(text, /keiyaku wait|to wait|-----|📁/u);
 });
 
 
