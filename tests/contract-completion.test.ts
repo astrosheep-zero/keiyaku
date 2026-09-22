@@ -1,5 +1,6 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -113,6 +114,38 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     }
     const reacquired = await acquireTargetPlacementFence(scope, "refs/heads/main");
     reacquired.close();
+  });
+
+  test("completion retains a stopped Verification without letting it block an unverified Contract", async () => {
+    const repository = repositoryWithMain();
+    const bound = await Keiyaku.bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document("exit 0"),
+      workspace: "worktree",
+      gates: [],
+    });
+    const state = await bound.keiyaku.state();
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+    mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(worktree, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        worktree: {
+          create: [{ name: "reject-candidate", argv: [process.execPath, "-e", "process.exit(7)"], timeoutMs: 5_000 }],
+        },
+      }),
+    );
+    repository.run(["-C", worktree, "add", "candidate.txt", ".keiyaku/settings.json"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+
+    const delivered = await bound.keiyaku.deliver();
+    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+    const verification = delivered.value.verification;
+    assert.ok(verification !== undefined && "failure" in verification);
+    assert.equal(verification.failure, "environment-failure");
+    assert.ok(delivered.value.completion);
+    assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
   });
 
   test("fatal post-admission errors retain their identity and real journal receipts", async () => {

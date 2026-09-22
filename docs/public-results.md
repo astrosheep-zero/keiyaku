@@ -50,14 +50,19 @@ Delivery and review may admit their leading fact while verification, placement,
 or dependent continuation reports a distinct typed stop. Those trailing channels
 are independent: a satisfied review can still find no delivery to place, and a
 verification or placement stop cannot undo an accepted delivery or review.
-Recovery names an existing delivery fact as already admitted, reports only this
-invocation's facts, and does not disguise later workspace bytes as a candidate.
-Successful placement is represented once as completion; callers do not rebuild
-it from facts or folded state. A completed placement also carries the movement
-it made — the reference it advanced and the head it advanced from — so a
-receipt states the target's movement instead of deriving it from journal
-facts or folded state. Reused Verification evidence is identified as reuse,
-not a cache or a new evidence source.
+Verification blocks placement only when the Contract selected `verified`;
+otherwise an unsatisfied or stopped Verification remains observable evidence,
+keeps its typed shape, and does not prevent a claim. Recovery names an existing
+delivery fact as already admitted, reports only this invocation's facts, and does
+not disguise later workspace bytes as a candidate. Successful placement is
+represented once as completion; callers do not rebuild it from facts or folded
+state. A completed placement also carries the movement it made — the reference it
+advanced and the head it advanced from — so a receipt states the target's
+movement instead of deriving it from journal facts or folded state. Reused
+Verification evidence is identified as reuse, not a cache or a new evidence
+source. A completed placement that retained a non-blocking Verification stop
+reports that stop beside its movement.
+
 An admitted current candidate with declared Verification but no terminal fact
 is `unrecorded`, distinct from undeclared or terminal Verification and implying
 no timeout, liveness, or retry state.

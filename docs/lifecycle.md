@@ -63,7 +63,11 @@ Contract has moved. Placement alone applies generic currentness: the latest
 testimony for a declared gate and its current subject must be satisfied. A later
 unsatisfied testimony for the same subject supersedes earlier satisfaction.
 No renderer, protocol adapter, or board recomputes this judgment. Producer
-methodology for `verified` belongs to [verification.md](verification.md).
+methodology for `verified` belongs to [verification.md](verification.md);
+selecting `verified` is the only bridge that makes that producer's current
+result a placement obligation. Without it, Verification may still run and
+record truthfully, but its result neither satisfies nor blocks a declared gate
+and its typed stops stay evidence rather than a hidden obligation.
 
 Placement claims only a delivered Contract whose current prerequisites and gates
 pass. Missing delivery, terminal state, unmet prerequisites, and unmet gates are
@@ -76,8 +80,14 @@ Leading testimony and completion have different ownership. Review admits its
 captured testimony; delivery admits its captured candidate. Their shared
 completion node judges one Contract at a time. Satisfied review enters at
 placement, while delivery and delivered-dependent continuation first obtain
-current Verification evidence. Unsatisfied review and audit do not trigger
-placement. The trigger changes the entry point, never the placement rules.
+current Verification evidence. Verification is not an implicit gate: a declared
+Verification still runs when delivery needs current evidence, and its result
+remains observable, but an unsatisfied verdict, declaration refusal, or runtime
+stop blocks placement only when the Contract selected `verified`. Without that
+selection, placement proceeds under the declared gates and the result stays
+observable evidence. `reviewed` is independent and neither enables nor replaces
+Verification. Unsatisfied review and audit do not trigger placement. The trigger
+changes the entry point, never the placement rules.
 
 The invocation composes those steps synchronously. Dependent discovery is a
 bounded scheduling observation, not permission to mutate a stale worktree or

@@ -224,4 +224,25 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal(finalState.terminal?.kind, "claimed");
     assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
   });
+
+  test("declared failing Verification with no gate does not block a library delivery claim", async () => {
+    const repository = repositoryWithMain();
+    const bound = await Keiyaku.bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document("exit 1"),
+      workspace: "worktree",
+      gates: [],
+    });
+    const state = await bound.keiyaku.state();
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+
+    const delivered = await bound.keiyaku.deliver();
+    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+    assert.deepEqual(delivered.value.completion?.verification, { mode: "ran", verdict: "unsatisfied" });
+    assert.equal(delivered.value.placement, undefined);
+    assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  });
 });

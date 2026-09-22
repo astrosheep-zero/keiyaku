@@ -14,6 +14,7 @@ import {
 } from "./progress.js";
 import type { DocumentDerivation, PlacementStop, VerificationStop } from "./operations.js";
 import { placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
+import { VERIFIED } from "../verification/declaration.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
@@ -223,18 +224,25 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
   return result;
 }
 
+/** Verification blocks completion only when the Contract selected the verified gate; placement owns gate eligibility. */
+function verificationBlocks(state: ContractCheckpoint["state"]): boolean {
+  return state.terms.gates.includes(VERIFIED);
+}
+
 async function verifyCandidateReadiness(
   input: CompletionInput,
   cursor: CompletionCursor,
 ): Promise<CompletionResult | undefined> {
   const observedPlacement = await observeCandidateTarget(input, cursor);
   await verifyCurrentCandidate(input, cursor);
-  if (cursor.evidence.verification !== undefined || observedPlacement !== undefined) {
+  const verification = cursor.evidence.verification;
+  const blocking = verification !== undefined && verificationBlocks(cursor.checkpoint.state);
+  if (blocking || observedPlacement !== undefined) {
     return {
       kind: "stopped",
       checkpoint: cursor.checkpoint,
       evidence: { ...cursor.evidence, ...(observedPlacement === undefined ? {} : { placement: observedPlacement }) },
-      stop: cursor.evidence.verification ?? observedPlacement!,
+      stop: blocking ? verification! : observedPlacement!,
     };
   }
   return undefined;
