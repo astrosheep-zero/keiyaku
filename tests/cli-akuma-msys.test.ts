@@ -18,7 +18,7 @@ function parseExecution(argv: readonly string[]): ParsedExecution {
   return parsed;
 }
 
-const command = parseExecution(["call", "worker", "-d", "prompt"]).command;
+const command = parseExecution(["call", "worker", "prompt"]).command;
 const waitingCommand = parseExecution(["call", "worker", "--wait", "30s", "prompt"]).command;
 
 function detachedCall(
@@ -38,12 +38,19 @@ function detachedCall(
   };
 }
 
-test("detached wait keeps Windows cwd separate from its POSIX-copyable handle", () => {
-  const result = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
-  const text = renderAkumaText(command, result);
-  assert.ok(text.split("\n").includes(`  cwd  ${world}`));
-  assert.doesNotMatch(text, /keiyaku wait|to wait|-----|📁/u);
+test("call defaults to detached birth and rejects removed detach flags", () => {
+  assert.deepEqual(command, {
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    prompt: { kind: "argument", value: "prompt" },
+    output: "text",
+  });
+  assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
+  assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
+  assert.match(renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } })), /cwd/u);
 });
+
 
 function observingCall(
   observation: CallObservation,

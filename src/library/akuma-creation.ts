@@ -158,8 +158,8 @@ function integrationFailure(error: unknown): IntegrationFailure {
 }
 
 function callMode(value: unknown): "wait" | "detach" {
-  if (value === undefined || value === "wait") return "wait";
-  if (value === "detach") return "detach";
+  if (value === undefined || value === "detach") return "detach";
+  if (value === "wait") return "wait";
   throw new TypeError("mode must be wait or detach");
 }
 

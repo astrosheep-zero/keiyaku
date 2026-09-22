@@ -57,17 +57,16 @@ const AKUMA_COMMAND_SPECS = {
       contract: "value",
       alias: "value",
       wait: "value",
-      detach: "boolean",
       allowed: "repeatable",
       json: "boolean",
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
-      "Default: --wait 5m. An explicit --wait replaces that duration; -d and --detach return after birth.",
+      "Default: return after birth without waiting for the first answer. Explicit --wait observes the first work for that duration.",
       "--contract dispatches the born Akuma to that Contract.",
       "--workdir selects the execution directory; a relative path is relative to the invocation cwd.",
       "Without --workdir, a Contract call uses its appointed worktree; an unassociated call uses the invocation cwd.",
@@ -215,9 +214,7 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
       if (stdin) fail("stdin marker '-' may appear only once");
       stdin = true;
     } else if (token === "-d") {
-      if (action !== "call") fail(`option ${token} is not valid for ${action}`);
-      if (flags.detach !== undefined) fail("duplicate option: --detach");
-      flags.detach = true;
+      fail(`option ${token} is not valid for ${action}`);
     } else if (!token.startsWith("--")) {
       if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
       positionals.push(token);
@@ -397,8 +394,7 @@ function parseCall(
       fail(error instanceof Error ? error.message : "invalid Akuma alias");
     }
   }
-  if (flags.detach === true && flags.wait !== undefined) fail("call --wait and --detach are mutually exclusive");
-  const mode = flags.detach === true ? ("detach" as const) : ("wait" as const);
+  const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
   const allowed = parseAllowedFlag(flags.allowed, fail);
   const schema =

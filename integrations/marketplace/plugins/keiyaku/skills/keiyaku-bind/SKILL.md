@@ -1,123 +1,198 @@
 ---
 name: keiyaku-bind
 description: >-
-  Use when deciding what must be in one Keiyaku Contract and how its work
-  is divided into Arcs, or when writing or binding that Contract.
+  Must read before binding a `kei` (Contract). Use when deciding what belongs
+  in one `kei`, how to divide its work, and how to write or run `bind`.
 ---
 
-# Keiyaku Bind
+# Before Binding A Keiyaku
 
-## What Bind Records
+Bind records a Contract whose objective, design, and acceptance boundary are
+settled. Do not use it to leave an open design for someone else to decide.
 
-Bind journals decisions that have already been made. The Contract author
-arrives with the public outcome decided: Objective, Design, Region, Criteria,
-Verification. A design gap discovered while authoring goes back to whoever
-owns the decision — it is never forwarded into the worktree for a worker to
-resolve.
+## 1. What Must Be Clear Before Binding
 
-## Author And Freedom
+Settle these facts first:
 
-The author pins every public, high-level fact: surfaces, semantics, persisted
-shapes, the observable acceptance boundary. Private decomposition, helper
-names, and equivalent control flow belong to the Deliverer — and that freedom
-comes from the author genuinely not caring, never from the author not deciding.
-Criteria are observable accept/reject observations a Reviewer can judge without
-asking the author anything further.
+- objective and intended outcome;
+- architecture and module boundaries;
+- detailed design and implementation approach;
+- public interfaces, behavior, data, and persistence;
+- ordering, concurrency, dependencies, and failure behavior;
+- acceptance conditions;
+- verification and required evidence;
+- the affected Region;
+- the one holder responsible for the `kei`.
 
-## Author And Bind
+The Design section is a detailed design document. It may contain subsections
+such as:
 
-`keiyaku -C <repo> bind --help` lists the options; only the heredoc is
-stdin. Each section states what it must contain:
+- Architecture: components, module boundaries, ownership, and connections;
+- Interfaces And Behavior: public surfaces, inputs, outputs, success, and
+  refusal behavior;
+- Data And Persistence: data shape, identity, lifecycle facts, and persistence;
+- Approach And Flow: implementation approach, dependencies, ordering,
+  concurrency, and failure handling;
+- Pseudocode: algorithms and control flow.
+
+Record every design decision the implementation must follow. Add other Design
+subsections when needed. Do not bind while the architecture, design, approach,
+or acceptance conditions are open.
+
+### Contract Shape
+
+- Bind separate `kei`s for outcomes that can be accepted independently.
+- Use an Arc for a chapter inside one `kei`; an Arc is not separately accepted.
+- Use a Task for decomposition or dependency memory that must outlive the
+  current conversation.
+
+A `kei` owns one independently acceptable outcome and its delivery lifecycle. A
+Task records decomposition or dependency memory; it may exist without a `kei`,
+and it does not create a second acceptance or lifecycle. Associate a `kei` with
+an existing Task only when that Task has real scheduling or dependency value.
+Do not create a Task just to mirror a `kei`.
+
+### Parallel Work
+
+Parallel work is the default.
+
+- Bind and advance independent `kei`s in parallel. Each has its own acceptance
+  boundary and holder.
+- Within one `kei`, run independent Tasks or Arc chapters in parallel whenever
+  their work can proceed independently. They converge on the one acceptance
+  boundary, which the holder owns.
+
+Region overlap is planning information. It does not prevent parallel work and
+is not a lock, ownership claim, exact diff, or dependency. Use `--after` only
+when one result must exist before another can proceed because of a real logical
+dependency. Do not add `--after` merely because work touches the same Region.
+
+## 2. Bind Syntax
+
+Read the command's help for the complete option grammar:
+
+```bash
+keiyaku -C <repo> bind --help
+```
+
+Inspect declared Regions when planning parallel work:
+
+```bash
+keiyaku -C <repo> region
+keiyaku -C <repo> region <kei/...>
+keiyaku -C <repo> region --path 'src/**' --path 'tests/**'
+```
+
+These list active Regions, read one Contract's Region, or show active Regions
+overlapping the supplied patterns. Overlap is coordination information only.
+
+Bind from stdin with a heredoc or a saved Markdown file:
 
 ~~~~bash
 keiyaku -C <repo> bind - <<'KEIYAKU'
-# <Delivery name — one decision, active voice; source of the kei/... identity>
+# <Delivery name>
 
 ## Context
-<Premises: coordinates of the governing decision or document, and facts a
-reader would otherwise re-derive wrongly. Never narrative. If Objective and
-Design read the same without a sentence here, delete it.>
+<Motivation, authority, baseline, and boundaries.>
 
 ## Objective
-<One end-state you could watch happen, named at the level of intent and goal
-— above implementation detail, above spec recital. If "and" joins two
-outcomes that would each stand alone, bind two Contracts. Even an outcome
-that cannot split into two may still need arcs to organize its
-fulfillment.>
+<One observable, independently acceptable outcome.>
 
 ## Design
-<The closed decisions. A statement belongs here exactly when a test-green
-candidate could still violate it: existing owner modules and entry points,
-what is reused or changed, the implementation approach, critical ordering, the
-exact public surface — each type with its fields, each verb with its success,
-refusal, and error arms and their reason words; the persisted format; which way
-data flows and where it commits or refuses; which parallel shapes are
-forbidden. Unresolved architectural choices are settled before binding. Private
-helper names and equivalent control flow remain the Deliverer's freedom.>
+### Architecture
+<Components, module boundaries, ownership, and connections.>
 
-```text
-<pseudocode — only where ordering matters>
-```
+### Interfaces And Behavior
+<Public surfaces, inputs, outputs, success, and refusal behavior.>
+
+### Data And Persistence
+<Data shape, identity, lifecycle facts, and persistence decisions.>
+
+### Approach And Flow
+<Implementation approach, dependencies, ordering, concurrency, and failure.>
+
+### Pseudocode
+<Algorithms and control flow.>
 
 ## Region
-<one intended write pattern per line — the narrowest justified intended
-writes for this approach, not every potentially involved file. Planning evidence
-for overlap detection, never ownership or the exact diff. No broad directory
-fallback or redundant parent/child patterns; directory patterns end with `/`.
-Fenced lines, list items, and bare lines are equivalent and union.>
+<One repository-relative write pattern per nonblank line.>
 
 ## Criteria
-### <one observable condition>
-<One accept/reject observation with its method: run this, observe that.
-Decidable without consulting you.>
+### <observable acceptance condition>
+<How to observe pass or refusal.>
 
 ## Verification
-```bash timeout=<honest bound>
+```bash timeout=5m
 <commands runnable exactly as written>
 ```
 KEIYAKU
 ~~~~
 
-Use separate fences for checks that need separate timeouts or results. Fences
-run top-to-bottom, and later fences may use earlier outputs. Put setup/build
-before its consumers; use `&&` in one fence only when the consumer must stop
-if setup fails.
+Use the narrowest justified Region patterns for likely writes. A trailing `/`
+is directory shorthand for `/**`. Patterns may be fenced lines, list items, or
+bare lines; those forms are combined. Region patterns are planning evidence,
+not a prediction of the exact diff.
 
-Each declaration may set an individual timeout in its fence info string, using
-an explicit duration unit such as `bash timeout=5m`. Omit it for an unbounded
-declaration; there is no Verification-wide timeout.
+Verification is optional. Each declaration is a closed bash, zsh, or pwsh
+fence containing commands runnable as written. Use separate fences when checks
+need different timeouts or results. Use an explicit timeout for bounded
+commands; `5m` is the normal baseline.
 
-For a saved document:
+Verification runs against the exact integration snapshot in a clean disposable
+worktree for that attempt. It does not run in the author's worktree or the
+target checkout. If the Contract declares Verification, `deliver` runs it when
+no current `verified` attestation exists and otherwise reuses the current
+attestation. A newly run unsatisfied result stops that delivery. `audit` runs
+Verification for a prospective candidate. `--gates reviewed` requires review
+evidence; it does not select or suppress Verification. Selected gates are
+checked at placement.
+
+For an existing Task with real scheduling or dependency value:
 
 ```bash
-keiyaku -C <repo> bind - < CONTRACT.md
 keiyaku -C <repo> bind --task <task/...> - < CONTRACT.md
 ```
 
-Use `--task` only for an existing Task with scheduling or dependency value;
-do not create one just to mirror the Contract.
+For a real logical dependency between Contracts:
 
-## Authority Order
+```bash
+keiyaku -C <repo> bind --after <kei/...> - < CONTRACT.md
+```
 
-Settled upstream decisions and their documentation → this Contract → commission
-and brief (directs the current round's work and questions; never terms, never
-acceptance) → review evidence (witnessed fact, never law). The journaled terms
-are the standing acceptance floor. A brief or tell genuinely commands what this
-round works on and what evidence it gathers; anything that must survive beyond
-the round as a placement condition enters the journal through bind or amend, or
-it is not acceptance.
+Gate selection is part of binding:
 
-## One Boundary, One Contract
+```bash
+keiyaku -C <repo> bind --gates <name,...> - < CONTRACT.md
+keiyaku -C <repo> bind --gates "" - < CONTRACT.md
+keiyaku -C <repo> bind --gates reviewed - < CONTRACT.md
+```
 
-One atomic acceptance boundary per Contract. Independent boundaries are
-separate Contracts; a boundary that cannot be split but is too large for one
-pass is chaptered with Arcs, and dispatch carries only the current Arc.
+Omitting `--gates` uses `gates.default`, or `reviewed` when no default bundle
+exists. `--gates ""` selects no gates. Gates are named acceptance obligations,
+not work assignments.
 
-## Read The Receipt
+## 3. After Binding
 
-Treat the receipt as the handoff. Keep the complete `kei/...` identity, work
-in the reported managed worktree when one was created, and retain the target
-and gate facts it reports. A waiting receipt means prerequisites remain; it
-is not a second authoring workflow.
+Read the receipt as the handoff. Keep the complete `kei/...` identity and note:
 
-Continue the delivery with `keiyaku-workflow`.
+- the holder;
+- the reported worktree, if one was created;
+- the target;
+- gates and prerequisites;
+- whether the `kei` is ready or waiting.
+
+If a worktree was created, work there. If the receipt is waiting, the stated
+prerequisites remain; do not bind a duplicate Contract.
+
+The holder now owns the lifecycle:
+
+1. Start the work directly or delegate Tasks, Arc chapters, Akumas, or seats.
+2. Run independent work in parallel and let it converge on the one acceptance
+   boundary.
+3. Prepare and deliver the candidate.
+4. Coordinate verification, review evidence, gates, and prerequisites.
+5. Continue until the `kei` is claimed, amend terms while keeping the same
+   objective and acceptance boundary, or abandon it when either has changed.
+
+Continue with `keiyaku-workflow` for this lifecycle. For Akuma invocation,
+telling, waiting, permissions, and history, read `keiyaku-akuma`.

@@ -1,206 +1,125 @@
 ---
 name: keiyaku-akuma
 description: >-
-  Calling an Akuma: delegating scouting, mechanical chores, or fanned-out
-  parallel work instead of doing it inline.
+  Calling an Akuma: delegate work to a new or existing worker, then observe,
+  guide, and collect the result.
 ---
 
 # Keiyaku Akuma
 
-An Akuma is a durable callable worker. Its complete identity is
-`aku/<akuma>/<hex8>` — keep it; it is how you address the same worker
-later. An Alias is a movable world-local selector usable wherever a direct id
-is accepted; the identity underneath never changes.
+Use Akumas to delegate work to another worker. `call` creates a new Akuma;
+`tell` gives an existing Akuma another prompt. Keep the complete AkuId, such
+as `aku/worker/1234abcd`, when you need to address the same worker later. An
+alias such as `@reviewer` is a shorter, world-local name.
 
-## Automated Orchestration
-
-For task-specific JavaScript orchestration with the public Akuma API, read
-[Automation With The Akuma API](references/automation.md). It covers structured
-answers, semantic ranking and tournaments, adversarial verification, learning
-from corrections, bounded parallelism, and failure/reconnection handling.
-Use it when the flagship should write and run a program for this task rather
-than coordinate every delegation in conversation. The examples are adaptable
-techniques, not a fixed workflow or a built-in workflow runtime.
-
-## Start One
+## Call a new Akuma
 
 ```bash
-keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration> | -d | --detach] (<prompt> | -)
+keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)
 ```
 
-Give the worker's initial prompt as one argument (quote it when it contains
-spaces), or use final `-` to read it from stdin. These forms are mutually
-exclusive. Decide up front whether you will stay:
+The prompt is the new Akuma's first prompt. Give it as one argument, or use
+`-` to read stdin, never both. Calls are detached by default: they return the
+new identity after birth without waiting for the first answer. Use explicit
+`--wait <duration>` when this invocation should block while observing that
+initial work. `--wait` only bounds this command; it never stops the Akuma.
 
-- The default observes up to five minutes and writes the complete answer when
-  it arrives inside that window. `--wait <duration>` replaces that window.
-- `-d` / `--detach` returns right after birth with the AkuId. Use it when the
-  work outlives your attention; come back with `wait`.
+Useful options:
 
-`--alias @name` assigns that world-local selector to the born Akuma. If the
-Alias already points elsewhere, it moves to the born Akuma. `-C` selects the
-invocation World; `--workdir <path>` selects the worker execution cwd relative
-to that invocation directory. Without `--workdir`, an unassociated call uses
-the invocation cwd, while a `--contract` call uses its appointed worktree.
+- `--alias @name` assigns a reusable world-local selector; an existing alias moves to this Akuma.
+- `--contract <kei/...>` associates the Akuma with a Contract.
+- `--workdir <path>` chooses its execution directory.
+- `--allowed <product.action>` adds actions subject to the Akuma's restrictions.
+- `--schema <file>` requests a structured answer described by a JSON Schema.
 
-Repeated `--allowed` values add actions to the selected Akuma's defaults; they
-never narrow them. An omitted Archetype permits `akuma.*`, every `task.*`,
-`contract.audit`, and `contract.deliver`; `contract.review` requires an explicit
-Archetype or call-time grant. An explicit empty default permits none. A nested
-call can use only actions permitted by its direct parent Soul. Use `status
-<aku/...|@alias>` to inspect the born worker's frozen effective actions.
+The selected Akuma name is a reusable worker configuration, not an individual.
+Calling it again creates an independent Akuma. Use different names for
+capabilities, not merely for parallelism.
 
-## Answer Schemas
+## Public-library core example
 
-For a schema-bearing call or tell through the public API, pass the schema
-directly — `{ schema: z.object({ claim: z.string() }) }` — importing `z` from
-the package root next to `Akuma`. Any Standard Schema v1 value works the same
-way, and the explicit `Schema.zod(...)` and `Schema.json(...)` forms remain
-available for callers who want them.
-
-Keep an answer contract inside simple JSON shape vocabulary: objects, arrays,
-strings, numbers, booleans, enums, literals, and optional or nullable fields.
-Do not attach `.max`, `.min`, `.regex`, `.refine`, `.transform`, or other
-constraint methods. The provider must satisfy the contract, and a fragile or
-unrepresentable constraint fails the loop after submission; the seam refuses
-such a schema at submission and names the offending keyword instead. Enforce
-bounds, formats, and cross-field rules in ordinary caller code after the answer
-arrives, and treat a full JSON Schema through `Schema.json(...)` as the explicit
-waiver a caller signs only when it owns that risk.
-
-## Akuma Names
-
-An Akuma name selects a reusable worker configuration, not an individual worker.
-Calling the same name multiple times creates independent workers with distinct
-AkuIds. Choose different names for different capabilities, not merely to run
-work in parallel.
-
-Each name fixes its own capability stance — provider, model, permissions —
-and a born Akuma keeps those selected defaults for its lifetime. A name may
-also ask for full host access, which disables only its provider's native
-command sandbox and never grants extra operating-system permissions; it
-cannot combine with a readonly restriction or a disabled network. `keiyaku ls
-aku/` lists the available names with their providers and descriptions. If none
-grants the permissions and stance the work needs, add a new Akuma name;
-`keiyaku settings --help` says where Akuma definitions live and what they may
-declare.
-
-## Commission And Steer
-
-A call assembles a commission from independent inputs: the selected Akuma fixes
-capability stance for the identity's whole life; the `--contract` Dispatch
-associates standing terms; allowed actions set what the callee may do, subject
-to that Akuma's restrictions and the parent Soul's ceiling; the prompt carries
-the question. None of these implies another — association is not a seat, forwarded
-actions are not a seat, and no combination mints a role.
-
-The prompt and every later tell genuinely direct the callee's work: they choose
-the subject, scope, depth, risks, and deliverable of the round. They spend
-decisions already made and ask questions still open; they never change the
-Dispatch, the journal, or what counts as acceptance, and an expectation stated
-in a prompt is never evidence for the callee's own findings.
-
-A commission can be as large as a whole Contract's fulfillment loop: call one
-Aku with the Contract association, forward the actions the loop needs —
-including nested calls, which stay under this Soul's ceiling — and state the
-loop as the question. Steering that delegation afterwards goes to the holder,
-not around it.
-
-When that whole-loop worker must operate in the main repository rather than its
-Contract worktree, make that execution choice explicit:
-
-```bash
-keiyaku -C <repo> call worker --contract <kei/...> --workdir <repo> --allowed contract.deliver -d "Own this Contract loop."
+```ts
+const akuma = await Akuma.birth({ path, archetype: "worker" });
+const answer = await akuma.tell("Inspect the change");
+console.log(answer);
 ```
 
-## Watch
+## Commission Context
+
+`--contract` only records the association. It does not tell the Akuma the
+Contract or worktree. Put them in the prompt explicitly:
+
+```text
+Contract: <kei/...>
+Worktree: <exact path>
+This Arc: <what to do>
+```
+
+`--contract` does not choose a worktree. Use `--workdir <path>` when needed.
+
+## Tell an existing Akuma
 
 ```bash
-keiyaku status                            # deep fleet observation
-keiyaku status <aku/...|@alias>           # one worker's snapshot
-keiyaku ls aku/                           # shallow catalog; also aku/<akuma>/ and "aku/*/*"
+keiyaku tell <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)
+```
+
+Use `tell` for the next instruction. Plain `tell` lets current work continue;
+`--interrupt` asks the current Body to yield before the new prompt is handled.
+Use `--wait <duration>` to wait for this Tell's answer. An admitted Tell is
+not withdrawn when the wait ends. Use `--schema` when the answer must follow a
+JSON Schema.
+
+## Observe work
+
+```bash
 keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
 ```
 
-`wait` accepts complete ids, aliases, and Akuma globs. Prefer one plural wait
-over separate waits. The default mode is any: the wait returns when any
-selected Akuma completes, and a member that already completed counts right
-away, so waiting again can return at once. Use `--all` to wait until every
-selected Akuma completes:
+Use `wait` for one or more existing Akumas. The default is `--any`; use
+`--all` for every selected Akuma. `--timeout` limits observation and does not
+stop workers. A completed Akuma already counts, so repeating a wait can return
+immediately.
 
-```bash
-keiyaku -C <cwd> call worker --alias @projection -d "Inspect the projection."
-keiyaku -C <cwd> call worker --alias @host-boundary -d "Inspect the host boundary."
-keiyaku -C <cwd> wait @projection --timeout 5m
-keiyaku -C <cwd> wait @projection @host-boundary --timeout 5m   # returns when either completes
-keiyaku -C <cwd> wait @projection @host-boundary --all --timeout 5m
+The three waiting forms have distinct subjects:
+
+```text
+call --wait   create an Akuma and observe its initial work
+tell --wait   deliver a Tell and observe that Tell's answer
+wait          observe existing Akumas
 ```
 
-Omitted mode behaves as `--any` and leaves the others alone. When the timeout
-expires, `wait` returns their current status without stopping them.
-
-## Steer
+## Inspect and retrieve results
 
 ```bash
-keiyaku tell <aku/...|@alias> (<prompt> | -)
-keiyaku tell <aku/...|@alias> --interrupt (<prompt> | -)
-```
-
-Give `tell` one prompt argument (quote it when it contains spaces) or final `-`
-for stdin, never both.
-`tell` continues the same worker: it steers a live Body in place, or — when
-none is running, including after an answer — records the message durably and
-wakes a successor. `tell --interrupt` puts down the current Body synchronously
-first, then hands the message to the successor; it is not a kill. Choose plain
-`tell` when the current attempt should finish with your guidance folded in;
-choose `--interrupt` when the current attempt itself is the problem.
-
-## Take The Answer
-
-```bash
+keiyaku status                         # current Akuma fleet
+keiyaku status <aku/...|@alias>        # one Akuma
+keiyaku ls aku/                        # names available to call
+keiyaku ls aku/<akuma>/                # existing workers from one name
+keiyaku ls "aku/*/*"                   # existing workers across names
 keiyaku history <aku/...|@alias> --last
 keiyaku history <aku/...|@alias> --id <historyId>
 keiyaku history <aku/...|@alias> [--before <N> | --since <N>] [--limit <N>]
 ```
 
-`--last` writes exactly the complete answer bytes of the latest answered turn
-and says so plainly when no answer exists yet. Snapshot rows elsewhere may
-clip long text; the terminal answer from `call`/`wait` and the bytes from
-`--last` are never clipped — when you need the full result, take it from one
-of those. Every completed answered or failed outcome carries one Heart-owned
-public `historyId` shaped as `turn/<positive-safe-integer>` in `status`, `wait`,
-and history output. Use `--id` with that same value to read exactly one retained
-outcome: text writes the complete answer or diagnostic bytes without clipping
-or framing. Provider-native history coordinates remain private. A malformed or
-unknown ID is a typed nonzero refusal. `--id` is mutually exclusive with
-`--last`, `--before`, `--since`, and `--limit`.
+Use `history --last` for the latest complete answer. Use `--id` for one exact
+answered result named by a status, wait, or history result. Use the complete
+AkuId when an alias may move.
 
-Cursor reads page the activity timeline; `--before` and `--since` are exclusive
-sequence cursors. `--limit` defaults to 50 and accepts at most 5000 semantic
-rows.
-
-## Stop
+## Stop and branch
 
 ```bash
 keiyaku kill <selector>...
-```
-
-`kill` accepts the same id, alias, and glob selectors as `wait`. It stops the
-current Body and records that it did; everything else survives — Heart,
-session, history, pending Tells, and Body Requests — so a later `tell` wakes
-the same worker where it left off. Killing pauses a worker; nothing is
-deleted.
-
-## Branch
-
-```bash
 keiyaku fork <aku/...|@alias> --at <historyId> [--alias @name]
 ```
 
-`fork` starts a child from one exact retained answered-turn coordinate and
-leaves the source untouched. It is a provider capability, not a guarantee:
-when the provider cannot fork from that turn, the command refuses rather than
-fabricating a fresh start. Pass the same public `historyId` exposed by status,
-wait, or history; Heart privately resolves the provider coordinate. The ID must
-name an answered outcome with a provider fork point. Failed outcomes are not
-forkable.
+`kill` stops current work without deleting the Akuma or its history. `fork`
+creates a new Akuma from one exact retained answered history point; the source
+is unchanged, and providers that cannot fork report that refusal.
+
+## JavaScript automation
+
+For a task-specific JavaScript program that coordinates Akumas, read
+[Automation With The Akuma API](references/automation.md). `Akuma.birth`
+creates an Akuma without a prompt; call `tell` on the returned handle to give
+it its first prompt. Use `idle()` when a script must wait before sending
+another schema Tell, and keep AkuIds in the script's own results.
