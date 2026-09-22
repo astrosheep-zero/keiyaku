@@ -92,7 +92,8 @@ export type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinary
  */
 export type LiveStatusObservation = BudgetedStatusObservation & Readonly<{ rows: readonly ActivityRow[] }>;
 
-async function bornLiveStatus(
+/** Internal live companion for an observation loop; it is not a public result. */
+export async function bornLiveStatus(
   paths: AkumaPaths,
   expected: AkuId,
   input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,

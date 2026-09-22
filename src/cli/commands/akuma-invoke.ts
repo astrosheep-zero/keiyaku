@@ -22,7 +22,7 @@ import {
   type Repo,
 } from "../../index.js";
 import { callObservationStream, waitObservationStream, type WaitSelectedIdentity } from "../render/akuma-activity.js";
-import { callObservationHead, waitedTellProgress } from "../render/akuma.js";
+import { callObservationHead, tellWaitProgressStream } from "../render/akuma.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
@@ -321,6 +321,8 @@ async function invokeWaitedTell(
   body: string,
 ): Promise<AkumaInvocationResult> {
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const alias = inputAlias(command.akuma);
+  const progress = command.output === "text" ? tellWaitProgressStream(undefined, alias, resultContext()) : undefined;
   const result = await tellWaitAkuma(
     {
       ...(await inputInitiator(input)),
@@ -332,12 +334,19 @@ async function invokeWaitedTell(
       ...(command.interrupt ? { interrupt: true } : {}),
       ...(input.repo === undefined ? {} : { repo: input.repo }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(progress === undefined
+        ? {}
+        : {
+            observe: {
+              admitted: (tell, id) => writeProgress(progress.admitted(tell, id).join("\n")),
+              observe: (observation) => writeProgress(progress.observe(observation).join("\n")),
+            },
+          }),
     },
     input.execution ?? localExecutionContext(),
   );
   const rendered = schema === undefined ? result : decodeWaitedTellSchema(result, schema);
-  const alias = inputAlias(command.akuma);
-  if (command.output === "text") writeProgress(waitedTellProgress(rendered, alias, resultContext()));
+  if (progress !== undefined) writeProgress(progress.conclude(rendered).join("\n"));
   return {
     kind: "akuma",
     action: "tell",

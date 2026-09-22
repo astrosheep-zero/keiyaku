@@ -35,6 +35,7 @@ import { spawnAkumaBody } from "./body.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import {
   bornStatus,
+  bornLiveStatus,
   defaultWaitComplete,
   readWaitComplete,
   waitForObservation,
@@ -284,7 +285,11 @@ export class AkumaHandle {
   /** Observe the exact admitted Tell's bound Turn without substituting Akuma-wide idleness. */
   async tellOutcome(
     tellId: string,
-    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
+    options: Readonly<{
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      observe?: (observation: import("./akuma-observe.js").LiveStatusObservation) => void | Promise<void>;
+    }> = {},
   ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null }>> {
     const waited = await waitForObservation({
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
@@ -293,6 +298,9 @@ export class AkumaHandle {
         const tell = await readTell(this.paths, tellId);
         if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
         const outcome = await this.boundTellOutcome(tell);
+        if (options.observe !== undefined) {
+          await options.observe(await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }));
+        }
         return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
       },
       complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,

@@ -3,6 +3,7 @@ import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { ParsedCommand } from "../parse.js";
 import { parseAkumaStatus } from "../../akuma/akuma.js";
 import {
+  activityStream,
   DEFAULT_CONTEXT,
   akumaRawAnswer as akumaActivityRawAnswer,
   associatedIdentity,
@@ -16,7 +17,68 @@ import {
   type ObservedCallHead,
 } from "./akuma-activity.js";
 import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
+import type { AkuId } from "../../akuma/identity.js";
+import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
+import type { TellResult } from "../../akuma/akuma.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
+
+function tellWaitConclusion(result: AkumaTellWaitResult): string {
+  return result.observation.reason === "answered"
+    ? "✓ answered"
+    : result.observation.reason === "failed"
+      ? `! failed · ${safeText(result.observation.diagnostic)}`
+      : result.observation.reason === "unanswered"
+        ? "○ unanswered"
+        : "⧖ deadline";
+}
+
+export type TellWaitProgress = Readonly<{
+  admitted: (tell: TellResult, id: AkuId) => readonly string[];
+  observe: (observation: LiveStatusObservation) => readonly string[];
+  conclude: (result: AkumaTellWaitResult) => readonly string[];
+}>;
+
+export function tellWaitProgressStream(
+  akuma: AkuId | undefined,
+  alias: string | undefined,
+  context: TextRenderContext,
+): TellWaitProgress {
+  let target = akuma;
+  const stream = activityStream(context);
+  let opened = false;
+  return {
+    admitted: (tell, id) => {
+      target = id;
+      if (target === undefined) throw new Error("Tell progress admitted without identity");
+      return [
+        tellText(
+          {
+            kind: "akuma",
+            action: "tell",
+            mode: "ordinary",
+            result: { akuma: target, tell },
+            body: "",
+            ...(alias === undefined ? {} : { alias }),
+          },
+          context,
+        ),
+      ];
+    },
+    observe: (observation) => {
+      const lines: string[] = [];
+      if (target === undefined) throw new Error("Tell progress observed before admission");
+      if (!opened) {
+        opened = true;
+        lines.push(...snapshotHeading(target, alias, undefined));
+        lines.push(...stream.seed({ snapshot: observation.status.timeline, rows: observation.rows }));
+      } else {
+        lines.push(...stream({ snapshot: observation.status.timeline, rows: observation.rows }));
+      }
+      return lines;
+    },
+    conclude: (result) => [...stream.flush(), tellWaitConclusion(result)],
+  };
+}
 
 export function waitedTellProgress(
   result: AkumaTellWaitResult,
@@ -34,14 +96,7 @@ export function waitedTellProgress(
     },
     context,
   );
-  const conclusion =
-    result.observation.reason === "answered"
-      ? "✓ answered"
-      : result.observation.reason === "failed"
-        ? `! failed · ${safeText(result.observation.diagnostic)}`
-        : result.observation.reason === "unanswered"
-          ? "○ unanswered"
-          : "⧖ deadline";
+  const conclusion = tellWaitConclusion(result);
   return `${receipt}\n${conclusion}`;
 }
 

@@ -182,6 +182,11 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   });
 }
 
+export type TellWaitObserver = Readonly<{
+  admitted?: (tell: TellResult, id: AkumaStatus["id"]) => void | Promise<void>;
+  observe?: (observation: LiveStatusObservation) => void | Promise<void>;
+}>;
+
 export type TellExecutionInput = Readonly<{
   path: WorldRoot;
   id: AkumaStatus["id"];
@@ -190,6 +195,7 @@ export type TellExecutionInput = Readonly<{
   recordedAt?: string;
   initiator?: string;
   signal?: AbortSignal;
+  onObserve?: TellWaitObserver;
 }>;
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
@@ -227,6 +233,7 @@ export async function executeTellWaitAkuma(
   if (admission.kind === "unavailable")
     throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
   if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
+  await input.onObserve?.admitted?.(await handle.admittedReceipt(admission.tell.id), input.id);
   // The wake runs behind the window; a settled wake is preferred, otherwise the
   // receipt reports the admitted Tell as it stands when the window closes.
   let settled: TellResult | undefined;
@@ -239,6 +246,7 @@ export async function executeTellWaitAkuma(
   const observed = await handle.tellOutcome(admission.tell.id, {
     timeoutMs: input.timeoutMs,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
   const observation =
     observed.outcome === null

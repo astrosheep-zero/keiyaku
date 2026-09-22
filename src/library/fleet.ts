@@ -23,7 +23,7 @@ import {
   executeTellWaitAkuma,
   executeWaitAkuma,
 } from "../akuma/fleet-execution.js";
-import type { WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
+import type { TellWaitObserver, WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -70,6 +70,7 @@ export type AkumaTellWaitInput = AkumaAddressInput &
     interrupt?: boolean;
     initiator?: string;
     signal?: AbortSignal;
+    observe?: TellWaitObserver;
   }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type { CreatedTaskObservation } from "../task/created-observation.js";
@@ -469,7 +470,7 @@ export async function tellWaitAkuma(
 ): Promise<AkumaTellWaitResult> {
   const values = requireInput(input, "Keiyaku tell wait input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal"].includes(key)) {
+    if (!["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal", "observe"].includes(key)) {
       throw new TypeError(`Keiyaku tell wait input has unknown field: ${key}`);
     }
   }
@@ -510,6 +511,7 @@ export async function tellWaitAkuma(
     ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
     ...(input.interrupt === true ? { interrupt: true } : {}),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.observe === undefined ? {} : { onObserve: input.observe }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
 }
