@@ -101,6 +101,19 @@ async function directArchetypeSettings(root: string) {
   return { home, value, placement: { home, settings: value } };
 }
 
+async function directCallFixture() {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  return { raw, world, configured: await directArchetypeSettings(world) };
+}
+
+function okSchema() {
+  return Schema.json(
+    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    (value) => value as { ok: boolean },
+  );
+}
+
 function slowEmptyPublicationBody() {
   let held:
     | Readonly<{
@@ -142,13 +155,8 @@ function slowEmptyPublicationBody() {
 }
 
 test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
+  const { raw, world, configured } = await directCallFixture();
+  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
@@ -221,13 +229,8 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
 });
 
 test("local schema Keiyaku.call starts its zero observation budget after birth", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
+  const { raw, world, configured } = await directCallFixture();
+  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
@@ -302,13 +305,8 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
 });
 
 test("schema Keiyaku.call preserves its child when initial Tell admission fails", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
+  const { raw, world, configured } = await directCallFixture();
+  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -360,13 +358,8 @@ test("schema Keiyaku.call preserves its child when initial Tell admission fails"
 });
 
 test("forwarded schema Keiyaku.call waits for birth and retains readonly evidence", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
+  const { raw, world, configured } = await directCallFixture();
+  const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const { pump, leash } = await requestPump(world, slow.spawn);
   const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
@@ -434,13 +427,8 @@ test("forwarded schema Keiyaku.call waits for birth and retains readonly evidenc
 });
 
 test("forwarded schema Keiyaku.call admits its initial Tell after held birth before a zero-budget deadline", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
+  const { raw, world, configured } = await directCallFixture();
+  const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const { pump, leash } = await requestPump(world, slow.spawn);
   const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
@@ -480,9 +468,7 @@ test("forwarded schema Keiyaku.call admits its initial Tell after held birth bef
 });
 
 test("forwarded Keiyaku.call spends its wait budget from the child's Tell admission", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
+  const { raw, world, configured } = await directCallFixture();
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   const slow = slowEmptyPublicationBody();
   let admittedAtPerf = Number.NaN;
@@ -545,9 +531,7 @@ test("forwarded Keiyaku.call spends its wait budget from the child's Tell admiss
 });
 
 test("ordinary Keiyaku.call stays bound to its first Turn when a later Turn settles before observation", async (t) => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
+  const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -707,9 +691,7 @@ async function requestPump(
 }
 
 test("forwarded call preserves the born child when its exact initial Tell receipt is absent", async () => {
-  const { raw } = await repositoryFixture();
-  const world = await World.at(raw.path);
-  const configured = await directArchetypeSettings(world);
+  const { raw, world, configured } = await directCallFixture();
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   const { pump, leash } = await requestPump(world, defaultRequestSpawn, async () => ({
     kind: "birth-failed",

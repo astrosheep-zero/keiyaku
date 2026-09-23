@@ -368,11 +368,8 @@ const CALL_INPUT_KEYS = [
 ] as const;
 
 type ParsedCallInput = Readonly<{
-  values: Record<string, unknown>;
   path: WorldRoot;
   archetype: string;
-  body: string;
-  initiator?: string;
   readonlyRequested?: true;
   cwd?: string;
   mode: "wait" | "detach";
@@ -381,6 +378,7 @@ type ParsedCallInput = Readonly<{
   home?: string;
   settings?: Settings;
   alias?: AkumaAlias;
+  allowed?: readonly AllowedAction[];
   seat: ReturnType<typeof callSeat>;
   initialTell: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
   observe?: CallWaitObserver;
@@ -414,11 +412,8 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
     ...(initiator === undefined ? {} : { initiator }),
   };
   return {
-    values,
     path,
     archetype,
-    body,
-    ...(initiator === undefined ? {} : { initiator }),
     ...(readonlyRequested === undefined ? {} : { readonlyRequested }),
     ...(cwd === undefined ? {} : { cwd }),
     mode,
@@ -427,6 +422,7 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
     ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
     ...(alias === undefined ? {} : { alias }),
+    ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     seat,
     initialTell,
     ...(observe === undefined ? {} : { observe }),
@@ -443,7 +439,7 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
       ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
     },
     ...(input.readonlyRequested === undefined ? {} : { readonly: input.readonlyRequested }),
-    ...(input.values.allowed === undefined ? {} : { allowed: input.values.allowed as readonly AllowedAction[] }),
+    ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   };
@@ -603,18 +599,15 @@ async function observeCall(call: PublishedCall, admission: AdmittedCallTell): Pr
   }
 }
 
-async function publishCall(born: BornCall): Promise<CallResult> {
-  const call = await publishCallTarget(born);
-  const admission = await admitCallTell(call);
-  if (admission.kind === "failed") return admission.result;
-  return born.mode === "detach" ? await detachCall(call, admission) : await observeCall(call, admission);
-}
-
 export async function callKeiyaku(
   input: CallInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<CallResult> {
-  return await publishCall(await prepareCall(input, execution));
+  const born = await prepareCall(input, execution);
+  const call = await publishCallTarget(born);
+  const admission = await admitCallTell(call);
+  if (admission.kind === "failed") return admission.result;
+  return born.mode === "detach" ? await detachCall(call, admission) : await observeCall(call, admission);
 }
 
 export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {

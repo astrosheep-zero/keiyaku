@@ -425,6 +425,24 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
     : renderMultilineRow({ row, first, continuation, value, context, history: layout.history === true, quoted });
 }
 
+/** Snapshot and live streams select different rows, but render each selected row identically. */
+function renderTimelineRow(
+  row: RenderRow,
+  context: TextRenderContext,
+  layout: RowLayout,
+  time: string | undefined,
+  inFlightSay = false,
+): readonly string[] {
+  const tool = row.kind === "tool" ? toolRepr(row) : undefined;
+  return renderRow(row, context, {
+    layout,
+    first: layout.head(time, inFlightSay ? "⧖" : mark(row), label(row, tool), context.columns),
+    continuation: layout.continuation(),
+    tool,
+    inFlightSay,
+  });
+}
+
 function groupedEntries(
   entries: readonly RenderEntry[],
   context: TextRenderContext,
@@ -440,15 +458,7 @@ function groupedEntries(
     const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
-    const tool = row.kind === "tool" ? toolRepr(row) : undefined;
-    lines.push(
-      ...renderRow(row, context, {
-        layout,
-        first: layout.head(changed ? at : undefined, mark(row), label(row, tool), context.columns),
-        continuation: layout.continuation(),
-        tool,
-      }),
-    );
+    lines.push(...renderTimelineRow(row, context, layout, changed ? at : undefined));
     previousClock = at;
   }
   return lines;
@@ -567,12 +577,8 @@ function settledRows(activity: RenderedActivity): readonly RenderRow[] {
   return activity.rows.filter(isSettledStreamRow);
 }
 
-function isProtectedStreamRow(row: RenderRow): boolean {
-  return row.kind === "said";
-}
-
 function isBoundedStreamTool(row: RenderRow): boolean {
-  return row.kind === "tool" && !isProtectedStreamRow(row);
+  return row.kind === "tool";
 }
 
 function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
@@ -609,16 +615,7 @@ function renderStreamRow(
   const at = clock(row.at);
   const previousClock = layout.clock?.previous ?? state.previousClock;
   const changed = previousClock === undefined || at !== previousClock;
-  const tool = row.kind === "tool" ? toolRepr(row) : undefined;
-  lines.push(
-    ...renderRow(row, context, {
-      layout,
-      first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row, tool), context.columns),
-      continuation: layout.continuation(),
-      tool,
-      inFlightSay,
-    }),
-  );
+  lines.push(...renderTimelineRow(row, context, layout, changed ? at : undefined, inFlightSay));
   if (layout.clock !== undefined) layout.clock.previous = at;
   else state.previousClock = at;
 }
