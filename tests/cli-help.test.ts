@@ -46,6 +46,9 @@ test("namespace and leaf help identify an executable command", () => {
   assert.doesNotMatch(renderAkumaHelp("call"), /--detach|\s-d(?:\s|\])/u);
   assert.match(renderAkumaHelp("call"), /--contract associates .*never selects a workdir/u);
   assert.match(renderAkumaHelp("call"), /uses the invocation cwd whether or not --contract is present/u);
+  const auditHelp = renderContractHelp("audit");
+  assert.match(auditHelp, /\[--show-diff\]/u);
+  assert.doesNotMatch(auditHelp, /\[--diff\]/u);
   assert.match(renderContractHelp("status"), /execution workdir/u);
   assert.match(renderAkumaHelp("call"), /Default actions: .*contract\.deliver.*task\.update/u);
   assert.doesNotMatch(renderAkumaHelp("call").match(/Default actions: .*/u)?.[0] ?? "", /contract\.review/u);

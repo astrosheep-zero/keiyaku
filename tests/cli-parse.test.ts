@@ -121,6 +121,20 @@ test("root version is recognized only after coordinates and help", () => {
   );
 });
 
+test("audit maps only --show-diff to the existing display choice", () => {
+  assert.deepEqual(command(["audit"]), {
+    command: "audit", includeDirty: false, showDiff: false, output: "text",
+  });
+  assert.deepEqual(command(["audit", "kei/example", "--show-diff", "--include-dirty"]), {
+    command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text",
+  });
+  assert.deepEqual(command(["audit", "@example", "--show-diff", "--json"]), {
+    command: "audit", contract: "@example", includeDirty: false, showDiff: true, output: "json",
+  });
+  assert.throws(() => parseArgv(["audit", "--diff"]), /option --diff is not valid for audit/u);
+  assert.throws(() => parseArgv(["deliver", "kei/example", "--show-diff"]), /option --show-diff is not valid for deliver/u);
+});
+
 test("show parses one optional Contract selector and JSON output", () => {
   assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
     command: { command: "show", contract: "kei/example", output: "json" },

@@ -202,8 +202,8 @@ export const CONTRACT_COMMAND_SPECS = {
   audit: {
     positional: "optional",
     stdin: "none",
-    flags: { "include-dirty": "boolean", diff: "boolean", json: "boolean" },
-    usage: "audit [<contract>|@<contract>] [--include-dirty] [--diff]",
+    flags: { "include-dirty": "boolean", "show-diff": "boolean", json: "boolean" },
+    usage: "audit [<contract>|@<contract>] [--include-dirty] [--show-diff]",
     purpose: "Ask what candidate preparation, Verification, and target placement would do; progress is on stderr.",
   },
   reconcile: {

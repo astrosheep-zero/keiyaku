@@ -367,7 +367,7 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
         command: "audit",
         ...(contract === undefined ? {} : { contract }),
         includeDirty: parts.flags["include-dirty"] === true,
-        showDiff: parts.flags.diff === true,
+        showDiff: parts.flags["show-diff"] === true,
         output: parts.output,
       };
     }
