@@ -36,13 +36,14 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics.
 
-Schema-bearing call and tell inputs are composed through the public Akuma
-surface. A schema-bearing call waits for its own prompt-free birth Body to
-settle before submitting its initial Tell, whether the call is local or
-forwarded. This does not relax the busy refusal for schema Tells sent to an
-existing running Akuma. The schema is frozen at input admission and does not
-create a second route or alter ordinary lifecycle, wait, history, or kill
-behavior.
+A call composes prompt-free birth with admission of its first ordinary Tell.
+Akuma execution owns that admission and wake for both local and forwarded calls;
+Library composes surrounding Dispatch and Alias facts. A forwarded child receipt
+proves birth only. If its exact initial Tell receipt is absent, the call keeps
+the child identity and reports partial failure without replaying admission or
+requesting a separate Tell authority. A schema belongs to that same input and
+its answer contract; it creates no second call workflow or route and does not
+alter the existing busy refusal for schema Tells to a running Akuma.
 
 ## Address, Fleet, And Catalog
 

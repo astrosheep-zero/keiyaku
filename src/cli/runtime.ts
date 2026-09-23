@@ -6,7 +6,7 @@ import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import type { ParsedCommand, ParsedExecution } from "./parse.js";
 import { CliUsageError, usageGuideForCommand } from "./parse.js";
 import { renderUsageMessage } from "./usage.js";
-import { safeText } from "./render/terminal.js";
+import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
 import type { ExecutionEvent } from "../library/execution.js";
@@ -24,7 +24,10 @@ export async function writeExecutionProgress(
   await renderExecutionProgress(events, {
     stream: terminal,
     context: {
-      columns: terminal.isTTY === true && Number.isInteger(terminal.columns) ? (terminal.columns ?? 80) : 80,
+      columns:
+        terminal.isTTY === true && Number.isInteger(terminal.columns)
+          ? (terminal.columns ?? DEFAULT_CLI_COLUMNS)
+          : DEFAULT_CLI_COLUMNS,
       color: false,
     },
   });
@@ -50,7 +53,10 @@ export async function writeTask(
 ): Promise<number> {
   const { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } = await import("./render/task.js");
   const context = {
-    columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
+    columns:
+      process.stdout.isTTY === true && Number.isInteger(process.stdout.columns)
+        ? process.stdout.columns
+        : DEFAULT_CLI_COLUMNS,
     color: false,
   };
   if (command.output === "json") writeCliStream(process.stdout, JSON.stringify(result));
@@ -70,7 +76,10 @@ export async function writeTask(
 
 function displayContext() {
   return {
-    columns: process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : 80,
+    columns:
+      process.stdout.isTTY === true && Number.isInteger(process.stdout.columns)
+        ? process.stdout.columns
+        : DEFAULT_CLI_COLUMNS,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
   };
 }

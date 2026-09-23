@@ -3,6 +3,7 @@ import test from "node:test";
 import { parseAkumaStatus, type ActivityRow, type AkumaStatus } from "../src/akuma/akuma.js";
 import {
   associatedIdentity,
+  callObservationStream,
   DEFAULT_CONTEXT,
   frameRule,
   mutationObservationStageText,
@@ -11,7 +12,14 @@ import {
   waitObservationStream,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
-import { akumaRawAnswer, renderAkumaJson, waitedTellProgress } from "../src/cli/render/akuma.js";
+import {
+  akumaRawAnswer,
+  renderAkumaJson,
+  renderAkumaText,
+  tellWaitProgressStream,
+  waitedTellProgress,
+} from "../src/cli/render/akuma.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { akumaMark } from "../src/cli/render/kanshi-akuma.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
@@ -111,8 +119,11 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
   assert.match(tellText(ordinary, context), /⧖ tell +"continue"/u);
-  assert.match(waitedTellProgress(result.result, undefined, context), /⧖ tell +"continue"/u);
-  assert.match(waitedTellProgress(result.result, undefined, context), /✓ answered$/u);
+  const progress = waitedTellProgress(result.result, undefined, context);
+  assert.match(progress, /⧖ tell +"continue"/u);
+  assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
+  assert.equal(progress.match(/⧖ tell +"continue"/gu)?.length, 1, "the admission row is not replayed");
+  assert.match(progress, /✓ answered\n\n$/u, "the progress conclusion separates stdout answer bytes");
   const long = {
     ...ordinary,
     result: {
@@ -139,6 +150,72 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   );
   assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
   assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
+
+  const structured = {
+    ...result,
+    structured: true as const,
+    result: { ...result.result, observation: { reason: "answered" as const, answer: "decoded scalar" } },
+  };
+  assert.equal(akumaRawAnswer(structured), '"decoded scalar"');
+  const command = parseArgv(["tell", result.result.akuma, "--wait", "1s", "continue"]);
+  assert.equal("command" in command, true);
+  assert.equal(renderAkumaText(command as never, structured, context), '"decoded scalar"');
+});
+
+test("call and bounded Tell share one input frame and pinned conclusion", () => {
+  const id = parseAkuId("aku/worker/deadbeef").id;
+  const context = { columns: 100, color: false };
+  const startedAt = Date.parse(AKUMA_ACTIVITY_AT) - 5_000;
+  const tell = {
+    admission: { fact: "recorded" as const, tellId: "tell-bound" },
+    row: {
+      kind: "tell" as const,
+      sequence: 1,
+      at: new Date(startedAt).toISOString(),
+      tellId: "tell-bound",
+      text: "continue",
+      state: "told" as const,
+      deliveries: [],
+    },
+    wake: { kind: "told" as const },
+  };
+  const status = running(id, [tell.row]);
+  const call = callObservationStream(
+    context,
+    { id, contract: { kind: "none" }, facts: [] },
+    { now: () => startedAt },
+  );
+  const callFrame = call.observe({ status, rows: [tell.row] });
+  const callConclusion = call.conclude({
+    kind: "observed",
+    tell,
+    observation: { reason: "answered", answer: "exact answer" },
+    completedAt: AKUMA_ACTIVITY_AT,
+  });
+
+  const progress = tellWaitProgressStream(undefined, undefined, context);
+  const admission = progress.admitted(tell, id);
+  const tellFrame = progress.observe({ status, rows: [tell.row] });
+  const tellConclusion = progress.conclude({
+    akuma: id,
+    tell,
+    observation: { reason: "answered", answer: "exact answer" },
+    completedAt: AKUMA_ACTIVITY_AT,
+  });
+  const tellTranscript = [...admission, ...tellFrame, ...tellConclusion].join("\n");
+  const callTranscript = [...callFrame, callConclusion].join("\n");
+  assert.equal(admission[0], id, "the shared stream opens the identity frame before the Tell receipt");
+  assert.equal(admission[1], "─".repeat(displayColumns(id)));
+  assert.equal(tellTranscript.match(/tell +"continue"/gu)?.length, 1);
+  assert.ok(tellTranscript.indexOf("tell") > tellTranscript.indexOf(`${id}\n`));
+  assert.equal(tellTranscript.split(id).length - 1, 1, "the transcript contains exactly one identity frame");
+  assert.equal(callTranscript.match(/told +“continue”/gu)?.length, 1);
+  assert.ok(callTranscript.indexOf("told") > callTranscript.indexOf(`${id}\n`));
+  assert.equal(callTranscript.split(id).length - 1, 1, "the call transcript contains exactly one identity frame");
+  assert.equal(tellFrame.length, 0, "the admitted Tell receipt is not replayed by observation");
+  assert.equal(tellConclusion.length, 1);
+  assert.equal(tellConclusion[0], callConclusion);
+  assert.match(callConclusion, /✓ answered — 5s/u, "both adapters use the exact terminal completion time");
 });
 
 test("Akuma presentation uses the settled six-mark vocabulary", () => {

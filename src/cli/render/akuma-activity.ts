@@ -6,23 +6,25 @@ import type {
   CreatedTaskObservation,
   DispatchAssociation,
 } from "../../index.js";
-import { parseAkumaStatus } from "../../akuma/akuma.js";
+import type { AkumaTellWaitObservation } from "../../akuma/fleet-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import {
+  DEFAULT_CLI_COLUMNS,
   displayColumns,
   renderBoundedTextBlock,
   safeText,
   takeDisplayColumns,
+  takeDisplayColumnsFromEnd,
   truncateDisplayText,
   truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
 
-export const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
+export const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
@@ -126,7 +128,11 @@ function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
 function rowText(
   row: RenderRow,
   tool?: ToolRepr,
-): Readonly<{ text: string; lines: number; middle?: true; suffix?: string }> {
+): Readonly<{
+  text: string;
+  lines: number;
+  suffix?: string;
+}> {
   if (
     row.kind === "said" ||
     row.kind === "thought" ||
@@ -150,7 +156,6 @@ function rowText(
   return {
     text: repr.text,
     lines: 1,
-    ...(repr.overflow === "middle-ellipsis" ? { middle: true as const } : {}),
     ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }),
   };
 }
@@ -196,10 +201,12 @@ type RowLayout = Readonly<{
   head: (time: string | undefined, glyph: string, verb: string, columns: number) => string;
   continuation: () => string;
   marker: (count: number) => string;
-  /** A plural wait shares one minute clock across all of its attributed rows. */
-  clock?: { previous?: string };
+  history?: true;
+  compactRun?: true;
   /** Plural wait rows spend their full remaining width on one terminal line. */
   singleLine?: true;
+  /** A plural wait shares one minute clock across all of its attributed rows. */
+  clock?: { previous?: string };
 }>;
 
 function timelineMarker(text: string): string {
@@ -212,6 +219,14 @@ function plainLayout(): RowLayout {
     continuation: continuationPrefix,
     marker: (count) => timelineMarker(`${count} omitted`),
   };
+}
+
+function compactLayout(): RowLayout {
+  return { ...plainLayout(), compactRun: true };
+}
+
+function historyLayout(): RowLayout {
+  return { ...compactLayout(), history: true };
 }
 
 function sourceLayout(source: string, width: () => number, clock: { previous?: string }): RowLayout {
@@ -250,22 +265,90 @@ function quoteLines(lines: readonly string[], prefix: string): readonly string[]
   });
 }
 
-function renderMiddleEllipsis(first: string, text: string, suffix: string, columns: number): string {
-  const prefixWidth = displayColumns(first);
-  const remaining = columns - prefixWidth;
-  const suffixWidth = displayColumns(suffix);
-  const withSuffix = remaining - suffixWidth;
-  // `$ ` + one head char + ellipsis + tail; cue and ellipsis alone are not a subject.
-  const showSuffix = suffix.length > 0 && withSuffix >= 6;
-  return `${first}${truncateMiddleDisplayText(text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`;
+function pathTail(path: string, maximum: number): string {
+  if (displayColumns(path) <= maximum) return path;
+  if (maximum <= 1) return maximum === 1 ? "…" : "";
+  const separator = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  const parts = path.split(/[\\/]/u);
+  const basename = parts.pop() ?? path;
+  let tail = basename;
+  const marker = `…${separator}`;
+  for (const parent of parts.reverse()) {
+    if (parent.length === 0) continue;
+    const candidate = `${parent}${separator}${tail}`;
+    if (displayColumns(`${marker}${candidate}`) > maximum) break;
+    tail = candidate;
+  }
+  if (displayColumns(`${marker}${tail}`) <= maximum) return `${marker}${tail}`;
+  return `…${takeDisplayColumnsFromEnd(path, maximum - 1).text}`;
+}
+
+function renderPathPreview(
+  first: string,
+  text: string,
+  pathPreview: NonNullable<ToolRepr["pathPreview"]>,
+  columns: number,
+): string {
+  const available = Math.max(0, columns - displayColumns(first));
+  if (displayColumns(text) <= available) return `${first}${text}`;
+  const before = pathPreview.before;
+  const detail = pathPreview.detail;
+  const diagnostic = pathPreview.diagnostic ?? "";
+  const descriptorWidth = displayColumns(before) + displayColumns(detail);
+  let renderedDetail = detail;
+  if (descriptorWidth >= available) {
+    const detailBudget = Math.max(0, available - displayColumns(before) - 1);
+    renderedDetail = truncateDisplayText(detail, detailBudget);
+  }
+  const pathWidth = Math.max(0, available - displayColumns(before) - displayColumns(renderedDetail));
+  const renderedPath = pathTail(pathPreview.path, pathWidth);
+  const base = `${before}${renderedPath}${renderedDetail}`;
+  const remainder = Math.max(0, available - displayColumns(base));
+  const renderedDiagnostic = remainder > 0 ? truncateDisplayText(diagnostic, remainder) : "";
+  return `${first}${base}${renderedDiagnostic}`;
+}
+
+function takeWordPrefix(value: string, maximum: number): Readonly<{ head: string; rest: string }> {
+  const taken = takeDisplayColumns(value, maximum);
+  if (taken.rest.length === 0) return { head: taken.text, rest: "" };
+  const split = taken.text.lastIndexOf(" ");
+  if (split <= 0) return { head: taken.text, rest: taken.rest };
+  return {
+    head: taken.text.slice(0, split).trimEnd(),
+    rest: `${taken.text.slice(split)}${taken.rest}`.trimStart(),
+  };
+}
+
+function renderRunCommand(
+  first: string,
+  continuation: string,
+  text: string,
+  suffix: string,
+  columns: number,
+): readonly string[] {
+  const firstBudget = Math.max(0, columns - displayColumns(first));
+  const secondBudget = Math.max(0, columns - displayColumns(continuation));
+  if (displayColumns(`${text}${suffix}`) <= firstBudget) return [`${first}${text}${suffix}`];
+  const command = text.startsWith("$ ") ? text.slice(2) : text;
+  const firstPart = takeWordPrefix(command, Math.max(0, firstBudget - 3));
+  const restWidth = displayColumns(firstPart.rest) + displayColumns(suffix);
+  if (restWidth <= secondBudget) {
+    return [`${first}$ ${firstPart.head}`, `${continuation}${firstPart.rest}${suffix}`];
+  }
+  const suffixBudget = Math.min(displayColumns(suffix), Math.max(0, secondBudget - 8));
+  const keptSuffix = suffixBudget > 0 ? truncateDisplayText(suffix, suffixBudget) : "";
+  const tailBudget = Math.max(0, secondBudget - displayColumns(keptSuffix) - 1);
+  const headBudget = Math.max(0, firstBudget - 3);
+  const head = takeDisplayColumns(command, headBudget).text;
+  const tail = takeDisplayColumnsFromEnd(command, tailBudget).text;
+  return [`${first}$ ${head}…`, `${continuation}…${tail}${keptSuffix}`];
 }
 
 type RowRenderOptions = Readonly<{
-  history: boolean;
+  layout: RowLayout;
   first: string;
   continuation: string;
   tool?: ToolRepr | undefined;
-  singleLine?: boolean;
   inFlightSay?: boolean;
 }>;
 
@@ -274,23 +357,39 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
   return toolContent(row, columns);
 }
 
-function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
-  const { history, first, continuation, tool, singleLine = false, inFlightSay = false } = options;
-  const value = rowText(row, tool);
-  const quoted = quotedBody(row);
-  if (singleLine) {
-    const openQuote = row.kind === "said" && inFlightSay;
-    const quoteWidth = quoted ? (openQuote ? 1 : 2) : 0;
-    const remaining = context.columns - displayColumns(first) - quoteWidth;
-    const bodyText = rowBody(row, value.text, remaining);
-    const text = truncateDisplayText(bodyText, Math.max(0, remaining));
-    if (!quoted) return [text.length === 0 ? first.trimEnd() : `${first}${text}`];
-    return [`${first}"${text}${openQuote ? "" : '"'}`];
-  }
+function renderSingleLineRow(
+  input: Readonly<{
+    row: RenderRow;
+    first: string;
+    value: ReturnType<typeof rowText>;
+    context: TextRenderContext;
+    quoted: boolean;
+    inFlightSay: boolean;
+  }>,
+): readonly string[] {
+  const { row, first, value, context, quoted, inFlightSay } = input;
+  const openQuote = row.kind === "said" && inFlightSay;
+  const quoteWidth = quoted ? (openQuote ? 1 : 2) : 0;
+  const remaining = context.columns - displayColumns(first) - quoteWidth;
+  const bodyText = rowBody(row, value.text, remaining);
+  const text = truncateDisplayText(bodyText, Math.max(0, remaining));
+  if (!quoted) return [text.length === 0 ? first.trimEnd() : `${first}${text}`];
+  return [`${first}"${text}${openQuote ? "" : '"'}`];
+}
+
+function renderMultilineRow(
+  input: Readonly<{
+    row: RenderRow;
+    first: string;
+    continuation: string;
+    value: ReturnType<typeof rowText>;
+    context: TextRenderContext;
+    history: boolean;
+    quoted: boolean;
+  }>,
+): readonly string[] {
+  const { row, first, continuation, value, context, history, quoted } = input;
   const quoteWidth = quoted ? 2 : 0;
-  if (value.middle === true) {
-    return [renderMiddleEllipsis(first, value.text, value.suffix ?? "", context.columns - quoteWidth)];
-  }
   const remaining = context.columns - quoteWidth - displayColumns(first);
   // A name that already fills its row spends the width whole; its arguments trim away entirely.
   if (remaining <= 0) return [first.trimEnd()];
@@ -305,10 +404,30 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
   return quoted ? quoteLines(lines, first) : lines;
 }
 
+function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
+  const { layout, first, continuation, tool, inFlightSay = false } = options;
+  const value = rowText(row, tool);
+  if (tool?.overflow === "command") {
+    if (layout.compactRun !== true)
+      return renderRunCommand(first, continuation, value.text, value.suffix ?? "", context.columns);
+    const remaining = context.columns - displayColumns(first);
+    const suffix = value.suffix ?? "";
+    const withSuffix = remaining - displayColumns(suffix);
+    const showSuffix = suffix.length > 0 && withSuffix >= 6;
+    return [
+      `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
+    ];
+  }
+  if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
+  const quoted = quotedBody(row);
+  return layout.singleLine === true
+    ? renderSingleLineRow({ row, first, value, context, quoted, inFlightSay })
+    : renderMultilineRow({ row, first, continuation, value, context, history: layout.history === true, quoted });
+}
+
 function groupedEntries(
   entries: readonly RenderEntry[],
   context: TextRenderContext,
-  history = false,
   layout: RowLayout = plainLayout(),
 ): readonly string[] {
   const lines: string[] = [];
@@ -324,11 +443,10 @@ function groupedEntries(
     const tool = row.kind === "tool" ? toolRepr(row) : undefined;
     lines.push(
       ...renderRow(row, context, {
-        history,
+        layout,
         first: layout.head(changed ? at : undefined, mark(row), label(row, tool), context.columns),
         continuation: layout.continuation(),
         tool,
-        singleLine: layout.singleLine === true,
       }),
     );
     previousClock = at;
@@ -339,13 +457,11 @@ function groupedEntries(
 function groupedRows(
   rows: readonly RenderRow[],
   context: TextRenderContext,
-  history = false,
   layout: RowLayout = plainLayout(),
 ): readonly string[] {
   return groupedEntries(
     rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })),
     context,
-    history,
     layout,
   );
 }
@@ -410,14 +526,14 @@ export function snapshotActivityLines(
     return groupedEntries(coalesceAdjacentGaps(full), context);
   }
   const latest = entries.filter((entry) => entry.kind === "row").at(-1);
-  return latest === undefined ? [] : groupedEntries([latest], context);
+  return latest === undefined ? [] : groupedEntries([latest], context, compactLayout());
 }
 
 /** One command's append-only activity view, with a baseline and a final tail flush. */
 export type ActivityStream = ((activity: RenderedActivity) => readonly string[]) &
   Readonly<{
     /** Establish a wait baseline without spending the command's live tool budget. */
-    seed: (activity: RenderedActivity) => readonly string[];
+    seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly string[];
     /** Emit the deferred tail exactly once before the command's conclusion. */
     flush: () => readonly string[];
   }>;
@@ -431,6 +547,7 @@ type ActivityStreamState = {
   mutableSequences: Set<number>;
   previousClock: string | undefined;
   renderedBoundaries: Set<number>;
+  admittedTellSequences: Set<number>;
   openingTools: number;
   deferred: DeferredActivityEntry[];
 };
@@ -451,7 +568,7 @@ function settledRows(activity: RenderedActivity): readonly RenderRow[] {
 }
 
 function isProtectedStreamRow(row: RenderRow): boolean {
-  return row.kind === "said" || (row.kind === "tool" && row.call.kind === "fileChange");
+  return row.kind === "said";
 }
 
 function isBoundedStreamTool(row: RenderRow): boolean {
@@ -495,11 +612,10 @@ function renderStreamRow(
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   lines.push(
     ...renderRow(row, context, {
-      history: false,
+      layout,
       first: layout.head(changed ? at : undefined, inFlightSay ? "⧖" : mark(row), label(row, tool), context.columns),
       continuation: layout.continuation(),
       tool,
-      singleLine: layout.singleLine === true,
       inFlightSay,
     }),
   );
@@ -580,6 +696,7 @@ function observeActivitySnapshot(
   // settled cursor, even if its earlier pending form was remembered as mutable.
   if (boundary !== undefined) state.mutableSequences.delete(boundary.row.sequence);
   const observedRows = settledRows(activity)
+    .filter((row) => !state.admittedTellSequences.has(row.sequence))
     .filter(
       (row) =>
         boundary === undefined ||
@@ -600,6 +717,12 @@ function observeActivitySnapshot(
   );
   const rows = observedRows.filter((row) => row.kind !== "thought");
   for (const row of rows) {
+    if (row.kind === "said") {
+      lines.push(...flushActivityTail(state, context, layout));
+      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
+      state.openingTools = 0;
+      continue;
+    }
     if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
@@ -648,16 +771,19 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     mutableSequences: new Set(),
     previousClock: undefined,
     renderedBoundaries: new Set(),
+    admittedTellSequences: new Set(),
     openingTools: 0,
     deferred: [],
   };
-  const seed = (activity: RenderedActivity): readonly string[] => {
+  const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly string[] => {
     const lines: string[] = [];
+    if (alreadyRenderedSequence !== undefined) state.admittedTellSequences.add(alreadyRenderedSequence);
     const boundary = currentTurnBoundary(activity);
     const unseenBoundary = boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence);
     if (unseenBoundary) {
-      renderCurrentTurnBoundary(state, activity, lines, context, layout);
-      const omitted = baselineOmissionCount(activity, boundary!);
+      if (boundary.row.sequence === alreadyRenderedSequence) state.renderedBoundaries.add(boundary.turnSequence);
+      else renderCurrentTurnBoundary(state, activity, lines, context, layout);
+      const omitted = baselineOmissionCount(activity, boundary);
       if (omitted > 0) lines.push(layout.marker(omitted));
     }
     rememberMutableRows(state, activity);
@@ -888,6 +1014,53 @@ function conclusionClause(at: number, startedAt: number, complete: boolean, end:
   return at >= startedAt ? ` — ${durationText(Math.max(0, at - startedAt))}` : "";
 }
 
+/** One wait-style conclusion for every observer of an input-bound Tell. */
+function waitConclusionRow(
+  input: Readonly<{
+    at?: number;
+    startedAt: number;
+    complete: boolean;
+    end: number;
+    mark: string;
+    verb: string;
+    target?: string;
+  }>,
+): string {
+  const time = input.at === undefined ? "unknown" : clockFromMs(input.at);
+  const duration = input.at === undefined ? "" : conclusionClause(input.at, input.startedAt, input.complete, input.end);
+  return `${time}${input.target ?? ""} ${input.mark} ${input.verb}${duration}`;
+}
+
+export function inputWaitConclusion(
+  observation: AkumaTellWaitObservation,
+  input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number }>,
+): readonly string[] {
+  const end = input.now ?? Date.now();
+  const complete = observation.reason !== "deadline";
+  const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
+  const at = complete ? (Number.isFinite(pinned) ? pinned : undefined) : end;
+  const conclusion =
+    observation.reason === "answered"
+      ? { mark: "✓", verb: "answered" }
+      : observation.reason === "failed" || observation.reason === "invalid-output"
+        ? { mark: "!", verb: "failed" }
+        : observation.reason === "unanswered"
+          ? { mark: "○", verb: "unanswered" }
+          : { mark: "⧖", verb: "deadline" };
+  return [
+    waitConclusionRow({
+      ...(at === undefined ? {} : { at }),
+      startedAt: input.startedAt,
+      complete,
+      end,
+      ...conclusion,
+    }),
+    ...(observation.reason === "failed" || observation.reason === "invalid-output"
+      ? [`! error ${safeText(observation.diagnostic)}`]
+      : []),
+  ];
+}
+
 /** Present ids in frozen selection order, then any result member the selection never named. */
 function orderedWaitIds(state: WaitObservationStreamState, result: WaitConclusionResult): readonly string[] {
   const ids = [...state.sources.keys()];
@@ -941,7 +1114,7 @@ function concludeWaitStream(
     const at = complete ? (state.settledAt.get(id) ?? end) : end;
     const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
     const target = multi ? ` ${padToDisplay(sourceTag(state, id), state.sourceWidth)}` : "";
-    return [`${clockFromMs(at)}${target} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`];
+    return [waitConclusionRow({ at, startedAt, complete, end, mark, verb, target })];
   });
   const answeredSingle =
     !multi && result.observations.length === 1 && statusAnswer(result.observations[0]!) !== undefined;
@@ -991,10 +1164,25 @@ export type ObservedCallHead = Readonly<{
   facts: readonly string[];
 }>;
 
-export type CallObservationStream = Readonly<{
+export type InputWaitConclusion =
+  | Readonly<{ kind: "failed"; diagnostic: string }>
+  | Readonly<{
+      kind: "observed";
+      observation: AkumaTellWaitObservation;
+      completedAt?: string | null;
+    }>;
+
+export type InputWaitStream = Readonly<{
+  admitted: (input: Readonly<{ at?: string; sequence?: number; rows: readonly string[] }>) => readonly string[];
   observe: (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>) => readonly string[];
-  conclude: (observation: CallObservation) => string;
+  conclude: (result: InputWaitConclusion) => string;
   opened: () => boolean;
+}>;
+
+export type CallObservationStream = Readonly<{
+  observe: InputWaitStream["observe"];
+  conclude: (observation: CallObservation) => string;
+  opened: InputWaitStream["opened"];
 }>;
 
 function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
@@ -1003,53 +1191,92 @@ function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
 }
 
 /**
- * Live view over one observing call: its identity frame and birth diagnostics
- * open the stream once, settled rows follow as they arrive, and the return
- * appends one conclusion in single-target wait grammar. The stream never
- * replays its own activity as a final snapshot, and it never carries the
- * birth receipt's cwd row.
+ * Live view over one observing input: its identity frame opens once, selected
+ * activity follows, and the input-bound outcome supplies the closing row.
  */
+export function inputWaitStream(
+  context: TextRenderContext,
+  head: () => ObservedCallHead,
+  options: Readonly<{ cursor: "empty" | "admission"; now?: () => number; answerSeparator?: true }>,
+): InputWaitStream {
+  const now = options.now ?? ((): number => Date.now());
+  const activity = activityStream(context);
+  let startedAt = Number.NaN;
+  let admitted = false;
+  let admittedSequence: number | undefined;
+  let opened = false;
+  let cursorSeeded = false;
+  const admit: InputWaitStream["admitted"] = (input) => {
+    if (admitted) throw new Error("input wait admitted more than once");
+    const pinned = input.at === undefined ? Number.NaN : Date.parse(input.at);
+    startedAt = Number.isFinite(pinned) ? pinned : now();
+    admittedSequence = input.sequence;
+    admitted = true;
+    if (input.rows.length === 0) return [];
+    const lines: string[] = [];
+    open(lines);
+    lines.push(...input.rows);
+    return lines;
+  };
+  const open = (lines: string[], failedBeforeAdmission = false): void => {
+    if (opened) return;
+    if (!admitted && !failedBeforeAdmission) throw new Error("input wait observed before admission");
+    opened = true;
+    const identity = head();
+    lines.push(...snapshotHeading(identity.id, identity.alias, identity.contract), ...identity.facts);
+  };
+  const observe: InputWaitStream["observe"] = (observation) => {
+    const lines: string[] = [];
+    open(lines);
+    const activityInput = { snapshot: observation.status.timeline, rows: observation.rows };
+    if (!cursorSeeded && options.cursor === "admission") lines.push(...activity.seed(activityInput, admittedSequence));
+    else lines.push(...activity(activityInput));
+    cursorSeeded = true;
+    return lines;
+  };
+  const conclude: InputWaitStream["conclude"] = (result) => {
+    const lines: string[] = [];
+    open(lines, result.kind === "failed");
+    lines.push(...activity.flush());
+    if (result.kind === "failed") lines.push(`! error ${safeText(result.diagnostic)}`);
+    else
+      lines.push(
+        ...inputWaitConclusion(result.observation, {
+          startedAt,
+          ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
+          now: now(),
+        }),
+      );
+    return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
+  };
+  return { admitted: admit, observe, conclude, opened: () => opened };
+}
+
 export function callObservationStream(
   context: TextRenderContext,
   head: ObservedCallHead,
-  options: Readonly<{ now?: () => number }> = {},
+  options: Readonly<{ now?: () => number; admittedAt?: string }> = {},
 ): CallObservationStream {
-  const now = options.now ?? ((): number => Date.now());
-  const startedAt = now();
-  const stream = activityStream(context);
-  let opened = false;
-  const open = (lines: string[]): void => {
-    if (opened) return;
-    opened = true;
-    lines.push(...snapshotHeading(head.id, head.alias, head.contract), ...head.facts);
+  const stream = inputWaitStream(context, () => head, {
+    cursor: "empty",
+    answerSeparator: true,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
+  return {
+    observe: stream.observe,
+    conclude: (observation) => {
+      if (observation.kind === "failed")
+        return stream.conclude({ kind: "failed", diagnostic: observation.failure.diagnostic });
+      if (observation.kind !== "observed") return "";
+      return stream.conclude({
+        kind: "observed",
+        observation: observation.observation,
+        ...(observation.completedAt === undefined ? {} : { completedAt: observation.completedAt }),
+      });
+    },
+    opened: stream.opened,
   };
-  const observe = (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>): readonly string[] => {
-    const lines: string[] = [];
-    open(lines);
-    lines.push(...stream({ snapshot: observation.status.timeline, rows: observation.rows }));
-    return lines;
-  };
-  const conclude = (observation: CallObservation): string => {
-    const lines: string[] = [];
-    open(lines);
-    lines.push(...stream.flush());
-    if (observation.kind === "failed") {
-      lines.push(`! error ${safeText(observation.failure.diagnostic)}`);
-      return lines.join("\n");
-    }
-    if (observation.kind !== "observed") return lines.join("\n");
-    const end = now();
-    const status = observation.status;
-    const answered = statusAnswer({ status }) !== undefined;
-    const complete = defaultWaitComplete(status);
-    const at = complete ? (settleMoment(status) ?? end) : end;
-    const { mark, verb } = conclusionMarkVerb(status, answered);
-    lines.push(`${clockFromMs(at)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`);
-    const failure = failedOutcomeDiagnostic(status);
-    if (failure !== undefined) lines.push(`! error ${safeText(failure)}`);
-    return lines.join("\n");
-  };
-  return { observe, conclude, opened: () => opened };
 }
 
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
@@ -1203,36 +1430,54 @@ export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"]
   return timeline.outcome.outcome.answer;
 }
 
-function answerCallFailed(result: Extract<AkumaInvocationResult, { action: "call" }>["result"]): boolean {
-  return result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.readonly?.enforcement === "none";
+function answerBytes(answer: unknown, structured: boolean): string | undefined {
+  return !structured && typeof answer === "string" ? answer : JSON.stringify(answer);
+}
+
+function tellAnswer(result: Extract<AkumaInvocationResult, { action: "tell" }>): string | undefined {
+  if (result.mode !== "wait") return undefined;
+  if (result.result.observation.reason !== "answered") return "";
+  return answerBytes(result.result.observation.answer, result.structured === true);
+}
+
+function callAnswer(result: Extract<AkumaInvocationResult, { action: "call" }>): string | undefined {
+  const observation = result.result.observation;
+  if (observation.kind !== "observed" || observation.observation.reason !== "answered")
+    return result.streamed === true ? "" : undefined;
+  return answerBytes(observation.observation.answer, result.result.structured === true);
+}
+
+function waitAnswer(result: Extract<AkumaInvocationResult, { action: "wait" }>): string | undefined {
+  const total = result.result.observations.length + result.result.unobserved.length;
+  if (result.streamed === true) {
+    // Plural waits leave stdout empty so one answer can never be mistaken for the whole result.
+    if (total !== 1) return "";
+    const single = result.result.observations[0];
+    return single === undefined ? "" : (statusAnswer(single) ?? "");
+  }
+  if (total !== 1) return undefined;
+  return statusAnswer(result.result.observations[0]!);
+}
+
+function historyAnswer(result: Extract<AkumaInvocationResult, { action: "history" }>): string | undefined {
+  if (result.mode !== "exact" || result.historyResult.kind !== "exact") return undefined;
+  const outcome = result.historyResult.outcome.outcome;
+  return outcome.kind === "answered" ? outcome.answer : outcome.diagnostic;
 }
 
 export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
-  if (result.action === "call") {
-    if (result.streamed === true) {
-      // A streamed call's stdout is its answer or nothing; diagnostics belong to stderr.
-      if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return "";
-      return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) }) ?? "";
-    }
-    if (answerCallFailed(result.result) || result.result.observation.kind !== "observed") return undefined;
-    return statusAnswer({ status: parseAkumaStatus(result.result.observation.status) });
+  switch (result.action) {
+    case "tell":
+      return tellAnswer(result);
+    case "call":
+      return callAnswer(result);
+    case "wait":
+      return waitAnswer(result);
+    case "history":
+      return historyAnswer(result);
+    default:
+      return undefined;
   }
-  if (result.action === "wait") {
-    if (result.streamed === true) {
-      // Plural waits leave stdout empty so one answer can never be mistaken for the whole result.
-      const total = result.result.observations.length + result.result.unobserved.length;
-      const single = total === 1 ? result.result.observations[0] : undefined;
-      return single === undefined ? "" : (statusAnswer(single) ?? "");
-    }
-    const total = result.result.observations.length + result.result.unobserved.length;
-    if (total === 1) return statusAnswer(result.result.observations[0]!);
-  }
-  if (result.action === "history" && result.mode === "exact" && result.historyResult.kind === "exact") {
-    return result.historyResult.outcome.outcome.kind === "answered"
-      ? result.historyResult.outcome.outcome.answer
-      : result.historyResult.outcome.outcome.diagnostic;
-  }
-  return undefined;
 }
 
 export function waitText(
@@ -1314,7 +1559,7 @@ export function historyText(
   }
   if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
   if (result.mode !== "page") throw new Error("history result lacks page");
-  const rows = groupedRows(result.history.rows, context, true);
+  const rows = groupedRows(result.history.rows, context, historyLayout());
   const paging =
     result.history.omitted > 0
       ? [
@@ -1331,18 +1576,29 @@ export function historyText(
 export function tellText(
   result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>,
   context: TextRenderContext,
+  options: Readonly<{ identity?: boolean }> = {},
 ): string {
   const wake = result.result.tell.wake;
   const target = identity(result.result.akuma, result.alias);
-  const row = groupedRows([result.result.tell.row], context, false, {
+  const row = groupedRows([result.result.tell.row], context, {
     ...plainLayout(),
     head: (time, _glyph, _verb, columns) => eventPrefix(wake.kind === "held" ? "⧗" : "⧖", "tell", time, columns),
     singleLine: true,
   }).join("\n");
+  const identityLine = options.identity === false ? [] : [target];
   if (wake.kind === "failed") {
     const child = "child" in wake ? wake.child : undefined;
     const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
-    return `${target}\n${row}\n${renderBoundedTextBlock(failure, { first: "", continuation: "  ", columns: context.columns, lines: Number.MAX_SAFE_INTEGER }).join("\n")}`;
+    return [
+      ...identityLine,
+      row,
+      ...renderBoundedTextBlock(failure, {
+        first: "",
+        continuation: "  ",
+        columns: context.columns,
+        lines: Number.MAX_SAFE_INTEGER,
+      }),
+    ].join("\n");
   }
-  return `${target}\n${row}`;
+  return [...identityLine, row].join("\n");
 }

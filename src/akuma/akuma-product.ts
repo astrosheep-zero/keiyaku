@@ -12,8 +12,8 @@ import type {
   AkumaListRow,
   UnbornAkumaListRow,
 } from "./akuma.js";
-import { CALL_WITH_CONTEXT } from "./akuma-product-symbols.js";
 import { callReadonly, canonicalBirthCwd } from "./call-input.js";
+import type { CallInitialTell } from "./call-initial-tell.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
@@ -23,7 +23,6 @@ import { requestForwardedAkumaCall } from "./call-request.js";
 import { executionChannel } from "./requests.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import { settings as readSettings } from "../settings.js";
-import { schemaJsonText } from "./schema.js";
 import type { WorldRoot } from "../world.js";
 import type { BodyLaunch } from "./body.js";
 import type { AllocatedAkuma } from "./identity.js";
@@ -31,14 +30,13 @@ import type { AllocatedAkuma } from "./identity.js";
 type AkumaCallRecipe = Omit<NonNullable<BodyLaunch["seed"]>, "id" | "archetype" | "cwd" | "origin">;
 type BornExecution = Readonly<{ cwd: string; source: "input" | "caller" | "process" | "world" }>;
 
+export type InitialCallTell = CallInitialTell;
+
 export type BornAkumaCall = Readonly<{
   kind: "born";
   allocated: AllocatedAkuma;
   seed: AkumaCallRecipe &
     Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
-  initialBody?: string;
-  initiator?: string;
-  initialSchemaJson?: string;
   execution: BornExecution;
 }>;
 
@@ -51,7 +49,7 @@ export type RequestedAkumaCall = Readonly<{
 
 export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
 
-type AkumaCallLaunchInput = Omit<AkumaCallInput, "body"> & Readonly<{ body?: string }>;
+type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell: InitialCallTell }>;
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 type KnownAkuma = Readonly<{
   id: ReturnType<typeof akuIdFromDirectoryName>["id"];
@@ -77,8 +75,7 @@ async function admitBodyRequest(input: {
     id: randomUUID(),
     world: input.path,
     archetype: input.name,
-    ...(input.call.body === undefined ? {} : { body: input.call.body }),
-    ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
+    initialTell: input.call.initialTell,
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
     ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
@@ -120,9 +117,6 @@ async function admitDirect(input: {
       cwd,
       origin: { kind: "direct" },
     },
-    ...(input.call.body === undefined ? {} : { initialBody: input.call.body }),
-    ...(input.call.initiator === undefined ? {} : { initiator: input.call.initiator }),
-    ...(input.call.schema === undefined ? {} : { initialSchemaJson: schemaJsonText(input.call.schema) }),
     execution: {
       cwd,
       source: input.call.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
@@ -241,9 +235,6 @@ class AkumaProduct {
       ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
     });
   }
-  async invoke(input: AkumaCallLaunchInput): Promise<AkumaHandle> {
-    return await this[CALL_WITH_CONTEXT](input, { initiatorCwd: process.cwd() });
-  }
   async admit(input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaBornCall> {
     const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
@@ -281,9 +272,6 @@ class AkumaProduct {
         await spawnAkumaBody({
           paths: allocated.paths,
           seed: born.seed,
-          ...(born.initialBody === undefined ? {} : { initialBody: born.initialBody }),
-          ...(born.initiator === undefined ? {} : { initiator: born.initiator }),
-          ...(born.initialSchemaJson === undefined ? {} : { initialSchemaJson: born.initialSchemaJson }),
           ...(Object.keys(completion).length === 0 ? {} : { completion }),
         }),
     });
@@ -291,9 +279,6 @@ class AkumaProduct {
       cwd: born.execution.cwd,
       source: born.execution.source,
     });
-  }
-  async [CALL_WITH_CONTEXT](input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaHandle> {
-    return await this.publish(await this.admit(input, context));
   }
   async listComplete(input: Readonly<{ archetype?: string }> = {}): Promise<AkumaCompleteList> {
     if (typeof input !== "object" || input === null || Array.isArray(input))

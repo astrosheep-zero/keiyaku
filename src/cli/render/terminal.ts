@@ -1,3 +1,5 @@
+export const DEFAULT_CLI_COLUMNS = 100;
+
 export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
 
 export type GitShortStat = Readonly<{
@@ -86,6 +88,18 @@ export function takeDisplayColumns(value: string, maximum: number): Readonly<{ t
     columns += width;
   }
   return { text: clusters.slice(0, index).join(""), rest: clusters.slice(index).join("") };
+}
+
+export function takeDisplayColumnsFromEnd(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
+  const clusters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
+  let columns = 0;
+  let index = clusters.length;
+  for (; index > 0; index -= 1) {
+    const width = graphemeColumns(clusters[index - 1]!);
+    if (columns + width > maximum) break;
+    columns += width;
+  }
+  return { text: clusters.slice(index).join(""), rest: clusters.slice(0, index).join("") };
 }
 
 export function truncateDisplayText(value: string, maximum: number): string {

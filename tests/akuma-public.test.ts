@@ -604,7 +604,7 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
   assert.equal(defaultBudget.ordinaryCount, 4);
 });
 
-test("open snapshots protect every settled say and file change at zero budget", () => {
+test("open snapshots protect settled says but select file changes as ordinary tools", () => {
   const completedTool = (sequence: number, id: string, call: ToolCall) =>
     activityFact(sequence, 1, `2026-08-10T00:00:${String(sequence).padStart(2, "0")}.000Z`, {
       type: "tool",
@@ -622,16 +622,35 @@ test("open snapshots protect every settled say and file change at zero budget", 
     completedTool(5, "file-1", { kind: "fileChange", changes: [{ op: "update", path: "src/one.ts" }] }),
     completedTool(6, "ordinary-2", { kind: "run", command: "ordinary-2" }),
     activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "assistant", text: "say two" }),
-    completedTool(8, "file-2", { kind: "fileChange", changes: [{ op: "update", path: "src/two.ts" }] }),
+    completedTool(8, "file-2", {
+      kind: "fileChange",
+      changes: [{ op: "update", path: "src/two.ts", diffstat: { added: 4, removed: 2 } }],
+    }),
   ]);
-  const selected = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
+  const zero = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
 
+  assert.equal(zero.snapshot.kind, "open");
+  if (zero.snapshot.kind === "open") {
+    assert.deepEqual(snapshotSequences(zero.snapshot), [2, "gap:1", 4, "gap:2", 7, "gap:1"]);
+    assert.equal(zero.snapshot.omitted, 4);
+  }
+  assert.equal(zero.ordinaryCount, 0);
+
+  const selected = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1, voice: 0 } });
   assert.equal(selected.snapshot.kind, "open");
   if (selected.snapshot.kind === "open") {
-    assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, 5, "gap:1", 7, 8]);
-    assert.equal(selected.snapshot.omitted, 2);
+    assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, "gap:2", 7, 8]);
+    assert.equal(selected.snapshot.omitted, 3);
+    const edit = selected.snapshot.entries.find(
+      (entry) => entry.kind === "row" && entry.row.sequence === 8,
+    );
+    assert.equal(edit?.kind, "row");
+    if (edit?.kind === "row" && edit.row.kind === "tool" && edit.row.call.kind === "fileChange") {
+      assert.equal(edit.row.call.changes[0]?.path, "src/two.ts");
+      assert.deepEqual(edit.row.call.changes[0]?.diffstat, { added: 4, removed: 2 });
+    } else assert.fail("the selected ordinary edit retains its typed file-change evidence");
   }
-  assert.equal(selected.ordinaryCount, 0);
+  assert.equal(selected.ordinaryCount, 1);
 });
 
 test("open snapshots select the retained launch Tell only without a current-Turn call", () => {
@@ -1053,8 +1072,8 @@ test("reported file changes keep the newest five independently of ordinary omiss
   assert.equal(view.reportedChanges.at(-1)?.op, "update");
   assert.equal(view.reportedChanges.at(-1)?.diffstat, undefined);
   assert.equal(view.reportedChangesOmitted, 2);
-  assert.equal(view.omitted, 3);
-  assert.deepEqual(snapshotSequences(view), [2, "gap:1", 5, "gap:2"]);
+  assert.equal(view.omitted, 5);
+  assert.deepEqual(snapshotSequences(view), ["gap:5"]);
 });
 
 test("outcome folding preserves a truncated final voice equal to the answer", () => {

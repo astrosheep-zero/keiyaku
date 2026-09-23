@@ -37,7 +37,10 @@ import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
-import { waitAkuma, tellAkuma, tellWaitAkuma } from "../src/library/fleet.js";
+import { waitAkuma, tellAkuma } from "../src/library/fleet.js";
+import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
+import { akumaRawAnswer } from "../src/cli/render/akuma.js";
+import { parseArgv } from "../src/cli/parse.js";
 import {
   fleetRequestCommand,
   fleetRequestProtocol,
@@ -60,6 +63,10 @@ import {
   taskMutationRequestProtocol,
   type TaskMutationRequestPort,
 } from "../src/task/mutation.js";
+
+function callTell(body = ""): Readonly<{ tellId: string; body: string }> {
+  return { tellId: randomUUID(), body };
+}
 
 async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => draw });
@@ -832,6 +839,7 @@ test("call allocation crossing the admission fence settles voided without spawni
       world: root,
       paths: parent.paths,
       parent: parent.soul,
+      admitInitialTell: async () => ({ kind: "not-born" as const }),
       spawn: async () => {
         spawnCalls += 1;
       },
@@ -846,7 +854,7 @@ test("call allocation crossing the admission fence settles voided without spawni
         id,
         world: root,
         archetype: "worker",
-        body: "fenced child",
+        initialTell: callTell("fenced child"),
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: {},
@@ -873,6 +881,7 @@ test("a noncanonical routed call fails the pump before child allocation", async 
       world: root,
       paths: parent.paths,
       parent: parent.soul,
+      admitInitialTell: async () => ({ kind: "not-born" as const }),
       spawn: async () => {
         spawns += 1;
       },
@@ -884,7 +893,7 @@ test("a noncanonical routed call fails the pump before child allocation", async 
     id,
     world: `${root}/.`,
     archetype: "worker",
-    body: "must not allocate",
+    initialTell: callTell("must not allocate"),
     recipe: {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
@@ -911,6 +920,7 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
       world: root,
       paths: parent.paths,
       parent: parent.soul,
+      admitInitialTell: async () => ({ kind: "not-born" as const }),
       spawn: async () => {
         spawnCalls += 1;
         throw new Error("invalid recipe must not spawn");
@@ -923,7 +933,7 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
     id,
     world: root,
     archetype: "worker",
-    body: "invalid recipe",
+    initialTell: callTell("invalid recipe"),
     recipe: {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: { readonly: true },
@@ -1643,15 +1653,21 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   const pump = await openFleetPump(parent, fleetRequestPort(parentRoot));
   try {
-    const pending = tellWaitAkuma(
-      { path: callerRoot, akuma: target.id, body: "facade delayed", timeoutMs: 10_000 },
-      bodyRequestExecutionContext(pump.directory),
-    );
+    const parsed = parseArgv(["tell", target.id, "--wait", "10s", "facade delayed"]);
+    if (!("command" in parsed) || parsed.command.command !== "tell") throw new Error("expected a Tell command");
+    const pending = invokeAkuma(parsed.command, {
+      path: callerRoot,
+      environment: {},
+      readStdin: async () => "",
+      execution: bodyRequestExecutionContext(pump.directory),
+    });
     await started.promise;
     finish.resolve({ kind: "answered", answer: "facade delayed answer", historyId: "facade-direct-history" });
     const result = await pending;
-    assert.deepEqual(result.observation, { reason: "answered", answer: "facade delayed answer" });
-    assert.equal(result.tell.row.text, "facade delayed");
+    if (result.action !== "tell" || result.mode !== "wait") throw new Error("expected a bounded Tell result");
+    assert.deepEqual(result.result.observation, { reason: "answered", answer: "facade delayed answer" });
+    assert.equal(result.result.tell.row.text, "facade delayed");
+    assert.equal(akumaRawAnswer(result), "facade delayed answer", "forwarded CLI preserves exact stdout bytes");
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
     restoreTellRuntime();

@@ -71,8 +71,9 @@ function objectFieldsText(value: Readonly<Record<string, unknown>>, columns: num
 export type ToolRepr = Readonly<{
   label: string;
   text: string;
-  overflow?: "middle-ellipsis";
+  overflow?: "command";
   suffix?: string;
+  pathPreview?: Readonly<{ before: string; path: string; detail: string; diagnostic?: string }>;
 }>;
 
 type ToolCore = Omit<ToolRepr, "suffix">;
@@ -106,14 +107,17 @@ function result(row: ToolRow): string | undefined {
   return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
-function readText(call: Extract<ToolRow["call"], { kind: "read" }>): string {
+function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolCore {
   const path = oneLine(call.path);
-  if (call.offset !== undefined && call.limit !== undefined) {
-    return `${path} · L${call.offset}-${call.offset + call.limit - 1}`;
-  }
-  if (call.offset !== undefined) return `${path} · from L${call.offset}`;
-  if (call.limit !== undefined) return `${path} · ${call.limit} lines`;
-  return path;
+  const detail =
+    call.offset !== undefined && call.limit !== undefined
+      ? ` · L${call.offset}-${call.offset + call.limit - 1}`
+      : call.offset !== undefined
+        ? ` · from L${call.offset}`
+        : call.limit !== undefined
+          ? ` · ${call.limit} lines`
+          : "";
+  return { label: "read", text: `${path}${detail}`, pathPreview: { before: "", path, detail } };
 }
 
 function searchLabel(scope: Extract<ToolRow["call"], { kind: "search" }>["scope"]): string {
@@ -174,19 +178,26 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
   if (first === undefined) return { label: "edit", text: "files" };
   const label =
     call.changes.length === 1 ? (first.op === "add" ? "write" : first.op === "delete" ? "delete" : "edit") : "edit";
-  const subject =
-    call.changes.length === 1 ? oneLine(first.path) : `${call.changes.length} files · ${oneLine(first.path)} ...`;
+  const before = call.changes.length === 1 ? "" : `${call.changes.length} files · `;
+  const path = oneLine(first.path);
   const complete = call.changes.every((change) => change.diffstat !== undefined);
-  if (!complete && (state === "active" || state === "unsettled")) return { label, text: subject };
-  if (!complete) return { label, text: `${subject} — +? -?` };
-  const totals = call.changes.reduce(
-    (sum, change) => ({
-      added: sum.added + change.diffstat!.added,
-      removed: sum.removed + change.diffstat!.removed,
-    }),
-    { added: 0, removed: 0 },
-  );
-  return { label, text: `${subject} — +${totals.added} -${totals.removed}` };
+  if (!complete && (state === "active" || state === "unsettled")) {
+    const detail = call.changes.length === 1 ? "" : " ...";
+    return { label, text: `${before}${path}${detail}`, pathPreview: { before, path, detail } };
+  }
+  const totals = complete
+    ? call.changes.reduce(
+        (sum, change) => ({
+          added: sum.added + change.diffstat!.added,
+          removed: sum.removed + change.diffstat!.removed,
+        }),
+        { added: 0, removed: 0 },
+      )
+    : undefined;
+  const detail = `${call.changes.length === 1 ? "" : " ..."} — ${
+    totals === undefined ? "+? -?" : `+${totals.added} -${totals.removed}`
+  }`;
+  return { label, text: `${before}${path}${detail}`, pathPreview: { before, path, detail } };
 }
 
 /** One provider-neutral core owns every tool-kind label and non-generic body. */
@@ -196,10 +207,10 @@ function toolCore(row: ToolRow): ToolCore {
       return {
         label: "run",
         text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`,
-        overflow: "middle-ellipsis",
+        overflow: "command",
       };
     case "read":
-      return { label: "read", text: readText(row.call) };
+      return readText(row.call);
     case "search":
       return { label: searchLabel(row.call.scope), text: searchText(row.call) };
     case "fileChange":
@@ -215,7 +226,14 @@ export function toolRepr(row: ToolRow): ToolRepr {
   if (row.call.kind === "other") return core;
   const suffix = result(row);
   if (suffix === undefined) return core;
-  return core.overflow === "middle-ellipsis"
-    ? { ...core, suffix: ` — ${suffix}` }
-    : { ...core, text: `${core.text} — ${suffix}` };
+  if (core.overflow === "command") return { ...core, suffix: ` — ${suffix}` };
+  if (core.pathPreview !== undefined) {
+    const diagnostic = ` — ${suffix}`;
+    return {
+      ...core,
+      text: `${core.text}${diagnostic}`,
+      pathPreview: { ...core.pathPreview, diagnostic },
+    };
+  }
+  return { ...core, text: `${core.text} — ${suffix}` };
 }

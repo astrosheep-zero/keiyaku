@@ -8,13 +8,15 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
-import { HeldAkumaLeash, initializeHeart, type Soul } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { admitCallInitialTell } from "../src/akuma/call-initial-tell.js";
+import { HeldAkumaLeash, initializeHeart, projectTell, readTell, type Soul } from "../src/akuma/heart/index.js";
+import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { World } from "../src/world.js";
+import { Keiyaku } from "../src/index.js";
+import { World, type WorldRoot } from "../src/world.js";
 import { removeTempDirectory } from "./support/process.js";
 
 const packagedCli = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
@@ -162,6 +164,58 @@ function attributedAttemptNumbers(stderr: string, tag: string): readonly number[
   );
 }
 
+function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: string, mode: string): void {
+  const queuedPrompt = new RegExp(`^.*${tag} +✓ told +"prompt"$`, "gmu");
+  assert.equal(
+    stderr.match(queuedPrompt)?.length,
+    1,
+    `${mode} streamed the queued input once for its source:\n${stderr}`,
+  );
+  assert.match(
+    stderr,
+    new RegExp(`^.*${tag} +⧖ say +"attempt \\d+`, "mu"),
+    `${mode} streamed in-flight say evidence for its source:\n${stderr}`,
+  );
+
+  const rowMarker = new RegExp(`^.*${tag} +(✓|⧖|│|⧗|!|\\?|×|⋮) `, "u");
+  const rows = stderr.split("\n").filter((line) => rowMarker.test(line));
+  assert.ok(rows.length >= 2, `${mode} streamed attributed activity rows:\n${stderr}`);
+  for (const row of rows) {
+    const marker = rowMarker.exec(row)?.[1];
+    assert.notEqual(marker, undefined, `an attributed row has a mark:\n${row}`);
+    assert.equal(
+      markColumn(row, marker!),
+      markColumn(score, "●"),
+      `${mode} rows align with the scoreboard:\n${stderr}`,
+    );
+  }
+
+  const attempts = attributedAttemptNumbers(stderr, tag);
+  assert.ok(attempts.length >= 1, `${mode} streamed attributed messages:\n${stderr}`);
+  assert.equal(new Set(attempts).size, attempts.length, `${mode} never streams one message twice`);
+  assert.deepEqual(
+    attempts,
+    [...attempts].sort((left, right) => left - right),
+    `${mode} streams messages in order`,
+  );
+}
+
+async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
+  const killed = await Keiyaku.kill({ path: world, akuma: [selector] });
+  assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
+  const member = killed.results[0]!;
+  assert.ok(
+    member.evidence === "killed" || member.evidence === "already-killed" || member.evidence === "already-stopped",
+    `public kill has settled evidence for ${selector}: ${member.evidence}`,
+  );
+
+  const waited = await Keiyaku.wait({ path: world, akuma: [selector], timeoutMs: 10_000 });
+  assert.equal(waited.reason, "completed", `public wait confirms ${selector} settled after kill`);
+  assert.equal(waited.observations.length, 1, `public wait observes ${selector} once`);
+  assert.equal(waited.observations[0]!.status.id, member.id);
+  assert.notEqual(waited.observations[0]!.status.life, "running");
+}
+
 test("packaged observing calls stream one framed session and one conclusion per outcome", { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
@@ -176,7 +230,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
     assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
     assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
-    assert.equal(unfinished.stderr.match(/● still running — waited /gu)?.length, 1, "one truthful conclusion");
+    assert.equal(unfinished.stderr.match(/⧖ deadline — waited /gu)?.length, 1, "one input-bound deadline conclusion");
     const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
     assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
     assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
@@ -190,6 +244,22 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.match(single.stderr, /attempt \d+/u, `a single wait still streams eligible activity:\n${single.stderr}`);
     await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
 
+    let detachedStarted = false;
+    try {
+      const detached = await runPackagedCli(["-C", world, "call", "worker", "--alias", "@detached", "prompt"], {
+        cwd: world, env,
+      });
+      assert.equal(detached.code, 0, detached.stderr);
+      detachedStarted = true;
+      const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--timeout", "1s"], {
+        cwd: world, env,
+      });
+      assert.equal(afterExit.code, 0, afterExit.stderr);
+      assert.match(afterExit.stderr, /attempt \d+/u, "detached input still drives its Body after the caller exits");
+    } finally {
+      if (detachedStarted) await killAndAwaitPluralTarget(await World.at(world), "@detached");
+    }
+
     const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {
       cwd: world,
       env,
@@ -198,6 +268,17 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
     assert.match(answered.stderr, /✓ answered — \d+s/u);
     assert.doesNotMatch(answered.stderr, /the answer/u, "the stream never replays the settled answer");
+    const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
+    assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
+    const tell = await runPackagedCli(["-C", world, "tell", finisherId!, "--wait", "20s", "continue"], {
+      cwd: world, env,
+    });
+    assert.equal(tell.code, 0, tell.stderr);
+    assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
+    assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
+    assert.equal(tell.stderr.match(/tell +"continue"/gu)?.length, 1, "the admission row appears once");
+    assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
+    assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 
     const silent = await runPackagedCli(["-C", world, "call", "silent", "--wait", "20s", "prompt"], {
       cwd: world,
@@ -231,14 +312,17 @@ test("packaged observing call bounds nine eligible tools across polling callback
   }
 });
 
-test("packaged plural waits attribute activity and close every target", { timeout: 120_000 }, async () => {
+test("packaged plural waits attribute activity and close every target", { timeout: 120_000 }, async (t) => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
+  const worldRoot = await World.at(world);
+  const cleanupAliases: string[] = [];
   try {
     const running = await runPackagedCli(
       ["-C", world, "call", "worker", "--wait", "1s", "--alias", "@notes", "prompt"],
       { cwd: world, env },
     );
+    cleanupAliases.push("@notes");
     assert.equal(running.code, 0, running.stderr);
     const settled = await runPackagedCli(
       ["-C", world, "call", "finisher", "--wait", "20s", "--alias", "@done", "prompt"],
@@ -249,6 +333,7 @@ test("packaged plural waits attribute activity and close every target", { timeou
       ["-C", world, "call", "slowcoach", "--wait", "1s", "--alias", "@slow", "prompt"],
       { cwd: world, env },
     );
+    cleanupAliases.push("@slow");
     assert.equal(slow.code, 0, slow.stderr);
 
     // `--any` streams rounds until the slow target answers, then closes every target.
@@ -264,11 +349,6 @@ test("packaged plural waits attribute activity and close every target", { timeou
       /aku\/(?:worker|slowcoach)\/[0-9a-f]{8} \(@/u,
       `no per-target identity frame follows the aggregate head:\n${any.stderr}`,
     );
-    assert.match(
-      any.stderr,
-      new RegExp(`${anyNotesTag} +│ (?:call|say)`, "mu"),
-      `--any attributed a settled activity row to its source:\n${any.stderr}`,
-    );
     assert.doesNotMatch(any.stderr, /retry note/u, "--any omits thought narration");
     assert.match(any.stderr, new RegExp(`${anySlowTag} +✓ answered — `, "mu"), "--any scored the answered target");
     assert.match(
@@ -280,15 +360,15 @@ test("packaged plural waits attribute activity and close every target", { timeou
     const anyScore =
       anyLines.find((line) => new RegExp(`${anyNotesTag} +● still running — waited `, "u").test(line)) ??
       assert.fail(`--any has its running conclusion:\n${any.stderr}`);
-    const anyRows = anyLines.filter((line) => new RegExp(`${anyNotesTag} +│ `, "u").test(line));
-    assert.ok(anyRows.length >= 1, `--any streamed attributed rows:\n${any.stderr}`);
-    for (const row of anyRows) {
-      assert.equal(markColumn(row, "│"), markColumn(anyScore, "●"), `rows share the scoreboard mark column:\n${any.stderr}`);
-    }
+    assertAttributedInputAndLiveSays(any.stderr, anyNotesTag, anyScore, "--any");
     const anyAttempts = attributedAttemptNumbers(any.stderr, anySlowTag);
     assert.ok(anyAttempts.length >= 1, `--any streamed messages for its source:\n${any.stderr}`);
     assert.equal(new Set(anyAttempts).size, anyAttempts.length, "no settled message streams twice");
-    assert.deepEqual(anyAttempts, [...anyAttempts].sort((left, right) => left - right), "messages stream in order");
+    assert.deepEqual(
+      anyAttempts,
+      [...anyAttempts].sort((left, right) => left - right),
+      "messages stream in order",
+    );
 
     // `--all` outlives the running target: the already settled and the running one both close.
     const all = await runPackagedCli(["-C", world, "wait", "@notes", "@done", "--all", "--timeout", "2s"], {
@@ -303,13 +383,12 @@ test("packaged plural waits attribute activity and close every target", { timeou
       /aku\/(?:worker|finisher)\/[0-9a-f]{8} \(@/u,
       `no per-target identity frame follows the aggregate head:\n${all.stderr}`,
     );
+    assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
     assert.match(
       all.stderr,
-      new RegExp(`${allNotesTag} +│ (?:call|say)`, "mu"),
-      `--all attributed a settled activity row to its source:\n${all.stderr}`,
+      new RegExp(`${allDoneTag} +✓ answered$`, "mu"),
+      "--all scored the already settled target without inventing a duration",
     );
-    assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
-    assert.match(all.stderr, new RegExp(`${allDoneTag} +✓ answered$`, "mu"), "--all scored the already settled target without inventing a duration");
     assert.match(
       all.stderr,
       new RegExp(`${allNotesTag} +● still running — waited 2s`, "mu"),
@@ -319,13 +398,20 @@ test("packaged plural waits attribute activity and close every target", { timeou
     const allScore =
       allLines.find((line) => new RegExp(`${allNotesTag} +● still running — waited `, "u").test(line)) ??
       assert.fail(`--all has its running conclusion:\n${all.stderr}`);
-    for (const row of allLines.filter((line) => new RegExp(`${allNotesTag} +│ `, "u").test(line))) {
-      assert.equal(markColumn(row, "│"), markColumn(allScore, "●"), `rows share the scoreboard mark column:\n${all.stderr}`);
-    }
+    assertAttributedInputAndLiveSays(all.stderr, allNotesTag, allScore, "--all");
     assert.equal(all.stderr.match(/✓ answered/gu)?.length, 1, "every target closes exactly once");
-    await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
   } finally {
-    await removeTempDirectory(root);
+    let cleanupFailure: unknown;
+    for (const alias of cleanupAliases) {
+      try {
+        await killAndAwaitPluralTarget(worldRoot, alias);
+      } catch (error) {
+        cleanupFailure ??= error;
+      }
+    }
+    if (cleanupFailure === undefined) await removeTempDirectory(root);
+    else t.diagnostic(`retained fixture ${root}; a plural-wait target did not settle: ${String(cleanupFailure)}`);
+    if (cleanupFailure !== undefined) throw cleanupFailure;
   }
 });
 
@@ -414,7 +500,39 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     bodySequence: 1,
     now: () => "2026-08-15T00:00:01.000Z",
     signal: new AbortController().signal,
-    commands: composeRequestCommands(akumaCallRequestCommands({ world, paths: parent.paths, parent: soul, spawn: spawnChild })),
+    commands: composeRequestCommands(
+      akumaCallRequestCommands({
+        world,
+        paths: parent.paths,
+        parent: soul,
+        spawn: spawnChild,
+        admitInitialTell: async ({ id, initialTell, signal }) => {
+          if (initialTell.body === "admission-failure")
+            return { kind: "birth-failed", diagnostic: "fixture initial Tell admission failed" };
+          const admission = await admitCallInitialTell({
+            world,
+            id,
+            initialTell,
+            signal,
+            now: () => "2026-08-15T00:00:03.000Z",
+            wake: async (tell) => {
+              const paths = pathsForAkuId(world, id);
+              await driveAkumaBody({ paths, refuseIfHeld: true }, provider, {
+                now: () => "2026-08-15T00:00:04.000Z",
+              });
+              const delivered = await readTell(paths, tell.id);
+              if (delivered === null) throw new Error(`initial Tell ${tell.id} disappeared`);
+              return {
+                admission: { tellId: tell.id, fact: "recorded" },
+                row: projectTell(delivered),
+                wake: { kind: "told" },
+              };
+            },
+          });
+          return admission;
+        },
+      }),
+    ),
   });
   const env = { ...process.env, KEIYAKU_HOME: home, AKUMA_REQUESTS: pump.directory };
   const localEnv = { ...process.env, KEIYAKU_HOME: home };
@@ -434,6 +552,20 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     });
     assert.equal(history.code, 0, history.stderr);
     assert.equal(JSON.parse(history.stdout).answer, "finished");
+
+    const failed = await runPackagedCli(["-C", root, "call", "worker", "--wait", "10s", "admission-failure"], {
+      cwd: root,
+      env,
+    });
+    assert.equal(failed.code, 2, failed.stderr);
+    assert.equal(failed.stdout, "", "a pre-admission failure keeps stdout byte-pure");
+    assert.equal(
+      failed.stderr.match(/^aku\/worker\/[0-9a-f]{8}$/gmu)?.length,
+      1,
+      "failure opens the known child identity once",
+    );
+    assert.match(failed.stderr, /! error recorded Tell .* missing from Heart/u);
+    assert.doesNotMatch(failed.stderr, /⧖ tell/u, "a birth reference does not claim Tell admission");
   } finally {
     await pump.close();
     leash.release();

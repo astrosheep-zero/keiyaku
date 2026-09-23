@@ -24,7 +24,7 @@ import {
   stopLines,
   titleLines,
 } from "./receipt.js";
-import { renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
 
@@ -393,7 +393,7 @@ function renderAcceptedAbandon(result: AcceptedAbandonResult, columns: number): 
 }
 
 export function renderAccepted(result: AcceptedResult, context?: TextRenderContext): string {
-  const columns = context?.columns ?? 80;
+  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   switch (result.verb) {
     case "audit":
       return renderAcceptedAudit(result, context);
@@ -413,7 +413,7 @@ export function renderAccepted(result: AcceptedResult, context?: TextRenderConte
 }
 
 export function renderRetry(result: RetryResult, context?: TextRenderContext): string {
-  const columns = context?.columns ?? 80;
+  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const detail =
     isRecord(result.detail) && typeof result.detail.kind === "string"
       ? retryLines(result.detail as KeiyakuRetryReason, HANG, columns)

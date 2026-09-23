@@ -47,13 +47,13 @@ content or delivery metadata.
 
 The ordinary current-work window is the open Turn's call and provider activity
 along with its retained settled delivered Tells, all in durable sequence order.
-Every settled say and typed file-change activity row in that current Turn is
-also protected from the ordinary status budget. Only the selected opening
-input and the existing active, pending, and receipt-specific evidence add their
-own pins; a later or unrelated settled Tell gains no global status privilege.
-Its omission gaps therefore describe only that current window, never an earlier
-Turn or unrelated Tell. Protection is derived from retained activity meaning,
-not inferred paths, diffstats, or filesystem state.
+Every settled say in that current Turn is protected from the ordinary status
+budget. File-change activity follows the same bounded selection as other tools;
+when selected it retains its typed operation and available path and diffstat.
+Only the selected opening input and the existing active, pending, and
+receipt-specific evidence add their own pins; a later or unrelated settled Tell
+gains no global status privilege. Its omission gaps therefore describe only
+that current window, never an earlier Turn or unrelated Tell.
 
 Placement discharges reported changes at the observation composition. While the
 Akuma's dispatch-associated Contract is active, a composed status surfaces them
@@ -78,13 +78,15 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, call, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-Plain Tell returns the answer text for its exact Tell after ordinary wake and
-settlement. A Schema-bearing Tell instead awaits the terminal Turn bound to that
-Tell and decodes its raw answer; schema failure remains distinct from provider
-failure. Both forms retain the same busy, interrupt, routing, and recovery
-semantics. A caller signal may stop awaiting the result, but never retracts a
-Tell already admitted to Heart. Interrupt combines Body put-down with delivery
-of a new Tell and exposes its settlement receipt; kill exposes its kill evidence.
+A Tell's answer belongs to the terminal Turn bound to that exact admitted Tell;
+later work cannot replace it. A schema-bearing Tell decodes that same answer,
+and a decode failure remains distinct from provider failure. A call composes
+prompt-free birth with its first ordinary Tell admission and observes the same
+input-bound outcome. Plain wait remains a separate Akuma-wide idle observation.
+These forms retain the same busy, interrupt, routing, and recovery semantics. A
+caller signal may stop awaiting the result, but never retracts a Tell already
+admitted to Heart. Interrupt combines Body put-down with delivery of a new Tell
+and exposes its settlement receipt; kill exposes its kill evidence.
 Interrupt control has no local elapsed-time failure boundary: it waits for leash
 custody or durable Body settlement, unless the caller's signal stops waiting.
 Wait observes status until its Akuma-owned completion judgment — a non-running

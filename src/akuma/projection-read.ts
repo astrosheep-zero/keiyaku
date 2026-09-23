@@ -148,10 +148,7 @@ function isActiveTool(row: ActivityRow): boolean {
 }
 
 function isProtectedCurrentTurnActivity(row: ActivityRow): boolean {
-  return (
-    row.kind === "said" ||
-    (row.kind === "tool" && row.call.kind === "fileChange" && row.state !== "active" && row.state !== "unsettled")
-  );
+  return row.kind === "said";
 }
 
 function isSettledTellDeliveredTo(row: ActivityRow, turnSequence: number): row is TellRow {

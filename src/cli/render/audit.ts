@@ -9,7 +9,7 @@ import {
   titleLines,
 } from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
-import { gitShortStat, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, gitShortStat, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 const CHILD = "  ";
 
@@ -143,7 +143,7 @@ function recordLines(result: AcceptedAuditResult, columns: number): readonly str
 
 export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
   const report = result.report;
-  const columns = context?.columns ?? 80;
+  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   return [
     ...titleLines("✓", "audit", result.contract, columns),
     ...candidateLines(report, columns, result.contract),

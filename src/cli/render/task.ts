@@ -23,7 +23,7 @@ import type {
 import type { TaskInvocationResult, TaskShowResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
 import { outcomeLines, receiptPayload } from "./receipt.js";
-import { displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
 type TaskFailure =
@@ -45,7 +45,7 @@ type RefusalProjection = Readonly<{
 }>;
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
-const DEFAULT_CONTEXT: TextRenderContext = { columns: 80, color: false };
+const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 
 function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
   return (

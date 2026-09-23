@@ -16,6 +16,8 @@ import {
   type TellFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
+import type { CallInitialTellAdmission } from "./call-initial-tell.js";
+import type { InitialTellAdmissionRequest } from "./call-request.js";
 import {
   encodeAgentEvent,
   type AgentEvent,
@@ -87,6 +89,7 @@ export type DriveTurnInput = Readonly<{
   schemaJson?: string;
   supervisor: BodySupervisor;
   runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
+  admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
   world: import("../world.js").WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
   now(): string;
@@ -180,8 +183,11 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       boundAt: input.now(),
     });
   }
-  const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands } = input;
-  const commands = composeRequestCommands(akumaCallRequestCommands({ world, paths, parent, spawn }), externalCommands);
+  const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands, admitInitialTell } = input;
+  const commands = composeRequestCommands(
+    akumaCallRequestCommands({ world, paths, parent, spawn, admitInitialTell }),
+    externalCommands,
+  );
   const requests = await BodyRequestPump.open({
     paths: input.paths,
     allowed: input.soul.allowed,

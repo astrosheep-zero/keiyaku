@@ -6,10 +6,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
+import { AkumaComposition as Akuma, recordCallInitialTell } from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
+  finishBodyIfIdle,
   HeldAkumaLeash,
   admitRequest,
   beginRequest,
@@ -23,12 +24,32 @@ import {
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
+import {
+  akumaCallRequestCommands,
+  requestForwardedAkumaCall as requestBodyCall,
+  type AkumaCallRequestChildLaunch,
+} from "../src/akuma/call-request.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext } from "../src/akuma/requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
+
+async function settlePromptFreeChild(launch: AkumaCallRequestChildLaunch, createdAt: string): Promise<void> {
+  const leash = (await HeldAkumaLeash.try(launch.paths))!;
+  await leash.birth(launch.paths, { ...launch.seed, createdAt });
+  const leashTakenAt = new Date(Date.parse(createdAt) + 1_000).toISOString();
+  const body = await leash.recordBody(launch.paths, { leashTakenAt });
+  await finishBodyIfIdle(launch.paths, {
+    sequence: body.sequence,
+    at: new Date(Date.parse(leashTakenAt) + 1_000).toISOString(),
+  });
+  leash.release();
+}
+
+function callTell(body = ""): Readonly<{ tellId: string; body: string }> {
+  return { tellId: randomUUID(), body };
+}
 
 async function akumaAt(root: string, requestDirectory?: string) {
   return Akuma.of(await World.at(root), {
@@ -281,6 +302,7 @@ test("reserved child request is adjudicated from child Soul after publication fa
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
+      admitInitialTell: recordCallInitialTell(value.root),
       spawn: async (launch) => {
         const leash = (await HeldAkumaLeash.try(launch.paths))!;
         await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-26T00:00:02.000Z" });
@@ -296,7 +318,7 @@ test("reserved child request is adjudicated from child Soul after publication fa
       id,
       world: value.root,
       archetype: "worker",
-      body: "child",
+      initialTell: callTell("child"),
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
@@ -347,6 +369,7 @@ test("a closed request channel does not report a reserved child as voided", asyn
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
+      admitInitialTell: recordCallInitialTell(value.root),
       spawn: async (launch) => {
         childLeash = await HeldAkumaLeash.try(launch.paths);
         assert.notEqual(childLeash, null);
@@ -361,7 +384,7 @@ test("a closed request channel does not report a reserved child as voided", asyn
       id,
       world: value.root,
       archetype: "worker",
-      body: "child",
+      initialTell: callTell("child"),
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
@@ -463,11 +486,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
-      spawn: async (launch) => {
-        const leash = (await HeldAkumaLeash.try(launch.paths))!;
-        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
-        leash.release();
-      },
+      admitInitialTell: recordCallInitialTell(value.root),
+      spawn: async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"),
     }),
     signal: new AbortController().signal,
   });
@@ -492,11 +512,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
         world: value.root,
         paths: childPaths,
         parent: childSoul,
-        spawn: async (launch) => {
-          const leash = (await HeldAkumaLeash.try(launch.paths))!;
-          await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:04.000Z" });
-          leash.release();
-        },
+        admitInitialTell: recordCallInitialTell(value.root),
+        spawn: async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:04.000Z"),
       }),
       signal: new AbortController().signal,
     });
@@ -535,6 +552,7 @@ test("nested akuma.call admits provider options before child publication", async
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
+      admitInitialTell: recordCallInitialTell(value.root),
       spawn: async (launch) => {
         spawns += 1;
         const leash = (await HeldAkumaLeash.try(launch.paths))!;
@@ -551,7 +569,14 @@ test("nested akuma.call admits provider options before child publication", async
     diagnostic: RegExp,
   ): Promise<void> => {
     await assert.rejects(
-      requestBodyCall({ directory: pump.directory, id, world: value.root, archetype: "worker", recipe }),
+      requestBodyCall({
+        directory: pump.directory,
+        id,
+        world: value.root,
+        archetype: "worker",
+        initialTell: callTell(),
+        recipe,
+      }),
       (error: unknown) =>
         error instanceof AkumaBodyRequestError && error.outcome === "refused" && diagnostic.test(error.diagnostic),
     );
@@ -617,6 +642,7 @@ test("nested akuma.call admits provider options before child publication", async
       id: "00000000-0000-4000-8000-000000000106",
       world: value.root,
       archetype: "worker",
+      initialTell: callTell(),
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: { sandbox: "full-access" },
@@ -632,6 +658,7 @@ test("nested akuma.call admits provider options before child publication", async
       id: "00000000-0000-4000-8000-000000000107",
       world: value.root,
       archetype: "worker",
+      initialTell: callTell(),
       recipe: {
         provider: { name: "codex", kind: "codex-app-server" },
         options: { sandbox: "full-access" },
@@ -660,6 +687,7 @@ test("Heart refuses a disabled call before child publication", async () => {
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
+      admitInitialTell: recordCallInitialTell(value.root),
       spawn: async () => {
         assert.fail("disabled request reached child publication");
       },
@@ -673,7 +701,7 @@ test("Heart refuses a disabled call before child publication", async () => {
         id: "00000000-0000-4000-8000-000000000004",
         world: value.root,
         archetype: "worker",
-        body: "blocked",
+        initialTell: callTell("blocked"),
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: {},
@@ -909,11 +937,8 @@ test("a drive serves Body Requests through transport while Heart remains authori
       world: value.root,
       paths: value.parent.paths,
       parent: value.soul,
-      spawn: async (launch) => {
-        const child = (await HeldAkumaLeash.try(launch.paths))!;
-        await child.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
-        child.release();
-      },
+      admitInitialTell: recordCallInitialTell(value.root),
+      spawn: async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"),
     }),
     signal: new AbortController().signal,
   });
@@ -997,7 +1022,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
         id: "00000000-0000-4000-8000-000000000002",
         world: otherWorld,
         archetype: "worker",
-        body: "wrong world",
+        initialTell: callTell("wrong world"),
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: { systemPrompt: "Work.\n" },

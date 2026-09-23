@@ -1,5 +1,5 @@
 import type { Settings, SettingsScopeState } from "../../settings.js";
-import { displayColumns, renderTextBlock } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, displayColumns, renderTextBlock } from "./terminal.js";
 import { fieldName } from "./value.js";
 
 function settingValueLines(name: string, value: unknown, indent: string): readonly string[] {
@@ -38,7 +38,7 @@ export function settingsJsonValue(value: Settings): unknown {
   };
 }
 
-export function renderSettingsText(value: Settings, columns = 80): string {
+export function renderSettingsText(value: Settings, columns = DEFAULT_CLI_COLUMNS): string {
   const lines = [
     "settings",
     ...scopeLines("user", value.scopes.user, columns),

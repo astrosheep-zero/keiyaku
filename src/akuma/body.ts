@@ -3,7 +3,7 @@ import { basename, delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
-import type { AkumaCallRequestChildLaunch } from "./call-request.js";
+import type { AkumaCallRequestChildLaunch, InitialTellAdmissionRequest } from "./call-request.js";
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
@@ -29,10 +29,16 @@ import {
   type BodyEnd,
   type SessionFact,
   type Soul,
-  type TellRow,
   type TurnOutcome,
 } from "./heart/index.js";
-import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import {
+  admitCallInitialTell,
+  type CallInitialTellAdmission,
+  type TellResult,
+  type TellWake,
+} from "./call-initial-tell.js";
+export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { akumaExecutionEnvironment } from "./providers/execution-environment.js";
 import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
 import { World, type WorldRoot } from "../world.js";
@@ -40,12 +46,7 @@ import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
 import type { ErasedRequestCommand } from "./request-wire.js";
-import {
-  spawnDetachedProcess,
-  type DetachedProcessExit,
-  type OwnedProcess,
-  type RunLogReference,
-} from "../runtime/proc/run.js";
+import { spawnDetachedProcess, type DetachedProcessExit, type OwnedProcess } from "../runtime/proc/run.js";
 
 const LEASH_RETRY_MS = 100;
 const WAKE_REREAD_MS = 100;
@@ -61,26 +62,6 @@ export type BodyLaunch = Readonly<{
   initialSchemaJson?: string;
   refuseIfHeld?: boolean;
   completion?: Readonly<{ contractId?: string }>;
-}>;
-
-export type TellWake =
-  | Readonly<{ kind: "told" }>
-  | Readonly<{ kind: "pursuing"; bodySequence: number }>
-  | Readonly<{ kind: "held" }>
-  | Readonly<{
-      kind: "failed";
-      diagnostic: string;
-      child?: Readonly<{
-        code: number | null;
-        signal: string | null;
-        log: RunLogReference;
-      }>;
-    }>;
-
-export type TellResult = Readonly<{
-  admission: Readonly<{ tellId: string; fact: "recorded" }>;
-  row: TellRow;
-  wake: TellWake;
 }>;
 
 export type TellWakeRuntime = Readonly<{
@@ -501,6 +482,31 @@ function bodyEndEmitter(
 
 type BodyTurnEnd = "handoff" | undefined;
 
+async function admitInitialCallTell(
+  runtime: BodyRuntime,
+  input: InitialTellAdmissionRequest,
+): Promise<CallInitialTellAdmission> {
+  const paths = pathsForAkuId(runtime.world, input.id);
+  return await admitCallInitialTell({
+    world: runtime.world,
+    id: input.id,
+    initialTell: input.initialTell,
+    signal: input.signal,
+    now: runtime.now,
+    wake: async (tell) =>
+      await wakeRecordedTell(
+        paths,
+        tell.id,
+        {
+          spawn: async (tellPaths) =>
+            await (runtime.spawnBody ?? spawnAkumaBody)({ paths: tellPaths, refuseIfHeld: true }),
+          schedule: abortableDelay,
+        },
+        input.signal,
+      ),
+  });
+}
+
 async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime, turnOutcome } = input;
   let initial = launch.initialBody;
@@ -530,6 +536,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       bodySequence,
       supervisor,
       runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
+      admitInitialTell: async (admission) => await admitInitialCallTell(runtime, admission),
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
       ...(launch.initiator === undefined ? {} : { initiator: launch.initiator }),

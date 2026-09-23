@@ -4,6 +4,7 @@ import test from "node:test";
 import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
+import type { CallObservation } from "../src/library/akuma-creation.js";
 import {
   activityStream,
   akumaRawAnswer,
@@ -96,6 +97,30 @@ function observed(
   rows: readonly ActivityRow[] = activityRows(status.timeline),
 ): WaitObservedAkuma {
   return { status, rows, ...facts };
+}
+
+function callObservation(
+  observation: Extract<CallObservation, { kind: "observed" }>["observation"],
+  completedAt: string | null = AKUMA_ACTIVITY_AT,
+): CallObservation {
+  return {
+    kind: "observed",
+    tell: {
+      admission: { tellId: "tell/call-render", fact: "recorded" },
+      row: {
+        kind: "tell",
+        sequence: 1,
+        at: AKUMA_ACTIVITY_AT,
+        tellId: "tell/call-render",
+        text: "call input",
+        state: "told",
+        deliveries: [],
+      },
+      wake: { kind: "told" },
+    },
+    observation,
+    completedAt,
+  };
 }
 
 test("Akuma call help omits the caller readonly flag", () => {
@@ -1146,6 +1171,38 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
+test("long read and edit previews keep path tails with range and diffstat detail", () => {
+  const longRead = "/worktrees/one/very/deep/project/architecture/reader/ReadMeber.ts";
+  const longEdit = "/worktrees/one/very/deep/project/architecture/changes/ChangedFile.ts";
+  const rows = [
+    snapshotRow(completedTool(1, "read", { kind: "read", path: longRead, offset: 20, limit: 3 })),
+    snapshotRow(
+      completedTool(2, "edit", {
+        kind: "fileChange",
+        changes: [{ op: "update", path: longEdit, diffstat: { added: 5, removed: 2 } }],
+      }),
+    ),
+  ];
+
+  for (const columns of [100, 48]) {
+    const lines = snapshotActivityLines(openAkumaSnapshot(rows), { columns, color: false });
+    const readPath = columns === 100 ? longRead : "…/reader/ReadMeber.ts";
+    const editPath = columns === 100 ? longEdit : "…/changes/ChangedFile.ts";
+    assert.ok(lines.some((line) => line.includes(`${readPath} · L20-22`)), lines.join("\\n"));
+    assert.ok(lines.some((line) => line.includes(`${editPath} — +5 -2`)), lines.join("\\n"));
+    for (const line of lines) assert.ok(displayColumns(line) <= columns, `${columns} columns: ${line}`);
+  }
+
+  const short = snapshotActivityLines(
+    openAkumaSnapshot([
+      snapshotRow(completedTool(1, "read", { kind: "read", path: "src/short.ts", offset: 2, limit: 2 })),
+    ]),
+    { columns: 100, color: false },
+  );
+  assert.ok(short.some((line) => line.includes("src/short.ts · L2-3")));
+  assert.ok(short.every((line) => !line.includes("…")));
+});
+
 test("settled file changes retain exact stats or show unknown stats", () => {
   const snapshot = openAkumaSnapshot([
     snapshotRow(
@@ -1890,46 +1947,44 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
   assert.doesNotMatch(text, /hidden-[123]/u);
 });
 
-test("file changes stream through a crowded live tool tail without spending its budget", () => {
+test("a newly eligible say flushes a crowded tail with edits under ordinary tool priority", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
   const fileChange = (sequence: number, path: string, state: CompletedToolRow["state"] = { status: "ok" }) =>
-    snapshotRow(completedTool(sequence, "edit", { kind: "fileChange", changes: [{ op: "update", path }] }, state));
+    snapshotRow(
+      completedTool(
+        sequence,
+        "edit",
+        { kind: "fileChange", changes: [{ op: "update", path, diffstat: { added: 4, removed: 2 } }] },
+        state,
+      ),
+    );
   const say = (sequence: number, text: string) =>
     snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
   const rows = [
-    tool(1),
+    say(1, "before-tools"),
     tool(2),
     tool(3),
-    say(4, "say-one"),
-    fileChange(5, "src/first.ts"),
+    tool(4),
+    fileChange(5, "src/middle.ts"),
     tool(6),
-    say(7, "say-two"),
-    fileChange(8, "src/second.ts", { status: "error", message: "refused" }),
-    tool(9),
-    say(10, "say-three"),
-    fileChange(11, "src/third.ts"),
-    tool(12),
-    tool(13),
+    tool(7),
+    tool(8),
+    fileChange(9, "src/selected.ts", { status: "error", message: "refused" }),
+    say(10, "flush-now"),
   ];
   const stream = activityStream({ columns: 120, color: false });
-  const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
-  const assertEvidenceOrder = (expected: readonly string[]): void => {
-    let previous = -1;
-    for (const evidence of expected) {
-      const index = text.indexOf(evidence);
-      assert.ok(index > previous, `${evidence} follows its projected predecessor:\n${text}`);
-      assert.equal(text.split(evidence).length - 1, 1, `${evidence} renders once:\n${text}`);
-      previous = index;
-    }
-  };
+  const observed = stream(liveActivity(idleAkumaSnapshot(rows))).join("\n");
+  const text = [observed, ...stream.flush()].filter(Boolean).join("\n");
 
-  assertEvidenceOrder(["src/first.ts", "src/second.ts", "src/third.ts"]);
-  assertEvidenceOrder(["say-one", "say-two", "say-three"]);
-  assert.match(text, /src\/second\.ts — \+\? -\? — error · refused/u);
-  for (const sequence of [1, 2, 3, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  for (const sequence of [6, 9]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.equal((text.match(/⋮ 1 omitted/gu) ?? []).length, 2);
+  assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
+  assert.doesNotMatch(text, /src\/middle\.ts/u, "a middle edit can be omitted like any ordinary tool");
+  assert.match(text, /src\/selected\.ts — \+4 -2 — error · refused/u);
+  for (const sequence of [2, 3, 4, 8]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.match(text, /! edit   src\/selected\.ts — \+4 -2 — error · refused/u);
+  for (const sequence of [6, 7]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.equal((text.match(/⋮ 3 omitted/gu) ?? []).length, 1);
+  assert.equal(text.split("flush-now").length - 1, 1);
 });
 
 test("a plural wait gives each target its own whole-command tool budget", () => {
@@ -2217,10 +2272,9 @@ test("conclusion durations assert real waiting", () => {
     { id, contract: { kind: "none" }, facts: [] },
     { now: () => settledAtMs + 10_000 },
   );
-  assert.equal(
-    call.conclude({ kind: "observed", reason: "completed", status: answered }).split("\n").at(-1),
-    `${clockAt(settledAtMs)} ✓ answered`,
-  );
+  const callConclusion = call.conclude(callObservation({ reason: "answered", answer: "the answer" }));
+  assert.equal(callConclusion.split("\n").at(-3), `${clockAt(settledAtMs)} ✓ answered`);
+  assert.ok(callConclusion.endsWith("\n\n"), "the progress channel owns the answer separator");
 });
 
 test("wait conclusions distinguish ordinary completion, a deadline-held Tell, and a failed outcome", () => {
@@ -2443,14 +2497,8 @@ test("a streamed observing call opens one framed head and never replays a settle
   assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
-  const answered = parseAkumaStatus({
-    id,
-    life: "asleep",
-    allowed: [],
-    timeline: idleAkumaSnapshot([], answeredOutcome(2, "the answer")),
-  });
-  const conclusion = stream.conclude({ kind: "observed", reason: "completed", status: answered });
-  assert.equal(conclusion, `${clockAt(settledAtMs)} ✓ answered — 4s`);
+  const conclusion = stream.conclude(callObservation({ reason: "answered", answer: "the answer" }));
+  assert.equal(conclusion, `${clockAt(settledAtMs)} ✓ answered — 4s\n\n`);
   assert.doesNotMatch(conclusion, /the answer|└─ kei\/demo|@scout/u, "no head or answer replay");
 });
 
@@ -2460,31 +2508,24 @@ test("a streamed observing call concludes truthfully when its stream never opene
   let now = 10_000;
   const runningStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
   now = 40_000;
-  const running = parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
-  const opened = runningStream.conclude({ kind: "observed", reason: "deadline", status: running }).split("\n");
+  const opened = runningStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(opened.at(-1), `${clockAt(40_000)} ● still running — waited 30s`);
+  assert.equal(opened.at(-3), `${clockAt(40_000)} ⧖ deadline — waited 30s`);
+  assert.ok(runningStream.opened());
 
   const failedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
   const failed = failedStream
-    .conclude({ kind: "failed", failure: { kind: "infrastructure", diagnostic: "window lost" } })
+    .conclude({
+      kind: "failed",
+      tellId: "tell/call-render",
+      failure: { kind: "infrastructure", diagnostic: "window lost" },
+    })
     .split("\n");
   assert.deepEqual(failed.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(failed.at(-1), "! error window lost");
+  assert.equal(failed.at(-3), "! error window lost");
 
-  const failedOutcome: OutcomeRow = {
-    kind: "outcome",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    outcome: { kind: "failed", historyId: "history-1", diagnostic: "provider 503" },
-  };
   const outcomeStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
-  const outcomeText = outcomeStream.conclude({
-    kind: "observed",
-    reason: "completed",
-    status: parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: idleAkumaSnapshot([], failedOutcome) }),
-  });
+  const outcomeText = outcomeStream.conclude(callObservation({ reason: "failed", diagnostic: "provider 503" }));
   assert.match(outcomeText, /! failed — /u);
   assert.match(outcomeText, /! error provider 503/u);
 });

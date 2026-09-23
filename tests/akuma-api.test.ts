@@ -16,12 +16,19 @@ import {
 } from "../src/akuma/index.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
-import { readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
+import {
+  readHeart,
+  readTell,
+  readTurn,
+  recordTell,
+  recordTellReceipt,
+} from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeTellWaitAkuma } from "../src/akuma/fleet-execution.js";
 import { deferred, settlementProbe, waitForCondition } from "./support/process.js";
 import { type InvokedAkumaCommand } from "../src/cli/commands/akuma.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
+import { akumaExitCode } from "../src/cli/render/akuma.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 
@@ -268,10 +275,15 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     assert.deepEqual(result.result.observation, { reason: "answered", answer: { ok: true } });
 
     const invalid = await born("a1000014", answering("not-json"));
-    await assert.rejects(
-      invokeAkuma({ ...command, akuma: invalid.allocated.id }, { path: invalid.world, environment: {}, readStdin: async () => "" }),
-      AkumaDecodeError,
+    const invalidResult = await invokeAkuma(
+      { ...command, akuma: invalid.allocated.id },
+      { path: invalid.world, environment: {}, readStdin: async () => "" },
     );
+    assert.equal(invalidResult.kind, "akuma");
+    if (invalidResult.kind !== "akuma" || invalidResult.action !== "tell" || invalidResult.mode !== "wait")
+      throw new Error("expected a waited Tell invocation result");
+    assert.equal(invalidResult.result.observation.reason, "invalid-output");
+    assert.equal(akumaExitCode(invalidResult), 2, "invalid schema output fails like an invalid call answer");
 
     const interrupt = await born("a1000012", answering("unused"));
     context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));

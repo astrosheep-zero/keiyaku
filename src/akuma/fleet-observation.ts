@@ -64,11 +64,17 @@ const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultS
 const tellWaitObservationSchema = z.union([
   z.object({ reason: z.literal("answered"), answer: z.unknown() }).strict(),
   z.object({ reason: z.literal("failed"), diagnostic: z.string() }).strict(),
+  z.object({ reason: z.literal("invalid-output"), diagnostic: z.string(), answer: z.string() }).strict(),
   z.object({ reason: z.literal("unanswered") }).strict(),
   z.object({ reason: z.literal("deadline") }).strict(),
 ]);
 const akumaTellWaitResultSchema = z
-  .object({ akuma: akumaIdSchema, tell: tellResultSchema, observation: tellWaitObservationSchema })
+  .object({
+    akuma: akumaIdSchema,
+    tell: tellResultSchema,
+    observation: tellWaitObservationSchema,
+    completedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  })
   .strict();
 
 export type AkumaObservation = z.infer<typeof akumaObservationSchema>;
@@ -79,6 +85,7 @@ export type AkumaUnobserved = z.infer<typeof akumaUnobservedSchema>;
 export type AkumaWaitResult = z.infer<typeof akumaWaitResultSchema>;
 export type AkumaKillResult = z.infer<typeof akumaKillResultSchema>;
 export type AkumaTellResult = z.infer<typeof akumaTellResultSchema>;
+export type AkumaTellWaitObservation = z.infer<typeof tellWaitObservationSchema>;
 export type AkumaTellWaitResult = z.infer<typeof akumaTellWaitResultSchema>;
 
 export function parseAkumaObservation(value: unknown): AkumaObservation {

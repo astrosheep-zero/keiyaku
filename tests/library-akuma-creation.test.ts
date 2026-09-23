@@ -1,13 +1,32 @@
 import { temporaryDirectory } from "./support/process.js";
-import { deferred as promiseBarrier } from "./support/process.js";
+import { deferred as promiseBarrier, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
-import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
-import { finishBodyIfIdle, HeldAkumaLeash, initializeHeart, readHeart, readSoul, type Soul } from "../src/akuma/heart/index.js";
+import {
+  akumaCallRequestCommands,
+  type AkumaCallRequestChildLaunch,
+  type InitialTellAdmissionRequest,
+} from "../src/akuma/call-request.js";
+import { admitCallInitialTell, type CallInitialTellAdmission } from "../src/akuma/call-initial-tell.js";
+import {
+  beginTurn,
+  bindTellsToTurn,
+  endTurn,
+  finishBodyIfIdle,
+  HeldAkumaLeash,
+  initializeHeart,
+  projectTell,
+  readHeart,
+  readSoul,
+  readTell,
+  readTurn,
+  recordTell,
+  type Soul,
+} from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
@@ -122,15 +141,6 @@ function slowEmptyPublicationBody() {
   };
 }
 
-async function assertBirthSettledAtTell(world: WorldRoot, akumaId: string): Promise<void> {
-  const paths = pathsForAkuId(world, parseAkuId(akumaId).id);
-  const heart = await readHeart(paths);
-  assert.equal(heart.latestBody?.end, "exited");
-  const leash = await HeldAkumaLeash.try(paths);
-  assert.notEqual(leash, null, "schema Tell must observe the released birth leash");
-  leash?.release();
-}
-
 test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
@@ -147,19 +157,6 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let operationFailed = true;
-  let birthSettled = false;
-  const wait = AkumaHandle.prototype.wait;
-  const tell = PublicAkuma.prototype.tell;
-  t.mock.method(AkumaHandle.prototype, "wait", async function (this: AkumaHandle, ...args: Parameters<typeof wait>) {
-    const status = await wait.apply(this, args);
-    birthSettled = true;
-    return status;
-  });
-  t.mock.method(PublicAkuma.prototype, "tell", async function (this: PublicAkuma, ...args: Parameters<typeof tell>) {
-    await assertBirthSettledAtTell(world, this.id);
-    assert.equal(birthSettled, true, "schema Tell must await the prompt-free birth Body");
-    return await tell.apply(this, args);
-  });
   try {
     const pending = Keiyaku.call({
       path: world,
@@ -188,7 +185,9 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
       await pending.catch(() => undefined);
     }
     akumaId = result.akuma;
-    assert.deepEqual(result.schemaAnswer, { ok: true });
+    assert.equal(result.observation.kind, "observed");
+    if (result.observation.kind === "observed")
+      assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
     const history = await PublicAkuma.select(world, result.akuma).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
@@ -235,6 +234,18 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreEmptyPublicationBarrier = installAkumaBodyEmptyPublicationBarrier(emptyPublicationBarrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let akumaId: string | undefined;
+  let wake: Promise<unknown> | undefined;
+  const admitInitialTell = AkumaHandle.prototype.admitInitialTell;
+  t.mock.method(
+    AkumaHandle.prototype,
+    "admitInitialTell",
+    async function (this: AkumaHandle, ...args: Parameters<typeof admitInitialTell>) {
+      const admitted = await admitInitialTell.apply(this, args);
+      if (admitted.kind === "admitted") wake = admitted.wake;
+      return admitted;
+    },
+  );
   let operationFailed = true;
   try {
     const pending = Keiyaku.call({
@@ -251,15 +262,28 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
     const readyPath = join(emptyPublicationBarrier, "ready");
     await waitForFixtureFile(readyPath);
     const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
+    const child = parseAkuId(held.id).id;
+    assert.equal((await readHeart(pathsForAkuId(world, child))).latestBody?.end, undefined);
+    writeFileSync(join(emptyPublicationBarrier, "release"), "release\n");
     const result = await pending;
+    akumaId = result.akuma;
     assert.deepEqual(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "deadline");
-    assert.equal(result.schemaAnswer, undefined);
-    assert.deepEqual((await readHeart(pathsForAkuId(world, parseAkuId(held.id).id))).pending, []);
-    assert.equal((await readHeart(pathsForAkuId(world, parseAkuId(held.id).id))).latestBody?.end, undefined);
+    if (result.observation.kind === "observed") {
+      assert.deepEqual(result.observation.observation, { reason: "deadline" });
+      assert.equal(result.observation.tell.row.text, "zero-budget-after-birth");
+    }
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    const tells = history.rows.filter((row) => row.kind === "tell");
+    assert.equal(tells.length, 1);
+    assert.equal(tells[0]?.kind === "tell" ? tells[0].text : undefined, "zero-budget-after-birth");
     operationFailed = false;
   } finally {
     try {
+      if (akumaId !== undefined)
+        await PublicAkuma.select(world, akumaId)
+          .kill()
+          .catch(() => undefined);
+      await wake?.catch(() => undefined);
       const releasePath = join(emptyPublicationBarrier, "release");
       if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
       const cleanup = await cleanupSpawnCapableFixture({
@@ -277,7 +301,7 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
   }
 });
 
-test("schema Keiyaku.call skips Tell after a non-asleep terminal birth", async (t) => {
+test("schema Keiyaku.call preserves its child when initial Tell admission fails", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -289,19 +313,14 @@ test("schema Keiyaku.call skips Tell after a non-asleep terminal birth", async (
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
-  let tellCalls = 0;
+  let admissionCalls = 0;
   let operationFailed = true;
-  t.mock.method(AkumaHandle.prototype, "wait", async function (this: AkumaHandle) {
+  t.mock.method(AkumaHandle.prototype, "admitInitialTell", async function (this: AkumaHandle) {
+    admissionCalls += 1;
     return {
-      id: this.id,
-      life: "killed",
-      allowed: [],
-      timeline: { kind: "idle", entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
-    } as never;
-  });
-  t.mock.method(PublicAkuma.prototype, "tell", async function () {
-    tellCalls += 1;
-    throw new Error("schema Tell must not be admitted after a terminal birth");
+      kind: "birth-failed" as const,
+      diagnostic: `Akuma ${this.id} prompt-free birth did not settle cleanly`,
+    };
   });
   try {
     const result = await Keiyaku.call({
@@ -314,10 +333,11 @@ test("schema Keiyaku.call skips Tell after a non-asleep terminal birth", async (
       schema,
     });
     akumaId = result.akuma;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(result.observation.kind, "detached");
-    assert.equal(tellCalls, 0);
-    assert.deepEqual((await readHeart(pathsForAkuId(world, parseAkuId(result.akuma).id))).pending, []);
+    assert.equal(result.observation.kind, "failed");
+    if (result.observation.kind === "failed") assert.match(result.observation.failure.diagnostic, /did not settle cleanly/u);
+    assert.equal(admissionCalls, 1);
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
     operationFailed = false;
   } finally {
     try {
@@ -339,7 +359,7 @@ test("schema Keiyaku.call skips Tell after a non-asleep terminal birth", async (
   }
 });
 
-test("forwarded schema Keiyaku.call waits for its empty Body before admitting its Tell", async (t) => {
+test("forwarded schema Keiyaku.call waits for birth and retains readonly evidence", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -361,6 +381,7 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
       archetype: "worker",
       body: "forwarded-schema-call",
       cwd: world,
+      readonly: true,
       ...configured.placement,
       mode: "wait",
       schema,
@@ -374,7 +395,10 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
     await slow.release();
     const result = await pending;
     akumaId = result.akuma;
-    assert.deepEqual(result.schemaAnswer, { ok: true });
+    assert.equal(result.readonly?.enforcement, "native");
+    assert.equal(result.observation.kind, "observed");
+    if (result.observation.kind === "observed")
+      assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
     const history = await PublicAkuma.select(world, result.akuma).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
@@ -409,7 +433,7 @@ test("forwarded schema Keiyaku.call waits for its empty Body before admitting it
   }
 });
 
-test("forwarded schema Keiyaku.call's deadline cancels its held birth Body request", async () => {
+test("forwarded schema Keiyaku.call admits its initial Tell after held birth before a zero-budget deadline", async () => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
@@ -425,19 +449,24 @@ test("forwarded schema Keiyaku.call's deadline cancels its held birth Body reque
     const pending = routedKeiyaku.call({
       path: world,
       archetype: "worker",
-      body: "forwarded-deadline-before-birth-body-settles",
+      body: "forwarded-deadline-after-birth",
       cwd: world,
       ...configured.placement,
       mode: "wait",
       schema,
-      timeoutMs: 20,
+      timeoutMs: 0,
     });
     const body = await slow.started;
-    const result = await pending;
-    assert.deepEqual(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "deadline");
-    assert.equal(result.schemaAnswer, undefined);
     assert.equal((await readHeart(body.paths)).latestBody?.end, undefined);
+    await slow.release();
+    const result = await pending;
+    assert.equal(result.observation.kind, "observed");
+    if (result.observation.kind === "observed") {
+      assert.deepEqual(result.observation.observation, { reason: "deadline" });
+      assert.equal(result.observation.tell.row.text, "forwarded-deadline-after-birth");
+    }
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    assert.equal(history.rows.filter((row) => row.kind === "tell").length, 1);
   } finally {
     try {
       await slow.release();
@@ -450,43 +479,150 @@ test("forwarded schema Keiyaku.call's deadline cancels its held birth Body reque
   }
 });
 
-test("schema Keiyaku.call spends its one deadline through a delayed schema answer", async (t) => {
+test("forwarded Keiyaku.call spends its wait budget from the child's Tell admission", async (t) => {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
-  const schema = Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  const slow = slowEmptyPublicationBody();
+  let admittedAtPerf = Number.NaN;
+  let remainingBudget: number | undefined;
+  const tellOutcome = AkumaHandle.prototype.tellOutcome;
+  t.mock.method(
+    AkumaHandle.prototype,
+    "tellOutcome",
+    async function (this: AkumaHandle, tellId: string, options?: Parameters<AkumaHandle["tellOutcome"]>[1]) {
+      remainingBudget = options?.timeoutMs;
+      return await tellOutcome.call(this, tellId, options);
+    },
   );
+  const { pump, leash } = await requestPump(world, slow.spawn, async ({ id, initialTell, signal }) => {
+    const admission = await admitCallInitialTell({
+      world,
+      id,
+      initialTell,
+      ...(signal === undefined ? {} : { signal }),
+      wake: async (tell) => ({
+        admission: { tellId: tell.id, fact: "recorded" },
+        row: projectTell(tell),
+        wake: { kind: "held" },
+      }),
+    });
+    if (admission.kind === "admitted") {
+      admittedAtPerf = performance.now();
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+    }
+    return admission;
+  });
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  try {
+    const pending = routedKeiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "forwarded-budget-after-admission",
+      cwd: world,
+      ...configured.placement,
+      mode: "wait",
+      timeoutMs: 250,
+    });
+    await slow.started;
+    await slow.release();
+    const result = await pending;
+    const elapsed = performance.now() - admittedAtPerf;
+    assert.equal(result.observation.kind, "observed", JSON.stringify(result.observation));
+    if (result.observation.kind === "observed") assert.deepEqual(result.observation.observation, { reason: "deadline" });
+    assert.equal(remainingBudget, 0, `forwarding delay consumed the deadline after ${elapsed}ms from Tell admission`);
+  } finally {
+    try {
+      await slow.release();
+      await pump.close();
+      leash.release();
+    } finally {
+      rmSync(raw.path, { recursive: true, force: true });
+      restoreSquareLedger();
+    }
+  }
+});
+
+test("ordinary Keiyaku.call stays bound to its first Turn when a later Turn settles before observation", async (t) => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
-  const tell = PublicAkuma.prototype.tell;
-  let schemaSignal: AbortSignal | undefined;
-  t.mock.method(PublicAkuma.prototype, "tell", async function (this: PublicAkuma, ...args: Parameters<typeof tell>) {
-    const options = args[1];
-    schemaSignal = options !== undefined && "signal" in options ? options.signal : undefined;
-    assert.ok(schemaSignal instanceof AbortSignal, "bounded schema Tell must receive the call deadline signal");
-    return await new Promise<never>((_resolve, reject) => {
-      schemaSignal!.addEventListener("abort", () => reject(schemaSignal!.reason), { once: true });
-    });
-  });
+  let observedTellId: string | undefined;
   let operationFailed = true;
   try {
     const result = await Keiyaku.call({
       path: world,
       archetype: "worker",
-      body: "schema-deadline",
+      body: "ordinary-first-input",
       cwd: world,
       ...configured.placement,
       mode: "wait",
-      schema,
-      timeoutMs: 5_000,
+      timeoutMs: 10_000,
+      observe: {
+        admitted: async (tell, id) => {
+          observedTellId = tell.admission.tellId;
+          const paths = pathsForAkuId(world, id);
+          await waitForCondition("the call's admitted Turn to settle", async () => {
+            const persisted = await readTell(paths, tell.admission.tellId);
+            if (persisted?.binding === undefined) return false;
+            return (await readTurn(paths, persisted.binding.turnSequence))?.end !== undefined;
+          });
+          await waitForCondition("the call Body to release its leash", async () => {
+            const available = await HeldAkumaLeash.try(paths);
+            if (available === null) return false;
+            available.release();
+            return true;
+          });
+          const leash = await HeldAkumaLeash.try(paths);
+          if (leash === null) throw new Error("settled call Body did not release its leash");
+          try {
+            const at = new Date().toISOString();
+            const body = await leash.recordBody(paths, { leashTakenAt: at });
+            const laterTellId = `${tell.admission.tellId}-later`;
+            const laterTell = await recordTell(paths, {
+              kind: "tell",
+              id: laterTellId,
+              body: "later input",
+              recordedAt: at,
+            });
+            assert.equal(laterTell.kind, "recorded");
+            const laterTurn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+            await bindTellsToTurn(paths, {
+              turnSequence: laterTurn.sequence,
+              tellIds: [laterTellId],
+              boundAt: at,
+            });
+            const completedAt = new Date(Date.parse(at) + 1).toISOString();
+            await endTurn(paths, {
+              turnSequence: laterTurn.sequence,
+              outcome: {
+                kind: "answered",
+                historyId: "later-call-history",
+                session: { sessionId: "later-call-session" },
+                answer: "later answer",
+              },
+              completedAt,
+            });
+            await finishBodyIfIdle(paths, {
+              sequence: body.sequence,
+              at: new Date(Date.parse(completedAt) + 1).toISOString(),
+            });
+          } finally {
+            leash.release();
+          }
+        },
+      },
     });
-    assert.equal(result.schemaAnswer, undefined);
+    assert.equal(result.structured, undefined);
     assert.deepEqual(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") assert.equal(result.observation.reason, "completed");
-    assert.equal(schemaSignal?.aborted, true);
+    if (result.observation.kind === "observed") {
+      assert.deepEqual(result.observation.observation, { reason: "answered", answer: '{"ok":true}' });
+      assert.equal(result.observation.tell.admission.tellId, observedTellId);
+    }
     operationFailed = false;
   } finally {
     try {
@@ -512,7 +648,11 @@ async function defaultRequestSpawn(launch: AkumaCallRequestChildLaunch): Promise
 
 type RequestSpawn = (launch: AkumaCallRequestChildLaunch) => Promise<OwnedProcess | void>;
 
-async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequestSpawn) {
+async function requestPump(
+  root: WorldRoot,
+  spawn: RequestSpawn = defaultRequestSpawn,
+  admitInitialTell?: (input: InitialTellAdmissionRequest) => Promise<CallInitialTellAdmission>,
+) {
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);
   const soul: Soul = {
@@ -534,7 +674,17 @@ async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequest
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
     commands: composeRequestCommands(
-      akumaCallRequestCommands({ world: root, paths: parent.paths, parent: soul, spawn }),
+      akumaCallRequestCommands({
+        world: root,
+        paths: parent.paths,
+        parent: soul,
+        spawn,
+        admitInitialTell:
+          admitInitialTell ??
+          (async ({ id, initialTell, signal }) =>
+            await new AkumaHandle(id, root).admitInitialTell(initialTell, { signal })),
+
+      }),
       fleetRequestCommands({
         wait: async () => {
           throw new Error("unexpected forwarded wait");
@@ -555,6 +705,43 @@ async function requestPump(root: WorldRoot, spawn: RequestSpawn = defaultRequest
   });
   return { pump, leash };
 }
+
+test("forwarded call preserves the born child when its exact initial Tell receipt is absent", async () => {
+  const { raw } = await repositoryFixture();
+  const world = await World.at(raw.path);
+  const configured = await directArchetypeSettings(world);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  const { pump, leash } = await requestPump(world, defaultRequestSpawn, async () => ({
+    kind: "birth-failed",
+    diagnostic: "initial Tell admission failed after child birth",
+  }));
+  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  try {
+    const result = await routedKeiyaku.call({
+      path: world,
+      archetype: "worker",
+      body: "forwarded-partial-birth",
+      cwd: world,
+      ...configured.placement,
+      mode: "detach",
+    });
+    assert.equal(result.observation.kind, "failed");
+    if (result.observation.kind === "failed") {
+      assert.equal(result.observation.tellId.length > 0, true);
+      assert.match(result.observation.failure.diagnostic, /missing from Heart/u);
+      assert.equal(result.observation.tell, undefined);
+    }
+    assert.equal((await PublicAkuma.select(world, result.akuma).history()).rows.some((row) => row.kind === "tell"), false);
+  } finally {
+    try {
+      await pump.close();
+      leash.release();
+    } finally {
+      rmSync(raw.path, { recursive: true, force: true });
+      restoreSquareLedger();
+    }
+  }
+});
 
 test("Contract association never selects the Akuma execution workdir", async (t) => {
   const { raw, repo, git } = await repositoryFixture();

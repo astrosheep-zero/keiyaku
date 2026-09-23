@@ -83,6 +83,8 @@ export type {
   CallObservation,
   CallInput,
   CallResult,
+  CallWaitHead,
+  CallWaitObserver,
   DispatchStage,
   ForkInput,
   ForkResult,

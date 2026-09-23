@@ -1,6 +1,7 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
 import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
 import {
+  DEFAULT_CLI_COLUMNS,
   checkoutNotFollowableLines,
   displayColumns,
   gitShortStat,
@@ -122,7 +123,7 @@ export function renderRefusalFacts(
 }
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
-  const columns = context?.columns ?? 80;
+  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const base = `× ${result.verb} refused`;
   const lines =
     result.contract === undefined

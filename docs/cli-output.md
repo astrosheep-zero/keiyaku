@@ -123,7 +123,11 @@ prints its activity age only when that age differs from the state age.
 Activity previews keep observed source punctuation, including Markdown headings,
 list markers, backticks, and emphasis. They apply only terminal-safe handling,
 whitespace folding for wrapping, and width-aware truncation; a preview never
-rewrites what an Akuma said. A
+rewrites what an Akuma said. When a terminal width is unavailable, command
+rendering uses one shared fallback while respecting a narrower actual terminal.
+Long timeline run previews may continue on a second aligned row, preserving
+useful command head and tail with visible omission; other tool rows keep their
+compact preview budget. This presentation never changes raw answer bytes. A
 present but empty world-status section omits its header entirely instead of
 printing a bare heading, while a fully empty view keeps whatever empty state
 the law already blesses. Task dispositions render as words — `in progress`,
@@ -186,22 +190,24 @@ Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt and
 cleanup boundary instead of replacing that result with an early CLI exit.
 
-An observing call reports the same kind of progress. A call that waits, renders
-text, and carries no answer contract opens one identity frame on the progress
-channel — the same identity-and-association notation and frame rule every
-observation uses, without the birth receipt's working-directory row — and then
-each timeline row once it has settled, as the window advances; progress rows
-and the closing conclusion stay on the progress channel, and stdout carries
-only the call's answer, written once when it has one, so an unanswered call
-leaves stdout empty. When the call returns, it closes the
-stream with one conclusion row in the same conclusion wording and order a
-wait's own closing row uses, stating an answer, a still-running elapsed wait,
-or truthful terminal-failure evidence. The stream restates the timeline's own
-rows in their final form rather than inventing a private vocabulary or standing
-in for the final result, and it never replays its own activity as a final
-snapshot. A failure that leaves no answer keeps its diagnostic on the progress
-channel, so empty stdout never hides it. A call that answers a schema, renders
-JSON, or detaches has no such stream and keeps its ordinary receipt.
+An observing call and a bounded Tell share one input-wait presentation. Each
+opens one identity frame on the progress channel — the same identity-and-
+association notation and frame rule every observation uses, without a detached
+receipt's working-directory row — and streams eligible timeline rows once;
+progress rows and the closing conclusion stay on the progress channel. A call
+starts at an empty cursor. A bounded Tell first reports its admission receipt,
+then starts its cursor at that boundary without replaying prior work. Each input
+is shown once, and its single conclusion follows the same clock, mark, verb, and
+duration grammar as wait. The observed answer always belongs to that input's
+exact terminal Turn; plain Akuma-wide idle never stands in for it. Stdout carries
+only that answer once, leaving zero bytes for an empty answer, deadline, or
+failure. A schema-bearing text input JSON-encodes its decoded answer, including
+string values; a failure or invalid output keeps its diagnostic on the progress
+channel. JSON output has no progress stream, and a detached call keeps its
+ordinary receipt. The stream restates the timeline's own rows in their final
+form rather than inventing a private vocabulary or standing in for the final
+result, and it never replays its activity as a final snapshot. Its progress
+conclusion owns the blank line separating the exact stdout answer.
 
 A wait reports the same kind of progress. It announces no birth and streams
 eligible newly settled `say`, `note`, `call`, `tell`, and tool rows once in
@@ -234,12 +240,11 @@ attempt, wait seeding first renders one retained boundary: the initial
 commission, or the settled wake that started the attempt. A Tell delivered to
 an already pursuing Body is ordinary activity, and absence of either durable
 boundary produces no synthetic row or omission.
-In an open current Turn, every settled say and typed file-change activity row
-is protected in both the status snapshot and the live stream: neither the
-ordinary status budget nor live tool-tail omission may remove it. Other
-narrative and ordinary tools keep their existing budgets. Protection follows
-typed activity meaning rather than inferred paths, diffstats, or filesystem
-state, and individual previews remain independently bounded.
+In an open current Turn, every settled say is protected in both the status
+snapshot and the live stream. File-change activity follows ordinary tool
+selection and omission in snapshots and live streams; a selected edit still
+renders its typed operation, path, outcome, and available diffstat. It is
+neither hidden nor specially pinned.
 The Turn outcome is the closing result, never a streamed activity row; an
 answered closing result is labeled `answer`, never `say`. That channel also
 carries the closing conclusion, while stdout
@@ -247,12 +252,13 @@ carries only an answer, never progress, and a plural wait leaves it
 empty; a wait that renders JSON, or one forwarded to a Body, has no such
 stream. A live stream
 never re-renders a settled row. Its bounded eligible observed tool evidence is
-a command-lifetime per-Akuma view: opening evidence streams live, while recent
-evidence waits until the observation ends so the stream can retain the actual
-end of the command; intermediate tool evidence is represented by counted
-omission markers. Typed file-change activity streams with narrative rather than
-consuming that bounded tool capacity, while retaining its observed outcome.
-Narrative remains in its original order around that deferred evidence.
+tracked per Akuma and per narrative segment: opening evidence streams live,
+recent evidence waits until the segment ends so the stream can retain the actual
+end of that evidence, and intermediate tools are represented by counted
+omission markers. A newly eligible say flushes the preceding tool tail in order
+before it is emitted, then opens a fresh tool segment. File changes consume the
+same bounded tool capacity and retain their observed outcome when selected.
+Narrative remains in its original order around deferred evidence.
 A single-target wait's stream opens with that Akuma's identity frame before
 any row — carrying the alias currently addressing it and the Contract
 association it holds — and an already settled Akuma prints that frame while
@@ -274,9 +280,7 @@ observation seam rather than a renderer reading of the world. A failure fact for
 an unobserved member is not an attributed activity row: it keeps that member's
 complete Akuma identity, so it never substitutes the tag or alias. Across the rendered plural stream,
 its timestamp prints only when the minute changes regardless of source,
-preserving the time column while blank. Every plural activity row occupies one terminal line: excess content truncates with one trailing
-ellipsis, with quoted previews retaining their closing quote unless an
-in-flight say uses its open quote as the streaming signal. An omission marker
+preserving the time column while blank. Plural activity rows occupy one terminal line, except a long timeline run preview may continue on one aligned second row to preserve useful command head and tail; other tool rows keep their compact preview budget. Excess content otherwise truncates with one trailing ellipsis, with quoted previews retaining their closing quote unless an in-flight say uses its open quote as the streaming signal. An omission marker
 keeps its source, and the frozen selected set fixes the attribution width before
 the first row, so the whole stream and its scoreboard share one alignment. A
 conclusion row states a duration only when the target became complete after the

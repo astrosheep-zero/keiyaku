@@ -3,10 +3,8 @@ import { squareAssignedParticipantName } from "@astrosheep/square";
 import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory } from "../../akuma/akuma.js";
-import type { WaitObserver } from "../../akuma/fleet-execution.js";
-import { observeAkumaStatus } from "../../akuma/akuma-observe.js";
+import { decodeTellWaitObservation, type WaitObserver } from "../../akuma/fleet-execution.js";
 import {
-  AuthorityCorruptionError,
   Keiyaku,
   type AkumaKillResult,
   type AkumaHistoryResult,
@@ -14,16 +12,19 @@ import {
   type AkumaTellResult,
   type AkumaWaitResult,
   type CallInput,
-  type CallObservation,
   type CallResult,
   type ForkResult,
-  type IntegrationFailure,
   type Keiyaku as KeiyakuContract,
   type Repo,
 } from "../../index.js";
-import { callObservationStream, waitObservationStream, type WaitSelectedIdentity } from "../render/akuma-activity.js";
-import { callObservationHead, tellWaitProgressStream } from "../render/akuma.js";
-import type { TextRenderContext } from "../render/terminal.js";
+import {
+  callObservationStream,
+  inputWaitStream,
+  waitObservationStream,
+  type WaitSelectedIdentity,
+} from "../render/akuma-activity.js";
+import { callObservationHead, tellWaitProgressStream, waitedTellProgress } from "../render/akuma.js";
+import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
@@ -32,7 +33,6 @@ import { localExecutionContext, type ExecutionContext } from "../../akuma/reques
 import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { addressAkuma, resolveAkuma } from "../../library/address.js";
 import { executionChannel } from "../../akuma/requests.js";
-import { AkumaDecodeError } from "../../akuma/akuma-errors.js";
 import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
 import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
 
@@ -42,7 +42,6 @@ export type AkumaInvocationResult =
       action: "call";
       result: CallResult;
       world: WorldRoot;
-      schemaAnswer?: unknown;
       streamed?: boolean;
     }>
   | Readonly<{ kind: "akuma"; action: "status"; status: AkumaObservation; alias?: string }>
@@ -59,7 +58,15 @@ export type AkumaInvocationResult =
     }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "tell"; mode: "wait"; result: AkumaTellWaitResult; body: string; alias?: string }>
+  | Readonly<{
+      kind: "akuma";
+      action: "tell";
+      mode: "wait";
+      result: AkumaTellWaitResult;
+      body: string;
+      alias?: string;
+      structured?: true;
+    }>
   | Readonly<{
       kind: "akuma";
       action: "tell";
@@ -118,9 +125,6 @@ type InvokeInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** The window a call observes for when the caller gives no `--wait` duration. */
-const CALL_TIMEOUT_MS = 300_000;
-
 /** The call the CLI makes once its prompt, schema, and placement are resolved. */
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
 
@@ -128,57 +132,18 @@ function callSignalOption(signal: AbortSignal | undefined): Pick<CallRequest, "s
   return signal === undefined ? {} : { signal };
 }
 
-function integrationFailure(error: unknown): IntegrationFailure {
-  return {
-    kind: error instanceof AuthorityCorruptionError ? "authority-corruption" : "infrastructure",
-    diagnostic: error instanceof Error ? error.message : String(error),
-  };
-}
-
 /** The display context the command result renders with, so live progress rows match the result. */
 function resultContext(): TextRenderContext {
   const tty = process.stderr.isTTY === true;
   return {
-    columns: tty && Number.isInteger(process.stderr.columns) ? process.stderr.columns : 80,
+    columns: tty && Number.isInteger(process.stderr.columns) ? process.stderr.columns : DEFAULT_CLI_COLUMNS,
     color: tty && process.env.NO_COLOR === undefined,
   };
 }
 
 function writeProgress(body: string): void {
+  if (body.length === 0) return;
   process.stderr.write(body.endsWith("\n") ? body : `${body}\n`);
-}
-
-/**
- * The live half of an observe-mode call: the resolved birth opens one identity
- * frame (never the detached receipt's cwd row), each later observation prints
- * the settled rows that arrived since the previous one, and the return appends
- * one conclusion. The stream is append-only, so no final snapshot replays.
- */
-async function observeCallUntilComplete(
-  command: Extract<InvokedAkumaCommand, { command: "call" }>,
-  input: InvokeInput,
-  born: CallResult,
-): Promise<CallObservation> {
-  const stream = callObservationStream(resultContext(), callObservationHead(born));
-  try {
-    const observed = await observeAkumaStatus(input.path, born.akuma, {
-      timeoutMs: command.timeoutMs ?? CALL_TIMEOUT_MS,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      observe: (observed) => {
-        const lines = stream.observe(observed);
-        if (lines.length > 0) writeProgress(lines.join("\n"));
-      },
-    });
-    const conclusion = stream.conclude({ kind: "observed", reason: observed.reason, status: observed.status });
-    if (conclusion.length > 0) writeProgress(conclusion);
-    return { kind: "observed", reason: observed.reason, status: observed.status };
-  } catch (error) {
-    if (input.signal?.aborted) throw error;
-    const failure = integrationFailure(error);
-    const conclusion = stream.conclude({ kind: "failed", failure });
-    if (conclusion.length > 0) writeProgress(conclusion);
-    return { kind: "failed", failure };
-  }
 }
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
@@ -291,30 +256,6 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
   return { initiator };
 }
 
-function decodeWaitedTellSchema(result: AkumaTellWaitResult, schema: Schema<unknown>): AkumaTellWaitResult {
-  if (result.observation.reason !== "answered") return result;
-  if (typeof result.observation.answer !== "string") {
-    throw new AkumaDecodeError("Answer is not valid JSON", String(result.observation.answer));
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(result.observation.answer);
-  } catch (error) {
-    throw new AkumaDecodeError(
-      error instanceof Error ? error.message : "Answer is not valid JSON",
-      result.observation.answer,
-    );
-  }
-  try {
-    return { ...result, observation: { reason: "answered", answer: schema.decode(parsed) } };
-  } catch (error) {
-    throw new AkumaDecodeError(
-      error instanceof Error ? error.message : "Answer failed schema decode",
-      result.observation.answer,
-    );
-  }
-}
-
 async function invokeWaitedTell(
   command: Extract<InvokedAkumaCommand, { command: "tell" }> & Readonly<{ timeoutMs: number }>,
   input: InvokeInput,
@@ -322,7 +263,11 @@ async function invokeWaitedTell(
 ): Promise<AkumaInvocationResult> {
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const alias = inputAlias(command.akuma);
-  const progress = command.output === "text" ? tellWaitProgressStream(undefined, alias, resultContext()) : undefined;
+  const channel = executionChannel(input.execution);
+  const progress =
+    command.output === "text" && channel.kind === "local"
+      ? tellWaitProgressStream(undefined, alias, resultContext())
+      : undefined;
   const result = await tellWaitAkuma(
     {
       ...(await inputInitiator(input)),
@@ -345,8 +290,11 @@ async function invokeWaitedTell(
     },
     input.execution ?? localExecutionContext(),
   );
-  const rendered = schema === undefined ? result : decodeWaitedTellSchema(result, schema);
+  const rendered =
+    schema === undefined ? result : { ...result, observation: decodeTellWaitObservation(result.observation, schema) };
   if (progress !== undefined) writeProgress(progress.conclude(rendered).join("\n"));
+  else if (command.output === "text" && channel.kind === "body-request")
+    writeProgress(waitedTellProgress(rendered, alias, resultContext()));
   return {
     kind: "akuma",
     action: "tell",
@@ -354,6 +302,7 @@ async function invokeWaitedTell(
     result: rendered,
     body,
     ...(alias === undefined ? {} : { alias }),
+    ...(schema === undefined ? {} : { structured: true as const }),
   };
 }
 
@@ -525,21 +474,52 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...(schema === undefined ? {} : { schema }),
         ...callSignalOption(input.signal),
       };
-      const observing = schema === undefined && command.mode === "wait" && command.output === "text";
-      const born = await caller.call(
-        observing
-          ? { ...request, mode: "detach" }
-          : {
-              ...request,
-              mode: command.mode,
-              ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      let stream: ReturnType<typeof callObservationStream> | undefined;
+      const observing = command.mode === "wait" && command.output === "text";
+      const observe: CallRequest["observe"] = observing
+        ? {
+            admitted: (tell, id, head) => {
+              stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
+                admittedAt: tell.row.at,
+              });
             },
-      );
-      const result = observing ? { ...born, observation: await observeCallUntilComplete(command, input, born) } : born;
-      if (schema !== undefined && command.mode === "wait" && result.schemaAnswer !== undefined) {
-        return { kind: "akuma", action: "call", result, world: input.path, schemaAnswer: result.schemaAnswer };
+            observe: (observation) => {
+              const lines = stream?.observe(observation) ?? [];
+              if (lines.length > 0) writeProgress(lines.join("\n"));
+            },
+          }
+        : undefined;
+      const result = await caller.call({
+        ...request,
+        mode: command.mode,
+        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+        ...(observe === undefined ? {} : { observe }),
+      });
+      let streamed = stream !== undefined;
+      if (stream !== undefined) {
+        writeProgress(stream.conclude(result.observation));
+      } else if (observing && result.observation.kind === "failed") {
+        const fallback = inputWaitStream(
+          resultContext(),
+          () =>
+            callObservationHead({
+              akuma: result.akuma,
+              dispatch: result.dispatch,
+              alias: result.alias,
+              ...(result.readonly === undefined ? {} : { readonly: result.readonly }),
+            }),
+          { cursor: "empty", answerSeparator: true },
+        );
+        writeProgress(fallback.conclude({ kind: "failed", diagnostic: result.observation.failure.diagnostic }));
+        streamed = true;
       }
-      return { kind: "akuma", action: "call", result, world: input.path, ...(observing ? { streamed: true } : {}) };
+      return {
+        kind: "akuma",
+        action: "call",
+        result,
+        world: input.path,
+        ...(streamed ? { streamed: true } : {}),
+      };
     }
     case "wait":
       return await invokeWait(command, input);

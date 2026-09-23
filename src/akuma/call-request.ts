@@ -3,6 +3,7 @@ import { clipAllowedActions, decodeAllowedActions } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { archetypeName, parseAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
+import type { CallInitialTell, CallInitialTellAdmission } from "./call-initial-tell.js";
 import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
 import { decodeProviderExecution, resolveProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
@@ -73,12 +74,19 @@ const akumaCallRecipeSchema = z
     }
   });
 
+const initialTellSchema = z
+  .object({
+    tellId: z.string().trim().min(1),
+    body: z.string(),
+    schemaJson: z.string().trim().min(1).optional(),
+    initiator: z.string().min(1).optional(),
+  })
+  .strict();
 const akumaCallPayloadSchema = z
   .object({
     world: absolutePathSchema,
     archetype: archetypeSchema,
-    body: z.string().optional(),
-    initiator: z.string().min(1).optional(),
+    initialTell: initialTellSchema,
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -90,8 +98,12 @@ export type AkumaCallRequest = z.infer<typeof akumaCallPayloadSchema> & Readonly
 export type AkumaCallRequestChildLaunch = Readonly<{
   paths: AkumaPaths;
   seed: Omit<Soul, "createdAt">;
-  initialBody?: string;
-  initiator?: string;
+}>;
+
+export type InitialTellAdmissionRequest = Readonly<{
+  id: AkuId;
+  initialTell: CallInitialTell;
+  signal: AbortSignal;
 }>;
 
 type AkumaCallRequestCapabilities = Readonly<{
@@ -99,6 +111,7 @@ type AkumaCallRequestCapabilities = Readonly<{
   paths: AkumaPaths;
   parent: Soul;
   spawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
+  admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
 }>;
 
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
@@ -151,11 +164,22 @@ async function executeAkumaCall(
           cwd: request.cwd ?? parent.cwd,
           origin: { kind: "request", parent: parent.id, requestId: facts.id },
         },
-        ...(request.body === undefined ? {} : { initialBody: request.body }),
-        ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
       });
     },
   });
+  const admitted = await capabilities.admitInitialTell({
+    id: published.id,
+    initialTell: {
+      tellId: request.initialTell.tellId,
+      body: request.initialTell.body,
+      ...(request.initialTell.schemaJson === undefined ? {} : { schemaJson: request.initialTell.schemaJson }),
+      ...(request.initialTell.initiator === undefined ? {} : { initiator: request.initialTell.initiator }),
+    },
+    signal: facts.signal,
+  });
+  if (admitted.kind === "birth-failed") throw new Error(admitted.diagnostic);
+  if (admitted.kind === "not-born") throw new Error(`Akuma ${published.id} was not born for its initial Tell`);
+  await admitted.wake;
   return { result: published.id, child: published.id };
 }
 

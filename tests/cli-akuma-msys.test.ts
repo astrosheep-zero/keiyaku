@@ -2,13 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { AkuId } from "../src/akuma/identity.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import { parseAkumaStatus } from "../src/akuma/akuma.js";
 import type { CallObservation, CallResult } from "../src/library/akuma-creation.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
 import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
-import { answeredOutcome, idleAkumaSnapshot } from "./support/kanshi-activity.js";
+import { AKUMA_ACTIVITY_AT } from "./support/kanshi-activity.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkuId;
@@ -21,6 +20,22 @@ function parseExecution(argv: readonly string[]): ParsedExecution {
 const command = parseExecution(["call", "worker", "prompt"]).command;
 const waitingCommand = parseExecution(["call", "worker", "--wait", "30s", "prompt"]).command;
 
+function tellResult() {
+  return {
+    admission: { tellId: "tell/msys", fact: "recorded" as const },
+    row: {
+      kind: "tell" as const,
+      sequence: 1,
+      at: AKUMA_ACTIVITY_AT,
+      tellId: "tell/msys",
+      text: "prompt",
+      state: "told" as const,
+      deliveries: [],
+    },
+    wake: { kind: "told" as const },
+  };
+}
+
 function detachedCall(
   result: Pick<CallResult, "dispatch" | "alias" | "readonly">,
 ): Extract<AkumaInvocationResult, { action: "call" }> {
@@ -32,7 +47,7 @@ function detachedCall(
       kind: "called",
       akuma,
       execution: { cwd: world, source: "process" },
-      observation: { kind: "detached" },
+      observation: { kind: "detached", tell: tellResult() },
       ...result,
     },
   };
@@ -74,13 +89,10 @@ function observingCall(
 }
 
 test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
-  const status = parseAkumaStatus({
-    id: akuma,
-    life: "asleep",
-    allowed: [],
-    timeline: idleAkumaSnapshot([], answeredOutcome(1, "final answer")),
-  });
-  const text = renderAkumaText(waitingCommand, observingCall({ kind: "observed", reason: "completed", status }));
+  const text = renderAkumaText(
+    waitingCommand,
+    observingCall({ kind: "observed", tell: tellResult(), observation: { reason: "answered", answer: "final answer" } }),
+  );
   assert.equal(text, "final answer");
   assert.doesNotMatch(text, /cwd/u);
 });
@@ -88,7 +100,11 @@ test("an observing call writes its answer once without repeating cwd or the outc
 test("an observing call keeps a failed observation diagnostic on stdout without cwd", () => {
   const text = renderAkumaText(
     waitingCommand,
-    observingCall({ kind: "failed", failure: { kind: "infrastructure", diagnostic: "window lost" } }),
+    observingCall({
+      kind: "failed",
+      tellId: "tell/msys",
+      failure: { kind: "infrastructure", diagnostic: "window lost" },
+    }),
   );
   assert.match(text, /! error window lost/u);
   assert.doesNotMatch(text, /cwd/u);

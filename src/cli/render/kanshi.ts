@@ -11,6 +11,7 @@ import {
   targetFacts,
 } from "./contract-observation.js";
 import {
+  DEFAULT_CLI_COLUMNS,
   entityLines,
   elapsedMilliseconds,
   identityLine,
@@ -345,7 +346,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
 
 export function renderKanshiText(
   report: KanshiReport,
-  context: TextRenderContext = { columns: 80, color: false },
+  context: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false },
   selection: "world" | "contract" = "world",
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");

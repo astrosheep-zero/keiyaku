@@ -233,7 +233,8 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     const lag = await runCreateHooks(worktree, hooks);
     assert.equal(lag.lag, null);
     assert.deepEqual(lag.runs, ["long"]);
-    assert.deepEqual(lines(log), ["start", "start", "end", "end"]);
+    // A busy host may finish the orphan before replay starts; both completed orders are valid.
+    assert.match(lines(log).join(","), /^start,(?:start,end,end|end,start,end)$/u);
   } finally {
     if (caller.exitCode === null && caller.signalCode === null) caller.kill("SIGKILL");
     rmSync(directory, { recursive: true, force: true });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { admitCallInitialTell, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { handoffPendingTells, type TellResult, type TellWakeRuntime, wakeRecordedTell } from "./body.js";
 import {
   HeldAkumaLeash,
@@ -122,6 +123,7 @@ export async function killAkumaWithRecovery(
 export type TellAdmission =
   | Readonly<{ kind: "not-born" }>
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>;
+export type InitialTellAdmission = CallInitialTellAdmission;
 
 export type InterruptAdmission =
   | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>
@@ -220,6 +222,19 @@ export class AkumaHandle {
     return (await this.waitReceipt(predicate, options)).status;
   }
 
+  async admitInitialTell(
+    initialTell: CallInitialTell,
+    options: Readonly<{ signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
+  ): Promise<InitialTellAdmission> {
+    return await admitCallInitialTell({
+      world: this.worldPath,
+      id: this.id,
+      initialTell,
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      wake: (tell) => wakeRecordedTell(this.paths, tell.id, options.runtime, options.signal),
+    });
+  }
+
   async tell(
     body: string,
     tellId: string = randomUUID(),
@@ -290,7 +305,7 @@ export class AkumaHandle {
       signal?: AbortSignal;
       observe?: (observation: import("./akuma-observe.js").LiveStatusObservation) => void | Promise<void>;
     }> = {},
-  ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null }>> {
+  ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null }>> {
     const waited = await waitForObservation({
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -303,17 +318,23 @@ export class AkumaHandle {
             await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }),
           );
         }
-        return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
+        return { ...outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
       },
       complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
     });
-    return { reason: waited.reason, outcome: waited.value.outcome };
+    return {
+      reason: waited.reason,
+      outcome: waited.value.outcome,
+      completedAt: waited.value.completedAt,
+    };
   }
 
-  private async boundTellOutcome(tell: TellFact): Promise<TurnOutcome | null> {
-    if (tell.binding === undefined) return null;
-    const turn = await readTurn(this.paths, tell.binding.turnSequence);
-    return turn?.end?.outcome ?? null;
+  private async boundTellOutcome(
+    tell: TellFact,
+  ): Promise<Readonly<{ outcome: TurnOutcome | null; completedAt: string | null }>> {
+    if (tell.binding === undefined) return { outcome: null, completedAt: null };
+    const end = (await readTurn(this.paths, tell.binding.turnSequence))?.end;
+    return { outcome: end?.outcome ?? null, completedAt: end?.completedAt ?? null };
   }
 
   async interrupt(
