@@ -16,7 +16,7 @@ function externalConsumer(context: TestContext): string {
   return directory;
 }
 
-test("built package supports Contract, Task, Kanshi and plugin consumers", (context) => {
+test("built package supports branded Contract, standalone Akuma, Akumas, Task, Kanshi and plugin consumers", (context) => {
   const directory = externalConsumer(context);
   mkdirSync(join(directory, "node_modules", "@types"), { recursive: true });
   symlinkSync(
@@ -26,7 +26,7 @@ test("built package supports Contract, Task, Kanshi and plugin consumers", (cont
   );
   symlinkSync(join(root, "node_modules", "@types", "node"), join(directory, "node_modules", "@types", "node"), "dir");
   symlinkSync(join(root, "node_modules", "undici-types"), join(directory, "node_modules", "undici-types"), "dir");
-  const examples = ["contract", "task", "kanshi", "plugin"].map((name) => name + ".ts");
+  const examples = ["contract", "akumas", "task", "kanshi", "plugin"].map((name) => name + ".ts");
   for (const example of examples) {
     copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
   }
@@ -58,9 +58,31 @@ test("built package supports Contract, Task, Kanshi and plugin consumers", (cont
       [
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
-        'import { Delivery, Keiyaku } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Delivery, Keiyaku, nuke } from "@astrosheep/keiyaku";',
+        'import { Akumas as AkumasSubpath } from "@astrosheep/keiyaku/akumas";',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
         'assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);',
+        'assert.equal(typeof Keiyaku.with, "function");',
+        'assert.equal(Keiyaku.call, Function.prototype.call);',
+        'assert.equal(Keiyaku.bind, Function.prototype.bind);',
+        'assert.equal("fork" in Keiyaku, false);',
+        'assert.equal("history" in Keiyaku, false);',
+        'assert.equal("interrupt" in Keiyaku, false);',
+        'assert.equal("kill" in Keiyaku, false);',
+        'assert.equal("nuke" in Keiyaku, false);',
+        'assert.equal("ls" in Keiyaku, false);',
+        'assert.equal("list" in Keiyaku, false);',
+        'assert.equal("observe" in Keiyaku, false);',
+        'assert.equal("of" in Keiyaku, false);',
+        'assert.equal("status" in Keiyaku, false);',
+        'assert.equal("tell" in Keiyaku, false);',
+        'assert.equal("wait" in Keiyaku, false);',
+        'assert.equal(Object.hasOwn(Keiyaku, Symbol.hasInstance), false);',
+        'assert.equal(typeof Akuma.birth, "function");',
+        'assert.equal(typeof Akuma.select, "function");',
+        'assert.equal(typeof Akumas.of, "function");',
+        'assert.equal(AkumasSubpath, Akumas);',
+        'assert.equal(typeof nuke, "function");',
         'assert.throws(() => Reflect.construct(Delivery, []), TypeError);',
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',

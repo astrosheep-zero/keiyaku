@@ -63,7 +63,7 @@ const ordinaryCandidateTemplates = new Map<string, Promise<ManagedCandidateTempl
 let claimedUnfollowedCandidateTemplate: Promise<ManagedCandidateTemplate> | undefined;
 
 async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
@@ -124,7 +124,7 @@ async function candidateFixture(template: ManagedCandidateTemplate) {
   restoreWorktreeFiles(worktree, template.generatedFiles);
   repository.run(["update-ref", "-d", TEMPLATE_CANDIDATE_REF]);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.of({ repo, id: template.id });
+  const contract = Keiyaku.with().select({ repo, id: template.id });
   return { repository, contract, id: template.id, path: worktree };
 }
 
@@ -201,12 +201,12 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     if (delivery === undefined) throw new Error("delivery was not recorded");
     const repo = await cachedRepoAt(repository.path);
     const contractId = (await contract.state()).id;
-    const placed = await Keiyaku.observe({ repo, id: contractId });
+    const placed = await Keiyaku.with().observe({ repo, id: contractId });
     assert.ok(placed.kind === "present", "expected placed.kind = \"present\"");
     assert.deepEqual(placed.row.targetObservation, { head: delivery.integration.snapshot, drift: false });
 
     repository.run(["reset", "--hard", delivery.integration.predecessor]);
-    const rewound = await Keiyaku.observe({ repo, id: contractId });
+    const rewound = await Keiyaku.with().observe({ repo, id: contractId });
     assert.ok(rewound.kind === "present", "expected rewound.kind = \"present\"");
     assert.deepEqual(rewound.row.targetObservation, { head: delivery.integration.predecessor, drift: true });
   });
@@ -285,7 +285,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       ].join("\n"),
       {},
       async (gitPath) =>
-        Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id }).reconcile(),
+        Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id }).reconcile(),
     );
 
     assert.deepEqual(reconciled.lag, []);
@@ -346,7 +346,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       },
       async (gitPath) =>
         (
-          await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id })
+          await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id })
         ).reconcile(),
     );
 

@@ -9,27 +9,25 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const before = (await Keiyaku.list({ repo })).rows;
+  const before = (await Keiyaku.with().list({ repo })).rows;
 
   await assert.rejects(() => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])), TypeError);
   assert.throws(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.of, Keiyaku, [{ repo, id: null }])),
+    () => withGitShim("exit 99", {}, () => Keiyaku.with().select({ repo, id: null } as never)),
     TypeError,
   );
-  await assert.rejects(() => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.list, Keiyaku, [null])), TypeError);
+  await assert.rejects(() => withGitShim("exit 99", {}, () => Keiyaku.with().list(null as never)), TypeError);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Reflect.apply(Keiyaku.observe, Keiyaku, [{ repo, id: "bad" }])),
+    () => withGitShim("exit 99", {}, () => Keiyaku.with().observe({ repo, id: "bad" as never })),
     (error: unknown) => error instanceof TypeError && error.message === "contract ID must be kei/<contract-segment>",
   );
   await assert.rejects(
     () =>
-      withGitShim("exit 99", {}, () =>
-        Reflect.apply(Keiyaku.bind, Keiyaku, [{ repo, markdown: null, workspace: "worktree" }]),
-      ),
+      withGitShim("exit 99", {}, () => Keiyaku.with().bind({ repo, markdown: null, workspace: "worktree" } as never)),
     TypeError,
   );
 
-  assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
+  assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
 });
 
 test("amend validates programmer input before observing a missing contract", async () => {
@@ -38,8 +36,8 @@ test("amend validates programmer input before observing a missing contract", asy
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.of({ repo, id: "kei/missing" as never });
-  const before = (await Keiyaku.list({ repo })).rows;
+  const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
+  const before = (await Keiyaku.with().list({ repo })).rows;
 
   await assert.rejects(
     () =>
@@ -48,7 +46,7 @@ test("amend validates programmer input before observing a missing contract", asy
       ),
     (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
   );
-  assert.deepEqual((await Keiyaku.list({ repo })).rows, before);
+  assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
 });
 
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {
@@ -58,7 +56,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   await assert.rejects(
-    Keiyaku.bind({
+    Keiyaku.with().bind({
       repo,
       markdown: [
         "# T",
@@ -88,7 +86,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
   );
 
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo,
     markdown: [
       "# T",
@@ -115,6 +113,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     workspace: "worktree",
     gates: ["security-audited"],
   });
+  assert.ok(bound.keiyaku instanceof Keiyaku);
   await assert.rejects(
     () => withGitShim("exit 99", {}, () => bound.keiyaku.deliver({ actor: " " } as never)),
     (error: unknown) => error instanceof TypeError && error.message === "deliver input has unknown field: actor",

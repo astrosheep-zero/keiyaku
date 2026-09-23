@@ -20,7 +20,7 @@ test("two concurrent private-state binds both publish distinct accepted contract
   const results = await Promise.all(
     Array.from({ length: writers }, () =>
       (async () =>
-        Keiyaku.bind({
+        Keiyaku.with().bind({
           repo: await Repo.at({ path: repository.path }),
           markdown: document(),
           workspace: "worktree",
@@ -109,7 +109,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
     ].join("\n"),
     { KEIYAKU_STALLING: stalling, KEIYAKU_RELEASE: release },
     async (gitPath) =>
-      await Keiyaku.bind({
+      await Keiyaku.with().bind({
         repo: await Repo.at({ path: repository.path, gitPath }),
         markdown: document(),
         workspace: "worktree",
@@ -125,7 +125,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   }
   assert.ok(existsSync(stalling), "the bind must stall in its seat-external preparation");
   // Another independent bind must publish while the first still waits outside the seat.
-  const concurrent = await Keiyaku.bind({
+  const concurrent = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
@@ -156,7 +156,7 @@ test("an injected Git publication error still returns publication-failed", async
       { KEIYAKU_ATTEMPTS: attempts },
       async (gitPath) =>
         (
-          await Keiyaku.of({
+          await Keiyaku.with().select({
             repo: await Repo.at({ path: repository.path, gitPath }),
             id: (await contract.state()).id,
           })

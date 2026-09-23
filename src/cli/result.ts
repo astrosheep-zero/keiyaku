@@ -16,7 +16,7 @@ import type {
 import type { KanshiReport } from "../kanshi/index.js";
 import type { AkumaObservation } from "../index.js";
 import type { RegionRead, Section } from "../kanshi/index.js";
-import type { Catalog } from "../index.js";
+import type { Catalog } from "./catalog.js";
 import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
 import type { NukeResult } from "../index.js";
 

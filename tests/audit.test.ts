@@ -40,7 +40,7 @@ async function failedStoredVerification(): Promise<
   }>
 > {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(),
     workspace: "worktree",
@@ -60,7 +60,7 @@ async function failedStoredVerification(): Promise<
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",
@@ -108,7 +108,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
 
 test("audit without Verification still returns an accepted ready candidate", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",

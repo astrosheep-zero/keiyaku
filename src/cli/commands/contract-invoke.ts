@@ -87,8 +87,12 @@ async function selectContract(
   const id =
     selector !== undefined && !selector.startsWith("@")
       ? contractFromInput(repo, selector).id
-      : resolveContextualContract(await library.list({ repo }), selector, scope);
-  return { id, contract: library.of({ repo, id }) };
+      : resolveContextualContract(
+          await (await import("../../library/contract.js")).listCompleteContractBoard(repo),
+          selector,
+          scope,
+        );
+  return { id, contract: library.select({ repo, id }) };
 }
 
 function draftWarning(error: unknown): Readonly<{ warning: string }> {
@@ -263,15 +267,15 @@ async function invokeReview(
 
 async function contractLibrary(input: ContractMutationInput, parsed: ExistingCommand): Promise<KeiyakuLibrary> {
   const { configuration, edge, hooks } = input;
+  const { Keiyaku } = await import("../../library/keiyaku.js");
   if (input.execution.channel.kind !== "local" || !["audit", "deliver", "review"].includes(parsed.command)) {
-    const { Keiyaku } = await import("../../library/keiyaku.js");
-    return Keiyaku.withExecution({ execution: input.execution });
+    return Keiyaku.with({ execution: input.execution });
   }
   const requireBranchesToBeUpToDate =
     parsed.command !== "review" && configuration !== undefined ? await selectedGitPolicy(configuration) : false;
   const actor = actorFromEdge(undefined, edge.environment);
-  const { Keiyaku } = await import("../../library/keiyaku.js");
-  return Keiyaku.withLocal({
+  return Keiyaku.with({
+    execution: input.execution,
     ...(actor === undefined ? {} : { actor }),
     ...(hooks === undefined ? {} : { hooks }),
     requireBranchesToBeUpToDate,

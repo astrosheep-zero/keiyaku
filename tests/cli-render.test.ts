@@ -42,7 +42,7 @@ import {
   AKUMA_ACTIVITY_AT,
   type ActivityToolCall,
 } from "./support/kanshi-activity.js";
-import type { Catalog } from "../src/library/catalog.js";
+import type { Catalog } from "../src/cli/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -147,6 +147,7 @@ test("catalog text renders only the selected identity layer", () => {
     renderCatalogText({
       kind: "archetypes",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
+      hasMore: false,
     }),
     ["available Akuma", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
   );

@@ -7,7 +7,9 @@ import type { AmendRegionObservation, RegionObservation } from "./region.js";
 import type { Repo } from "./repo.js";
 import type { MutationResult } from "./mutation.js";
 import type { SettlementReport } from "../settlement/settle.js";
-import type { Keiyaku, AttestationVerdict } from "./contract.js";
+import type { AttestationVerdict } from "./contract.js";
+import type { Keiyaku } from "./contract-handle.js";
+import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
 import type { TaskId } from "../task/identity.js";
 import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
@@ -70,9 +72,10 @@ export type AmendInput = ActorOptions &
     gates?: readonly Gate[];
   }>;
 export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
-export type ContractListInput = Readonly<{ repo: Repo }>;
+export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;
+export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type KeiyakuOfInput = Readonly<{ repo: Repo; id: ContractId }>;
+export type KeiyakuSelectInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type ReviewInput = Readonly<{ verdict: AttestationVerdict; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = Readonly<{

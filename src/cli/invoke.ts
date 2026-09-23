@@ -178,8 +178,8 @@ function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
   const { contractFromInput, resolveContextualContract } = await import("./selectors.js");
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
-  const { Keiyaku } = await import("../library/keiyaku.js");
-  const id = resolveContextualContract(await Keiyaku.list({ repo }), selector, scope);
+  const { listCompleteContractBoard } = await import("../library/contract.js");
+  const id = resolveContextualContract(await listCompleteContractBoard(repo), selector, scope);
   return contractFromInput(repo, id);
 }
 
@@ -246,26 +246,62 @@ async function invokeCatalog(
   home?: string,
 ) {
   try {
-    const { Keiyaku } = await import("../library/keiyaku.js");
     if (parsed.query.kind === "contracts") {
       if (repo === undefined) throw new Error("Contract catalog requires a resolved Repo");
-      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, repo }) };
-    }
-    if (parsed.query.kind === "archetypes") {
+      const { Keiyaku } = await import("../library/keiyaku.js");
       return {
         kind: "catalog" as const,
-        catalog: await Keiyaku.ls({
-          query: parsed.query,
-          ...(world === null ? {} : { path: world }),
-          ...(home === undefined ? {} : { home }),
-        }),
+        catalog: {
+          kind: "contracts" as const,
+          ...(await Keiyaku.with().list({
+            repo,
+            ...(parsed.query.limit === undefined ? {} : { limit: parsed.query.limit }),
+          })),
+        },
+      };
+    }
+    if (parsed.query.kind === "archetypes") {
+      const { listArchetypeDefinitions } = await import("../akuma/archetype.js");
+      return {
+        kind: "catalog" as const,
+        catalog: {
+          kind: "archetypes" as const,
+          ...(await listArchetypeDefinitions({
+            ...(world === null ? {} : { project: world }),
+            ...(parsed.query.limit === undefined ? {} : { limit: parsed.query.limit }),
+            ...(home === undefined ? {} : { home }),
+          })),
+        },
       };
     }
     if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
     if (parsed.query.kind === "tasks") {
-      return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
+      const { Tasks } = await import("../task/index.js");
+      const listed = await Tasks.of(world).list({
+        selection: "all",
+        namespace: parsed.query.namespace ?? [],
+        ...(parsed.query.limit === undefined ? {} : { limit: parsed.query.limit }),
+      });
+      if (listed.kind !== "accepted") throw new Error("Task list did not return an accepted observation");
+      return {
+        kind: "catalog" as const,
+        catalog: { kind: "tasks" as const, root: world, ...listed.value },
+      };
     }
-    return { kind: "catalog" as const, catalog: await Keiyaku.ls({ query: parsed.query, path: world }) };
+    const { Akumas } = await import("../library/akumas.js");
+    const listed = await Akumas.of(world).list({
+      ...(parsed.query.archetype === undefined ? {} : { archetype: parsed.query.archetype }),
+      ...(parsed.query.limit === undefined ? {} : { limit: parsed.query.limit }),
+    });
+    return {
+      kind: "catalog" as const,
+      catalog: {
+        kind: "akuma" as const,
+        root: world,
+        archetype: parsed.query.archetype ?? null,
+        ...listed,
+      },
+    };
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);

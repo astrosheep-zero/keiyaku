@@ -376,10 +376,10 @@ export async function waitAkuma(
   execution: ExecutionContext = localExecutionContext(),
   observer?: WaitObserver,
 ): Promise<AkumaWaitResult> {
-  const values = requireInput(input, "Keiyaku.wait input");
+  const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
-      throw new TypeError(`Keiyaku.wait input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.wait input has unknown field: ${key}`);
     }
   }
   const selected = completionMode(values.completion);
@@ -407,10 +407,10 @@ export async function killAkuma(
   input: AkumaKillInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaKillResult> {
-  const values = requireInput(input, "Keiyaku.kill input");
+  const values = requireInput(input, "Akumas.kill input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "signal"].includes(key)) {
-      throw new TypeError(`Keiyaku.kill input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.kill input has unknown field: ${key}`);
     }
   }
   const callerSignal = signal(values.signal);
@@ -435,10 +435,10 @@ export async function tellAkuma(
   input: AkumaTellInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaTellResult> {
-  const values = requireInput(input, "Keiyaku.tell input");
+  const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
-      throw new TypeError(`Keiyaku.tell input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.tell input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
@@ -473,7 +473,7 @@ function validateTellWaitInput(
         key,
       )
     ) {
-      throw new TypeError(`Keiyaku tell wait input has unknown field: ${key}`);
+      throw new TypeError(`Akumas tell wait input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
@@ -493,7 +493,7 @@ export async function tellWaitAkuma(
   input: AkumaTellWaitInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaTellWaitResult> {
-  const values = requireInput(input, "Keiyaku tell wait input");
+  const values = requireInput(input, "Akumas tell wait input");
   validateTellWaitInput(values);
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
@@ -527,10 +527,10 @@ export async function tellWaitAkuma(
 }
 
 export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
-  const values = requireInput(input, "Keiyaku.interrupt input");
+  const values = requireInput(input, "Akumas.interrupt input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
-      throw new TypeError(`Keiyaku.interrupt input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.interrupt input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
@@ -548,7 +548,7 @@ export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaI
 function validateHistoryInput(values: Record<string, unknown>): void {
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "id", "before", "since", "limit", "last", "repo"].includes(key))
-      throw new TypeError(`Keiyaku.history input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.history input has unknown field: ${key}`);
   }
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
   if (values.id !== undefined && (typeof values.id !== "string" || values.id.trim() === ""))
@@ -563,7 +563,7 @@ function validateHistoryInput(values: Record<string, unknown>): void {
 }
 
 export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
-  const values = requireInput(input, "Keiyaku.history input");
+  const values = requireInput(input, "Akumas.history input");
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
   try {

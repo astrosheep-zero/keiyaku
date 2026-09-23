@@ -20,7 +20,7 @@ import {
 } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
-import type { Catalog } from "../src/library/catalog.js";
+import type { Catalog } from "../src/cli/catalog.js";
 import type { ContractKanshiRow, KanshiReport } from "../src/kanshi/index.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Settings } from "../src/settings.js";

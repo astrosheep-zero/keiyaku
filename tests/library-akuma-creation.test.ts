@@ -1,7 +1,16 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -37,7 +46,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { Akumas, bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixture,
   installAkumaBodyEmptyPublicationBarrier,
@@ -154,7 +163,7 @@ function slowEmptyPublicationBody() {
   };
 }
 
-test("local schema Keiyaku.call waits for its held empty Body before admitting its Tell", async (t) => {
+test("local schema Akumas.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
@@ -166,8 +175,7 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
   let akumaId: string | undefined;
   let operationFailed = true;
   try {
-    const pending = Keiyaku.call({
-      path: world,
+    const pending = Akumas.of(world).call({
       archetype: "worker",
       body: "schema-call",
       cwd: world,
@@ -228,7 +236,7 @@ test("local schema Keiyaku.call waits for its held empty Body before admitting i
   }
 });
 
-test("local schema Keiyaku.call starts its zero observation budget after birth", async (t) => {
+test("local schema Akumas.call starts its zero observation budget after birth", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
@@ -251,8 +259,7 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
   );
   let operationFailed = true;
   try {
-    const pending = Keiyaku.call({
-      path: world,
+    const pending = Akumas.of(world).call({
       archetype: "worker",
       body: "zero-budget-after-birth",
       cwd: world,
@@ -304,7 +311,7 @@ test("local schema Keiyaku.call starts its zero observation budget after birth",
   }
 });
 
-test("schema Keiyaku.call preserves its child when initial Tell admission fails", async (t) => {
+test("schema Akumas.call preserves its child when initial Tell admission fails", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
@@ -321,8 +328,7 @@ test("schema Keiyaku.call preserves its child when initial Tell admission fails"
     };
   });
   try {
-    const result = await Keiyaku.call({
-      path: world,
+    const result = await Akumas.of(world).call({
       archetype: "worker",
       body: "terminal-birth-schema-call",
       cwd: world,
@@ -332,7 +338,8 @@ test("schema Keiyaku.call preserves its child when initial Tell admission fails"
     });
     akumaId = result.akuma;
     assert.equal(result.observation.kind, "failed");
-    if (result.observation.kind === "failed") assert.match(result.observation.failure.diagnostic, /did not settle cleanly/u);
+    if (result.observation.kind === "failed")
+      assert.match(result.observation.failure.diagnostic, /did not settle cleanly/u);
     assert.equal(admissionCalls, 1);
     const history = await PublicAkuma.select(world, result.akuma).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
@@ -357,20 +364,19 @@ test("schema Keiyaku.call preserves its child when initial Tell admission fails"
   }
 });
 
-test("forwarded schema Keiyaku.call waits for birth and answers its first Tell", async (t) => {
+test("forwarded schema Akumas.call waits for birth and answers its first Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const { pump, leash } = await requestPump(world, slow.spawn);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let operationFailed = true;
   try {
-    const pending = routedKeiyaku.call({
-      path: world,
+    const pending = routedAkumas.call({
       archetype: "worker",
       body: "forwarded-schema-call",
       cwd: world,
@@ -424,16 +430,15 @@ test("forwarded schema Keiyaku.call waits for birth and answers its first Tell",
   }
 });
 
-test("forwarded schema Keiyaku.call admits its initial Tell after held birth before a zero-budget deadline", async () => {
+test("forwarded schema Akumas.call admits its initial Tell after held birth before a zero-budget deadline", async () => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const { pump, leash } = await requestPump(world, slow.spawn);
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   try {
-    const pending = routedKeiyaku.call({
-      path: world,
+    const pending = routedAkumas.call({
       archetype: "worker",
       body: "forwarded-deadline-after-birth",
       cwd: world,
@@ -465,7 +470,7 @@ test("forwarded schema Keiyaku.call admits its initial Tell after held birth bef
   }
 });
 
-test("forwarded Keiyaku.call spends its wait budget from the child's Tell admission", async (t) => {
+test("forwarded Akumas.call spends its wait budget from the child's Tell admission", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   const slow = slowEmptyPublicationBody();
@@ -498,10 +503,9 @@ test("forwarded Keiyaku.call spends its wait budget from the child's Tell admiss
     }
     return admission;
   });
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   try {
-    const pending = routedKeiyaku.call({
-      path: world,
+    const pending = routedAkumas.call({
       archetype: "worker",
       body: "forwarded-budget-after-admission",
       cwd: world,
@@ -514,7 +518,8 @@ test("forwarded Keiyaku.call spends its wait budget from the child's Tell admiss
     const result = await pending;
     const elapsed = performance.now() - admittedAtPerf;
     assert.equal(result.observation.kind, "observed", JSON.stringify(result.observation));
-    if (result.observation.kind === "observed") assert.deepEqual(result.observation.observation, { reason: "deadline" });
+    if (result.observation.kind === "observed")
+      assert.deepEqual(result.observation.observation, { reason: "deadline" });
     assert.equal(remainingBudget, 0, `forwarding delay consumed the deadline after ${elapsed}ms from Tell admission`);
   } finally {
     try {
@@ -528,7 +533,7 @@ test("forwarded Keiyaku.call spends its wait budget from the child's Tell admiss
   }
 });
 
-test("ordinary Keiyaku.call stays bound to its first Turn when a later Turn settles before observation", async (t) => {
+test("ordinary Akumas.call stays bound to its first Turn when a later Turn settles before observation", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
@@ -536,8 +541,7 @@ test("ordinary Keiyaku.call stays bound to its first Turn when a later Turn sett
   let observedTellId: string | undefined;
   let operationFailed = true;
   try {
-    const result = await Keiyaku.call({
-      path: world,
+    const result = await Akumas.of(world).call({
       archetype: "worker",
       body: "ordinary-first-input",
       cwd: world,
@@ -665,7 +669,6 @@ async function requestPump(
           admitInitialTell ??
           (async ({ id, initialTell, signal }) =>
             await new AkumaHandle(id, root).admitInitialTell(initialTell, { signal })),
-
       }),
       fleetRequestCommands({
         wait: async () => {
@@ -695,10 +698,9 @@ test("forwarded call preserves the born child when its exact initial Tell receip
     kind: "birth-failed",
     diagnostic: "initial Tell admission failed after child birth",
   }));
-  const routedKeiyaku = Keiyaku.withExecution({ execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   try {
-    const result = await routedKeiyaku.call({
-      path: world,
+    const result = await routedAkumas.call({
       archetype: "worker",
       body: "forwarded-partial-birth",
       cwd: world,
@@ -711,7 +713,10 @@ test("forwarded call preserves the born child when its exact initial Tell receip
       assert.match(result.observation.failure.diagnostic, /missing from Heart/u);
       assert.equal(result.observation.tell, undefined);
     }
-    assert.equal((await PublicAkuma.select(world, result.akuma).history()).rows.some((row) => row.kind === "tell"), false);
+    assert.equal(
+      (await PublicAkuma.select(world, result.akuma).history()).rows.some((row) => row.kind === "tell"),
+      false,
+    );
   } finally {
     try {
       await pump.close();
@@ -731,11 +736,11 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let operationFailed = true;
-  let bound: Awaited<ReturnType<typeof Keiyaku.bind>> | undefined;
+  let bound: Awaited<ReturnType<ReturnType<typeof Keiyaku.with>["bind"]>> | undefined;
   const environment = { ...process.env };
   delete environment[AKUMA_REQUESTS_ENV];
   try {
-    bound = await Keiyaku.bind({
+    bound = await Keiyaku.with().bind({
       repo,
       markdown: contractMarkdown("Akuma execution placement", {
         Context: "A Contract association and a call execution directory are separate inputs.",
@@ -803,31 +808,44 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   const root = await World.at(temporaryDirectory(context, "keiyaku-library-world-proof-"));
   const forged = `${root}/.`;
   await assert.rejects(
-    Keiyaku.call({ path: forged as never, archetype: "worker", body: "must not start" }),
+    Akumas.of(forged as never).call({
+      archetype: "worker",
+      body: "must not start",
+    }),
     /canonical physical directory/u,
   );
   await assert.rejects(
-    Keiyaku.fork({ path: forged as never, akuma: "aku/worker/1234abcd", at: "turn/1" }),
+    Akumas.of(forged as never).fork({
+      akuma: "aku/worker/1234abcd",
+      at: "turn/1",
+    }),
+    /canonical physical directory/u,
+  );
+  await assert.rejects(Akumas.of(forged as never).list(), /canonical physical directory/u);
+  await assert.rejects(
+    Akumas.of(forged as never).status({
+      akuma: "aku/worker/1234abcd",
+    }),
     /canonical physical directory/u,
   );
   await assert.rejects(
-    Keiyaku.ls({ query: { kind: "tasks" }, path: forged as never }),
+    Akumas.of(forged as never).wait({
+      akuma: ["aku/worker/1234abcd"],
+      completion: "all",
+    }),
     /canonical physical directory/u,
   );
   await assert.rejects(
-    Keiyaku.status({ path: forged as never, akuma: "aku/worker/1234abcd" }),
+    Akumas.of(forged as never).tell({
+      akuma: "aku/worker/1234abcd",
+      body: "must not tell",
+    }),
     /canonical physical directory/u,
   );
   await assert.rejects(
-    Keiyaku.wait({ path: forged as never, akuma: ["aku/worker/1234abcd"], completion: "all" }),
-    /canonical physical directory/u,
-  );
-  await assert.rejects(
-    Keiyaku.tell({ path: forged as never, akuma: "aku/worker/1234abcd", body: "must not tell" }),
-    /canonical physical directory/u,
-  );
-  await assert.rejects(
-    Keiyaku.kill({ path: forged as never, akuma: ["aku/worker/1234abcd"] }),
+    Akumas.of(forged as never).kill({
+      akuma: ["aku/worker/1234abcd"],
+    }),
     /canonical physical directory/u,
   );
   assert.equal(existsSync(join(root, ".keiyaku", "akuma")), false);

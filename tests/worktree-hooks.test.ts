@@ -76,7 +76,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     create: [appendCommand(log, "create\n", 100)],
     destroy: [appendCommand(log, "destroy\n")],
   };
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Concurrent hooks"),
     hooks,
@@ -130,7 +130,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
       },
     ],
   };
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Recovery around destroy hooks"),
     hooks,
@@ -154,7 +154,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
 test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Terminal wins"),
     hooks: EMPTY_HOOKS,
@@ -263,7 +263,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   );
   repository.run(["add", ".keiyaku/settings.json"]);
   repository.run(["commit", "--quiet", "-m", "scratch settings"]);
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Scratch cleanup"),
     hooks: EMPTY_HOOKS,

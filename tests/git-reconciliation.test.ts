@@ -39,7 +39,7 @@ let tenderedReviewGatedTargetTemplate: Promise<TenderedReviewGatedTargetTemplate
 
 async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
@@ -89,7 +89,7 @@ async function tenderedReviewGatedTargetFixture() {
     chmodSync(path, generated.mode);
   }
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.of({ repo, id: template.id });
+  const contract = Keiyaku.with().select({ repo, id: template.id });
   return { contract, repository, worktree };
 }
 
@@ -107,7 +107,7 @@ async function restoreOwnedRefs(
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
     const repository = repositoryWithMain();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: document(),
       workspace: "worktree",
@@ -192,7 +192,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
       async (gitPath) =>
         (
-          await Keiyaku.of({
+          await Keiyaku.with().select({
             repo: await Repo.at({ path: repository.path, gitPath }),
             id: state.id,
           })

@@ -1,5 +1,5 @@
 import { archetypeName } from "../../akuma/identity.js";
-import type { CatalogQuery } from "../../library/catalog.js";
+import type { CatalogQuery } from "../catalog.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
@@ -265,10 +265,6 @@ function akumaCatalogQuery(
   parts: ParsedContractParts,
 ): CatalogQuery {
   const limit = optionalFlag(parts.flags, "limit");
-  if (query.kind !== "akuma") {
-    if (limit !== undefined) refuse("ls", "--limit requires an Akuma instance directory");
-    return query;
-  }
   if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
     refuse("ls", "--limit requires a positive safe integer");
   return {

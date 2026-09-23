@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
+import { boundedListLimit, type BoundedList } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
 import { archetypeName } from "./identity.js";
 import type { ProviderAdapter } from "./provider.js";
@@ -332,12 +333,21 @@ async function resolveArchetype(
 }
 
 export async function listArchetypeDefinitions(
-  input: ArchetypeCoordinates = {},
-): Promise<readonly ArchetypeCatalogRow[]> {
+  input: ArchetypeCoordinates & Readonly<{ limit?: number }> = {},
+): Promise<BoundedList<ArchetypeCatalogRow>> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
+  const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
+  const all = await archetypePaths(input);
+  const selected =
+    limit === undefined
+      ? { paths: all, hasMore: false }
+      : (() => {
+          const paths = all.slice(0, limit + 1);
+          return { paths: paths.slice(0, limit), hasMore: paths.length > limit };
+        })();
   const settled = await Promise.allSettled(
-    (await archetypePaths(input)).map(async ({ name, path }) => {
+    selected.paths.map(async ({ name, path }) => {
       try {
         const definition = await resolveArchetype(name, input, undefined);
         return Object.freeze({
@@ -357,7 +367,10 @@ export async function listArchetypeDefinitions(
   );
   const firstInvalid = settled.find((result) => result.status === "rejected");
   if (firstInvalid !== undefined) throw firstInvalid.reason;
-  return settled.map((result) => (result as PromiseFulfilledResult<ArchetypeCatalogRow>).value);
+  return {
+    rows: settled.map((result) => (result as PromiseFulfilledResult<ArchetypeCatalogRow>).value),
+    hasMore: selected.hasMore,
+  };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {

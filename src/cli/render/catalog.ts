@@ -1,4 +1,5 @@
-import type { Catalog, ContractRow } from "../../index.js";
+import type { Catalog } from "../catalog.js";
+import type { ContractRow } from "../../library/contract.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -116,6 +117,7 @@ export function renderCatalogText(catalog: Catalog): string {
         `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
         ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
       ]),
+      ...(catalog.hasMore ? ["…"] : []),
     ].join("\n");
   }
   return renderAkumaCatalog(catalog);

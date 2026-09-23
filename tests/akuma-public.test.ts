@@ -19,9 +19,9 @@ import {
   activitySnapshotSchema,
   type ActivitySnapshot,
   type ActivityHistory,
-  type TurnLedger
+  type TurnLedger,
 } from "../src/akuma/projection.js";
-import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
+import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
@@ -43,7 +43,7 @@ import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../s
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
-import { Keiyaku } from "../src/index.js";
+import { Akumas } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { World } from "../src/world.js";
@@ -195,7 +195,10 @@ test("malformed public history IDs refuse before Heart reads", async (context) =
   await assert.rejects(() => born.handle.history({ id: "history-1" }), /turn\/<positive safe integer>/u);
   await assert.rejects(
     async () =>
-      Keiyaku.history({ path: await World.at(root), akuma: born.allocated.id, id: "turn/9007199254740992" }),
+      Akumas.of(await World.at(root)).history({
+        akuma: born.allocated.id,
+        id: "turn/9007199254740992",
+      }),
     /turn\/<positive safe integer>/u,
   );
 });
@@ -339,8 +342,6 @@ test("a failed Heart refresh releases the observation's free leash claim", async
   }
 });
 
-
-
 const provider: ProviderAdapter = fixtureAdapter(async () => {
   const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
   return {
@@ -478,7 +479,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
   ];
   const ledger = projectTurns(facts);
   const selected = snapshot(ledger, { tail: 1 });
-  assert.ok(selected.kind === "open", "expected selected.kind = \"open\"");
+  assert.ok(selected.kind === "open", 'expected selected.kind = "open"');
   assert.deepEqual(
     selected.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
     [5, 6, 7, 8],
@@ -517,7 +518,7 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
     }),
   ]);
   const idle = snapshot(closed);
-  assert.ok(idle.kind === "idle", "expected idle.kind = \"idle\"");
+  assert.ok(idle.kind === "idle", 'expected idle.kind = "idle"');
   assert.equal(idle.outcome?.outcome.kind, "answered");
   assert.deepEqual(
     idle.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
@@ -562,7 +563,9 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
 });
 
 function snapshotSequences(snapshot: ActivitySnapshot): readonly (number | `gap:${number}`)[] {
-  return snapshot.entries.map((entry) => (entry.kind === "gap" ? (`gap:${entry.count}` as `gap:${number}`) : entry.row.sequence));
+  return snapshot.entries.map((entry) =>
+    entry.kind === "gap" ? (`gap:${entry.count}` as `gap:${number}`) : entry.row.sequence,
+  );
 }
 
 test("open snapshots retain one current-Turn opening input outside the ordinary budget", () => {
@@ -639,9 +642,7 @@ test("open snapshots protect settled says but select file changes as ordinary to
   if (selected.snapshot.kind === "open") {
     assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, "gap:2", 7, 8]);
     assert.equal(selected.snapshot.omitted, 3);
-    const edit = selected.snapshot.entries.find(
-      (entry) => entry.kind === "row" && entry.row.sequence === 8,
-    );
+    const edit = selected.snapshot.entries.find((entry) => entry.kind === "row" && entry.row.sequence === 8);
     assert.equal(edit?.kind, "row");
     if (edit?.kind === "row" && edit.row.kind === "tool" && edit.row.call.kind === "fileChange") {
       assert.equal(edit.row.call.changes[0]?.path, "src/two.ts");
@@ -660,9 +661,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
       body: "wake this Turn",
       recordedAt: "2026-08-10T00:00:01.000Z",
       state: "told",
-      deliveries: [
-        { route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:02.000Z" },
-      ],
+      deliveries: [{ route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:02.000Z" }],
     },
     {
       kind: "tell",
@@ -671,9 +670,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
       body: "also at launch",
       recordedAt: "2026-08-10T00:00:02.000Z",
       state: "told",
-      deliveries: [
-        { route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:03.000Z" },
-      ],
+      deliveries: [{ route: "launch", turnSequence: 4, deliveredAt: "2026-08-10T00:00:03.000Z" }],
     },
     { kind: "turn-start", sequence: 4, bodySequence: 1, startedAt: "2026-08-10T00:00:04.000Z" },
     activityFact(5, 4, "2026-08-10T00:00:05.000Z", { type: "assistant", text: "working" }),
@@ -684,9 +681,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
       body: "old launch",
       recordedAt: "2026-08-10T00:00:06.000Z",
       state: "told",
-      deliveries: [
-        { route: "launch", turnSequence: 1, deliveredAt: "2026-08-10T00:00:06.000Z" },
-      ],
+      deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: "2026-08-10T00:00:06.000Z" }],
     },
     {
       kind: "tell",
@@ -695,9 +690,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
       body: "steer current work",
       recordedAt: "2026-08-10T00:00:07.000Z",
       state: "told",
-      deliveries: [
-        { route: "live", turnSequence: 4, receipt: "required", deliveredAt: "2026-08-10T00:00:07.000Z" },
-      ],
+      deliveries: [{ route: "live", turnSequence: 4, receipt: "required", deliveredAt: "2026-08-10T00:00:07.000Z" }],
     },
     activityFact(8, 4, "2026-08-10T00:00:08.000Z", { type: "note", text: "still working" }),
   ];
@@ -707,9 +700,18 @@ test("open snapshots select the retained launch Tell only without a current-Turn
     assert.equal(launch.snapshot.openingSequence, 1);
     assert.deepEqual(snapshotSequences(launch.snapshot), [1, "gap:1", 5, "gap:2"]);
     assert.equal(launch.snapshot.entries.filter((entry) => entry.kind === "row" && entry.row.sequence === 1).length, 1);
-    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 6), false);
-    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 7), false);
-    assert.equal(launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2), false);
+    assert.equal(
+      launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 6),
+      false,
+    );
+    assert.equal(
+      launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 7),
+      false,
+    );
+    assert.equal(
+      launch.snapshot.entries.some((entry) => entry.kind === "row" && entry.row.sequence === 2),
+      false,
+    );
   }
 
   const callWins = selectSnapshot(
@@ -760,7 +762,15 @@ test("opening input composes with existing actionable and receipt pins without a
       name: "Search",
       call: { kind: "search", query: "TODO" },
     }),
-    { kind: "tell" as const, sequence: 6, id: "pending", body: "keep going", recordedAt: "2026-08-10T00:00:06.000Z", state: "pending" as const, deliveries: [] },
+    {
+      kind: "tell" as const,
+      sequence: 6,
+      id: "pending",
+      body: "keep going",
+      recordedAt: "2026-08-10T00:00:06.000Z",
+      state: "pending" as const,
+      deliveries: [],
+    },
     {
       kind: "tell" as const,
       sequence: 7,
@@ -768,7 +778,14 @@ test("opening input composes with existing actionable and receipt pins without a
       body: "receipt evidence",
       recordedAt: "2026-08-10T00:00:07.000Z",
       state: "told" as const,
-      deliveries: [{ route: "live" as const, turnSequence: 2, receipt: "required" as const, deliveredAt: "2026-08-10T00:00:07.000Z" }],
+      deliveries: [
+        {
+          route: "live" as const,
+          turnSequence: 2,
+          receipt: "required" as const,
+          deliveredAt: "2026-08-10T00:00:07.000Z",
+        },
+      ],
     },
   ]);
   const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
@@ -840,10 +857,24 @@ test("opening identity is positive and names exactly one open snapshot entry", (
     }),
   );
   assert.throws(() =>
-    activitySnapshotSchema.parse({ kind: "unborn", entries: [], omitted: 0, openingSequence: 1, reportedChanges: [], reportedChangesOmitted: 0 }),
+    activitySnapshotSchema.parse({
+      kind: "unborn",
+      entries: [],
+      omitted: 0,
+      openingSequence: 1,
+      reportedChanges: [],
+      reportedChangesOmitted: 0,
+    }),
   );
   assert.throws(() =>
-    activitySnapshotSchema.parse({ kind: "idle", entries: [], omitted: 0, openingSequence: 1, reportedChanges: [], reportedChangesOmitted: 0 }),
+    activitySnapshotSchema.parse({
+      kind: "idle",
+      entries: [],
+      omitted: 0,
+      openingSequence: 1,
+      reportedChanges: [],
+      reportedChangesOmitted: 0,
+    }),
   );
 });
 
@@ -1285,10 +1316,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await handle.status()).life, "asleep");
   const finalStatus = await handle.status();
-  assert.equal(
-    finalStatus.timeline.kind === "idle" && finalStatus.timeline.outcome?.outcome.kind === "answered",
-    true,
-  );
+  assert.equal(finalStatus.timeline.kind === "idle" && finalStatus.timeline.outcome?.outcome.kind === "answered", true);
   assert.equal(await handle.kill(), "already-stopped");
   assert.equal(await pauseRequested(allocated.paths), false);
   assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
@@ -1635,10 +1663,10 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     const world = await akumaAt(root, { home, settings: settingsValue });
     assert.deepEqual(await world.listArchetypes(), ["home-only", "project-only", "shared"]);
 
-    const catalog = await Keiyaku.ls({ query: { kind: "archetypes" }, path: await World.at(root), home });
+    const catalog = await listArchetypeDefinitions({ project: root, home });
     assert.deepEqual(catalog, {
-      kind: "archetypes",
       rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
+      hasMore: false,
     });
 
     const parsed = parseArgv(["-C", root, "ls", "aku/"]);
@@ -1646,7 +1674,7 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     const cli = await invoke(parsed, {
       environment: { KEIYAKU_HOME: home },
     });
-    assert.deepEqual(cli, { kind: "catalog", catalog });
+    assert.deepEqual(cli, { kind: "catalog", catalog: { kind: "archetypes", rows: catalog.rows, hasMore: false } });
 
     const shared = await loadArchetype({ name: "shared", project: root, home, settings: settingsValue });
     assert.equal(shared.path, join(root, ".keiyaku", "akuma", "shared.md"));

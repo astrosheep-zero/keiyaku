@@ -17,7 +17,7 @@ function runtimeStopSettings(): string {
 
 async function bindAndCommit(options: { gates: readonly string[]; verification: string; runtimeStop?: boolean }) {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(options.verification),
     workspace: "worktree",

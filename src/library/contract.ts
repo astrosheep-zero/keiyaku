@@ -1,4 +1,4 @@
-// Contract's static facade deliberately depends only on construction and observation.
+// Contract composition depends only on construction and observation.
 import { actorOption, optionalBoolean, requireInput } from "./input.js";
 import { worktreeHooksOption } from "./configuration.js";
 import type { RegionOverlap } from "./region.js";
@@ -50,9 +50,8 @@ export type {
   MutationFinalitySurface,
   MutationPendingSurface,
 } from "./mutation.js";
-import { bindFromCli as bindFromCliImplementation, bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
-export { KeiyakuHandle } from "./contract-handle.js";
-import { KeiyakuHandle } from "./contract-handle.js";
+import { bindKeiyaku as bindKeiyakuImplementation } from "./contract-bind.js";
+import type { Keiyaku, createKeiyakuHandle } from "./contract-handle.js";
 import type {
   AbandonInput,
   AmendInput,
@@ -60,11 +59,12 @@ import type {
   ArcInput,
   BindInput,
   BindResult,
+  ContractList,
   ContractListInput,
   ContractObservationInput,
   DeliverInput,
   ForkBindInput,
-  KeiyakuOfInput,
+  KeiyakuSelectInput,
   LocalContractComposition,
   MarkdownBindInput,
   ReconcileReport,
@@ -117,11 +117,12 @@ export type {
   ContractWorkspaceObservation,
   BindInput,
   BindResult,
+  ContractList,
   ContractListInput,
   ContractObservationInput,
   DeliverInput,
   ForkBindInput,
-  KeiyakuOfInput,
+  KeiyakuSelectInput,
   MarkdownBindInput,
   ReconcileReport,
   ReviewInput,
@@ -150,66 +151,55 @@ export { Delivery };
 
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
 
-export type Keiyaku = KeiyakuHandle;
 export type LocalContractCompositionCapture = Readonly<{
   actor?: NonNullable<ReturnType<typeof actorOption>["actor"]>;
   hooks: ReturnType<typeof worktreeHooksOption>;
   requireBranchesToBeUpToDate: boolean;
 }>;
 
+type KeiyakuHandleFactory = typeof createKeiyakuHandle;
+
 export function captureLocalContractComposition(input?: LocalContractComposition): LocalContractCompositionCapture {
-  const values = requireInput(input ?? {}, "Keiyaku.withLocal input", [
-    "actor",
-    "hooks",
-    "requireBranchesToBeUpToDate",
-  ]);
+  const values = requireInput(input ?? {}, "Keiyaku.with input", ["actor", "hooks", "requireBranchesToBeUpToDate"]);
   const actor = actorOption(values.actor).actor;
   return Object.freeze({
     ...(actor === undefined ? {} : { actor }),
     hooks: worktreeHooksOption(values.hooks),
     requireBranchesToBeUpToDate:
-      optionalBoolean(values.requireBranchesToBeUpToDate, "Keiyaku.withLocal requireBranchesToBeUpToDate") ?? false,
+      optionalBoolean(values.requireBranchesToBeUpToDate, "Keiyaku.with requireBranchesToBeUpToDate") ?? false,
   });
 }
 
-export function keiyakuOf(
-  input: KeiyakuOfInput,
+export function selectKeiyaku(
+  input: KeiyakuSelectInput,
+  createHandle: KeiyakuHandleFactory,
   execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Keiyaku {
-  const values = requireInput(input, "Keiyaku.of input");
+  const values = requireInput(input, "Keiyaku.with().select input");
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  return new KeiyakuHandle(contractId(values.id), scope, execution, composition);
+  return createHandle(contractId(values.id), scope, execution, composition);
 }
 
-export async function listKeiyaku(input: ContractListInput): Promise<ContractBoard> {
-  const values = requireInput(input, "Keiyaku.list input");
-  for (const key of Object.keys(values))
-    if (key !== "repo") throw new TypeError(`Keiyaku.list input has unknown field: ${key}`);
-  const scope = scopeForRepo(values.repo);
+export async function listCompleteContractBoard(repo: Repo): Promise<ContractBoard> {
+  const scope = scopeForRepo(repo);
   return withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
 }
 
-/** Internal bounded catalogue composition; the public Contract board remains complete. */
-export async function listContractCatalogue(
-  input: Readonly<{ repo: Repo; limit?: number }>,
-): Promise<ContractCatalogue> {
-  const values = requireInput(input, "Contract catalogue input");
+export async function listKeiyaku(input: ContractListInput): Promise<ContractList> {
+  const values = requireInput(input, "Keiyaku.with().list input");
   for (const key of Object.keys(values)) {
-    if (key !== "repo" && key !== "limit") throw new TypeError(`Contract catalogue input has unknown field: ${key}`);
-  }
-  const limit = values.limit;
-  if (limit !== undefined && typeof limit !== "number") {
-    throw new TypeError("Contract catalogue limit must be a number");
+    if (key !== "repo" && key !== "limit") throw new TypeError(`Keiyaku.with().list input has unknown field: ${key}`);
   }
   const scope = scopeForRepo(values.repo);
+  if (values.limit === undefined) {
+    const board = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
+    return { ...board, hasMore: false };
+  }
+  if (typeof values.limit !== "number") throw new TypeError("Contract list limit must be a number");
   return withGitDecodeChannel(scope, (channel) =>
-    contractCatalogueOperation({
-      scope,
-      channel,
-      ...(limit === undefined ? {} : { limit }),
-    }),
+    contractCatalogueOperation({ scope, channel, limit: values.limit as number }),
   );
 }
 
@@ -230,19 +220,11 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
 
 export async function bindKeiyaku(
   input: BindInput,
+  createHandle: KeiyakuHandleFactory,
   execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<BindResult> {
-  return bindKeiyakuImplementation(input, (id, scope) => new KeiyakuHandle(id, scope, execution, composition));
+  return bindKeiyakuImplementation(input, (id, scope) => createHandle(id, scope, execution, composition));
 }
 
 export { parseMarkdownBindDocument } from "./contract-bind.js";
-
-/** Internal CLI composition; not exported from the package root. */
-export async function bindFromCli(
-  input: BindInput,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<BindResult> {
-  const composition = captureLocalContractComposition();
-  return bindFromCliImplementation(input, (id, scope) => new KeiyakuHandle(id, scope, execution, composition));
-}

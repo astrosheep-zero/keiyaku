@@ -90,7 +90,7 @@ test("placement keeps post-bind Task edits and changes only state to done", asyn
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Edited completion");
   commitTasks(world);
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Edited completion"),
@@ -116,7 +116,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Replay completion", "drop");
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Replay completion"),
@@ -155,7 +155,7 @@ test(
     const world = repository(),
       repo = await cachedRepoAt(world.path);
     const taskId = await task(world.path, "Settlement cleanup", "drop");
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo,
       task: taskId,
       markdown: document("Settlement cleanup"),
@@ -213,7 +213,7 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Unknown holder release", "drop");
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Unknown holder release"),

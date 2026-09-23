@@ -96,7 +96,7 @@ test("CLI accepts native repository coordinate spellings through managed worktre
     });
     assert.equal(result.kind, "accepted");
     if (result.kind !== "accepted") continue;
-    const row = (await Keiyaku.list({ repo: await Repo.at({ path }) })).rows.find(
+    const row = (await Keiyaku.with().list({ repo: await Repo.at({ path }) })).rows.find(
       (candidate) => candidate.id === result.contract,
     );
     assert.notEqual(row?.worktreePath, null);

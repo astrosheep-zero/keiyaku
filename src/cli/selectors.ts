@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { identitySegments } from "../identity/coordinates.js";
 import { Keiyaku, type ContractBoard, type ContractId, type ContractRow, type Repo } from "../index.js";
-import { keiyakuOf } from "../library/contract.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import type { KanshiReport } from "../kanshi/index.js";
 import { CliUsageError } from "./parse.js";
@@ -32,7 +31,7 @@ export function contractFromInput(
 ): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: keiyakuOf({ repo, id }, execution) };
+    return { id, contract: Keiyaku.with({ execution }).select({ repo, id }) };
   } catch (error) {
     selectorError(error instanceof Error ? error.message : String(error));
   }

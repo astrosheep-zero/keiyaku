@@ -7,9 +7,11 @@ declarations, help, and executable specifications.
 The public caller path is `Akuma.birth`, synchronous `Akuma.select`, and
 `Akuma.tell`. Birth submits no prompt; selection performs no read. A selected
 Akuma exposes its identity, status, plain text Tell, and schema-decoded Tell
-answer, along with the lifecycle-only idle, history, and kill observations. The
-composition facade owns root, alias, dispatch, and request routing around this
-product; those concerns do not become Akuma handle methods.
+answer, along with the lifecycle-only idle, history, and kill observations.
+`Akumas` owns World selection, Alias and Contract selector resolution, Dispatch
+and TaskHolder association, and plural request routing around this product;
+those concerns do not become single-Akuma handle methods. `Akuma` remains
+independent of Repo and selector composition.
 
 ## One Public Timeline
 

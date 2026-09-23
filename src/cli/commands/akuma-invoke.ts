@@ -5,7 +5,8 @@ import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory } from "../../akuma/akuma.js";
 import { decodeTellWaitObservation, type WaitObserver } from "../../akuma/fleet-execution.js";
 import {
-  Keiyaku,
+  Akumas,
+  type AkumaInterruptResult,
   type AkumaKillResult,
   type AkumaHistoryResult,
   type AkumaObservation,
@@ -28,7 +29,7 @@ import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "../render/terminal.
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
-import { killAkuma, tellAkuma, tellWaitAkuma, waitAkuma } from "../../library/fleet.js";
+import { tellWaitAkuma, waitAkuma } from "../../library/fleet.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { addressAkuma, resolveAkuma } from "../../library/address.js";
@@ -71,7 +72,7 @@ export type AkumaInvocationResult =
       kind: "akuma";
       action: "tell";
       mode: "interrupt";
-      result: Awaited<ReturnType<typeof Keiyaku.interrupt>>;
+      result: AkumaInterruptResult;
       body: string;
       alias?: string;
     }>
@@ -127,6 +128,10 @@ type InvokeInput = Readonly<{
 
 /** The call the CLI makes once its prompt, schema, and placement are resolved. */
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
+
+function akumas(input: InvokeInput) {
+  return Akumas.of(input.path, { execution: input.execution ?? localExecutionContext() });
+}
 
 function callSignalOption(signal: AbortSignal | undefined): Pick<CallRequest, "signal"> {
   return signal === undefined ? {} : { signal };
@@ -354,9 +359,8 @@ async function invokeTell(
   }
   const initiator = await inputInitiator(input);
   if (command.interrupt) {
-    const result = await Keiyaku.interrupt({
+    const result = await akumas(input).interrupt({
       ...initiator,
-      path: input.path,
       akuma: command.akuma,
       body,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
@@ -372,17 +376,13 @@ async function invokeTell(
       ...(alias === undefined ? {} : { alias }),
     };
   }
-  const result = await tellAkuma(
-    {
-      ...initiator,
-      path: input.path,
-      akuma: command.akuma,
-      body,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    },
-    input.execution ?? localExecutionContext(),
-  );
+  const result = await akumas(input).tell({
+    ...initiator,
+    akuma: command.akuma,
+    body,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
   const alias = inputAlias(command.akuma);
   return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
 }
@@ -391,8 +391,7 @@ async function invokeHistory(
   command: Extract<InvokedAkumaCommand, { command: "history" }>,
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
-  const result = await Keiyaku.history({
-    path: input.path,
+  const result = await akumas(input).history({
     akuma: command.akuma,
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(command.before === undefined ? {} : { before: command.before }),
@@ -424,8 +423,7 @@ async function invokeFork(
   return {
     kind: "akuma",
     action: "fork",
-    receipt: await Keiyaku.fork({
-      path: input.path,
+    receipt: await akumas(input).fork({
       akuma: command.akuma,
       at: command.at,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
@@ -441,15 +439,11 @@ async function invokeKill(
   return {
     kind: "akuma",
     action: "kill",
-    result: await killAkuma(
-      {
-        path: input.path,
-        akuma: command.akuma,
-        ...(input.repo === undefined ? {} : { repo: input.repo }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      },
-      input.execution ?? localExecutionContext(),
-    ),
+    result: await akumas(input).kill({
+      akuma: command.akuma,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    }),
     ...(alias === undefined ? {} : { alias }),
   };
 }
@@ -459,10 +453,9 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
     case "call": {
       const body = await promptBody(command, input);
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-      const caller = input.execution === undefined ? Keiyaku : Keiyaku.withExecution({ execution: input.execution });
+      const caller = akumas(input);
       const request: CallRequest = {
         ...(await inputInitiator(input)),
-        path: input.path,
         archetype: command.archetype,
         body,
         ...(input.home === undefined ? {} : { home: input.home }),
@@ -542,7 +535,7 @@ export async function invokeAkumaStatus(
   return {
     kind: "akuma",
     action: "status",
-    status: await Keiyaku.status({ path, akuma, ...(repo === undefined ? {} : { repo }) }),
+    status: await Akumas.of(path).status({ akuma, ...(repo === undefined ? {} : { repo }) }),
     ...(alias === undefined ? {} : { alias }),
   };
 }

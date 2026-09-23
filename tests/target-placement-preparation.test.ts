@@ -55,7 +55,7 @@ function document(title = "Target checkout placement"): string {
 }
 
 async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",

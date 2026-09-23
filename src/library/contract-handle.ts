@@ -64,16 +64,26 @@ import {
 } from "./contract-operations.js";
 import { KeiyakuRefused, requireAccepted } from "./refusal.js";
 import type { LocalContractCompositionCapture } from "./contract.js";
+import { composeContractLibrary, type KeiyakuLibrary, type KeiyakuWithInput } from "./composition.js";
 type Review = OperationReview;
 
-export class KeiyakuHandle {
+const KEIYAKU_HANDLE = Symbol("Keiyaku handle");
+
+export class Keiyaku {
+  static with(input?: KeiyakuWithInput): KeiyakuLibrary {
+    return composeContractLibrary(input, createKeiyakuHandle);
+  }
+
   constructor(
+    token: typeof KEIYAKU_HANDLE,
     private readonly id: ContractId,
     private readonly scope: RepositoryScope,
     private readonly execution: ExecutionContext = localExecutionContext(),
     private readonly composition: LocalContractCompositionCapture,
   ) {
+    if (token !== KEIYAKU_HANDLE) throw new TypeError("Keiyaku handles are created by Keiyaku.with");
     KEIYAKU_SEATS.set(this, { id, scope });
+    Object.freeze(this);
   }
 
   async state(): Promise<ContractState> {
@@ -454,6 +464,16 @@ export class KeiyakuHandle {
 }
 
 const KEIYAKU_SEATS = new WeakMap<object, Readonly<{ id: ContractId; scope: RepositoryScope }>>();
+
+/** Internal constructor capability; callers select a Contract through Keiyaku.with. */
+export function createKeiyakuHandle(
+  id: ContractId,
+  scope: RepositoryScope,
+  execution: ExecutionContext,
+  composition: LocalContractCompositionCapture,
+): Keiyaku {
+  return new Keiyaku(KEIYAKU_HANDLE, id, scope, execution, composition);
+}
 
 /** Internal package composition capability; not exported from the package root. */
 export function seatForKeiyaku(value: unknown): Readonly<{ id: ContractId; scope: RepositoryScope }> | null {

@@ -98,11 +98,11 @@ const tasks: Edge = ["task/index.ts", "tasks"];
 const catalog: Edge = ["task/catalog.ts", "catalog"];
 const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
   ["library/composition.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
-  ["library/catalog.ts", [akuma, catalog], marker, true],
-  ["library/catalog/index.ts", [akuma, catalog], marker, true],
+  ["library/akumas.ts", [akuma, tasks], marker, true],
+  ["library/akumas/index.ts", [akuma, catalog], marker, true],
   ["library/fleet.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],
   ["library/moved-root.ts", [akuma, tasks], marker, true],
-  ["library/catalog.ts", [akuma, catalog], "", false],
+  ["library/akumas.ts", [akuma, tasks], "", false],
   ["library/rogue-composition.ts", [akuma, tasks], "", false],
   ["library/rogue.ts", [akuma, tasks, ["workspace-place.ts", "appoint"]], "", false],
   ["library/fleet-extra.ts", [akuma, tasks], "", false],

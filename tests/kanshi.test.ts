@@ -68,7 +68,7 @@ async function populatedWorld(t: TestContext) {
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     task: added.value.id,
     markdown: document(),

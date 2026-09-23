@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { createAkumaProduct, type AkumaBornCall } from "../../src/akuma/akuma-product.js";
 import type { AkumaCallInput } from "../../src/akuma/akuma.js";
-import { Keiyaku } from "../../src/index.js";
+import { Akumas } from "../../src/index.js";
 import type {
   AkumaCallContext,
   AkumaConfiguration,
@@ -57,10 +57,9 @@ export class AkumaComposition {
 
   async call(input: AkumaCallInput): Promise<AkumaHandle> {
     const execution = this.configuration.execution;
-    const caller = execution === undefined ? Keiyaku : Keiyaku.withExecution({ execution });
+    const caller = Akumas.of(this.root, execution === undefined ? {} : { execution });
     const cwd = input.cwd ?? (execution?.channel.kind === "body-request" ? undefined : process.cwd());
     const result = await caller.call({
-      path: this.root,
       ...input,
       ...(cwd === undefined ? {} : { cwd }),
       ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),

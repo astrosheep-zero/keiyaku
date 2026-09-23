@@ -260,7 +260,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       timeoutMs: 5_000,
     };
     const hooks = { create: [], destroy: [destroy] };
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Release order"),
       workspace: "worktree",
@@ -287,7 +287,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("Git removal failure retains custody and a fresh reconcile retries successfully", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Retry removal"),
       workspace: "worktree",
@@ -311,12 +311,12 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     ].join("\n");
 
     await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
-      const first = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
+      const first = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
       assert.ok(first.lags.some((lag) => lag.kind === "worktree-retained"));
       assert.equal(repository.run(custody), beforeRefs);
       assert.equal(existsSync(appointment.path), true);
       assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
-      const second = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).reconcile();
+      const second = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).reconcile();
       assert.deepEqual(second.lag, []);
     });
 
@@ -326,7 +326,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("a dangling symlink recreated after Git removal is retained as physical residue", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Dangling path"),
       workspace: "worktree",
@@ -356,7 +356,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
         KEIYAKU_RECREATE_PATH: appointment.path,
       },
       async (gitPath) => {
-        const retained = await Keiyaku.of({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
+        const retained = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
         assert.ok(retained.lags.some((lag) => lag.kind === "worktree-retained"));
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
         assert.equal(repository.run(custody), beforeRefs);
@@ -376,7 +376,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const tasks = Tasks.of(await World.at(repository.path));
     const added = await tasks.add({ title: "Independent task", priority: 0 });
     assert.equal(added.kind, "accepted");
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Corrupt register"),
       workspace: "worktree",
@@ -411,7 +411,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     mkdirSync(target);
     const worktrees = repository.run(["worktree", "list", "--porcelain"]);
     try {
-      const bound = await Keiyaku.bind({
+      const bound = await Keiyaku.with().bind({
         repo: await Repo.at({ path: repository.path }),
         markdown: contractBody("Unrealized"),
         workspace: "worktree",
@@ -430,7 +430,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("release write failure keeps the appointment after physical removal", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Release write"),
       workspace: "worktree",

@@ -105,7 +105,7 @@ async function buildPostBindTemplate(
     repository.run(["config", "user.name", "Test User"]);
     repository.run(["config", "user.email", "test@example.com"]);
   }
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
     workspace: "worktree",
@@ -143,7 +143,7 @@ async function postBindFixture(target: "targetless" | "targeted", gates: readonl
   repository.run(["worktree", "add", "--detach", worktree, template.start]);
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.of({ repo, id: template.id });
+  const contract = Keiyaku.with().select({ repo, id: template.id });
   return { contract, repository, id: template.id, preparation: template.preparation, worktree };
 }
 
@@ -187,7 +187,7 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
     },
     "tracked directory",
   );
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
     workspace: "worktree",
@@ -573,7 +573,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
@@ -605,7 +605,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   test("reconcile recreates a registered managed worktree whose directory disappeared", async () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
@@ -694,7 +694,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       ].join("\n"),
       {},
       async (gitPath) =>
-        Keiyaku.bind({
+        Keiyaku.with().bind({
           repo: await Repo.at({ path: repository.path, gitPath }),
           markdown: contractBody(),
           workspace: "worktree",
@@ -715,7 +715,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(state.id, result.facts[0]?.contract);
     assert.equal(state.head, result.head);
     assert.equal(state.terminal, null);
-    const observation = await Keiyaku.observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
+    const observation = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
     assert.equal(observation.kind, "present");
   });
 
@@ -821,7 +821,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
 
     assert.ok(report.kind === "completed", "expected report.kind = \"completed\"");
     assert.equal(report.contracts.find((item) => item.contractId === id)?.report.lag.length, 0);
-    assert.equal((await Keiyaku.of({ repo: fresh, id }).state()).terminal?.kind, "claimed");
+    assert.equal((await Keiyaku.with().select({ repo: fresh, id }).state()).terminal?.kind, "claimed");
     assert.equal(await readRef(git, deliveryRefFor(id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
@@ -835,7 +835,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
 
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",

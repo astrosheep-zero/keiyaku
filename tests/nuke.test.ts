@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Keiyaku, World } from "../src/index.js";
+import { nuke, World } from "../src/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
@@ -167,7 +167,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     writeFileSync(join(orphanRun, "leash.db"), "orphan leash\n");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
     await running.body;
     assert.equal(existsSync(running.allocated.paths.heart), false);
     assert.equal(existsSync(running.allocated.paths.leash), false);
@@ -189,7 +189,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(readFileSync(join(unknownRun, "bytes.bin"), "utf8"), "foreign runtime\n");
     assert.equal(readFileSync(join(orphanRun, "leash.db"), "utf8"), "orphan leash\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -207,7 +207,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -216,7 +216,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.equal(existsSync(allocated.paths.requests), false);
     assert.equal(existsSync(allocated.paths.directory), false);
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
@@ -257,7 +257,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     const foreignByte = join(foreign, "foreign.txt");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -275,7 +275,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -305,7 +305,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
     writeFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "sibling\n");
     mkdirSync(join(allocated.paths.requests, "other-dir"));
     writeFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "inside\n");
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json")), false);
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json")), false);
     assert.equal(readFileSync(unknownFile, "utf8"), "keep-request-unknown\n");
@@ -324,7 +324,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
       mkdirSync(noncanonical);
       writeFileSync(join(noncanonical, "43333333-3333-4333-8333-333333333333.request.json"), "keep-noncanonical\n");
     }
-    assert.deepEqual(await Keiyaku.nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
     for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
       assert.equal(
         readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"),
@@ -358,7 +358,7 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       writeFileSync(allocated.paths.log, "stdio\n");
       mkdirSync(allocated.paths.requests, { recursive: true });
       writeFileSync(join(allocated.paths.requests, "pending.json"), "claim\n");
-      const result = await Keiyaku.nuke({ world, confirm: world });
+      const result = await nuke({ world, confirm: world });
       assert.equal(result.kind, "failed");
       assert.match(result.diagnostic, /could not be stopped: unavailable/u);
       assert.equal(existsSync(allocated.paths.heart), true);

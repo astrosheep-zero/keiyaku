@@ -24,8 +24,8 @@ declare const id: ContractId;
 declare const markdown: string;
 
 const input: BindInput = { repo, markdown, after: [id], gates: ["reviewed"] };
-const bound: Promise<BindResult> = Keiyaku.bind(input);
-const selected = Keiyaku.of({ repo, id });
+const bound: Promise<BindResult> = Keiyaku.with().bind(input);
+const selected = Keiyaku.with().select({ repo, id });
 const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
 const reviewed: MutationResult<Review> = await selected.review(cancellable);
 const cleanup: readonly ExecutionCleanup[] = reviewed.cleanup;
@@ -38,11 +38,11 @@ const local: LocalContractComposition = {
   hooks: { create: [], destroy: [] },
   requireBranchesToBeUpToDate: true,
 };
-Keiyaku.withLocal(local).of({ repo, id }).review(cancellable);
+Keiyaku.with(local).select({ repo, id }).review(cancellable);
 const execution = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });
-Keiyaku.withExecution({ execution }).of({ repo, id }).review(cancellable);
+Keiyaku.with({ execution }).select({ repo, id }).review(cancellable);
 
-const observed: ContractObservation = await Keiyaku.observe({ repo, id });
+const observed: ContractObservation = await Keiyaku.with().observe({ repo, id });
 if (observed.kind === "present") observed.row.gates.reports;
 declare const reconciled: RepoReconcileReport;
 if (reconciled.kind === "completed") reconciled.contracts;
@@ -64,7 +64,7 @@ const unreported: RepoReconcileReport = { kind: "world-observation-failed" };
 // @ts-expect-error a successful reconciliation must describe its contracts
 const incomplete: RepoReconcileReport = { kind: "completed" };
 // @ts-expect-error binding must contain Markdown or a fork source
-Keiyaku.bind({ repo });
+Keiyaku.with().bind({ repo });
 
 void bound;
 void cleanup;
@@ -74,9 +74,9 @@ void unreported;
 void incomplete;
 
 // @ts-expect-error selectors require branded Contract identities
-Keiyaku.of({ repo, id: "kei/unbranded" });
+Keiyaku.with().select({ repo, id: "kei/unbranded" });
 // @ts-expect-error prerequisite identities cannot be unbranded strings
-Keiyaku.bind({ repo, markdown, after: ["kei/unbranded"] });
+Keiyaku.with().bind({ repo, markdown, after: ["kei/unbranded"] });
 // @ts-expect-error obsolete singular cleanup is not a public result
 reviewed.leak;
 // @ts-expect-error a Repo cannot act as an alternative construction facade

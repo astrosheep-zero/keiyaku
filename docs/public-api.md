@@ -1,15 +1,14 @@
 # Public API
 
-The ESM package root is the sole public Contract import surface. It exposes the
-world/repository construction, Contract handles and operations, delivery view,
-settings construction, plugin contract types, and their public errors and
-values. The root also exposes the public Akuma product without wrapping it:
-its handles, schema construction, errors, and values are identical to those
-available through the Akuma subpath. Import choice changes neither product
+The ESM package root exposes Keiyaku as the Contract product and native
+Contract handle, Akuma as the standalone single-Akuma product, and Akumas as
+the World-bound plural Akuma composition. It also exposes Settings, Plugin
+types, Repo, World, and the named `nuke` operation. The `./akuma` and `./akumas`
+subpaths expose the same respective products as the root; Task and Kanshi
+retain their named product subpaths. Import choice changes neither product
 ownership nor execution semantics and exposes no private execution or storage
-mechanism. Task, Kanshi, Akuma, and Plugin retain their named product subpaths
-and owner chapters. There is no legacy package compatibility export or generic
-orchestration surface.
+mechanism. The package has no generic mixed orchestration facade or legacy
+compatibility export.
 
 ## Composition Boundary
 
@@ -35,12 +34,16 @@ belong to generated declarations, leaf help, and executable specifications.
 
 ## Contract Surface
 
-`Repo` establishes the one Git world shared by its worktrees. `Keiyaku` is a
-stateless branded Contract handle created by binding or by selecting a complete
+`Repo` establishes the one Git world shared by its worktrees. `Keiyaku` is the
+native branded Contract handle created by binding or by selecting a complete
 Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
 amendment, delivery, review, abandonment, arc, audit, and reconciliation.
-Repository-level operations bind, list, observe, and reconcile Contracts.
+`Keiyaku.with()` captures one immutable execution channel and Contract-local
+composition, then exposes only Contract collection operations: bind, select,
+list, and observe. Its actor, worktree hooks, and branch-freshness policy stay
+within Contract operations and never configure Akumas. There is no Contract
+`of` alias or package-root Akuma operation on Keiyaku.
 
 Binding accepts either caller Markdown or a fork of existing terms. It may
 associate a Task through the post-admission association owned by
@@ -63,10 +66,11 @@ not pretend to know the world-wide reverse-dependency view. Text rendering may
 shorten physical Git identities only when unambiguous; product identities remain
 complete.
 
-The explicit repository Contract board read is complete: callers choose it
-when they need the whole board as an SDK fact. Mutable catalogue composition is
-a separate bounded recent observation for presentation; it never turns a
-catalogue request into an exhaustive board read or a lifecycle judgment.
+Contract listing preserves the complete board when no limit is selected. An
+explicit bound reports whether that same observation contains additional
+rows. Selector resolution that requires the complete board uses a private
+complete read and never resolves identity through a bounded public list.
+Listing remains a read-time projection, not a lifecycle judgment.
 
 `Delivery` exposes the captured candidate identity and a presentation diff.
 The diff may be unavailable when Git can no longer supply the recorded bytes;
@@ -96,13 +100,18 @@ omission retains the operation's default or existing terms. Later configuration
 changes never rewrite admitted gates.
 
 World construction and destructive world reset are owned by
-[world.md](world.md); this package surface provides the public entry and result
-without adding another reset authority.
+[world.md](world.md). The package root names the reset operation `nuke`; it
+accepts the explicit World confirmation and adds no reset authority to a
+product handle.
 
-The separate Akuma product owns its own identity, execution, and public handles.
-Package-root composition may connect Contract-facing capabilities to it but
-cannot create a second Akuma mechanism. Similarly, the Task subpath neither
-reads nor writes Contract authority except through the settlement owner.
+The standalone Akuma product owns one Akuma's identity, execution, and public
+handle. `Akumas.of(world)` captures a World and execution channel for selector,
+fleet, creation, and fork operations; callers do not repeat that World on each
+operation. It retains an explicit Repo only for Contract selection or Dispatch
+association and never infers Repo from World or World from Repo. Archetype
+definitions remain an archetype-owner listing. The independent Task product
+likewise captures World and does not read or write Contract authority except
+through the settlement owner.
 
 CLI grammar, flags, help rows, and literal output are owned by the CLI chapters.
 They are deliberately not copied into this package law. Mutation outcome

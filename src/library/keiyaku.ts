@@ -1,20 +1,15 @@
-import {
-  captureLocalContractComposition,
-  type Keiyaku as KeiyakuType,
-  type LocalContractComposition,
-} from "./contract.js";
-import { composeLibrary } from "./composition.js";
-import { libraryExecutionInput, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
-
+export { Keiyaku } from "./contract-handle.js";
+export { Delivery, KeiyakuRefused, KeiyakuRetry, projectMutationFinality } from "./contract.js";
+export type { KeiyakuRefusal, KeiyakuRetryReason } from "./contract.js";
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
-export { Delivery, KeiyakuRefused, KeiyakuRetry } from "./contract.js";
-export { projectMutationFinality } from "./contract.js";
 export { NoGitWorldError, Repo } from "./repo.js";
 export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
-export { AkumaWorldScopeError } from "./address.js";
 export { bodyRequestExecution } from "../akuma/requests.js";
+export { nukeKeiyaku as nuke } from "./nuke.js";
+export { executionReceipt } from "./execution-result.js";
 export type { LibraryExecution } from "../akuma/requests.js";
-export type { LocalContractComposition } from "./contract.js";
+export type { LocalContractComposition, KeiyakuSelectInput } from "./contract-types.js";
+export type { KeiyakuLibrary, KeiyakuWithInput } from "./composition.js";
 
 export type {
   AbandonInput,
@@ -28,7 +23,6 @@ export type {
   DeliveryPreparationRefusal,
   BindInput,
   BindResult,
-  AfterEndpointObservation,
   ContractAfterEdge,
   ContractBoard,
   ContractDependent,
@@ -37,6 +31,7 @@ export type {
   ContractGateReport,
   ContractHistory,
   ContractHistoryEvent,
+  ContractList,
   ContractListInput,
   ContractObservation,
   ContractObservationInput,
@@ -46,11 +41,8 @@ export type {
   ContinuationReport,
   DeliverInput,
   Fact,
-  IntegrationConflictMaterialized,
   FactKind,
-  KeiyakuOfInput,
-  KeiyakuRefusal,
-  KeiyakuRetryReason,
+  IntegrationConflictMaterialized,
   Lag,
   MutationResult,
   MutationFinality,
@@ -77,72 +69,7 @@ export type {
 export type { RegionOverlap } from "./region.js";
 export type { ReconcileInput, RepoAtInput, RepoReconcileReport } from "./repo.js";
 export type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
-export type {
-  AliasStage,
-  AkumaStatus,
-  CallObservation,
-  CallInput,
-  CallResult,
-  CallWaitHead,
-  CallWaitObserver,
-  DispatchStage,
-  ForkInput,
-  ForkResult,
-  IntegrationFailure,
-} from "./akuma-creation.js";
-export type { AliasBinding } from "../alias/index.js";
-export type { Dispatch, DispatchFailure } from "../dispatch/index.js";
-export type { AkumaAlias } from "../identity/selector.js";
-export type { AkumaGlob } from "../identity/selector.js";
-export type { AkuId } from "../akuma/identity.js";
-export type { TellResult, TellWake } from "./fleet.js";
-export type { AllowedAction, AllowedActions } from "../akuma/allowed.js";
-export type { Catalog, CatalogInput, CatalogQuery } from "./catalog.js";
 export type { NukeInput, NukeResult } from "./nuke.js";
 export type { NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "./refusal.js";
-export type {
-  AkumaAddressInput,
-  AkumaSetAddressInput,
-  AkumaWorldScopeRefusal,
-  DirectAkumaSelector,
-  SetAkumaSelector,
-} from "./address.js";
-export type {
-  CreatedTaskObservation,
-  DispatchAssociation,
-  AkumaKillResult,
-  AkumaObservation,
-  AkumaObservationStage,
-  AkumaTellResult,
-  AkumaUnobserved,
-  AkumaWaitResult,
-} from "./fleet.js";
-export type {
-  AkumaHistoryInput,
-  AkumaHistoryResult,
-  AkumaInterruptInput,
-  AkumaInterruptResult,
-  AkumaTellInput,
-  AkumaWaitInput,
-} from "./fleet.js";
-
-export type Keiyaku = KeiyakuType;
-export type KeiyakuLibrary = ReturnType<typeof composeLibrary>;
-
-function routedLibrary(input: Readonly<{ execution: LibraryExecution }>): KeiyakuLibrary {
-  return composeLibrary(libraryExecutionInput(input));
-}
-
-function localLibrary(input?: LocalContractComposition): KeiyakuLibrary {
-  return composeLibrary(localExecutionContext(), captureLocalContractComposition(input));
-}
-
-export const Keiyaku = Object.freeze({
-  ...composeLibrary(),
-  withExecution: routedLibrary,
-  withLocal: localLibrary,
-});
-
-export { executionReceipt } from "./execution-result.js";
 export type { ContractExecution, ExecutionEvent } from "./execution.js";
 export type { ExecutionCleanup, ExecutionStop, ExecutionReceipt, MutationOperation } from "./execution-result.js";

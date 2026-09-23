@@ -246,7 +246,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("admission publishes a journal append and opaque companion in one Git snapshot", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: contractBody(),
       workspace: "worktree",
@@ -305,7 +305,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: contractBody(),
       workspace: "worktree",
@@ -368,7 +368,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("rejects a foreign-contract journal entry before publication", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: contractBody(),
       workspace: "worktree",
@@ -407,7 +407,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("classifies the candidate journal from its folded terminal state", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: contractBody(),
       workspace: "worktree",
@@ -544,7 +544,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("public reconcile and admission observation retain canonical journal validation", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: contractBody(),
       workspace: "worktree",

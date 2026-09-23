@@ -318,6 +318,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitCalledPluginSignal"])],
       deny: libraryOwner.deny,
     },
+    {
+      source: "library/akumas.ts",
+      allow: [...libraryOwner.allow, any("library/akuma-creation.ts")],
+      deny: [
+        any("git/target-placement.ts"),
+        any("protocol/attempt.ts"),
+        any("protocol/placement.ts"),
+        any("protocol/run.ts"),
+      ],
+    },
     { source: "library/**", ...libraryOwner },
     {
       source: "task/**",
@@ -483,6 +493,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "index.ts",
       allow: [
         any("akuma/index.ts"),
+        any("library/akumas.ts"),
         any("library/keiyaku.ts"),
         any("settings.ts"),
         any("world.ts"),

@@ -27,7 +27,7 @@ import { localExecutionContext, type ExecutionContext } from "../akuma/requests.
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
-import { type Keiyaku } from "./contract.js";
+import type { Keiyaku } from "./contract-handle.js";
 import { seatForKeiyaku } from "./contract-handle.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -380,8 +380,8 @@ type ParsedCallInput = Readonly<{
 }>;
 
 async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
-  const values = requireInput(input, "Keiyaku.call input");
-  onlyKeys(values, CALL_INPUT_KEYS, "Keiyaku.call input");
+  const values = requireInput(input, "Akumas.call input");
+  onlyKeys(values, CALL_INPUT_KEYS, "Akumas.call input");
   const path = await World.prove(nonblank(values.path, "path"));
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
@@ -588,7 +588,7 @@ async function observeCall(call: PublishedCall, admission: AdmittedCallTell): Pr
   }
 }
 
-export async function callKeiyaku(
+export async function callAkumas(
   input: CallInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<CallResult> {
@@ -599,9 +599,9 @@ export async function callKeiyaku(
   return born.mode === "detach" ? await detachCall(call, admission) : await observeCall(call, admission);
 }
 
-export async function forkKeiyaku(input: ForkInput): Promise<ForkResult> {
-  const values = requireInput(input, "Keiyaku.fork input");
-  onlyKeys(values, ["path", "akuma", "at", "repo"], "Keiyaku.fork input");
+export async function forkAkumas(input: ForkInput): Promise<ForkResult> {
+  const values = requireInput(input, "Akumas.fork input");
+  onlyKeys(values, ["path", "akuma", "at", "repo"], "Akumas.fork input");
   const at = nonblank(values.at, "at");
   const addressed = await addressAkuma({ path: values.path, akuma: nonblank(values.akuma, "akuma") });
   const { path, id: akuma } = addressed;

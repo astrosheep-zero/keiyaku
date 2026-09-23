@@ -1,4 +1,5 @@
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
+import { listArchetypeDefinitions } from "../src/akuma/archetype.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
@@ -17,7 +18,7 @@ import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { AkumaWorldScopeError, Keiyaku, Repo, type Catalog, type WorldRoot } from "../src/index.js";
+import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { waitAkuma } from "../src/library/fleet.js";
@@ -87,11 +88,6 @@ async function initializeUnbornFixture(
   copyFileSync(template.leash, paths.leash, constants.COPYFILE_EXCL);
 }
 
-function catalogOf<K extends Catalog["kind"]>(catalog: Catalog, kind: K): Extract<Catalog, { kind: K }> {
-  if (catalog.kind !== kind) throw new Error(`expected ${kind} catalogue`);
-  return catalog as Extract<Catalog, { kind: K }>;
-}
-
 function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
   return {
     id,
@@ -145,9 +141,8 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
   const reviewer = await answered(root, "reviewer", "00000001");
   await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
 
-  assert.equal((await Keiyaku.status({ path: root, akuma: "@review" })).status.id, reviewer.id);
-  const waited = await Keiyaku.wait({
-    path: root,
+  assert.equal((await Akumas.of(root).status({ akuma: "@review" })).status.id, reviewer.id);
+  const waited = await Akumas.of(root).wait({
     akuma: ["aku/*/*", "@review", worker.id],
     completion: "all",
     timeoutMs: 0,
@@ -157,7 +152,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     [reviewer.id, worker.id],
   );
 
-  const killed = await Keiyaku.kill({ path: root, akuma: ["@review", worker.id] });
+  const killed = await Akumas.of(root).kill({ akuma: ["@review", worker.id] });
   assert.deepEqual(
     killed.results.map((member) => member.id),
     [reviewer.id, worker.id],
@@ -228,9 +223,9 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
         "",
       ].join("\n"),
     );
-    const tasks = await Keiyaku.ls({ query: { kind: "tasks" }, path: root });
-    assert.equal(tasks.kind, "tasks");
-    assert.deepEqual(tasks.rows, [
+    const tasks = await Tasks.of(await World.at(root)).list({ selection: "all" });
+    assert.equal(tasks.kind, "accepted");
+    assert.deepEqual(tasks.value.rows, [
       {
         id: task.value.id,
         title: "Catalog task",
@@ -241,23 +236,23 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
         bodyPresent: false,
       },
     ]);
-    assert.deepEqual(await Keiyaku.ls({ query: { kind: "archetypes" }, home }), {
-      kind: "archetypes",
+    assert.deepEqual(await listArchetypeDefinitions({ home }), {
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
+      hasMore: false,
     });
-    const workers = catalogOf(await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker" }, path: root }), "akuma");
+    const workers = await Akumas.of(await World.at(root)).list({ archetype: "worker" });
     assert.deepEqual(
       workers.rows.map((row) => row.id),
       [source.id],
     );
-    assert.deepEqual((await Keiyaku.ls({ query: { kind: "akuma", archetype: "reviewer" }, path: root })).rows, []);
+    assert.deepEqual((await Akumas.of(await World.at(root)).list({ archetype: "reviewer" })).rows, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("facade Akuma catalog returns bounded Heart activity in semantic order", async (t) => {
+test("Akumas roster returns bounded Heart activity in semantic order", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-");
   const first = await answered(root, "worker", "00000003");
   const tiedFirst = await answered(root, "worker", "00000001");
@@ -281,8 +276,7 @@ test("facade Akuma catalog returns bounded Heart activity in semantic order", as
     at: "2026-08-11T00:00:03.000Z",
   });
 
-  const page = await Keiyaku.ls({ query: { kind: "akuma", archetype: "worker", limit: 2 }, path: root });
-  assert.equal(page.kind, "akuma");
+  const page = await Akumas.of(await World.at(root)).list({ archetype: "worker", limit: 2 });
   assert.deepEqual(
     page.rows.map((row) => row.id),
     [tiedFirst.id, tiedSecond.id],
@@ -296,7 +290,7 @@ test("facade Akuma catalog returns bounded Heart activity in semantic order", as
   };
   try {
     await assert.rejects(
-      Keiyaku.ls({ query: { kind: "akuma", limit: 501 }, path: root }),
+      Akumas.of(await World.at(root)).list({ limit: 501 }),
       /limit must be an integer from 1 to 500/u,
     );
   } finally {
@@ -450,7 +444,7 @@ test("recent Task catalog does not skip older-mtime malformed authority", async 
     new Date("2099-01-01T00:00:00.000Z"),
   );
 
-  await assert.rejects(Keiyaku.ls({ query: { kind: "tasks", limit: 1 }, path: root }), /front matter/u);
+  await assert.rejects(Tasks.of(world).list({ selection: "all", limit: 1 }), /front matter/u);
 });
 
 test("named Address resolution refuses a Contract short-id shared with an Alias", async (t) => {
@@ -458,7 +452,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const repo = await Repo.at({ path: repository.path });
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo,
     markdown: [
       "# Review",
@@ -567,8 +561,7 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
     "dispatched",
   );
   const repoB = await Repo.at({ path: worldB });
-  const wait = Keiyaku.wait({
-    path: worldB,
+  const wait = Akumas.of(worldB).wait({
     akuma: ["kei/foreign"],
     repo: repoB,
     timeoutMs: 0,
@@ -580,7 +573,8 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
     return true;
   });
   await assert.rejects(
-    Keiyaku.kill({ path: worldB, akuma: ["kei/foreign"], repo: repoB }),
+    Akumas.of(worldB).kill({
+    akuma: ["kei/foreign"], repo: repoB }),
     (error: unknown) => error instanceof AkumaWorldScopeError && error.refusal.kind === "akuma-not-in-world",
   );
 });
@@ -598,18 +592,17 @@ test("fleet status projects Dispatch association without changing Akuma core", a
   );
 
   const world = await World.at(repository.path);
-  const plain = await Keiyaku.status({ path: world, akuma: source.id });
+  const plain = await Akumas.of(world).status({
+    akuma: source.id });
   assert.equal("contractId" in plain, false);
   assert.equal(plain.status.id, source.id);
-  const projected = await Keiyaku.status({
-    path: world,
+  const projected = await Akumas.of(world).status({
     akuma: source.id,
     repo: await Repo.at({ path: repository.path }),
   });
   assert.deepEqual(projected.contract, { kind: "associated", contractId: owner });
   assert.equal(projected.status.id, source.id);
-  const waited = await Keiyaku.wait({
-    path: world,
+  const waited = await Akumas.of(world).wait({
     akuma: [source.id],
     repo: await Repo.at({ path: repository.path }),
     timeoutMs: 0,
@@ -642,8 +635,7 @@ test("multi-member wait and kill project every member from one Task board snapsh
     }),
   );
   const expected = projectTaskBoardObservation((await readBoard(world)).board);
-  const waited = await Keiyaku.wait({
-    path: root,
+  const waited = await Akumas.of(root).wait({
     akuma: [worker.id, reviewer.id],
     completion: "all",
     timeoutMs: 0,
@@ -659,7 +651,8 @@ test("multi-member wait and kill project every member from one Task board snapsh
       { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
     ],
   );
-  const killed = await Keiyaku.kill({ path: root, akuma: [worker.id, reviewer.id] });
+  const killed = await Akumas.of(root).kill({
+    akuma: [worker.id, reviewer.id] });
   assert.deepEqual(
     killed.results.map((member) => member.id),
     [worker.id, reviewer.id],
@@ -682,16 +675,19 @@ test("failed Task associations do not hide readable Fleet members or kill eviden
   const b = await answered(root, "worker", "a0000002");
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not Task authority\n");
-  const status = await Keiyaku.status({ path: root, akuma: a.id });
+  const status = await Akumas.of(root).status({
+    akuma: a.id });
   assert.equal(status.status.id, a.id);
   assert.equal(status.createdTasks.kind, "failed");
-  const waited = await Keiyaku.wait({ path: root, akuma: [a.id, b.id], completion: "all", timeoutMs: 0 });
+  const waited = await Akumas.of(root).wait({
+    akuma: [a.id, b.id], completion: "all", timeoutMs: 0 });
   assert.deepEqual(waited.observations.map((view) => view.status.id).sort(), [a.id, b.id]);
   assert.deepEqual(
     waited.observations.map((view) => view.createdTasks),
     [status.createdTasks, status.createdTasks],
   );
-  const killed = await Keiyaku.kill({ path: root, akuma: [a.id, b.id] });
+  const killed = await Akumas.of(root).kill({
+    akuma: [a.id, b.id] });
   assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
   assert.ok(killed.results.every((member) => member.evidence === "already-stopped" && !("observation" in member)));
 });

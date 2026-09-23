@@ -63,13 +63,6 @@ export function libraryExecution(value: unknown): LibraryExecution {
   throw new TypeError("execution channel must be local or body-request");
 }
 
-export function libraryExecutionInput(input: unknown): LibraryExecution {
-  const value = valueRecord(input, "Keiyaku.withExecution input");
-  closed(value, ["execution"], "Keiyaku.withExecution input");
-  if (value.execution === undefined) throw new TypeError("Keiyaku.withExecution input requires execution");
-  return libraryExecution(value.execution);
-}
-
 export function executionChannel(context?: ExecutionContext): ExecutionChannel {
   return context?.channel ?? LOCAL_CHANNEL;
 }

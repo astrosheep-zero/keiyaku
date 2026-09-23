@@ -44,12 +44,12 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | --- | --- | --- |
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, abandon, audit, reconcile | Request the named lifecycle, evidence, inspection, or repair judgment; refuse an absent or ambiguous Contract selector. | Return the owning lifecycle, audit, or reconciliation result unchanged. |
-| show, status, ls | Read one requested Contract, catalogue, Akuma, Task, or World projection; refuse a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
+| show, status, ls | Read one requested Contract, Akuma, archetype, Task, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
-| nuke | Ask the World owner to perform its deliberately confirmed reset. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
+| nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | task | Delegate to the separate Task command surface. | Task owns Task judgment and result semantics. |
-| call, fork, wait, tell, history, kill | Delegate to the package-root Akuma facet. | Akuma owns identity, life, requests, answers, and recovery. |
+| call, fork, wait, tell, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
 
 In a declared direct-parent request channel, the CLI forwards only the
 caller-selected operation and the information needed to execute it locally.
@@ -65,8 +65,11 @@ empty success. Task command intent and Task presentation are owned by
 [cli-task.md](cli-task.md). Literal help rows, flags, positional forms, stdin
 rules, and parser recovery are executable interface detail, not CLI law.
 
-Mutable catalogue commands adapt their owner's bounded recent observation;
-they do not offer an edge-level route to an exhaustive SDK board.
+`ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
+through `Akumas.of(world).list`, archetypes through their definition owner, and
+Tasks through `Tasks.of(world).list`. Contract selector resolution continues
+to use a complete read where required; a bounded list never narrows selector
+meaning. The SDK exposes product `list` operations and no mixed `ls`.
 
 The call and tell edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.

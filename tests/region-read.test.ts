@@ -42,7 +42,7 @@ function document(title: string, patterns: readonly string[]): string {
 }
 
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {
-  const result = await Keiyaku.bind({
+  const result = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(title, patterns),
     workspace: "worktree",

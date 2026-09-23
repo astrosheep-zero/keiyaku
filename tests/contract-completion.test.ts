@@ -25,7 +25,7 @@ let template: ReturnType<typeof candidateTemplate> | undefined;
 async function fixture() {
   const prepared = await (template ??= candidateTemplate());
   const repository = snapshotGitRepository(prepared.repository);
-  const contract = Keiyaku.of({ repo: await cachedRepoAt(repository.path), id: prepared.id });
+  const contract = Keiyaku.with().select({ repo: await cachedRepoAt(repository.path), id: prepared.id });
   const state = await contract.state();
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   repository.run(["worktree", "add", "--quiet", "--detach", worktree, prepared.candidate]);
@@ -76,7 +76,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("review cancellation after admission stops fenced placement and retains the real receipt", async () => {
     const repository = repositoryWithMain();
     const primary = (
-      await Keiyaku.bind({
+      await Keiyaku.with().bind({
         repo: await Repo.at({ path: repository.path }),
         markdown: document(),
         target: "refs/heads/main",
@@ -118,7 +118,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
 
   test("completion retains a stopped Verification without letting it block an unverified Contract", async () => {
     const repository = repositoryWithMain();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: document("exit 0"),
       workspace: "worktree",
@@ -187,7 +187,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repo = await Repo.at({ path: repository.path });
     const child = async (title: string, after: readonly ContractId[]) =>
       (
-        await Keiyaku.bind({
+        await Keiyaku.with().bind({
           repo,
           markdown: document().replace("# Library verbs", `# ${title}`),
           workspace: "worktree",

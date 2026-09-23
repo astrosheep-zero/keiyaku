@@ -60,7 +60,7 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   writeFileSync(join(repository.path, "z.txt"), "base\n");
   repository.run(["add", "a.txt", "z.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
-  const bound = await Keiyaku.bind({
+  const bound = await Keiyaku.with().bind({
     repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
@@ -98,7 +98,7 @@ async function reviewGatedConflictCandidateFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.candidateHead]);
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.of({ repo, id: template.id });
+  const contract = Keiyaku.with().select({ repo, id: template.id });
   return { repository, repo, contract, targetHead: template.targetHead, worktree };
 }
 
@@ -227,7 +227,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
   test("declared failing Verification with no gate does not block a library delivery claim", async () => {
     const repository = repositoryWithMain();
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: document("exit 1"),
       workspace: "worktree",

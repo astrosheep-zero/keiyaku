@@ -23,7 +23,7 @@ test("delivery prepares clean candidate scratch without importing worktree symli
         'test "$(readlink node_modules/@fixture/self)" = ../..',
         'printf "declaration-output\\n"',
       ].join(" && ");
-      const bound = await Keiyaku.bind({
+      const bound = await Keiyaku.with().bind({
         repo: await Repo.at({ path: raw.path }),
         markdown: document(declaration),
         workspace: "worktree",

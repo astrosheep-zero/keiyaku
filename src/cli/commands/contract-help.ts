@@ -152,7 +152,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean" },
     usage:
-      'ls task[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/]\nls aku/<akuma>[/] [--limit <count>]\nls "aku/*/*" [--limit <count>]',
+      'ls task[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<akuma>[/] [--limit <count>]\nls "aku/*/*" [--limit <count>]',
     purpose: "List Tasks, Contracts, or Akumas in a selected scope.",
   },
   audit: {

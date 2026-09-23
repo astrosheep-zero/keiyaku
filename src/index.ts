@@ -1,4 +1,5 @@
 export * from "./library/keiyaku.js";
+export * from "./library/akumas.js";
 export {
   Akuma,
   Schema,

@@ -1,17 +1,23 @@
 # Public Akuma Facets
 
-This chapter owns package-root Akuma creation, addressing, fleet composition,
-and catalogs. It composes Akuma, Alias, Dispatch, Task, and Contract owners
-without moving any of their authority into Library.
+This chapter owns the World-bound `Akumas` composition for creation, addressing,
+and fleet operations. It composes Akuma, Alias, Dispatch, Task, and Contract
+owners without moving any of their authority into Library. `Akuma` remains the
+standalone product for one resolved identity; `Tasks` remains an independent
+World-bound product.
 
 ## Composition
 
-The facade captures one execution channel at construction. Ordinary calls are
-local; a Body Request uses one explicit direct-parent channel. Public inputs do
-not select a route, forwarding never recurses, and composition creates no cached
-resolution, parallel writer, or background integration queue. Every filesystem,
-Alias, Dispatch, Task, and Heart observation is awaited before its public
-Promise settles.
+`Akumas.of(world)` captures one World and execution channel at construction.
+Ordinary calls are local; a Body Request uses one explicit direct-parent
+channel. Public inputs do not select a route, forwarding never recurses, and
+composition creates no cached resolution, parallel writer, or background
+integration queue. Callers do not repeat World on operations. Repo stays an
+explicit separate coordinate for Contract selector and Dispatch association;
+neither coordinate is inferred from the other. Every filesystem, Alias,
+Dispatch, Task, and Heart observation is awaited before its public Promise
+settles. Contract-local actor, hook, and branch-freshness configuration does
+not enter this composition.
 
 Akuma creation is owned by Akuma itself. Package composition may add a requested
 Contract Dispatch and then a requested Alias move. Birth or fork is the leading,
@@ -44,10 +50,10 @@ requesting a separate Tell authority. A schema belongs to that same input and
 its answer contract; it creates no second call workflow or route and does not
 alter the existing busy refusal for schema Tells to a running Akuma.
 
-## Address, Fleet, And Catalog
+## Address, Fleet, And Listing
 
-The Address facet is the sole selector interpreter. It resolves complete Akuma
-identity, Alias, glob, and Contract selection from one frozen owner observation,
+The Address facet is the sole selector interpreter for Akumas. It resolves
+complete Akuma identity, Alias, glob, and Contract selection from one frozen owner observation,
 and refuses an ambiguous human selector. Akuma itself remains unaware of Alias,
 Dispatch, Contract, glob, and repository coordinates. A resolved selector is
 not resolved again downstream. A readable Alias remains an Akuma address when
@@ -73,9 +79,10 @@ fabricates completion. A wait reports its requested mode separately from its
 completed-or-deadline return reason. Tell and kill return their primary evidence; interrupt retains its
 separate post-action observation.
 
-The catalog invokes exactly one selected product owner. Its Akuma catalogue is
-one bounded recent-activity observation and preserves the owner's membership,
-semantic order, and observed extent in every presentation; it does not count or
-reopen the whole fleet. It creates no aggregate, cross-product fallback,
-selector API, history scan, or provider admission. CLI and renderer layers
-consume these adjudicated values without performing their own owner lookup.
+`Akumas.list` is one bounded recent-activity roster observation and preserves
+the owner's membership, semantic order, and observed extent; it does not count
+or reopen the whole fleet. Archetype definitions are listed by the archetype
+owner. There is no cross-product SDK catalogue or `ls` operation. The CLI's
+`ls` command adapts Contract, Akuma, archetype, and Task listing through their
+respective owners, and renderers consume those adjudicated values without
+performing their own owner lookup.

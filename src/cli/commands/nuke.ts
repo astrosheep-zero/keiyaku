@@ -1,4 +1,4 @@
-import { Keiyaku, KeiyakuRefused, type NukeResult } from "../../index.js";
+import { KeiyakuRefused, nuke, type NukeResult } from "../../index.js";
 import type { WorldRoot } from "../../world.js";
 import { CliUsageError, type ParsedCommand } from "../parse.js";
 import type { InvocationResult } from "../result.js";
@@ -11,7 +11,7 @@ export async function invokeNuke(
   try {
     return {
       kind: "nuke",
-      result: await Keiyaku.nuke({
+      result: await nuke({
         world,
         ...(command.confirm === undefined ? {} : { confirm: command.confirm }),
       }),

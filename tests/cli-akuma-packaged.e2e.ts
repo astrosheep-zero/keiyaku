@@ -15,7 +15,7 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { Keiyaku } from "../src/index.js";
+import { Akumas } from "../src/index.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { removeTempDirectory } from "./support/process.js";
 
@@ -201,7 +201,8 @@ function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: st
 }
 
 async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
-  const killed = await Keiyaku.kill({ path: world, akuma: [selector] });
+  const killed = await Akumas.of(world).kill({
+    akuma: [selector] });
   assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
   const member = killed.results[0]!;
   assert.ok(
@@ -209,7 +210,8 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
     `public kill has settled evidence for ${selector}: ${member.evidence}`,
   );
 
-  const waited = await Keiyaku.wait({ path: world, akuma: [selector], timeoutMs: 10_000 });
+  const waited = await Akumas.of(world).wait({
+    akuma: [selector], timeoutMs: 10_000 });
   assert.equal(waited.reason, "completed", `public wait confirms ${selector} settled after kill`);
   assert.equal(waited.observations.length, 1, `public wait observes ${selector} once`);
   assert.equal(waited.observations[0]!.status.id, member.id);

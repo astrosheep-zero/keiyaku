@@ -23,7 +23,7 @@ function document(title: string, region: readonly string[]): string {
 }
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
-  const result = await Keiyaku.bind({
+  const result = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(title, region),
     workspace: "worktree",
@@ -100,7 +100,7 @@ test("post-admission observation failure preserves the admitted Contract without
     ].join("\n"),
     { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
     async (gitPath) =>
-      Keiyaku.bind({
+      Keiyaku.with().bind({
         repo: await Repo.at({ path: repository.path, gitPath }),
         markdown: document("Observed failure", ["docs/**"]),
         workspace: "worktree",
@@ -120,6 +120,6 @@ test("post-admission observation failure preserves the admitted Contract without
   assert.equal(state.id, result.facts[0]?.contract);
   assert.equal(state.head, result.head);
   assert.equal(state.terminal, null);
-  const observed = await Keiyaku.observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
+  const observed = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
   assert.equal(observed.kind, "present");
 });

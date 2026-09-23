@@ -49,7 +49,7 @@ function crossProcessAmend(
     "if (process.env.KEIYAKU_WAIT_FOR_RELEASE === '1') await new Promise((resolve) => process.stdin.once('data', resolve));",
     "try {",
     "  if (intent === undefined) {",
-    "    const contract = await Keiyaku.of({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: contractId });",
+    "    const contract = await Keiyaku.with().select({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: contractId });",
     "    await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN });",
     "    process.stdout.write('accepted\\n');",
     "  } else {",
@@ -186,7 +186,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
   test("reintegration observes and publishes only after the shared private-state seat", async () => {
     const repository = repositoryWithMain();
     repository.run(["branch", "release"]);
-    const bound = await Keiyaku.bind({
+    const bound = await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: document(),
       target: "refs/heads/release",
