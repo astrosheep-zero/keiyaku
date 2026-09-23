@@ -1,5 +1,5 @@
 import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
-import type { ProviderOptions, ReadonlyRestraint } from "./provider-recipe.js";
+import type { ProviderOptions } from "./provider-recipe.js";
 
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
@@ -712,7 +712,7 @@ export type DriveInput = Readonly<{
 }>;
 
 export type ProviderOptionAdmission =
-  | Readonly<{ kind: "admitted"; options: ProviderOptions; readonly?: ReadonlyRestraint }>
+  | Readonly<{ kind: "admitted"; options: ProviderOptions }>
   | Readonly<{ kind: "refused"; diagnostic: string }>;
 
 export type ProviderAdapter = Readonly<{

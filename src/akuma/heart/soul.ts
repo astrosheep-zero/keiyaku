@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { parseAkuId, type AkuId } from "../identity.js";
-import { decodeProviderOptions, decodeProviderRecipe, decodeReadonlyRestraint } from "../provider-recipe.js";
+import { decodeProviderOptions, decodeProviderRecipe } from "../provider-recipe.js";
 import type { AkumaOrigin, Soul, SoulRow } from "./facts.js";
 import { historicalAllowedActions } from "../allowed.js";
 
@@ -58,17 +58,12 @@ function validateSoul(value: unknown): Soul {
   const description = soul.description === undefined ? undefined : nonblank(soul.description, "description");
   const provider = decodeProviderRecipe(soul.provider);
   const options = decodeProviderOptions(soul.options);
-  const restraint = soul.readonly === undefined ? undefined : decodeReadonlyRestraint(soul.readonly);
-  if ((options.readonly === true) !== (restraint !== undefined)) {
-    throw new Error("Akuma soul readonly option and restraint must agree");
-  }
   return {
     id,
     archetype,
     ...(description === undefined ? {} : { description }),
     provider,
     options,
-    ...(restraint === undefined ? {} : { readonly: restraint }),
     cwd: nonblank(soul.cwd, "cwd"),
     origin: decodeOrigin(soul.origin),
     allowed: historicalAllowedActions(soul.allowed),

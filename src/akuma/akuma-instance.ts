@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { callReadonly, canonicalBirthCwd } from "./call-input.js";
+import { canonicalBirthCwd } from "./call-input.js";
 import { spawnAkumaBody, type TellResult } from "./body.js";
 import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
 import type { AllowedAction } from "./allowed.js";
@@ -31,7 +31,6 @@ export type AkumaBirthInput = Readonly<{
   cwd?: string;
   home?: string;
   settings?: Settings;
-  readonly?: true;
   allowed?: readonly AllowedAction[];
 }>;
 
@@ -156,8 +155,7 @@ export class Akuma {
     const name = archetype;
     const home = input.home === undefined ? {} : { home: input.home };
     const settings = input.settings ?? (await readSettings({ root: input.root, ...home }));
-    const readonly = callReadonly(input.readonly, "Akuma birth readonly must be true");
-    const loaded = await loadArchetype({ name, project: input.root, ...home, settings, ...readonly });
+    const loaded = await loadArchetype({ name, project: input.root, ...home, settings });
     const allowed =
       input.allowed === undefined
         ? loaded.allowed
@@ -175,7 +173,6 @@ export class Akuma {
             ...(loaded.description === undefined ? {} : { description: loaded.description }),
             provider: loaded.provider,
             options: loaded.options,
-            ...(loaded.readonly === undefined ? {} : { readonly: loaded.readonly }),
             allowed,
             cwd,
             origin: { kind: "direct" },

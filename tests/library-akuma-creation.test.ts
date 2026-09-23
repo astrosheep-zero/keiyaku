@@ -357,7 +357,7 @@ test("schema Keiyaku.call preserves its child when initial Tell admission fails"
   }
 });
 
-test("forwarded schema Keiyaku.call waits for birth and retains readonly evidence", async (t) => {
+test("forwarded schema Keiyaku.call waits for birth and answers its first Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
@@ -374,7 +374,6 @@ test("forwarded schema Keiyaku.call waits for birth and retains readonly evidenc
       archetype: "worker",
       body: "forwarded-schema-call",
       cwd: world,
-      readonly: true,
       ...configured.placement,
       mode: "wait",
       schema,
@@ -388,7 +387,6 @@ test("forwarded schema Keiyaku.call waits for birth and retains readonly evidenc
     await slow.release();
     const result = await pending;
     akumaId = result.akuma;
-    assert.equal(result.readonly?.enforcement, "native");
     assert.equal(result.observation.kind, "observed");
     if (result.observation.kind === "observed")
       assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });

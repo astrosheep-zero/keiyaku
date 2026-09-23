@@ -36,17 +36,12 @@ export const akumaIdSchema = z.string().transform((value, context) => {
     return z.NEVER;
   }
 });
-const readonlySchema = z.union([
-  z.object({ enforcement: z.literal("native") }).strict(),
-  z.object({ enforcement: z.literal("none"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
-]);
 export const akumaStatusSchema = z
   .object({
     id: akumaIdSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
     cwd: z.string().optional(),
     allowed: allowedActionsSchema,
-    readonly: readonlySchema.optional(),
     timeline: activitySnapshotSchema,
     strandedReason: z.literal("resume-unsupported").optional(),
   })
@@ -60,7 +55,6 @@ export function parseAkumaStatus(value: unknown): AkumaStatus {
 export { defaultWaitComplete } from "./akuma-observe.js";
 export { withoutReportedChanges } from "./projection.js";
 
-export type { ReadonlyRestraint } from "./provider-recipe.js";
 export type * from "./projection.js";
 
 export type UnbornAkumaListRow = Readonly<{
@@ -91,7 +85,6 @@ export type AkumaCallInput = Readonly<{
   archetype: string;
   body: string;
   cwd?: string;
-  readonly?: true;
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
   initiator?: string;

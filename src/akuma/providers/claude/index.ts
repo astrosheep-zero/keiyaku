@@ -66,24 +66,13 @@ class ReceiptChannel implements AsyncIterable<TellReceipt> {
 }
 
 function admitClaudeOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.sandbox === "full-access" && options.readonly === true) {
-    return { kind: "refused", diagnostic: "Claude full-access sandbox cannot combine with readonly" };
-  }
-  if (options.sandbox === "full-access" && options.network === "disabled") {
-    return { kind: "refused", diagnostic: "Claude full-access sandbox cannot combine with disabled network" };
-  }
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Claude provider does not support the network option" };
   }
   return {
     kind: "admitted",
     options: Object.freeze({ ...options }),
-    ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
   };
-}
-
-function permissionMode(readonly: ProviderOptions["readonly"]): "plan" | "bypassPermissions" {
-  return readonly === true ? "plan" : "bypassPermissions";
 }
 
 function claudeSessionId(coordinate: ResumeCoordinate): string {
@@ -98,7 +87,6 @@ function claudeQueryOptions(
   execution: ClaudeExecution,
   abortController: AbortController,
 ): Options {
-  const mode = permissionMode(input.options.readonly);
   return {
     ...(execution.config ?? {}),
     cwd: input.cwd,
@@ -106,10 +94,9 @@ function claudeQueryOptions(
     ...(input.requests === undefined ? {} : { additionalDirectories: [input.requests.dir] }),
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
     env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir),
-    permissionMode: mode,
-    ...(mode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
+    permissionMode: "bypassPermissions",
+    allowDangerouslySkipPermissions: true,
     settingSources: ["user", "project", "local"],
-    ...(input.options.sandbox === "full-access" ? { sandbox: { enabled: false } } : {}),
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort as NonNullable<Options["effort"]> }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0

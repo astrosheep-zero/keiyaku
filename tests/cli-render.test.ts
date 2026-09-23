@@ -45,7 +45,7 @@ import {
 import type { Catalog } from "../src/library/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
-import { parseArgv, renderHelp } from "../src/cli/parse.js";
+import { parseArgv } from "../src/cli/parse.js";
 import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 
 const worldRoot = "/world" as WorldRoot;
@@ -122,10 +122,6 @@ function callObservation(
     completedAt,
   };
 }
-
-test("Akuma call help omits the caller readonly flag", () => {
-  assert.doesNotMatch(renderHelp({ kind: "akuma", action: "call" }), /--readonly/u);
-});
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(

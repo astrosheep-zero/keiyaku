@@ -15,8 +15,7 @@ authenticated direct parent only; it never walks an ancestor chain.
 
 When an Archetype uses a load-time base, omission of `allowed` inherits the
 base set. An explicit empty list or explicit list replaces the base set
-completely. Readonly is monotonic across the same chain: `readonly: true` may
-be added, but an inherited readonly restriction cannot be removed or set false.
+completely.
 
 Every Soul freezes its effective set. Wake and restart retain it, and fork copies
 it exactly without an override. Historical Soul without an explicit set means

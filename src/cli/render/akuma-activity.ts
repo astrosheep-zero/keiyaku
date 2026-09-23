@@ -1361,7 +1361,6 @@ function snapshotCore(
   const facts = [
     ...(view.status.cwd === undefined ? [] : [`cwd  ${safeText(view.status.cwd)}`]),
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
-    ...(view.status.readonly?.enforcement === "none" ? [`! ${safeText(view.status.readonly.diagnostic)}`] : []),
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
   ];
@@ -1421,7 +1420,6 @@ export function mutationObservationStageText(
 export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
   if (!defaultWaitComplete(view.status)) return undefined;
   if (view.status.life !== "asleep") return undefined;
-  if (view.status.readonly?.enforcement === "none") return undefined;
   const timeline = view.status.timeline;
   if (timeline.kind !== "idle" || timeline.outcome?.outcome.kind !== "answered") return undefined;
   return timeline.outcome.outcome.answer;

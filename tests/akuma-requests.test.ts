@@ -2,7 +2,7 @@ import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -21,7 +21,7 @@ import {
   reserveRequest,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import {
@@ -66,8 +66,7 @@ async function fixture(allowed?: Soul["allowed"]) {
     id: parent.id,
     archetype: "parent",
     provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: { readonly: true },
-    readonly: { enforcement: "native" },
+    options: {},
     cwd: root,
     origin: { kind: "direct" },
     allowed: allowed ?? ALLOWED_ACTIONS,
@@ -540,142 +539,6 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
   }
 });
 
-test("nested akuma.call admits provider options before child publication", async () => {
-  const value = await fixture(["akuma.call"]);
-  let spawns = 0;
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-09T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async (launch) => {
-        spawns += 1;
-        const leash = (await HeldAkumaLeash.try(launch.paths))!;
-        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-09T00:00:02.000Z" });
-        leash.release();
-      },
-    }),
-    signal: new AbortController().signal,
-  });
-  const before = readdirSync(akumaRunRoot(value.root)).sort();
-  const refuse = async (
-    id: string,
-    recipe: Parameters<typeof requestBodyCall>[0]["recipe"],
-    diagnostic: RegExp,
-  ): Promise<void> => {
-    await assert.rejects(
-      requestBodyCall({
-        directory: pump.directory,
-        id,
-        world: value.root,
-        archetype: "worker",
-        initialTell: callTell(),
-        recipe,
-      }),
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError && error.outcome === "refused" && diagnostic.test(error.diagnostic),
-    );
-    assert.equal((await readRequest(value.parent.paths, id))?.state, "refused");
-    assert.equal(spawns, 0);
-    assert.deepEqual(readdirSync(akumaRunRoot(value.root)).sort(), before);
-  };
-  try {
-    await refuse(
-      "00000000-0000-4000-8000-000000000101",
-      {
-        provider: { name: "codex", kind: "codex-app-server" },
-        options: { sandbox: "full-access", readonly: true },
-        readonly: { enforcement: "native" },
-        allowed: ["akuma.call"],
-      },
-      /full-access sandbox cannot combine with readonly/u,
-    );
-    await refuse(
-      "00000000-0000-4000-8000-000000000102",
-      {
-        provider: { name: "codex", kind: "codex-app-server" },
-        options: { sandbox: "full-access", network: "disabled" },
-        allowed: ["akuma.call"],
-      },
-      /full-access sandbox cannot combine with disabled network/u,
-    );
-    await refuse(
-      "00000000-0000-4000-8000-000000000103",
-      {
-        provider: {
-          name: "acp",
-          kind: "acp",
-          executable: "agent",
-          config: { argvBefore: [], argvAfter: [] },
-        },
-        options: { sandbox: "full-access" },
-        allowed: ["akuma.call"],
-      },
-      /does not support the sandbox option/u,
-    );
-    await refuse(
-      "00000000-0000-4000-8000-000000000104",
-      {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: { sandbox: "full-access", readonly: true },
-        readonly: { enforcement: "native" },
-        allowed: ["akuma.call"],
-      },
-      /full-access sandbox cannot combine with readonly/u,
-    );
-    await refuse(
-      "00000000-0000-4000-8000-000000000105",
-      {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: { sandbox: "full-access", network: "disabled" },
-        allowed: ["akuma.call"],
-      },
-      /full-access sandbox cannot combine with disabled network/u,
-    );
-    const claudeChild = await requestBodyCall({
-      directory: pump.directory,
-      id: "00000000-0000-4000-8000-000000000106",
-      world: value.root,
-      archetype: "worker",
-      initialTell: callTell(),
-      recipe: {
-        provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: { sandbox: "full-access" },
-        allowed: ["akuma.call", "task.add"],
-      },
-    });
-    assert.equal(spawns, 1);
-    const claudeSoul = await readSoul(pathsForAkuId(value.root, claudeChild));
-    assert.deepEqual(claudeSoul?.options, { sandbox: "full-access" });
-    assert.deepEqual(claudeSoul?.allowed, ["akuma.call"]);
-    const child = await requestBodyCall({
-      directory: pump.directory,
-      id: "00000000-0000-4000-8000-000000000107",
-      world: value.root,
-      archetype: "worker",
-      initialTell: callTell(),
-      recipe: {
-        provider: { name: "codex", kind: "codex-app-server" },
-        options: { sandbox: "full-access" },
-        allowed: ["akuma.call", "task.add"],
-      },
-    });
-    assert.equal(spawns, 2);
-    const soul = await readSoul(pathsForAkuId(value.root, child));
-    assert.deepEqual(soul?.options, { sandbox: "full-access" });
-    assert.deepEqual(soul?.allowed, ["akuma.call"]);
-  } finally {
-    await pump.close();
-    value.leash.release();
-    value.close();
-  }
-});
-
 test("Heart refuses a disabled call before child publication", async () => {
   const value = await fixture([]);
   const pump = await BodyRequestPump.open({
@@ -922,10 +785,10 @@ test("a drive serves Body Requests through transport while Heart remains authori
   const priorRequests = process.env[AKUMA_REQUESTS_ENV];
   const home = join(value.root, "home");
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
-  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\nreadonly: true\n---\nWork.\n");
+  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(
     join(home, ".keiyaku", "akuma", "codex.md"),
-    "---\nprovider: codex-app-server\nreadonly: true\n---\nWork.\n",
+    "---\nprovider: codex-app-server\n---\nWork.\n",
   );
   process.env.HOME = home;
   const pump = await BodyRequestPump.open({
@@ -955,7 +818,6 @@ test("a drive serves Body Requests through transport while Heart remains authori
     const origin = childSoul?.origin;
     assert.equal(origin?.kind, "request");
     if (origin?.kind !== "request") return;
-    assert.deepEqual(childSoul?.readonly, { enforcement: "native" });
     assert.equal(childSoul?.cwd, value.soul.cwd);
     const requestId = origin.requestId;
     assert.equal((await readRequest(value.parent.paths, requestId))?.state, "served");
@@ -1037,25 +899,6 @@ test("a drive serves Body Requests through transport while Heart remains authori
       "legacy association bytes must not enter Heart",
     );
 
-    const mismatchId = "00000000-0000-4000-8000-000000000003";
-    writeFileSync(
-      join(pump.directory, `${mismatchId}.request.json`),
-      JSON.stringify({
-        id: mismatchId,
-        world: value.root,
-        archetype: "worker",
-        body: "restraint mismatch",
-        recipe: {
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: { readonly: true, systemPrompt: "Work.\n" },
-        },
-      }),
-    );
-    assert.equal(
-      await readRequest(value.parent.paths, mismatchId),
-      null,
-      "a restraint/options mismatch must not enter Heart",
-    );
   } finally {
     await pump.close();
     value.leash.release();

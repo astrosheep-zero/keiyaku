@@ -8,7 +8,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
-import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import type { ProviderExecution } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
 
 export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
@@ -66,24 +66,6 @@ async function steerTurn(
   return { kind: "accepted", fence: `${accepted}:${tell.id}` };
 }
 
-function sandbox(
-  cwd: string,
-  options: ProviderOptions,
-  requests?: Readonly<{ dir: string }>,
-): Readonly<Record<string, unknown>> {
-  if (options.sandbox === "full-access") return { type: "dangerFullAccess" };
-  if (options.readonly === true) {
-    return { type: "readOnly", networkAccess: options.network === "enabled" };
-  }
-  return {
-    type: "workspaceWrite",
-    writableRoots: [cwd, ...(requests === undefined ? [] : [requests.dir])],
-    networkAccess: options.network === "enabled",
-    excludeTmpdirEnvVar: false,
-    excludeSlashTmp: false,
-  };
-}
-
 async function admitTurn(
   server: LineRpcProcess,
   input: StartInput,
@@ -128,7 +110,6 @@ async function admitTurn(
       ...(input.options.model === undefined ? {} : { model: input.options.model }),
       ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
       approvalPolicy: "never",
-      sandboxPolicy: sandbox(input.cwd, input.options, input.requests),
       ...(input.schemaJson === undefined ? {} : { outputSchema: JSON.parse(input.schemaJson) as unknown }),
     }),
   );
@@ -261,16 +242,9 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
     typeof input === "string" ? { name: "codex-app-server", kind: "codex-app-server", executable: input } : input;
   return {
     admitOptions(options) {
-      if (options.sandbox === "full-access" && options.readonly === true) {
-        return { kind: "refused", diagnostic: "Codex full-access sandbox cannot combine with readonly" };
-      }
-      if (options.sandbox === "full-access" && options.network === "disabled") {
-        return { kind: "refused", diagnostic: "Codex full-access sandbox cannot combine with disabled network" };
-      }
       return {
         kind: "admitted",
         options: Object.freeze({ ...options }),
-        ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
       };
     },
     fork: (input) =>

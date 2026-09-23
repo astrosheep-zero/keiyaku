@@ -26,7 +26,7 @@ export type InstallInvocationResult = Readonly<{
 export type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
 
 export const INSTALL_USAGE = "install <codex|claude|opencode|pi>\ninstall --all";
-export const INSTALL_ROOT_PURPOSE = "Install Keiyaku into coding harnesses";
+export const INSTALL_ROOT_PURPOSE = "Install the Keiyaku plugin into a supported coding harness";
 
 function isHarness(value: string | undefined): value is HarnessName {
   return value !== undefined && (HARNESS_NAMES as readonly string[]).includes(value);

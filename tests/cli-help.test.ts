@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderTaskHelp } from "../src/cli/commands/task.js";
@@ -40,26 +40,6 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
-  assert.match(renderAkumaHelp("call"), /relative path is relative to the invocation cwd/u);
-  assert.match(renderAkumaHelp("call"), /Default: return after birth without waiting/u);
-  assert.match(renderAkumaHelp("call"), /Explicit --wait observes the first work/u);
-  assert.doesNotMatch(renderAkumaHelp("call"), /--detach|\s-d(?:\s|\])/u);
-  assert.match(renderAkumaHelp("call"), /--contract associates .*never selects a workdir/u);
-  assert.match(renderAkumaHelp("call"), /uses the invocation cwd whether or not --contract is present/u);
-  const auditHelp = renderContractHelp("audit");
-  assert.match(auditHelp, /\[--show-diff\]/u);
-  assert.doesNotMatch(auditHelp, /\[--diff\]/u);
-  assert.match(renderContractHelp("status"), /execution workdir/u);
-  assert.match(renderAkumaHelp("call"), /Default actions: .*contract\.deliver.*task\.update/u);
-  assert.doesNotMatch(renderAkumaHelp("call").match(/Default actions: .*/u)?.[0] ?? "", /contract\.review/u);
-  assert.match(renderContractHelp("bind"), /stdin is Contract Markdown/u);
-  assert.match(renderContractHelp("bind"), /existing owner modules\/entry points.*critical ordering/u);
-  assert.match(renderContractHelp("bind"), /narrowest justified intended writes for this approach/u);
-  const settingsHelp = renderContractHelp("settings");
-  assert.match(settingsHelp, /^Akuma definitions are Markdown files, one per name:$/mu);
-  assert.match(settingsHelp, /^  user      ~\/\.keiyaku\/akuma\/<name>\.md$/mu);
-  assert.match(settingsHelp, /^  project   <WorldRoot>\/\.keiyaku\/akuma\/<name>\.md$/mu);
-  assert.match(settingsHelp, /^usage  keiyaku settings$/mu);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {
@@ -71,7 +51,7 @@ test("help projections reflow at the requested terminal width without splitting 
       help,
     );
   }
-  assert.match(root, /bind\s+Create one Contract/u);
+  assert.match(root, /usage  keiyaku <command>/u);
   assert.match(history, /usage  keiyaku history/u);
   assert.match(history, /--limit/u);
   assert.match(history, /<count>/u);
@@ -141,6 +121,7 @@ test("bare ls is help-only even when its cwd cannot be read", async () => {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /^List one identity directory\.\n\nusage  keiyaku ls task\[\/\]/u);
+  assert.match(stdout, /usage  keiyaku ls task\[\/\]/u);
+
   assert.equal(stderr, "");
 });

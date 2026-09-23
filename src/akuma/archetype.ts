@@ -10,7 +10,6 @@ import {
   decodeProviderRecipe,
   type ProviderExecution,
   type ProviderOptions,
-  type ReadonlyRestraint,
 } from "./provider-recipe.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { DEFAULT_ALLOWED_ACTIONS, decodeAllowedActions, type AllowedActions } from "./allowed.js";
@@ -22,7 +21,6 @@ type LocalArchetype = Readonly<{
   provider?: string;
   description?: string;
   options: ProviderOptions;
-  readonly?: true;
   allowed?: AllowedActions;
   allowedPresent: boolean;
 }>;
@@ -33,7 +31,6 @@ type DecodedArchetype = Readonly<{
   provider: string;
   description?: string;
   options: ProviderOptions;
-  readonly?: true;
   allowed: AllowedActions;
 }>;
 
@@ -44,10 +41,9 @@ export type ArchetypeCatalogRow = Readonly<{
 }>;
 
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedArchetype = Omit<ArchetypeDefinition, "provider" | "readonly"> &
+type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> &
   Readonly<{
     provider: ProviderExecution;
-    readonly?: ReadonlyRestraint;
   }>;
 
 export class AkumaArchetypeError extends Error {
@@ -165,12 +161,6 @@ function archetypeEnum<T extends string>(
   return value as T;
 }
 
-function archetypeReadonly(values: Readonly<Record<string, unknown>>): true | undefined {
-  if (!("readonly" in values)) return undefined;
-  if (values.readonly !== true) throw new TypeError("Akuma readonly must be true");
-  return true;
-}
-
 type ArchetypeFrontmatter = Readonly<{
   lines: readonly string[];
   closing: number;
@@ -196,9 +186,7 @@ type ArchetypeFields = Readonly<{
   provider?: string;
   model?: string;
   effort?: string;
-  readonly?: true;
   network?: "disabled" | "enabled";
-  sandbox?: "full-access";
   description?: string;
   allowed?: AllowedActions;
   allowedPresent: boolean;
@@ -209,12 +197,9 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
   const provider = archetypeField(values, "provider");
   const baseValue = archetypeField(values, "base");
   const base = baseValue === undefined ? undefined : archetypeName(baseValue);
-  if ("access" in values) throw new TypeError("Akuma access is not supported; use readonly: true");
   const model = archetypeField(values, "model");
   const effort = archetypeField(values, "effort");
-  const readonly = archetypeReadonly(values);
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
-  const sandbox = archetypeEnum(values, "sandbox", ["full-access"] as const);
   const description = archetypeField(values, "description");
   const allowedPresent = "allowed" in values;
   const allowed = allowedPresent ? decodeAllowedActions(values.allowed) : undefined;
@@ -224,9 +209,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
     ...(provider === undefined ? {} : { provider }),
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
-    ...(readonly === undefined ? {} : { readonly }),
     ...(network === undefined ? {} : { network }),
-    ...(sandbox === undefined ? {} : { sandbox }),
     ...(description === undefined ? {} : { description }),
     ...(allowed === undefined ? {} : { allowed }),
     allowedPresent,
@@ -251,7 +234,6 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
       ...(fields.model === undefined ? {} : { model: fields.model }),
       ...(fields.effort === undefined ? {} : { effort: fields.effort }),
       ...(fields.network === undefined ? {} : { network: fields.network }),
-      ...(fields.sandbox === undefined ? {} : { sandbox: fields.sandbox }),
       ...(systemPrompt.length === 0
         ? {}
         : {
@@ -259,7 +241,6 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
             systemPromptMode: fields.systemPromptMode ?? "append",
           }),
     }),
-    ...(fields.readonly === undefined ? {} : { readonly: fields.readonly }),
     ...(fields.allowed === undefined ? {} : { allowed: fields.allowed }),
     allowedPresent: fields.allowedPresent,
   });
@@ -280,7 +261,6 @@ function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetyp
         : { description: base.description }
       : { description: local.description }),
     options,
-    ...(local.readonly === true || base?.readonly === true ? { readonly: true as const } : {}),
     allowed,
   });
 }
@@ -438,11 +418,7 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-async function admitArchetype(
-  archetype: DecodedArchetype,
-  settings: Settings,
-  callReadonly: true | undefined,
-): Promise<AdmittedArchetype> {
+async function admitArchetype(archetype: DecodedArchetype, settings: Settings): Promise<AdmittedArchetype> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
     selected = await resolveProviderExecution(providerExecution(settings, archetype.provider));
@@ -453,28 +429,22 @@ async function admitArchetype(
   }
   const execution = selected.execution;
   const adapter = selected.adapter;
-  const effectiveReadonly = archetype.readonly === true || callReadonly === true;
-  const admission = adapter.admitOptions({
-    ...archetype.options,
-    ...(effectiveReadonly ? { readonly: true } : {}),
-  });
+  const admission = adapter.admitOptions(archetype.options);
   if (admission.kind === "refused") {
     throw new AkumaArchetypeError(archetype.name, [archetype.path], `is unsupported: ${admission.diagnostic}`);
   }
-  const { readonly: _readonly, ...definition } = archetype;
   return Object.freeze({
-    ...definition,
+    ...archetype,
     provider: execution,
     adapter,
     options: admission.options,
-    ...(admission.readonly === undefined ? {} : { readonly: admission.readonly }),
   });
 }
 
 export async function loadArchetype(
-  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings; readonly?: true }>,
+  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
 ): Promise<AdmittedArchetype> {
   const name = archetypeName(input.name);
   const definition = await resolveArchetype(name, input, undefined);
-  return await admitArchetype(definition, input.settings, input.readonly);
+  return await admitArchetype(definition, input.settings);
 }

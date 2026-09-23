@@ -1,6 +1,6 @@
 import type { AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
-import type { ProviderExecution, ProviderOptions, ReadonlyRestraint } from "../provider-recipe.js";
+import type { ProviderExecution, ProviderOptions } from "../provider-recipe.js";
 import type { AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
@@ -22,14 +22,13 @@ export type Soul = Readonly<{
   description?: string;
   provider: ProviderExecution;
   options: ProviderOptions;
-  readonly?: ReadonlyRestraint;
   cwd: string;
   origin: AkumaOrigin;
   allowed: AllowedActions;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "readonly" | "allowed">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "allowed">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 

@@ -61,7 +61,6 @@ export class Akuma {
     options: Readonly<{
       root: WorldRoot;
       alias?: string;
-      readonly?: true;
       allowed?: readonly AllowedAction[];
       contract?: string;
     }>,

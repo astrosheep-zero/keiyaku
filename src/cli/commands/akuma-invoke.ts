@@ -506,7 +506,6 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
               akuma: result.akuma,
               dispatch: result.dispatch,
               alias: result.alias,
-              ...(result.readonly === undefined ? {} : { readonly: result.readonly }),
             }),
           { cursor: "empty", answerSeparator: true },
         );

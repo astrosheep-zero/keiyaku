@@ -1283,8 +1283,7 @@ function codecSoul(): Soul {
       config: { flag: true },
       env: { HOME: "/tmp/home" },
     },
-    options: { model: "claude-sonnet-4-5", effort: "high", readonly: true, network: "disabled", systemPrompt: "Work." },
-    readonly: { enforcement: "native" },
+    options: { model: "claude-sonnet-4-5", effort: "high", network: "disabled", systemPrompt: "Work." },
     cwd: "/tmp/work",
     origin: {
       kind: "request",
@@ -1300,12 +1299,6 @@ test("soul codec hard-fails invalid known members", () => {
   // prettier-ignore
   const corruptions: readonly Readonly<{ name: string; change: (soul: Soul) => unknown }>[] = [
     { name: "missing required field", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).cwd; return copy; } },
-    { name: "options readonly false", change: (soul) => ({ ...soul, options: { ...soul.options, readonly: false } }) },
-    { name: "readonly option without restraint", change: (soul) => { const copy = { ...soul }; delete (copy as Record<string, unknown>).readonly; return copy; } },
-    { name: "restraint without readonly option", change: (soul) => ({ ...soul, options: { ...soul.options, readonly: undefined } }) },
-    { name: "none restraint blank diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: " " } }) },
-    { name: "none restraint non-string diagnostic", change: (soul) => ({ ...soul, readonly: { enforcement: "none", diagnostic: 7 } }) },
-    { name: "unknown restraint enforcement", change: (soul) => ({ ...soul, readonly: { enforcement: "warn" } }) },
     { name: "unknown systemPromptMode", change: (soul) => ({ ...soul, options: { ...soul.options, systemPromptMode: "merge" } }) },
     { name: "systemPromptMode without systemPrompt", change: (soul) => {
       const options = { ...soul.options, systemPromptMode: "append" };

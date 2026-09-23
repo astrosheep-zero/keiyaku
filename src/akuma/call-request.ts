@@ -4,7 +4,7 @@ import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { archetypeName, parseAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
 import type { CallInitialTell, CallInitialTellAdmission } from "./call-initial-tell.js";
-import { decodeProviderOptions, decodeReadonlyRestraint } from "./provider-recipe.js";
+import { decodeProviderOptions } from "./provider-recipe.js";
 import { decodeProviderExecution, resolveProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import {
@@ -57,7 +57,6 @@ const archetypeSchema = z.string().transform((value, context) => {
 const allowedActionsSchema = schemaDecode(decodeAllowedActions, "expected allowed actions");
 const providerExecutionSchema = schemaDecode(decodeProviderExecution, "expected provider execution");
 const providerOptionsSchema = schemaDecode(decodeProviderOptions, "expected provider options");
-const readonlyRestraintSchema = schemaDecode(decodeReadonlyRestraint, "expected readonly restraint");
 
 const akumaCallRecipeSchema = z
   .object({
@@ -65,14 +64,8 @@ const akumaCallRecipeSchema = z
     allowed: allowedActionsSchema,
     provider: providerExecutionSchema,
     options: providerOptionsSchema,
-    readonly: readonlyRestraintSchema.optional(),
   })
-  .strict()
-  .superRefine((recipe, context) => {
-    if ((recipe.options.readonly === true) !== (recipe.readonly !== undefined)) {
-      context.addIssue({ code: "custom", message: "readonly recipe fields disagree" });
-    }
-  });
+  .strict();
 
 const initialTellSchema = z
   .object({
@@ -146,7 +139,6 @@ async function executeAkumaCall(
     allowed: clipAllowedActions(request.recipe.allowed, parent.allowed),
     provider: selected.execution,
     options: admission.options,
-    ...(admission.readonly === undefined ? {} : { readonly: admission.readonly }),
   };
   const published = await publishAkuma({
     worldPath: world,

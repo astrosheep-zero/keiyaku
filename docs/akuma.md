@@ -15,7 +15,7 @@ structural projection, not a second identity. Atomic allocation prevents reuse; 
 coordinate is never adopted as a different Akuma.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider
-recipe, execution cwd, origin, frozen restraint, and effective permissions. A
+recipe, execution cwd, origin, and effective permissions. A
 Body is the one live driver, holding the exclusive leash for its lifetime. The
 leash is the sole execution-seat and liveness authority; Heart owns durable
 facts. Live process custody is a handle held by the spawning Body or adapter,
@@ -43,18 +43,9 @@ Stopping a Body preserves Soul, sessions, history, pending tells, and requests.
 
 An Archetype is call-time personality and provider configuration. Its exact
 Markdown grammar is edge detail; admission rejects malformed, unknown, or
-unsupported provider input before allocation. The selected provider alone judges
-its opaque configuration and realization of readonly restraint. Readonly only
-adds a frozen birth restriction; it can never be loosened or toggled later.
-Later Archetype or Settings edits affect only future births. A missing native
-resume promise never authorizes reconstructing one.
-
-An Archetype may explicitly select full host access for a future birth when its
-provider admits that execution choice. It disables only native command
-sandboxing, never operating-system permissions. Full host access and a readonly
-restriction or disabled network are contradictory and refuse before allocation;
-an inherited or caller-added readonly restriction has the same force. The
-selected choice remains frozen through the Akuma's sessions and descendants.
+unsupported provider input before allocation. Later Archetype or Settings edits
+change only future births. A missing native resume promise never authorizes
+reconstructing one.
 
 Archetype definitions may come from both the current project and Home. A
 project definition shadows a Home definition with the same canonical name;
@@ -67,8 +58,7 @@ using the same project-over-Home precedence, then the child is merged into one
 complete snapshot before catalog presentation or birth. Provider, model,
 effort, network, and description are replaced only when present on the child;
 otherwise the base value remains. A nonempty child body replaces the base body,
-while an empty body inherits it. A child may add readonly restriction but can
-never clear an inherited restriction. The resolved base relation is not part of
+while an empty body inherits it. The resolved base relation is not part of
 AkuId, Soul, Heart, Dispatch, or any public call input, and later file edits
 affect only future loads.
 

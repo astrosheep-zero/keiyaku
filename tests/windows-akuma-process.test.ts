@@ -184,7 +184,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     mkdirSync(piHome);
     writeFileSync(
       join(home, "akuma", "fixture.md"),
-      "---\nprovider: pi\nmodel: fixture/fixture-chat\nreadonly: true\n---\n",
+      "---\nprovider: pi\nmodel: fixture/fixture-chat\n---\n",
     );
     writeFileSync(
       join(piHome, "models.json"),

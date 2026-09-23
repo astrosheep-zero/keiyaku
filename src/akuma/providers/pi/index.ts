@@ -41,8 +41,6 @@ function diagnostic(error: unknown): string {
 }
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
-  if (options.sandbox !== undefined)
-    return { kind: "refused", diagnostic: "Pi provider does not support the sandbox option" };
   if (options.network !== undefined)
     return { kind: "refused", diagnostic: "Pi provider does not support the network option" };
   if (options.model !== undefined && !MODEL_PATTERN.test(options.model)) {
@@ -54,7 +52,6 @@ function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["a
   return {
     kind: "admitted",
     options: Object.freeze({ ...options }),
-    ...(options.readonly === undefined ? {} : { readonly: { enforcement: "native" as const } }),
   };
 }
 
@@ -87,7 +84,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
             throw new Error("Pi resume requires sessionFile");
           })();
   const customTools =
-    input.requests === undefined || input.options.readonly === true
+    input.requests === undefined
       ? undefined
       : [
           sdk.createBashToolDefinition(input.cwd, {
@@ -103,7 +100,6 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
     ...(model === undefined || modelRuntime === undefined ? {} : { model, modelRuntime }),
     ...(resourceLoader === undefined ? {} : { resourceLoader }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
-    ...(input.options.readonly === undefined ? {} : { tools: ["read", "grep", "find", "ls"] }),
     ...(customTools === undefined ? {} : { customTools }),
   };
 }

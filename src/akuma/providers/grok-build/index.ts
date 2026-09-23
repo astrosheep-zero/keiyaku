@@ -90,9 +90,6 @@ export const interpretGrokTool: AcpToolInterpreter = (update) => {
 };
 
 function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
-  if (options.sandbox !== undefined) {
-    return { kind: "refused", diagnostic: "Grok Build does not support the sandbox option" };
-  }
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "Grok Build does not support the network option" };
   }
@@ -102,14 +99,6 @@ function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
   return {
     kind: "admitted",
     options,
-    ...(options.readonly === undefined
-      ? {}
-      : {
-          readonly: {
-            enforcement: "none" as const,
-            diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
-          },
-        }),
   };
 }
 

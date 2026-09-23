@@ -610,11 +610,6 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   const root = temporaryDirectory(context, "keiyaku-acp-provider-");
   const fake = fakeAcp(root);
   const provider = createAcpProvider(fake.execution);
-  assert.deepEqual(provider.admitOptions({ readonly: true }), {
-    kind: "admitted",
-    options: { readonly: true },
-    readonly: { enforcement: "none", diagnostic: "ACP cannot remove task-surface mutation capabilities" },
-  });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
     freshInput("build", {
@@ -866,13 +861,9 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
       return controlled.process;
     },
   });
-  assert.deepEqual(provider.admitOptions({ model: "grok-4.6", effort: "high", readonly: true }), {
+  assert.deepEqual(provider.admitOptions({ model: "grok-4.6", effort: "high" }), {
     kind: "admitted",
-    options: { model: "grok-4.6", effort: "high", readonly: true },
-    readonly: {
-      enforcement: "none",
-      diagnostic: "Grok Build cannot remove task-surface mutation capabilities",
-    },
+    options: { model: "grok-4.6", effort: "high" },
   });
   const drive = await provider.start(freshInput("build", { options: { model: "grok-4.6", effort: "high" } })).result;
   assert.deepEqual((controlled.sessionNew as { _meta?: Readonly<Record<string, unknown>> })._meta, {
@@ -1676,25 +1667,25 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
   );
 });
 
-test("Pi readonly admits native enforcement and removes every task-surface mutation tool", async () => {
+test("Pi installs the request-scoped Bash tool without changing the default toolset", async () => {
   const fake = fakePiSdk({
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }],
   });
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const drive = await provider.start(
-    freshInput("inspect", { cwd: "/work", options: { readonly: true }, requests: { dir: "/work/requests" } }),
+    freshInput("inspect", {
+      cwd: "/work",
+      requests: { dir: "/work/requests" },
+    }),
   ).result;
   for await (const _event of drive.events) {
     /* drain */
   }
   await drive.completion;
-  assert.deepEqual(fake.seen.options?.tools, ["read", "grep", "find", "ls"]);
-  assert.equal(fake.seen.options?.customTools, undefined);
-  assert.deepEqual(provider.admitOptions({ readonly: true }), {
-    kind: "admitted",
-    options: { readonly: true },
-    readonly: { enforcement: "native" },
-  });
+  assert.equal(fake.seen.options?.tools, undefined);
+  const customTools = fake.seen.options?.customTools;
+  assert.ok(Array.isArray(customTools));
+  assert.equal(customTools.length, 1);
 });
 
 test("provider recipe preserves opaque config until adapter construction", async () => {
@@ -2092,42 +2083,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
 });
 
-test("Claude full-access resumed turns disable the native sandbox", async () => {
-  let seen: Record<string, unknown> | undefined;
-  const provider = createClaudeProvider(async () => ({
-    query(input) {
-      seen = input.options as Record<string, unknown> | undefined;
-      return fakeQuery(
-        [
-          { type: "system", subtype: "init", session_id: "session-full-access-resume" } as unknown as SDKMessage,
-          {
-            type: "result",
-            subtype: "success",
-            session_id: "session-full-access-resume",
-            result: "done",
-          } as unknown as SDKMessage,
-        ],
-        input.prompt as AsyncIterable<unknown>,
-      );
-    },
-  }));
-  const drive = await provider.resume!({
-    ...DRIVE_DEFAULTS,
-    body: "continue",
-    launchTells: [],
-    cwd: "/work",
-    options: { sandbox: "full-access" },
-    session: { kind: "resume", coordinate: { sessionId: "session-to-resume" } },
-  }).result;
-  await drive.completion;
-
-  assert.deepEqual(seen?.sandbox, { enabled: false });
-  assert.equal(seen?.resume, "session-to-resume");
-  assert.equal(seen?.permissionMode, "bypassPermissions");
-  assert.equal(seen?.allowDangerouslySkipPermissions, true);
-});
-
-test("Claude readonly preserves execution config and plan permissions", async () => {
+test("Claude preserves execution config and uses its ordinary permission mode", async () => {
   let seen: Record<string, unknown> | undefined;
   const provider = createClaudeProvider(
     async () => ({
@@ -2149,25 +2105,17 @@ test("Claude readonly preserves execution config and plan permissions", async ()
     }),
     { config: { sandbox: { enabled: true } } },
   );
-  const drive = await provider.start(freshInput("inspect", { cwd: "/work", options: { readonly: true } })).result;
+  const drive = await provider.start(freshInput("inspect", { cwd: "/work" })).result;
   await drive.completion;
 
   assert.deepEqual(seen?.sandbox, { enabled: true });
-  assert.equal(seen?.permissionMode, "plan");
-  assert.equal(seen?.allowDangerouslySkipPermissions, undefined);
+  assert.equal(seen?.permissionMode, "bypassPermissions");
+  assert.equal(seen?.allowDangerouslySkipPermissions, true);
 });
 
-test("Claude full-access refuses readonly and disabled network conflicts", () => {
+test("Claude refuses an unsupported network option", () => {
   const provider = createClaudeProvider(async () => {
     throw new Error("native Claude query must not start");
-  });
-  assert.deepEqual(provider.admitOptions({ sandbox: "full-access", readonly: true }), {
-    kind: "refused",
-    diagnostic: "Claude full-access sandbox cannot combine with readonly",
-  });
-  assert.deepEqual(provider.admitOptions({ sandbox: "full-access", network: "disabled" }), {
-    kind: "refused",
-    diagnostic: "Claude full-access sandbox cannot combine with disabled network",
   });
   assert.deepEqual(provider.admitOptions({ network: "enabled" }), {
     kind: "refused",
@@ -2289,11 +2237,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     systemPrompt: "Work precisely.",
   };
   assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
-  assert.deepEqual(provider.admitOptions({ readonly: true }), {
-    kind: "admitted",
-    options: { readonly: true },
-    readonly: { enforcement: "native" },
-  });
 
   const requestDirectory = join(root, "body-requests");
   mkdirSync(requestDirectory);
@@ -2331,13 +2274,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     model: "gpt-test",
     effort: "high",
     approvalPolicy: "never",
-    sandboxPolicy: {
-      type: "workspaceWrite",
-      writableRoots: [root, requestDirectory],
-      networkAccess: true,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false,
-    },
   });
   assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
 });
@@ -2394,71 +2330,16 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
   assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
 });
 
-test("unsupported providers refuse full-access while Codex and Claude admit it", () => {
-  const fullAccess = { sandbox: "full-access" as const };
-  const unsupported = [
-    createAcpProvider({
-      name: "acp",
-      kind: "acp",
-      executable: "agent",
-      config: { argvBefore: [], argvAfter: [] },
-    }),
-    createGrokBuildProvider({ name: "grok-build", kind: "grok-build", executable: "grok" }),
-    createOpencodeProvider(),
-    createPiProvider({ name: "pi", kind: "pi" }),
-  ];
-  for (const provider of unsupported) assert.equal(provider.admitOptions(fullAccess).kind, "refused");
-
-  const claude = createClaudeProvider(async () => {
-    throw new Error("not started");
-  });
-  assert.deepEqual(claude.admitOptions(fullAccess), { kind: "admitted", options: fullAccess });
-
-  const codex = createCodexAppServerProvider();
-  assert.deepEqual(codex.admitOptions(fullAccess), { kind: "admitted", options: fullAccess });
-  assert.deepEqual(codex.admitOptions({ ...fullAccess, readonly: true }).kind, "refused");
-  assert.deepEqual(codex.admitOptions({ ...fullAccess, network: "disabled" }).kind, "refused");
-});
-
-test("Codex full-access sandbox emits dangerFullAccess for fresh and resumed turns", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-codex-full-access-");
+test("Codex leaves sandbox policy to native configuration", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-policy-");
   const fake = fakeCodex(root, "complete");
   const provider = createCodexAppServerProvider(fake.executable);
-  const fullAccess = { sandbox: "full-access" as const };
-  const fresh = await provider.start(freshInput("build", { cwd: root, options: fullAccess })).result;
-  await fresh.completion;
-  const resumed = await provider.resume!({
-    ...DRIVE_DEFAULTS,
-    body: "continue",
-    launchTells: [],
-    cwd: root,
-    options: fullAccess,
-    session: { kind: "resume", coordinate: { sessionId: "thread-resumed" } },
-  }).result;
-  await resumed.completion;
-  const readonly = await provider.start(freshInput("inspect", { cwd: root, options: { readonly: true } })).result;
-  await readonly.completion;
-  const omitted = await provider.start(freshInput("write", { cwd: root })).result;
-  await omitted.completion;
-  const turns = fake
+  const drive = await provider.start(freshInput("write", { cwd: root })).result;
+  await drive.completion;
+  const turn = fake
     .requests()
-    .filter((request) => request.method === "turn/start")
-    .map((request) => request.params as Record<string, unknown>);
-  assert.deepEqual(
-    turns.map((turn) => turn.sandboxPolicy),
-    [
-      { type: "dangerFullAccess" },
-      { type: "dangerFullAccess" },
-      { type: "readOnly", networkAccess: false },
-      {
-        type: "workspaceWrite",
-        writableRoots: [root, "/tmp/akuma-test-requests"],
-        networkAccess: false,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      },
-    ],
-  );
+    .find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
+  assert.equal(Object.hasOwn(turn, "sandboxPolicy"), false);
 });
 
 test("Codex maps observations without leaking output or unknown payloads", async (context) => {

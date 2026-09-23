@@ -102,7 +102,6 @@ export function callObservationHead(input: Readonly<{ akuma: string }> & CallWai
   const contractId = input.dispatch.kind === "dispatched" ? input.dispatch.dispatch.contractId : undefined;
   const facts = [
     ...dispatchLines(input.dispatch),
-    ...(input.readonly?.enforcement === "none" ? [`! ${safeText(input.readonly.diagnostic)}`] : []),
     ...(input.alias.kind === "failed"
       ? [`alias failed ${input.alias.failure.kind} ${safeText(input.alias.failure.diagnostic)}`]
       : []),
@@ -121,7 +120,6 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     akuma: result.result.akuma,
     dispatch: result.result.dispatch,
     alias: result.result.alias,
-    ...(result.result.readonly === undefined ? {} : { readonly: result.result.readonly }),
   });
   if (result.result.observation.kind === "detached") {
     return [

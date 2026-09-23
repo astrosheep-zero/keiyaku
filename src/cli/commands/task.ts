@@ -1,10 +1,8 @@
 import {
   CliUsageError,
-  commandGuide,
   isBlankInput,
   TASK_FAMILY_USAGE_GUIDE,
   unknownCommandGuide,
-  usageLine,
   type CliUsageGuide,
 } from "../usage.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
@@ -80,7 +78,7 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
   [--supersedes <TaskId>]... [--relates <TaskId>]...
   [--body <text>]
 task add [--namespace <ns>] [--actor <actor>] -`,
-    purpose: "Create one Task from flags or a canonical stdin document.",
+    purpose: "Create a Task from flags or a Task document on stdin.",
   },
   show: {
     arity: [1, Number.POSITIVE_INFINITY],
@@ -92,21 +90,24 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     arity: [0, 1],
     flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
     usage: "task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>]",
-    purpose: "List Tasks in the selected scope.",
-    details: "--world lists every namespace in the current Task world.",
+    purpose: "List Tasks in the selected namespace.",
+    details: [
+      "With no selector, lists the current directory Task context.",
+      "task/ selects the root namespace; --world lists every namespace in the current Task world.",
+    ].join("\n"),
   },
   ready: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
     usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]",
-    purpose: "List open Tasks whose every need is terminal.",
+    purpose: "List open Tasks whose every dependency is complete or dropped.",
     details: "--world lists every namespace in the current Task world.",
   },
   blocked: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
     usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]",
-    purpose: "List Tasks blocked by dependencies.",
+    purpose: "List Tasks with unmet dependencies.",
     details: "--world lists every namespace in the current Task world.",
   },
   query: {
@@ -114,10 +115,11 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" },
     usage: `task query [--where <expression>] [--world]
   [--sort priority|created|updated|id] [--limit <n>]`,
-    purpose: "Query Task facts with a typed boolean expression.",
+    purpose: "Filter and sort Tasks with a boolean expression.",
     details: [
       "fields: state priority title id parent under needs blocks ready blocked created updated",
       "operators: = != < > <= >= ~ and or not ( )",
+      "sort: priority and created ascend; updated descends; id is lexical. Default: priority.",
       "--world lists every namespace in the current Task world.",
       "examples:",
       "  keiyaku task query --where 'priority <= 1 and ready' --world",
@@ -128,13 +130,13 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     arity: [1, 1],
     flags: COMMON,
     usage: "task tree <TaskId>",
-    purpose: "Read one Task parent decomposition tree.",
+    purpose: "Show a Task and its parent/child breakdown.",
   },
   doctor: {
     arity: [0, 0],
     flags: COMMON,
     usage: "task doctor",
-    purpose: "Inspect Task authority without repairing it.",
+    purpose: "Check Tasks for inconsistencies without changing them.",
   },
   update: {
     arity: [1, 1],
@@ -160,7 +162,11 @@ task add [--namespace <ns>] [--actor <actor>] -`,
   [--parent <TaskId> | --no-parent]
   [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
   [--relates <TaskId>]... [--drop-relates <TaskId>]...`,
-    purpose: "Apply one or more patches to a Task.",
+    purpose: "Change a Task's fields and relationships.",
+    details: [
+      "--body replaces the body; --append adds text after it, separated by a newline when needed.",
+      "--body - reads replacement body text from stdin.",
+    ].join("\n"),
   },
   start: {
     arity: [1, Number.POSITIVE_INFINITY],
@@ -196,20 +202,21 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
     usage: "task drop <TaskId>... [--note <text>]",
-    purpose: "Drop one or more Tasks.",
+    purpose: "Mark one or more Tasks as no longer needed.",
   },
   context: {
     arity: [0, 1],
     flags: COMMON,
     usage: "task context [<namespace>]",
-    purpose: "Read or replace the directory Task context.",
+    purpose: "Set or read the default Task namespace for this directory.",
+    details: "Omit <namespace> to read the current context; use / to reset it to the root namespace.",
   },
   compose: {
     arity: [0, 0],
     stdin: "compose",
     flags: { ...COMMON, actor: "value", plan: "boolean" },
     usage: "task compose [--actor <actor>] [--plan] -",
-    purpose: "Plan or admit one explicit Task composition.",
+    purpose: "Create or update several Tasks from one document, with an optional preview.",
     details: [
       "nodes: + <Title> creates; @task/<id> modifies a pre-existing Task",
       "properties: as = <alias>; state = open|in_progress|on_hold|done|drop; pri = 0..3; parent = <ref>|empty",
@@ -238,7 +245,7 @@ export function isTaskAction(value: string | undefined): value is TaskAction {
 export function renderTaskHelp(action?: TaskAction): string {
   if (action !== undefined) {
     const spec = TASK_COMMAND_SPECS[action];
-    return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
+    return `${spec.purpose}\n\n${renderTaskUsage(action)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
   }
   return [
     "usage  keiyaku task <command> ...",
@@ -254,11 +261,34 @@ export function renderTaskHelp(action?: TaskAction): string {
 }
 
 export function renderTaskUsage(action: TaskAction): string {
-  return usageLine(TASK_COMMAND_SPECS[action].usage);
+  return TASK_COMMAND_SPECS[action].usage
+    .split("\n")
+    .map((line, index) => {
+      if (index === 0 || line.trimStart().startsWith("task ")) {
+        const command = line.trimStart().startsWith("task ") ? `keiyaku ${line.trim()}` : `keiyaku ${line}`;
+        return `${index === 0 ? "usage  " : "      "}${command}`;
+      }
+      return `      ${line.trim()}`;
+    })
+    .join("\n");
+}
+
+function taskUsage(action: TaskAction): string {
+  const lines = TASK_COMMAND_SPECS[action].usage.split("\n");
+  return lines
+    .map((line, index) => {
+      if (index === 0 || line.trimStart().startsWith("task ")) return `keiyaku ${line.trim()}`;
+      return `           ${line.trim()}`;
+    })
+    .join("\n");
 }
 
 export function taskUsageGuide(action: TaskAction): CliUsageGuide {
-  return commandGuide(`task ${action}`, TASK_COMMAND_SPECS[action].usage);
+  return {
+    scope: `keiyaku task ${action}`,
+    accepts: taskUsage(action),
+    help: `keiyaku task ${action} --help`,
+  };
 }
 
 function setFlag(

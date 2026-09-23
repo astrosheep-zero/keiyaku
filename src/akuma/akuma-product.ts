@@ -12,7 +12,7 @@ import type {
   AkumaListRow,
   UnbornAkumaListRow,
 } from "./akuma.js";
-import { callReadonly, canonicalBirthCwd } from "./call-input.js";
+import { canonicalBirthCwd } from "./call-input.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
 import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
@@ -236,11 +236,10 @@ class AkumaProduct {
     });
   }
   async admit(input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaBornCall> {
-    const readonly = callReadonly(input.readonly);
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? (await readSettings({ root: this.path, ...home }));
-    const archetype = await loadArchetype({ name, project: this.path, ...home, settings, ...readonly });
+    const archetype = await loadArchetype({ name, project: this.path, ...home, settings });
     const allowed =
       input.allowed === undefined
         ? archetype.allowed
@@ -250,7 +249,6 @@ class AkumaProduct {
       ...(archetype.description === undefined ? {} : { description: archetype.description }),
       provider: archetype.provider,
       options: archetype.options,
-      ...(archetype.readonly === undefined ? {} : { readonly: archetype.readonly }),
       allowed,
     });
     if (execution.kind === "body-request")

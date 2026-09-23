@@ -36,10 +36,9 @@ import {
   probeLeash,
   readHeart,
   recordTell,
-  type Soul,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
-import { akumaPaths, akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -403,7 +402,7 @@ test("turn owner folds a rejected completion while the event stream remains open
   }
 });
 
-async function answeredSource(root: string, suffix: string, readonly?: Soul["readonly"]) {
+async function answeredSource(root: string, suffix: string) {
   const world = await World.at(root);
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
@@ -415,8 +414,7 @@ async function answeredSource(root: string, suffix: string, readonly?: Soul["rea
         archetype: "claude",
         description: "Fork source",
         provider: CLAUDE_EXECUTION,
-        options: { model: "fixture-model", ...(readonly === undefined ? {} : { readonly: true }) },
-        ...(readonly === undefined ? {} : { readonly }),
+        options: { model: "fixture-model" },
         origin: { kind: "direct" },
         allowed: [],
         cwd: world,
@@ -1163,68 +1161,6 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   const exact = await handle.history({ id: "turn/1" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
   assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
-});
-
-test("fork preserves the exact admitted readonly restraint byte-for-byte", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-restraint-"));
-  const mutable = claudeProvider as MutableProvider;
-  const originalFork = mutable.fork;
-  const deferred = configureDeferredBodyEndPlugin(root);
-  let sourcePromise: Promise<Awaited<ReturnType<typeof answeredSource>>> | undefined;
-  let forkPromise: Promise<Awaited<ReturnType<AkumaHandle["fork"]>>> | undefined;
-  try {
-    let sourceSettled = false;
-    sourcePromise = answeredSource(root, "f0a10007", { enforcement: "native" }).then((source) => {
-      sourceSettled = true;
-      return source;
-    });
-    await waitForFile(deferred.turnStarted);
-    await Promise.resolve();
-    assert.equal(sourceSettled, false);
-    writeFileSync(deferred.turnRelease, "release\n");
-    await waitForFile(deferred.started);
-    await Promise.resolve();
-    assert.equal(sourceSettled, false);
-    assert.equal(
-      await probeLeash(akumaPaths({ runRoot: akumaRunRoot(root), archetype: "claude", suffix: "f0a10007" })),
-      "free",
-    );
-    writeFileSync(deferred.release, "release\n");
-    const source = await sourcePromise;
-    await waitForFile(deferred.settled);
-    await waitForFile(deferred.turnSettled);
-    assert.equal(existsSync(join(root, ".square", "KEIYAKU.square")), true);
-    mutable.fork = () =>
-      createProviderAttempt(undefined, async () => ({ session: { sessionId: "fork-restraint-child" } }));
-    const world = await akumaAt(root);
-    unlinkSync(deferred.started);
-    unlinkSync(deferred.release);
-    unlinkSync(deferred.settled);
-    unlinkSync(deferred.turnStarted);
-    unlinkSync(deferred.turnRelease);
-    forkPromise = world.of({ id: source.id }).fork({ at: "turn/1" });
-    await waitForFile(deferred.started);
-    const childRows = (await world.list()).rows.filter((row) => row.id !== source.id);
-    assert.equal(childRows.length, 1);
-    assert.equal(await probeLeash(pathsForAkuId(root, childRows[0]!.id)), "free");
-    writeFileSync(deferred.release, "release\n");
-    const receipt = await forkPromise;
-    await waitForFile(deferred.settled);
-    assert.ok(receipt.kind === "forked", JSON.stringify(receipt));
-    const child = world.of({ id: receipt.child });
-    assert.deepEqual((await readHeart(pathsForAkuId(root, receipt.child))).soul?.readonly, { enforcement: "native" });
-    assert.equal((await child.status()).readonly?.enforcement, "native");
-  } finally {
-    mutable.fork = originalFork;
-    writeFileSync(deferred.release, "release\n");
-    writeFileSync(deferred.turnRelease, "release\n");
-    await sourcePromise?.catch(() => undefined);
-    await forkPromise?.catch(() => undefined);
-    if (existsSync(deferred.started)) await waitForFile(deferred.settled).catch(() => undefined);
-    if (existsSync(deferred.turnStarted)) await waitForFile(deferred.turnSettled).catch(() => undefined);
-    rmSync(root, { recursive: true, force: true });
-    assert.equal(existsSync(root), false);
-  }
 });
 
 test("fork preserves categorical, exact-history, native, local, and not-born failures", async () => {

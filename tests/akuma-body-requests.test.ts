@@ -936,7 +936,7 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
     initialTell: callTell("invalid recipe"),
     recipe: {
       provider: { name: "claude", kind: "claude-agent-sdk" },
-      options: { readonly: true },
+      options: null as never,
       allowed: ALLOWED_ACTIONS,
     },
   });

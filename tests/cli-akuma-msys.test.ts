@@ -37,7 +37,7 @@ function tellResult() {
 }
 
 function detachedCall(
-  result: Pick<CallResult, "dispatch" | "alias" | "readonly">,
+  result: Pick<CallResult, "dispatch" | "alias">,
 ): Extract<AkumaInvocationResult, { action: "call" }> {
   return {
     kind: "akuma",
@@ -131,14 +131,6 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
         alias: { kind: "failed", failure: { kind: "infrastructure", diagnostic: "locked" } },
       }),
       diagnostic: "alias failed infrastructure locked",
-    },
-    {
-      result: detachedCall({
-        dispatch: { kind: "none" },
-        alias: { kind: "none" },
-        readonly: { enforcement: "none", diagnostic: "readonly unsupported" },
-      }),
-      diagnostic: "! readonly unsupported",
     },
   ];
   for (const { result, diagnostic } of failures) {

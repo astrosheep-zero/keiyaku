@@ -459,7 +459,6 @@ export class AkumaHandle {
               ...(source.description === undefined ? {} : { description: source.description }),
               provider: source.provider,
               options: source.options,
-              ...(source.readonly === undefined ? {} : { readonly: source.readonly }),
               allowed: source.allowed,
               cwd: source.cwd,
               origin: { kind: "fork", parent: this.id, at: input.at },

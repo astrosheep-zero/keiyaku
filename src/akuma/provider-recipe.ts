@@ -3,16 +3,10 @@ export type SystemPromptMode = "append" | "replace";
 export type ProviderOptions = Readonly<{
   model?: string;
   effort?: string;
-  readonly?: true;
   network?: "disabled" | "enabled";
-  sandbox?: "full-access";
   systemPrompt?: string;
   systemPromptMode?: SystemPromptMode;
 }>;
-
-export type ReadonlyRestraint = Readonly<
-  { enforcement: "native"; diagnostic?: never } | { enforcement: "none"; diagnostic: string }
->;
 
 export type ProviderExecution = Readonly<{
   name: string;
@@ -53,16 +47,9 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
   if (options === null) throw new TypeError("provider options must be an object");
   const model = optionText(options, "model", "refuse");
   const effort = optionText(options, "effort", "refuse");
-  if (options.readonly !== undefined && options.readonly !== true) {
-    throw new TypeError("provider option readonly must be true");
-  }
   const network = options.network;
   if (network !== undefined && network !== "disabled" && network !== "enabled") {
     throw new TypeError("provider option network must be disabled, enabled");
-  }
-  const sandbox = options.sandbox;
-  if (sandbox !== undefined && sandbox !== "full-access") {
-    throw new TypeError("provider option sandbox must be full-access");
   }
   const systemPrompt = optionText(options, "systemPrompt", "allow");
   const systemPromptMode = options.systemPromptMode;
@@ -77,28 +64,10 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
   return Object.freeze({
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
-    ...(options.readonly === undefined ? {} : { readonly: true as const }),
     ...(network === undefined ? {} : { network }),
-    ...(sandbox === undefined ? {} : { sandbox }),
     ...(systemPrompt === undefined ? {} : { systemPrompt }),
     ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   });
-}
-
-export function decodeReadonlyRestraint(value: unknown): ReadonlyRestraint {
-  const restraint = record(value);
-  if (restraint === null) throw new TypeError("readonly restraint must be an object");
-  if (restraint.enforcement === "native") {
-    return Object.freeze({ enforcement: "native" });
-  }
-  if (
-    restraint.enforcement === "none" &&
-    typeof restraint.diagnostic === "string" &&
-    restraint.diagnostic.trim().length > 0
-  ) {
-    return Object.freeze({ enforcement: "none", diagnostic: restraint.diagnostic });
-  }
-  throw new TypeError("readonly restraint must be native or none with a diagnostic");
 }
 
 function providerKind(value: unknown): value is ProviderExecution["kind"] {

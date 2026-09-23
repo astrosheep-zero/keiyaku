@@ -22,7 +22,7 @@ test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", " "]), /requires a nonblank value/u);
   assert.throws(() => parseArgv(["nuke", "--confirm", "/one", "--confirm", "/two"]), /duplicate option/u);
-  assert.match(renderContractHelp("nuke"), /usage  keiyaku nuke \[--confirm <WorldRoot>\]/u);
+  assert.match(renderContractHelp("nuke"), /usage  keiyaku nuke \[--confirm <world-directory>\]/u);
   assert.match(renderContractHelp("nuke"), /Remove Keiyaku-owned data/u);
 });
 
@@ -123,16 +123,30 @@ test("root version is recognized only after coordinates and help", () => {
 
 test("audit maps only --show-diff to the existing display choice", () => {
   assert.deepEqual(command(["audit"]), {
-    command: "audit", includeDirty: false, showDiff: false, output: "text",
+    command: "audit",
+    includeDirty: false,
+    showDiff: false,
+    output: "text",
   });
   assert.deepEqual(command(["audit", "kei/example", "--show-diff", "--include-dirty"]), {
-    command: "audit", contract: "kei/example", includeDirty: true, showDiff: true, output: "text",
+    command: "audit",
+    contract: "kei/example",
+    includeDirty: true,
+    showDiff: true,
+    output: "text",
   });
   assert.deepEqual(command(["audit", "@example", "--show-diff", "--json"]), {
-    command: "audit", contract: "@example", includeDirty: false, showDiff: true, output: "json",
+    command: "audit",
+    contract: "@example",
+    includeDirty: false,
+    showDiff: true,
+    output: "json",
   });
   assert.throws(() => parseArgv(["audit", "--diff"]), /option --diff is not valid for audit/u);
-  assert.throws(() => parseArgv(["deliver", "kei/example", "--show-diff"]), /option --show-diff is not valid for deliver/u);
+  assert.throws(
+    () => parseArgv(["deliver", "kei/example", "--show-diff"]),
+    /option --show-diff is not valid for deliver/u,
+  );
 });
 
 test("show parses one optional Contract selector and JSON output", () => {

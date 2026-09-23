@@ -2,7 +2,7 @@
 import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
-import { type AkumaStatus, type ForkReceipt, type ReadonlyRestraint } from "../akuma/akuma.js";
+import { type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
 import { createAkumaProduct, type AkumaBornCall, type InitialCallTell } from "../akuma/akuma-product.js";
 import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
@@ -24,7 +24,7 @@ import {
 import type { AkumaTellWaitResult } from "../akuma/fleet-observation.js";
 import type { TellResult } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-import { callReadonly, canonicalBirthCwd } from "../akuma/call-input.js";
+import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
 import { type Keiyaku } from "./contract.js";
@@ -52,7 +52,6 @@ export type AliasStage =
 export type CallWaitHead = Readonly<{
   dispatch: DispatchStage;
   alias: AliasStage;
-  readonly?: ReadonlyRestraint;
 }>;
 
 export type CallWaitObserver = Readonly<{
@@ -65,7 +64,6 @@ export type CallInput = Readonly<{
   archetype: string;
   body: string;
   cwd?: string;
-  readonly?: true;
   mode?: "wait" | "detach";
   timeoutMs?: number;
   home?: string;
@@ -92,7 +90,6 @@ export type CallObservation =
 export type CallResult = Readonly<{
   kind: "called";
   akuma: AkuId;
-  readonly?: ReadonlyRestraint;
   execution: Readonly<{
     cwd: string;
     source: "input" | "caller" | "process" | "world";
@@ -353,7 +350,6 @@ const CALL_INPUT_KEYS = [
   "archetype",
   "body",
   "cwd",
-  "readonly",
   "mode",
   "timeoutMs",
   "home",
@@ -370,7 +366,6 @@ const CALL_INPUT_KEYS = [
 type ParsedCallInput = Readonly<{
   path: WorldRoot;
   archetype: string;
-  readonlyRequested?: true;
   cwd?: string;
   mode: "wait" | "detach";
   timeoutMs: number;
@@ -391,7 +386,6 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   const archetype = nonblank(values.archetype, "archetype");
   const body = text(values.body, "body");
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
-  const readonlyRequested = callReadonly(values.readonly, "readonly must be true").readonly;
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
@@ -414,7 +408,6 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   return {
     path,
     archetype,
-    ...(readonlyRequested === undefined ? {} : { readonlyRequested }),
     ...(cwd === undefined ? {} : { cwd }),
     mode,
     timeoutMs,
@@ -438,7 +431,6 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
       ...(input.initialTell.schemaJson === undefined ? {} : { schemaJson: input.initialTell.schemaJson }),
       ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
     },
-    ...(input.readonlyRequested === undefined ? {} : { readonly: input.readonlyRequested }),
     ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -490,7 +482,6 @@ async function publishCallTarget(born: BornCall): Promise<PublishedCall> {
   const world = akumaWorld(born.path);
   const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
   const handle = await world.publish(born.born, { ...(contractId === undefined ? {} : { contractId }) }, born.signal);
-  const readonly = (await handle.status()).readonly;
   return {
     born,
     handle,
@@ -500,7 +491,6 @@ async function publishCallTarget(born: BornCall): Promise<PublishedCall> {
       execution: born.execution,
       dispatch: born.dispatch,
       alias: born.alias,
-      ...(readonly === undefined ? {} : { readonly }),
       ...(born.initialTell.schema === undefined ? {} : { structured: true }),
     },
   };
@@ -566,7 +556,6 @@ async function observeCall(call: PublishedCall, admission: AdmittedCallTell): Pr
       await born.observe?.admitted?.(receipt, id, {
         dispatch: born.dispatch,
         alias: born.alias,
-        ...(call.result.readonly === undefined ? {} : { readonly: call.result.readonly }),
       });
     },
     ...(born.observe?.observe === undefined ? {} : { observe: born.observe.observe }),

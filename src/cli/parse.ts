@@ -97,6 +97,8 @@ export function renderRootHelp(columns?: number): string {
       "Global options:",
       "  -C, --cwd <path>  Set the invocation working directory.",
       "  --repo <path>     Select the Git repository coordinate.",
+      "",
+      "Call option:",
       "  --workdir <path>  Set the execution directory for call only.",
     ].join("\n"),
     columns,

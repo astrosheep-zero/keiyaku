@@ -35,7 +35,6 @@ function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
   return coordinateValue.sessionId;
 }
 function admit(options: ProviderOptions): void {
-  if (options.sandbox !== undefined) throw new Error("OpenCode does not support the sandbox option");
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
   if (options.systemPromptMode === "replace") {
     throw new Error("OpenCode V1 does not support replacing the native system prompt");
@@ -387,14 +386,6 @@ export function createOpencodeProvider(
       return {
         kind: "admitted",
         options: Object.freeze({ ...options }),
-        ...(options.readonly === undefined
-          ? {}
-          : {
-              readonly: {
-                enforcement: "none" as const,
-                diagnostic: "OpenCode V1 cannot remove task-surface mutation capabilities",
-              },
-            }),
       };
     },
     start: (input) =>
