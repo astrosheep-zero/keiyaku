@@ -4,7 +4,7 @@ import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
+import { parseAkumaAlias, parseReadableAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 
 const VERSION = 1;
@@ -68,7 +68,7 @@ function decode(path: string, bytes: string): readonly AliasBinding[] {
   for (const [rawAlias, rawAkuId] of Object.entries(record.aliases as Record<string, unknown>)) {
     if (typeof rawAkuId !== "string") corruption(`Alias target must be an AkuId: ${path}`);
     try {
-      bindings.push({ alias: parseAkumaAlias(rawAlias), akuId: parseAkuId(rawAkuId).id });
+      bindings.push({ alias: parseReadableAkumaAlias(rawAlias), akuId: parseAkuId(rawAkuId).id });
     } catch (error) {
       return corruption(`Alias binding is invalid: ${path}`, error);
     }
@@ -123,7 +123,7 @@ export async function readAliases(world: WorldRoot): Promise<readonly AliasBindi
 }
 
 export async function resolveAlias(world: WorldRoot, value: AkumaAlias): Promise<AkuId | null> {
-  const alias = parseAkumaAlias(value);
+  const alias = parseReadableAkumaAlias(value);
   return (await readAliases(world)).find((binding) => binding.alias === alias)?.akuId ?? null;
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "keiyaku-harness",
-  "version": "0.1.2",
+  "version": "4.5.28",
   "type": "module",
   "main": "./opencode.js",
   "keywords": [

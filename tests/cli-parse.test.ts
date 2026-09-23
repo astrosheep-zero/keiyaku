@@ -62,7 +62,13 @@ test("global coordinates are independent of command position", () => {
   });
   assert.deepEqual(parseArgv(["call", "worker", "--workdir", "work", "body"]), {
     workdir: "work",
-    command: { command: "call", archetype: "worker", mode: "detach", prompt: { kind: "argument", value: "body" }, output: "text" },
+    command: {
+      command: "call",
+      archetype: "worker",
+      mode: "detach",
+      prompt: { kind: "argument", value: "body" },
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["call", "worker", "--contract", "kei/example", "--workdir", "work", "body"]), {
     workdir: "work",
@@ -77,13 +83,22 @@ test("global coordinates are independent of command position", () => {
   });
   assert.throws(() => parseArgv(["status", "--repo"]), /--repo requires a path/u);
   assert.throws(() => parseArgv(["--repo", "/one", "status", "--repo", "/two"]), /--repo may appear only once/u);
-  assert.throws(() => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]), /--workdir may appear only once/u);
+  assert.throws(
+    () => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]),
+    /--workdir may appear only once/u,
+  );
   assert.throws(() => parseArgv(["call", "worker", "--workdir", "body"]), /call requires a prompt argument or stdin/u);
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--workdir", "work", "body"]), /option --workdir is not valid for tell/u);
-  assert.throws(() => parseArgv(["fork", "aku/worker/1234abcd", "--at", "turn/1", "--workdir", "work"]), /option --workdir is not valid for fork/u);
+  assert.throws(
+    () => parseArgv(["tell", "@worker", "--workdir", "work", "body"]),
+    /option --workdir is not valid for tell/u,
+  );
+  assert.throws(
+    () => parseArgv(["fork", "aku/worker/1234abcd", "--at", "turn/1", "--workdir", "work"]),
+    /option --workdir is not valid for fork/u,
+  );
 });
 
 test("root version is recognized only after coordinates and help", () => {
@@ -229,6 +244,19 @@ test("abandon accepts a note but no caller-selected reason", () => {
     },
   });
   assert.throws(() => parseArgv(["abandon", "kei/example", "--reason", "manual"]), CliUsageError);
+});
+
+test("call accepts a bare alias name and keeps prefixed input compatible", () => {
+  for (const input of ["pi-reset-api-review", "@pi-reset-api-review"]) {
+    const parsed = command(["call", "intern", "--alias", input, "audit"]);
+    assert.equal(parsed.command, "call");
+    if (parsed.command === "call") assert.equal(parsed.alias, "@pi-reset-api-review");
+  }
+  const unicode = command(["call", "审查-二号", "--alias", "审查-二号", "audit"]);
+  assert.equal(unicode.command, "call");
+  if (unicode.command === "call") assert.equal(unicode.alias, "@审查-二号");
+  assert.throws(() => parseArgv(["call", "intern", "--alias", "Reviewer", "audit"]), /normalized Akuma name/u);
+  assert.throws(() => parseArgv(["call", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
 test("wait accepts a plural selection without an explicit completion mode", () => {

@@ -1334,7 +1334,11 @@ export function tellText(
 ): string {
   const wake = result.result.tell.wake;
   const target = identity(result.result.akuma, result.alias);
-  const row = groupedRows([result.result.tell.row], context).join("\n");
+  const row = groupedRows([result.result.tell.row], context, false, {
+    ...plainLayout(),
+    head: (time, _glyph, _verb, columns) => eventPrefix(wake.kind === "held" ? "⧗" : "⧖", "tell", time, columns),
+    singleLine: true,
+  }).join("\n");
   if (wake.kind === "failed") {
     const child = "child" in wake ? wake.child : undefined;
     const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;

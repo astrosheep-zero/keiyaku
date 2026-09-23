@@ -62,7 +62,7 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias @name] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)",
+      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)",
     purpose: "Birth an Akuma from <akuma-name> with one prompt.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
@@ -70,7 +70,7 @@ const AKUMA_COMMAND_SPECS = {
       "--contract associates the born Akuma with that Contract for Dispatch; it never selects a workdir.",
       "--workdir selects the execution directory; a relative path is relative to the invocation cwd.",
       "Without --workdir, the call uses the invocation cwd whether or not --contract is present.",
-      "--alias assigns the world-local @name selector to the born Akuma.",
+      "--alias <name> assigns the world-local @name selector to the born Akuma; @name is also accepted.",
       `Legal actions: ${ALLOWED_ACTIONS.join(", ")}.`,
       `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
       "Repeated --allowed adds actions to the selected Akuma's defaults; it never narrows them.",
@@ -389,7 +389,8 @@ function parseCall(
   let alias: AkumaAlias | undefined;
   if (flags.alias !== undefined) {
     try {
-      alias = parseAkumaAlias(stringFlag(flags.alias, "--alias requires @name", fail));
+      const name = stringFlag(flags.alias, "--alias requires a name", fail);
+      alias = parseAkumaAlias(name.startsWith("@") ? name : `@${name}`);
     } catch (error) {
       fail(error instanceof Error ? error.message : "invalid Akuma alias");
     }

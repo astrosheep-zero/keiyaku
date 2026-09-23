@@ -7,6 +7,7 @@ import {
   frameRule,
   mutationObservationStageText,
   snapshotHeading,
+  tellText,
   waitObservationStream,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
@@ -101,7 +102,42 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     },
   };
   assert.equal(akumaRawAnswer(result), "exact answer");
-  assert.match(waitedTellProgress(result.result, undefined, { columns: 80, color: false }), /✓ answered$/u);
+  const context = { columns: 80, color: false };
+  const ordinary = {
+    kind: "akuma" as const,
+    action: "tell" as const,
+    mode: "ordinary" as const,
+    body: result.body,
+    result: { akuma: result.result.akuma, tell: result.result.tell },
+  };
+  assert.match(tellText(ordinary, context), /⧖ tell +"continue"/u);
+  assert.match(waitedTellProgress(result.result, undefined, context), /⧖ tell +"continue"/u);
+  assert.match(waitedTellProgress(result.result, undefined, context), /✓ answered$/u);
+  const long = {
+    ...ordinary,
+    result: {
+      ...ordinary.result,
+      tell: {
+        ...ordinary.result.tell,
+        row: {
+          ...ordinary.result.tell.row,
+          text: "one line of caller input ".repeat(20),
+        },
+      },
+    },
+  };
+  const receipt = tellText(long, context).split("\n");
+  assert.equal(receipt.length, 2, "identity and one Tell line only");
+  assert.match(receipt[1]!, /⧖ tell +"one line of caller input .*…"$/u);
+  assert.ok(displayColumns(receipt[1]!) <= 80);
+  assert.match(
+    tellText(
+      { ...long, result: { ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } } },
+      context,
+    ),
+    /⧗ tell/u,
+  );
+  assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
   assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
 });
 

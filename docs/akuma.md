@@ -8,8 +8,10 @@ durable authority.
 ## Identity, Birth, And Life
 
 An Akuma has one complete public identity in the Akuma family defined by
-[model.md](model.md). Physical topology is its private structural projection,
-not a second identity. Atomic allocation prevents reuse; an occupied or sealed
+[model.md](model.md). Archetype names are bounded canonical human identity
+segments; Alias uses the same name admission. The bound applies to new names,
+not the readability of existing identities. Physical topology is its private
+structural projection, not a second identity. Atomic allocation prevents reuse; an occupied or sealed
 coordinate is never adopted as a different Akuma.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider

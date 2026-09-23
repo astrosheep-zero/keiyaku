@@ -7,7 +7,7 @@ import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";
 import {
   matchesAkumaGlob,
-  parseAkumaAlias,
+  parseReadableAkumaAlias,
   parseAkumaGlob,
   type AkumaAlias,
   type AkumaGlob,
@@ -76,7 +76,7 @@ function nonblank(value: unknown, label: string): string {
 
 function parseAddressAlias(selector: string): AkumaAlias {
   try {
-    return parseAkumaAlias(selector);
+    return parseReadableAkumaAlias(selector);
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
     throw new AkumaAddressError({ kind: "invalid-akuma", selector });

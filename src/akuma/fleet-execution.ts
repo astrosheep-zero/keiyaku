@@ -1,6 +1,7 @@
 import { AkumaDecodeError, AkumaProviderError } from "./akuma-errors.js";
 import { AkumaNotBornError, defaultWaitComplete, type AkumaStatus, type TellResult } from "./akuma.js";
 import { createAkumaProduct } from "./akuma-product.js";
+import type { AkumaHandle } from "./akuma-handle.js";
 import { readLiveStatus, waitForObservation, type LiveStatusObservation } from "./akuma-observe.js";
 import type { ActivityRow } from "./projection.js";
 import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./dispatch-association.js";
@@ -212,6 +213,17 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   });
 }
 
+function tellWaitObservation(
+  observed: Awaited<ReturnType<AkumaHandle["tellOutcome"]>>,
+): AkumaTellWaitResult["observation"] {
+  if (observed.outcome === null)
+    return observed.reason === "deadline" ? { reason: "deadline" } : { reason: "unanswered" };
+  if (observed.outcome.kind === "answered")
+    return { reason: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer };
+  if (observed.outcome.kind === "failed") return { reason: "failed", diagnostic: observed.outcome.diagnostic };
+  throw new AkumaDecodeError(observed.outcome.diagnostic, observed.outcome.answer);
+}
+
 export async function executeTellWaitAkuma(
   input: TellExecutionInput & Readonly<{ timeoutMs: number; schemaJson?: string; interrupt?: boolean }>,
 ): Promise<AkumaTellWaitResult> {
@@ -248,18 +260,7 @@ export async function executeTellWaitAkuma(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
-  const observation =
-    observed.outcome === null
-      ? observed.reason === "deadline"
-        ? { reason: "deadline" as const }
-        : { reason: "unanswered" as const }
-      : observed.outcome.kind === "answered"
-        ? { reason: "answered" as const, answer: observed.outcome.answerJson ?? observed.outcome.answer }
-        : observed.outcome.kind === "failed"
-          ? { reason: "failed" as const, diagnostic: observed.outcome.diagnostic }
-          : (() => {
-              throw new AkumaDecodeError(observed.outcome.diagnostic, observed.outcome.answer);
-            })();
+  const observation = tellWaitObservation(observed);
   const tell = settled ?? (await handle.admittedReceipt(admission.tell.id));
   return fleetResultSchemas.tellWait.parse({ akuma: input.id, tell, observation });
 }

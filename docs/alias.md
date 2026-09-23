@@ -1,7 +1,10 @@
 # Alias
 
 Alias is the sole authority for movable, world-local human selectors that point
-at Akuma identities. It is convenience, not Akuma identity, lineage, Dispatch,
+at Akuma identities. Alias names share Akuma's bounded canonical name admission;
+the selector marker distinguishes a reference, not the caller's naming intent.
+Previously admitted selector spellings remain readable, but new assignments use
+the shared admission. It is convenience, not Akuma identity, lineage, Dispatch,
 lifecycle, or a durable property of an Akuma. Selector grammar belongs to
 [model.md](model.md).
 

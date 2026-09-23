@@ -464,13 +464,15 @@ export async function tellAkuma(
   });
 }
 
-export async function tellWaitAkuma(
-  input: AkumaTellWaitInput,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaTellWaitResult> {
-  const values = requireInput(input, "Keiyaku tell wait input");
+function validateTellWaitInput(
+  values: Record<string, unknown>,
+): asserts values is Record<string, unknown> & Pick<AkumaTellWaitInput, "body" | "timeoutMs"> {
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal", "observe"].includes(key)) {
+    if (
+      !["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal", "observe"].includes(
+        key,
+      )
+    ) {
       throw new TypeError(`Keiyaku tell wait input has unknown field: ${key}`);
     }
   }
@@ -485,6 +487,14 @@ export async function tellWaitAkuma(
   }
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
+}
+
+export async function tellWaitAkuma(
+  input: AkumaTellWaitInput,
+  execution: ExecutionContext = localExecutionContext(),
+): Promise<AkumaTellWaitResult> {
+  const values = requireInput(input, "Keiyaku tell wait input");
+  validateTellWaitInput(values);
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {

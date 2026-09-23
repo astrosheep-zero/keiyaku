@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
-import { normalizeIdentityStem } from "../identity/normalize.js";
+import { isCanonicalAkumaName, validateAkumaName } from "../identity/normalize.js";
 declare const AKU_ID: unique symbol;
 
 export type AkuId = string & { readonly [AKU_ID]: true };
@@ -32,10 +32,7 @@ export type AllocatedAkuma = Readonly<{
 }>;
 
 export function archetypeName(value: string): string {
-  if (value.length === 0 || normalizeIdentityStem({ source: value }) !== value) {
-    throw new TypeError("Akuma name must be one normalized human identity segment");
-  }
-  return value;
+  return validateAkumaName(value);
 }
 
 function suffixSegment(value: string): string {
@@ -53,9 +50,11 @@ export function akuId(input: Readonly<{ archetype: string; suffix: string }>): A
 export function parseAkuId(value: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
   const segments = identitySegments({ family: "aku", value });
   if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<akuma>/<hex8>");
-  const archetype = archetypeName(segments[0]!);
+  const archetype = segments[0]!;
+  // Existing identities remain addressable after new births gain a name limit.
+  if (!isCanonicalAkumaName(archetype)) throw new TypeError("Akuma name must be one normalized human identity segment");
   const suffix = suffixSegment(segments[1]!);
-  return { id: akuId({ archetype, suffix }), archetype, suffix };
+  return { id: value as AkuId, archetype, suffix };
 }
 
 export function akumaRunRoot(worldRoot: string): string {
@@ -69,7 +68,9 @@ export function akumaPaths(
     suffix: string;
   }>,
 ): AkumaPaths {
-  const directory = join(input.runRoot, `${archetypeName(input.archetype)}-${suffixSegment(input.suffix)}`);
+  if (!isCanonicalAkumaName(input.archetype))
+    throw new TypeError("Akuma name must be one normalized human identity segment");
+  const directory = join(input.runRoot, `${input.archetype}-${suffixSegment(input.suffix)}`);
   return {
     directory,
     heart: join(directory, "heart.db"),
@@ -83,7 +84,7 @@ export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; arch
   if (name.length < 10 || name.at(-9) !== "-") throw new Error(`invalid Akuma run directory ${name}`);
   const archetype = name.slice(0, -9);
   const suffix = name.slice(-8);
-  return { id: akuId({ archetype, suffix }), archetype, suffix };
+  return parseAkuId(`aku/${archetype}/${suffix}`);
 }
 
 export async function ensureAkumaRunRoot(worldRoot: string): Promise<string> {

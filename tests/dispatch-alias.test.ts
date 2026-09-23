@@ -37,9 +37,15 @@ test("Dispatch publishes one immutable association and preserves its first times
 
   assert.equal(await readDispatch(repository, akuma), null);
   const first = await publishDispatch({ repository, akuId: akuma, contractId: owner });
-  assert.ok(first.kind === "dispatched", "expected first.kind = \"dispatched\"");
-  assert.equal(raw.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(), "keiyaku authority - do not delete or rewrite");
-  assert.match(raw.run(["log", "-1", "--format=%B", "refs/heads/keiyaku-state"]), /\n\ndispatch aku\/worker\/1234abcd\n/u);
+  assert.ok(first.kind === "dispatched", 'expected first.kind = "dispatched"');
+  assert.equal(
+    raw.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(),
+    "keiyaku authority - do not delete or rewrite",
+  );
+  assert.match(
+    raw.run(["log", "-1", "--format=%B", "refs/heads/keiyaku-state"]),
+    /\n\ndispatch aku\/worker\/1234abcd\n/u,
+  );
   assert.deepEqual(await readDispatch(repository, akuma), first.dispatch);
   assert.deepEqual(await readDispatches(repository), [first.dispatch]);
 
@@ -67,7 +73,7 @@ test("confirmed private-state seat close failure remains lag on a dispatched ass
   const akuma = parseAkuId("aku/worker/1234abcd").id;
   const owner = contractId("kei/dispatch-owner");
   const published = await publishDispatch({ repository, akuId: akuma, contractId: owner });
-  assert.ok(published.kind === "dispatched", "expected published.kind = \"dispatched\"");
+  assert.ok(published.kind === "dispatched", 'expected published.kind = "dispatched"');
   assert.deepEqual(await readDispatch(repository, akuma), published.dispatch);
   assert.deepEqual(published.seatClose, [
     {
@@ -86,7 +92,10 @@ test("concurrent distinct Dispatch publications wait for one repository seat", a
     parseAkuId("aku/worker/22222222").id,
     parseAkuId("aku/reviewer/33333333").id,
   ];
-  const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(repository), mode: "immediate" });
+  const held = await acquireSqliteTransactionLock({
+    path: privateStatePublicationSeatPath(repository),
+    mode: "immediate",
+  });
   const arrivals = ids.map(() => deferred<void>());
   const pending = ids.map((akuId, index) =>
     publishDispatch({
@@ -143,8 +152,8 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
         contractId: owner,
       }),
   );
-  assert.ok(failed.kind === "failed", "expected failed.kind = \"failed\"");
-  assert.ok(failed.failure.kind === "publication-failed", "expected failed.failure.kind = \"publication-failed\"");
+  assert.ok(failed.kind === "failed", 'expected failed.kind = "failed"');
+  assert.ok(failed.failure.kind === "publication-failed", 'expected failed.failure.kind = "publication-failed"');
   assert.match(failed.failure.diagnostic, /forced hard publication failure/u);
 
   const raced = await withGitShim(
@@ -165,7 +174,7 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
         contractId: owner,
       }),
   );
-  assert.ok(raced.kind === "failed", "expected raced.kind = \"failed\"");
+  assert.ok(raced.kind === "failed", 'expected raced.kind = "failed"');
   assert.equal(raced.failure.kind, "publication-failed");
   assert.equal(await readDispatch(repository, parseAkuId("aku/worker/99999999").id), null);
 });
@@ -194,6 +203,23 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
     previous: first,
   });
   assert.equal(await resolveAlias(world, alpha), second);
+});
+
+test("existing noncanonical alias spelling stays readable but cannot be newly assigned", async (context) => {
+  const world = temporaryDirectory(context, "keiyaku-legacy-alias-") as WorldRoot;
+  const directory = join(world, ".keiyaku", "akuma");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "alias.json"), '{"version":1,"aliases":{"@old--":"aku/worker/11111111"}}\n');
+  assert.deepEqual(await readAliases(world), [{ alias: "@old--", akuId: parseAkuId("aku/worker/11111111").id }]);
+  assert.equal(await resolveAlias(world, "@old--" as ReturnType<typeof parseAkumaAlias>), "aku/worker/11111111");
+  await assert.rejects(
+    moveAlias({
+      world,
+      alias: "@old--" as ReturnType<typeof parseAkumaAlias>,
+      akuId: parseAkuId("aku/worker/22222222").id,
+    }),
+    /normalized Akuma name/u,
+  );
 });
 
 test("Alias corruption is visible instead of becoming an empty authority", async (context) => {

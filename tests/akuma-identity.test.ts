@@ -9,7 +9,9 @@ import {
   akuIdFromDirectoryName,
   ensureAkumaRunRoot,
   parseAkuId,
+  archetypeName,
 } from "../src/akuma/identity.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 
 test("Aku identity has one exact durable spelling", async () => {
   assert.equal(akuId({ archetype: "claude", suffix: "12ab34cd" }), "aku/claude/12ab34cd");
@@ -25,6 +27,21 @@ test("Aku identity has one exact durable spelling", async () => {
     archetype: "claude-fast",
     suffix: "12ab34cd",
   });
+});
+
+test("Akuma archetypes and aliases share bounded canonical name admission", () => {
+  for (const name of ["pi-reset-api-review", "审查-二号", "🦈", "9workers", "a".repeat(64), "鱼".repeat(21)]) {
+    assert.equal(archetypeName(name), name);
+    assert.equal(parseAkumaAlias(`@${name}`), `@${name}`);
+  }
+  for (const name of ["", "Reviewer", "a--b", "a-", "a/b", "a".repeat(65), "鱼".repeat(22), "🦈".repeat(17)]) {
+    assert.throws(() => archetypeName(name), /Akuma name/u);
+    assert.throws(() => parseAkumaAlias(`@${name}`), /Akuma alias name/u);
+  }
+  assert.throws(() => parseAkumaAlias("reviewer"), /start with @/u);
+  const historic = `aku/${"a".repeat(65)}/1234abcd`;
+  assert.equal(parseAkuId(historic).id, historic);
+  assert.throws(() => akuId({ archetype: "a".repeat(65), suffix: "1234abcd" }), /64 UTF-8 bytes/u);
 });
 
 test("directory creation is the identity allocation adjudicator", async (context) => {

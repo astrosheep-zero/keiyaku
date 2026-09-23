@@ -299,7 +299,9 @@ export class AkumaHandle {
         if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
         const outcome = await this.boundTellOutcome(tell);
         if (options.observe !== undefined) {
-          await options.observe(await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }));
+          await options.observe(
+            await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }),
+          );
         }
         return { outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
       },

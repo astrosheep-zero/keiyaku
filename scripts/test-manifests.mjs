@@ -59,6 +59,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/cli-verification.test.ts",
   "tests/contract-completion.test.ts",
   "tests/contract-fork.test.ts",
+  "tests/contract-lifecycle.test.ts",
   "tests/dispatch-alias.test.ts",
   "tests/facade-fleet.test.ts",
   "tests/git-change-id.test.ts",

@@ -145,8 +145,10 @@ additional text fact. Dispatch, alias, and restraint problems retain their
 evidence as attention rows. The receipt stops at facts: it neither claims a
 live worker state nor prescribes a follow-up command.
 
-Tell delivery has one text carrier: its corresponding timeline row. A held or
-pursuing delivery does not add a separate wake or receipt-status line. A
+Tell delivery has one text carrier: its corresponding timeline row. The immediate
+receipt shows the in-flight or waiting mark and one width-bounded preview of the
+submitted Tell; full input remains available through history. A held or pursuing
+delivery does not add a separate wake or receipt-status line. A
 failed delivery may add one prominent failure fact to that same carrier.
 
 Opaque configuration and observation values retain exact names, scalar types,

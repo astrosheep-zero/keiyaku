@@ -7,6 +7,21 @@ function graphemes(value: string): readonly string[] {
   return [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
 }
 
+export const MAX_AKUMA_NAME_BYTES = 64;
+
+export function isCanonicalAkumaName(value: string): boolean {
+  return value.length > 0 && normalizeIdentityStem({ source: value }) === value;
+}
+
+export function validateAkumaName(value: string): string {
+  if (!isCanonicalAkumaName(value) || Buffer.byteLength(value, "utf8") > MAX_AKUMA_NAME_BYTES) {
+    throw new TypeError(
+      `Akuma name must be one normalized human identity segment of at most ${MAX_AKUMA_NAME_BYTES} UTF-8 bytes`,
+    );
+  }
+  return value;
+}
+
 export function normalizeIdentityStem(input: Readonly<{ source: string }>): string {
   const source = input.source.normalize("NFKC").toLowerCase().normalize("NFKC");
   let result = "";

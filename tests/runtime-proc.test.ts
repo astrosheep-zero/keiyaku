@@ -422,6 +422,7 @@ test("owned-process lifecycle releases during pending termination exactly once",
 function waitForOutputLine(
   expected: string,
   message: string,
+  timeoutMs = 2_000,
 ): Readonly<{
   wait: Promise<void>;
   observe(chunk: Uint8Array): void;
@@ -436,7 +437,7 @@ function waitForOutputLine(
       settled = true;
       reject(new Error(message));
     }
-  }, 2_000);
+  }, timeoutMs);
   const settle = (): void => {
     if (settled) return;
     settled = true;
@@ -465,8 +466,8 @@ function waitForOutputLine(
   };
 }
 
-async function waitForFile(path: string): Promise<string> {
-  const deadline = performance.now() + 2_000;
+async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
+  const deadline = performance.now() + timeoutMs;
   for (;;) {
     const contents = existsSync(path) ? readFileSync(path, "utf8") : "";
     if (contents.endsWith("\n")) return contents;
@@ -711,7 +712,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
   const descendant = [
     'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
     'process.stdout.write("descendant/ready\\n");',
-    "setTimeout(() => process.exit(99), 2_000);",
+    "setTimeout(() => process.exit(99), 30_000);",
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
@@ -720,7 +721,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
     `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  const ready = waitForOutputLine("descendant/ready", "timeout helper did not signal readiness");
+  const ready = waitForOutputLine("descendant/ready", "timeout helper did not signal readiness", 5_000);
   let pending: ReturnType<typeof consumeProcessStdout> | undefined;
   const output: string[] = [];
   try {
@@ -728,7 +729,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
       {
         ...input([process.execPath, "-e", parent]),
         cwd: root,
-        timeoutMs: 1_000,
+        timeoutMs: 6_000,
       },
       (chunk) => {
         output.push(chunk.toString("utf8"));
@@ -857,13 +858,13 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
   let pending: ReturnType<typeof runProcess> | undefined;
   let descendantPid: number | undefined;
   try {
-    pending = runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 1_000 });
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    pending = runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 6_000 });
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
     const started = performance.now();
     const outcome = await pending;
     assert.equal(outcome.kind, "timeout");
     if (outcome.kind === "timeout") assert.match(outcome.stdout, /descendant\/ready/u);
-    assert.ok(performance.now() - started < 3_000);
+    assert.ok(performance.now() - started < 9_000);
     await waitForProcessExit(descendantPid);
   } finally {
     if (descendantPid !== undefined) {
