@@ -542,6 +542,7 @@ test("idle after kill names the killed life", async () => {
     assert.equal(await akuma.kill(), "killed");
     await body;
     body = undefined;
+    await waitForCondition("the killed life to become observable", async () => (await akuma.status()).life === "killed");
     const killed = await akuma.idle();
     assert.equal(killed.reason, "completed");
     assert.equal(killed.status.life, "killed");

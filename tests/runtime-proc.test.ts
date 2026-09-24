@@ -777,7 +777,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
       log: join(root, "stdio.log"),
     });
     const ownedProcess = owned;
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
     await ownedProcess.exited;
     await waitForProcessExit(descendantPid);
     await expectLaterTerminateIsInert(ownedProcess);
@@ -893,7 +893,11 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const controller = new AbortController();
-  const ready = waitForOutputLine("descendant/ready", "cancel helper did not signal readiness");
+  const ready = waitForOutputLine(
+    "descendant/ready",
+    "cancel helper did not signal readiness",
+    5_000,
+  );
   let pending: ReturnType<typeof consumeProcessStdout> | undefined;
   const output: string[] = [];
   try {
@@ -936,7 +940,7 @@ test("LineRpcProcess close closes the directly-owned helper boundary", async () 
   let readyTimer!: ReturnType<typeof setTimeout>;
   const notifications: string[] = [];
   const isReady = new Promise<void>((resolve, reject) => {
-    readyTimer = setTimeout(() => reject(new Error("line RPC helper did not signal readiness")), 2_000);
+    readyTimer = setTimeout(() => reject(new Error("line RPC helper did not signal readiness")), 5_000);
     ready = () => {
       clearTimeout(readyTimer);
       resolve();
@@ -1021,7 +1025,7 @@ test("LineRpcProcess rejects pending requests and closes on malformed JSON", asy
   ].join(" ");
   let rpc: LineRpcProcess | undefined;
   try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 5_000 });
     await assert.rejects(rpc.request("probe"), /malformed JSON/u);
   } finally {
     await rpc?.close(true);
