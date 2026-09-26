@@ -8,7 +8,7 @@ surface. Read every owner named for the surface being changed.
 | Chapter | Owns |
 | --- | --- |
 | [public-api.md](public-api.md) | Package-root composition, Contract handles and operations, construction, and delivery diff. |
-| [public-akuma.md](public-akuma.md) | Package-root Akuma creation, addressing, fleet operations, and cross-product composition. |
+| [public-akuma.md](public-akuma.md) | Package-root Akuma creation, addressing, selection operations, and cross-product composition. |
 | [public-results.md](public-results.md) | Meaning and ownership of public operation outcomes, including refusal, retry, audit, and admission. |
 | [document.md](document.md) | Contract document authority, amendment and arc intent, and reserved authorial boundaries. |
 | [model.md](model.md) | Journal authority, durable identity, current Contract interpretation, and dependency direction. |
@@ -30,7 +30,7 @@ surface. Read every owner named for the surface being changed.
 | [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
 | [akuma-requests.md](akuma-requests.md) | Body Request admission, forwarding, serving, and recovery protocol. |
 | [akuma-provider.md](akuma-provider.md) | Provider boundary, shared event meaning, and adaptation responsibility. |
-| [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and fleet values. |
+| [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and roster values. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |
 | [plugins.md](plugins.md) | Plugin contract, selection, process-local activation, World capabilities, signal delivery, and failure isolation. |
 | [kanshi.md](kanshi.md) | Composite World observation, section availability, read-time associations, and selection. |

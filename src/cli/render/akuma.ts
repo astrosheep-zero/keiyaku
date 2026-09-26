@@ -15,7 +15,7 @@ import {
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
-import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
+import type { AkumaTellWaitResult } from "../../akuma/selection-observation.js";
 import type { AkuId } from "../../akuma/identity.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/akuma.js";

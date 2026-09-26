@@ -37,9 +37,9 @@ absence.
 For bare World status, Kanshi obtains one bounded recent Akuma observation and
 keeps that owner order. It observes detailed activity only for its first few
 returned rows and retains whether that observation reaches farther without
-manufacturing a fleet total. This bounded display observation never supplies
+manufacturing a roster total. This bounded display observation never supplies
 the frozen complete subject set required by selection, waiting, mutation, or
-other complete fleet operations.
+other complete roster operations.
 
 ## Associations and selection
 

@@ -20,8 +20,8 @@ import {
   decodeTellWaitObservation,
   observeAdmittedTellWaitAkuma,
   type TellWaitObserver,
-} from "../akuma/fleet-execution.js";
-import type { AkumaTellWaitResult } from "../akuma/fleet-observation.js";
+} from "../akuma/selection-execution.js";
+import type { AkumaTellWaitResult } from "../akuma/selection-observation.js";
 import type { TellResult } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";

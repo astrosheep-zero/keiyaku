@@ -15,13 +15,13 @@ const result = {
     {
       contract: contractId("kei/attribute-live-activity-and-31ce"),
       patterns: [
-        { mine: "src/library/fleet.ts", theirs: "src/library/fleet.ts" },
+        { mine: "src/library/selection.ts", theirs: "src/library/selection.ts" },
         { mine: "tests/cli-render.test.ts", theirs: "tests/cli-render.test.ts" },
       ],
     },
     {
       contract: contractId("kei/attribute-live-activity-and-31ce"),
-      patterns: [{ mine: "src/library/fleet.ts", theirs: "src/library/fleet.ts" }],
+      patterns: [{ mine: "src/library/selection.ts", theirs: "src/library/selection.ts" }],
     },
   ],
 } as AcceptedBindResult;
@@ -36,7 +36,7 @@ test("overlap receipt groups a related Contract above deduplicated paths", () =>
       "",
       "  overlap",
       "  └─ kei/attribute-live-activity-and-31ce",
-      "       src/library/fleet.ts",
+      "       src/library/selection.ts",
       "       tests/cli-render.test.ts",
     ].join("\n"),
   );

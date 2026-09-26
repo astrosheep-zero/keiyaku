@@ -21,8 +21,8 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { waitAkuma } from "../src/library/fleet.js";
-import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/fleet-execution.js";
+import { waitAkuma } from "../src/library/selection.js";
+import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -40,10 +40,10 @@ function fixtureSession(input: Readonly<{ signal: AbortSignal }>) {
     const completion = eventsFinished.then(() => ({
       kind: "answered" as const,
       answer: "done",
-      historyId: `fleet-history-${fixtureHistory++}`,
+      historyId: `roster-history-${fixtureHistory++}`,
     }));
     const session = {
-      admission: { fence: "fleet-fixture-turn" },
+      admission: { fence: "roster-fixture-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
@@ -136,7 +136,7 @@ async function answered(root: string, archetype: string, suffix: string) {
 
 
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-fleet-");
+  const root = fixtureRoot(t, "keiyaku-facade-selection-");
   const worker = await answered(root, "worker", "00000002");
   const reviewer = await answered(root, "reviewer", "00000001");
   await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
@@ -521,7 +521,7 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
   );
 });
 
-test("named Address resolves a retained Alias outside Kanshi fleet rows", async (t) => {
+test("named Address resolves a retained Alias outside Kanshi roster rows", async (t) => {
   const root = fixtureRoot(t, "keiyaku-named-kanshi-alias-");
   const id = akuId({ archetype: "worker", suffix: "deadbeef" });
   await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
@@ -579,7 +579,7 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
   );
 });
 
-test("fleet status projects Dispatch association without changing Akuma core", async (t) => {
+test("selection status projects Dispatch association without changing Akuma core", async (t) => {
   const repository = fixtureRepository(t);
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -669,8 +669,8 @@ function fixtureRepository(t: TestContext) {
   return repository;
 }
 
-test("failed Task associations do not hide readable Fleet members or kill evidence", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-fleet-task-failure-");
+test("failed Task associations do not hide readable roster members or kill evidence", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-roster-task-failure-");
   const a = await answered(root, "worker", "a0000001");
   const b = await answered(root, "worker", "a0000002");
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });

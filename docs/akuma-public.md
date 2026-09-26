@@ -118,7 +118,7 @@ fresh Heart evidence protected against succession for that bounded observation;
 it neither mutates lifecycle facts nor retains execution custody afterward.
 This is not a frozen view of subsequent activity or a barrier to future Bodies.
 
-The fleet is a compact bounded recent-activity roster, not a smaller status
+The roster is a compact bounded recent-activity observation, not a smaller status
 view. Its order is the later of each readable Heart's life and activity evidence,
 with complete identity breaking equal activity and untimestamped rows following
 timestamped rows. The observation says whether another readable member lies
@@ -126,8 +126,8 @@ beyond its bounded result without claiming a total or a frozen continuation.
 It exposes born identity, frozen descriptive snapshots, life evidence, recent
 activity and pending-tell information without loading each history. Recognized
 unborn or stillborn allocation state remains visible; a hard direct-read failure
-may omit that fleet row without suppressing readable peers and without
-inventing a per-row diagnostic. Status and fleet never re-evaluate provider
+may omit that roster row without suppressing readable peers and without
+inventing a per-row diagnostic. Status and roster never re-evaluate provider
 capability or turn provider evidence into new lifecycle facts. An explicit
 advanced library observation may read the complete roster for callers whose
 semantics require a frozen set; it is distinct from ordinary bounded observation

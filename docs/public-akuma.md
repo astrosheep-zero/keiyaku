@@ -1,7 +1,7 @@
 # Public Akuma Facets
 
 This chapter owns the World-bound `Akumas` composition for creation, addressing,
-and fleet operations. It composes Akuma, Alias, Dispatch, Task, and Contract
+and selection operations. It composes Akuma, Alias, Dispatch, Task, and Contract
 owners without moving any of their authority into Library. `Akuma` remains the
 standalone product for one resolved identity; `Tasks` remains an independent
 World-bound product.
@@ -50,7 +50,7 @@ requesting a separate Tell authority. A schema belongs to that same input and
 its answer contract; it creates no second call workflow or route and does not
 alter the existing busy refusal for schema Tells to a running Akuma.
 
-## Address, Fleet, And Listing
+## Address, Selection, And Listing
 
 The Address facet is the sole selector interpreter for Akumas. It resolves
 complete Akuma identity, Alias, glob, and Contract selection from one frozen owner observation,
@@ -62,7 +62,7 @@ in the separate association context rather than concealing the core Akuma.
 Address may use the explicit advanced complete library observation for this
 frozen expansion; it never becomes a second public catalogue.
 
-Fleet composes public Akuma handles after address expansion. It preserves the
+Selection composes public Akuma handles after address expansion. It preserves the
 raw Akuma status and mutation evidence, adding separate read-only Dispatch and
 Task associations where available; it never intersects them into Akuma state or
 re-evaluates lifecycle. Wait and kill freeze their subject set at entry in the
@@ -81,7 +81,7 @@ separate post-action observation.
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
-or reopen the whole fleet. Archetype definitions are listed by the archetype
+or reopen the whole roster. Archetype definitions are listed by the archetype
 owner. There is no cross-product SDK catalogue or `ls` operation. The CLI's
 `ls` command adapts Contract, Akuma, archetype, and Task listing through their
 respective owners, and renderers consume those adjudicated values without

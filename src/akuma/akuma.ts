@@ -122,7 +122,7 @@ export function wait(milliseconds: number): Promise<void> {
 
 export {
   bornStatus,
-  fleetListRow,
+  rosterListRow,
   readAkumaBirthCwd,
   readBudgetedStatus,
   type BudgetedStatusObservation,

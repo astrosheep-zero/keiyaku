@@ -106,7 +106,7 @@ product handle.
 
 The standalone Akuma product owns one Akuma's identity, execution, and public
 handle. `Akumas.of(world)` captures a World and execution channel for selector,
-fleet, creation, and fork operations; callers do not repeat that World on each
+selection, creation, and fork operations; callers do not repeat that World on each
 operation. It retains an explicit Repo only for Contract selection or Dispatch
 association and never infers Repo from World or World from Repo. Archetype
 definitions remain an archetype-owner listing. The independent Task product

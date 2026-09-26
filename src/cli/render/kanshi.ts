@@ -144,24 +144,24 @@ function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly str
   const linked: string[] = [];
   if (row.holder.kind === "held") linked.push(linkedTask(report, row.holder.taskId));
   if (row.holder.kind === "unavailable") linked.push("! task · unavailable");
-  for (const attached of row.fleet) linked.push(linkedAkuma(report, attached.id, attached.aliases));
+  for (const attached of row.roster) linked.push(linkedAkuma(report, attached.id, attached.aliases));
   return linked;
 }
 
 function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): string | undefined {
-  if (row.fleet.length === 0) return undefined;
+  if (row.roster.length === 0) return undefined;
   if (report.akuma.kind !== "present") return "akuma  unavailable";
   const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
-  const known = row.fleet
+  const known = row.roster
     .map((attached) => byId.get(attached.id))
     .filter((akuma): akuma is AkumaAttachmentRow => akuma !== undefined);
-  if (known.length === 0) return `akuma  ${row.fleet.length} · unavailable`;
+  if (known.length === 0) return `akuma  ${row.roster.length} · unavailable`;
   const live = known.filter((akuma) => !isTerminalAkuma(akuma.life)).length;
   const terminal = known.length - live;
-  const facts = [`akuma  ${row.fleet.length}`];
+  const facts = [`akuma  ${row.roster.length}`];
   if (live > 0) facts.push(`${live} live`);
   if (terminal > 0) facts.push(`${terminal} terminal`);
-  if (known.length < row.fleet.length) facts.push(`${row.fleet.length - known.length} unavailable`);
+  if (known.length < row.roster.length) facts.push(`${row.roster.length - known.length} unavailable`);
   return facts.join(" · ");
 }
 

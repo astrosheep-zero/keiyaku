@@ -67,7 +67,7 @@ invalid inherited data, repeated or cyclic chains, and a final snapshot without
 a provider refuse before allocation. Refusals identify the reference chain
 and the paths searched.
 
-All worktrees of one repository share one Akuma World, fleet, Alias authority,
+All worktrees of one repository share one Akuma World, roster, Alias authority,
 and Heart storage. Soul cwd is execution input, not World identity. Contract
 association never supplies that input: an explicit execution directory wins,
 and otherwise the effective invocation directory stands. Akuma state lives in

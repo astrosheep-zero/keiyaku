@@ -39,7 +39,7 @@ import {
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
+import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -670,7 +670,7 @@ async function requestPump(
           (async ({ id, initialTell, signal }) =>
             await new AkumaHandle(id, root).admitInitialTell(initialTell, { signal })),
       }),
-      fleetRequestCommands({
+      selectionRequestCommands({
         wait: async () => {
           throw new Error("unexpected forwarded wait");
         },
@@ -685,7 +685,7 @@ async function requestPump(
         kill: async () => {
           throw new Error("unexpected forwarded kill");
         },
-      } satisfies FleetRequestPort),
+      } satisfies SelectionRequestPort),
     ),
   });
   return { pump, leash };

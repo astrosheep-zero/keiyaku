@@ -22,6 +22,7 @@ import {
   killAkuma,
   statusAkuma,
   tellAkuma,
+  tellWaitAkuma,
   waitAkuma,
   type AkumaHistoryInput as LibraryAkumaHistoryInput,
   type AkumaHistoryResult,
@@ -33,9 +34,11 @@ import {
   type AkumaObservationStage,
   type AkumaTellInput as LibraryAkumaTellInput,
   type AkumaTellResult,
+  type AkumaTellWaitInput as LibraryAkumaTellWaitInput,
+  type AkumaTellWaitResult,
   type AkumaWaitInput as LibraryAkumaWaitInput,
   type AkumaWaitResult,
-} from "./fleet.js";
+} from "./selection.js";
 import { requireInput } from "./input.js";
 import type { AkumaAddressInput as LibraryAkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 export { AkumaWorldScopeError, AkumaAddressError } from "./address.js";
@@ -48,6 +51,7 @@ export type AkumaAddressInput = Omit<LibraryAkumaAddressInput, "path">;
 export type AkumaWaitInput = Omit<LibraryAkumaWaitInput, "path">;
 export type AkumaKillInput = Omit<LibraryAkumaKillInput, "path">;
 export type AkumaTellInput = Omit<LibraryAkumaTellInput, "path">;
+export type AkumaTellWaitInput = Omit<LibraryAkumaTellWaitInput, "path">;
 export type AkumaInterruptInput = Omit<LibraryAkumaInterruptInput, "path">;
 export type AkumaHistoryInput = Omit<LibraryAkumaHistoryInput, "path">;
 export type CallInput = Omit<LibraryCallInput, "path">;
@@ -61,6 +65,7 @@ export type {
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
+  AkumaTellWaitResult,
   AkumaWaitResult,
   CallResult,
   CallWaitHead,
@@ -104,6 +109,10 @@ class AkumasHandle {
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
     return tellAkuma(this.withWorld(input, "Akumas.tell input") as LibraryAkumaTellInput, this.#execution);
+  }
+
+  tellWait(input: AkumaTellWaitInput): Promise<AkumaTellWaitResult> {
+    return tellWaitAkuma(this.withWorld(input, "Akumas.tellWait input") as LibraryAkumaTellWaitInput, this.#execution);
   }
 
   wait(input: AkumaWaitInput): Promise<AkumaWaitResult> {

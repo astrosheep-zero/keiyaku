@@ -23,7 +23,7 @@ import {
 import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { AkumaNotBornError, AkumaObservationError } from "../src/akuma/akuma-errors.js";
-import { fleetRequestPort } from "../src/akuma/fleet-owner-port.js";
+import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import {
   atomicJson,
@@ -34,20 +34,20 @@ import {
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
-import { executeTellAkuma } from "../src/akuma/fleet-execution.js";
+import { executeTellAkuma } from "../src/akuma/selection-execution.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
-import { waitAkuma, tellAkuma } from "../src/library/fleet.js";
+import { waitAkuma, tellAkuma } from "../src/library/selection.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
 import { akumaRawAnswer } from "../src/cli/render/akuma.js";
 import { parseArgv } from "../src/cli/parse.js";
 import {
-  fleetRequestCommand,
-  fleetRequestProtocol,
-  fleetRequestCommands,
-  type FleetRequestPort,
-} from "../src/akuma/fleet-request.js";
-import { isTellResult, isTellWaitResult, type AkumaTellResult } from "../src/akuma/fleet-observation.js";
+  selectionRequestCommand,
+  selectionRequestProtocol,
+  selectionRequestCommands,
+  type SelectionRequestPort,
+} from "../src/akuma/selection-request.js";
+import { isTellResult, isTellWaitResult, type AkumaTellResult } from "../src/akuma/selection-observation.js";
 import {
   contractRequestCommand,
   contractRequestProtocol,
@@ -87,11 +87,11 @@ async function born(root: WorldRoot, archetype: string, draw: string, allowed: S
   return { ...allocated, soul };
 }
 
-async function openFleetPump(
+async function openSelectionPump(
   parent: Awaited<ReturnType<typeof born>>,
-  port: FleetRequestPort,
+  port: SelectionRequestPort,
 ): Promise<BodyRequestPump> {
-  return await openPump(parent, fleetRequestCommands(port));
+  return await openPump(parent, selectionRequestCommands(port));
 }
 
 async function openContractPump(
@@ -101,23 +101,23 @@ async function openContractPump(
   return await openPump(parent, contractRequestCommands({ ...unusedContractPort, ...port }));
 }
 
-async function openFleetAndContractPump(
+async function openSelectionAndContractPump(
   parent: Awaited<ReturnType<typeof born>>,
-  fleet: FleetRequestPort,
+  selection: SelectionRequestPort,
   contract: ContractRequestPort,
 ): Promise<BodyRequestPump> {
-  return await openPump(parent, composeRequestCommands(fleetRequestCommands(fleet), contractRequestCommands(contract)));
+  return await openPump(parent, composeRequestCommands(selectionRequestCommands(selection), contractRequestCommands(contract)));
 }
 
-const unusedFleetPort: FleetRequestPort = {
+const unusedSelectionPort: SelectionRequestPort = {
   wait: async () => {
-    throw new Error("unexpected Fleet request");
+    throw new Error("unexpected Selection request");
   },
   tell: async () => {
-    throw new Error("unexpected Fleet request");
+    throw new Error("unexpected Selection request");
   },
   kill: async () => {
-    throw new Error("unexpected Fleet request");
+    throw new Error("unexpected Selection request");
   },
 };
 
@@ -172,7 +172,7 @@ async function requestBodyWait(
     signal?: AbortSignal;
   }>,
 ) {
-  const command = fleetRequestProtocol("akuma.wait");
+  const command = selectionRequestProtocol("akuma.wait");
   return await requestBodyCommand({
     ...input,
     command,
@@ -187,7 +187,7 @@ async function requestBodyWait(
 }
 
 async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string }>) {
-  const command = fleetRequestProtocol("akuma.tell");
+  const command = selectionRequestProtocol("akuma.tell");
   return await requestBodyCommand({
     ...input,
     command,
@@ -200,7 +200,7 @@ async function requestBodyTellWait(
 ) {
   return await requestBodyCommand({
     ...input,
-    command: fleetRequestProtocol("akuma.tell-wait"),
+    command: selectionRequestProtocol("akuma.tell-wait"),
     value: {
       action: "akuma.tell-wait",
       target: input.target,
@@ -211,7 +211,7 @@ async function requestBodyTellWait(
 }
 
 async function requestBodyKill(input: Readonly<{ directory: string; id?: string; targets: readonly AkuId[] }>) {
-  const command = fleetRequestProtocol("akuma.kill");
+  const command = selectionRequestProtocol("akuma.kill");
   return await requestBodyCommand({
     ...input,
     command,
@@ -272,8 +272,8 @@ async function openProgressPump(
 
 test("forwarded ordinary and schema Tells retain the submitting initiator at the service port", async () => {
   const received: Array<string | undefined> = [];
-  const port: FleetRequestPort = {
-    ...unusedFleetPort,
+  const port: SelectionRequestPort = {
+    ...unusedSelectionPort,
     tell: async (input) => {
       received.push(input.initiator);
       return {} as never;
@@ -291,7 +291,7 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
     admissionOpen: () => true,
   };
   for (const action of ["akuma.tell", "akuma.tell-answer"] as const) {
-    const command = fleetRequestCommand(action, port);
+    const command = selectionRequestCommand(action, port);
     const request = command.protocol.decodeRequest({
       target: "aku/worker/22222222",
       body: "continue",
@@ -304,13 +304,13 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
   assert.deepEqual(received, ["Bob", "Bob"]);
 });
 
-test("fleet request permissions stay separated by action", () => {
-  assert.equal(fleetRequestProtocol("akuma.wait").isPermitted([]), true);
-  assert.equal(fleetRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
-  assert.equal(fleetRequestProtocol("akuma.tell-answer").isPermitted(["akuma.tell"]), true);
-  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted(["akuma.kill"]), true);
-  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted([]), false);
-  assert.equal(fleetRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
+test("selection request permissions stay separated by action", () => {
+  assert.equal(selectionRequestProtocol("akuma.wait").isPermitted([]), true);
+  assert.equal(selectionRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
+  assert.equal(selectionRequestProtocol("akuma.tell-answer").isPermitted(["akuma.tell"]), true);
+  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.kill"]), true);
+  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted([]), false);
+  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
 });
 
 async function readTransportClaim(directory: string, id: string): Promise<Readonly<{ payload: unknown }>> {
@@ -408,7 +408,7 @@ test("Contract owner codecs reject malformed live, failure, and service payloads
   );
 });
 
-test("Fleet owner codecs reject malformed live and service payloads", () => {
+test("Selection owner codecs reject malformed live and service payloads", () => {
   const forwarded = {
     mode: "all" as const,
     reason: "completed" as const,
@@ -426,10 +426,10 @@ test("Fleet owner codecs reject malformed live and service payloads", () => {
     ],
     unobserved: [],
   };
-  assert.deepEqual(fleetRequestProtocol("akuma.wait").decodeResult(forwarded), forwarded);
+  assert.deepEqual(selectionRequestProtocol("akuma.wait").decodeResult(forwarded), forwarded);
   assert.throws(
     () =>
-      fleetRequestProtocol("akuma.wait").decodeResult({
+      selectionRequestProtocol("akuma.wait").decodeResult({
         mode: "all",
         reason: "completed",
         observations: [],
@@ -439,12 +439,12 @@ test("Fleet owner codecs reject malformed live and service payloads", () => {
   );
   assert.throws(
     () =>
-      fleetRequestCommand("akuma.tell", unusedFleetPort).decodeService({
+      selectionRequestCommand("akuma.tell", unusedSelectionPort).decodeService({
         action: "akuma.tell",
         target: "aku/worker/nothex",
         tellId: "tell",
       }),
-    /malformed stored Fleet service evidence/u,
+    /malformed stored Selection service evidence/u,
   );
 });
 
@@ -467,7 +467,7 @@ test("Task owner codecs reject malformed live and service/reference payloads", (
 
 test("request command composition rejects a duplicate action", () => {
   assert.throws(
-    () => composeRequestCommands(fleetRequestCommands(unusedFleetPort), fleetRequestCommands(unusedFleetPort)),
+    () => composeRequestCommands(selectionRequestCommands(unusedSelectionPort), selectionRequestCommands(unusedSelectionPort)),
     /duplicate request command action: akuma\.wait/u,
   );
 });
@@ -530,7 +530,7 @@ test("request progress includes the final snapshot published between progress an
 test("request pump discards an enumerated request only when its read reports ENOENT", async (t) => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-enumeration-race-")));
   const parent = await born(root, "parent", "24681357");
-  const pump = await openFleetPump(parent, unusedFleetPort);
+  const pump = await openSelectionPump(parent, unusedSelectionPort);
   const requestPath = join(pump.directory, `${randomUUID()}.request.json`);
   const originalRead = fsPromises.readFile;
   const { promise: readStarted, resolve: started } = promiseBarrier<void>();
@@ -562,7 +562,7 @@ test("request pump discards an enumerated request only when its read reports ENO
 test("request pump propagates permission errors while reading an enumerated request", async (t) => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-read-error-")));
   const parent = await born(root, "parent", "13572468");
-  const pump = await openFleetPump(parent, unusedFleetPort);
+  const pump = await openSelectionPump(parent, unusedSelectionPort);
   const requestPath = join(pump.directory, `${randomUUID()}.request.json`);
   const originalRead = fsPromises.readFile;
   const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
@@ -718,7 +718,7 @@ test("cancellation after publication aborts the served operation and frees the s
   const { promise: executionStarted, resolve: started } = promiseBarrier<void>();
   const { promise: executionCancelled, resolve: cancelled } = promiseBarrier<void>();
   let calls = 0;
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     wait: async (input) => {
       calls += 1;
       if (calls > 1) return emptyWaitResult;
@@ -784,7 +784,7 @@ test("a same-id different-payload conflict is refused without changing the admit
   const parent = await born(root, "parent", "11111111");
   const id = randomUUID();
   let calls = 0;
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     wait: async () => {
       calls += 1;
       return emptyWaitResult;
@@ -1269,7 +1269,7 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
   const parent = await born(root, "parent", "11111111", []);
   const target = "aku/worker/22222222" as AkuId;
   const calls: string[] = [];
-  const fleet: FleetRequestPort = {
+  const selection: SelectionRequestPort = {
     wait: async () => {
       calls.push("wait");
       return emptyWaitResult;
@@ -1297,7 +1297,7 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
       return {} as never;
     },
   };
-  const pump = await openFleetAndContractPump(parent, fleet, contract);
+  const pump = await openSelectionAndContractPump(parent, selection, contract);
   try {
     assert.deepEqual(
       await requestBodyWait({
@@ -1348,7 +1348,7 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-wait-")));
   const parent = await born(root, "parent", "42424242");
   const completions: ("any" | "all")[] = [];
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     wait: async (input) => {
       completions.push(input.completion);
       return { mode: input.completion, reason: "completed", observations: [], unobserved: [] };
@@ -1382,7 +1382,7 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   const absent = "aku/intern/33dd4670" as AkuId;
-  const pump = await openFleetPump(parent, fleetRequestPort(root));
+  const pump = await openSelectionPump(parent, selectionRequestPort(root));
   const id = randomUUID();
   try {
     await assert.rejects(
@@ -1407,7 +1407,7 @@ test("a forwarded operation answers from the parent World without reading the ch
   const target = await born(parentWorld, "worker", "abcd0043");
   const local = await born(childWorld, "worker", "abcd0043");
   await writeFile(local.paths.heart, "this is not a database\n");
-  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
   try {
     // The child's own Heart is unreadable here: a local probe would fail this.
     const result = await waitAkuma(
@@ -1430,7 +1430,7 @@ test("a forwarded refusal keeps the parent's answer over the child's local birth
   const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-child-")));
   const parent = await born(parentWorld, "parent", "44434343");
   const local = await born(childWorld, "intern", "33dd4670");
-  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
   try {
     // The target is born only in the child's World, so a locally proved
     // operation would succeed instead of answering as the parent does.
@@ -1452,7 +1452,7 @@ test("a forwarded observation failure keeps the parent's reason", async () => {
   const target = await born(childWorld, "worker", "abcd0045");
   const mirrored = await born(parentWorld, "worker", "abcd0045");
   await writeFile(mirrored.paths.heart, "this is not a database\n");
-  const pump = await openFleetPump(parent, fleetRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
   try {
     await assert.rejects(
       tellAkuma({ path: childWorld, akuma: target.id, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
@@ -1474,7 +1474,7 @@ test("transport rejects malformed target sets and foreign World coordinates befo
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-malformed-")));
   const parent = await born(root, "parent", "11111111");
   let calls = 0;
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     ...noDeliver(),
     wait: async () => {
       calls += 1;
@@ -1529,8 +1529,8 @@ test("bounded forwarded Tell admits once under the request identity", async () =
   const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
   const target = "aku/worker/22222222" as AkuId;
   let calls = 0;
-  const pump = await openFleetPump(parent, {
-    ...unusedFleetPort,
+  const pump = await openSelectionPump(parent, {
+    ...unusedSelectionPort,
     tellWait: async (input) => {
       calls += 1;
       return {
@@ -1602,7 +1602,7 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     now: "2026-08-18T00:00:02.000Z",
   });
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openFleetPump(parent, fleetRequestPort(root));
+  const pump = await openSelectionPump(parent, selectionRequestPort(root));
   try {
     const pending = requestBodyTellWait({
       directory: pump.directory,
@@ -1651,7 +1651,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     now: "2026-08-18T00:00:03.000Z",
   });
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openFleetPump(parent, fleetRequestPort(parentRoot));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot));
   try {
     const parsed = parseArgv(["tell", target.id, "--wait", "10s", "facade delayed"]);
     if (!("command" in parsed) || parsed.command.command !== "tell") throw new Error("expected a Tell command");
@@ -1685,7 +1685,7 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   let calls = 0;
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     ...noDeliver(),
     wait: async () => {
       throw new Error("unexpected wait");
@@ -1765,7 +1765,7 @@ test("an allowed forwarded kill reaches its direct parent owner once", async () 
   const target = "aku/worker/22222222" as AkuId;
   const result = { results: [{ id: target, evidence: "already-stopped" as const }] };
   let calls = 0;
-  const pump = await openFleetPump(parent, {
+  const pump = await openSelectionPump(parent, {
     ...noDeliver(),
     wait: async () => {
       throw new Error("unexpected wait");

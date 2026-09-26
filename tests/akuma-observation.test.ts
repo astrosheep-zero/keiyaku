@@ -27,7 +27,7 @@ import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { World } from "../src/world.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
-import { executeWaitAkuma } from "../src/akuma/fleet-execution.js";
+import { executeWaitAkuma } from "../src/akuma/selection-execution.js";
 import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 

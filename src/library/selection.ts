@@ -12,18 +12,18 @@ import { AkumaObservationError } from "../akuma/akuma-errors.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
-  requestForwardedFleetKill,
-  requestForwardedFleetTell,
-  requestForwardedFleetTellWait,
-  requestForwardedFleetWait,
-} from "../akuma/fleet-request.js";
+  requestForwardedSelectionKill,
+  requestForwardedSelectionTell,
+  requestForwardedSelectionTellWait,
+  requestForwardedSelectionWait,
+} from "../akuma/selection-request.js";
 import {
   executeKillAkuma,
   executeTellAkuma,
   executeTellWaitAkuma,
   executeWaitAkuma,
-} from "../akuma/fleet-execution.js";
-import type { TellWaitObserver, WaitIdentityFacts, WaitObserver } from "../akuma/fleet-execution.js";
+} from "../akuma/selection-execution.js";
+import type { TellWaitObserver, WaitIdentityFacts, WaitObserver } from "../akuma/selection-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -42,7 +42,7 @@ import {
 } from "./address.js";
 import { requireInput } from "./input.js";
 import {
-  fleetResultSchemas,
+  selectionResultSchemas,
   parseAkumaObservation,
   type AkumaKillResult,
   type AkumaObservation,
@@ -50,7 +50,7 @@ import {
   type AkumaTellResult,
   type AkumaTellWaitResult,
   type AkumaWaitResult,
-} from "../akuma/fleet-observation.js";
+} from "../akuma/selection-observation.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 import { parsePublicHistoryId } from "../akuma/identity.js";
 
@@ -80,9 +80,10 @@ export type {
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
+  AkumaTellWaitResult,
   AkumaUnobserved,
   AkumaWaitResult,
-} from "../akuma/fleet-observation.js";
+} from "../akuma/selection-observation.js";
 export type AkumaInterruptInput = AkumaAddressInput &
   Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
 export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
@@ -265,7 +266,7 @@ async function attachWaitAssociations(
     result.observations.map((observation) => observation.status),
   );
   const discharged = placementDischarged(repo);
-  return fleetResultSchemas.wait.parse({
+  return selectionResultSchemas.wait.parse({
     ...result,
     observations: await Promise.all(
       result.observations.map(async (observation, index) => {
@@ -329,7 +330,7 @@ async function forwardedWait(
   return await attachWaitAssociations(
     addressed.path,
     input.repo,
-    await requestForwardedFleetWait({
+    await requestForwardedSelectionWait({
       directory: input.directory,
       targets: addressed.orderedIds,
       completion: input.completion,
@@ -395,7 +396,7 @@ export async function waitAkuma(
   };
   if (channel.kind === "body-request") {
     // A forwarded operation resolves coordinates without proving birth: the
-    // parent Fleet owns the target, so this process never probes locally.
+    // parent Selection owns the target, so this process never probes locally.
     const addressed = await resolveAkumaSet(setAddress(values));
     return await forwardedWait(addressed, { ...mode, directory: channel.directory });
   }
@@ -417,7 +418,7 @@ export async function killAkuma(
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
     const addressed = await resolveAkumaSet(setAddress(values));
-    return await requestForwardedFleetKill({
+    return await requestForwardedSelectionKill({
       directory: channel.directory,
       targets: addressed.orderedIds,
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
@@ -446,7 +447,7 @@ export async function tellAkuma(
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
     const addressed = await resolveAkuma(directAddress(values));
-    return await requestForwardedFleetTell({
+    return await requestForwardedSelectionTell({
       directory: channel.directory,
       target: addressed.id,
       body: values.body,
@@ -501,7 +502,7 @@ export async function tellWaitAkuma(
     // A forwarded Tell is resolved by its serving parent, so this process must
     // not prove the target against its own Heart files.
     const addressed = await resolveAkuma(directAddress(values));
-    return await requestForwardedFleetTellWait({
+    return await requestForwardedSelectionTellWait({
       directory: channel.directory,
       target: addressed.id,
       body: values.body,

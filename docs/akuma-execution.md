@@ -98,7 +98,7 @@ Kill similarly requires explicit settlement of the exact stopped Body before it
 can record a witness. A Body that is already explicitly settled without a kill
 witness — a stranded life whose process is gone — needs no stop request: kill
 witnesses that exact settled Body in place, receipts the kill, and later status
-and fleet observation present the killed life instead of stranded. A genuinely
+and roster observation present the killed life instead of stranded. A genuinely
 running or asleep Body keeps its semantics: the running Body is asked to stop
 and is witnessed only after settlement, the asleep Body receipts already
 stopped, and only an already witnessed Body receipts already killed. Hung,

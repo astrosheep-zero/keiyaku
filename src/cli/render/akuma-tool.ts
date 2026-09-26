@@ -3,8 +3,8 @@ import type { AkumaObservation } from "../../index.js";
 import { displayColumns, truncateDisplayText } from "./terminal.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
 
-type FleetTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
-type ToolRow = Extract<ActivityRow | SnapshotRow | FleetTimelineRow, { kind: "tool" }>;
+type StatusTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
+type ToolRow = Extract<ActivityRow | SnapshotRow | StatusTimelineRow, { kind: "tool" }>;
 
 /** The bounded body of a generic tool row, including its terminal diagnostic. */
 export function toolContent(row: ToolRow, columns: number): string {

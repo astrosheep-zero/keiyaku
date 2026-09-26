@@ -271,7 +271,7 @@ function verifiedContractRow(): ContractKanshiRow {
     after: [],
     dependents: [],
     holder: { kind: "none" },
-    fleet: [],
+    roster: [],
   };
 }
 

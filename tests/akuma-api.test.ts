@@ -24,7 +24,7 @@ import {
   recordTellReceipt,
 } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
-import { executeTellWaitAkuma } from "../src/akuma/fleet-execution.js";
+import { executeTellWaitAkuma } from "../src/akuma/selection-execution.js";
 import { deferred, settlementProbe, waitForCondition } from "./support/process.js";
 import { type InvokedAkumaCommand } from "../src/cli/commands/akuma.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";

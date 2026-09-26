@@ -52,7 +52,7 @@ When a complete Turn's exact final non-truncated narration equals its answered
 outcome, that projector omits only that projected duplicate. Heart retains both
 source facts; renderers never decide this fold.
 
-Recent fleet observations derive their activity order and bounded extent solely
+Recent roster observations derive their activity order and bounded extent solely
 from that Heart projection. Custody metadata may conservatively bound which
 unread Hearts need opening, but it is never returned, treated as activity, used
 for lifecycle judgment, or allowed to choose membership, order, or extent.

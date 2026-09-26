@@ -39,7 +39,7 @@ frozen permission before generic admission; refusal runs no operation owner.
 An admitted service call durably marks begun before owner execution; voided
 proves no product effect, while unproven records an effect whose absence or
 success is not proven. An admitted call reserves its child before spawn and settles served only after birth. A failed reservation or publication settles voided without claiming
-cross-database atomicity. Fleet requests cross only canonical resolved Akuma
+cross-database atomicity. Selection requests cross only canonical resolved Akuma
 targets; Contract and Task requests invoke their same direct-parent local
 executors, retaining only owner-minted terminal references rather than replayable
 results or caller composition authority.
