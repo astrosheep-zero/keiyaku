@@ -1,12 +1,16 @@
 import { decodeContractDocument } from "../body/decode.js";
-import { regionsOverlap } from "../body/region.js";
+import { regionsOverlapWithRelation } from "../body/region.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
 
 export type RegionOverlap = Readonly<{
   contract: ContractId;
-  patterns: readonly Readonly<{ mine: string; theirs: string }>[];
+  patterns: readonly Readonly<{
+    mine: string;
+    theirs: string;
+    relation?: "same" | "mine-within-theirs" | "theirs-within-mine" | "intersect";
+  }>[];
 }>;
 
 export type RegionObservation = Readonly<
@@ -35,11 +39,15 @@ export async function observeRegion(
     for (const peer of await documentsOperationAt(scope, channel)) {
       if (peer.contract === self) continue;
       try {
-        const pairs = regionsOverlap(mine, decodeContractDocument(peer.documentBytes).region);
+        const pairs = regionsOverlapWithRelation(mine, decodeContractDocument(peer.documentBytes).region);
         if (pairs.length > 0)
           overlaps.push({
             contract: peer.contract,
-            patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
+            patterns: pairs.map(([minePattern, theirsPattern, relation]) => ({
+              mine: minePattern,
+              theirs: theirsPattern,
+              relation,
+            })),
           });
       } catch (error) {
         return { overlapFailure: `${peer.contract}: ${diagnostic(error)}` };

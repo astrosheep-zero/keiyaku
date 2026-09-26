@@ -52,7 +52,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   assert.deepEqual(second.overlaps, [
     {
       contract: firstId,
-      patterns: [{ mine: "src/api/**", theirs: "src/**" }],
+      patterns: [{ mine: "src/api/**", theirs: "src/**", relation: "mine-within-theirs" }],
     },
   ]);
   assert.equal("overlapFailure" in second, false);
@@ -64,7 +64,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   assert.deepEqual(third.overlaps, [
     {
       contract: secondId,
-      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**" }],
+      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**", relation: "mine-within-theirs" }],
     },
   ]);
 
@@ -74,7 +74,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   assert.deepEqual(amended.overlaps, [
     {
       contract: thirdId,
-      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
+      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**", relation: "same" }],
     },
   ]);
   assert.equal("overlapFailure" in amended, false);

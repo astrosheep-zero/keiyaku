@@ -7,57 +7,97 @@ import type { AcceptedBindResult } from "../src/cli/result.js";
 const result = {
   kind: "accepted",
   verb: "bind",
-  contract: contractId("kei/default-plural-wait-to-any-5062"),
+  contract: contractId("kei/overlap-render-owner-5062"),
   facts: [],
   settlementLags: [],
   target: "refs/heads/main",
-  overlaps: [
-    {
-      contract: contractId("kei/attribute-live-activity-and-31ce"),
-      patterns: [
-        { mine: "src/library/fleet.ts", theirs: "src/library/fleet.ts" },
-        { mine: "tests/cli-render.test.ts", theirs: "tests/cli-render.test.ts" },
-      ],
-    },
-    {
-      contract: contractId("kei/attribute-live-activity-and-31ce"),
-      patterns: [{ mine: "src/library/fleet.ts", theirs: "src/library/fleet.ts" }],
-    },
-  ],
+  overlaps: [],
 } as AcceptedBindResult;
 
-test("overlap receipt groups a related Contract above deduplicated paths", () => {
-  const text = renderAccepted(result, { columns: 80, color: false });
+function render(overlaps: NonNullable<AcceptedBindResult["overlaps"]>, columns = 100): string {
+  return renderAccepted({ ...result, overlaps }, { columns, color: false });
+}
+
+const related = contractId("kei/overlap-render-peer-31ce");
+
+test("overlap receipt renders identical declarations once and separates Contracts", () => {
+  assert.equal(
+    render([
+      {
+        contract: related,
+        patterns: [
+          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts", relation: "same" },
+          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts", relation: "same" },
+          { mine: "src/cli/usage.ts", theirs: "src/cli/usage.ts", relation: "same" },
+        ],
+      },
+      {
+        contract: contractId("kei/overlap-render-second"),
+        patterns: [{ mine: "tests/**", theirs: "tests/**", relation: "same" }],
+      },
+    ]),
+    [
+      "✓ bound  kei/overlap-render-owner-5062",
+      "  target  refs/heads/main",
+      "",
+      "  overlap  kei/overlap-render-peer-31ce",
+      "    ≡  src/cli/parse.ts",
+      "    ≡  src/cli/usage.ts",
+      "",
+      "  overlap  kei/overlap-render-second",
+      "    ≡  tests/**",
+    ].join("\n"),
+  );
+});
+
+test("overlap receipt renders containment trees with aligned leaves and truncation", () => {
+  const leaves = Array.from({ length: 7 }, (_, index) => `src/cli/render/file-${index}.ts`);
+  const text = render([
+    {
+      contract: related,
+      patterns: [
+        { mine: "src/cli/render/**", theirs: "src/cli/render/**", relation: "same" },
+        { mine: "src/cli/parse.ts", theirs: "src/cli/**", relation: "mine-within-theirs" },
+        ...leaves.map((mine) => ({ mine, theirs: "tests/**", relation: "mine-within-theirs" as const })),
+      ],
+    },
+  ]);
   assert.equal(
     text,
     [
-      "✓ bound  kei/default-plural-wait-to-any-5062",
+      "✓ bound  kei/overlap-render-owner-5062",
       "  target  refs/heads/main",
       "",
-      "  overlap",
-      "  └─ kei/attribute-live-activity-and-31ce",
-      "       src/library/fleet.ts",
-      "       tests/cli-render.test.ts",
+      "  overlap  kei/overlap-render-peer-31ce",
+      "    ≡  src/cli/render/**",
+      "    ⊂  src/cli/**",
+      "       └─ src/cli/parse.ts",
+      "    ⊂  tests/**",
+      "       ├─ src/cli/render/file-0.ts",
+      "       ├─ src/cli/render/file-1.ts",
+      "       ├─ src/cli/render/file-2.ts",
+      "       ├─ src/cli/render/file-3.ts",
+      "       ├─ src/cli/render/file-4.ts",
+      "       ├─ src/cli/render/file-5.ts",
+      "       └─ … (1 more)",
     ].join("\n"),
   );
-  const colored = renderAccepted(result, { columns: 80, color: true });
-  assert.equal(colored.replace(/\u001b\[[0-9;]*m/gu, ""), text);
-  assert.ok(colored.includes("\u001b[1mkei/attribute-live-activity-and-31ce\u001b[0m"));
 });
 
-test("overlap differing patterns retain sides and full paths at narrow widths", () => {
-  const text = renderAccepted(
+test("overlap receipt renders reversed containment and partial intersection", () => {
+  const text = render([
     {
-      ...result,
-      overlaps: [
-        {
-          contract: contractId("kei/other-ab12"),
-          patterns: [{ mine: "src/cli/**", theirs: "src/cli/render/contract.ts" }],
-        },
+      contract: related,
+      patterns: [
+        { mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" },
+        { mine: "src/*", theirs: "src/?.ts", relation: "intersect" },
       ],
     },
-    { columns: 24, color: false },
-  );
-  assert.ok(text.includes("  └─ kei/other-ab12\n       this   src/cli/**\n       other  src/cli/render/contract.ts"));
-  assert.ok(!renderAccepted({ ...result, overlaps: [] }).includes("overlap"));
+  ]);
+  assert.match(text, /    ⊃  src\/\*\*[\s\S]*       └─ src\/cli\/\*\*[\s\S]*    ∩  src\/\* · src\/\?\.ts/u);
+  assert.doesNotMatch(text, /this|other/u);
+});
+
+test("overlap receipt omits the block when there are no overlaps", () => {
+  assert.doesNotMatch(render([]), /\n  overlap  /u);
 });

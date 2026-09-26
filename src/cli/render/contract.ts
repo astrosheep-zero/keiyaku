@@ -107,31 +107,80 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
   return lines;
 }
 
-function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readonly string[] {
-  const groups = new Map<string, Map<string, RegionOverlap["patterns"][number]>>();
-  for (const overlap of overlaps) {
-    let patterns = groups.get(overlap.contract);
-    if (patterns === undefined) {
-      patterns = new Map();
-      groups.set(overlap.contract, patterns);
+type OverlapPattern = RegionOverlap["patterns"][number];
+
+type OverlapGroup = Readonly<{
+  identical: readonly string[];
+  contained: readonly Readonly<{ symbol: "⊂" | "⊃"; container: string; leaves: readonly string[] }>[];
+  intersections: readonly Readonly<{ mine: string; theirs: string }>[];
+}>;
+
+function overlapGroup(patterns: readonly OverlapPattern[]): OverlapGroup {
+  const identical: string[] = [];
+  const identicalSeen = new Set<string>();
+  const contained = new Map<string, { symbol: "⊂" | "⊃"; container: string; leaves: string[] }>();
+  const intersections: Array<{ mine: string; theirs: string }> = [];
+  const intersectionSeen = new Set<string>();
+
+  for (const pattern of patterns) {
+    if (pattern.relation === "same" || (pattern.relation === undefined && pattern.mine === pattern.theirs)) {
+      if (!identicalSeen.has(pattern.mine)) {
+        identicalSeen.add(pattern.mine);
+        identical.push(pattern.mine);
+      }
+      continue;
     }
-    for (const pattern of overlap.patterns) patterns.set(JSON.stringify([pattern.mine, pattern.theirs]), pattern);
+    if (pattern.relation === "mine-within-theirs" || pattern.relation === "theirs-within-mine") {
+      const symbol = pattern.relation === "mine-within-theirs" ? "⊂" : "⊃";
+      const container = pattern.relation === "mine-within-theirs" ? pattern.theirs : pattern.mine;
+      const leaf = pattern.relation === "mine-within-theirs" ? pattern.mine : pattern.theirs;
+      const key = `${symbol}\u0000${container}`;
+      const entry = contained.get(key) ?? { symbol, container, leaves: [] };
+      if (!entry.leaves.includes(leaf)) entry.leaves.push(leaf);
+      contained.set(key, entry);
+      continue;
+    }
+    const key = `${pattern.mine}\u0000${pattern.theirs}`;
+    if (!intersectionSeen.has(key)) {
+      intersectionSeen.add(key);
+      intersections.push({ mine: pattern.mine, theirs: pattern.theirs });
+    }
+  }
+
+  return { identical, contained: [...contained.values()], intersections };
+}
+
+function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readonly string[] {
+  const groups = new Map<string, OverlapPattern[]>();
+  for (const overlap of overlaps) {
+    const patterns = groups.get(overlap.contract) ?? [];
+    patterns.push(...overlap.patterns);
+    groups.set(overlap.contract, patterns);
   }
   if (groups.size === 0) return [];
-  const lines = ["", `  ${tone("overlap", "dim", color)}`];
+
+  const lines = [""];
+  let groupIndex = 0;
   for (const [contract, patterns] of groups) {
-    if (lines.length > 2) lines.push("");
+    if (groupIndex++ > 0) lines.push("");
     const identity = safeText(contract);
-    lines.push(`  ${tone("└─", "dim", color)} ${color ? `\u001b[1m${identity}\u001b[0m` : identity}`);
-    let first = true;
-    for (const { mine, theirs } of patterns.values()) {
-      if (mine === theirs) lines.push(`       ${safeText(mine)}`);
-      else {
-        if (!first) lines.push("");
-        lines.push(`       this   ${safeText(mine)}`, `       other  ${safeText(theirs)}`);
-      }
-      first = false;
+    lines.push(`  overlap  ${color ? `\u001b[1m${identity}\u001b[0m` : identity}`);
+    const group = overlapGroup(patterns);
+    const relation = (symbol: string) => tone(symbol, "dim", color);
+    const bounded = group.identical.slice(0, 6);
+    for (const pattern of bounded) lines.push(`    ${relation("≡")}  ${safeText(pattern)}`);
+    if (group.identical.length > 6) lines.push(`    ${relation("≡")}  … (${group.identical.length - 6} more)`);
+    for (const { symbol, container, leaves } of group.contained) {
+      lines.push(`    ${relation(symbol)}  ${safeText(container)}`);
+      const boundedLeaves = leaves.slice(0, 6);
+      boundedLeaves.forEach((leaf, index) => {
+        const last = index === boundedLeaves.length - 1 && leaves.length <= 6;
+        lines.push(`       ${last ? "└─" : "├─"} ${safeText(leaf)}`);
+      });
+      if (leaves.length > 6) lines.push(`       └─ … (${leaves.length - 6} more)`);
     }
+    for (const { mine, theirs } of group.intersections)
+      lines.push(`    ${relation("∩")}  ${safeText(mine)} · ${safeText(theirs)}`);
   }
   return lines;
 }

@@ -12,7 +12,10 @@ const declarations: KanshiRegionSelection = { kind: "declarations" };
 const contract: KanshiRegionSelection = { kind: "contract", contract: id };
 const path: KanshiRegionSelection = { kind: "path", patterns: ["src/**", "tests/**"] as [string, ...string[]] };
 const declaration: RegionDeclaration = { contract: id, patterns: ["src/**"] };
-const overlap: RegionOverlap = { contract: id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] };
+const overlap: RegionOverlap = {
+  contract: id,
+  patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }],
+};
 const rootOverlap: RootOverlap = overlap;
 const read: RegionRead = { kind: "contract", declaration, overlaps: [rootOverlap] };
 const input: KanshiInput = { world: null, region: path };

@@ -213,16 +213,58 @@ export function decodeRegion(_document: DocumentNode, section: SectionNode): rea
   return patterns.map((pattern) => compileRegionPattern(pattern).source);
 }
 
-export function regionsOverlap(mine: readonly string[], theirs: readonly string[]): readonly [string, string][] {
+export type RegionRelation = "same" | "mine-within-theirs" | "theirs-within-mine" | "intersect";
+
+function literalPrefixWithDeepTail(pattern: CompiledRegionPattern): readonly string[] | null {
+  if (pattern.segments.at(-1)?.kind !== "deep") return null;
+  const prefix = pattern.segments.slice(0, -1);
+  if (
+    prefix.some(
+      (segment) =>
+        segment.kind !== "segment" || segment.characters.some((character) => character === "*" || character === "?"),
+    )
+  )
+    return null;
+  return prefix.map((segment) => (segment as Extract<RegionSegment, { kind: "segment" }>).characters.join(""));
+}
+
+function patternWithin(container: CompiledRegionPattern, candidate: CompiledRegionPattern): boolean {
+  const prefix = literalPrefixWithDeepTail(container);
+  if (prefix === null) return false;
+  const candidateSegments = candidate.segments;
+  if (candidateSegments.length < prefix.length) return false;
+  return prefix.every((value, index) => {
+    const segment = candidateSegments[index];
+    return segment?.kind === "segment" && segment.characters.join("") === value;
+  });
+}
+
+function relationOf(mine: CompiledRegionPattern, theirs: CompiledRegionPattern): RegionRelation {
+  if (mine.source === theirs.source) return "same";
+  if (patternWithin(theirs, mine)) return "mine-within-theirs";
+  if (patternWithin(mine, theirs)) return "theirs-within-mine";
+  return "intersect";
+}
+
+export type RegionOverlapPair = readonly [mine: string, theirs: string, relation: RegionRelation];
+
+export function regionsOverlapWithRelation(
+  mine: readonly string[],
+  theirs: readonly string[],
+): readonly RegionOverlapPair[] {
   const myPatterns = mine.map((pattern) => compileRegionPattern(pattern));
   const theirPatterns = theirs.map((pattern) => compileRegionPattern(pattern));
-  const overlaps: [string, string][] = [];
+  const overlaps: RegionOverlapPair[] = [];
   for (const myPattern of myPatterns) {
     for (const theirPattern of theirPatterns) {
       if (patternsOverlap(myPattern.segments, theirPattern.segments)) {
-        overlaps.push([myPattern.source, theirPattern.source]);
+        overlaps.push([myPattern.source, theirPattern.source, relationOf(myPattern, theirPattern)]);
       }
     }
   }
   return overlaps;
+}
+
+export function regionsOverlap(mine: readonly string[], theirs: readonly string[]): readonly [string, string][] {
+  return regionsOverlapWithRelation(mine, theirs).map(([minePattern, theirsPattern]) => [minePattern, theirsPattern]);
 }

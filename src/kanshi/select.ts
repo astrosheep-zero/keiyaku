@@ -1,4 +1,4 @@
-import { regionsOverlap } from "../body/region.js";
+import { regionsOverlapWithRelation } from "../body/region.js";
 import type { KanshiReport } from "./report.js";
 import type { KanshiRegionSelection, RegionDeclaration, RegionOverlap, RegionRead } from "./report.js";
 
@@ -7,11 +7,15 @@ export type KanshiSelection = Readonly<{ contract: string }>;
 function regionOverlaps(mine: readonly string[], declarations: readonly RegionDeclaration[]): readonly RegionOverlap[] {
   const overlaps: RegionOverlap[] = [];
   for (const declaration of declarations) {
-    const pairs = regionsOverlap(mine, declaration.patterns);
+    const pairs = regionsOverlapWithRelation(mine, declaration.patterns);
     if (pairs.length === 0) continue;
     overlaps.push({
       contract: declaration.contract,
-      patterns: pairs.map(([minePattern, theirsPattern]) => ({ mine: minePattern, theirs: theirsPattern })),
+      patterns: pairs.map(([minePattern, theirsPattern, relation]) => ({
+        mine: minePattern,
+        theirs: theirsPattern,
+        relation,
+      })),
     });
   }
   return overlaps;

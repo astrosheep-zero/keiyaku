@@ -27,7 +27,10 @@ function parseArgv(argv: readonly string[]): ParsedExecution {
   return parsed;
 }
 
-async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Parameters<typeof invokeRaw>[1]): Promise<InvocationResult> {
+async function invoke(
+  invocation: Parameters<typeof invokeRaw>[0],
+  runtime?: Parameters<typeof invokeRaw>[1],
+): Promise<InvocationResult> {
   return (await invokeRaw(invocation, runtime)) as InvocationResult;
 }
 
@@ -93,7 +96,9 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
       value: {
         kind: "contract",
         declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
-        overlaps: [{ contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**" }] }],
+        overlaps: [
+          { contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }] },
+        ],
       },
     });
 
@@ -105,12 +110,24 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
         patterns: ["src/cli/invoke.ts"],
         overlaps: firstIsLeft
           ? [
-              { contract: first.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**" }] },
-              { contract: second.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**" }] },
+              {
+                contract: first.id,
+                patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**", relation: "mine-within-theirs" }],
+              },
+              {
+                contract: second.id,
+                patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**", relation: "mine-within-theirs" }],
+              },
             ]
           : [
-              { contract: second.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**" }] },
-              { contract: first.id, patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**" }] },
+              {
+                contract: second.id,
+                patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**", relation: "mine-within-theirs" }],
+              },
+              {
+                contract: first.id,
+                patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**", relation: "mine-within-theirs" }],
+              },
             ],
       },
     });
@@ -162,7 +179,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
       value: {
         kind: "path",
         patterns: ["docs/**"],
-        overlaps: [{ contract: id, patterns: [{ mine: "docs/**", theirs: "docs/**" }] }],
+        overlaps: [{ contract: id, patterns: [{ mine: "docs/**", theirs: "docs/**", relation: "same" }] }],
       },
     });
   });
@@ -199,7 +216,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
       "published",
     );
     const report = await read(repository, { kind: "declarations" });
-    assert.ok(report.contracts.kind === "present", "expected report.contracts.kind = \"present\"");
+    assert.ok(report.contracts.kind === "present", 'expected report.contracts.kind = "present"');
     const row = report.contracts.value.rows.find((candidate) => candidate.id === id);
     assert.equal(row?.title, null);
     assert.equal(row?.verification, undefined);

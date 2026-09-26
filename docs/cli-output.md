@@ -305,11 +305,14 @@ snapshot and its answered frame states the outcome verb. JSON mode keeps its
 result shape.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
-warning or a separate report. It groups shared scope beneath each related
-Contract, distinguishing the Contract identity from its subordinate patterns.
-Identical patterns appear once; differing patterns retain which Contract each
-belongs to. Terminal emphasis reinforces this hierarchy without carrying facts
-that disappear in plain text. Overlap does not itself assert a code conflict.
+warning or a separate report. It renders one group per related Contract, with
+`overlap  kei/<id>` as the group head. Identical declarations use `≡` once per
+distinct pattern; `⊂` and `⊃` identify containment and hang the contained
+patterns beneath their container; `∩` retains a partial intersection as one
+`mine · theirs` row. Leaves and identical rows are bounded, with a named
+omission row when more remain. Terminal emphasis reinforces this hierarchy
+without carrying facts that disappear in plain text, and the words `this` and
+`other` do not appear. Overlap does not itself assert a code conflict.
 
 When an exceptional Contract execution already confirmed admissions, the CLI
 reports the failure together with those receipts instead of projecting a usage
