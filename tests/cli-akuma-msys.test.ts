@@ -88,6 +88,14 @@ function observingCall(
   };
 }
 
+test("prompt-free call renders its born identity without a Tell receipt", () => {
+  const result = observingCall({ kind: "born" });
+  const text = renderAkumaText(command, result);
+  assert.match(text, /aku\/worker\/1234abcd/u);
+  assert.match(text, /cwd/u);
+  assert.doesNotMatch(text, /tell|answer/u);
+  assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
+});
 test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
   const text = renderAkumaText(
     waitingCommand,

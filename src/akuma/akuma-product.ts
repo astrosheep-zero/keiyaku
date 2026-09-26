@@ -49,7 +49,7 @@ export type RequestedAkumaCall = Readonly<{
 
 export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
 
-type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell: InitialCallTell }>;
+type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell?: InitialCallTell }>;
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 type KnownAkuma = Readonly<{
   id: ReturnType<typeof akuIdFromDirectoryName>["id"];
@@ -75,7 +75,7 @@ async function admitBodyRequest(input: {
     id: randomUUID(),
     world: input.path,
     archetype: input.name,
-    initialTell: input.call.initialTell,
+    ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
     ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),

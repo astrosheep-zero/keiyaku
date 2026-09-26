@@ -121,7 +121,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     dispatch: result.result.dispatch,
     alias: result.result.alias,
   });
-  if (result.result.observation.kind === "detached") {
+  if (result.result.observation.kind === "detached" || result.result.observation.kind === "born") {
     return [
       associatedIdentity(result.result.akuma, head.alias),
       ...(head.contract.kind === "associated" ? [`  -> ${safeText(head.contract.contractId)}`] : []),

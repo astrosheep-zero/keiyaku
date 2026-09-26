@@ -163,6 +163,32 @@ function slowEmptyPublicationBody() {
   };
 }
 
+test("prompt-free Akumas.call reports born without admitting a Tell", async () => {
+  const { raw, world, configured } = await directCallFixture();
+  const result = await Akumas.of(world).call({
+    archetype: "worker",
+    cwd: world,
+    ...configured.placement,
+  });
+  assert.deepEqual(result.observation, { kind: "born" });
+  const history = await PublicAkuma.select(world, result.akuma).history();
+  assert.equal(history.rows.some((row) => row.kind === "tell"), false);
+  await PublicAkuma.select(world, result.akuma).kill().catch(() => undefined);
+  await rmSync(raw.path, { recursive: true, force: true });
+});
+
+test("prompt-free Akumas.call refuses schema and wait options", async () => {
+  const { world, configured } = await directCallFixture();
+  await assert.rejects(
+    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, schema: okSchema() }),
+    /schema requires body/u,
+  );
+  await assert.rejects(
+    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, mode: "wait" }),
+    /wait and timeoutMs require body/u,
+  );
+});
+
 test("local schema Akumas.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();

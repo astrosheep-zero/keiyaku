@@ -62,7 +62,7 @@ export type CallWaitObserver = Readonly<{
 export type CallInput = Readonly<{
   path: WorldRoot;
   archetype: string;
-  body: string;
+  body?: string;
   cwd?: string;
   mode?: "wait" | "detach";
   timeoutMs?: number;
@@ -78,6 +78,7 @@ export type CallInput = Readonly<{
 }>;
 
 export type CallObservation =
+  | Readonly<{ kind: "born" }>
   | Readonly<{ kind: "detached"; tell: TellResult }>
   | Readonly<{
       kind: "observed";
@@ -111,7 +112,7 @@ export type BornCall = Readonly<{
   signal?: AbortSignal;
   dispatch: DispatchStage;
   alias: AliasStage;
-  initialTell: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
+  initialTell?: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
   observe?: CallWaitObserver;
 }>;
 
@@ -181,6 +182,20 @@ function callMode(value: unknown): "wait" | "detach" {
   if (value === undefined || value === "detach") return "detach";
   if (value === "wait") return "wait";
   throw new TypeError("mode must be wait or detach");
+}
+
+function callBody(value: unknown): string | undefined {
+  return value === undefined ? undefined : text(value, "body");
+}
+
+function validateCallBodyOptions(
+  body: string | undefined,
+  values: Record<string, unknown>,
+  mode: "wait" | "detach",
+): void {
+  if (body === undefined && values.schema !== undefined) throw new TypeError("schema requires body");
+  if (body === undefined && (mode === "wait" || values.timeoutMs !== undefined))
+    throw new TypeError("wait and timeoutMs require body");
 }
 
 function callTimeout(value: unknown, mode: "wait" | "detach"): number {
@@ -375,7 +390,7 @@ type ParsedCallInput = Readonly<{
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
   seat: ReturnType<typeof callSeat>;
-  initialTell: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
+  initialTell?: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
   observe?: CallWaitObserver;
 }>;
 
@@ -384,10 +399,11 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   onlyKeys(values, CALL_INPUT_KEYS, "Akumas.call input");
   const path = await World.prove(nonblank(values.path, "path"));
   const archetype = nonblank(values.archetype, "archetype");
-  const body = text(values.body, "body");
+  const body = callBody(values.body);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
+  validateCallBodyOptions(body, values, mode);
   const timeoutMs = callTimeout(values.timeoutMs, mode);
   const signal = callSignal(values.signal);
   const home = homeOption(values.home);
@@ -398,13 +414,16 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   const schema = values.schema as Schema<unknown> | undefined;
   const schemaJson = schema === undefined ? undefined : schemaJsonText(schema);
   const observe = values.observe as TellWaitObserver | undefined;
-  const initialTell = {
-    tellId: randomUUID(),
-    body,
-    ...(schemaJson === undefined ? {} : { schemaJson }),
-    ...(schema === undefined ? {} : { schema }),
-    ...(initiator === undefined ? {} : { initiator }),
-  };
+  const initialTell =
+    body === undefined
+      ? undefined
+      : {
+          tellId: randomUUID(),
+          body,
+          ...(schemaJson === undefined ? {} : { schemaJson }),
+          ...(schema === undefined ? {} : { schema }),
+          ...(initiator === undefined ? {} : { initiator }),
+        };
   return {
     path,
     archetype,
@@ -417,7 +436,7 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
     ...(alias === undefined ? {} : { alias }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     seat,
-    initialTell,
+    ...(initialTell === undefined ? {} : { initialTell }),
     ...(observe === undefined ? {} : { observe }),
   };
 }
@@ -425,12 +444,16 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
 function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
   return {
     archetype: input.archetype,
-    initialTell: {
-      tellId: input.initialTell.tellId,
-      body: input.initialTell.body,
-      ...(input.initialTell.schemaJson === undefined ? {} : { schemaJson: input.initialTell.schemaJson }),
-      ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
-    },
+    ...(input.initialTell === undefined
+      ? {}
+      : {
+          initialTell: {
+            tellId: input.initialTell.tellId,
+            body: input.initialTell.body,
+            ...(input.initialTell.schemaJson === undefined ? {} : { schemaJson: input.initialTell.schemaJson }),
+            ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
+          },
+        }),
     ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -464,7 +487,7 @@ async function prepareCall(input: CallInput, context: ExecutionContext): Promise
     ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
     dispatch,
     alias: aliasStage,
-    initialTell: parsed.initialTell,
+    ...(parsed.initialTell === undefined ? {} : { initialTell: parsed.initialTell }),
     ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
   };
 }
@@ -475,6 +498,8 @@ type PublishedCall = Readonly<{
   handle: PublishedCallHandle;
   result: Omit<CallResult, "observation">;
 }>;
+type PromptedCall = PublishedCall &
+  Readonly<{ born: BornCall & Readonly<{ initialTell: InitialCallTell & Readonly<{ schema?: Schema<unknown> }> }> }>;
 type AdmittedCallTell = Readonly<{ kind: "admitted"; wake?: Promise<TellResult> }>;
 type CallTellAdmission = AdmittedCallTell | Readonly<{ kind: "failed"; result: CallResult }>;
 
@@ -491,12 +516,12 @@ async function publishCallTarget(born: BornCall): Promise<PublishedCall> {
       execution: born.execution,
       dispatch: born.dispatch,
       alias: born.alias,
-      ...(born.initialTell.schema === undefined ? {} : { structured: true }),
+      ...(born.initialTell?.schema === undefined ? {} : { structured: true }),
     },
   };
 }
 
-function failedCall(call: PublishedCall, error: unknown, tell?: TellResult): CallResult {
+function failedCall(call: PromptedCall, error: unknown, tell?: TellResult): CallResult {
   return {
     ...call.result,
     observation: {
@@ -508,7 +533,7 @@ function failedCall(call: PublishedCall, error: unknown, tell?: TellResult): Cal
   };
 }
 
-async function admitCallTell(call: PublishedCall): Promise<CallTellAdmission> {
+async function admitCallTell(call: PromptedCall): Promise<CallTellAdmission> {
   const { born, handle } = call;
   if (born.born.kind === "requested") return { kind: "admitted" };
   let admitted: Awaited<ReturnType<typeof handle.admitInitialTell>>;
@@ -532,7 +557,7 @@ async function admitCallTell(call: PublishedCall): Promise<CallTellAdmission> {
   return { kind: "admitted", wake };
 }
 
-async function detachCall(call: PublishedCall, admission: AdmittedCallTell): Promise<CallResult> {
+async function detachCall(call: PromptedCall, admission: AdmittedCallTell): Promise<CallResult> {
   let tell: TellResult | undefined;
   try {
     tell =
@@ -547,7 +572,7 @@ async function detachCall(call: PublishedCall, admission: AdmittedCallTell): Pro
   }
 }
 
-async function observeCall(call: PublishedCall, admission: AdmittedCallTell): Promise<CallResult> {
+async function observeCall(call: PromptedCall, admission: AdmittedCallTell): Promise<CallResult> {
   const { born, handle } = call;
   let tell: TellResult | undefined;
   const onObserve: TellWaitObserver = {
@@ -594,9 +619,11 @@ export async function callAkumas(
 ): Promise<CallResult> {
   const born = await prepareCall(input, execution);
   const call = await publishCallTarget(born);
-  const admission = await admitCallTell(call);
+  if (born.initialTell === undefined) return { ...call.result, observation: { kind: "born" } };
+  const prompted: PromptedCall = { ...call, born: { ...born, initialTell: born.initialTell } };
+  const admission = await admitCallTell(prompted);
   if (admission.kind === "failed") return admission.result;
-  return born.mode === "detach" ? await detachCall(call, admission) : await observeCall(call, admission);
+  return born.mode === "detach" ? await detachCall(prompted, admission) : await observeCall(prompted, admission);
 }
 
 export async function forkAkumas(input: ForkInput): Promise<ForkResult> {

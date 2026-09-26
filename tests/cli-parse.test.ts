@@ -87,7 +87,15 @@ test("global coordinates are independent of command position", () => {
     () => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]),
     /--workdir may appear only once/u,
   );
-  assert.throws(() => parseArgv(["call", "worker", "--workdir", "body"]), /call requires a prompt argument or stdin/u);
+  assert.deepEqual(command(["call", "worker"]), {
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    output: "text",
+  });
+  assert.throws(() => parseArgv(["call", "worker", "--schema", "answer.json"]), /call --schema requires a prompt/u);
+  assert.throws(() => parseArgv(["call", "worker", "--wait", "1s"]), /call --wait requires a prompt/u);
+
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
@@ -350,7 +358,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],
     [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
-    [["call", "worker"], /call requires a prompt argument or stdin/],
+    [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["call", "worker", ""], /call requires a nonblank value/],
     [["call", " ", "-"], /call requires a nonblank value/],

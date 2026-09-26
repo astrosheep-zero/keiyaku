@@ -79,7 +79,7 @@ const akumaCallPayloadSchema = z
   .object({
     world: absolutePathSchema,
     archetype: archetypeSchema,
-    initialTell: initialTellSchema,
+    initialTell: initialTellSchema.optional(),
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -159,6 +159,7 @@ async function executeAkumaCall(
       });
     },
   });
+  if (request.initialTell === undefined) return { result: published.id, child: published.id };
   const admitted = await capabilities.admitInitialTell({
     id: published.id,
     initialTell: {

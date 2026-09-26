@@ -447,13 +447,13 @@ async function invokeKill(
 export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInput): Promise<AkumaInvocationResult> {
   switch (command.command) {
     case "call": {
-      const body = await promptBody(command, input);
+      const body = command.prompt === undefined ? undefined : await promptBody({ prompt: command.prompt }, input);
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
       const caller = akumas(input);
       const request: CallRequest = {
         ...(await inputInitiator(input)),
         archetype: command.archetype,
-        body,
+        ...(body === undefined ? {} : { body }),
         ...(input.home === undefined ? {} : { home: input.home }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
