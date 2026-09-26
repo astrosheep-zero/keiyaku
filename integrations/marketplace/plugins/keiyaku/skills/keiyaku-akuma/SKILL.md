@@ -123,3 +123,17 @@ For a task-specific JavaScript program that coordinates Akumas, read
 creates an Akuma without a prompt; call `tell` on the returned handle to give
 it its first prompt. Use `idle()` when a script must wait before sending
 another schema Tell, and keep AkuIds in the script's own results.
+
+Run this as an `.mjs` file where `@astrosheep/keiyaku` resolves. Select an
+available name with `keiyaku ls aku/` and set `AKUMA_ARCHETYPE` to that name.
+The example assumes the current directory is its World and execution directory.
+
+```js
+import { Akuma, World } from "@astrosheep/keiyaku";
+
+const worker = await Akuma.birth(process.env.AKUMA_ARCHETYPE, { root: await World.at(process.cwd()) });
+await worker.idle();
+console.log(worker.id, await worker.tell("Inspect this repository and name one concrete risk."));
+```
+
+For structured answers and multi-worker orchestration, use the linked guide.
