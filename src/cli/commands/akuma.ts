@@ -214,9 +214,17 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
   const flags: Record<string, FlagValue> = {};
   const positionals: string[] = [];
   let stdin = false;
+  let positionalOnly = false;
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token === "-") {
+    if (!positionalOnly && token === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (positionalOnly) {
+      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
+      positionals.push(token);
+    } else if (token === "-") {
       if (!spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
       if (stdin) fail("stdin marker '-' may appear only once");
       stdin = true;
