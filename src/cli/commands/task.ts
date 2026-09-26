@@ -352,15 +352,20 @@ function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (messag
     positionals: string[] = [],
     flags: Record<string, TaskFlagValue> = {};
   let stdin: TaskStdin | undefined;
+  let positionalOnly = false;
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token === "-") {
+    if (!positionalOnly && token === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (!positionalOnly && token === "-") {
       if (spec.stdin === undefined) fail("stdin marker '-' is not valid here");
       if (stdin !== undefined) fail("stdin marker '-' may appear only once");
       stdin = spec.stdin;
       continue;
     }
-    if (!token.startsWith("--")) {
+    if (positionalOnly || !token.startsWith("--")) {
       if (isBlankInput(token)) fail(`task ${action} requires a nonblank value`);
       positionals.push(token);
       continue;
