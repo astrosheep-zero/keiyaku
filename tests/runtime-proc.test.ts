@@ -1067,23 +1067,31 @@ test("LineRpcProcess times out a stalled request", async () => {
 test("StdioProcess endInputAndDrain retains output until producer EOF", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-drain-"));
   const child = [
-    'process.stdout.write("terminal");',
     "process.stdin.resume();",
-    'process.stdin.on("end", () => setTimeout(() => { process.stdout.write(" tail"); process.exit(0); }, 50));',
+    'process.stdin.on("end", () => setTimeout(() => { process.stdout.write("tail"); process.exit(0); }, 50));',
+    'process.stdout.write("terminal\\n");',
   ].join(" ");
   let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
   let closed = false;
+  const ready = waitForOutputLine("terminal", "stdio producer did not signal readiness", 5_000);
   try {
     stdio = spawnStdioProcess({ argv: [process.execPath, "-e", child], cwd: root });
     const output = (async () => {
       const chunks: Buffer[] = [];
-      for await (const chunk of stdio!.output) chunks.push(Buffer.from(chunk));
+      for await (const chunk of stdio!.output) {
+        const data = Buffer.from(chunk);
+        chunks.push(data);
+        ready.observe(data);
+      }
       return Buffer.concat(chunks).toString("utf8");
     })();
-    await stdio.endInputAndDrain();
-    assert.equal(await output, "terminal tail");
+    await ready.wait;
+    await stdio.endInputAndDrain(5_000);
+    assert.deepEqual(await stdio.exited, { code: 0, signal: null, stderr: "" });
+    assert.equal(await output, "terminal\ntail");
     closed = true;
   } finally {
+    ready.dispose();
     if (!closed) await stdio?.close(true);
     rmSync(root, { recursive: true, force: true });
   }
