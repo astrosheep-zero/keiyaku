@@ -19,6 +19,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   } catch (error) {
     const diagnostic = error instanceof Error ? error.message : String(error);
     process.stderr.write(diagnostic.endsWith("\n") ? diagnostic : `${diagnostic}\n`);
-    return error instanceof CliUsageError ? 1 : 3;
+    return error instanceof CliUsageError ? 64 : 3;
   }
 }

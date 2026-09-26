@@ -6,7 +6,7 @@ authority, change an owner's judgment, or make a display convenience durable.
 
 ## Help and outcome
 
-Root help is a compact index of product pillars and repository utilities.
+Root help is a compact index of product pillars and repository utilities. Process outcomes use a fixed exit map: exit 0 means accepted, exit 1 means refused, exit 2 means retry, exit 3 means failed, and exit 64 means usage.
 Each command family supplies its own purpose and leaf help; leaf help is the
 sole user-facing owner of literal invocation grammar. Help remains available
 without a World, input stream, or product observation. A syntax or input-source
@@ -15,6 +15,8 @@ and help handles without trying the command or appending a complete help page.
 Explicit help remains complete, including supported invocation coordinates.
 Operation and recovery handles do not prescribe a working directory; any
 workspace coordinate is a separate fact for the caller to use.
+
+Substantive refusals use one text grammar: a `× <verb> refused` title, a labeled `diagnostic` fact with machine kinds rendered as words, and labeled entity/state facts where present. Usage refusals retain their compact usage grammar. Unknown machine kinds render as de-dashed words.
 
 Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions

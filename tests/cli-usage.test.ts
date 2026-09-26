@@ -38,7 +38,7 @@ async function captureMain(
   }
 }
 
-function runCli(cwd: string, argv: readonly string[]) {
+function runCli(cwd: string, argv: readonly string[], input?: string) {
   // A caller inside an Akuma Body carries AKUMA_REQUESTS and would forward the
   // operation to its parent; this suite asserts the local addressing result.
   const environment = { ...process.env };
@@ -54,7 +54,7 @@ function runCli(cwd: string, argv: readonly string[]) {
       cwd,
       ...argv,
     ],
-    { encoding: "utf8", env: environment },
+    { encoding: "utf8", env: environment, ...(input === undefined ? {} : { input }) },
   );
 }
 
@@ -78,7 +78,10 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
       new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
       `× Akuma alias not found  @missing`,
     ],
-    [new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }), `× invalid Akuma  aku/intern/nope`],
+    [
+      new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }),
+      `× invalid Akuma address  aku/intern/nope`,
+    ],
     [
       new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as never }),
       `× Akuma not in this World  ${id}`,
@@ -152,27 +155,46 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     );
   try {
     const text = run([]);
-    assert.equal(text.status, 3);
-    assert.equal(text.stdout, "");
+    assert.equal(text.status, 1);
+    assert.equal(text.stderr, "");
     assert.equal(
-      text.stderr,
-      [
-        "× selector  keiyaku show",
-        "  diagnostic  Keiyaku refused: contract-missing",
-        "  given  kei/missing",
-        "  accepts  keiyaku show [<contract>|@<contract>]",
-        "  help  keiyaku show --help",
-        "",
-      ].join("\n"),
+      text.stdout,
+      ["× show refused", "  contract  kei/missing", "  diagnostic  contract missing"].join("\n") + "\n",
     );
-    assert.doesNotMatch(text.stderr, /next|then|please/u);
     const json = run(["--json"]);
-    assert.equal(json.status, 3);
-    assert.equal(json.stdout, "");
-    assert.equal(json.stderr, "Keiyaku refused: contract-missing\n");
+    assert.equal(json.status, 1);
+    assert.equal(json.stderr, "");
+    assert.match(json.stdout, /contract-missing/u);
   } finally {
     rmSync(repo.path, { recursive: true, force: true });
   }
+});
+
+test("malformed bind is a substantive refusal on stdout with its draft", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-refusal-"));
+  const result = runCli(cwd, ["bind", "-"], "not valid bind markdown\n");
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^× bind refused$/mu);
+  assert.match(result.stdout, /^  diagnostic  invalid document$/mu);
+  assert.equal(result.stderr, "");
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-json-refusal-"));
+  const result = runCli(cwd, ["bind", "--json", "-"], "not valid bind markdown\n");
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "");
+  const body = JSON.parse(result.stdout) as {
+    kind: string;
+    refusal: { kind: string; diagnostic: string };
+    draft?: { path?: string; warning?: string };
+  };
+  assert.equal(body.kind, "refused");
+  assert.equal(body.refusal.kind, "invalid-document");
+  assert.match(body.refusal.diagnostic, /contract document/u);
+  assert.ok(body.draft?.path !== undefined || body.draft?.warning !== undefined);
+  rmSync(cwd, { recursive: true, force: true });
 });
 
 test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {
@@ -206,10 +228,10 @@ test("settings and duplicate-flag diagnostics stay visible", () => {
   );
 });
 
-test("usage refusal exits 1 without touching an absent world", async () => {
+test("usage refusal exits 64 without touching an absent world", async () => {
   const cwd = join(mkdtempSync(join(tmpdir(), "keiyaku-usage-")), "missing-world");
   const result = await captureMain(["-C", cwd, "nonsense"]);
-  assert.equal(result.exit, 1);
+  assert.equal(result.exit, 64);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /^× usage  keiyaku$/mu);
   assert.match(result.stderr, /^  given  nonsense$/mu);

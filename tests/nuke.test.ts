@@ -14,6 +14,7 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { invoke } from "../src/cli/invoke.js";
+import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
 import type { RefusedResult } from "../src/cli/result.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
@@ -572,7 +573,8 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
   try {
     const bare = parseArgv(["-C", world, "nuke"]);
     const mismatch = parseArgv(["-C", world, "nuke", "--confirm", "wrong"]);
-    if (!("command" in bare) || !("command" in mismatch)) throw new Error("nuke invocation did not parse as executable");
+    if (!("command" in bare) || !("command" in mismatch))
+      throw new Error("nuke invocation did not parse as executable");
     const required = await invoke(bare, { cwd: world });
     const rejected = await invoke(mismatch, { cwd: world });
     if (!("kind" in required) || required.kind !== "refused") throw new Error("nuke did not return a refusal");
@@ -583,7 +585,7 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       renderRefusal(requiredRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
-        "  nuke confirmation required",
+        "  diagnostic  nuke confirmation required",
         `  world  ${world}`,
         `  nuke  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
@@ -592,7 +594,7 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
-        "  nuke confirmation mismatch",
+        "  diagnostic  nuke confirmation mismatch",
         `  world  ${world}`,
         "  confirmation  wrong",
         `  nuke  keiyaku nuke --confirm '${world}'`,
@@ -601,6 +603,35 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
+});
+
+test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts", async () => {
+  const world = await testWorld();
+  let stdout = "";
+  let stderr = "";
+  const writeStdout = process.stdout.write;
+  const writeStderr = process.stderr.write;
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const exit = await main(["-C", world, "nuke"]);
+    assert.equal(exit, 1);
+  } finally {
+    process.stdout.write = writeStdout;
+    process.stderr.write = writeStderr;
+    rmSync(world, { recursive: true, force: true });
+  }
+  assert.match(stdout, /^× nuke refused$/mu);
+  assert.match(stdout, /^  diagnostic  nuke confirmation required$/mu);
+  assert.match(stdout, /^  world  /mu);
+  assert.match(stdout, /^  nuke  keiyaku nuke --confirm /mu);
+  assert.equal(stderr, "");
 });
 
 test("CLI nuke exit code reports owner failure", () => {

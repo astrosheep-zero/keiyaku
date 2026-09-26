@@ -4,8 +4,7 @@ import type { InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import type { ParsedCommand, ParsedExecution } from "./parse.js";
-import { CliUsageError, usageGuideForCommand } from "./parse.js";
-import { renderUsageMessage } from "./usage.js";
+import { CliUsageError } from "./parse.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
@@ -191,7 +190,7 @@ export async function akumaFailureProjection(
     const body =
       error.refusal.kind === "akuma-alias-not-found"
         ? `× Akuma alias not found  ${safeText(error.refusal.alias)}`
-        : `× invalid Akuma  ${safeText(error.refusal.selector)}`;
+        : `× invalid Akuma address  ${safeText(error.refusal.selector)}`;
     return { body: command.output === "json" ? error.message : body, exitCode: 1 };
   }
   if (error instanceof AkumaWorldScopeError) {
@@ -218,26 +217,29 @@ export async function akumaFailureProjection(
 async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
   const diagnostic = error instanceof Error ? error.message : String(error);
   if (command.output === "json" || error instanceof CliUsageError) return diagnostic;
+  const { AkumaArchetypeError } = await import("../akuma/archetype.js");
+  if (error instanceof AkumaArchetypeError) {
+    if (command.command === "call") {
+      return `× call refused\n  diagnostic  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`;
+    }
+    return `× ${command.command} failed\n  diagnostic  ${safeText(error.message)}`;
+  }
   const { KeiyakuRefused } = await import("../library/refusal.js");
   if (error instanceof KeiyakuRefused) {
-    if (error.refusal.kind === "contract-missing") {
-      return renderUsageMessage(
-        diagnostic,
-        {
-          ...usageGuideForCommand(command),
-          given: error.refusal.contractId,
-        },
-        "selector",
-      );
-    }
     const { renderRefusalFacts } = await import("./render/refusal.js");
-    return [`× ${command.command} refused`, ...renderRefusalFacts(error.refusal, "  ", displayContext().columns)].join(
-      "\n",
-    );
+    const contract =
+      "contractId" in error.refusal && typeof error.refusal.contractId === "string"
+        ? error.refusal.contractId
+        : undefined;
+    return [
+      `× ${command.command} refused`,
+      ...renderRefusalFacts(error.refusal, "  ", displayContext().columns, contract),
+    ].join("\n");
   }
   return `× ${command.command} failed\n  diagnostic  ${safeText(diagnostic)}`;
 }
 
+// eslint-disable-next-line complexity, max-lines-per-function -- the process edge keeps one truthful cleanup boundary.
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
   const command = invocation.command;
   const cancellation = cliCancellation();
@@ -273,14 +275,56 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     if (command.command === "bind") {
       const { BindDraftError } = await import("./draft.js");
       if (error instanceof BindDraftError) {
-        writeCliStream(process.stderr, await commandFailureText(error.original, command));
-        const { renderBindDraftReceipt } = await import("./render/refusal.js");
-        writeCliStream(process.stderr, renderBindDraftReceipt(error.draft));
-        return error.original instanceof CliUsageError ? 1 : 3;
+        const { renderRefusal } = await import("./render/refusal.js");
+        const refusal =
+          error.original instanceof (await import("../library/refusal.js")).KeiyakuRefused
+            ? error.original.refusal
+            : {
+                kind: "invalid-document",
+                diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
+              };
+        const result = { kind: "refused" as const, verb: "bind", refusal, draft: error.draft };
+        writeCliStream(process.stdout, command.output === "json" ? JSON.stringify(result) : renderRefusal(result));
+        return error.original instanceof CliUsageError ? 64 : 1;
       }
     }
+    const { AkumaArchetypeError } = await import("../akuma/archetype.js");
+    if (error instanceof AkumaArchetypeError && command.command === "call") {
+      writeCliStream(
+        process.stdout,
+        command.output === "json"
+          ? JSON.stringify({
+              kind: "refused",
+              diagnostic: "Akuma not found",
+              archetype: error.archetype,
+              available: "keiyaku ls aku/",
+            })
+          : `× call refused\n  diagnostic  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`,
+      );
+      return 1;
+    }
+    const { KeiyakuRefused } = await import("../library/refusal.js");
+    if (error instanceof KeiyakuRefused) {
+      const contract =
+        "contractId" in error.refusal && typeof error.refusal.contractId === "string"
+          ? error.refusal.contractId
+          : undefined;
+      const refusal = {
+        kind: "refused" as const,
+        verb: command.command,
+        ...(contract === undefined ? {} : { contract: contract as never }),
+        refusal: error.refusal,
+      };
+      writeCliStream(
+        process.stdout,
+        command.output === "json"
+          ? JSON.stringify(refusal)
+          : (await import("./render/refusal.js")).renderRefusal(refusal),
+      );
+      return 1;
+    }
     writeCliStream(process.stderr, await commandFailureText(error, command));
-    return error instanceof CliUsageError ? 1 : 3;
+    return error instanceof CliUsageError ? 64 : 3;
   } finally {
     cancellation.close();
   }

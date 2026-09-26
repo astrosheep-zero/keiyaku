@@ -3,7 +3,6 @@ import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../inde
 import {
   DEFAULT_CLI_COLUMNS,
   checkoutNotFollowableLines,
-  displayColumns,
   gitShortStat,
   renderOpaqueBlock,
   safeText,
@@ -41,8 +40,21 @@ function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string
   return skipAddressedContract(addressed, contractId) ? undefined : contractId;
 }
 
+const REFUSAL_WORDS: Readonly<Record<string, string>> = {
+  "contract-missing": "contract missing",
+  "task-missing": "task missing",
+  "invalid-lifecycle-transition": "invalid lifecycle transition",
+  "invalid-namespace-context": "invalid namespace context",
+  "relation-owned-by-other": "relation owned by other",
+  "invalid-composition": "invalid composition",
+};
+
+function refusalWords(kind: string): string {
+  return REFUSAL_WORDS[kind] ?? kind.replaceAll("-", " ");
+}
+
 function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
-  return [kind, identity, ...details].filter((part): part is string => part !== undefined).join("  ");
+  return [refusalWords(kind), identity, ...details].filter((part): part is string => part !== undefined).join("  ");
 }
 
 function renderDirtyRefusal(
@@ -68,6 +80,7 @@ function renderDirtyRefusal(
   return lines;
 }
 
+// eslint-disable-next-line complexity -- one closed projection preserves every refusal fact.
 export function renderRefusalFacts(
   refusal: RenderableRefusal,
   indent: string,
@@ -78,7 +91,7 @@ export function renderRefusalFacts(
   if (refusal.kind === "nuke-confirmation-mismatch" || refusal.kind === "nuke-confirmation-required") {
     const world = safeText(refusal.world);
     return [
-      `${indent}nuke confirmation ${refusal.kind === "nuke-confirmation-mismatch" ? "mismatch" : "required"}`,
+      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
       `${indent}world  ${world}`,
       ...(refusal.kind === "nuke-confirmation-mismatch"
         ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
@@ -88,13 +101,13 @@ export function renderRefusalFacts(
   }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "unmerged-paths") {
-    return [
-      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
-      ...collectionLines("paths", refusal.paths, indent),
-    ];
+    return [`${indent}diagnostic  ${refusalWords(refusal.kind)}`, ...collectionLines("paths", refusal.paths, indent)];
   }
   if (refusal.kind === "integration-failed") {
-    const lines = [...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns)];
+    const lines = [
+      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
+    ];
     lines.push(`${indent}reason  ${safeText(refusal.reason)}`, `${indent}target  ${safeText(refusal.targetHead)}`);
     if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflicts", refusal.conflictPaths, indent));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
@@ -105,32 +118,45 @@ export function renderRefusalFacts(
   }
   if (refusal.kind === "merge-state-present") {
     return [
-      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
+      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
       `${indent}workspace kind  ${refusal.workspace.kind}`,
       `${indent}workspace  ${safeText(refusal.workspace.path)}`,
     ];
   }
   if (refusal.kind === "integration-unsupported") {
     return [
-      ...renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns),
+      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
       `${indent}required Git  ${safeText(refusal.requiredGit)}`,
     ];
   }
   if (refusal.kind === "checkout-not-followable") {
     return checkoutNotFollowableLines(refusal);
   }
-  return renderOpaqueBlock(refusalHead(refusal.kind, identity, []), indent, columns);
+  const lines = [`${indent}diagnostic  ${refusalWords(refusal.kind)}`];
+  if (identity !== undefined) lines.push(`${indent}contract  ${safeText(identity)}`);
+  if ("taskId" in refusal && typeof refusal.taskId === "string")
+    lines.push(`${indent}task  ${safeText(refusal.taskId)}`);
+  const fields = refusal as unknown as Record<string, unknown>;
+  const kind = String(fields.kind);
+  if (kind === "invalid-lifecycle-transition")
+    lines.push(`${indent}state  ${safeText(String(fields.state))} · verb  ${safeText(String(fields.verb))}`);
+  if (kind === "invalid-namespace-context") lines.push(`${indent}path  ${safeText(String(fields.path))}`);
+  if (kind === "relation-owned-by-other") {
+    lines.push(`${indent}related task  ${safeText(String(fields.related))}`);
+    lines.push(`${indent}declaring task  ${safeText(String(fields.declaringTask))}`);
+  }
+  if ("diagnostic" in refusal && typeof refusal.diagnostic === "string")
+    lines.push(`${indent}detail  ${safeText(refusal.diagnostic)}`);
+  return lines;
 }
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const base = `× ${result.verb} refused`;
-  const lines =
-    result.contract === undefined
-      ? [base]
-      : displayColumns(`${base}  ${result.contract}`) <= columns
-        ? [`${base}  ${result.contract}`]
-        : [base, `  contract  ${safeText(result.contract)}`];
+  const lines = [base];
+  if (result.contract !== undefined) lines.push(`  contract  ${safeText(result.contract)}`);
   if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
     lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "  ", columns, result.contract));
   }

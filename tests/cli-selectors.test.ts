@@ -5,7 +5,10 @@ import type { ContractKanshiBoard } from "../src/kanshi/index.js";
 import type { WorldRoot } from "../src/world.js";
 import type { KanshiReport } from "../src/kanshi/index.js";
 import { resolveContextualContract, resolveKanshiContract } from "../src/cli/selectors.js";
-import { CliUsageError } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv } from "../src/cli/parse.js";
+import { invoke } from "../src/cli/invoke.js";
+import { makeGitRepository } from "./support/git.js";
+import { rmSync } from "node:fs";
 
 const active = "kei/active-contract" as ContractId;
 
@@ -75,6 +78,23 @@ function kanshiReport(contracts: KanshiReport["contracts"]): KanshiReport {
     akuma: { kind: "absent" },
   };
 }
+
+test("missing Contract selectors refuse uniformly across read and reconcile verbs", async () => {
+  const repo = makeGitRepository();
+  try {
+    for (const verb of ["show", "deliver", "status", "region", "reconcile"] as const) {
+      const parsed = parseArgv([verb, "kei/missing"]);
+      if (!("command" in parsed)) throw new Error(`expected ${verb} command`);
+      const result = await invoke(parsed, { cwd: repo.path, environment: {} });
+      assert.ok("kind" in result && result.kind === "refused");
+      if ("kind" in result && result.kind === "refused") {
+        assert.equal((result.refusal as { kind: string }).kind, "contract-missing");
+      }
+    }
+  } finally {
+    rmSync(repo.path, { recursive: true, force: true });
+  }
+});
 
 test("Kanshi selectors share Contract identity syntax without hiding world availability", () => {
   assert.equal(resolveKanshiContract(kanshiReport({ kind: "present", value: board() }), "@active-contract"), active);

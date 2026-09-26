@@ -14,7 +14,7 @@ import {
   type ParsedExecution,
 } from "./parse.js";
 import { isBlankInput } from "./usage.js";
-import type { InvocationResult, RegionResult } from "./result.js";
+import type { InvocationResult, RegionResult, RefusedResult } from "./result.js";
 import type { SelectedContract } from "./selectors.js";
 import type { ActorId, ContractId } from "../index.js";
 import type { KanshiRegionSelection } from "../kanshi/index.js";
@@ -318,6 +318,7 @@ async function invokeCatalog(
   }
 }
 
+// eslint-disable-next-line complexity -- status adapts the selected public projections at one edge.
 async function invokeStatus(
   parsed: Extract<ParsedCommand, { command: "status" }>,
   world: WorldRoot | null,
@@ -366,11 +367,16 @@ async function invokeStatus(
     if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
     const { canonicalContractSelector } = await import("./selectors.js");
     const contract = canonicalContractSelector(parsed.contract);
-    return {
-      kind: "status" as const,
-      report: await kanshi({ world, repo, contract }),
-      selection: "contract" as const,
-    };
+    const report = await kanshi({ world, repo, contract });
+    if (report.contracts.kind === "present" && report.contracts.value.rows.length === 0) {
+      return {
+        kind: "refused" as const,
+        verb: "status",
+        contract,
+        refusal: { kind: "contract-missing" as const, contractId: contract },
+      };
+    }
+    return { kind: "status" as const, report, selection: "contract" as const };
   }
   const report = await kanshi({ world, ...(repo === undefined ? {} : { repo }) });
   const { resolveKanshiContract } = await import("./selectors.js");
@@ -382,7 +388,7 @@ async function invokeRegion(
   parsed: Extract<ParsedCommand, { command: "region" }>,
   world: WorldRoot | null,
   repo: Repo,
-): Promise<RegionResult> {
+): Promise<RegionResult | RefusedResult> {
   const { kanshi, selectRegion } = await import("../kanshi/index.js");
   const read = async (region: KanshiRegionSelection) => {
     try {
@@ -404,11 +410,13 @@ async function invokeRegion(
   const report = await read({ kind: "declarations" });
   const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
-  if (
-    report.contracts.kind !== "present" ||
-    report.contracts.value.rows.every((row) => row.id !== contract || row.disposition !== "active")
-  ) {
-    throw new CliUsageError(`unknown contract selector: ${parsed.contract}`);
+  if (report.contracts.kind !== "present" || report.contracts.value.rows.every((row) => row.id !== contract)) {
+    return {
+      kind: "refused" as const,
+      verb: "region",
+      contract: contract as ContractId,
+      refusal: { kind: "contract-missing" as const, contractId: contract as ContractId },
+    };
   }
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {
     return { kind: "region", region: report.region ?? { kind: "absent" } };
@@ -519,7 +527,7 @@ async function invokeParsedAkuma(
   });
 }
 
-// eslint-disable-next-line complexity -- command dispatch keeps the CLI's existing boundary in one place.
+// eslint-disable-next-line complexity, max-lines-per-function -- command dispatch keeps the CLI's existing boundary in one place.
 async function invokeParsed(
   invocation: NonInstallExecution,
   runtime: InvokeRuntime,
@@ -563,7 +571,14 @@ async function invokeParsed(
 
   if (parsed.command === "show") {
     const selected = await selectContract(repo, parsed.contract, scope);
-    return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
+    try {
+      return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
+    } catch (error) {
+      const { KeiyakuRefused } = await import("../library/keiyaku.js");
+      if (error instanceof KeiyakuRefused)
+        return { kind: "refused" as const, verb: "show", contract: selected.id, refusal: error.refusal };
+      throw error;
+    }
   }
   if (parsed.command === "reconcile") {
     if (parsed.contract === undefined) {
@@ -573,12 +588,28 @@ async function invokeParsed(
         report: await repo.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
       };
     }
-    const { contract } = await selectContract(repo, parsed.contract, scope);
-    return {
-      kind: "observation",
-      command: "reconcile",
-      ...(await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks })),
-    };
+    const { id, contract } = await selectContract(repo, parsed.contract, scope);
+    const observed = await (await import("../library/contract.js")).observeKeiyaku({ repo, id });
+    if (observed.kind === "missing") {
+      return {
+        kind: "refused" as const,
+        verb: "reconcile",
+        contract: id,
+        refusal: { kind: "contract-missing" as const, contractId: id },
+      };
+    }
+    try {
+      return {
+        kind: "observation",
+        command: "reconcile",
+        ...(await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks })),
+      };
+    } catch (error) {
+      const { KeiyakuRefused } = await import("../library/keiyaku.js");
+      if (error instanceof KeiyakuRefused)
+        return { kind: "refused" as const, verb: "reconcile", contract: id, refusal: error.refusal };
+      throw error;
+    }
   }
   return invokeContractMutation({
     parsed,

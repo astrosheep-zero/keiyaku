@@ -298,7 +298,8 @@ function taskCatalogQuery(path: string, limit: number | undefined): CatalogQuery
 }
 
 function parseLs(parts: ParsedContractParts): ParsedLs {
-  const path = parts.positionals[0]!;
+  const path = parts.positionals[0];
+  if (path === undefined) refuse("ls", "ls requires a selector");
   const limit = listLimit(parts);
   const taskQuery = taskCatalogQuery(path, limit);
   if (taskQuery !== null) return { command: "ls", query: taskQuery, output: parts.output };

@@ -25,8 +25,8 @@ test("help resolves the longest legal command-word prefix before syntax scanning
   assert.deepEqual(parseArgv(["-C", "/absent/world", "--json", "--help"]), {
     help: { kind: "root" },
   });
-  assert.deepEqual(parseArgv(["ls"]), { help: { kind: "contract", command: "ls" } });
-  assert.deepEqual(parseArgv(["ls", "--json"]), { help: { kind: "contract", command: "ls" } });
+  assert.throws(() => parseArgv(["ls"]), CliUsageError);
+  assert.throws(() => parseArgv(["ls", "--json"]), CliUsageError);
   assert.throws(() => parseArgv(["-h"]), CliUsageError);
   assert.throws(() => parseArgv(["help"]), CliUsageError);
 });
@@ -34,6 +34,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 test("namespace and leaf help identify an executable command", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
   assert.match(renderRootHelp(), /--workdir <path>/u);
+  assert.match(renderRootHelp(), /Outcomes:  exit 0 accepted · 1 refused · 2 retry · 3 failed · 64 usage/u);
   assert.match(renderRootHelp(), /--version\s+Print the running package version\./u);
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
@@ -105,7 +106,7 @@ test("version is stdout zero and does not enter an absent world", () => {
   assert.equal(result.stderr, "");
 });
 
-test("bare ls is help-only even when its cwd cannot be read", async () => {
+test("bare ls is a compact usage refusal even when its cwd cannot be read", async () => {
   let stdout = "";
   let stderr = "";
   const writeStdout = process.stdout.write;
@@ -119,12 +120,12 @@ test("bare ls is help-only even when its cwd cannot be read", async () => {
     return true;
   }) as typeof process.stderr.write;
   try {
-    assert.equal(await main(["-C", "/definitely/absent/keiyaku-world", "ls"]), 0);
+    assert.equal(await main(["-C", "/definitely/absent/keiyaku-world", "ls"]), 64);
   } finally {
     process.stdout.write = writeStdout;
     process.stderr.write = writeStderr;
   }
-  assert.match(stdout, /usage  keiyaku ls task\[\/\]/u);
-
-  assert.equal(stderr, "");
+  assert.equal(stdout, "");
+  assert.match(stderr, /× usage  keiyaku ls/u);
+  assert.match(stderr, /ls requires a selector/u);
 });

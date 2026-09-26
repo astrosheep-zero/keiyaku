@@ -159,6 +159,11 @@ test("show parses one optional Contract selector and JSON output", () => {
   assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one contract/);
 });
 
+test("bare ls requires a selector rather than opening help", () => {
+  assert.throws(() => parseArgv(["ls"]), CliUsageError);
+  assert.throws(() => parseArgv(["ls", "--json"]), CliUsageError);
+});
+
 test("ls parses only canonical identity directories", () => {
   for (const path of ["task", "task/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {

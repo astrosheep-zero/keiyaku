@@ -39,8 +39,8 @@ type TaskEntity = Readonly<{
   title: string | null;
 }>;
 type RefusalProjection = Readonly<{
-  line: string;
-  diagnostic?: string;
+  diagnostic: string;
+  facts?: readonly string[];
   compositionDiagnostics?: readonly TaskCompositionDiagnostic[];
 }>;
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
@@ -100,23 +100,33 @@ function stateEntity(task: TaskView | (TaskRef & { priority?: number | null })):
   };
 }
 
-function projectRefusal(refusal: TaskRefusal): RefusalProjection {
-  if (refusal.kind === "task-missing") return { line: `task-missing ${refusal.taskId}` };
-  if (refusal.kind === "invalid-lifecycle-transition") {
-    return { line: `invalid-lifecycle-transition ${refusal.taskId} ${refusal.state} ${refusal.verb}` };
-  }
-  if (refusal.kind === "invalid-namespace-context") return { line: `invalid-namespace-context ${refusal.path}` };
-  if (refusal.kind === "relation-owned-by-other") {
-    return { line: `relation-owned-by-other ${refusal.taskId} ${refusal.related} ${refusal.declaringTask}` };
-  }
-  if (refusal.kind === "invalid-composition") {
-    return { line: refusal.kind, compositionDiagnostics: refusal.diagnostics };
-  }
-  return { line: refusal.kind, diagnostic: refusal.diagnostic };
-}
+const TASK_REFUSAL_WORDS: Readonly<Record<string, string>> = {
+  "task-missing": "task missing",
+  "invalid-lifecycle-transition": "invalid lifecycle transition",
+  "invalid-namespace-context": "invalid namespace context",
+  "relation-owned-by-other": "relation owned by other",
+  "invalid-composition": "invalid composition",
+};
 
-function appendDiagnostic(lines: string[], diagnostic: string | undefined): void {
-  if (diagnostic !== undefined) receiptPayload(lines, "diagnostic", diagnostic);
+function projectRefusal(refusal: TaskRefusal): RefusalProjection {
+  const diagnostic = TASK_REFUSAL_WORDS[refusal.kind] ?? refusal.kind.replaceAll("-", " ");
+  if (refusal.kind === "task-missing") return { diagnostic, facts: [`task  ${refusal.taskId}`] };
+  if (refusal.kind === "invalid-lifecycle-transition") {
+    return { diagnostic, facts: [`task  ${refusal.taskId}`, `state  ${refusal.state} · verb  ${refusal.verb}`] };
+  }
+  if (refusal.kind === "invalid-namespace-context") return { diagnostic, facts: [`path  ${refusal.path}`] };
+  if (refusal.kind === "relation-owned-by-other") {
+    return {
+      diagnostic,
+      facts: [
+        `task  ${refusal.taskId}`,
+        `related task  ${refusal.related}`,
+        `declaring task  ${refusal.declaringTask}`,
+      ],
+    };
+  }
+  if (refusal.kind === "invalid-composition") return { diagnostic, compositionDiagnostics: refusal.diagnostics };
+  return refusal.diagnostic === undefined ? { diagnostic } : { diagnostic, facts: [`detail  ${refusal.diagnostic}`] };
 }
 
 function renderFailure(verb: string, result: TaskFailure, columns: number): string {
@@ -125,8 +135,8 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   }
   const lines = [...outcomeLines("×", verb, "refused", undefined, columns)];
   const facts = projectRefusal(result.refusal);
-  lines.push(facts.line);
-  appendDiagnostic(lines, facts.diagnostic);
+  lines.push(`  diagnostic  ${facts.diagnostic}`);
+  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
   for (const item of facts.compositionDiagnostics ?? []) {
     lines.push(`line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`);
   }
@@ -277,8 +287,8 @@ function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): 
   if (item.outcome.kind === "accepted") return `✓ ${verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  const lines = [`× ${verb}  ${item.id}  ${facts.line}`];
-  appendDiagnostic(lines, facts.diagnostic);
+  const lines = [`× ${verb} refused`, `  task  ${item.id}`, `  diagnostic  ${facts.diagnostic}`];
+  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
   return lines.join("\n");
 }
 
@@ -296,8 +306,8 @@ function composeDiffs(
 function stoppedLines(stopped: ComposeStop): string[] {
   if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
   const facts = projectRefusal(stopped);
-  const lines = [`× stopped  ${facts.line}`];
-  appendDiagnostic(lines, facts.diagnostic);
+  const lines = [`× stopped refused`, `  diagnostic  ${facts.diagnostic}`];
+  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
   return lines;
 }
 

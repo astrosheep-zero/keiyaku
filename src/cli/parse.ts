@@ -98,6 +98,8 @@ export function renderRootHelp(columns?: number): string {
       "  -C, --cwd <path>  Set the invocation working directory.",
       "  --repo <path>     Select the Git repository coordinate.",
       "",
+      "Outcomes:  exit 0 accepted · 1 refused · 2 retry · 3 failed · 64 usage",
+      "",
       "Call option:",
       "  --workdir <path>  Set the execution directory for call only.",
     ].join("\n"),
@@ -388,13 +390,6 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
   if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "--version") return { version: true };
-  if (
-    invocation.commandArgv[0] === "ls" &&
-    (invocation.commandArgv.length === 1 ||
-      (invocation.commandArgv.length === 2 && invocation.commandArgv[1] === "--json"))
-  ) {
-    return { help: { kind: "contract", command: "ls" } };
-  }
   const task = invocation.commandArgv[0] === "task" ? parseTaskCommand(invocation.commandArgv.slice(1)) : undefined;
   const install =
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;

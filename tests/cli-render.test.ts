@@ -1232,7 +1232,7 @@ test("unmerged index paths render as a complete public refusal", () => {
       contract,
       refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
     }),
-    ["× deliver refused  kei/conflicted", "  unmerged-paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
+    ["× deliver refused", "  contract  kei/conflicted", "  diagnostic  unmerged paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
   );
 });
 
