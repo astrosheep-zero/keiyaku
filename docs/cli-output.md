@@ -198,8 +198,11 @@ progress rows and the closing conclusion stay on the progress channel. A call
 starts at an empty cursor. A bounded Tell first reports its admission receipt,
 then starts its cursor at that boundary without replaying prior work. Each input
 is shown once, and its single conclusion follows the same clock, mark, verb, and
-duration grammar as wait. The observed answer always belongs to that input's
-exact terminal Turn; plain Akuma-wide idle never stands in for it. Stdout carries
+duration grammar as wait. A caller deadline concludes on the target's observed
+status — still running, pending tell, or its terminal life — rather than naming
+the deadline; the explicit completed-or-deadline reason stays in JSON. The
+observed answer always belongs to that input's exact terminal Turn; plain
+Akuma-wide idle never stands in for it. Stdout carries
 only that answer once, leaving zero bytes for an empty answer, deadline, or
 failure. A schema-bearing text input JSON-encodes its decoded answer, including
 string values; a failure or invalid output keeps its diagnostic on the progress

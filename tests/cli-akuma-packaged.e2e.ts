@@ -232,7 +232,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
     assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
     assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
-    assert.equal(unfinished.stderr.match(/⧖ deadline — waited /gu)?.length, 1, "one input-bound deadline conclusion");
+    assert.equal(unfinished.stderr.match(/● still running — waited /gu)?.length, 1, "one input-bound conclusion states the observed life");
     const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
     assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
     assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
