@@ -29,9 +29,11 @@ Each declaration and scratch setup or cleanup hook inherits the caller process
 environment through the shared runtime. Candidate-owned settings remain the
 only settings authority for those hooks. Declarations run in order even after a
 failing command. A terminal run records one ordinary `verified` attestation
-with a satisfied or unsatisfied verdict. A timeout is terminal unsatisfied
-evidence; candidate unavailability, environment/setup failure, spawn failure,
-unknown exit, and caller cancellation admit no attestation.
+with a satisfied or unsatisfied verdict. When the current attestation for the
+same Contract, gate, verdict, and captured snapshot already exists, result
+admission records no new fact and reports reuse instead. A timeout is terminal
+unsatisfied evidence; candidate unavailability, environment/setup failure,
+spawn failure, unknown exit, and caller cancellation admit no attestation.
 
 The producer captures its subject before execution, and admission never
 retargets it. A completed older observation remains truthful history even when

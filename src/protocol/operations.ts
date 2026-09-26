@@ -182,16 +182,25 @@ export function unpackVerificationOutcome(verification: VerificationResult): Rea
   leak?: WorktreeLeak;
   stop?: VerificationStop;
   admission?: AcceptedProtocolStep;
+  reuse?: VerificationResult["reuse"];
   counts?: NonNullable<VerificationResult["counts"]>;
 }> {
   const step = verification.step;
-  const stop = "failure" in step ? step : stepStop(step);
+  const stop: VerificationStop | undefined =
+    "failure" in step
+      ? step
+      : "refusal" in step && step.refusal.kind === "verification-reuse"
+        ? undefined
+        : "kind" in step && step.kind === "reused"
+          ? undefined
+          : stepStop(step as ProtocolResult<AttestationRefusal>);
   const admission = !("failure" in step) && step.kind === "accepted" ? step : undefined;
   return {
     ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
     ...(verification.leak === undefined ? {} : { leak: verification.leak }),
     ...(stop === undefined ? {} : { stop }),
     ...(admission === undefined ? {} : { admission }),
+    ...(verification.reuse === undefined ? {} : { reuse: verification.reuse }),
     ...(verification.counts === undefined ? {} : { counts: verification.counts }),
   };
 }

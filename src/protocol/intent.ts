@@ -6,9 +6,11 @@ import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.j
 import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import { dependencyKeySet } from "../core/subject.js";
+import { activeContract } from "../core/facts/observation.js";
+import { dependencyKeySet, dependencyKeys } from "../core/subject.js";
 import type {
   ActorId,
+  AttestationEntry,
   ContractId,
   ContractState,
   DependencyKeySet,
@@ -148,9 +150,22 @@ export type VerificationCleanupFailure = Readonly<{
   detail: HookFailure;
 }>;
 
-export type VerificationStep = ProtocolResult<AttestationRefusal> | VerificationRuntimeStop;
+type VerificationReuseRefusal = Readonly<{
+  kind: "verification-reuse";
+  reuse: CurrentVerifiedAttestation;
+}>;
+
+export type VerificationReuseStep = Readonly<{
+  kind: "reused";
+  reuse: CurrentVerifiedAttestation;
+}>;
+export type VerificationStep =
+  | ProtocolResult<AttestationRefusal | VerificationReuseRefusal>
+  | VerificationRuntimeStop
+  | VerificationReuseStep;
 export type VerificationResult = Readonly<{
   step: VerificationStep;
+  reuse?: CurrentVerifiedAttestation;
   counts?: Readonly<{ passed: number; total: number; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
@@ -189,6 +204,23 @@ export type CurrentVerifiedAttestation = Readonly<{
   summary?: string;
 }>;
 
+export function reusableVerificationAttestation(
+  current: AttestationEntry | undefined,
+  subject: DependencyKeySet,
+  verdict: "satisfied" | "unsatisfied",
+): CurrentVerifiedAttestation | undefined {
+  const currentSnapshot =
+    current === undefined ? undefined : dependencyKeys(current.data.subject).find((key) => key.kind === "snapshot");
+  const subjectSnapshot = dependencyKeys(subject).find((key) => key.kind === "snapshot");
+  if (current === undefined || currentSnapshot?.value !== subjectSnapshot?.value || current.data.verdict !== verdict)
+    return undefined;
+  return {
+    entry: current.entry,
+    verdict: current.data.verdict,
+    ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
+  };
+}
+
 /** Read the latest current verified attestation through the generic currentness judge. */
 export function currentVerifiedAttestation(state: ContractState): CurrentVerifiedAttestation | undefined {
   const current = latestCurrentAttestations(state, new Set([VERIFIED])).get(VERIFIED);
@@ -211,13 +243,27 @@ async function verificationStep(
   subject: DependencyKeySet,
 ): Promise<VerificationStep> {
   if (execution.outcome.kind === "terminal") {
-    return await admitIntent<AttestationInput<never>, AttestationRefusal>(
+    const verdict = execution.outcome.verdict;
+    const admission = await admitIntent<AttestationInput<never>, AttestationRefusal | VerificationReuseRefusal>(
       input.channel,
       input.repository,
       verificationInput(execution.outcome, input, subject),
       decideAttestation,
-      input.progress === undefined ? {} : { progress: input.progress },
+      {
+        ...(input.progress === undefined ? {} : { progress: input.progress }),
+        validateAdmission: (observation) => {
+          const state = activeContract(observation.decision, input.contractId);
+          if ("kind" in state) return undefined;
+          const current = [...state.attestations].reverse().find((attestation) => attestation.data.gate === VERIFIED);
+          const reuse = reusableVerificationAttestation(current, subject, verdict);
+          return reuse === undefined ? undefined : { kind: "verification-reuse", reuse };
+        },
+      },
     );
+    if (admission.kind === "refused" && admission.refusal.kind === "verification-reuse") {
+      return { kind: "reused", reuse: admission.refusal.reuse };
+    }
+    return admission;
   }
   if (execution.outcome.kind === "candidate-unavailable")
     return { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
@@ -270,6 +316,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
   retainVerificationReceipt(input, step);
   return {
     step,
+    ...("kind" in step && step.kind === "reused" ? { reuse: step.reuse } : {}),
     ...(counts === undefined ? {} : { counts }),
     ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
     ...(execution.leak === undefined ? {} : { leak: execution.leak }),

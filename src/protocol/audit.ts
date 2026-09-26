@@ -37,6 +37,7 @@ export type AuditReport = Readonly<{
     | Readonly<{ kind: "not-run" }>
     | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
+    | Readonly<{ kind: "reused"; entry: EntryUlid; verdict: "satisfied" | "unsatisfied"; summary?: string }>
     | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
   target: Readonly<{ kind: "not-observed" }> | AuditTargetAnswer;
   delivery?: Readonly<{
@@ -120,6 +121,7 @@ function auditVerificationAnswer(
 ): AuditReport["verification"] {
   if (verified === undefined) return { kind: "not-run" };
   if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
+  if (verified.reuse !== undefined) return { kind: "reused", ...verified.reuse };
   if (verified.counts === undefined) throw new Error("terminal Verification is missing producer counts");
   return {
     kind: verified.counts.verdict,

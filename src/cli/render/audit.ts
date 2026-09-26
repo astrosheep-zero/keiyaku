@@ -5,6 +5,7 @@ import {
   executionStopLines,
   receiptPayload,
   receiptRow,
+  reuseLines,
   stopLines,
   titleLines,
 } from "./receipt.js";
@@ -55,6 +56,12 @@ function verificationLines(
   }
   if (verification.kind === "stopped") {
     return stopLines(verification.stop, columns, addressed);
+  }
+  if (verification.kind === "reused") {
+    receiptRow(lines, " ", "verification", [{ text: "reused" }, { text: verification.verdict }], columns);
+    lines.push(...reuseLines(verification, columns));
+    if (verification.summary !== undefined) receiptPayload(lines, "summary", verification.summary);
+    return lines;
   }
   receiptRow(
     lines,

@@ -461,6 +461,18 @@ function decodeAuditVerification(value: unknown): AuditReport["verification"] {
           : { summary: typeof object.summary === "string" ? object.summary : fail() }),
       };
     },
+    (input): Extract<AuditReport["verification"], { kind: "reused" }> => {
+      const object = record(input, ["kind", "entry", "verdict"], ["summary"]);
+      if (object.kind !== "reused" || (object.verdict !== "satisfied" && object.verdict !== "unsatisfied")) fail();
+      return {
+        kind: "reused",
+        entry: decodeEntryUlid(object.entry),
+        verdict: object.verdict,
+        ...(object.summary === undefined
+          ? {}
+          : { summary: typeof object.summary === "string" ? object.summary : fail() }),
+      };
+    },
   ]);
 }
 

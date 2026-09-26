@@ -105,6 +105,9 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   });
   if (result === null) return;
   const verified = unpackVerificationOutcome(result);
+  if (verified.reuse !== undefined) {
+    cursor.evidence = { verificationReuse: verified.reuse };
+  }
   if (verified.admission !== undefined) {
     cursor.checkpoint = contractCheckpoint(verified.admission);
     input.progress.recordResidue(state.id, verified.admission);

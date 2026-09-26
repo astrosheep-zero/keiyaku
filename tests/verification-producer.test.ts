@@ -7,6 +7,9 @@ import type { VerificationDeclaration } from "../src/verification/declaration.js
 import { executeVerification, type ExecuteVerificationInput } from "../src/verification/execution.js";
 import type { MaterializedScratchCandidate } from "../src/git/scratch.js";
 import { settings } from "../src/settings.js";
+import { dependencyKeySet } from "../src/core/subject.js";
+import { contractId, documentSegmentKey, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
+import { reusableVerificationAttestation } from "../src/protocol/intent.js";
 
 function declaration(
   script: string,
@@ -109,7 +112,7 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
 
     const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
     const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor)]));
-    assert.ok(spawnError.outcome.kind === "spawn-error", "expected spawnError.outcome.kind = \"spawn-error\"");
+    assert.ok(spawnError.outcome.kind === "spawn-error", 'expected spawnError.outcome.kind = "spawn-error"');
     assert.match(spawnError.outcome.diagnostic, new RegExp(`spawn ${missingExecutor} ENOENT`));
   });
 });
@@ -125,7 +128,7 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
       ]),
     );
 
-    assert.ok(outcome.outcome.kind === "terminal", "expected outcome.outcome.kind = \"terminal\"");
+    assert.ok(outcome.outcome.kind === "terminal", 'expected outcome.outcome.kind = "terminal"');
     assert.equal(outcome.outcome.verdict, "unsatisfied");
     assert.notEqual(outcome.outcome.summary, undefined);
     const summary = outcome.outcome.summary!;
@@ -135,6 +138,40 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
     assert.match(summary, /stdout:\n[x]+\nstderr:\n[y]+$/);
     assert.doesNotMatch(summary, /first-out/);
   });
+});
+
+test("verification admission reuses an identical current attestation", () => {
+  const current = {
+    v: 1 as const,
+    kind: "attestation" as const,
+    contract: contractId("kei/reuse"),
+    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
+    at: "2026-09-26T00:00:00.000Z",
+    data: {
+      gate: gate("verified"),
+      subject: dependencyKeySet([
+        { kind: "snapshot", value: snapshotId("snapshot") },
+        { kind: "segment", value: documentSegmentKey("verification") },
+      ]),
+      verdict: "satisfied" as const,
+      summary: "all good",
+    },
+  };
+  const subject = current.data.subject;
+  assert.deepEqual(reusableVerificationAttestation(current, subject, "satisfied"), {
+    entry: current.entry,
+    verdict: "satisfied",
+    summary: "all good",
+  });
+  assert.equal(reusableVerificationAttestation(current, subject, "unsatisfied"), undefined);
+  assert.equal(
+    reusableVerificationAttestation(
+      current,
+      dependencyKeySet([{ kind: "snapshot", value: snapshotId("different") }]),
+      "satisfied",
+    ),
+    undefined,
+  );
 });
 
 test("a deterministic missing executor returns a spawn error", async () => {

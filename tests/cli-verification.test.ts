@@ -11,7 +11,7 @@ import { writeExecutionProgress } from "../src/cli/runtime.js";
 import { startContractExecution, type ExecutionEvent } from "../src/library/execution.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { makeGitRepository, observeContract } from "./support/git.js";
+import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 
 function executable(argv: readonly string[]) {
@@ -84,6 +84,80 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   assert.match(progress, /● declaration 1\/1/u);
   assert.match(progress, /delivery-live-output/u);
   assert.match(progress, /✓ declaration 1\/1/u);
+});
+
+test("audit reports reuse on a second unchanged verification", async () => {
+  const { raw, id } = await bindAndDeliver("false");
+  const first = await invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} });
+  const second = await invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} });
+  assert.ok("kind" in first && first.kind === "accepted");
+  assert.equal((first as { facts: readonly unknown[] }).facts.length, 1);
+  assert.ok("kind" in second && second.kind === "accepted");
+  assert.equal((second as { facts: readonly unknown[] }).facts.length, 0);
+  const secondReport = (second as unknown as { report: { verification: { kind: string; [key: string]: unknown } } })
+    .report;
+  assert.equal(secondReport.verification.kind, "reused");
+  const repository = await repositoryAt(raw.path);
+  const state = (await observeContract(repository, id)).state!;
+  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 2);
+});
+
+test("concurrent unchanged audits admit one attestation and reuse the loser", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  raw.run(["checkout", "--quiet", "-b", "candidate"]);
+  writeFileSync(resolve(raw.path, "candidate.txt"), "candidate\n");
+  raw.run(["add", "candidate.txt"]);
+  raw.run(["commit", "--quiet", "-m", "candidate"]);
+  mkdirSync(resolve(raw.path, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    resolve(raw.path, ".keiyaku", "settings.json"),
+    JSON.stringify({ gates: { default: { kind: "bundle", gates: ["verified"] } } }),
+  );
+  const bound = (await invokeRaw(executable(["-C", raw.path, "bind", "--target", "refs/heads/main", "-"]), {
+    environment: {},
+    readStdin: async () => markdown("false"),
+  })) as unknown as { kind: string; contract: string };
+  assert.equal(bound.kind, "accepted");
+  const id = bound.contract as ContractId;
+  const [first, second] = await Promise.all([
+    invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} }),
+    invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} }),
+  ]);
+  assert.ok("kind" in first && first.kind === "accepted");
+  assert.ok("kind" in second && second.kind === "accepted");
+  assert.equal(
+    (first as { facts: readonly unknown[] }).facts.length + (second as { facts: readonly unknown[] }).facts.length,
+    1,
+  );
+  const reused = [first, second].filter(
+    (result) =>
+      "kind" in result &&
+      result.kind === "accepted" &&
+      (result as unknown as { report: { verification: { kind: string } } }).report.verification.kind === "reused",
+  );
+  assert.equal(reused.length, 1);
+  const repository = await repositoryAt(raw.path);
+  const state = (await observeContract(repository, id)).state!;
+  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 1);
+});
+
+test("audit admits a new attestation after the candidate changes", async () => {
+  const { raw, id } = await bindAndDeliver("false");
+  const first = await invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} });
+  assert.ok("kind" in first && first.kind === "accepted");
+  const repository = await repositoryAt(raw.path);
+  const state = (await observeContract(repository, id)).state!;
+  const worktree = await appointedWorktreePath(repository, id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "changed\n");
+  raw.run(["-C", worktree, "add", "candidate.txt"]);
+  raw.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
+  const second = await invokeRaw(executable(["-C", raw.path, "audit", id]), { environment: {} });
+  assert.ok("kind" in second && second.kind === "accepted");
+  assert.equal((second as { facts: readonly unknown[] }).facts.length, 1);
+  const after = (await observeContract(repository, id)).state!;
+  assert.equal(after.attestations.filter((fact) => fact.data.gate === "verified").length, 3);
+  assert.notEqual(after.attestations.at(-1)?.data.subject, state.attestations.at(-1)?.data.subject);
 });
 
 test("closing or failing CLI progress output does not cancel the operation", async (t) => {
