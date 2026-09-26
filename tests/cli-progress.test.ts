@@ -94,6 +94,14 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
   assert.match(stream.text, /verify  ✓ 1\/1 · 42s\n$/u);
 });
 
+test("non-TTY progress does not repeat a phase coordinate", async () => {
+  const stream = new CapturedStream(false);
+  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
+  await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
+  assert.equal(stream.text, "● declaration 1/1 · /scratch\n✓ declaration 1/1\n");
+});
+
 test("non-TTY progress emits sparse boundaries, bounded output, and no key-value vocabulary", async () => {
   const stream = new CapturedStream(false);
   async function* events(): AsyncGenerator<ExecutionEvent> {
@@ -143,7 +151,7 @@ test("live output consolidates adjacent chunks by stream and resets at the next 
   assert.equal((stream.text.match(/^stderr$/gmu) ?? []).length, 1);
   assert.match(stream.text, /stdout\n  stdout onestdout two\nstderr\n  stderr one\n/u);
   assert.match(stream.text, /stderr\n  stderr one\nstdout\n  stdout three\n/u);
-  assert.match(stream.text, /● declaration 1\/1 · \/scratch\nstdout\n  stdout next\n/u);
+  assert.match(stream.text, /● declaration 1\/1\nstdout\n  stdout next\n/u);
 });
 
 test("live output applies one cumulative UTF-8-safe stream budget", async () => {

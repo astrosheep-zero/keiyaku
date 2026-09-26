@@ -1,5 +1,5 @@
 import type { InvocationResult } from "../result.js";
-import { renderObservation } from "./board.js";
+import { renderReconcile } from "./reconcile.js";
 import { renderAccepted, renderContractHistory, renderRetry } from "./contract.js";
 import { renderKanshiText } from "./kanshi.js";
 import { renderConflictMaterialized, renderRefusal } from "./refusal.js";
@@ -21,5 +21,5 @@ export function renderText(result: InvocationResult, context?: TextRenderContext
   if (result.kind === "refused") return renderRefusal(result, context);
   if (result.kind === "retry") return renderRetry(result, context);
   if (result.kind === "integration-conflict-materialized") return renderConflictMaterialized(result, context);
-  return renderObservation(result);
+  return renderReconcile(result, context);
 }

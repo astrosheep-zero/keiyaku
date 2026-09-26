@@ -134,11 +134,11 @@ function invocationJson(result: InvocationResult): unknown {
   }
 }
 
-async function invocationExitCode(result: InvocationResult): Promise<number> {
+export async function invocationExitCode(result: InvocationResult): Promise<number> {
   if (result.kind === "nuke") return (await import("./render/nuke.js")).nukeExitCode(result.result);
-  if (result.kind === "observation") {
-    const { worldObservationFailureText } = await import("./render/board.js");
-    return worldObservationFailureText(result) === undefined ? 0 : 1;
+  if (result.kind === "reconcile") {
+    const { reconcileHasFailure } = await import("./render/reconcile.js");
+    return reconcileHasFailure(result.report) ? 1 : 0;
   }
   return result.kind === "refused" ? 1 : result.kind === "retry" ? 2 : 0;
 }

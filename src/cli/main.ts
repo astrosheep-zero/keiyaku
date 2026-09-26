@@ -1,7 +1,16 @@
 import { CliUsageError, parseArgv, renderHelp } from "./parse.js";
 import { installedPackageVersion } from "./version.js";
 
+function handleBrokenPipe(stream: NodeJS.WriteStream): void {
+  stream.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EPIPE") process.exit(0);
+    throw error;
+  });
+}
+
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  handleBrokenPipe(process.stdout);
+  handleBrokenPipe(process.stderr);
   try {
     const parsed = parseArgv(argv);
     if ("help" in parsed) {

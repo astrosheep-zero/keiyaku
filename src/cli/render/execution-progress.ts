@@ -29,8 +29,14 @@ function phaseDetail(observation: Extract<ExecutionEvent, { kind: "verification"
   return observation.name === undefined ? observation.phase : `${observation.phase} · ${safeText(observation.name)}`;
 }
 
-function phaseStartLine(observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"]): string {
-  return `● ${[phaseDetail(observation), ...(observation.cwd === undefined ? [] : [safeText(observation.cwd)])].join(" · ")}`;
+function phaseStartLine(
+  observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"],
+  omitCoordinate = false,
+): string {
+  return `● ${[
+    phaseDetail(observation),
+    ...(omitCoordinate || observation.cwd === undefined ? [] : [safeText(observation.cwd)]),
+  ].join(" · ")}`;
 }
 
 function phaseMark(outcome: string | undefined): "✓" | "×" | "?" {
@@ -181,6 +187,7 @@ export class ExecutionProgressRenderer {
   private phaseFailed = false;
   private phaseUnknown = false;
   private readonly liveOutput = new VerificationLiveOutput();
+  private lastCoordinate: string | undefined;
 
   constructor(private readonly input: ExecutionProgressOptions) {
     this.status = new StatusLine(input.stream, input);
@@ -218,7 +225,11 @@ export class ExecutionProgressRenderer {
       this.verificationStartedAt ??= (this.input.now ?? (() => performance.now()))();
       if (this.status.isTTY)
         this.status.show((duration) => `verify  ● ${phaseDetail(observation)} · ${elapsed(duration)}`);
-      else await this.write([phaseStartLine(observation)]);
+      else {
+        const omitCoordinate = observation.cwd !== undefined && observation.cwd === this.lastCoordinate;
+        await this.write([phaseStartLine(observation, omitCoordinate)]);
+        if (observation.cwd !== undefined) this.lastCoordinate = observation.cwd;
+      }
       return;
     }
     await this.write(this.liveOutput.finish(this.input.context));

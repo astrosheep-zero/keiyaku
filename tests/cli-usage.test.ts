@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,8 @@ import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { akumaFailureProjection } from "../src/cli/runtime.js";
+import { akumaFailureProjection, invocationExitCode } from "../src/cli/runtime.js";
+import { contractId } from "../src/core/facts/types.js";
 
 async function captureMain(
   argv: readonly string[],
@@ -57,6 +58,182 @@ function runCli(cwd: string, argv: readonly string[], input?: string) {
     { encoding: "utf8", env: environment, ...(input === undefined ? {} : { input }) },
   );
 }
+
+test("a closed stdout pipe during a blocked large write exits silently", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-pipe-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const added = runCli(root, ["task", "add", "Title", "--body", "x".repeat(500_000), "--json"]);
+  assert.equal(added.status, 0, added.stderr ?? added.error?.message);
+  const id = JSON.parse(added.stdout).value.id as string;
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)), "task", "show", id, "--json"],
+    { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stderr = "";
+  child.stderr?.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+  await new Promise<void>((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  child.stdout?.destroy();
+  const status = await new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
+  assert.equal(status, 0);
+  assert.equal(stderr, "");
+});
+
+test("worktree hook failure reports exit 1 at the CLI boundary", async () => {
+  const result: import("../src/cli/result.js").InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        {
+          kind: "worktree-hook-failed",
+          phase: "create",
+          path: "/tmp/wt",
+          command: 0,
+          name: "prepare",
+          failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  assert.equal(await invocationExitCode(result), 1);
+});
+
+test("target checkout retention reports exit 1 at the CLI boundary", async () => {
+  const result: import("../src/cli/result.js").InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        {
+          kind: "target-checkout-retained",
+          target: "refs/heads/main",
+          path: "/repo/file",
+          diagnostic: "checkout failed",
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  assert.equal(await invocationExitCode(result), 1);
+});
+
+test("private-state seat-close failure reports exit 1 at the CLI boundary", async () => {
+  const result: import("../src/cli/result.js").InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [],
+      settlement: {
+        actions: [],
+        lags: [],
+        seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
+      },
+    },
+  };
+  assert.equal(await invocationExitCode(result), 1);
+});
+
+test("reconcile failure reports exit 1 at the CLI boundary", async () => {
+  const result: import("../src/cli/result.js").InvocationResult = {
+    kind: "reconcile" as const,
+    report: {
+      effects: [],
+      lag: [{ kind: "contract-file-failed", worktree: "/tmp/wt", path: "KEIYAKU.md", diagnostic: "write failed" }],
+      settlement: {
+        actions: [],
+        lags: [
+          {
+            kind: "settlement-failed",
+            surface: "task" as const,
+            contractId: contractId("kei/example"),
+            diagnostic: "task failed",
+          },
+        ],
+      },
+    },
+  };
+  assert.equal(await invocationExitCode(result), 1);
+});
+
+test("task show preserves a multi-line body end to end", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-task-"));
+  const added = runCli(root, ["task", "add", "Title", "--body", "first\nsecond", "--json"]);
+  assert.equal(added.status, 0);
+  const id = JSON.parse(added.stdout).value.id as string;
+  const shown = runCli(root, ["task", "show", id]);
+  assert.equal(shown.status, 0);
+  assert.match(shown.stdout, /body\n  first\n  second/u);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("audit show-diff preserves an actual candidate diff", () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const markdown = [
+    "# CLI audit",
+    "",
+    "## Context",
+    "test",
+    "",
+    "## Objective",
+    "test",
+    "",
+    "## Design",
+    "test",
+    "",
+    "## Region",
+    "src/**",
+    "",
+    "## Criteria",
+    "### candidate",
+    "test",
+  ].join("\n");
+  const bound = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)),
+      "-C",
+      repository.path,
+      "bind",
+      "--gates",
+      "",
+      "-",
+      "--json",
+    ],
+    {
+      input: markdown,
+      encoding: "utf8",
+    },
+  );
+  assert.equal(bound.status, 0, bound.stderr);
+  const contract = JSON.parse(bound.stdout).contract as string;
+  const binding = JSON.parse(bound.stdout);
+  writeFileSync(join(binding.workspace.path, "candidate.txt"), "candidate\n");
+  const audited = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)),
+      "-C",
+      repository.path,
+      "audit",
+      contract,
+      "--include-dirty",
+      "--show-diff",
+    ],
+    {
+      encoding: "utf8",
+    },
+  );
+  assert.equal(audited.status, 0, audited.stderr);
+  assert.match(audited.stdout, /diff --git/u);
+  assert.match(audited.stdout, /\+\+\+|@@/u);
+});
 
 test("a local status on an absent complete id reports one caller-facing fact", (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-not-found-"));

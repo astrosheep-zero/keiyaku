@@ -19,6 +19,7 @@ import type { RegionRead, Section } from "../kanshi/index.js";
 import type { Catalog } from "./catalog.js";
 import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
 import type { NukeResult } from "../index.js";
+import type { RepoReconcileReport } from "../library/reconcile.js";
 
 export type BindDraftReceipt = Readonly<{ path: string; warning?: string } | { path?: never; warning: string }>;
 
@@ -233,10 +234,9 @@ export type RetryResult = Readonly<{
   detail: unknown;
 }>;
 
-export type ObservationResult = Readonly<{
-  kind: "observation";
-  command: string;
-  [key: string]: unknown;
+export type ReconcileResult = Readonly<{
+  kind: "reconcile";
+  report: ReconcileReport | RepoReconcileReport;
 }>;
 
 export type GuidanceResult = Readonly<{
@@ -270,7 +270,7 @@ export type InvocationResult =
   | AcceptedResult
   | RefusedResult
   | RetryResult
-  | ObservationResult
+  | ReconcileResult
   | GuidanceResult
   | StatusResult
   | StatusSetResult

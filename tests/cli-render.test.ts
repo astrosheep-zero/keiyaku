@@ -28,7 +28,12 @@ import type { DispatchAssociation } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { displayColumns, takeDisplayColumns, truncateDisplayText } from "../src/cli/render/terminal.js";
+import {
+  displayColumns,
+  renderOpaqueBlock,
+  takeDisplayColumns,
+  truncateDisplayText,
+} from "../src/cli/render/terminal.js";
 import { renderText } from "../src/cli/render/text.js";
 import {
   activeTool,
@@ -653,30 +658,167 @@ test("every verb receipt states facts without journal rows or entry ids", () => 
   );
 });
 
-test("observation text keeps the command and view data together", () => {
-  const result: InvocationResult = { kind: "observation", command: "status", contracts: [] };
-  assert.equal(renderText(result), "observation  status\n  contracts  list (0)");
+test("opaque payloads preserve lines and name overflow", () => {
+  assert.deepEqual(renderOpaqueBlock("diff --git a/x b/x\n+++ b/x\n@@ -1 +1 @@", "  ", 100), [
+    "  diff --git a/x b/x",
+    "  +++ b/x",
+    "  @@ -1 +1 @@",
+  ]);
+  const lines = renderOpaqueBlock(`${"line\n".repeat(100)}tail`, "  ", 100);
+  assert.equal(lines.length, 100);
+  assert.match(lines.at(-1) ?? "", /omitted/u);
+  const wrapped = renderOpaqueBlock("x".repeat(8_000), "  ", 80);
+  assert.equal(wrapped.length, 100);
+  assert.match(wrapped.at(-1) ?? "", /omitted/u);
 });
 
-test("world reconcile text keeps a completed report under report", () => {
+test("reconcile renders a healthy no-op compactly", () => {
   const result: InvocationResult = {
-    kind: "observation",
-    command: "reconcile",
-    report: { kind: "completed", contracts: [] },
+    kind: "reconcile",
+    report: { effects: [], lag: [], settlement: { actions: [], lags: [] } },
   };
+  assert.equal(renderText(result), "✓ reconcile");
+});
+
+test("reconcile failure renders mark and facts", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [{ kind: "reconcile-failed", stage: "effect", diagnostic: "git failed" }],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  assert.equal(renderText(result), "! reconcile  effect  git failed");
+});
+
+test("reconcile renders worktree hook failure as attention", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        {
+          kind: "worktree-hook-failed",
+          phase: "create",
+          path: "/tmp/wt",
+          command: 0,
+          name: "prepare",
+          failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  assert.match(renderText(result), /! reconcile  hook  create  \/tmp\/wt  prepare  command 0  exit 7/u);
+});
+
+test("reconcile renders target checkout retention as attention", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        {
+          kind: "target-checkout-retained",
+          target: "refs/heads/main",
+          path: "/repo/file",
+          diagnostic: "checkout failed",
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  const text = renderText(result);
+  assert.match(text, /! reconcile  target-checkout-retained  target refs\/heads\/main  path \/repo\/file/u);
+  assert.match(text, /diagnostic checkout failed/u);
+});
+
+test("reconcile renders private-state seat-close failure and diagnostic", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [],
+      settlement: {
+        actions: [],
+        lags: [],
+        seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
+      },
+    },
+  };
+  const text = renderText(result);
+  assert.match(text, /! settlement  private-state-seat-close-failed/u);
+  assert.match(text, /! diagnostic  could not close publication seat/u);
+});
+
+test("reconcile hook payloads preserve lines and remain bounded", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        {
+          kind: "worktree-hook-failed",
+          phase: "destroy",
+          path: "/tmp/wt",
+          command: 1,
+          name: "cleanup",
+          failure: {
+            kind: "exit",
+            code: 9,
+            stdout: "",
+            stderr: `${"line\n".repeat(100)}tail`,
+            truncated: false,
+          },
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  const lines = renderText(result).split("\n");
+  assert.equal(lines.filter((line) => line.startsWith("  ")).length <= 101, true);
+  assert.equal(lines.includes("  line"), true);
+  assert.equal(lines.includes("  tail"), false);
+  assert.match(lines.at(-2) ?? "", /omitted/u);
   assert.equal(
-    renderText(result),
-    'observation  reconcile\n  report  object (2)\n    kind  "completed"\n    contracts  list (0)',
+    lines.some((line) => line === "  line  line"),
+    false,
   );
 });
 
-test("world observation failure text is exact", () => {
+test("reconcile renders contract-file and settlement failures", () => {
   const result: InvocationResult = {
-    kind: "observation",
-    command: "reconcile",
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        { kind: "contract-file-failed", worktree: "/tmp/wt", path: ".keiyaku/KEIYAKU.md", diagnostic: "write failed" },
+      ],
+      settlement: {
+        actions: [],
+        lags: [
+          {
+            kind: "settlement-failed",
+            surface: "task",
+            contractId: contractId("kei/example"),
+            diagnostic: "task failed",
+          },
+        ],
+      },
+    },
+  };
+  const text = renderText(result);
+  assert.match(text, /! reconcile  contract-file-failed  worktree \/tmp\/wt  path \.keiyaku\/KEIYAKU\.md/u);
+  assert.match(text, /! settlement  surface task  contractId kei\/example  diagnostic task failed/u);
+});
+
+test("world reconcile failure renders its diagnostic", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
     report: { kind: "world-observation-failed", diagnostic: "git failed" },
   };
-  assert.equal(renderText(result), "× observation  reconcile\n  diagnostic  git failed");
+  assert.equal(renderText(result), "! reconcile  git failed");
 });
 
 test("Verification create action names are safe in text receipts", () => {
@@ -1232,7 +1374,14 @@ test("unmerged index paths render as a complete public refusal", () => {
       contract,
       refusal: { kind: "unmerged-paths", contractId: contract, paths: ["a.txt", "z.txt"] },
     }),
-    ["× deliver refused", "  contract  kei/conflicted", "  diagnostic  unmerged paths", "  paths", "    a.txt", "    z.txt"].join("\n"),
+    [
+      "× deliver refused",
+      "  contract  kei/conflicted",
+      "  diagnostic  unmerged paths",
+      "  paths",
+      "    a.txt",
+      "    z.txt",
+    ].join("\n"),
   );
 });
 

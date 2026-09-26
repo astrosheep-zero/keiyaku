@@ -583,8 +583,7 @@ async function invokeParsed(
   if (parsed.command === "reconcile") {
     if (parsed.contract === undefined) {
       return {
-        kind: "observation",
-        command: "reconcile",
+        kind: "reconcile",
         report: await repo.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
       };
     }
@@ -600,9 +599,8 @@ async function invokeParsed(
     }
     try {
       return {
-        kind: "observation",
-        command: "reconcile",
-        ...(await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks })),
+        kind: "reconcile",
+        report: await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
       };
     } catch (error) {
       const { KeiyakuRefused } = await import("../library/keiyaku.js");

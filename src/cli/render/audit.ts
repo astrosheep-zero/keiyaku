@@ -17,7 +17,7 @@ const CHILD = "  ";
 function workspaceEvidence(
   workspace: Extract<AuditReport["candidate"], { kind: "ready" }>["workspace"],
 ): readonly string[] {
-  return [`${CHILD}workspace  ${workspace.kind}`, `${CHILD}worktree  ${safeText(workspace.path)}`];
+  return [`${CHILD}workspace  ${workspace.kind}  ${safeText(workspace.path)}`];
 }
 
 function candidateLines(report: AuditReport, columns: number, addressed: string): readonly string[] {

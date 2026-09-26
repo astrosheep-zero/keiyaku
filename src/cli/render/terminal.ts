@@ -220,35 +220,54 @@ export function renderTextBlock(value: string, indent: string, columns: number):
   return lines;
 }
 
+const OPAQUE_BLOCK_MAX_LINES = 100;
+
 export function renderOpaqueBlock(value: string, indent: string, columns: number): readonly string[] {
-  let rest = safeText(value);
-  if (rest.length === 0) return [indent.trimEnd()];
+  if (value.length === 0) return [indent.trimEnd()];
   const continuation = `${indent}  `;
   const lines: string[] = [];
+  const sourceLines = value.split("\n");
+  let sourceIndex = 0;
+  let rest = "";
   let prefix = indent;
-  while (rest.length > 0) {
+  let truncated = false;
+  while (sourceIndex < sourceLines.length || rest.length > 0) {
+    if (rest.length === 0) {
+      rest = safeText(sourceLines[sourceIndex++] ?? "");
+      prefix = indent;
+      if (rest.length === 0) {
+        if (lines.length === OPAQUE_BLOCK_MAX_LINES) {
+          truncated = true;
+          break;
+        }
+        lines.push(indent.trimEnd());
+        continue;
+      }
+    }
+    if (lines.length === OPAQUE_BLOCK_MAX_LINES) {
+      truncated = true;
+      break;
+    }
     const budget = columns - displayColumns(prefix);
     if (budget <= 0) {
-      if (prefix === continuation) {
-        lines.push(`${prefix}${rest}`);
-        break;
-      }
       lines.push(prefix.trimEnd());
       prefix = continuation;
       continue;
     }
-    if (displayColumns(rest) <= budget) {
-      lines.push(`${prefix}${rest}`);
-      break;
-    }
     const taken = takeDisplayColumns(rest, budget);
     if (taken.text.length === 0) {
       lines.push(`${prefix}${rest}`);
-      break;
+      rest = "";
+      continue;
     }
     lines.push(`${prefix}${taken.text}`);
     rest = taken.rest;
     prefix = continuation;
+  }
+  if (truncated || sourceIndex < sourceLines.length || rest.length > 0) {
+    const omittedLines = sourceLines.length - sourceIndex + (rest.length > 0 ? 1 : 0);
+    const omitted = omittedLines > 1 ? `${omittedLines} lines` : `${Math.max(1, omittedLines)} line`;
+    lines[OPAQUE_BLOCK_MAX_LINES - 1] = `${indent}… (${omitted} omitted)`;
   }
   return lines;
 }
