@@ -239,6 +239,10 @@ async function akumaWorldFor(
   return world;
 }
 
+function taskCatalogNamespace(namespace: readonly string[] | undefined): readonly string[] {
+  return namespace ?? [];
+}
+
 async function invokeCatalog(
   parsed: Extract<ParsedCommand, { command: "ls" }>,
   world: WorldRoot | null,
@@ -285,7 +289,12 @@ async function invokeCatalog(
       if (listed.kind !== "accepted") throw new Error("Task list did not return an accepted observation");
       return {
         kind: "catalog" as const,
-        catalog: { kind: "tasks" as const, root: world, ...listed.value },
+        catalog: {
+          kind: "tasks" as const,
+          root: world,
+          namespace: taskCatalogNamespace(parsed.query.namespace),
+          ...listed.value,
+        },
       };
     }
     const { Akumas } = await import("../library/akumas.js");

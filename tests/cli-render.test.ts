@@ -47,6 +47,8 @@ import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { renderTaskText } from "../src/cli/render/task.js";
+import { parseTaskCommand } from "../src/cli/commands/task.js";
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -89,7 +91,10 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
 
 type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
 const genericLines = (rows: readonly GenericFixture[], columns: number) =>
-  snapshotActivityLines(openAkumaSnapshot(rows.map(([sequence, name, input]) => snapshotRow(genericTool(sequence, name, input)))), { columns, color: false });
+  snapshotActivityLines(
+    openAkumaSnapshot(rows.map(([sequence, name, input]) => snapshotRow(genericTool(sequence, name, input)))),
+    { columns, color: false },
+  );
 /** One observed Akuma as the wait's observation seam reports it: status plus identity facts. */
 function observed(
   status: AkumaStatus,
@@ -128,6 +133,7 @@ test("catalog text renders only the selected identity layer", () => {
     renderCatalogText({
       kind: "tasks",
       root: "/world" as never,
+      namespace: [],
       rows: [
         {
           id: "task/catalog-row" as never,
@@ -141,7 +147,7 @@ test("catalog text renders only the selected identity layer", () => {
       ],
       hasMore: true,
     }),
-    ["○ task/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
+    ["TASKS // root", "○ task/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
   );
   assert.equal(
     renderCatalogText({
@@ -149,7 +155,7 @@ test("catalog text renders only the selected identity layer", () => {
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
       hasMore: false,
     }),
-    ["available Akuma", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["ARCHETYPES // available", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({
@@ -161,7 +167,7 @@ test("catalog text renders only the selected identity layer", () => {
       searched: ["/world/.keiyaku/akuma/run"],
       hasMore: false,
     }),
-    ["akuma  1 recent", "  scope  worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
+    ["AKUMA // worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
   );
 });
 
@@ -177,6 +183,7 @@ test("root Task catalogue marks every disposition with its own state", () => {
   const catalog: Extract<Catalog, { kind: "tasks" }> = {
     kind: "tasks",
     root: worldRoot,
+    namespace: [],
     hasMore: false,
     rows: cases.map(([disposition]) => ({
       id: `task/${disposition}` as never,
@@ -190,7 +197,63 @@ test("root Task catalogue marks every disposition with its own state", () => {
   };
   assert.equal(
     renderCatalogText(catalog),
-    cases.map(([state, mark]) => `${mark} task/${state} · ${state.replaceAll("_", " ")} · P1 — ${state}`).join("\n"),
+    [
+      "TASKS // root",
+      ...cases.map(([state, mark]) => `${mark} task/${state} · ${state.replaceAll("_", " ")} · P1 — ${state}`),
+    ].join("\n"),
+  );
+});
+
+test("empty World status has one explicit empty row", () => {
+  assert.equal(
+    renderKanshiText(
+      {
+        root: worldRoot,
+        observedAt: "2026-08-12T00:00:00.000Z",
+        branch: null,
+        contracts: {
+          kind: "present",
+          value: { root: worldRoot, state: null, observedAt: "2026-08-12T00:00:00.000Z", rows: [], hasMore: false },
+        },
+        tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
+        akuma: {
+          kind: "present",
+          value: { observedAt: "2026-08-12T00:00:00.000Z", searched: [], rows: [], hasMore: false },
+        },
+      },
+      { columns: 120, color: false },
+    ),
+    "○ world empty",
+  );
+});
+
+test("empty catalogues keep only their frame heads", () => {
+  assert.equal(
+    renderCatalogText({ kind: "tasks", root: worldRoot, namespace: [], rows: [], hasMore: false }),
+    "TASKS // root",
+  );
+  assert.equal(
+    renderCatalogText({
+      kind: "contracts",
+      root: "/repo",
+      state: null,
+      observedAt: "2026-08-12T00:00:00.000Z",
+      rows: [],
+      hasMore: false,
+    }),
+    "CONTRACTS // recent",
+  );
+  assert.equal(
+    renderCatalogText({
+      kind: "akuma",
+      root: worldRoot,
+      archetype: "worker",
+      observedAt: "2026-08-12T00:00:00.000Z",
+      rows: [],
+      searched: [],
+      hasMore: false,
+    }),
+    "AKUMA // worker",
   );
 });
 
@@ -217,6 +280,57 @@ test("World roster names a bound Contract once without a bare unavailable parent
   assert.match(free, /○ aku\/worker\/22220002 · asleep · 5s$/mu);
   assert.doesNotMatch(free, /bound to|unbound/u);
   assert.doesNotMatch(free, /·\s*$/mu);
+});
+
+test("Task family uses qualified empty frames and omits absent body facts", () => {
+  const context = { columns: 120, color: false } as const;
+  const empty = { kind: "accepted" as const, value: { rows: [], hasMore: false } };
+  assert.equal(renderTaskText(parseTaskCommand(["ls"]), empty, context), "TASKS // current namespace");
+  assert.equal(renderTaskText(parseTaskCommand(["ready"]), empty, context), "READY // current namespace");
+  const text = renderTaskText(
+    parseTaskCommand(["ls"]),
+    {
+      kind: "accepted",
+      value: {
+        rows: [
+          {
+            id: "task/no-body" as never,
+            title: "No body",
+            state: "open",
+            priority: 1,
+            disposition: "ready",
+            updatedAt: "2026-08-12T00:00:00.000Z",
+            bodyPresent: false,
+          },
+        ],
+        hasMore: false,
+      },
+    },
+    context,
+  );
+  assert.match(text, /^TASKS \/\/ current namespace\n/u);
+  assert.doesNotMatch(text, /no body/u);
+});
+
+test("Task catalogue rows omit absent body facts", () => {
+  const text = renderCatalogText({
+    kind: "tasks",
+    root: worldRoot,
+    namespace: [],
+    rows: [
+      {
+        id: "task/no-body" as never,
+        title: "No body",
+        state: "open",
+        priority: 1,
+        disposition: "ready",
+        updatedAt: "2026-08-12T00:00:00.000Z",
+        bodyPresent: false,
+      },
+    ],
+    hasMore: false,
+  });
+  assert.doesNotMatch(text, /no body/u);
 });
 
 test("World status task rows state a Contract association only when one exists", () => {
@@ -266,7 +380,7 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
     hasMore: true,
   };
   const text = renderCatalogText(catalog);
-  assert.match(text, /akuma  11 recent/u);
+  assert.match(text, /AKUMA \/\/ worker/u);
   assert.equal(text.endsWith("…"), true);
   assert.equal((text.match(/aku\/worker\//gu) ?? []).length, catalog.rows.length);
   assert.doesNotMatch(text, /aku\/\*\/\*/u);
@@ -348,7 +462,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const text = renderCatalogText(catalog);
 
   assert.doesNotMatch(text, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(text, /observed  2026-08-12T00:00:00.000Z/u);
+  assert.match(text, /^CONTRACTS \/\/ recent$/mu);
+  assert.doesNotMatch(text, /observed  /u);
   assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
   assert.match(text, /^  candidate  none\n  target  none$/mu);
   assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
@@ -1185,8 +1300,14 @@ test("long read and edit previews keep path tails with range and diffstat detail
     const lines = snapshotActivityLines(openAkumaSnapshot(rows), { columns, color: false });
     const readPath = columns === 100 ? longRead : "…/reader/ReadMeber.ts";
     const editPath = columns === 100 ? longEdit : "…/changes/ChangedFile.ts";
-    assert.ok(lines.some((line) => line.includes(`${readPath} · L20-22`)), lines.join("\\n"));
-    assert.ok(lines.some((line) => line.includes(`${editPath} — +5 -2`)), lines.join("\\n"));
+    assert.ok(
+      lines.some((line) => line.includes(`${readPath} · L20-22`)),
+      lines.join("\\n"),
+    );
+    assert.ok(
+      lines.some((line) => line.includes(`${editPath} — +5 -2`)),
+      lines.join("\\n"),
+    );
     for (const line of lines) assert.ok(displayColumns(line) <= columns, `${columns} columns: ${line}`);
   }
 
@@ -1239,14 +1360,27 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
 });
 
 test("generic tool rows preserve semantic and common summaries", () => {
-  const lines = genericLines([
-    [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })], [2, "mystery", preview({})],
-    [3, "silent"], [4, "notes_read", preview({ address: "project/notes.md", offset_chars: 12, limit_chars: 400 })], [5, "notes_read", preview({ path: "legacy.md" })],
-    [6, "history_read", preview({ item_id: "item-9", window_id: "win-2", offset_chars: 0, limit_chars: 50 })], [7, "history_list", preview({ role: "assistant", recent_first: false, limit: 20 })],
-    [8, "history_list", preview({ role: "user" })], [9, "get_context_remaining", preview({})], [10, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
-  ], 200);
+  const lines = genericLines(
+    [
+      [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })],
+      [2, "mystery", preview({})],
+      [3, "silent"],
+      [4, "notes_read", preview({ address: "project/notes.md", offset_chars: 12, limit_chars: 400 })],
+      [5, "notes_read", preview({ path: "legacy.md" })],
+      [6, "history_read", preview({ item_id: "item-9", window_id: "win-2", offset_chars: 0, limit_chars: 50 })],
+      [7, "history_list", preview({ role: "assistant", recent_first: false, limit: 20 })],
+      [8, "history_list", preview({ role: "user" })],
+      [9, "get_context_remaining", preview({})],
+      [10, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
+    ],
+    200,
+  );
   const text = lines.join("\n");
-  assert.match(text, /future_tool\s+\{"alpha":1,"beta":"x","gamma":\{"delta":\[true,null\]\}\}/u, "nested compact JSON keeps types and order");
+  assert.match(
+    text,
+    /future_tool\s+\{"alpha":1,"beta":"x","gamma":\{"delta":\[true,null\]\}\}/u,
+    "nested compact JSON keeps types and order",
+  );
   assert.match(text, /notes_read\s+project\/notes\.md · from 12 · 400 chars/u);
   assert.match(text, /notes_read\s+legacy\.md/u, "legacy path remains an admissible notes_read address");
   assert.match(text, /history_read\s+item-9 · win-2 · from 0 · 50 chars/u);
@@ -1264,10 +1398,38 @@ test("generic tool rows preserve semantic and common summaries", () => {
 
 test("generic tool rows preserve whole-field and indivisible-value omission", () => {
   const cases = [
-    { columns: 40, name: "future_tool", input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }), expected: /future_tool\s+\{"a":1\} \+5 fields$/u, absent: undefined, message: "leading whole fields survive with an explicit trailing-field count" },
-    { columns: 40, name: "future_tool", input: preview({ data: "x".repeat(400) }), expected: /future_tool\s+\{"data":"x+…$/u, absent: undefined, message: "a first value too large becomes one visibly truncated prefix" },
-    { columns: 30, name: "ft", input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }), expected: /…$/u, absent: /"f":6/u, message: "an unfittable field count still shows omission" },
-    { columns: 24, name: "ft", input: preview({ data: "x".repeat(400) }), expected: /…$/u, absent: undefined, message: "an indivisible value truncates visibly" },
+    {
+      columns: 40,
+      name: "future_tool",
+      input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
+      expected: /future_tool\s+\{"a":1\} \+5 fields$/u,
+      absent: undefined,
+      message: "leading whole fields survive with an explicit trailing-field count",
+    },
+    {
+      columns: 40,
+      name: "future_tool",
+      input: preview({ data: "x".repeat(400) }),
+      expected: /future_tool\s+\{"data":"x+…$/u,
+      absent: undefined,
+      message: "a first value too large becomes one visibly truncated prefix",
+    },
+    {
+      columns: 30,
+      name: "ft",
+      input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
+      expected: /…$/u,
+      absent: /"f":6/u,
+      message: "an unfittable field count still shows omission",
+    },
+    {
+      columns: 24,
+      name: "ft",
+      input: preview({ data: "x".repeat(400) }),
+      expected: /…$/u,
+      absent: undefined,
+      message: "an indivisible value truncates visibly",
+    },
   ] as const;
   for (const { columns, name, input, expected, absent, message } of cases) {
     const line = genericLines([[1, name, input]], columns)[0]!;
@@ -1277,18 +1439,49 @@ test("generic tool rows preserve whole-field and indivisible-value omission", ()
 });
 
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
-  const lines = snapshotActivityLines(openAkumaSnapshot([
-    snapshotRow(completedTool(1, "future_tool", { kind: "other", display: "future_tool", input: preview({ alpha: 1 }) }, { status: "error", message: "refused" })),
-    snapshotRow(completedTool(2, "future_tool", { kind: "other", display: "future_tool", input: preview({}) }, { status: "error", exitCode: 7 })),
-  ]), { columns: 200, color: false });
+  const lines = snapshotActivityLines(
+    openAkumaSnapshot([
+      snapshotRow(
+        completedTool(
+          1,
+          "future_tool",
+          { kind: "other", display: "future_tool", input: preview({ alpha: 1 }) },
+          { status: "error", message: "refused" },
+        ),
+      ),
+      snapshotRow(
+        completedTool(
+          2,
+          "future_tool",
+          { kind: "other", display: "future_tool", input: preview({}) },
+          { status: "error", exitCode: 7 },
+        ),
+      ),
+    ]),
+    { columns: 200, color: false },
+  );
   for (const [pattern, message] of [
     [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
     [/future_tool\s+— exit 7$/u, "an empty argument object never swallows failure evidence"],
-  ] as const) assert.ok(lines.some((line) => pattern.test(line)), `${message}: ${lines.join("\n")}`);
+  ] as const)
+    assert.ok(
+      lines.some((line) => pattern.test(line)),
+      `${message}: ${lines.join("\n")}`,
+    );
   assert.doesNotMatch(lines.join("\n"), / — ok/u);
-  const legacy = snapshotActivityLines(openAkumaSnapshot([
-    snapshotRow(completedTool(1, "mystery", { kind: "other", display: "Mystery Tool" }, { status: "error", message: "refused" })),
-  ]), { columns: 120, color: false }).join("\n");
+  const legacy = snapshotActivityLines(
+    openAkumaSnapshot([
+      snapshotRow(
+        completedTool(
+          1,
+          "mystery",
+          { kind: "other", display: "Mystery Tool" },
+          { status: "error", message: "refused" },
+        ),
+      ),
+    ]),
+    { columns: 120, color: false },
+  ).join("\n");
   assert.match(legacy, /mystery\s+— error · refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
@@ -1296,11 +1489,20 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
 test("generic tool rows preserve name, width, and grapheme behavior", () => {
   const exact = "e".repeat(71);
   const family = "👨‍👩‍👧‍👦";
-  const lines = genericLines([
-    [1, "n".repeat(120), preview({ a: 1 })], [2, "🙂".repeat(60), preview({ a: 1 })], [3, "n".repeat(120)], [4, exact, preview({ a: 1 })],
-    [5, family + family, preview({ a: 1 })], [6, family.repeat(60), preview({ a: 1 })], [7, "ok_tool", preview({ path: "a" })], [8, "a_very_long_tool_name_here", preview({ arguments: "y".repeat(200) })],
-    [9, "wide_tool", preview({ text: "🙂".repeat(30) })],
-  ], 80);
+  const lines = genericLines(
+    [
+      [1, "n".repeat(120), preview({ a: 1 })],
+      [2, "🙂".repeat(60), preview({ a: 1 })],
+      [3, "n".repeat(120)],
+      [4, exact, preview({ a: 1 })],
+      [5, family + family, preview({ a: 1 })],
+      [6, family.repeat(60), preview({ a: 1 })],
+      [7, "ok_tool", preview({ path: "a" })],
+      [8, "a_very_long_tool_name_here", preview({ arguments: "y".repeat(200) })],
+      [9, "wide_tool", preview({ text: "🙂".repeat(30) })],
+    ],
+    80,
+  );
   assert.equal(lines.length, 9, "one rendered line per generic tool row");
   for (const line of lines) assert.ok(displayColumns(line) <= 80, `one line within 80 columns: ${line}`);
   assert.ok(lines[0]!.includes("…"), "an over-wide name truncates visibly");
@@ -1326,7 +1528,8 @@ test("activity rows share one six-cell default action column in plain and plural
 
   const first = "aku/worker/abcd0050";
   const second = "aku/worker/abcd0051";
-  const baseline = (id: string) => parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+  const baseline = (id: string) =>
+    parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
   const noted = parseAkumaStatus({
     id: first,
     life: "running",
@@ -1352,7 +1555,8 @@ test("activity rows share one six-cell default action column in plain and plural
 
 test("a plural wait aligns generic tool rows under one source column", () => {
   const targets = [
-    { id: "aku/worker/abcd0050", alias: "@first", body: "alpha" }, { id: "aku/worker/abcd0051", alias: "@second", body: "beta" },
+    { id: "aku/worker/abcd0050", alias: "@first", body: "alpha" },
+    { id: "aku/worker/abcd0051", alias: "@second", body: "beta" },
   ] as const;
   const baseline = (id: string) =>
     parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
@@ -1361,9 +1565,7 @@ test("a plural wait aligns generic tool rows under one source column", () => {
       id,
       life: "running",
       allowed: [],
-      timeline: openAkumaSnapshot([
-        snapshotRow(genericTool(1, "future_tool", preview({ body }))),
-      ]),
+      timeline: openAkumaSnapshot([snapshotRow(genericTool(1, "future_tool", preview({ body })))]),
     });
   const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
   stream.select(targets.map(({ id, alias }) => ({ id, alias })));
@@ -2463,7 +2665,11 @@ test("terminal width counts grapheme clusters rather than code points", () => {
   assert.deepEqual(takeDisplayColumns("🇺🇸x", 1), { text: "", rest: "🇺🇸x" }, "a cluster never splits");
   assert.deepEqual(takeDisplayColumns("e\u0301x", 1), { text: "e\u0301", rest: "x" });
   assert.equal(displayColumns(truncateDisplayText(family.repeat(3), 5)), 5, "ZWJ truncation keeps its cell width");
-  assert.equal(truncateDisplayText(family.repeat(3), 5).includes("\uFFFD"), false, "ZWJ survives terminal-safe truncation");
+  assert.equal(
+    truncateDisplayText(family.repeat(3), 5).includes("\uFFFD"),
+    false,
+    "ZWJ survives terminal-safe truncation",
+  );
 });
 
 test("a streamed observing call opens one framed head and never replays a settled snapshot", () => {

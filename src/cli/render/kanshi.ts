@@ -350,8 +350,8 @@ export function renderKanshiText(
   selection: "world" | "contract" = "world",
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
-  return [renderContracts(report, context), renderAkuma(report, context), renderTasks(report, context)]
-    .filter((block) => block.length > 0)
-    .map((block) => block.join("\n"))
-    .join("\n\n");
+  const blocks = [renderContracts(report, context), renderAkuma(report, context), renderTasks(report, context)].filter(
+    (block) => block.length > 0,
+  );
+  return blocks.length === 0 ? "○ world empty" : blocks.map((block) => block.join("\n")).join("\n\n");
 }

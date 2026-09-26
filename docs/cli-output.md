@@ -55,12 +55,15 @@ keys render as words, as in `require branches up to date`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
-into a positive result. The text vocabulary is closed and eight marks wide:
+into a positive result. The text vocabulary is closed and nine marks wide:
 `●` moving or present, `○` calmly waiting or absent, `⧖` time in flight —
 running and in-flight activity, `⧗` time spent waiting — pending tells, on-hold
-Tasks, and tendered or otherwise waiting Contracts, `✓` an affirmed verdict,
+Tasks, and tendered or otherwise waiting Contracts, `‖` blocked — waiting on a
+dependency, `✓` an affirmed verdict,
 `×` a denied verdict, `!` attention, and `?` unknown; the word after a mark
-carries the detail. The hourglass marks are temporal and the verdict marks are
+carries the detail. `⧗` is a temporal wait and `‖` is a structural wait: the
+former names time spent waiting, while the latter names a dependency that
+prevents progress. The hourglass marks are temporal and the verdict marks are
 affirmative or negative, so the earlier fold that reduced time and verdict to
 presence and attention is reversed: waiting is not absence, and an unsatisfied
 gate is not generic attention. `│` is the neutral continuation and ordinary-row
@@ -76,7 +79,9 @@ plural head is a list of its targets instead and keeps the same association
 inline, as `· kei/<id>`. Git identities render at 7 characters in
 text and full length in JSON. Paths stay absolute and copyable where they are
 the answer, and stay out of board and catalogue rows where they are not.
-Absent facts are absent rows; zero counts and empty containers print nothing.
+Absent facts are absent rows. A fully empty World status view prints
+`○ world empty`; an empty catalogue prints its frame head alone. Neither shape
+prints an observed timestamp, a zero count, or an empty container.
 Multi-line payloads sit directly under their label, bounded, and name their
 own truncation. Recording review testimony and completing placement
 remain distinct facts; absence of completion does not establish a candidate. They may make a terminal-readable view denser, wrap

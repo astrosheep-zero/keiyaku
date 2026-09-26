@@ -10,7 +10,7 @@ import {
   targetFacts,
 } from "./contract-observation.js";
 import { safeText } from "./terminal.js";
-import { dispositionText, taskMark } from "./task.js";
+import { dispositionText, taskFrameHead, taskMark } from "./task.js";
 
 function akumaMark(life: string): string {
   if (life === "running") return "●";
@@ -34,11 +34,10 @@ function relativeAge(source: string | null, observedAt: string): string | null {
 
 function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
   const rows = catalog.rows;
-  const lines = [
-    `akuma  ${rows.length} recent`,
-    ...(catalog.archetype === null ? [] : [`  scope  ${safeText(catalog.archetype)}`]),
-    "",
-  ];
+  if (rows.length === 0) {
+    return catalog.archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(catalog.archetype)}`;
+  }
+  const lines = [catalog.archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(catalog.archetype)}`, ""];
   for (const row of rows) {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
@@ -83,7 +82,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ...catalog.rows.flatMap(gitIdsInRow),
   ]);
   const rows = catalog.rows;
-  const header = `observed  ${catalog.observedAt}`;
+  const header = "CONTRACTS // recent";
   const blocks = rows.map((row) => {
     const lines = [
       `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
@@ -100,24 +99,35 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
 }
 export function renderCatalogText(catalog: Catalog): string {
   if (catalog.kind === "tasks") {
+    const namespace = catalog.namespace ?? [];
+    const scope = namespace.length === 0 ? "root" : `namespace ${namespace.join("/")}`;
+    const head = taskFrameHead("tasks", scope);
     return [
-      ...catalog.rows.map(
-        (row) =>
-          `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
-      ),
+      head,
+      ...(catalog.rows.length === 0
+        ? []
+        : catalog.rows.map(
+            (row) =>
+              `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
+          )),
       ...(catalog.hasMore ? ["…"] : []),
     ].join("\n");
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
+    const head = "ARCHETYPES // available";
     return [
-      `available Akuma`,
-      "",
-      ...catalog.rows.flatMap((row) => [
-        `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
-        ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
-      ]),
-      ...(catalog.hasMore ? ["…"] : []),
+      head,
+      ...(catalog.rows.length === 0
+        ? []
+        : [
+            "",
+            ...catalog.rows.flatMap((row) => [
+              `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
+              ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
+            ]),
+            ...(catalog.hasMore ? ["…"] : []),
+          ]),
     ].join("\n");
   }
   return renderAkumaCatalog(catalog);

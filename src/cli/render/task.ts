@@ -138,8 +138,8 @@ function edge(label: string, ref: TaskRef, mark?: string): string {
   return `${prefix} ${ref.id} · ${dispositionText(ref.state)}`;
 }
 
-function pageHeading(view: string): string {
-  return view;
+export function taskFrameHead(view: string, scope: string): string {
+  return `${view.toUpperCase()} // ${scope}`;
 }
 
 function updatedAge(updatedAt: string): string {
@@ -154,7 +154,6 @@ function updatedAge(updatedAt: string): string {
 function compactFacts(item: TaskRow): string {
   return [
     `updated ${updatedAge(item.updatedAt)}`,
-    ...(item.bodyPresent ? [] : ["no body"]),
     ...(item.children === undefined ? [] : [`children ${item.children.live} live · ${item.children.total} total`]),
   ].join(" · ");
 }
@@ -190,14 +189,12 @@ function renderRows(
   const view = command.action === "ls" ? "tasks" : command.action;
   const footer = result.value.hasMore ? ["…"] : [];
   const scope =
-    command.action === "ls"
-      ? command.flags.world === true
-        ? "world"
-        : command.positionals.length > 0
-          ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
-          : "current namespace"
-      : undefined;
-  const heading = scope === undefined ? pageHeading(view) : `${pageHeading(view)} · ${scope}`;
+    command.flags.world === true
+      ? "world"
+      : command.action === "ls" && command.positionals.length > 0
+        ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
+        : "current namespace";
+  const heading = taskFrameHead(view, scope);
   return [
     heading,
     ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),

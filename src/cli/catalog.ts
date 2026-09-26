@@ -11,7 +11,13 @@ export type CatalogQuery =
   | Readonly<{ kind: "akuma"; archetype?: string; limit?: number }>;
 
 export type Catalog =
-  | Readonly<{ kind: "tasks"; root: WorldRoot; rows: readonly TaskRow[]; hasMore: boolean }>
+  | Readonly<{
+      kind: "tasks";
+      root: WorldRoot;
+      namespace?: readonly string[];
+      rows: readonly TaskRow[];
+      hasMore: boolean;
+    }>
   | Readonly<{
       kind: "contracts";
       root: string;
