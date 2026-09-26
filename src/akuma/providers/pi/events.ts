@@ -177,7 +177,6 @@ function translateMessage(
 ): readonly AgentEvent[] {
   const message = record(event.message);
   if (message?.role !== "assistant") return [];
-  state.assistantSeen = true;
   const translated: AgentEvent[] = [];
   if (Array.isArray(message.content)) {
     for (const block of message.content) {
@@ -193,7 +192,11 @@ function translateMessage(
     }
   }
   const text = textContent(message.content);
-  state.answer = text;
+  const terminal = message.stopReason !== "toolUse";
+  if (terminal) {
+    state.assistantSeen = true;
+    state.answer = text;
+  }
   // Gemini emits an empty text block alongside every tool-use message. It is
   // transport scaffolding, not narration; an ordinary terminal empty answer
   // remains public evidence.

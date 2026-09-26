@@ -1624,6 +1624,38 @@ test("Pi omits Gemini's empty tool-use text placeholder from narration", async (
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
 });
 
+test("Pi does not treat a tool-use message as the final answer", async () => {
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "inspect" },
+            { type: "toolCall", id: "call-1", name: "read", arguments: { path: "SOUL.md" } },
+            { type: "text", text: "" },
+          ],
+          stopReason: "toolUse",
+        },
+      },
+    ],
+  });
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
+  const events = [];
+  for await (const event of drive.events) events.push(event);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "thought", text: "inspect" },
+  ]);
+  assert.deepEqual(await drive.completion, {
+    kind: "failed",
+    diagnostic: "Pi completed without a native assistant answer",
+  });
+});
+
 test("Pi adapter resumes and forks only exact sessionFile coordinates", async () => {
   const fake = fakePiSdk({
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "resumed" }] } }],
