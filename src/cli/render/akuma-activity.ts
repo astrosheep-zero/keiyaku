@@ -6,10 +6,10 @@ import type {
   CreatedTaskObservation,
   DispatchAssociation,
 } from "../../index.js";
-import type { AkumaTellWaitObservation } from "../../akuma/fleet-observation.js";
+import type { AkumaTellWaitObservation } from "../../akuma/selection-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
-import type { WaitObservedAkuma } from "../../akuma/fleet-execution.js";
+import type { WaitObservedAkuma } from "../../akuma/selection-execution.js";
 import type { ParsedCommand } from "../parse.js";
 import { toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import {
@@ -41,14 +41,14 @@ export function frameRule(headLines: readonly string[]): string {
 const OPENING_TOOL_BUDGET = 3;
 const RECENT_TOOL_BUDGET = 2;
 
-type FleetTimeline = AkumaObservation["status"]["timeline"];
-type FleetTimelineEntry = FleetTimeline["entries"][number];
-type FleetReportedFileChange = FleetTimeline["reportedChanges"][number];
-type RenderRow = ActivityRow | Extract<FleetTimelineEntry, { kind: "row" }>["row"];
+type StatusTimeline = AkumaObservation["status"]["timeline"];
+type StatusTimelineEntry = StatusTimeline["entries"][number];
+type StatusReportedFileChange = StatusTimeline["reportedChanges"][number];
+type RenderRow = ActivityRow | Extract<StatusTimelineEntry, { kind: "row" }>["row"];
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
-type RenderedSnapshot = FleetTimeline;
+type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
-type RenderedFileChange = ReportedFileChange | FleetReportedFileChange;
+type RenderedFileChange = ReportedFileChange | StatusReportedFileChange;
 type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
 function identity(id: string, alias?: string): string {
@@ -1030,7 +1030,7 @@ function waitConclusionRow(
 
 export function inputWaitConclusion(
   observation: AkumaTellWaitObservation,
-  input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number }>,
+  input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number; status?: AkumaStatus }>,
 ): readonly string[] {
   const end = input.now ?? Date.now();
   const complete = observation.reason !== "deadline";
@@ -1043,7 +1043,9 @@ export function inputWaitConclusion(
         ? { mark: "!", verb: "failed" }
         : observation.reason === "unanswered"
           ? { mark: "○", verb: "unanswered" }
-          : { mark: "⧖", verb: "deadline" };
+          : input.status === undefined
+            ? { mark: "⧗", verb: "pending tell" }
+            : conclusionMarkVerb(input.status, false);
   return [
     waitConclusionRow({
       ...(at === undefined ? {} : { at }),
@@ -1203,6 +1205,8 @@ export function inputWaitStream(
   let admittedSequence: number | undefined;
   let opened = false;
   let cursorSeeded = false;
+  /** The last observed life, so a caller deadline concludes on the target's status rather than naming the deadline. */
+  let lastStatus: AkumaStatus | undefined;
   const admit: InputWaitStream["admitted"] = (input) => {
     if (admitted) throw new Error("input wait admitted more than once");
     const pinned = input.at === undefined ? Number.NaN : Date.parse(input.at);
@@ -1224,6 +1228,7 @@ export function inputWaitStream(
   };
   const observe: InputWaitStream["observe"] = (observation) => {
     const lines: string[] = [];
+    lastStatus = observation.status;
     open(lines);
     const activityInput = { snapshot: observation.status.timeline, rows: observation.rows };
     if (!cursorSeeded && options.cursor === "admission") lines.push(...activity.seed(activityInput, admittedSequence));
@@ -1242,6 +1247,7 @@ export function inputWaitStream(
           startedAt,
           ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
           now: now(),
+          ...(lastStatus === undefined ? {} : { status: lastStatus }),
         }),
       );
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;

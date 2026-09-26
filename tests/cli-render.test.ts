@@ -23,7 +23,7 @@ import {
   type CompletedToolRow,
   type OutcomeRow,
 } from "../src/akuma/akuma.js";
-import type { WaitObservedAkuma } from "../src/akuma/fleet-execution.js";
+import type { WaitObservedAkuma } from "../src/akuma/selection-execution.js";
 import type { DispatchAssociation } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
@@ -2507,8 +2507,20 @@ test("a streamed observing call concludes truthfully when its stream never opene
   now = 40_000;
   const opened = runningStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(opened.at(-3), `${clockAt(40_000)} ⧖ deadline — waited 30s`);
+  assert.equal(opened.at(-3), `${clockAt(40_000)} ⧗ pending tell — waited 30s`);
   assert.ok(runningStream.opened());
+
+  const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
+  observedStream.observe(
+    live(parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) })),
+  );
+  now = 55_000;
+  const observed = observedStream.conclude(callObservation({ reason: "deadline" })).split("\n");
+  assert.equal(
+    observed.at(-3),
+    `${clockAt(55_000)} ● still running — waited 15s`,
+    "a caller deadline states the observed life rather than naming the deadline",
+  );
 
   const failedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
   const failed = failedStream
