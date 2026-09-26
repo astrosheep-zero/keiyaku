@@ -3,6 +3,9 @@ import type { WorldRoot } from "../world.js";
 import {
   planTaskComposition,
   type PlannedTask,
+  type TaskCompositionAdmission,
+  type TaskCompositionPlanAlias,
+  type TaskCompositionPlanOrder,
   type TaskCompositionAlias,
   type TaskCompositionBodyPreview,
   type TaskCompositionPlan,
@@ -12,7 +15,13 @@ import { parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskCleanupFailure, TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
 import { readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
-export type { TaskCompositionAlias, TaskCompositionBodyPreview } from "./compose-language.js";
+export type {
+  TaskCompositionAdmission,
+  TaskCompositionBodyPreview,
+  TaskCompositionPlanAlias,
+  TaskCompositionPlanOrder,
+} from "./compose-language.js";
+export type { TaskCompositionAlias } from "./compose-language.js";
 export { taskCompositionNamespaceHeader } from "./compose-language.js";
 
 export type TaskDocumentChange = Readonly<{
@@ -27,8 +36,9 @@ export type TaskCompositionFacts = Readonly<{
 export type TaskCompositionResult =
   | Readonly<{
       kind: "planned";
-      aliases: readonly TaskCompositionAlias[];
-      admissionOrder: readonly TaskId[];
+      aliases: readonly TaskCompositionPlanAlias[];
+      admissionOrder: readonly TaskCompositionPlanOrder[];
+      admissions: readonly TaskCompositionAdmission[];
       bodies: readonly TaskCompositionBodyPreview[];
     }>
   | Readonly<
@@ -108,7 +118,27 @@ function recoveryDraft(namespace: readonly string[], remaining: readonly Planned
 }
 
 function plannedResult(plan: TaskCompositionPlan): Extract<TaskCompositionResult, { kind: "planned" }> {
-  return { kind: "planned", ...facts(plan), bodies: plan.bodies };
+  const positions = new Map(plan.tasks.map((task) => [task.after.id, task.index + 1]));
+  return {
+    kind: "planned",
+    aliases: plan.aliases.map(({ alias, taskId }) => ({ alias, position: positions.get(taskId)! })),
+    admissionOrder: plan.tasks.map((task) => ({
+      position: task.index + 1,
+      ...(task.kind === "existing" ? { taskId: task.after.id } : {}),
+      ...(task.alias === undefined ? {} : { alias: task.alias }),
+    })),
+    admissions: plan.admissions.map((admission) =>
+      admission.kind === "new"
+        ? {
+            position: admission.position,
+            kind: "new" as const,
+            ...(admission.alias === undefined ? {} : { alias: admission.alias }),
+            title: admission.title,
+          }
+        : { position: admission.position, kind: "existing" as const, taskId: admission.taskId, title: admission.title },
+    ),
+    bodies: plan.bodies,
+  };
 }
 
 function physicalPlanDiagnostics(plan: TaskCompositionPlan): readonly TaskCompositionDiagnostic[] {

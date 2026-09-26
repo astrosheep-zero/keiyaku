@@ -108,8 +108,12 @@ function contractHistoryEventLines(event: ContractHistoryEvent): readonly string
 export function renderContractHistory(history: ContractHistory): string {
   const journals = journalCount(history.events, "journal");
   const dispatches = journalCount(history.events, "dispatch");
+  const counts = [
+    ...(journals === 0 ? [] : [`${journals} journal entries`]),
+    ...(dispatches === 0 ? [] : [`${dispatches} dispatches`]),
+  ];
   return [
-    `history  ${history.id} · ${journals} journal · ${dispatches} dispatch`,
+    `history  ${history.id}${counts.length === 0 ? "" : ` · ${counts.join(" · ")}`}`,
     "",
     ...history.events.flatMap(contractHistoryEventLines),
   ].join("\n");

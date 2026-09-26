@@ -300,8 +300,18 @@ function missingWorld(command: ParsedTaskCommand): TaskInvocationResult {
   if (command.action === "context") return { kind: "accepted", value: { namespace: [], source: "default-root" } };
   if (command.action === "start" && command.positionals.length === 1) return missing(command.positionals[0]!);
   if (
+    (command.action === "start" ||
+      command.action === "stop" ||
+      command.action === "hold" ||
+      command.action === "resume") &&
+    command.positionals.length === 1
+  )
+    return missing(command.positionals[0]!);
+  if (
     command.action === "start" ||
+    command.action === "stop" ||
     command.action === "hold" ||
+    command.action === "resume" ||
     command.action === "done" ||
     command.action === "drop"
   ) {
@@ -330,9 +340,9 @@ async function invokeLocalMutation(
     case "start":
       return invokeStart(tasks, command.positionals, id);
     case "stop":
-      return tasks.task({ id }).stop();
+      return invokeLifecycle(tasks, command.positionals, id, "stop");
     case "resume":
-      return tasks.task({ id }).resume();
+      return invokeLifecycle(tasks, command.positionals, id, "resume");
     case "hold":
       return tasks.batch({ verb: "hold", ids: command.positionals });
     case "done": {
@@ -365,8 +375,17 @@ async function invokeLocalMutation(
   }
 }
 
+function invokeLifecycle(
+  tasks: TaskProduct,
+  ids: readonly string[],
+  firstId: string,
+  verb: "start" | "stop" | "hold" | "resume",
+): Promise<TaskInvocationResult> {
+  return ids.length === 1 ? tasks.task({ id: firstId })[verb]() : tasks.batch({ verb, ids });
+}
+
 function invokeStart(tasks: TaskProduct, ids: readonly string[], firstId: string): Promise<TaskInvocationResult> {
-  return ids.length === 1 ? tasks.task({ id: firstId }).start() : tasks.batch({ verb: "start", ids });
+  return invokeLifecycle(tasks, ids, firstId, "start");
 }
 
 function establishesWorld(command: ParsedTaskCommand): boolean {

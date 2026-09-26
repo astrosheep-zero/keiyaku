@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv, renderHelp, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderTaskHelp } from "../src/cli/commands/task.js";
@@ -40,6 +40,9 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
+  assert.match(renderContractHelp("show"), /requirements and work guidance/u);
+  assert.doesNotMatch(renderContractHelp("show"), /current state/u);
+  assert.match(renderAkumaHelp("wait"), /default mode is any/u);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {

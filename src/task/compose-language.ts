@@ -16,12 +16,32 @@ export function taskCompositionNamespaceHeader(markdown: string): Readonly<{
 }
 
 export type TaskCompositionAlias = Readonly<{ alias: string; taskId: TaskId }>;
+export type TaskCompositionPlanAlias = Readonly<{ alias: string; position: number }>;
+export type TaskCompositionPlanOrder = Readonly<{
+  position: number;
+  alias?: string | undefined;
+  taskId?: TaskId | undefined;
+}>;
 export type TaskCompositionBodyPreview = Readonly<{
-  taskId: TaskId;
+  position: number;
+  title: string;
   bytes: number;
   firstLine: string;
   lastLine: string;
 }>;
+export type TaskCompositionAdmission =
+  | Readonly<{
+      position: number;
+      kind: "new";
+      alias?: string | undefined;
+      title: string;
+    }>
+  | Readonly<{
+      position: number;
+      kind: "existing";
+      taskId: TaskId;
+      title: string;
+    }>;
 export type PlannedTask = Readonly<{
   index: number;
   line: number;
@@ -35,6 +55,13 @@ export type TaskCompositionPlan = Readonly<{
   aliases: readonly TaskCompositionAlias[];
   admissionOrder: readonly TaskId[];
   bodies: readonly TaskCompositionBodyPreview[];
+  admissions: readonly Readonly<{
+    position: number;
+    kind: "new" | "existing";
+    taskId: TaskId;
+    alias?: string | undefined;
+    title: string;
+  }>[];
   tasks: readonly PlannedTask[];
 }>;
 export type TaskCompositionPlanning =
@@ -362,15 +389,53 @@ function stableAdmissionOrder(
   return ordered;
 }
 
-function bodyPreview(node: ParsedNode, id: TaskId): TaskCompositionBodyPreview | null {
+function bodyPreview(node: ParsedNode, title: string): TaskCompositionBodyPreview | null {
   if (node.body?.kind !== "replace") return null;
   const lines = node.body.value.split(/\r\n|\n|\r/u);
   return {
-    taskId: id,
+    position: node.index + 1,
+    title,
     bytes: Buffer.byteLength(node.body.value),
     firstLine: lines[0] ?? "",
     lastLine: lines.at(-1) ?? "",
   };
+}
+
+function planPresentation(
+  ordered: readonly PlannedTask[],
+  tasks: readonly PlannedTask[],
+  parsed: ParsedComposition,
+  aliases: ReadonlyMap<string, TaskId>,
+): Readonly<{
+  aliases: readonly TaskCompositionAlias[];
+  admissions: readonly Readonly<{
+    position: number;
+    kind: "new" | "existing";
+    taskId: TaskId;
+    alias?: string;
+    title: string;
+  }>[];
+  bodies: readonly TaskCompositionBodyPreview[];
+}> {
+  const aliasBindings = [...aliases].map(([alias, taskId]) => ({ alias, taskId }));
+  const admissions = ordered.map((task) =>
+    task.kind === "new"
+      ? {
+          position: task.index + 1,
+          kind: "new" as const,
+          ...(task.alias === undefined ? {} : { alias: task.alias }),
+          title: task.after.title,
+          taskId: task.after.id,
+        }
+      : { position: task.index + 1, kind: "existing" as const, taskId: task.after.id, title: task.after.title },
+  );
+  const bodies = parsed.nodes.flatMap((node) => {
+    const task = tasks.find((candidate) => candidate.index === node.index);
+    if (task === undefined) return [];
+    const preview = bodyPreview(node, task.after.title);
+    return preview === null ? [] : [preview];
+  });
+  return { aliases: aliasBindings, admissions, bodies };
 }
 
 export function planTaskComposition(
@@ -426,20 +491,15 @@ export function planTaskComposition(
   diagnoseIntroducedCycles({ tasks: post }, tasks, diagnostics);
   const ordered = stableAdmissionOrder(tasks, diagnostics);
   if (diagnostics.length > 0) return { kind: "refused", diagnostics };
-  const aliasBindings = [...aliases].map(([alias, taskId]) => ({ alias, taskId }));
-  const bodies = parsed.nodes.flatMap((node) => {
-    const task = tasks.find((candidate) => candidate.index === node.index);
-    if (task === undefined) return [];
-    const preview = bodyPreview(node, task.after.id);
-    return preview === null ? [] : [preview];
-  });
+  const presentation = planPresentation(ordered, tasks, parsed, aliases);
   return {
     kind: "planned",
     plan: {
       namespace,
-      aliases: aliasBindings,
+      aliases: presentation.aliases,
       admissionOrder: ordered.map((task) => task.after.id),
-      bodies,
+      admissions: presentation.admissions,
+      bodies: presentation.bodies,
       tasks: ordered,
     },
   };

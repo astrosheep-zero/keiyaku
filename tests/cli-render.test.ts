@@ -1,7 +1,7 @@
 import { receipt } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeId, contractHead, contractId, gate, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import type { CallObservation } from "../src/library/akuma-creation.js";
@@ -48,6 +48,8 @@ import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
 import { renderTaskText } from "../src/cli/render/task.js";
+import { reuseLines } from "../src/cli/render/receipt.js";
+import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { parseTaskCommand } from "../src/cli/commands/task.js";
 
 const worldRoot = "/world" as WorldRoot;
@@ -127,6 +129,31 @@ function callObservation(
     completedAt,
   };
 }
+
+test("receipt and history rendering keeps journal ids and zero counts out of text", () => {
+  assert.deepEqual(reuseLines({ entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBG"), verdict: "satisfied" }, 120), [
+    "  reuse  verified · satisfied",
+  ]);
+  assert.equal(
+    renderContractHistory({ id: "kei/empty-history" as never, state: "snapshot" as never, events: [] }),
+    "history  kei/empty-history\n",
+  );
+});
+
+test("compose plan renders positions and titles instead of provisional Task ids", () => {
+  const command = parseArgv(["task", "compose", "--plan", "-"]);
+  assert.ok("command" in command);
+  if (!command.command || command.command.command !== "task") throw new Error("expected task command");
+  const text = renderTaskText(command.command, {
+    kind: "planned",
+    aliases: [{ alias: "alpha", position: 1 }],
+    admissionOrder: [{ position: 1, alias: "alpha" }],
+    admissions: [{ position: 1, kind: "new", alias: "alpha", title: "Alpha" }],
+    bodies: [],
+  });
+  assert.equal(text, "compose plan · 1 documents\nalias ^alpha 1\nadmit 1  + Alpha  as ^alpha");
+  assert.doesNotMatch(text, /task\//u);
+});
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(

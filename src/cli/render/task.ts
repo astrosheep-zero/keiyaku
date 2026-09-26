@@ -305,14 +305,21 @@ function aliasLines(aliases: readonly Readonly<{ alias: string; taskId: string }
   return aliases.map((binding) => `alias ^${binding.alias} ${binding.taskId}`);
 }
 
+function planAliasLines(aliases: Extract<TaskCompositionResult, { kind: "planned" }>["aliases"]): readonly string[] {
+  return aliases.map((binding) => `alias ^${binding.alias} ${binding.position}`);
+}
+
 function renderPlan(result: Extract<TaskCompositionResult, { kind: "planned" }>): string {
   const lines = [
     `compose plan · ${result.admissionOrder.length} documents`,
-    ...aliasLines(result.aliases),
-    ...result.admissionOrder.map((id, index) => `admit ${index + 1} ${id}`),
+    ...planAliasLines(result.aliases),
+    ...result.admissions.map(
+      (admission) =>
+        `admit ${admission.position}  ${admission.kind === "new" ? "+" : `@${admission.taskId}`} ${safeText(admission.title)}${admission.kind === "new" && admission.alias !== undefined ? `  as ^${admission.alias}` : ""}`,
+    ),
   ];
   for (const body of result.bodies) {
-    lines.push(`body ${body.taskId} · ${body.bytes} bytes`);
+    lines.push(`body ${body.position}  + ${safeText(body.title)} · ${body.bytes} bytes`);
     lines.push(`  first ${safeText(body.firstLine)}`);
     lines.push(`  last ${safeText(body.lastLine)}`);
   }
@@ -345,6 +352,10 @@ export function renderTaskText(
   return renderTaskValue(command, result, context.columns);
 }
 
+function isBatchAction(action: ParsedTaskCommand["action"]): boolean {
+  return ["start", "stop", "hold", "resume", "done", "drop"].includes(action);
+}
+
 function renderTaskValue(
   command: ParsedTaskCommand,
   result: Exclude<TaskInvocationResult, TaskWorldObservation>,
@@ -373,12 +384,7 @@ function renderTaskValue(
     return `context ${value} · ${context.value.source}`;
   }
   if (command.action === "compose") return renderCompose(result as TaskCompositionResult, columns);
-  if (
-    command.action === "start" ||
-    command.action === "hold" ||
-    command.action === "done" ||
-    command.action === "drop"
-  ) {
+  if (isBatchAction(command.action)) {
     if (!(typeof result === "object" && result !== null && "items" in result))
       return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);
     return renderBatch(command.action, result as TaskBatchResult);

@@ -145,7 +145,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { json: "boolean" },
     usage: "show [<contract>|@<contract>]",
-    purpose: "Show one Contract's requirements, current state, and work guidance.",
+    purpose: "Show one Contract's requirements and work guidance.",
   },
   ls: {
     positional: "optional",

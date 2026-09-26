@@ -131,6 +131,38 @@ export const taskBatchResultSchema = z
   .object({ items: z.array(z.object({ id: taskMutationIdSchema, outcome: taskMutationResultSchema }).strict()) })
   .strict() satisfies z.ZodType<TaskBatchResult>;
 const aliasesSchema = z.array(z.object({ alias: nonblankTextSchema, taskId: taskMutationIdSchema }).strict());
+const planAliasesSchema = z.array(
+  z.object({ alias: nonblankTextSchema, position: z.number().int().positive() }).strict(),
+);
+const planOrderSchema = z.array(
+  z
+    .object({
+      position: z.number().int().positive(),
+      alias: nonblankTextSchema.optional(),
+      taskId: taskMutationIdSchema.optional(),
+    })
+    .strict(),
+);
+const admissionsSchema = z.array(
+  z.discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("new"),
+        position: z.number().int().positive(),
+        alias: nonblankTextSchema.optional(),
+        title: z.string(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("existing"),
+        position: z.number().int().positive(),
+        taskId: taskMutationIdSchema,
+        title: z.string(),
+      })
+      .strict(),
+  ]),
+);
 const documentChangesSchema = z.array(
   z.object({ taskId: taskMutationIdSchema, kind: z.enum(["created", "updated"]), documentDiff: z.string() }).strict(),
 );
@@ -139,11 +171,14 @@ export const taskCompositionResultSchema = z.union([
   z
     .object({
       kind: z.literal("planned"),
-      ...compositionFactsSchema,
+      aliases: planAliasesSchema,
+      admissionOrder: planOrderSchema,
+      admissions: admissionsSchema,
       bodies: z.array(
         z
           .object({
-            taskId: taskMutationIdSchema,
+            position: z.number().int().positive(),
+            title: z.string(),
             bytes: z.number().int().nonnegative(),
             firstLine: z.string(),
             lastLine: z.string(),

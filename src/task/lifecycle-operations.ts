@@ -122,7 +122,7 @@ export async function lifecycleTask(
 
 export async function batchTasks(
   world: WorldRoot,
-  verb: "start" | "done" | "drop" | "hold",
+  verb: TaskLifecycleVerb,
   ids: readonly TaskId[],
   signal?: AbortSignal,
   note?: string,

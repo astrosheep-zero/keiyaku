@@ -287,6 +287,23 @@ test("call accepts a bare alias name and keeps prefixed input compatible", () =>
   assert.throws(() => parseArgv(["call", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
+test("stop and resume accept one or more Task ids", () => {
+  assert.deepEqual(command(["task", "stop", "task/one", "task/two"]), {
+    command: "task",
+    action: "stop",
+    output: "text",
+    positionals: ["task/one", "task/two"],
+    flags: {},
+  });
+  assert.deepEqual(command(["task", "resume", "task/one", "task/two"]), {
+    command: "task",
+    action: "resume",
+    output: "text",
+    positionals: ["task/one", "task/two"],
+    flags: {},
+  });
+});
+
 test("wait accepts a plural selection without an explicit completion mode", () => {
   assert.deepEqual(command(["wait", "aku/claude/1234abcd", "aku/claude/5678ef90"]), {
     command: "wait",

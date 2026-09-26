@@ -139,15 +139,6 @@ function obligationLines(result: AcceptedAuditResult, columns: number): readonly
   ];
 }
 
-function recordLines(result: AcceptedAuditResult, columns: number): readonly string[] {
-  if (result.facts.length === 0) return [];
-  const rows: string[] = [];
-  for (const fact of result.facts) {
-    receiptRow(rows, " ", "journal", [{ text: fact.entry, opaque: true }, { text: `· ${fact.kind}` }], columns);
-  }
-  return rows;
-}
-
 export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
   const report = result.report;
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
@@ -158,6 +149,5 @@ export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextR
     ...verificationLines(report.verification, columns, result.contract),
     ...targetLines(report.target, columns, result.contract),
     ...obligationLines(result, columns),
-    ...recordLines(result, columns),
   ].join("\n");
 }

@@ -80,9 +80,14 @@ test("compose previews without writing and rejects complete planning errors befo
     markdown: "+ Child\nas = child\nneeds = ^parent\n+ Parent\nas = parent\nbody <<BODY\nbody bytes\nBODY\n",
   });
   assert.ok(preview.kind === "planned");
-  const parent = preview.aliases.find(({ alias }) => alias === "parent")!.taskId;
-  const child = preview.aliases.find(({ alias }) => alias === "child")!.taskId;
-  assert.deepEqual(preview.admissionOrder, [parent, child]);
+  assert.deepEqual(preview.aliases, [
+    { alias: "child", position: 1 },
+    { alias: "parent", position: 2 },
+  ]);
+  assert.deepEqual(preview.admissionOrder, [
+    { position: 2, alias: "parent" },
+    { position: 1, alias: "child" },
+  ]);
   assert.equal(preview.bodies[0]?.bytes, 10);
   assert.deepEqual(await rows(product), []);
 

@@ -75,7 +75,7 @@ export function appendHookPayload(lines: string[], failure: HookFailure): void {
 
 export function reuseLines(reuse: VerificationReuse | undefined, columns: number): readonly string[] {
   if (reuse === undefined) return [];
-  return renderOpaqueBlock(`reuse  verified · ${reuse.verdict} · ${reuse.entry}`, "  ", columns);
+  return renderOpaqueBlock(`reuse  verified · ${reuse.verdict}`, "  ", columns);
 }
 
 function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
@@ -291,14 +291,6 @@ export function executionFailureLines(
     columns,
   );
   receiptPayload(lines, "diagnostic", diagnostic);
-  for (const fact of receipt.facts)
-    receiptRow(
-      lines,
-      " ",
-      "journal",
-      [{ text: fact.contract, opaque: true }, { text: fact.entry, opaque: true }, { text: fact.kind }],
-      columns,
-    );
   lines.push(
     ...executionStopLines(receipt.executionStops, columns),
     ...executionCleanupLines(receipt.cleanup, columns, receipt.contractId),

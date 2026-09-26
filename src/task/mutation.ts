@@ -111,7 +111,9 @@ const updateRequestSchema = z
   .object({ id: taskMutationIdSchema, input: updateInputSchema })
   .strict()
   .transform((request) => ({ action: "task.update" as const, ...request }));
-const singleOrBatchRequestSchema = <Action extends "task.start" | "task.hold">(action: Action) =>
+const singleOrBatchRequestSchema = <Action extends "task.start" | "task.stop" | "task.hold" | "task.resume">(
+  action: Action,
+) =>
   z.union([
     z
       .object({ id: taskMutationIdSchema })
@@ -122,11 +124,6 @@ const singleOrBatchRequestSchema = <Action extends "task.start" | "task.hold">(a
       .strict()
       .transform(({ ids }) => ({ action, ids })),
   ]);
-const singleRequestSchema = <Action extends "task.stop" | "task.resume">(action: Action) =>
-  z
-    .object({ id: taskMutationIdSchema })
-    .strict()
-    .transform((request) => ({ action, ...request }));
 const terminalRequestSchema = <Action extends "task.done" | "task.drop">(action: Action) =>
   z.union([
     z
@@ -145,9 +142,9 @@ const taskRequestSchemas = {
   "task.done": terminalRequestSchema("task.done"),
   "task.drop": terminalRequestSchema("task.drop"),
   "task.hold": singleOrBatchRequestSchema("task.hold"),
-  "task.resume": singleRequestSchema("task.resume"),
+  "task.resume": singleOrBatchRequestSchema("task.resume"),
   "task.start": singleOrBatchRequestSchema("task.start"),
-  "task.stop": singleRequestSchema("task.stop"),
+  "task.stop": singleOrBatchRequestSchema("task.stop"),
   "task.update": updateRequestSchema,
 } as const;
 
@@ -419,9 +416,13 @@ export async function executeTaskMutation(
       if ("ids" in request) return await batchTasks(world, "start", request.ids, signal);
       return await lifecycleTask(world, request.id, "start", signal);
     case "task.stop":
-      return await lifecycleTask(world, request.id, "stop", signal);
+      return "ids" in request
+        ? await batchTasks(world, "stop", request.ids, signal)
+        : await lifecycleTask(world, request.id, "stop", signal);
     case "task.resume":
-      return await lifecycleTask(world, request.id, "resume", signal);
+      return "ids" in request
+        ? await batchTasks(world, "resume", request.ids, signal)
+        : await lifecycleTask(world, request.id, "resume", signal);
     case "task.hold":
       if ("ids" in request) return await batchTasks(world, "hold", request.ids, signal);
       return await lifecycleTask(world, request.id, "hold", signal);

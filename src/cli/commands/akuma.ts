@@ -87,7 +87,7 @@ const AKUMA_COMMAND_SPECS = {
     usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
     purpose: "Wait for one or more Akumas to finish work.",
     details: [
-      "Without --any or --all the mode is any: the wait returns when any selected Akuma completes.",
+      "The default mode is any; --all waits until every selected Akuma completes.",
       "--all waits until every selected Akuma completes.",
       "An already completed member counts immediately, so repeating a selection can return at once.",
       "Akuma names, completed activity, and the final result stream on stderr.",

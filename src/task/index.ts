@@ -22,7 +22,10 @@ import {
 import {
   composeTasks,
   type TaskCompositionAlias,
+  type TaskCompositionAdmission,
   type TaskCompositionBodyPreview,
+  type TaskCompositionPlanAlias,
+  type TaskCompositionPlanOrder,
   type TaskCompositionResult,
 } from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
@@ -98,7 +101,10 @@ export type {
   TaskCleanupFailure,
   TaskCompositionDiagnostic,
   TaskCompositionAlias,
+  TaskCompositionAdmission,
   TaskCompositionBodyPreview,
+  TaskCompositionPlanAlias,
+  TaskCompositionPlanOrder,
   TaskCompositionResult,
   TaskDoctorIssue,
   TaskId,
@@ -383,7 +389,7 @@ class TasksHandle {
   }
   batch(
     input: Readonly<{
-      verb: "start" | "done" | "drop" | "hold";
+      verb: "start" | "stop" | "done" | "drop" | "hold" | "resume";
       ids: readonly string[];
       note?: string;
       signal?: AbortSignal;
@@ -392,7 +398,14 @@ class TasksHandle {
     const v = record(input, "batch input");
     closed(v, ["verb", "ids", "note", "signal"], "batch input");
     const verb = v.verb;
-    if (verb !== "start" && verb !== "done" && verb !== "drop" && verb !== "hold")
+    if (
+      verb !== "start" &&
+      verb !== "stop" &&
+      verb !== "done" &&
+      verb !== "drop" &&
+      verb !== "hold" &&
+      verb !== "resume"
+    )
       throw new TypeError("batch verb is invalid");
     const ids = taskIds(v.ids, "ids");
     if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one TaskId");
@@ -405,6 +418,10 @@ class TasksHandle {
       switch (verb) {
         case "start":
           return forwardTask(channel.directory, this.world, { action: "task.start", ids }, abort);
+        case "stop":
+          return forwardTask(channel.directory, this.world, { action: "task.stop", ids }, abort);
+        case "resume":
+          return forwardTask(channel.directory, this.world, { action: "task.resume", ids }, abort);
         case "hold":
           return forwardTask(channel.directory, this.world, { action: "task.hold", ids }, abort);
         case "done":
