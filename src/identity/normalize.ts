@@ -22,21 +22,22 @@ export function validateAkumaName(value: string): string {
   return value;
 }
 
+type SeparatorRun = "none" | "dot" | "dash";
+
+// A pending separator run is a dot only while every grapheme in it is one;
+// any other separator grapheme demotes the whole run to a dash.
+function extendSeparatorRun(run: SeparatorRun, segment: string): SeparatorRun {
+  if (segment !== ".") return "dash";
+  return run === "none" ? "dot" : run;
+}
+
 export function normalizeIdentityStem(input: Readonly<{ source: string }>): string {
   const source = input.source.normalize("NFKC").toLowerCase().normalize("NFKC");
   let result = "";
-  // A pending separator run is a dot only while every grapheme in it is one;
-  // any other separator grapheme demotes the whole run to a dash.
-  let separator: "none" | "dot" | "dash" = "none";
+  let separator: SeparatorRun = "none";
   for (const segment of graphemes(source)) {
     if (!WORD_GRAPHEME.test(segment) && !EMOJI_GRAPHEME.test(segment)) {
-      if (result.length > 0) {
-        if (segment === ".") {
-          if (separator === "none") separator = "dot";
-        } else {
-          separator = "dash";
-        }
-      }
+      if (result.length > 0) separator = extendSeparatorRun(separator, segment);
       continue;
     }
     if (separator === "dot") result += ".";
