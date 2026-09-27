@@ -74,8 +74,9 @@ function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "ins
     case "review":
       return command.summaryFromStdin === true ? "review requires a nonblank summary" : undefined;
     case "call":
+      return command.prompt?.kind === "stdin" ? "call requires a nonblank prompt" : undefined;
     case "tell":
-      return command.prompt.kind === "stdin" ? `${command.command} requires a nonblank prompt` : undefined;
+      return command.prompt.kind === "stdin" ? "tell requires a nonblank prompt" : undefined;
     case "task":
       switch (command.stdin) {
         case "document":

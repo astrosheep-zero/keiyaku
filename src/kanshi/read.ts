@@ -15,7 +15,7 @@ import { assertRegionPattern } from "../body/region.js";
 import { readDocuments, type ContractDocumentProjection } from "../protocol/read/documents.js";
 import { contractId } from "../core/facts/types.js";
 import { selectKanshi, selectRegion } from "./select.js";
-import { FLEET_SNAPSHOT_ROWS, FLEET_VISIBLE_ROWS } from "./fleet.js";
+import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { observeRecentTaskStatus, TaskAuthorityCorruptionError, type TaskRow } from "../task/index.js";
 import type {
   AkumaKanshiWorld,
@@ -181,12 +181,12 @@ async function readHolders(observation: GitReadObservation): Promise<HolderRead>
   }
 }
 
-function attachFleet(
+function attachRoster(
   contracts: Section<ContractKanshiBoard>,
   akuma: Section<AkumaKanshiWorld>,
 ): Section<ContractKanshiBoard> {
   if (contracts.kind !== "present") return contracts;
-  const attachments = new Map<string, ContractKanshiBoard["rows"][number]["fleet"][number][]>();
+  const attachments = new Map<string, ContractKanshiBoard["rows"][number]["roster"][number][]>();
   if (akuma.kind === "present") {
     for (const row of akuma.value.rows) {
       if (row.contract === undefined) continue;
@@ -199,7 +199,7 @@ function attachFleet(
     kind: "present",
     value: {
       ...contracts.value,
-      rows: contracts.value.rows.map((row) => ({ ...row, fleet: attachments.get(row.id) ?? [] })),
+      rows: contracts.value.rows.map((row) => ({ ...row, roster: attachments.get(row.id) ?? [] })),
     },
   };
 }
@@ -220,14 +220,14 @@ function decorateContracts(
           return {
             ...row,
             holder: { kind: "unavailable" as const },
-            fleet: [],
+            roster: [],
             ...(selected === undefined ? {} : { namespaceTasks: selected }),
           };
         }
         const holder = holders.kind === "present" ? holders.value.get(row.id) : undefined;
         return {
           ...row,
-          fleet: [],
+          roster: [],
           ...(selected === undefined ? {} : { namespaceTasks: selected }),
           holder:
             holder?.disposition === "held"
@@ -325,7 +325,7 @@ async function readTasks(
 }
 
 /**
- * Placement discharge for the observed fleet snapshots: an associated Contract
+ * Placement discharge for the observed roster snapshots: an associated Contract
  * whose own observation proves it claimed has placed the candidate those
  * reported changes describe, so the composite report no longer presents them
  * as pending. An unproven or failed Contract read keeps the changes.
@@ -357,7 +357,7 @@ async function joinAkuma(
 ): Promise<Section<AkumaKanshiWorld>> {
   if (aliases.kind !== "present") return aliases;
   try {
-    const source = await readAkumaCatalog(path, { limit: FLEET_VISIBLE_ROWS });
+    const source = await readAkumaCatalog(path, { limit: ROSTER_VISIBLE_ROWS });
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value)
       aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
@@ -377,7 +377,7 @@ async function joinAkuma(
             }),
       };
     });
-    const snapshotRows = rows.slice(0, FLEET_SNAPSHOT_ROWS);
+    const snapshotRows = rows.slice(0, ROSTER_SNAPSHOT_ROWS);
     const snapshots = new Map(
       await Promise.all(
         snapshotRows.map(async (row) => {
@@ -496,7 +496,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           root: world,
           observedAt,
           branch,
-          contracts: attachFleet(contracts, akuma),
+          contracts: attachRoster(contracts, akuma),
           tasks,
           akuma,
           ...(regionSection === undefined ? {} : { region: regionSection }),

@@ -27,7 +27,7 @@ import type { WorldRoot } from "../world.js";
 import type { AkumaListRow, AkumaStatus, UnbornAkumaListRow } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 
-export async function fleetListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
+export async function rosterListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul !== null) {
     const observed = await bornObservation(paths, expected, () => readHeart(paths), snapshot);

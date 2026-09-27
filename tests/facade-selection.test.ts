@@ -21,14 +21,16 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { waitAkuma } from "../src/library/fleet.js";
-import type { WaitObservedAkuma, WaitSelectedAkuma } from "../src/akuma/fleet-execution.js";
+import { waitAkuma } from "../src/library/selection.js";
+import { decodeTellWaitObservation, type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
+import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { Schema } from "../src/akuma/index.js";
 import { makeGitRepository } from "./support/git.js";
 import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
 
@@ -40,10 +42,10 @@ function fixtureSession(input: Readonly<{ signal: AbortSignal }>) {
     const completion = eventsFinished.then(() => ({
       kind: "answered" as const,
       answer: "done",
-      historyId: `fleet-history-${fixtureHistory++}`,
+      historyId: `roster-history-${fixtureHistory++}`,
     }));
     const session = {
-      admission: { fence: "fleet-fixture-turn" },
+      admission: { fence: "roster-fixture-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "fixture" } };
@@ -135,8 +137,46 @@ async function answered(root: string, archetype: string, suffix: string) {
 }
 
 
+test("facade tellWait admits, decodes, and addresses an alias through the World-bound face", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-tell-wait-");
+  const source = await bornWorld(root, "00000009");
+  await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akuId: source.allocated.id });
+  const schema = Schema.json({ type: "object", properties: { ok: { type: "boolean" } } }, (value) => value as { ok: boolean });
+  const bodies: Promise<unknown>[] = [];
+  const restore = installTellRuntime(
+    fixtureRuntime(
+      bodies,
+      new Map([[source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-11T00:00:00.000Z" }]]),
+    ),
+  );
+  try {
+    const result = await Akumas.of(root).tellWait({ akuma: "@worker", body: "continue", timeoutMs: 1_000, schema });
+    assert.equal(result.akuma, source.allocated.id);
+    assert.equal(result.tell.row.text, "continue");
+    assert.deepEqual(result.observation, { reason: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(
+      decodeTellWaitObservation(result.observation, schema),
+      { reason: "answered", answer: { ok: true } },
+    );
+  } finally {
+    restore();
+    await settleFixtureBodies(bodies);
+  }
+});
+
+test("facade tellWait refuses path selection and invalid timeout before addressing", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-tell-wait-refusal-");
+  assert.throws(
+    () => Akumas.of(root).tellWait({ path: root, akuma: "aku/worker/00000001", body: "x", timeoutMs: 0 } as never),
+    /does not accept path/u,
+  );
+  await assert.rejects(
+    () => Akumas.of(root).tellWait({ akuma: "aku/worker/00000001", body: "x", timeoutMs: -1 }),
+    /timeoutMs must be a nonnegative finite millisecond duration/u,
+  );
+});
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-fleet-");
+  const root = fixtureRoot(t, "keiyaku-facade-selection-");
   const worker = await answered(root, "worker", "00000002");
   const reviewer = await answered(root, "reviewer", "00000001");
   await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
@@ -521,7 +561,7 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
   );
 });
 
-test("named Address resolves a retained Alias outside Kanshi fleet rows", async (t) => {
+test("named Address resolves a retained Alias outside Kanshi roster rows", async (t) => {
   const root = fixtureRoot(t, "keiyaku-named-kanshi-alias-");
   const id = akuId({ archetype: "worker", suffix: "deadbeef" });
   await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
@@ -579,7 +619,7 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
   );
 });
 
-test("fleet status projects Dispatch association without changing Akuma core", async (t) => {
+test("selection status projects Dispatch association without changing Akuma core", async (t) => {
   const repository = fixtureRepository(t);
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -669,8 +709,8 @@ function fixtureRepository(t: TestContext) {
   return repository;
 }
 
-test("failed Task associations do not hide readable Fleet members or kill evidence", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-fleet-task-failure-");
+test("failed Task associations do not hide readable roster members or kill evidence", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-roster-task-failure-");
   const a = await answered(root, "worker", "a0000001");
   const b = await answered(root, "worker", "a0000002");
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });

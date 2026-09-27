@@ -21,6 +21,8 @@ function parseAkumaCatalogPath(
 ): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
   if (value === "aku" || value === "aku/") return { kind: "archetypes" };
   if (value === "aku/*/*") return { kind: "akuma" };
+  const scopedGlob = /^aku\/([^/]+)\/\*$/u.exec(value);
+  if (scopedGlob !== null) return { kind: "akuma", archetype: archetypeName(scopedGlob[1]!) };
   const match = /^aku\/([^/]+)\/?$/u.exec(value);
   if (match === null) return null;
   return { kind: "akuma", archetype: archetypeName(match[1]!) };

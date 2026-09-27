@@ -14,7 +14,7 @@ import type {
 } from "./akuma.js";
 import { canonicalBirthCwd } from "./call-input.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
-import { fleetListRow, readAkumaBirthCwd } from "./akuma-observe.js";
+import { rosterListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
 import { birthAkuma, launchAkuma } from "./publication.js";
@@ -49,7 +49,7 @@ export type RequestedAkumaCall = Readonly<{
 
 export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
 
-type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell: InitialCallTell }>;
+type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell?: InitialCallTell }>;
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 type KnownAkuma = Readonly<{
   id: ReturnType<typeof akuIdFromDirectoryName>["id"];
@@ -75,7 +75,7 @@ async function admitBodyRequest(input: {
     id: randomUUID(),
     world: input.path,
     archetype: input.name,
-    initialTell: input.call.initialTell,
+    ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
     ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
@@ -209,7 +209,7 @@ async function knownAkuma(
 async function readableRows(rows: readonly KnownAkuma[]): Promise<readonly AkumaListRowValue[]> {
   const loaded = await boundedMap(rows, async ({ id, paths }) => {
     try {
-      return await fleetListRow(paths, id);
+      return await rosterListRow(paths, id);
     } catch {
       return null;
     }

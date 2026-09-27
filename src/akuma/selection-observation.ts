@@ -108,7 +108,7 @@ export function isTellWaitResult(value: unknown): value is AkumaTellWaitResult {
   return akumaTellWaitResultSchema.safeParse(value).success;
 }
 
-export const fleetResultSchemas = {
+export const selectionResultSchemas = {
   wait: akumaWaitResultSchema,
   tell: akumaTellResultSchema,
   tellWait: akumaTellWaitResultSchema,

@@ -39,7 +39,7 @@ import {
 import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { fleetRequestCommands, type FleetRequestPort } from "../src/akuma/fleet-request.js";
+import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -162,6 +162,32 @@ function slowEmptyPublicationBody() {
     release,
   };
 }
+
+test("prompt-free Akumas.call reports born without admitting a Tell", async () => {
+  const { raw, world, configured } = await directCallFixture();
+  const result = await Akumas.of(world).call({
+    archetype: "worker",
+    cwd: world,
+    ...configured.placement,
+  });
+  assert.deepEqual(result.observation, { kind: "born" });
+  const history = await PublicAkuma.select(world, result.akuma).history();
+  assert.equal(history.rows.some((row) => row.kind === "tell"), false);
+  await PublicAkuma.select(world, result.akuma).kill().catch(() => undefined);
+  await rmSync(raw.path, { recursive: true, force: true });
+});
+
+test("prompt-free Akumas.call refuses schema and wait options", async () => {
+  const { world, configured } = await directCallFixture();
+  await assert.rejects(
+    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, schema: okSchema() }),
+    /schema requires body/u,
+  );
+  await assert.rejects(
+    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, mode: "wait" }),
+    /wait and timeoutMs require body/u,
+  );
+});
 
 test("local schema Akumas.call waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
@@ -670,7 +696,7 @@ async function requestPump(
           (async ({ id, initialTell, signal }) =>
             await new AkumaHandle(id, root).admitInitialTell(initialTell, { signal })),
       }),
-      fleetRequestCommands({
+      selectionRequestCommands({
         wait: async () => {
           throw new Error("unexpected forwarded wait");
         },
@@ -685,7 +711,7 @@ async function requestPump(
         kill: async () => {
           throw new Error("unexpected forwarded kill");
         },
-      } satisfies FleetRequestPort),
+      } satisfies SelectionRequestPort),
     ),
   });
   return { pump, leash };

@@ -270,8 +270,8 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
     return index;
   }
   const value = argv[index + 1];
-  if (value === undefined) refuse(command, `${token} requires a value`);
-  if (kind !== "raw-value" && (value === "-" || value.startsWith("--"))) {
+  if (value === undefined || value.startsWith("--")) refuse(command, `${token} requires a value`);
+  if (kind !== "raw-value" && value === "-") {
     refuse(command, `${token} requires a value`);
   }
   if (kind !== "raw-value" && isBlankInput(value)) refuse(command, `${token} requires a nonblank value`);
@@ -282,6 +282,27 @@ function scanOption(command: Command, argv: readonly string[], state: ScanState,
     state.flags[name] = value;
   }
   return index + 1;
+}
+
+function scanContractTokens(command: Command, argv: readonly string[], state: ScanState): void {
+  let positionalOnly = false;
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (!positionalOnly && token === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (!positionalOnly && token === "-") {
+      scanStdin(command, state);
+      continue;
+    }
+    if (!positionalOnly && token.startsWith("--")) {
+      index = scanOption(command, argv, state, index);
+      continue;
+    }
+    if (isBlankInput(token)) refuse(command, `${command} requires a nonblank value`);
+    state.positionals.push(token);
+  }
 }
 
 function scanArgv(argv: readonly string[]): ParsedContractParts {
@@ -295,20 +316,7 @@ function scanArgv(argv: readonly string[]): ParsedContractParts {
   const command = candidate as Command;
   const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
   const state: ScanState = { flags: {}, positionals: [], stdin: false };
-
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (token === "-") {
-      scanStdin(command, state);
-      continue;
-    }
-    if (token.startsWith("--")) {
-      index = scanOption(command, argv, state, index);
-      continue;
-    }
-    if (isBlankInput(token)) refuse(command, `${command} requires a nonblank value`);
-    state.positionals.push(token);
-  }
+  scanContractTokens(command, argv, state);
 
   if (spec.positional === "none" && state.positionals.length > 0) {
     refuse(command, `${command} accepts no contract`);
@@ -332,29 +340,35 @@ function invocationOptions(
   let repo: string | undefined;
   let workdir: string | undefined;
   const commandArgv: string[] = [];
+  let positionalOnly = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (!INVOCATION_PATH_OPTIONS.has(token)) {
+    if (!positionalOnly && token === "--") {
+      positionalOnly = true;
       commandArgv.push(token);
       continue;
     }
-    if (token === "--repo" && repo !== undefined) {
-      throw new CliUsageError("--repo may appear only once", ROOT_USAGE_GUIDE);
+    if (!positionalOnly && INVOCATION_PATH_OPTIONS.has(token)) {
+      if (token === "--repo" && repo !== undefined) {
+        throw new CliUsageError("--repo may appear only once", ROOT_USAGE_GUIDE);
+      }
+      if ((token === "-C" || token === "--cwd") && cwd !== undefined) {
+        throw new CliUsageError("-C/--cwd may appear only once", ROOT_USAGE_GUIDE);
+      }
+      if (token === "--workdir" && workdir !== undefined) {
+        throw new CliUsageError("--workdir may appear only once", ROOT_USAGE_GUIDE);
+      }
+      const value = argv[index + 1];
+      if (invalidInvocationPath(value)) {
+        throw new CliUsageError(`${token} requires a path`, ROOT_USAGE_GUIDE);
+      }
+      if (token === "--repo") repo = value;
+      else if (token === "--workdir") workdir = value;
+      else cwd = value;
+      index += 1;
+      continue;
     }
-    if ((token === "-C" || token === "--cwd") && cwd !== undefined) {
-      throw new CliUsageError("-C/--cwd may appear only once", ROOT_USAGE_GUIDE);
-    }
-    if (token === "--workdir" && workdir !== undefined) {
-      throw new CliUsageError("--workdir may appear only once", ROOT_USAGE_GUIDE);
-    }
-    const value = argv[index + 1];
-    if (invalidInvocationPath(value)) {
-      throw new CliUsageError(`${token} requires a path`, ROOT_USAGE_GUIDE);
-    }
-    if (token === "--repo") repo = value;
-    else if (token === "--workdir") workdir = value;
-    else cwd = value;
-    index += 1;
+    commandArgv.push(token);
   }
   return {
     ...(cwd === undefined ? {} : { cwd }),
@@ -369,7 +383,9 @@ function invalidInvocationPath(value: string | undefined): boolean {
 }
 
 function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
-  const help = argv.indexOf("--help");
+  const endOptions = argv.indexOf("--");
+  const optionEnd = endOptions < 0 ? argv.length : endOptions;
+  const help = argv.slice(0, optionEnd).indexOf("--help");
   if (help < 0) return null;
   const words = argv.slice(0, help);
   const root = words[0];

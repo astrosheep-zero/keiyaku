@@ -1,8 +1,8 @@
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
-import { fleetRequestPort } from "./akuma/fleet-owner-port.js";
-import { fleetRequestCommands } from "./akuma/fleet-request.js";
+import { selectionRequestPort } from "./akuma/selection-owner-port.js";
+import { selectionRequestCommands } from "./akuma/selection-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
 import {
   contractRequestCommands,
@@ -117,7 +117,7 @@ export async function externalRequestCommandsFor(
   return {
     world,
     commands: composeRequestCommands(
-      fleetRequestCommands(fleetRequestPort(world)),
+      selectionRequestCommands(selectionRequestPort(world)),
       contractRequestCommands(contractUpstream(processConfiguration)),
       taskMutationRequestCommands(taskMutationRequestPort()),
     ),

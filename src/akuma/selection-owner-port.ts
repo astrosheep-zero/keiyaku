@@ -1,13 +1,13 @@
 import type { AkumaStatus } from "./akuma.js";
 import { requireBornAkuma } from "./akuma-probe.js";
 import { Akuma as PublicAkuma } from "./akuma-instance.js";
-import { executeKillAkuma, executeTellAkuma, executeTellWaitAkuma, executeWaitAkuma } from "./fleet-execution.js";
-import type { FleetRequestPort } from "./fleet-request.js";
+import { executeKillAkuma, executeTellAkuma, executeTellWaitAkuma, executeWaitAkuma } from "./selection-execution.js";
+import type { SelectionRequestPort } from "./selection-request.js";
 import { Schema } from "./schema.js";
 import type { WorldRoot } from "../world.js";
 
 /**
- * The parent's Fleet owner boundary: one forwarded request arrives as complete
+ * The parent's Selection owner boundary: one forwarded request arrives as complete
  * identities the child resolved without reading a Heart, and this side answers
  * for them. It proves every target through the one addressability
  * normalization before the operation begins, so a refusal that reaches the wire
@@ -15,7 +15,7 @@ import type { WorldRoot } from "../world.js";
  * unaddressable member never starts; the executor's own access to the target is
  * then the product act, never a second addressing probe.
  */
-export function fleetRequestPort(world: WorldRoot): FleetRequestPort {
+export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
   const prove = async (targets: readonly AkumaStatus["id"][]): Promise<void> => {
     for (const id of targets) await requireBornAkuma(world, id);
   };

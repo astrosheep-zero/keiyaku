@@ -87,7 +87,15 @@ test("global coordinates are independent of command position", () => {
     () => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]),
     /--workdir may appear only once/u,
   );
-  assert.throws(() => parseArgv(["call", "worker", "--workdir", "body"]), /call requires a prompt argument or stdin/u);
+  assert.deepEqual(command(["call", "worker"]), {
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    output: "text",
+  });
+  assert.throws(() => parseArgv(["call", "worker", "--schema", "answer.json"]), /call --schema requires a prompt/u);
+  assert.throws(() => parseArgv(["call", "worker", "--wait", "1s"]), /call --wait requires a prompt/u);
+
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
@@ -198,6 +206,10 @@ test("ls parses only canonical identity directories", () => {
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
     command: { command: "ls", query: { kind: "akuma" }, output: "text" },
   });
+  assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
+    command: { command: "ls", query: { kind: "akuma", archetype: "elite", limit: 40 }, output: "text" },
+  });
+  assert.match(renderContractHelp("ls"), /ls "aku\/<archetype>\/\*"/u);
   for (const path of [
     "keiy/",
     "@review",
@@ -368,7 +380,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],
     [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
-    [["call", "worker"], /call requires a prompt argument or stdin/],
+    [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["call", "worker", ""], /call requires a nonblank value/],
     [["call", " ", "-"], /call requires a nonblank value/],
@@ -411,6 +423,30 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
   const called = command(["call", "worker", "  keep  "]);
   assert.equal(called.command, "call");
   if (called.command === "call") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
+  assert.deepEqual(command(["task", "add", "--", "--urgent task"]), {
+    command: "task",
+    action: "add",
+    output: "text",
+    positionals: ["--urgent task"],
+    flags: {},
+  });
+  assert.deepEqual(command(["call", "worker", "--", "--workdir"]), {
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    prompt: { kind: "argument", value: "--workdir" },
+    output: "text",
+  });
+  assert.deepEqual(parseArgv(["call", "worker", "--", "--workdir"]), {
+    command: {
+      command: "call",
+      archetype: "worker",
+      mode: "detach",
+      prompt: { kind: "argument", value: "--workdir" },
+      output: "text",
+    },
+  });
+  assert.throws(() => parseArgv(["bind", "--gates", "--json", "-"]), /--gates requires a value/u);
   assert.deepEqual(command(["task", "update", "task/a", "--priority", "1"]), {
     command: "task",
     action: "update",
@@ -443,6 +479,33 @@ test("stdin marker is position independent for Contract commands and global coor
     cwd: "/repo/caller",
     repo: "../delivery",
     command: { command: "bind", output: "text" },
+  });
+  assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--", "--json"]), {
+    command: {
+      command: "tell",
+      akuma: "aku/claude/1234abcd",
+      interrupt: false,
+      prompt: { kind: "argument", value: "--json" },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["call", "worker", "--", "--cwd"]), {
+    command: {
+      command: "call",
+      archetype: "worker",
+      mode: "detach",
+      prompt: { kind: "argument", value: "--cwd" },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["call", "worker", "--", "--help"]), {
+    command: {
+      command: "call",
+      archetype: "worker",
+      mode: "detach",
+      prompt: { kind: "argument", value: "--help" },
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["--repo", "../delivery", "bind", "-", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",

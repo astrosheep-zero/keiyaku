@@ -92,9 +92,11 @@ and exposes its settlement receipt; kill exposes its kill evidence.
 Interrupt control has no local elapsed-time failure boundary: it waits for leash
 custody or durable Body settlement, unless the caller's signal stops waiting.
 Wait observes status until its Akuma-owned completion judgment — a non-running
-life with no pending Tell — or a caller deadline. Every return carries its
-final status and says whether it completed or reached the deadline; completion
-wins when the final deadline-edge observation satisfies the judgment. A deadline
+life with no pending Tell — or a caller deadline. Standalone `idle` and plural
+or CLI `wait` name this same judgment for their respective caller contexts.
+Every return carries its final status and says whether it completed or reached
+the deadline; completion wins when the final deadline-edge observation satisfies
+the judgment. A deadline
 remains a current observation rather than manufacturing a lifecycle arm.
 Interrupt and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve
@@ -118,7 +120,7 @@ fresh Heart evidence protected against succession for that bounded observation;
 it neither mutates lifecycle facts nor retains execution custody afterward.
 This is not a frozen view of subsequent activity or a barrier to future Bodies.
 
-The fleet is a compact bounded recent-activity roster, not a smaller status
+The roster is a compact bounded recent-activity observation, not a smaller status
 view. Its order is the later of each readable Heart's life and activity evidence,
 with complete identity breaking equal activity and untimestamped rows following
 timestamped rows. The observation says whether another readable member lies
@@ -126,8 +128,8 @@ beyond its bounded result without claiming a total or a frozen continuation.
 It exposes born identity, frozen descriptive snapshots, life evidence, recent
 activity and pending-tell information without loading each history. Recognized
 unborn or stillborn allocation state remains visible; a hard direct-read failure
-may omit that fleet row without suppressing readable peers and without
-inventing a per-row diagnostic. Status and fleet never re-evaluate provider
+may omit that roster row without suppressing readable peers and without
+inventing a per-row diagnostic. Status and roster never re-evaluate provider
 capability or turn provider evidence into new lifecycle facts. An explicit
 advanced library observation may read the complete roster for callers whose
 semantics require a frozen set; it is distinct from ordinary bounded observation

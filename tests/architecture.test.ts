@@ -100,12 +100,12 @@ const compositionCases: readonly (readonly [string, readonly Edge[], string, boo
   ["library/composition.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
   ["library/akumas.ts", [akuma, tasks], marker, true],
   ["library/akumas/index.ts", [akuma, catalog], marker, true],
-  ["library/fleet.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],
+  ["library/selection.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],
   ["library/moved-root.ts", [akuma, tasks], marker, true],
   ["library/akumas.ts", [akuma, tasks], "", false],
   ["library/rogue-composition.ts", [akuma, tasks], "", false],
   ["library/rogue.ts", [akuma, tasks, ["workspace-place.ts", "appoint"]], "", false],
-  ["library/fleet-extra.ts", [akuma, tasks], "", false],
+  ["library/selection-extra.ts", [akuma, tasks], "", false],
   ["library/nested-marker.ts", [akuma, tasks], `export const architectureCompositionRoot = true;\n${marker}\nexport function nested(): void {}`, false],
 ];
 for (const [owner, edges, prefix, allowed] of compositionCases) {

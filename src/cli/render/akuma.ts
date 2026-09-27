@@ -15,7 +15,7 @@ import {
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
-import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
+import type { AkumaTellWaitResult } from "../../akuma/selection-observation.js";
 import type { AkuId } from "../../akuma/identity.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/akuma.js";
@@ -121,7 +121,7 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     dispatch: result.result.dispatch,
     alias: result.result.alias,
   });
-  if (result.result.observation.kind === "detached") {
+  if (result.result.observation.kind === "detached" || result.result.observation.kind === "born") {
     return [
       associatedIdentity(result.result.akuma, head.alias),
       ...(head.contract.kind === "associated" ? [`  -> ${safeText(head.contract.contractId)}`] : []),

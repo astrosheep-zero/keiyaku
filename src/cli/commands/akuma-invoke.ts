@@ -3,7 +3,7 @@ import { squareAssignedParticipantName } from "@astrosheep/square";
 import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory } from "../../akuma/akuma.js";
-import { decodeTellWaitObservation, type WaitObserver } from "../../akuma/fleet-execution.js";
+import { decodeTellWaitObservation, type WaitObserver } from "../../akuma/selection-execution.js";
 import {
   Akumas,
   type AkumaInterruptResult,
@@ -29,13 +29,13 @@ import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "../render/terminal.
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
-import { tellWaitAkuma, waitAkuma } from "../../library/fleet.js";
+import { waitAkuma } from "../../library/selection.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
 import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { addressAkuma, resolveAkuma } from "../../library/address.js";
 import { executionChannel } from "../../akuma/requests.js";
-import { requestForwardedFleetTellAnswer } from "../../akuma/fleet-request.js";
-import type { AkumaTellWaitResult } from "../../akuma/fleet-observation.js";
+import { requestForwardedSelectionTellAnswer } from "../../akuma/selection-request.js";
+import type { AkumaTellWaitResult } from "../../akuma/selection-observation.js";
 
 export type AkumaInvocationResult =
   | Readonly<{
@@ -273,28 +273,24 @@ async function invokeWaitedTell(
     command.output === "text" && channel.kind === "local"
       ? tellWaitProgressStream(undefined, alias, resultContext())
       : undefined;
-  const result = await tellWaitAkuma(
-    {
-      ...(await inputInitiator(input)),
-      path: input.path,
-      akuma: command.akuma,
-      body,
-      timeoutMs: command.timeoutMs,
-      ...(schema === undefined ? {} : { schema }),
-      ...(command.interrupt ? { interrupt: true } : {}),
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(progress === undefined
-        ? {}
-        : {
-            observe: {
-              admitted: (tell, id) => writeProgress(progress.admitted(tell, id).join("\n")),
-              observe: (observation) => writeProgress(progress.observe(observation).join("\n")),
-            },
-          }),
-    },
-    input.execution ?? localExecutionContext(),
-  );
+  const result = await akumas(input).tellWait({
+    ...(await inputInitiator(input)),
+    akuma: command.akuma,
+    body,
+    timeoutMs: command.timeoutMs,
+    ...(schema === undefined ? {} : { schema }),
+    ...(command.interrupt ? { interrupt: true } : {}),
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(progress === undefined
+      ? {}
+      : {
+          observe: {
+            admitted: (tell, id) => writeProgress(progress.admitted(tell, id).join("\n")),
+            observe: (observation) => writeProgress(progress.observe(observation).join("\n")),
+          },
+        }),
+  });
   const rendered =
     schema === undefined ? result : { ...result, observation: decodeTellWaitObservation(result.observation, schema) };
   if (progress !== undefined) writeProgress(progress.conclude(rendered).join("\n"));
@@ -326,13 +322,13 @@ async function invokeTell(
       akuma: command.akuma,
       ...(input.repo === undefined ? {} : { repo: input.repo }),
     };
-    // A forwarded answer lets the parent Fleet prove the target, so it resolves
+    // A forwarded answer lets the parent Selection prove the target, so it resolves
     // coordinates here and never reads this process's own Heart files.
     const addressed = channel.kind === "body-request" ? await resolveAkuma(values) : await addressAkuma(values);
     const initiator = await inputInitiator(input);
     const answer =
       channel.kind === "body-request"
-        ? await requestForwardedFleetTellAnswer({
+        ? await requestForwardedSelectionTellAnswer({
             directory: channel.directory,
             target: addressed.id,
             body,
@@ -451,13 +447,13 @@ async function invokeKill(
 export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInput): Promise<AkumaInvocationResult> {
   switch (command.command) {
     case "call": {
-      const body = await promptBody(command, input);
+      const body = command.prompt === undefined ? undefined : await promptBody({ prompt: command.prompt }, input);
       const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
       const caller = akumas(input);
       const request: CallRequest = {
         ...(await inputInitiator(input)),
         archetype: command.archetype,
-        body,
+        ...(body === undefined ? {} : { body }),
         ...(input.home === undefined ? {} : { home: input.home }),
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),

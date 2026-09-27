@@ -218,6 +218,21 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
   assert.notEqual(waited.observations[0]!.status.life, "running");
 }
 
+test("packaged prompt-free call births without admitting a Tell", { timeout: 120_000 }, async () => {
+  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
+  const { root, world, env } = observingWorld();
+  try {
+    const born = await runPackagedCli(["-C", world, "call", "worker"], { cwd: world, env });
+    assert.equal(born.code, 0, born.stderr);
+    assert.match(born.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu, "the final receipt exposes the born identity");
+    assert.ok(born.stdout.includes(`  cwd  ${world}`), "the final receipt includes the execution cwd");
+    assert.equal(born.stderr, "", "prompt-free birth has no progress or Tell output");
+    assert.doesNotMatch(born.stdout, /tell/u, "prompt-free birth admits no Tell");
+  } finally {
+    await removeTempDirectory(root);
+  }
+});
+
 test("packaged observing calls stream one framed session and one conclusion per outcome", { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
@@ -232,7 +247,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
     assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
     assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
-    assert.equal(unfinished.stderr.match(/⧖ deadline — waited /gu)?.length, 1, "one input-bound deadline conclusion");
+    assert.equal(unfinished.stderr.match(/● still running — waited /gu)?.length, 1, "one input-bound conclusion states the observed life");
     const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
     assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
     assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);

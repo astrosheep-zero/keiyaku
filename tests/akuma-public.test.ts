@@ -280,7 +280,7 @@ test("forward history reports a pruned interval after its cursor", async () => {
   );
 });
 
-for (const observation of ["status", "wait", "fleet"] as const) {
+for (const observation of ["status", "wait", "roster"] as const) {
   test(`${observation} observes a Body that finishes between Heart read and leash probe`, async (t) => {
     const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-observe-end-"));
     const value = await bornHistoryHandle(root, "f0000009");
@@ -302,7 +302,7 @@ for (const observation of ["status", "wait", "fleet"] as const) {
     });
     try {
       const result =
-        observation === "fleet"
+        observation === "roster"
           ? (await (await akumaAt(root)).list()).rows.find((row) => row.id === value.allocated.id)
           : observation === "wait"
             ? await value.handle.wait(undefined, { timeoutMs: 1_000 })

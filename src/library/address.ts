@@ -151,7 +151,7 @@ type AddressedAkuma = Readonly<{
 
 /**
  * Resolves one selector to a complete identity without proving it born. The
- * caller is a forwarding boundary: the parent Fleet answers for the target, so
+ * caller is a forwarding boundary: the parent Selection answers for the target, so
  * this process must not read its own Heart files to decide.
  */
 export async function resolveAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
@@ -199,7 +199,7 @@ function hasSelectorKind(selectors: readonly ParsedSetSelector[], kind: ParsedSe
 function addSelectorIds(
   selector: ParsedSetSelector,
   sources: Readonly<{
-    fleetIds: readonly AkuId[];
+    rosterIds: readonly AkuId[];
     aliases: ReadonlyMap<AkumaAlias, AkuId>;
     dispatches: readonly DispatchFact[];
   }>,
@@ -216,7 +216,7 @@ function addSelectorIds(
     return;
   }
   if (selector.kind === "glob") {
-    for (const id of sources.fleetIds) if (matchesAkumaGlob(selector.value, id)) selected.add(id);
+    for (const id of sources.rosterIds) if (matchesAkumaGlob(selector.value, id)) selected.add(id);
     return;
   }
   if (selector.kind === "alias") {
@@ -278,7 +278,7 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
-  const fleetIds = hasSelectorKind(selectors, "glob")
+  const rosterIds = hasSelectorKind(selectors, "glob")
     ? (await createAkumaProduct(path).listComplete()).rows.map((row) => row.id)
     : [];
   const aliases = hasSelectorKind(selectors, "alias")
@@ -290,14 +290,14 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
   const selected = new Set<AkuId>();
   const contractMembers = new Set<AkuId>();
   const explicit = new Set<AkuId>();
-  const sources = { fleetIds, aliases, dispatches };
+  const sources = { rosterIds, aliases, dispatches };
   for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
   return { path, orderedIds: [...selected], ids: canonicalAkumaOrder(selected), contractMembers, explicit };
 }
 
 /**
  * Resolves a selector set to complete identities without proving any born. The
- * caller is a forwarding boundary, the parent Fleet owns the answer, and no
+ * caller is a forwarding boundary, the parent Selection owns the answer, and no
  * member's Heart is read here.
  */
 export async function resolveAkumaSet(

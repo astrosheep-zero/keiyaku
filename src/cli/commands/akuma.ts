@@ -26,7 +26,7 @@ export type ParsedAkumaCommand = Output &
         allowed?: AllowedActions;
         schema?: string;
       }> &
-        Prompted)
+        Readonly<{ prompt?: AkumaPromptSource }>)
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
     | (Readonly<{ command: "tell"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
@@ -62,11 +62,12 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] (<prompt> | -)",
-    purpose: "Call an Akuma into the world with one prompt.",
+      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
+    purpose: "Call an Akuma into the world.",
     details: [
-      "Give <prompt> as one argument, or use - to read stdin.",
-      "By default, start returns once the Akuma is created; --wait also waits for its first answer, up to the given duration.",
+      "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
+      "--schema and --wait require a prompt.",
+      "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
       "--contract assigns the Akuma work from that Contract; it does not choose where the Akuma works.",
       "--workdir selects where the Akuma works; relative paths start from your current directory. Without it, the current directory is used.",
       "--alias <name> gives the new Akuma the selector @name; use it instead of aku/<id>.",
@@ -214,9 +215,17 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
   const flags: Record<string, FlagValue> = {};
   const positionals: string[] = [];
   let stdin = false;
+  let positionalOnly = false;
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index]!;
-    if (token === "-") {
+    if (!positionalOnly && token === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (positionalOnly) {
+      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
+      positionals.push(token);
+    } else if (token === "-") {
       if (!spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
       if (stdin) fail("stdin marker '-' may appear only once");
       stdin = true;
@@ -344,14 +353,18 @@ function parsePrompted(
   positionals: readonly string[],
   stdin: boolean,
   fail: (message: string) => never,
-): Readonly<{ subject: string; prompt: AkumaPromptSource }> {
+): Readonly<{ subject: string; prompt?: AkumaPromptSource }> {
   if (positionals.length < 1 || positionals.length > 2) fail(`${action} has invalid positional arguments`);
   const argument = positionals[1];
   if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
-  if (!stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
+  if (action === "tell" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
   return {
     subject: positionals[0]!,
-    prompt: stdin ? { kind: "stdin" } : { kind: "argument", value: argument! },
+    ...(stdin
+      ? { prompt: { kind: "stdin" as const } }
+      : argument === undefined
+        ? {}
+        : { prompt: { kind: "argument" as const, value: argument } }),
   };
 }
 
@@ -389,7 +402,7 @@ function parseAllowedFlag(raw: FlagValue | undefined, fail: (message: string) =>
 function parseCall(
   flags: Readonly<Record<string, FlagValue>>,
   archetype: string,
-  prompt: AkumaPromptSource,
+  prompt: AkumaPromptSource | undefined,
   output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "call" }> {
@@ -407,6 +420,8 @@ function parseCall(
   const allowed = parseAllowedFlag(flags.allowed, fail);
   const schema =
     flags.schema === undefined ? undefined : stringFlag(flags.schema, "call --schema requires a file", fail);
+  if (prompt === undefined && schema !== undefined) fail("call --schema requires a prompt");
+  if (prompt === undefined && flags.wait !== undefined) fail("call --wait requires a prompt");
   return {
     command: "call",
     archetype,
@@ -416,7 +431,7 @@ function parseCall(
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(allowed === undefined ? {} : { allowed }),
     ...(schema === undefined ? {} : { schema }),
-    prompt,
+    ...(prompt === undefined ? {} : { prompt }),
     output,
   };
 }
@@ -435,7 +450,7 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
     const parsed = parsePrompted(action, positionals, stdin, fail);
     return action === "call"
       ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
-      : parseTell(flags, parsed.subject, parsed.prompt, output, fail);
+      : parseTell(flags, parsed.subject, parsed.prompt!, output, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
     fail(`${action} has invalid positional arguments`);

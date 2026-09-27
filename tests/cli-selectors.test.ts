@@ -41,7 +41,7 @@ function board(): ContractKanshiBoard {
         after: [],
         dependents: [],
         holder: { kind: "none" },
-        fleet: [],
+        roster: [],
       },
     ],
   };

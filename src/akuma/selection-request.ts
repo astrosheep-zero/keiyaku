@@ -9,7 +9,7 @@ import {
 } from "./request-wire.js";
 import type { AkumaStatus } from "./akuma.js";
 import {
-  fleetResultSchemas,
+  selectionResultSchemas,
   isKillResult,
   isTellResult,
   isTellWaitResult,
@@ -18,14 +18,14 @@ import {
   type AkumaTellResult,
   type AkumaTellWaitResult,
   type AkumaWaitResult,
-} from "./fleet-observation.js";
+} from "./selection-observation.js";
 import { z } from "zod";
 import type { Schema } from "./schema.js";
 import { schemaJsonText } from "./schema.js";
 import { AkumaDecodeError, AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
-const fleetTargetsSchema = z
+const selectionTargetsSchema = z
   .array(akumaIdSchema)
   .min(1)
   .superRefine((ids, context) => {
@@ -34,7 +34,7 @@ const fleetTargetsSchema = z
   });
 const waitRequestSchema = z
   .object({
-    targets: fleetTargetsSchema,
+    targets: selectionTargetsSchema,
     completion: z.enum(["any", "all"]),
     timeoutMs: z.number().int().nonnegative().optional(),
   })
@@ -70,7 +70,7 @@ const tellWaitRequestSchema = z
   .strict()
   .transform((request) => ({ action: "akuma.tell-wait" as const, ...request }));
 const killRequestSchema = z
-  .object({ targets: fleetTargetsSchema })
+  .object({ targets: selectionTargetsSchema })
   .strict()
   .transform((request) => ({ action: "akuma.kill" as const, ...request }));
 const waitServiceSchema = z.object({ action: z.literal("akuma.wait") }).strict();
@@ -83,29 +83,29 @@ const tellWaitServiceSchema = z
 const killServiceSchema = z
   .object({
     action: z.literal("akuma.kill"),
-    results: z.array(z.object({ id: akumaIdSchema, evidence: fleetResultSchemas.killEvidence }).strict()),
+    results: z.array(z.object({ id: akumaIdSchema, evidence: selectionResultSchemas.killEvidence }).strict()),
   })
   .strict();
 
 /**
- * A forwarded Fleet request leaves selection and observation to the parent, so
+ * A forwarded Selection request leaves selection and observation to the parent, so
  * the parent's typed refusal is the only evidence the child can classify on.
  * Transporting it is the codec's own duty: an unencoded failure reaches the
  * caller as an anonymous request error and loses the identity it names.
  *
  * The transport voids a begun request only when the encoded failure proves no
  * product effect. A refused selection or an unreadable observation never
- * reached an action, so Fleet proves that through the same refusal envelope
+ * reached an action, so Selection proves that through the same refusal envelope
  * the Contract codec uses; a genuinely failed action stays unencoded and
  * keeps its existing anonymous classification.
  */
-const fleetRefusalSchema = z.union([
+const selectionRefusalSchema = z.union([
   z.object({ kind: z.literal("akuma-not-born"), id: akumaIdSchema }).strict(),
   z.object({ kind: z.literal("akuma-observation"), id: akumaIdSchema, diagnostic: z.string() }).strict(),
 ]);
-const fleetLiveFailureSchema = z.object({ kind: z.literal("refused"), failure: fleetRefusalSchema }).strict();
+const selectionLiveFailureSchema = z.object({ kind: z.literal("refused"), failure: selectionRefusalSchema }).strict();
 
-export function encodeFleetLiveFailure(error: unknown): unknown | null {
+export function encodeSelectionLiveFailure(error: unknown): unknown | null {
   const failure =
     error instanceof AkumaNotBornError
       ? { kind: "akuma-not-born" as const, id: error.id }
@@ -115,8 +115,8 @@ export function encodeFleetLiveFailure(error: unknown): unknown | null {
   return failure === null ? null : { kind: "refused", failure };
 }
 
-export function decodeFleetLiveFailure(value: unknown): Error | null {
-  const parsed = fleetLiveFailureSchema.safeParse(value);
+export function decodeSelectionLiveFailure(value: unknown): Error | null {
+  const parsed = selectionLiveFailureSchema.safeParse(value);
   if (!parsed.success) return null;
   const failure = parsed.data.failure;
   return failure.kind === "akuma-not-born"
@@ -124,20 +124,20 @@ export function decodeFleetLiveFailure(value: unknown): Error | null {
     : new AkumaObservationError(failure.id as AkumaStatus["id"], failure.diagnostic);
 }
 
-export type FleetRequest =
+export type SelectionRequest =
   | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
   | z.infer<typeof tellRequestSchema>
   | z.infer<typeof tellAnswerRequestSchema>
   | z.infer<typeof tellWaitRequestSchema>
   | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
-export type FleetService =
+export type SelectionService =
   | z.infer<typeof waitServiceSchema>
   | z.infer<typeof tellServiceSchema>
   | z.infer<typeof tellWaitServiceSchema>
   | (Omit<z.infer<typeof killServiceSchema>, "results"> &
       Readonly<{ results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>);
 
-export type FleetRequestPort = Readonly<{
+export type SelectionRequestPort = Readonly<{
   wait(
     input: Readonly<{
       targets: readonly AkumaStatus["id"][];
@@ -187,7 +187,7 @@ export type FleetRequestPort = Readonly<{
   >;
 }>;
 
-function decodeFleetRequest(action: FleetRequest["action"], value: unknown): FleetRequest | null {
+function decodeSelectionRequest(action: SelectionRequest["action"], value: unknown): SelectionRequest | null {
   const schema =
     action === "akuma.wait"
       ? waitRequestSchema
@@ -202,7 +202,7 @@ function decodeFleetRequest(action: FleetRequest["action"], value: unknown): Fle
   return parsed.success ? parsed.data : null;
 }
 
-function decodeFleetService(action: FleetRequest["action"], value: unknown): FleetService {
+function decodeSelectionService(action: SelectionRequest["action"], value: unknown): SelectionService {
   const schema =
     action === "akuma.wait"
       ? waitServiceSchema
@@ -212,29 +212,29 @@ function decodeFleetService(action: FleetRequest["action"], value: unknown): Fle
           ? tellWaitServiceSchema
           : killServiceSchema;
   const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new Error("malformed stored Fleet service evidence");
+  if (!parsed.success) throw new Error("malformed stored Selection service evidence");
   return parsed.data;
 }
 
-function decodedFleetResult(action: FleetRequest["action"], value: unknown): unknown {
+function decodedSelectionResult(action: SelectionRequest["action"], value: unknown): unknown {
   if (action === "akuma.tell-answer") return value;
   const schema =
     action === "akuma.wait"
-      ? fleetResultSchemas.wait
+      ? selectionResultSchemas.wait
       : action === "akuma.tell"
-        ? fleetResultSchemas.tell
+        ? selectionResultSchemas.tell
         : action === "akuma.tell-wait"
-          ? fleetResultSchemas.tellWait
-          : fleetResultSchemas.kill;
+          ? selectionResultSchemas.tellWait
+          : selectionResultSchemas.kill;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
   return parsed.data;
 }
 
 /** Akuma owns Body Request payload, live result, and durable service codecs for wait/tell/kill. */
-export function fleetRequestProtocol(
-  action: FleetRequest["action"],
-): RequestProtocol<FleetRequest, unknown, FleetService> {
+export function selectionRequestProtocol(
+  action: SelectionRequest["action"],
+): RequestProtocol<SelectionRequest, unknown, SelectionService> {
   return {
     action,
     supportsCancellation: true,
@@ -242,12 +242,12 @@ export function fleetRequestProtocol(
       const { action: _action, ...payload } = request;
       return payload;
     },
-    decodeRequest: (payload) => decodeFleetRequest(action, payload),
+    decodeRequest: (payload) => decodeSelectionRequest(action, payload),
     encodeResult: (result) => result,
-    decodeResult: (result) => decodedFleetResult(action, result),
-    encodeFailure: encodeFleetLiveFailure,
-    decodeFailure: decodeFleetLiveFailure,
-    decodeReference: (reference) => decodeFleetService(action, reference),
+    decodeResult: (result) => decodedSelectionResult(action, result),
+    encodeFailure: encodeSelectionLiveFailure,
+    decodeFailure: decodeSelectionLiveFailure,
+    decodeReference: (reference) => decodeSelectionService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||
       ((action === "akuma.tell" || action === "akuma.tell-answer" || action === "akuma.tell-wait") &&
@@ -256,16 +256,16 @@ export function fleetRequestProtocol(
   };
 }
 
-export function fleetRequestCommand(
-  action: FleetRequest["action"],
-  port: FleetRequestPort,
-): ServiceRequestCommand<FleetRequest, unknown, FleetService, FleetService> {
+export function selectionRequestCommand(
+  action: SelectionRequest["action"],
+  port: SelectionRequestPort,
+): ServiceRequestCommand<SelectionRequest, unknown, SelectionService, SelectionService> {
   return {
     completion: "service",
-    protocol: fleetRequestProtocol(action),
-    encodeService: (service) => decodeFleetService(action, service),
-    decodeService: (service) => decodeFleetService(action, service),
-    projectService: (service) => decodeFleetService(action, service),
+    protocol: selectionRequestProtocol(action),
+    encodeService: (service) => decodeSelectionService(action, service),
+    decodeService: (service) => decodeSelectionService(action, service),
+    projectService: (service) => decodeSelectionService(action, service),
     execute: async (request, facts) => {
       if (request.action === "akuma.wait") {
         return {
@@ -287,7 +287,7 @@ export function fleetRequestCommand(
         };
       }
       if (request.action === "akuma.tell-answer") {
-        if (port.tellAnswer === undefined) throw new Error("schema answer Fleet port is unavailable");
+        if (port.tellAnswer === undefined) throw new Error("schema answer Selection port is unavailable");
         return {
           result: await port.tellAnswer({
             target: request.target,
@@ -301,7 +301,7 @@ export function fleetRequestCommand(
         };
       }
       if (request.action === "akuma.tell-wait") {
-        if (port.tellWait === undefined) throw new Error("bounded Tell Fleet port is unavailable");
+        if (port.tellWait === undefined) throw new Error("bounded Tell Selection port is unavailable");
         return {
           result: await port.tellWait({
             target: request.target,
@@ -328,21 +328,21 @@ export function fleetRequestCommand(
   };
 }
 
-export function fleetRequestCommands(
-  port: FleetRequestPort,
+export function selectionRequestCommands(
+  port: SelectionRequestPort,
 ): Readonly<
   Record<"akuma.wait" | "akuma.tell" | "akuma.tell-answer" | "akuma.tell-wait" | "akuma.kill", ErasedRequestCommand>
 > {
   return {
-    "akuma.wait": eraseRequestCommand(fleetRequestCommand("akuma.wait", port)),
-    "akuma.tell": eraseRequestCommand(fleetRequestCommand("akuma.tell", port)),
-    "akuma.tell-answer": eraseRequestCommand(fleetRequestCommand("akuma.tell-answer", port)),
-    "akuma.tell-wait": eraseRequestCommand(fleetRequestCommand("akuma.tell-wait", port)),
-    "akuma.kill": eraseRequestCommand(fleetRequestCommand("akuma.kill", port)),
+    "akuma.wait": eraseRequestCommand(selectionRequestCommand("akuma.wait", port)),
+    "akuma.tell": eraseRequestCommand(selectionRequestCommand("akuma.tell", port)),
+    "akuma.tell-answer": eraseRequestCommand(selectionRequestCommand("akuma.tell-answer", port)),
+    "akuma.tell-wait": eraseRequestCommand(selectionRequestCommand("akuma.tell-wait", port)),
+    "akuma.kill": eraseRequestCommand(selectionRequestCommand("akuma.kill", port)),
   };
 }
 
-export async function requestForwardedFleetTellAnswer(
+export async function requestForwardedSelectionTellAnswer(
   input: Readonly<{
     directory: string;
     target: AkumaStatus["id"];
@@ -355,7 +355,7 @@ export async function requestForwardedFleetTellAnswer(
 ): Promise<unknown> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: fleetRequestProtocol("akuma.tell-answer"),
+    command: selectionRequestProtocol("akuma.tell-answer"),
     value: {
       action: "akuma.tell-answer",
       target: input.target,
@@ -378,37 +378,37 @@ export async function requestForwardedFleetTellAnswer(
   }
 }
 
-function forwardedFleetCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+function forwardedSelectionCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: "akuma.wait",
 ): AkumaWaitResult;
-function forwardedFleetCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+function forwardedSelectionCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: "akuma.tell",
 ): AkumaTellResult;
-function forwardedFleetCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+function forwardedSelectionCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: "akuma.tell-wait",
 ): AkumaTellWaitResult;
-function forwardedFleetCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
+function forwardedSelectionCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: "akuma.kill",
 ): AkumaKillResult;
-function forwardedFleetCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<FleetRequest, unknown, FleetService>>>,
-  action: FleetRequest["action"],
+function forwardedSelectionCommandResult(
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
+  action: SelectionRequest["action"],
 ): AkumaWaitResult | AkumaTellResult | AkumaTellWaitResult | AkumaKillResult {
   if (response.kind === "returned") {
     if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
     if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
     if (action === "akuma.tell-wait" && isTellWaitResult(response.result)) return response.result;
     if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
-    throw new Error(`transport integrity: request Fleet ${action} returned an invalid live result`);
+    throw new Error(`transport integrity: request Selection ${action} returned an invalid live result`);
   }
-  throw new Error("Akuma body request terminal Fleet reference cannot reproduce an expired live result");
+  throw new Error("Akuma body request terminal Selection reference cannot reproduce an expired live result");
 }
 
-export async function requestForwardedFleetWait(
+export async function requestForwardedSelectionWait(
   input: Readonly<{
     directory: string;
     targets: readonly AkumaStatus["id"][];
@@ -419,7 +419,7 @@ export async function requestForwardedFleetWait(
 ): Promise<AkumaWaitResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: fleetRequestProtocol("akuma.wait"),
+    command: selectionRequestProtocol("akuma.wait"),
     value: {
       action: "akuma.wait",
       targets: input.targets,
@@ -428,10 +428,10 @@ export async function requestForwardedFleetWait(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedFleetCommandResult(response, "akuma.wait");
+  return forwardedSelectionCommandResult(response, "akuma.wait");
 }
 
-export async function requestForwardedFleetTell(
+export async function requestForwardedSelectionTell(
   input: Readonly<{
     directory: string;
     target: AkumaStatus["id"];
@@ -442,7 +442,7 @@ export async function requestForwardedFleetTell(
 ): Promise<AkumaTellResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: fleetRequestProtocol("akuma.tell"),
+    command: selectionRequestProtocol("akuma.tell"),
     value: {
       action: "akuma.tell",
       target: input.target,
@@ -451,10 +451,10 @@ export async function requestForwardedFleetTell(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedFleetCommandResult(response, "akuma.tell");
+  return forwardedSelectionCommandResult(response, "akuma.tell");
 }
 
-export async function requestForwardedFleetTellWait(
+export async function requestForwardedSelectionTellWait(
   input: Readonly<{
     directory: string;
     target: AkumaStatus["id"];
@@ -468,7 +468,7 @@ export async function requestForwardedFleetTellWait(
 ): Promise<AkumaTellWaitResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: fleetRequestProtocol("akuma.tell-wait"),
+    command: selectionRequestProtocol("akuma.tell-wait"),
     value: {
       action: "akuma.tell-wait",
       target: input.target,
@@ -480,10 +480,10 @@ export async function requestForwardedFleetTellWait(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedFleetCommandResult(response, "akuma.tell-wait");
+  return forwardedSelectionCommandResult(response, "akuma.tell-wait");
 }
 
-export async function requestForwardedFleetKill(
+export async function requestForwardedSelectionKill(
   input: Readonly<{
     directory: string;
     targets: readonly AkumaStatus["id"][];
@@ -492,9 +492,9 @@ export async function requestForwardedFleetKill(
 ): Promise<AkumaKillResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: fleetRequestProtocol("akuma.kill"),
+    command: selectionRequestProtocol("akuma.kill"),
     value: { action: "akuma.kill", targets: input.targets },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedFleetCommandResult(response, "akuma.kill");
+  return forwardedSelectionCommandResult(response, "akuma.kill");
 }

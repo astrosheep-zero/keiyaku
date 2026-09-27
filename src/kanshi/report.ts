@@ -22,7 +22,7 @@ export type ContractHolderObservation =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "unavailable" }>;
 
-export type ContractFleetAttachment = Readonly<{
+export type ContractRosterAttachment = Readonly<{
   id: string;
   aliases: readonly AkumaAlias[];
 }>;
@@ -31,7 +31,7 @@ export type ContractKanshiRow = ContractBoard["rows"][number] &
   Readonly<{
     phase: ContractPhase;
     holder: ContractHolderObservation;
-    fleet: readonly ContractFleetAttachment[];
+    roster: readonly ContractRosterAttachment[];
     namespaceTasks?: Section<readonly TaskRow[]>;
     issue?: CurrentPhysicalIssue;
   }>;

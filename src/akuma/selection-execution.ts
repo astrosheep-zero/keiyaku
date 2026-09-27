@@ -10,7 +10,7 @@ import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import {
-  fleetResultSchemas,
+  selectionResultSchemas,
   parseAkumaObservation,
   type AkumaKillResult,
   type AkumaTellResult,
@@ -18,7 +18,7 @@ import {
   type AkumaTellWaitResult,
   type AkumaUnobserved,
   type AkumaWaitResult,
-} from "./fleet-observation.js";
+} from "./selection-observation.js";
 
 function source(path: WorldRoot) {
   return createAkumaProduct(path);
@@ -177,7 +177,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
     complete: (round) => roundComplete(round, input.completion),
     onObserve: async (round) => await observeRound(round),
   });
-  return fleetResultSchemas.wait.parse({
+  return selectionResultSchemas.wait.parse({
     mode: input.completion,
     reason: waited.reason,
     observations: waited.value.observations.map((observation) => akumaOnlyObservation(observation.status)),
@@ -209,7 +209,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   input.signal?.throwIfAborted();
-  return fleetResultSchemas.tell.parse({
+  return selectionResultSchemas.tell.parse({
     akuma: input.id,
     tell,
   });
@@ -291,7 +291,7 @@ export async function observeAdmittedTellWaitAkuma(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
-  return fleetResultSchemas.tellWait.parse({
+  return selectionResultSchemas.tellWait.parse({
     akuma: input.id,
     tell: settled ?? tell,
     observation: tellWaitObservation(observed),
@@ -345,7 +345,7 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
     handles.map(async (handle) => await handle.kill(input.signal === undefined ? {} : { signal: input.signal })),
   );
   input.signal?.throwIfAborted();
-  return fleetResultSchemas.kill.parse({
+  return selectionResultSchemas.kill.parse({
     results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),
   });
 }

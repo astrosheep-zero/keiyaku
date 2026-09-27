@@ -83,7 +83,7 @@ export type AkumaCallExecution = Readonly<{
 
 export type AkumaCallInput = Readonly<{
   archetype: string;
-  body: string;
+  body?: string;
   cwd?: string;
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
@@ -122,7 +122,7 @@ export function wait(milliseconds: number): Promise<void> {
 
 export {
   bornStatus,
-  fleetListRow,
+  rosterListRow,
   readAkumaBirthCwd,
   readBudgetedStatus,
   type BudgetedStatusObservation,
