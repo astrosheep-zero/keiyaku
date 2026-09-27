@@ -120,10 +120,13 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
     alias: result.result.alias,
   });
   if (result.result.observation.kind === "detached" || result.result.observation.kind === "born") {
+    const branches = [
+      ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
+      safeText(result.result.execution.cwd),
+    ];
     return [
       associatedIdentity(result.result.akuma, head.alias),
-      ...(head.contract.kind === "associated" ? [`  -> ${safeText(head.contract.contractId)}`] : []),
-      `  cwd  ${safeText(result.result.execution.cwd)}`,
+      ...branches.map((fact, index) => `${index === branches.length - 1 ? "└─" : "├─"} ${fact}`),
       ...head.facts,
     ].join("\n");
   }

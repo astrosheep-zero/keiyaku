@@ -43,6 +43,10 @@ the integrated object, and the final lifecycle state is one explicit row. An
 incomplete placement keeps its tender and content-identity rows and its
 current diagnostic shape.
 
+A birth or admission receipt is the identity frame head alone: the complete
+identity roots one line, and each coordinate fact hangs as one tree branch
+beneath it. Labels, arrows, and key-value columns are not receipt vocabulary.
+
 ## Shared rendering
 
 Each domain-state-to-mark mapping and refusal receipt assembly has one

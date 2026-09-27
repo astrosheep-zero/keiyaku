@@ -64,9 +64,19 @@ test("call defaults to detached birth and rejects removed detach flags", () => {
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
   const text = renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }));
-  assert.match(text, /cwd/u);
-  assert.ok(text.split("\n").includes(`  cwd  ${world}`));
-  assert.doesNotMatch(text, /keiyaku wait|to wait|-----|📁/u);
+  assert.equal(text, [`${akuma}`, `└─ ${world}`].join("\n"));
+  assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁/u);
+});
+
+test("a contract-bound call receipt hangs contract and cwd as tree branches", () => {
+  const text = renderAkumaText(
+    command,
+    detachedCall({
+      dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
+      alias: { kind: "aliased", alias: { alias: "@sapling" as AkumaAlias, akuId: akuma }, previous: null },
+    }),
+  );
+  assert.equal(text, [`${akuma} (@sapling)`, `├─ kei/tree-receipt`, `└─ ${world}`].join("\n"));
 });
 
 
@@ -91,9 +101,8 @@ function observingCall(
 test("prompt-free call renders its born identity without a Tell receipt", () => {
   const result = observingCall({ kind: "born" });
   const text = renderAkumaText(command, result);
-  assert.match(text, /aku\/worker\/1234abcd/u);
-  assert.match(text, /cwd/u);
-  assert.doesNotMatch(text, /tell|answer/u);
+  assert.equal(text, [`${akuma}`, `└─ ${world}`].join("\n"));
+  assert.doesNotMatch(text, /tell|answer|cwd|->/u);
   assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
 });
 test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
