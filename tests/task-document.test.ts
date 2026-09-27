@@ -16,6 +16,7 @@ import {
 
 test("task identity normalizes titles, fits new stems by whole words, and supports nested namespaces", () => {
   assert.equal(deriveLocalStem("  Ship Native Task!  "), "ship-native-task");
+  assert.equal(deriveLocalStem("Ship review.v2 notes"), "ship-review.v2-notes");
   assert.equal(deriveLocalStem("one two three four five six seven eight nine ten"), "one-two-three-four-five-six");
   assert.equal(
     deriveLocalStem("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"),
@@ -24,6 +25,10 @@ test("task identity normalizes titles, fits new stems by whole words, and suppor
   const id = formatTaskId({ namespace: ["contract", "internal"], localId: "ship-native-task" });
   assert.equal(id, "task/contract/internal/ship-native-task");
   assert.deepEqual(parseTaskId(id), { namespace: ["contract", "internal"], localId: "ship-native-task" });
+  const dotted = formatTaskId({ namespace: ["kei", "tell.ask"], localId: "ship-review.v2-notes" });
+  assert.equal(dotted, "task/kei/tell.ask/ship-review.v2-notes");
+  assert.deepEqual(parseTaskId(dotted), { namespace: ["kei", "tell.ask"], localId: "ship-review.v2-notes" });
+  assert.throws(() => parseTaskId("task/foo..bar"), /noncanonical segment/u);
 });
 
 test("task physical local-ID budget fits authority and lock components", () => {

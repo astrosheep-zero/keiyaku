@@ -25,15 +25,24 @@ export function validateAkumaName(value: string): string {
 export function normalizeIdentityStem(input: Readonly<{ source: string }>): string {
   const source = input.source.normalize("NFKC").toLowerCase().normalize("NFKC");
   let result = "";
-  let separator = false;
+  // A pending separator run is a dot only while every grapheme in it is one;
+  // any other separator grapheme demotes the whole run to a dash.
+  let separator: "none" | "dot" | "dash" = "none";
   for (const segment of graphemes(source)) {
     if (!WORD_GRAPHEME.test(segment) && !EMOJI_GRAPHEME.test(segment)) {
-      separator ||= result.length > 0;
+      if (result.length > 0) {
+        if (segment === ".") {
+          if (separator === "none") separator = "dot";
+        } else {
+          separator = "dash";
+        }
+      }
       continue;
     }
-    if (separator) result += "-";
+    if (separator === "dot") result += ".";
+    else if (separator === "dash") result += "-";
     result += segment;
-    separator = false;
+    separator = "none";
   }
   return result;
 }
@@ -48,7 +57,9 @@ export function fitIdentityStemWords(
     throw new Error("identity stem code point budget must be a positive safe integer");
   }
   const words = input.stem.split("-");
-  let fitted = truncateGraphemes(words[0]!, input.maxCodePoints);
+  // Strip before counting: a truncated head must not glue its dangling dot to
+  // the next word's dash.
+  let fitted = truncateGraphemes(words[0]!, input.maxCodePoints).replace(/[-.]+$/u, "");
   let count = [...fitted].length;
   for (const word of words.slice(1)) {
     const candidate = count + 1 + [...word].length;
@@ -56,6 +67,7 @@ export function fitIdentityStemWords(
     fitted += `-${word}`;
     count = candidate;
   }
+  fitted = fitted.replace(/[-.]+$/u, "");
   if (fitted.length === 0) throw new Error("identity stem is empty after fitting");
   return fitted;
 }
@@ -94,7 +106,7 @@ export function fitIdentityStem(
     if (Buffer.byteLength(stem + segment) > budget) break;
     stem += segment;
   }
-  stem = stem.replace(/-+$/u, "");
+  stem = stem.replace(/[-.]+$/u, "");
   if (stem.length === 0) throw new Error("identity stem is empty after fitting");
   return stem + suffix;
 }

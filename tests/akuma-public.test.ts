@@ -1695,6 +1695,28 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
   }
 });
 
+test("dotted archetype file stems join the catalogue as canonical names", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-root-"));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-home-"));
+  try {
+    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "review.v2.md"), "---\nprovider: claude\n---\nDotted.\n");
+    writeFileSync(join(home, "akuma", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+    writeFileSync(join(home, "akuma", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+
+    const catalog = await listArchetypeDefinitions({ project: root, home });
+    assert.deepEqual(catalog, { rows: [{ name: "review.v2" }], hasMore: false });
+
+    const settingsValue = await settings({ root, home });
+    const dotted = await loadArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
+    assert.equal(dotted.path, join(home, "akuma", "review.v2.md"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("hidden archetypes stay callable but leave the catalogue", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-root-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-home-"));

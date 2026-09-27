@@ -53,6 +53,32 @@ test("identity normalization retains words and complete emoji graphemes", () => 
   assert.equal(normalizeIdentityStem({ source: "  修复 REVIEW 👩‍💻 / 🇨🇳 证据  " }), "修复-review-👩‍💻-🇨🇳-证据");
 });
 
+test("identity normalization keeps a dot as a sticky inner joiner", () => {
+  assert.equal(normalizeIdentityStem({ source: "foo.bar" }), "foo.bar");
+  assert.equal(normalizeIdentityStem({ source: "foo..bar" }), "foo.bar");
+  assert.equal(normalizeIdentityStem({ source: "foo. -bar" }), "foo-bar");
+  assert.equal(normalizeIdentityStem({ source: "foo-.-bar" }), "foo-bar");
+  assert.equal(normalizeIdentityStem({ source: ".foo.bar." }), "foo.bar");
+  assert.equal(normalizeIdentityStem({ source: "ｆｏｏ．ｂａｒ" }), "foo.bar");
+  assert.equal(normalizeIdentityStem({ source: "Fix the .NET runtime" }), "fix-the-net-runtime");
+  assert.equal(normalizeIdentityStem({ source: "修复.review.证据" }), "修复.review.证据");
+  assert.equal(normalizeIdentityStem({ source: "👩‍💻.🇨🇳" }), "👩‍💻.🇨🇳");
+  assert.equal(normalizeIdentityStem({ source: "..." }), "");
+  for (const source of ["foo.bar", "foo..bar", ".foo.bar.", "foo. -bar", "..."]) {
+    const once = normalizeIdentityStem({ source });
+    assert.equal(normalizeIdentityStem({ source: once }), once);
+  }
+});
+
+test("identity fitting never leaves a dangling separator at a truncation edge", () => {
+  assert.equal(fitIdentityStem({ stem: "foo.bar", maxBytes: 4 }), "foo");
+  assert.equal(fitIdentityStem({ stem: "foo.bar", maxBytes: 5 }), "foo.b");
+  assert.equal(fitIdentityStemWords({ stem: "foo.bar-baz", maxCodePoints: 4 }), "foo");
+  // The head truncation stops after a wide grapheme with budget to spare: its
+  // dangling dot must be stripped before the next word joins with a dash.
+  assert.equal(fitIdentityStemWords({ stem: "ab.👨‍👩‍👧x-cd", maxCodePoints: 6 }), "ab-cd");
+});
+
 test("identity normalization is idempotent and removes filename punctuation", () => {
   const sources = [`ＡＢＣ < > : " / \\ | ? * ... 修复`, "  Mixed---CASE / punctuation  ", "👩‍💻 / 🇨🇳 / 证据"];
   for (const source of sources) {

@@ -96,7 +96,7 @@ function fitPhysicalStem(stem: string, suffix?: string): string {
     if (Buffer.byteLength(result + segment.segment) > maxBytes) break;
     result += segment.segment;
   }
-  result = result.replace(/-+$/u, "");
+  result = result.replace(/[-.]+$/u, "");
   if (result.length === 0) throw new TypeError("task title cannot fit the physical filename budget");
   return result;
 }

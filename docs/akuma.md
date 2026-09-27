@@ -44,7 +44,9 @@ Stopping a Body preserves Soul, sessions, history, pending tells, and requests.
 An Archetype is call-time personality and provider configuration. Its exact
 Markdown grammar is edge detail; admission rejects malformed, unknown, or
 unsupported provider input before allocation. Later Archetype or Settings edits
-change only future births. A missing native resume promise never authorizes
+change only future births. A definition file joins the catalogue exactly when
+its stem is one canonical name under [model.md](model.md); when the spelling
+rule widens, previously inadmissible files become live Archetypes unchanged. A missing native resume promise never authorizes
 reconstructing one.
 
 Archetype definitions may come from both the current project and Home. A

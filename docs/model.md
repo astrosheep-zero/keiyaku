@@ -46,7 +46,12 @@ its constructor, validation, collision policy, and persistence; consumers do
 not repair a bare or partial identity. Contract identity mints from the bound
 title as a word-boundary-fitted stem joined to a freshly drawn short random
 suffix; a collision redraws the suffix under a bounded attempt budget and then
-refuses rather than lengthening the identity. Acceptance is historical, not
+refuses rather than lengthening the identity. Human-facing identity stems
+admit exactly one canonical spelling per identity: letter case, compatibility
+forms, and separator runs fold, and a dot survives only as a sticky inner
+joiner between words of one segment, never at an edge, doubled, or mixed with
+other separators, so no canonical segment names a path special or a hidden
+file. Acceptance is historical, not
 constructive: every Contract identity minted under an earlier shape stays valid
 everywhere, and no stored fact is rewritten. Human-facing identity construction
 is stable and portable, while physical filesystem names remain Git's concern.
