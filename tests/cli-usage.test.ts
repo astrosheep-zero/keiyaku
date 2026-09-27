@@ -59,6 +59,12 @@ function runCli(cwd: string, argv: readonly string[], input?: string) {
   );
 }
 
+function builtCli(): string {
+  return fileURLToPath(
+    new URL(import.meta.url.endsWith(".js") ? "../../build/src/cli/index.js" : "../build/src/cli/index.js", import.meta.url),
+  );
+}
+
 test("a closed stdout pipe during a blocked large write exits silently", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-pipe-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -67,7 +73,7 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   const id = JSON.parse(added.stdout).value.id as string;
   const child = spawn(
     process.execPath,
-    [fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)), "task", "show", id, "--json"],
+    [builtCli(), "task", "show", id, "--json"],
     { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
   );
   let stderr = "";
@@ -197,7 +203,7 @@ test("audit show-diff preserves an actual candidate diff", () => {
   const bound = spawnSync(
     process.execPath,
     [
-      fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)),
+      builtCli(),
       "-C",
       repository.path,
       "bind",
@@ -218,7 +224,7 @@ test("audit show-diff preserves an actual candidate diff", () => {
   const audited = spawnSync(
     process.execPath,
     [
-      fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url)),
+      builtCli(),
       "-C",
       repository.path,
       "audit",

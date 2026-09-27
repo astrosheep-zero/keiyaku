@@ -45,7 +45,12 @@ const waitRequestSchema = z
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   }));
 const tellRequestSchema = z
-  .object({ target: akumaIdSchema, body: z.string(), initiator: nonblankTextSchema.optional(), interrupt: z.boolean().optional() })
+  .object({
+    target: akumaIdSchema,
+    body: z.string(),
+    initiator: nonblankTextSchema.optional(),
+    interrupt: z.boolean().optional(),
+  })
   .strict()
   .transform((request) => ({ action: "akuma.tell" as const, ...request }));
 const askRequestSchema = z
@@ -227,8 +232,7 @@ export function selectionRequestProtocol(
     decodeReference: (reference) => decodeSelectionService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||
-      ((action === "akuma.tell" || action === "akuma.ask") &&
-        allowed.includes("akuma.tell")) ||
+      ((action === "akuma.tell" || action === "akuma.ask") && allowed.includes("akuma.tell")) ||
       (action === "akuma.kill" && allowed.includes("akuma.kill")),
   };
 }
@@ -294,9 +298,7 @@ export function selectionRequestCommand(
 
 export function selectionRequestCommands(
   port: SelectionRequestPort,
-): Readonly<
-  Record<"akuma.wait" | "akuma.tell" | "akuma.ask" | "akuma.kill", ErasedRequestCommand>
-> {
+): Readonly<Record<"akuma.wait" | "akuma.tell" | "akuma.ask" | "akuma.kill", ErasedRequestCommand>> {
   return {
     "akuma.wait": eraseRequestCommand(selectionRequestCommand("akuma.wait", port)),
     "akuma.tell": eraseRequestCommand(selectionRequestCommand("akuma.tell", port)),

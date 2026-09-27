@@ -167,6 +167,17 @@ test("verification admission reuses an identical current attestation", () => {
   assert.equal(
     reusableVerificationAttestation(
       current,
+      dependencyKeySet([
+        { kind: "snapshot", value: snapshotId("snapshot") },
+        { kind: "segment", value: documentSegmentKey("amended-verification") },
+      ]),
+      "satisfied",
+    ),
+    undefined,
+  );
+  assert.equal(
+    reusableVerificationAttestation(
+      current,
       dependencyKeySet([{ kind: "snapshot", value: snapshotId("different") }]),
       "satisfied",
     ),

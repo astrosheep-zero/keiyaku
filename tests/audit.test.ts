@@ -145,7 +145,7 @@ test("audit without Verification still returns an accepted ready candidate", asy
   assert.equal(result.value.target.kind, "not-observed");
 });
 
-test("Verification reuse requires its exact producer subject", async () => {
+test("Verification reuse reads the durable current testimony, not a caller's state copy", async () => {
   const { repository, state } = await failedStoredVerification();
   const definition = verificationDefinition(decodeContractDocument(state.terms.document.bytes))!;
   const unrelated = {
@@ -170,7 +170,11 @@ test("Verification reuse requires its exact producer subject", async () => {
   );
   assert.ok(result !== null);
   if (!("kind" in result.step)) throw new Error("verification did not return a protocol result");
-  assert.equal(result.step.kind, "accepted");
+  assert.equal(result.step.kind, "reused");
+  if (result.step.kind === "reused") {
+    assert.equal(result.step.reuse.entry, state.attestations.at(-1)!.entry);
+    assert.notEqual(result.step.reuse.entry, unrelated.entry);
+  }
 });
 
 // Test declaration admission at its owner, without binding two complete worktrees.

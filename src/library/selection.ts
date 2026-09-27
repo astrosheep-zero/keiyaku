@@ -59,7 +59,8 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     signal?: AbortSignal;
   }>;
 
-export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; interrupt?: boolean; initiator?: string; signal?: AbortSignal }>;
+export type AkumaTellInput = AkumaAddressInput &
+  Readonly<{ body: string; interrupt?: boolean; initiator?: string; signal?: AbortSignal }>;
 export type AkumaAskInput<T = string> = AkumaAddressInput &
   Readonly<{
     body: string;
@@ -456,12 +457,13 @@ function validateAskInput(
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  if (values.timeoutMs !== undefined && (
-    typeof values.timeoutMs !== "number" ||
-    !Number.isFinite(values.timeoutMs) ||
-    !Number.isInteger(values.timeoutMs) ||
-    values.timeoutMs < 0
-  )) {
+  if (
+    values.timeoutMs !== undefined &&
+    (typeof values.timeoutMs !== "number" ||
+      !Number.isFinite(values.timeoutMs) ||
+      !Number.isInteger(values.timeoutMs) ||
+      values.timeoutMs < 0)
+  ) {
     throw new TypeError("timeoutMs must be a nonnegative finite millisecond duration");
   }
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
@@ -490,7 +492,11 @@ export async function askAkuma<T = string>(
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
-    return (input.schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, input.schema) }) as AkumaAskResult<T>;
+    return (
+      input.schema === undefined
+        ? result
+        : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
+    ) as AkumaAskResult<T>;
   }
   const addressed = await addressAkuma(directAddress(values));
   const result = await executeAskAkuma({
@@ -504,7 +510,11 @@ export async function askAkuma<T = string>(
     ...(input.observe === undefined ? {} : { onObserve: input.observe }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
-  return (input.schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, input.schema) }) as AkumaAskResult<T>;
+  return (
+    input.schema === undefined
+      ? result
+      : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
+  ) as AkumaAskResult<T>;
 }
 
 function validateHistoryInput(values: Record<string, unknown>): void {

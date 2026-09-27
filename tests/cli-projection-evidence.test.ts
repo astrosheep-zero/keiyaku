@@ -154,7 +154,12 @@ test("integration refusal keeps its reason distinct from the target coordinate",
     "  ",
     120,
   );
-  assert.deepEqual(lines, ["  integration-failed  kei/conflict", "  reason  conflict", `  target  ${target}`]);
+  assert.deepEqual(lines, [
+    "  diagnostic  integration failed",
+    "  contract  kei/conflict",
+    "  reason  conflict",
+    `  target  ${target}`,
+  ]);
 });
 
 test("bind draft facts preserve optional evidence without a separate text dialect", () => {
@@ -223,7 +228,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
   assert.equal(
     output,
     [
-      "history  kei/history · 4 journal · 0 dispatch",
+      "history  kei/history · 4 journal entries",
       "",
       `${at} bind · ${entries[0]} · reviewer`,
       "  start commit  start",
@@ -432,8 +437,7 @@ test("audit separates its observation outcome from complete candidate coordinate
       `  tender commit  ${"a".repeat(40)}`,
       `  integration commit  ${"c".repeat(40)}`,
       `  content identity (not commit)  ${"d".repeat(40)}`,
-      "  workspace  worktree",
-      "  worktree  /worktree",
+      "  workspace  worktree  /worktree",
       "  1 file changed, 2 insertions(+), 3 deletions(-)",
       `  ${path}`,
       "  verification  not-run",

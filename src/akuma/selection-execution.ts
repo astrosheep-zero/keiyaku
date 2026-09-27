@@ -238,10 +238,7 @@ function askObservation(observed: Awaited<ReturnType<AkumaHandle["tellOutcome"]>
   };
 }
 
-export function decodeAskObservation<T>(
-  observation: AkumaAskObservation,
-  schema: Schema<T>,
-): AkumaAskObservation<T> {
+export function decodeAskObservation<T>(observation: AkumaAskObservation, schema: Schema<T>): AkumaAskObservation<T> {
   if (observation.reason !== "answered") return observation;
   let value = observation.answer;
   if (typeof value === "string") {

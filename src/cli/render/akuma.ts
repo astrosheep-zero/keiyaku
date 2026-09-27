@@ -214,8 +214,7 @@ function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>
   return result.result.tell.wake.kind === "failed" ? 2 : 0;
 }
 function askExitCode(result: Extract<AkumaInvocationResult, { action: "ask" }>): number {
-  return result.result.observation.reason === "failed" || result.result.observation.reason === "invalid-output"
-    ? 2 : 0;
+  return result.result.observation.reason === "failed" || result.result.observation.reason === "invalid-output" ? 2 : 0;
 }
 function forkExitCode(result: Extract<AkumaInvocationResult, { action: "fork" }>): number {
   return result.receipt.kind === "forked" ? 0 : result.receipt.kind === "upstream-forked" ? 2 : 1;

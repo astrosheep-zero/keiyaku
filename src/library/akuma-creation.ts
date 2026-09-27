@@ -16,11 +16,7 @@ import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
-import {
-  decodeAskObservation,
-  observeAdmittedAskAkuma,
-  type AskObserver,
-} from "../akuma/selection-execution.js";
+import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/selection-execution.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import type { TellResult } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";

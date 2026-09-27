@@ -7,7 +7,7 @@ import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { activeContract } from "../core/facts/observation.js";
-import { dependencyKeySet, dependencyKeys } from "../core/subject.js";
+import { dependencyKeySet } from "../core/subject.js";
 import type {
   ActorId,
   AttestationEntry,
@@ -209,11 +209,7 @@ export function reusableVerificationAttestation(
   subject: DependencyKeySet,
   verdict: "satisfied" | "unsatisfied",
 ): CurrentVerifiedAttestation | undefined {
-  const currentSnapshot =
-    current === undefined ? undefined : dependencyKeys(current.data.subject).find((key) => key.kind === "snapshot");
-  const subjectSnapshot = dependencyKeys(subject).find((key) => key.kind === "snapshot");
-  if (current === undefined || currentSnapshot?.value !== subjectSnapshot?.value || current.data.verdict !== verdict)
-    return undefined;
+  if (current === undefined || current.data.subject !== subject || current.data.verdict !== verdict) return undefined;
   return {
     entry: current.entry,
     verdict: current.data.verdict,

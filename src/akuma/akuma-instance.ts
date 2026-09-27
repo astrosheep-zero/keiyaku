@@ -35,8 +35,8 @@ export type AkumaBirthInput = Readonly<{
 }>;
 
 export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boolean; initiator?: string }>;
-export type AkumaAskOptions<T> = AkumaTellOptions & Readonly<{ timeoutMs?: number; schema?: Schema<T> | StandardSchemaV1<T> }>;
-
+export type AkumaAskOptions<T> = AkumaTellOptions &
+  Readonly<{ timeoutMs?: number; schema?: Schema<T> | StandardSchemaV1<T> }>;
 
 function signalOption(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
@@ -106,7 +106,9 @@ export class Akuma {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     return executeTellAkuma({
-      path: this.root, id: this.id, body: text,
+      path: this.root,
+      id: this.id,
+      body: text,
       ...(options.interrupt === true ? { interrupt: true } : {}),
       ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
       ...(signal === undefined ? {} : { signal }),
@@ -114,27 +116,39 @@ export class Akuma {
   }
 
   async ask(text: string, options?: AkumaAskOptions<string>): Promise<AkumaAskResult<string>>;
-  async ask<T>(text: string, options: AkumaAskOptions<T> & Readonly<{ schema: Schema<T> | StandardSchemaV1<T> }>): Promise<AkumaAskResult<T>>;
+  async ask<T>(
+    text: string,
+    options: AkumaAskOptions<T> & Readonly<{ schema: Schema<T> | StandardSchemaV1<T> }>,
+  ): Promise<AkumaAskResult<T>>;
   async ask<T>(text: string, options: AkumaAskOptions<T> = {}): Promise<AkumaAskResult<string | T>> {
     if (typeof text !== "string") throw new TypeError("Akuma ask text must be a string");
     if (typeof options !== "object" || options === null || Array.isArray(options))
       throw new TypeError("Akuma ask options must be an object");
-    const unknown = Object.keys(options).find((key) => !["schema", "timeoutMs", "interrupt", "initiator", "signal"].includes(key));
+    const unknown = Object.keys(options).find(
+      (key) => !["schema", "timeoutMs", "interrupt", "initiator", "signal"].includes(key),
+    );
     if (unknown !== undefined) throw new TypeError(`Akuma ask options has unknown field: ${unknown}`);
-    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || !Number.isInteger(options.timeoutMs) || options.timeoutMs < 0))
+    if (
+      options.timeoutMs !== undefined &&
+      (!Number.isFinite(options.timeoutMs) || !Number.isInteger(options.timeoutMs) || options.timeoutMs < 0)
+    )
       throw new TypeError("Akuma ask timeoutMs must be a nonnegative finite millisecond duration");
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     const schema = options.schema === undefined ? undefined : schemaFromStandard(options.schema);
     const result = await executeAskAkuma({
-      path: this.root, id: this.id, body: text,
+      path: this.root,
+      id: this.id,
+      body: text,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(schema === undefined ? {} : { schemaJson: schemaJsonText(schema) }),
       ...(options.interrupt === true ? { interrupt: true } : {}),
       ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
       ...(signal === undefined ? {} : { signal }),
     });
-    return (schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }) as AkumaAskResult<string | T>;
+    return (
+      schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }
+    ) as AkumaAskResult<string | T>;
   }
 
   async status(): Promise<AkumaStatus> {

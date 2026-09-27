@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { renderAkumaUsage } from "../src/cli/commands/akuma.js";
 import {
   installAssetsRoot,
   installExitCode,
@@ -116,14 +115,15 @@ test("the bundled Akuma skill links to its packaged automation guide", () => {
   assert.ok(guide.includes("Schema.zod"));
 });
 
-test("bundled instructions keep facade and standalone Akuma call surfaces distinct", () => {
+test("bundled instructions keep invocation and execution coordinates distinct", () => {
   const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
-  const call = renderAkumaUsage("call").slice("usage  keiyaku ".length);
-  const canonical = `keiyaku -C <cwd> ${call}`;
-  const standalone = canonical.replace(" [--contract <kei/...>]", "");
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
-  assert.ok(rootSkill.includes(canonical));
-  assert.ok(akumaSkill.includes(standalone));
+  assert.match(rootSkill, /`-C` selects the invocation cwd and therefore the World/u);
+  assert.match(rootSkill, /`call\s*\n--workdir <path>` selects execution cwd/u);
+  assert.match(rootSkill, /`--contract` associates a\s*\nContract without selecting an execution directory/u);
+  assert.match(akumaSkill, /Read `call --help` for flag syntax/u);
+  assert.match(akumaSkill, /`--contract` only records the association/u);
+  assert.match(akumaSkill, /`--workdir <path>` when needed/u);
   assert.doesNotMatch(akumaSkill, /\bpersona\b|--persona/iu);
 });
