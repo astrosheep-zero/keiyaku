@@ -21,6 +21,7 @@ type LocalArchetype = Readonly<{
   base?: string;
   provider?: string;
   description?: string;
+  hidden?: boolean;
   options: ProviderOptions;
   allowed?: AllowedActions;
   allowedPresent: boolean;
@@ -31,6 +32,7 @@ type DecodedArchetype = Readonly<{
   path: string;
   provider: string;
   description?: string;
+  hidden?: boolean;
   options: ProviderOptions;
   allowed: AllowedActions;
 }>;
@@ -162,6 +164,13 @@ function archetypeEnum<T extends string>(
   return value as T;
 }
 
+function archetypeBoolean(values: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
+  const value = values[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new TypeError(`Akuma ${key} must be a boolean`);
+  return value;
+}
+
 type ArchetypeFrontmatter = Readonly<{
   lines: readonly string[];
   closing: number;
@@ -189,6 +198,7 @@ type ArchetypeFields = Readonly<{
   effort?: string;
   network?: "disabled" | "enabled";
   description?: string;
+  hidden?: boolean;
   allowed?: AllowedActions;
   allowedPresent: boolean;
   systemPromptMode?: "append" | "replace";
@@ -202,6 +212,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
   const effort = archetypeField(values, "effort");
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
+  const hidden = archetypeBoolean(values, "hidden");
   const allowedPresent = "allowed" in values;
   const allowed = allowedPresent ? decodeAllowedActions(values.allowed) : undefined;
   const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
@@ -212,6 +223,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
     ...(effort === undefined ? {} : { effort }),
     ...(network === undefined ? {} : { network }),
     ...(description === undefined ? {} : { description }),
+    ...(hidden === undefined ? {} : { hidden }),
     ...(allowed === undefined ? {} : { allowed }),
     allowedPresent,
     ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
@@ -231,6 +243,7 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
     ...(fields.base === undefined ? {} : { base: fields.base }),
     ...(fields.provider === undefined ? {} : { provider: fields.provider }),
     ...(fields.description === undefined ? {} : { description: fields.description }),
+    ...(fields.hidden === undefined ? {} : { hidden: fields.hidden }),
     options: decodeProviderOptions({
       ...(fields.model === undefined ? {} : { model: fields.model }),
       ...(fields.effort === undefined ? {} : { effort: fields.effort }),
@@ -261,6 +274,8 @@ function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetyp
         ? {}
         : { description: base.description }
       : { description: local.description }),
+    // Hiddenness is the file's own catalogue visibility; it never flows through base.
+    ...(local.hidden === true ? { hidden: true } : {}),
     options,
     allowed,
   });
@@ -339,22 +354,10 @@ export async function listArchetypeDefinitions(
   // definition in catalog byte order, not whichever read happened to finish first.
   const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
   const all = await archetypePaths(input);
-  const selected =
-    limit === undefined
-      ? { paths: all, hasMore: false }
-      : (() => {
-          const paths = all.slice(0, limit + 1);
-          return { paths: paths.slice(0, limit), hasMore: paths.length > limit };
-        })();
   const settled = await Promise.allSettled(
-    selected.paths.map(async ({ name, path }) => {
+    all.map(async ({ name, path }) => {
       try {
-        const definition = await resolveArchetype(name, input, undefined);
-        return Object.freeze({
-          name: definition.name,
-          ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
-          ...(definition.description === undefined ? {} : { description: definition.description }),
-        });
+        return await resolveArchetype(name, input, undefined);
       } catch (error) {
         if (error instanceof AkumaArchetypeError) throw error;
         throw new AkumaArchetypeError(
@@ -367,9 +370,19 @@ export async function listArchetypeDefinitions(
   );
   const firstInvalid = settled.find((result) => result.status === "rejected");
   if (firstInvalid !== undefined) throw firstInvalid.reason;
+  const visible = settled
+    .map((result) => (result as PromiseFulfilledResult<DecodedArchetype>).value)
+    .filter((definition) => definition.hidden !== true)
+    .map((definition) =>
+      Object.freeze({
+        name: definition.name,
+        ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
+        ...(definition.description === undefined ? {} : { description: definition.description }),
+      }),
+    );
   return {
-    rows: settled.map((result) => (result as PromiseFulfilledResult<ArchetypeCatalogRow>).value),
-    hasMore: selected.hasMore,
+    rows: limit === undefined ? visible : visible.slice(0, limit),
+    hasMore: limit === undefined ? false : visible.length > limit,
   };
 }
 

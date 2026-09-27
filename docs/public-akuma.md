@@ -84,7 +84,11 @@ separate post-action observation.
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
 or reopen the whole roster. Archetype definitions are listed by the archetype
-owner. There is no cross-product SDK catalogue or `ls` operation. The CLI's
+owner. An archetype definition may declare `hidden: true`: a hidden definition
+never appears in the archetype catalogue, but it resolves and answers calls by
+name exactly as a visible one, and hiddenness is the definition's own
+catalogue visibility, never inherited through `base`. There is no
+cross-product SDK catalogue or `ls` operation. The CLI's
 `ls` command adapts Contract, Akuma, archetype, and Task listing through their
 respective owners, and renderers consume those adjudicated values without
 performing their own owner lookup.

@@ -1695,6 +1695,35 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
   }
 });
 
+test("hidden archetypes stay callable but leave the catalogue", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-root-"));
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-home-"));
+  try {
+    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+    mkdirSync(join(home, "akuma"));
+    writeFileSync(join(home, "akuma", "visible.md"), "---\nprovider: claude\n---\nVisible.\n");
+    writeFileSync(join(home, "akuma", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
+    writeFileSync(join(home, "akuma", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
+
+    const catalog = await listArchetypeDefinitions({ project: root, home });
+    assert.deepEqual(catalog, { rows: [{ name: "child" }, { name: "visible" }], hasMore: false });
+    assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 1 }), {
+      rows: [{ name: "child" }],
+      hasMore: true,
+    });
+
+    const settingsValue = await settings({ root, home });
+    const hidden = await loadArchetype({ name: "secret", project: root, home, settings: settingsValue });
+    assert.equal(hidden.path, join(home, "akuma", "secret.md"));
+
+    writeFileSync(join(home, "akuma", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
+    await assert.rejects(listArchetypeDefinitions({ project: root, home }), /hidden must be a boolean/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("list silently skips identities whose compact row cannot be read", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-list-schema-cut-");
   const heartCut = await allocateAkumaDirectory({
