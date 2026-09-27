@@ -47,6 +47,16 @@ question at the first doubt, not at delivery.
 **Lightest lane.** Keep each lane as light as it can be; do not babysit what
 does not move without you.
 
+## Failure Shapes
+
+| Observed shape | First response |
+| --- | --- |
+| Silent wedge: initial answer empty and worktree clean | Inspect status and history, then send one steering `tell`. If the worker remains unresponsive, `kill` and call a new Akuma; an empty answer alone is not proof the Contract failed. |
+| Verdict record refused with `not-allowed` | Read the worker's analysis in history; call a new Reviewer with the grant from `keiyaku-workflow`, then have it inspect current work and record a fresh verdict. The refused request wrote no Contract testimony. |
+| Review stale after changed candidate tender | Normal content-currentness result. Give the same Reviewer the changed diff and current terms with `tell`; have it re-examine and record current testimony. A target move alone does not stale review. |
+| Target moved under the appointed worktree | Have the Deliverer inspect target movement and merge the target branch (main when selected) in that worktree when required; resolve conflicts there, then audit again. Do not resolve against a stale integration preview. |
+| Typed refusal names its rule | Fix the named input or physical condition, then retry from a fresh observation. Do not repeat the same request blindly. |
+
 ## What Babysitting Never Owns
 
 Commands and semantics belong to task, bind, workflow, and akuma. Acceptance

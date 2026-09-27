@@ -20,10 +20,6 @@ loop to one Aku in a single commission; the harness serves both styles
 equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
 `keiyaku-akuma` for invocation.
 
-Gate selections accept literal gate words and configured bundles together;
-`--gates ""` explicitly selects no gates. Consult `bind --help` and
-`amend --help` for expansion, defaults, and replacement semantics.
-
 ## Quick Start
 
 ```bash
@@ -35,20 +31,11 @@ keiyaku -C <repo> deliver [<contract>|@<contract>]
 keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
 ```
 
-```bash
-keiyaku -C <cwd> call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]
-keiyaku -C <repo> wait <akuma-selector>... [--any | --all]
-keiyaku -C <repo> tell <aku/...|@alias> (<prompt> | -)
-```
-
 `-C` selects the invocation cwd and therefore the World. `--repo <path>` only
 selects the Contract repository; it never retargets that World. `call
 --workdir <path>` selects execution cwd (relative to the effective invocation
 cwd). Without it, the call uses the invocation cwd; `--contract` associates a
 Contract without selecting an execution directory.
-
-Repeated `--allowed` values add actions to the selected Akuma's defaults. A
-nested call can use only actions permitted by its direct parent Soul.
 
 `deliver`, `review`, and `audit` may take time after their leading admission.
 Their witnessed progress is ephemeral stderr output; stdout remains one final

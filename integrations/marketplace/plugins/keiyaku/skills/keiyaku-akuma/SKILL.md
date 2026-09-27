@@ -14,43 +14,18 @@ alias such as `@reviewer` is a shorter, world-local name.
 
 ## Call a new Akuma
 
-```bash
-keiyaku -C <cwd> call <akuma-name> [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]
-```
-
 The prompt is optional for prompt-free birth. Otherwise it is the new Akuma's
 first prompt: give it as one argument, or use `-` to read stdin, never both.
 Calls are detached by default: they return the new identity after birth without
 waiting for the first answer. Use explicit `--wait <duration>` when this
 invocation should block while observing that initial work. `--wait` only bounds
-this command; it never stops the Akuma.
-
-Useful options:
-
-- `--alias <name>` assigns a reusable world-local `@name` selector; `--alias @name` is also accepted. An existing alias moves to this Akuma.
-- `--contract <kei/...>` associates the Akuma with a Contract; it never selects an execution directory.
-- `--workdir <path>` chooses its execution directory; without it the call uses the invocation cwd.
-- `--allowed <product.action>` adds actions subject to the Akuma's restrictions.
-  Independent Contract review is not part of the ordinary delegation
-  baseline: a Reviewer that must record verdicts for a `reviewed` gate needs
-  `--allowed contract.review` at call time, or its `review` is refused and
-  the verdict never reaches the Contract.
-- `--schema <file>` requests a structured answer described by a JSON Schema.
+this command; it never stops the Akuma. Read `call --help` for flag syntax,
+defaults, and action vocabulary.
+For seat grants see `keiyaku-workflow`'s table; Reviewers need `--allowed contract.review`.
 
 The selected Akuma name is a reusable worker configuration, not an individual.
 Calling it again creates an independent Akuma. Use different names for
 capabilities, not merely for parallelism.
-
-## Public-library core example
-
-```ts
-import { Akuma, Akumas, World } from "@astrosheep/keiyaku";
-
-const root = await World.at(process.cwd());
-const called = await Akumas.of(root).call({ archetype: "worker", body: "Inspect the change" });
-const akuma = Akuma.select(root, called.akuma);
-console.log(called.observation);
-```
 
 ## Commission Context
 
@@ -67,88 +42,36 @@ This Arc: <what to do>
 
 ## Tell an existing Akuma
 
-```bash
-keiyaku tell <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)
-```
-
 Use `tell` for the next instruction. Plain `tell` lets current work continue;
 `--interrupt` asks the current Body to yield before the new prompt is handled.
-Use `--wait <duration>` to wait for this Tell's answer. An admitted Tell is
-not withdrawn when the wait ends. Use `--schema` when the answer must follow a
-JSON Schema.
+Use `--wait` to wait for this Tell's answer. An admitted Tell is not withdrawn
+when the wait ends. Use `--schema` for a JSON Schema answer. See `tell --help`
+for syntax.
 
 ## Observe work
-
-```bash
-keiyaku wait <selector>... [--any | --all] [--timeout <duration>]
-```
 
 Use `wait` for one or more existing Akumas. The default is `--any`; use
 `--all` for every selected Akuma. `--timeout` limits observation and does not
 stop workers. A completed Akuma already counts, so repeating a wait can return
-immediately.
-
-The three waiting forms have distinct subjects:
-
-```text
-call --wait   create an Akuma and observe its initial work
-tell --wait   deliver a Tell and observe that Tell's answer
-wait          observe existing Akumas
-```
+immediately. See `wait --help` for syntax.
 
 ## Inspect and retrieve results
 
-```bash
-keiyaku status                         # current Akuma fleet
-keiyaku status <aku/...|@alias>        # one Akuma, including its execution workdir
-keiyaku ls aku/                        # names available to call
-keiyaku ls aku/<akuma>/                # existing workers from one name
-keiyaku ls "aku/*/*"                   # existing workers across names
-keiyaku history <aku/...|@alias> --last
-keiyaku history <aku/...|@alias> --id <historyId>
-keiyaku history <aku/...|@alias> [--before <N> | --since <N>] [--limit <N>]
-```
-
-Use `history --last` for the latest complete answer. Use `--id` for one exact
-answered result named by a status, wait, or history result. Use the complete
-AkuId when an alias may move.
+`status` shows the roster or one Akuma's workdir and effective actions.
+`ls aku/` shows callable names; `ls "aku/*/*"` shows born workers.
+`history --last` reads the latest complete answer; `history --id` reads an
+exact result named by status or wait. Use the complete AkuId when an alias may
+move; see `history --help` for paging.
 
 ## Stop and branch
 
-```bash
-keiyaku kill <selector>...
-keiyaku fork <aku/...|@alias> --at <historyId>
-```
-
 `kill` stops current work without deleting the Akuma or its history. `fork`
 creates a new Akuma from one exact retained answered history point; the source
-is unchanged, and providers that cannot fork report that refusal.
+is unchanged, and providers that cannot fork report that refusal. See the
+`kill --help` and `fork --help` syntax.
 
 ## JavaScript automation
 
-For a task-specific JavaScript program that coordinates Akumas, read
-[Automation With The Akuma API](references/automation.md). `Akumas.of(root).call`
-creates an Akuma and optionally admits its first ordinary Tell. Save its complete
-AkuId and use `Akuma.select(root, id)` for subsequent Tells. Use `idle()` before
-sending another schema Tell.
-
-Run this as an `.mjs` file where `@astrosheep/keiyaku` resolves. Select an
-available name with `keiyaku ls aku/` and set `AKUMA_ARCHETYPE` to that name.
-The example assumes the current directory is its World and execution directory.
-
-```js
-import { Akuma, Akumas, World } from "@astrosheep/keiyaku";
-
-const root = await World.at(process.cwd());
-const called = await Akumas.of(root).call({
-  archetype: process.env.AKUMA_ARCHETYPE,
-  cwd: process.cwd(),
-  body: "Inspect this repository and name one concrete risk.",
-  mode: "wait",
-});
-console.log(called.akuma, called.observation);
-const worker = Akuma.select(root, called.akuma);
-await worker.idle();
-```
-
-For structured answers and multi-worker orchestration, use the linked guide.
+Use [Automation With The Akuma API](references/automation.md) for a
+task-specific JavaScript coordinator, structured answers, or multi-worker
+orchestration. The CLI is enough for one commission and its return.
