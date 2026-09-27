@@ -61,18 +61,18 @@ const akumaWaitResultSchema = z
   .strict();
 const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema) }).strict();
 const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultSchema }).strict();
-const tellWaitObservationSchema = z.union([
+const askObservationSchema = z.union([
   z.object({ reason: z.literal("answered"), answer: z.unknown() }).strict(),
   z.object({ reason: z.literal("failed"), diagnostic: z.string() }).strict(),
   z.object({ reason: z.literal("invalid-output"), diagnostic: z.string(), answer: z.string() }).strict(),
   z.object({ reason: z.literal("unanswered") }).strict(),
   z.object({ reason: z.literal("deadline") }).strict(),
 ]);
-const akumaTellWaitResultSchema = z
+const akumaAskResultSchema = z
   .object({
     akuma: akumaIdSchema,
     tell: tellResultSchema,
-    observation: tellWaitObservationSchema,
+    observation: askObservationSchema,
     completedAt: z.string().datetime({ offset: true }).nullable().optional(),
   })
   .strict();
@@ -85,8 +85,11 @@ export type AkumaUnobserved = z.infer<typeof akumaUnobservedSchema>;
 export type AkumaWaitResult = z.infer<typeof akumaWaitResultSchema>;
 export type AkumaKillResult = z.infer<typeof akumaKillResultSchema>;
 export type AkumaTellResult = z.infer<typeof akumaTellResultSchema>;
-export type AkumaTellWaitObservation = z.infer<typeof tellWaitObservationSchema>;
-export type AkumaTellWaitResult = z.infer<typeof akumaTellWaitResultSchema>;
+export type AkumaAskObservation<T = unknown> =
+  | Exclude<z.infer<typeof askObservationSchema>, { reason: "answered" }>
+  | Readonly<{ reason: "answered"; answer: T }>;
+export type AkumaAskResult<T = unknown> = Omit<z.infer<typeof akumaAskResultSchema>, "observation"> &
+  Readonly<{ observation: AkumaAskObservation<T> }>;
 
 export function parseAkumaObservation(value: unknown): AkumaObservation {
   return akumaObservationSchema.parse(value);
@@ -104,14 +107,14 @@ export function isTellResult(value: unknown): value is AkumaTellResult {
   return akumaTellResultSchema.safeParse(value).success;
 }
 
-export function isTellWaitResult(value: unknown): value is AkumaTellWaitResult {
-  return akumaTellWaitResultSchema.safeParse(value).success;
+export function isAskResult(value: unknown): value is AkumaAskResult {
+  return akumaAskResultSchema.safeParse(value).success;
 }
 
 export const selectionResultSchemas = {
   wait: akumaWaitResultSchema,
   tell: akumaTellResultSchema,
-  tellWait: akumaTellWaitResultSchema,
+  ask: akumaAskResultSchema,
   kill: akumaKillResultSchema,
   killEvidence: killEvidenceSchema,
 };

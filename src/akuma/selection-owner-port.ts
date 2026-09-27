@@ -1,9 +1,7 @@
 import type { AkumaStatus } from "./akuma.js";
 import { requireBornAkuma } from "./akuma-probe.js";
-import { Akuma as PublicAkuma } from "./akuma-instance.js";
-import { executeKillAkuma, executeTellAkuma, executeTellWaitAkuma, executeWaitAkuma } from "./selection-execution.js";
+import { executeKillAkuma, executeTellAkuma, executeAskAkuma, executeWaitAkuma } from "./selection-execution.js";
 import type { SelectionRequestPort } from "./selection-request.js";
-import { Schema } from "./schema.js";
 import type { WorldRoot } from "../world.js";
 
 /**
@@ -28,18 +26,9 @@ export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
       await prove([target]);
       return await executeTellAkuma({ path: world, id: target, ...request });
     },
-    tellWait: async ({ target, ...request }) => {
+    ask: async ({ target, ...request }) => {
       await prove([target]);
-      return await executeTellWaitAkuma({ path: world, id: target, ...request });
-    },
-    tellAnswer: async ({ target, ...request }) => {
-      await prove([target]);
-      return await PublicAkuma.select(world, target).tell(request.body, {
-        schema: Schema.json(JSON.parse(request.schemaJson) as Record<string, unknown>, (value) => value),
-        ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
-        ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
-        signal: request.signal,
-      });
+      return await executeAskAkuma({ path: world, id: target, ...request });
     },
     kill: async ({ targets, ...request }) => {
       await prove(targets);

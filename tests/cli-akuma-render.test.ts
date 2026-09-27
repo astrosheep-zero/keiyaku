@@ -16,7 +16,7 @@ import {
   akumaRawAnswer,
   renderAkumaJson,
   renderAkumaText,
-  tellWaitProgressStream,
+  askProgressStream,
   waitedTellProgress,
 } from "../src/cli/render/akuma.js";
 import { parseArgv } from "../src/cli/parse.js";
@@ -88,8 +88,7 @@ test("Akuma observation failures name the target and reason without carrier word
 test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {
   const result = {
     kind: "akuma" as const,
-    action: "tell" as const,
-    mode: "wait" as const,
+    action: "ask" as const,
     body: "continue",
     result: {
       akuma: "aku/worker/deadbeef",
@@ -114,7 +113,6 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   const ordinary = {
     kind: "akuma" as const,
     action: "tell" as const,
-    mode: "ordinary" as const,
     body: result.body,
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
@@ -157,7 +155,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     result: { ...result.result, observation: { reason: "answered" as const, answer: "decoded scalar" } },
   };
   assert.equal(akumaRawAnswer(structured), '"decoded scalar"');
-  const command = parseArgv(["tell", result.result.akuma, "--wait", "1s", "continue"]);
+  const command = parseArgv(["ask", result.result.akuma, "--wait", "1s", "continue"]);
   assert.equal("command" in command, true);
   assert.equal(renderAkumaText(command as never, structured, context), '"decoded scalar"');
 });
@@ -193,7 +191,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
     completedAt: AKUMA_ACTIVITY_AT,
   });
 
-  const progress = tellWaitProgressStream(undefined, undefined, context);
+  const progress = askProgressStream(undefined, undefined, context);
   const admission = progress.admitted(tell, id);
   const tellFrame = progress.observe({ status, rows: [tell.row] });
   const tellConclusion = progress.conclude({

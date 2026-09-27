@@ -41,7 +41,7 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics.
 
-A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; the Tell is optional and a call without it reports birth alone.
+A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake for both local and forwarded calls;
 Library composes surrounding Dispatch and Alias facts. A forwarded child receipt
 proves birth only. If its exact initial Tell receipt is absent, the call keeps
@@ -65,7 +65,7 @@ frozen expansion; it never becomes a second public catalogue.
 Selection composes public Akuma handles after address expansion. It preserves the
 raw Akuma status and mutation evidence, adding separate read-only Dispatch and
 Task associations where available; it never intersects them into Akuma state or
-re-evaluates lifecycle. Standalone `idle` and plural or CLI `wait` name the same
+re-evaluates lifecycle. Selection uses one verb per meaning on both faces: `tell` admits a Tell and returns its receipt; `ask` admits a Tell and observes the answer bound to that admission; `wait` observes existing Akuma-wide work. An ask returns one shared result with answered, failed, invalid-output, unanswered, and deadline observations. Bounds are optional and limit observation only, never admission. Schema belongs to ask, not tell. Interrupt is a flag on tell or ask that puts down the current Body before admitting the new Tell; kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
 Akuma-owned completion judgment in their respective caller contexts. Wait and
 kill freeze their subject set at entry in the caller's deduplicated selection
 order. An
@@ -78,8 +78,7 @@ changes the frozen subject set, observation retries, or the honest
 distinguishing of observed and unobserved subjects. Plural wait retries
 transient unreadable members during observation, but final output never
 fabricates completion. A wait reports its requested mode separately from its
-completed-or-deadline return reason. Tell and kill return their primary evidence; interrupt retains its
-separate post-action observation.
+completed-or-deadline return reason. Tell and kill return their primary evidence; ask returns its input-bound observation.
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count

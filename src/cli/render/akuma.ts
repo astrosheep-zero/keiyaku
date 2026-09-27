@@ -8,30 +8,29 @@ import {
   historyText,
   inputWaitStream,
   killResultText,
-  mutationObservationStageText,
   snapshotHeading,
   snapshotText,
   tellText,
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
-import type { AkumaTellWaitResult } from "../../akuma/selection-observation.js";
+import type { AkumaAskResult } from "../../akuma/selection-observation.js";
 import type { AkuId } from "../../akuma/identity.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/akuma.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
-export type TellWaitProgress = Readonly<{
+export type AskProgress = Readonly<{
   admitted: (tell: TellResult, id: AkuId) => readonly string[];
   observe: (observation: LiveStatusObservation) => readonly string[];
-  conclude: (result: AkumaTellWaitResult) => readonly string[];
+  conclude: (result: AkumaAskResult) => readonly string[];
 }>;
 
-export function tellWaitProgressStream(
+export function askProgressStream(
   akuma: AkuId | undefined,
   alias: string | undefined,
   context: TextRenderContext,
-): TellWaitProgress {
+): AskProgress {
   let target = akuma;
   const stream = inputWaitStream(
     context,
@@ -52,7 +51,6 @@ export function tellWaitProgressStream(
             {
               kind: "akuma",
               action: "tell",
-              mode: "ordinary",
               result: { akuma: target, tell },
               body: "",
               ...(alias === undefined ? {} : { alias }),
@@ -75,11 +73,11 @@ export function tellWaitProgressStream(
 }
 
 export function waitedTellProgress(
-  result: AkumaTellWaitResult,
+  result: AkumaAskResult,
   alias: string | undefined,
   context: TextRenderContext,
 ): string {
-  const stream = tellWaitProgressStream(result.akuma, alias, context);
+  const stream = askProgressStream(result.akuma, alias, context);
   return [...stream.admitted(result.tell, result.akuma), ...stream.conclude(result)].join("\n");
 }
 
@@ -153,7 +151,7 @@ export function renderAkumaText(
 ): string {
   const answer = akumaRawAnswer(result);
   if (answer !== undefined) return answer;
-  if (result.action === "tell" && result.mode === "schema") return JSON.stringify(result.result);
+  if (result.action === "tell") return tellText(result, context);
   switch (result.action) {
     case "call":
       return callText(result, context);
@@ -163,14 +161,8 @@ export function renderAkumaText(
       });
     case "wait":
       return waitText(result, context);
-    case "tell":
-      if (result.mode === "wait") return "";
-      return result.mode === "ordinary"
-        ? tellText(result, context)
-        : mutationObservationStageText(result.result.id, result.result.observation, context, {
-            ...(result.alias === undefined ? {} : { alias: result.alias }),
-            showLife: false,
-          });
+    case "ask":
+      return "";
     case "history":
       return historyText(command as Extract<ParsedCommand, { command: "history"; last: boolean }>, result, context);
     case "fork": {
@@ -216,18 +208,11 @@ function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>
     : 0;
 }
 function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
-  if (result.mode === "schema") return 0;
-  if (result.mode === "wait")
-    return result.result.observation.reason === "failed" || result.result.observation.reason === "invalid-output"
-      ? 2
-      : 0;
-  return result.mode === "ordinary"
-    ? result.result.tell.wake.kind === "failed"
-      ? 2
-      : 0
-    : result.result.receipt.kind === "interrupted"
-      ? 0
-      : 1;
+  return result.result.tell.wake.kind === "failed" ? 2 : 0;
+}
+function askExitCode(result: Extract<AkumaInvocationResult, { action: "ask" }>): number {
+  return result.result.observation.reason === "failed" || result.result.observation.reason === "invalid-output"
+    ? 2 : 0;
 }
 function forkExitCode(result: Extract<AkumaInvocationResult, { action: "fork" }>): number {
   return result.receipt.kind === "forked" ? 0 : result.receipt.kind === "upstream-forked" ? 2 : 1;
@@ -245,6 +230,8 @@ export function akumaExitCode(result: AkumaInvocationResult): number {
       return killExitCode(result);
     case "tell":
       return tellExitCode(result);
+    case "ask":
+      return askExitCode(result);
     case "fork":
       return forkExitCode(result);
     case "history":
@@ -258,7 +245,7 @@ export function akumaJsonValue(result: AkumaInvocationResult): unknown {
   if (result.action === "fork") return result.receipt;
   if (result.action === "status") return result.status;
   if (result.action === "wait") return result.result;
-  if (result.action === "tell") return result.mode === "schema" ? result.result : result.result;
+  if (result.action === "tell" || result.action === "ask") return result.result;
   if (result.action === "kill") return result.result;
   return result.historyResult;
 }

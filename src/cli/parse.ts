@@ -208,6 +208,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
       return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };
     case "status":
     case "tell":
+    case "ask":
       return { use: "optional", acceptsExplicit: false };
     case "history":
       return "contract" in command

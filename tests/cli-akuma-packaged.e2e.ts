@@ -287,7 +287,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.doesNotMatch(answered.stderr, /the answer/u, "the stream never replays the settled answer");
     const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
     assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
-    const tell = await runPackagedCli(["-C", world, "tell", finisherId!, "--wait", "20s", "continue"], {
+    const tell = await runPackagedCli(["-C", world, "ask", finisherId!, "--wait", "20s", "continue"], {
       cwd: world, env,
     });
     assert.equal(tell.code, 0, tell.stderr);

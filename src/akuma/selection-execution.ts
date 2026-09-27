@@ -14,8 +14,8 @@ import {
   parseAkumaObservation,
   type AkumaKillResult,
   type AkumaTellResult,
-  type AkumaTellWaitObservation,
-  type AkumaTellWaitResult,
+  type AkumaAskObservation,
+  type AkumaAskResult,
   type AkumaUnobserved,
   type AkumaWaitResult,
 } from "./selection-observation.js";
@@ -185,7 +185,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
   });
 }
 
-export type TellWaitObserver = Readonly<{
+export type AskObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"]) => void | Promise<void>;
   observe?: (observation: LiveStatusObservation) => void | Promise<void>;
 }>;
@@ -198,24 +198,34 @@ export type TellExecutionInput = Readonly<{
   recordedAt?: string;
   initiator?: string;
   signal?: AbortSignal;
-  onObserve?: TellWaitObserver;
+  interrupt?: boolean;
+  onObserve?: AskObserver;
 }>;
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
   const handle = source(input.path).selectHandle({ id: input.id });
-  const tell = await handle.tell(input.body, input.tellId, input.recordedAt, undefined, {
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+  let tell;
+  if (input.interrupt === true) {
+    const interrupted = await handle.interrupt(input.body, {
+      ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (interrupted.kind === "unavailable")
+      throw new AkumaProviderError(`Tell interrupt unavailable: ${interrupted.evidence}`);
+    tell = interrupted.tell;
+  } else {
+    tell = await handle.tell(input.body, input.tellId, input.recordedAt, undefined, {
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
   input.signal?.throwIfAborted();
-  return selectionResultSchemas.tell.parse({
-    akuma: input.id,
-    tell,
-  });
+  return selectionResultSchemas.tell.parse({ akuma: input.id, tell });
 }
 
-function tellWaitObservation(observed: Awaited<ReturnType<AkumaHandle["tellOutcome"]>>): AkumaTellWaitObservation {
+function askObservation(observed: Awaited<ReturnType<AkumaHandle["tellOutcome"]>>): AkumaAskObservation {
   if (observed.outcome === null)
     return observed.reason === "deadline" ? { reason: "deadline" } : { reason: "unanswered" };
   if (observed.outcome.kind === "answered")
@@ -228,10 +238,10 @@ function tellWaitObservation(observed: Awaited<ReturnType<AkumaHandle["tellOutco
   };
 }
 
-export function decodeTellWaitObservation(
-  observation: AkumaTellWaitObservation,
-  schema: Schema<unknown>,
-): AkumaTellWaitObservation {
+export function decodeAskObservation<T>(
+  observation: AkumaAskObservation,
+  schema: Schema<T>,
+): AkumaAskObservation<T> {
   if (observation.reason !== "answered") return observation;
   let value = observation.answer;
   if (typeof value === "string") {
@@ -256,18 +266,18 @@ export function decodeTellWaitObservation(
   }
 }
 
-export async function observeAdmittedTellWaitAkuma(
+export async function observeAdmittedAskAkuma(
   input: Readonly<{
     path: WorldRoot;
     id: AkumaStatus["id"];
     tellId: string;
-    timeoutMs: number;
+    timeoutMs?: number;
     signal?: AbortSignal;
     startedAt?: number;
     wake?: Promise<TellResult>;
-    onObserve?: TellWaitObserver;
+    onObserve?: AskObserver;
   }>,
-): Promise<AkumaTellWaitResult> {
+): Promise<AkumaAskResult> {
   const handle = source(input.path).selectHandle({ id: input.id });
   const tell = await handle.admittedReceipt(input.tellId);
   await input.onObserve?.admitted?.(tell, input.id);
@@ -287,21 +297,21 @@ export async function observeAdmittedTellWaitAkuma(
         : 0
       : Math.max(0, performance.now() - input.startedAt);
   const observed = await handle.tellOutcome(input.tellId, {
-    timeoutMs: Math.max(0, input.timeoutMs - elapsed),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, input.timeoutMs - elapsed) }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
-  return selectionResultSchemas.tellWait.parse({
+  return selectionResultSchemas.ask.parse({
     akuma: input.id,
     tell: settled ?? tell,
-    observation: tellWaitObservation(observed),
+    observation: askObservation(observed),
     completedAt: observed.completedAt,
   });
 }
 
-export async function executeTellWaitAkuma(
-  input: TellExecutionInput & Readonly<{ timeoutMs: number; schemaJson?: string; interrupt?: boolean }>,
-): Promise<AkumaTellWaitResult> {
+export async function executeAskAkuma(
+  input: TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>,
+): Promise<AkumaAskResult> {
   input.signal?.throwIfAborted();
   const handle = source(input.path).selectHandle({ id: input.id });
   const admission =
@@ -320,11 +330,11 @@ export async function executeTellWaitAkuma(
   if (admission.kind === "unavailable")
     throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
   if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
-  return await observeAdmittedTellWaitAkuma({
+  return await observeAdmittedAskAkuma({
     path: input.path,
     id: input.id,
     tellId: admission.tell.id,
-    timeoutMs: input.timeoutMs,
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     startedAt: performance.now(),
     wake: admission.wake,
     ...(input.signal === undefined ? {} : { signal: input.signal }),

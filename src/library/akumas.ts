@@ -18,24 +18,21 @@ import type {
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
 import {
   historyAkuma,
-  interruptAkuma,
   killAkuma,
   statusAkuma,
   tellAkuma,
-  tellWaitAkuma,
+  askAkuma,
   waitAkuma,
   type AkumaHistoryInput as LibraryAkumaHistoryInput,
   type AkumaHistoryResult,
-  type AkumaInterruptInput as LibraryAkumaInterruptInput,
-  type AkumaInterruptResult,
   type AkumaKillInput as LibraryAkumaKillInput,
   type AkumaKillResult,
   type AkumaObservation,
   type AkumaObservationStage,
   type AkumaTellInput as LibraryAkumaTellInput,
   type AkumaTellResult,
-  type AkumaTellWaitInput as LibraryAkumaTellWaitInput,
-  type AkumaTellWaitResult,
+  type AkumaAskInput as LibraryAkumaAskInput,
+  type AkumaAskResult,
   type AkumaWaitInput as LibraryAkumaWaitInput,
   type AkumaWaitResult,
 } from "./selection.js";
@@ -51,8 +48,7 @@ export type AkumaAddressInput = Omit<LibraryAkumaAddressInput, "path">;
 export type AkumaWaitInput = Omit<LibraryAkumaWaitInput, "path">;
 export type AkumaKillInput = Omit<LibraryAkumaKillInput, "path">;
 export type AkumaTellInput = Omit<LibraryAkumaTellInput, "path">;
-export type AkumaTellWaitInput = Omit<LibraryAkumaTellWaitInput, "path">;
-export type AkumaInterruptInput = Omit<LibraryAkumaInterruptInput, "path">;
+export type AkumaAskInput<T = string> = Omit<LibraryAkumaAskInput<T>, "path">;
 export type AkumaHistoryInput = Omit<LibraryAkumaHistoryInput, "path">;
 export type CallInput = Omit<LibraryCallInput, "path">;
 export type ForkInput = Omit<LibraryForkInput, "path">;
@@ -60,12 +56,11 @@ export type AkumasOfInput = Readonly<{ execution?: LibraryExecution }>;
 
 export type {
   AkumaHistoryResult,
-  AkumaInterruptResult,
   AkumaKillResult,
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
-  AkumaTellWaitResult,
+  AkumaAskResult,
   AkumaWaitResult,
   CallResult,
   CallWaitHead,
@@ -111,8 +106,8 @@ class AkumasHandle {
     return tellAkuma(this.withWorld(input, "Akumas.tell input") as LibraryAkumaTellInput, this.#execution);
   }
 
-  tellWait(input: AkumaTellWaitInput): Promise<AkumaTellWaitResult> {
-    return tellWaitAkuma(this.withWorld(input, "Akumas.tellWait input") as LibraryAkumaTellWaitInput, this.#execution);
+  ask<T = string>(input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
+    return askAkuma(this.withWorld(input, "Akumas.ask input") as LibraryAkumaAskInput<T>, this.#execution);
   }
 
   wait(input: AkumaWaitInput): Promise<AkumaWaitResult> {
@@ -125,10 +120,6 @@ class AkumasHandle {
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
     return historyAkuma(this.withWorld(input, "Akumas.history input") as LibraryAkumaHistoryInput);
-  }
-
-  interrupt(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
-    return interruptAkuma(this.withWorld(input, "Akumas.interrupt input") as LibraryAkumaInterruptInput);
   }
 
   private withWorld(input: unknown, label: string): Record<string, unknown> {

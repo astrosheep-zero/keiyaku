@@ -3,10 +3,9 @@ import { squareAssignedParticipantName } from "@astrosheep/square";
 import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
 import { type AkuId } from "../../akuma/identity.js";
 import { type ActivityHistory } from "../../akuma/akuma.js";
-import { decodeTellWaitObservation, type WaitObserver } from "../../akuma/selection-execution.js";
+import { type WaitObserver } from "../../akuma/selection-execution.js";
 import {
   Akumas,
-  type AkumaInterruptResult,
   type AkumaKillResult,
   type AkumaHistoryResult,
   type AkumaObservation,
@@ -24,18 +23,16 @@ import {
   waitObservationStream,
   type WaitSelectedIdentity,
 } from "../render/akuma-activity.js";
-import { callObservationHead, tellWaitProgressStream, waitedTellProgress } from "../render/akuma.js";
+import { callObservationHead, askProgressStream, waitedTellProgress } from "../render/akuma.js";
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "../render/terminal.js";
 import type { Settings } from "../../settings.js";
 import type { WorldRoot } from "../../world.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma.js";
 import { waitAkuma } from "../../library/selection.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
-import { Akuma, Schema, type JsonSchemaDocument } from "../../akuma/index.js";
-import { addressAkuma, resolveAkuma } from "../../library/address.js";
+import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { executionChannel } from "../../akuma/requests.js";
-import { requestForwardedSelectionTellAnswer } from "../../akuma/selection-request.js";
-import type { AkumaTellWaitResult } from "../../akuma/selection-observation.js";
+import type { AkumaAskResult } from "../../akuma/selection-observation.js";
 
 export type AkumaInvocationResult =
   | Readonly<{
@@ -57,24 +54,14 @@ export type AkumaInvocationResult =
       /** The frozen selected set, so a non-streamed render names each target as the caller selected it. */
       selection?: readonly WaitSelectedIdentity[];
     }>
-  | Readonly<{ kind: "akuma"; action: "tell"; mode: "ordinary"; result: AkumaTellResult; body: string; alias?: string }>
-  | Readonly<{ kind: "akuma"; action: "tell"; mode: "schema"; result: unknown; body: string; alias?: string }>
+  | Readonly<{ kind: "akuma"; action: "tell"; result: AkumaTellResult; body: string; alias?: string }>
   | Readonly<{
       kind: "akuma";
-      action: "tell";
-      mode: "wait";
-      result: AkumaTellWaitResult;
+      action: "ask";
+      result: AkumaAskResult;
       body: string;
       alias?: string;
       structured?: true;
-    }>
-  | Readonly<{
-      kind: "akuma";
-      action: "tell";
-      mode: "interrupt";
-      result: AkumaInterruptResult;
-      body: string;
-      alias?: string;
     }>
   | Readonly<{
       kind: "akuma";
@@ -261,23 +248,23 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
   return { initiator };
 }
 
-async function invokeWaitedTell(
-  command: Extract<InvokedAkumaCommand, { command: "tell" }> & Readonly<{ timeoutMs: number }>,
+async function invokeAsk(
+  command: Extract<InvokedAkumaCommand, { command: "ask" }>,
   input: InvokeInput,
-  body: string,
 ): Promise<AkumaInvocationResult> {
+  const body = await promptBody(command, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const alias = inputAlias(command.akuma);
   const channel = executionChannel(input.execution);
   const progress =
     command.output === "text" && channel.kind === "local"
-      ? tellWaitProgressStream(undefined, alias, resultContext())
+      ? askProgressStream(undefined, alias, resultContext())
       : undefined;
-  const result = await akumas(input).tellWait({
+  const result = await akumas(input).ask({
     ...(await inputInitiator(input)),
     akuma: command.akuma,
     body,
-    timeoutMs: command.timeoutMs,
+    ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
     ...(schema === undefined ? {} : { schema }),
     ...(command.interrupt ? { interrupt: true } : {}),
     ...(input.repo === undefined ? {} : { repo: input.repo }),
@@ -291,15 +278,13 @@ async function invokeWaitedTell(
           },
         }),
   });
-  const rendered =
-    schema === undefined ? result : { ...result, observation: decodeTellWaitObservation(result.observation, schema) };
+  const rendered = result;
   if (progress !== undefined) writeProgress(progress.conclude(rendered).join("\n"));
   else if (command.output === "text" && channel.kind === "body-request")
     writeProgress(waitedTellProgress(rendered, alias, resultContext()));
   return {
     kind: "akuma",
-    action: "tell",
-    mode: "wait",
+    action: "ask",
     result: rendered,
     body,
     ...(alias === undefined ? {} : { alias }),
@@ -312,75 +297,17 @@ async function invokeTell(
   input: InvokeInput,
 ): Promise<AkumaInvocationResult> {
   const body = await promptBody(command, input);
-  if (command.timeoutMs !== undefined)
-    return await invokeWaitedTell(command as typeof command & { timeoutMs: number }, input, body);
-  if (command.schema !== undefined) {
-    const schema = await schemaFromFile(command.schema);
-    const channel = executionChannel(input.execution);
-    const values = {
-      path: input.path,
-      akuma: command.akuma,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-    };
-    // A forwarded answer lets the parent Selection prove the target, so it resolves
-    // coordinates here and never reads this process's own Heart files.
-    const addressed = channel.kind === "body-request" ? await resolveAkuma(values) : await addressAkuma(values);
-    const initiator = await inputInitiator(input);
-    const answer =
-      channel.kind === "body-request"
-        ? await requestForwardedSelectionTellAnswer({
-            directory: channel.directory,
-            target: addressed.id,
-            body,
-            schema,
-            interrupt: command.interrupt,
-            ...initiator,
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-          })
-        : await Akuma.select(addressed.path, addressed.id).tell(body, {
-            schema,
-            ...initiator,
-            ...(command.interrupt ? { interrupt: true } : {}),
-            ...(input.signal === undefined ? {} : { signal: input.signal }),
-          });
-    const alias = inputAlias(command.akuma);
-    return {
-      kind: "akuma",
-      action: "tell",
-      mode: "schema",
-      result: answer,
-      body,
-      ...(alias === undefined ? {} : { alias }),
-    };
-  }
   const initiator = await inputInitiator(input);
-  if (command.interrupt) {
-    const result = await akumas(input).interrupt({
-      ...initiator,
-      akuma: command.akuma,
-      body,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    const alias = inputAlias(command.akuma);
-    return {
-      kind: "akuma",
-      action: "tell",
-      mode: "interrupt",
-      result,
-      body,
-      ...(alias === undefined ? {} : { alias }),
-    };
-  }
   const result = await akumas(input).tell({
     ...initiator,
     akuma: command.akuma,
     body,
+    ...(command.interrupt ? { interrupt: true } : {}),
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const alias = inputAlias(command.akuma);
-  return { kind: "akuma", action: "tell", mode: "ordinary", result, body, ...(alias === undefined ? {} : { alias }) };
+  return { kind: "akuma", action: "tell", result, body, ...(alias === undefined ? {} : { alias }) };
 }
 
 async function invokeHistory(
@@ -513,6 +440,8 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
       return await invokeWait(command, input);
     case "tell":
       return await invokeTell(command, input);
+    case "ask":
+      return await invokeAsk(command, input);
     case "history":
       return await invokeHistory(command, input);
     case "fork":

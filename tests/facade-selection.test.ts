@@ -22,7 +22,7 @@ import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { waitAkuma } from "../src/library/selection.js";
-import { decodeTellWaitObservation, type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
+import { decodeAskObservation, type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -137,8 +137,8 @@ async function answered(root: string, archetype: string, suffix: string) {
 }
 
 
-test("facade tellWait admits, decodes, and addresses an alias through the World-bound face", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-tell-wait-");
+test("facade ask admits, decodes, and addresses an alias through the World-bound face", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-ask-");
   const source = await bornWorld(root, "00000009");
   await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akuId: source.allocated.id });
   const schema = Schema.json({ type: "object", properties: { ok: { type: "boolean" } } }, (value) => value as { ok: boolean });
@@ -150,13 +150,17 @@ test("facade tellWait admits, decodes, and addresses an alias through the World-
     ),
   );
   try {
-    const result = await Akumas.of(root).tellWait({ akuma: "@worker", body: "continue", timeoutMs: 1_000, schema });
+    const result = await Akumas.of(root).ask({ akuma: "@worker", body: "continue", timeoutMs: 1_000, schema });
     assert.equal(result.akuma, source.allocated.id);
     assert.equal(result.tell.row.text, "continue");
-    assert.deepEqual(result.observation, { reason: "answered", answer: '{"ok":true}' });
-    assert.deepEqual(
-      decodeTellWaitObservation(result.observation, schema),
-      { reason: "answered", answer: { ok: true } },
+    assert.deepEqual(result.observation, { reason: "answered", answer: { ok: true } });
+    if (result.observation.reason === "answered") {
+      const typed: { ok: boolean } = result.observation.answer;
+      assert.equal(typed.ok, true);
+    }
+    await assert.rejects(
+      Akumas.of(root).tell({ akuma: "@worker", body: "no schema", schema } as never),
+      /use Akumas.ask/u,
     );
   } finally {
     restore();
@@ -164,15 +168,19 @@ test("facade tellWait admits, decodes, and addresses an alias through the World-
   }
 });
 
-test("facade tellWait refuses path selection and invalid timeout before addressing", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-tell-wait-refusal-");
+test("facade ask refuses path selection and invalid timeout before addressing", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-ask-refusal-");
   assert.throws(
-    () => Akumas.of(root).tellWait({ path: root, akuma: "aku/worker/00000001", body: "x", timeoutMs: 0 } as never),
+    () => Akumas.of(root).ask({ path: root, akuma: "aku/worker/00000001", body: "x", timeoutMs: 0 } as never),
     /does not accept path/u,
   );
   await assert.rejects(
-    () => Akumas.of(root).tellWait({ akuma: "aku/worker/00000001", body: "x", timeoutMs: -1 }),
+    () => Akumas.of(root).ask({ akuma: "aku/worker/00000001", body: "x", timeoutMs: -1 }),
     /timeoutMs must be a nonnegative finite millisecond duration/u,
+  );
+  await assert.rejects(
+    () => Akumas.of(root).ask({ akuma: "aku/worker/00000001", body: "x", extra: true } as never),
+    /Akumas\.ask input has unknown field: extra/u,
   );
 });
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {

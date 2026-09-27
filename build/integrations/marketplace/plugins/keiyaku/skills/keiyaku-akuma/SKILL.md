@@ -8,9 +8,10 @@ description: >-
 # Keiyaku Akuma
 
 Use Akumas to delegate work to another worker. `call` creates a new Akuma;
-`tell` gives an existing Akuma another prompt. Keep the complete AkuId, such
-as `aku/worker/1234abcd`, when you need to address the same worker later. An
-alias such as `@reviewer` is a shorter, world-local name.
+`tell` admits a Tell for an existing Akuma; `ask` admits one and observes its
+exact answer. Keep the complete AkuId, such as `aku/worker/1234abcd`, when you
+need to address the same worker later. An alias such as `@reviewer` is a
+shorter, world-local name.
 
 ## Call a new Akuma
 
@@ -40,20 +41,23 @@ This Arc: <what to do>
 
 `--contract` does not choose a worktree. Use `--workdir <path>` when needed.
 
-## Tell an existing Akuma
+## Tell or ask an existing Akuma
 
-Use `tell` for the next instruction. Plain `tell` lets current work continue;
-`--interrupt` asks the current Body to yield before the new prompt is handled.
-Use `--wait` to wait for this Tell's answer. An admitted Tell is not withdrawn
-when the wait ends. Use `--schema` for a JSON Schema answer. See `tell --help`
-for syntax.
+`tell` admits the next instruction and returns its admission receipt; it does
+not await an answer. `ask` admits a Tell and observes that exact answer,
+unbounded unless `--wait` limits observation. Both require a prompt and accept
+`--interrupt` to put down current work before admitting the new Tell. Schema
+belongs only to `ask`; `tell --schema` and `tell --wait` refuse and point to
+`ask`. A deadline never withdraws an admitted Tell. Read `tell --help` and
+`ask --help` for invocation syntax.
 
 ## Observe work
 
 Use `wait` for one or more existing Akumas. The default is `--any`; use
 `--all` for every selected Akuma. `--timeout` limits observation and does not
 stop workers. A completed Akuma already counts, so repeating a wait can return
-immediately. See `wait --help` for syntax.
+immediately. See `wait --help` for syntax. Unlike `ask`, `wait` observes
+existing Akuma-wide work, not the answer to a newly admitted Tell.
 
 ## Inspect and retrieve results
 
@@ -65,13 +69,26 @@ move; see `history --help` for paging.
 
 ## Stop and branch
 
-`kill` stops current work without deleting the Akuma or its history. `fork`
-creates a new Akuma from one exact retained answered history point; the source
-is unchanged, and providers that cannot fork report that refusal. See the
-`kill --help` and `fork --help` syntax.
+`kill` stops current work without admitting a Tell, deleting the Akuma, or
+removing its history. `fork` creates a new Akuma from one exact retained
+answered history point; the source is unchanged, and providers that cannot
+fork report that refusal. See the `kill --help` and `fork --help` syntax.
 
 ## JavaScript automation
 
 Use [Automation With The Akuma API](references/automation.md) for a
 task-specific JavaScript coordinator, structured answers, or multi-worker
-orchestration. The CLI is enough for one commission and its return.
+orchestration. The CLI is enough for one commission and its return. A
+prompt-free birth followed by one input-bound ask uses the same identity:
+
+```ts
+import { Akuma, Akumas, World } from "@astrosheep/keiyaku";
+
+const root = await World.at(process.cwd());
+const called = await Akumas.of(root).call({ archetype: "worker" });
+const worker = Akuma.select(root, called.akuma);
+const result = await worker.ask("Inspect the change");
+console.log(result.observation);
+```
+
+The automation guide covers schema-based answer handling and longer workflows.

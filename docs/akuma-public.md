@@ -4,10 +4,7 @@ This chapter owns the small `./akuma` product surface and its lifecycle
 evidence. Exact TypeScript shapes, field budgets, and rendering belong to
 declarations, help, and executable specifications.
 
-The public caller path is `Akuma.birth`, synchronous `Akuma.select`, and
-`Akuma.tell`. Birth submits no prompt; selection performs no read. A selected
-Akuma exposes its identity, status, plain text Tell, and schema-decoded Tell
-answer, along with the lifecycle-only idle, history, and kill observations.
+The public caller path is `Akuma.birth`, synchronous `Akuma.select`, then `Akuma.tell` or `Akuma.ask`. Birth submits no prompt; selection performs no read. A selected Akuma exposes its identity, status, admission-only Tell, and input-bound AskResult with optional schema decoding, along with the lifecycle-only idle, history, and kill observations.
 `Akumas` owns World selection, Alias and Contract selector resolution, Dispatch
 and TaskHolder association, and plural request routing around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
@@ -80,17 +77,7 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, call, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell's answer belongs to the terminal Turn bound to that exact admitted Tell;
-later work cannot replace it. A schema-bearing Tell decodes that same answer,
-and a decode failure remains distinct from provider failure. A call composes
-prompt-free birth with its first ordinary Tell admission and observes the same
-input-bound outcome. Plain wait remains a separate Akuma-wide idle observation.
-These forms retain the same busy, interrupt, routing, and recovery semantics. A
-caller signal may stop awaiting the result, but never retracts a Tell already
-admitted to Heart. Interrupt combines Body put-down with delivery of a new Tell
-and exposes its settlement receipt; kill exposes its kill evidence.
-Interrupt control has no local elapsed-time failure boundary: it waits for leash
-custody or durable Body settlement, unless the caller's signal stops waiting.
+A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask, preempting current work before new Tell admission; kill is the pure stop. These forms retain the same busy, routing, and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment — a non-running
 life with no pending Tell — or a caller deadline. Standalone `idle` and plural
 or CLI `wait` name this same judgment for their respective caller contexts.
@@ -98,12 +85,12 @@ Every return carries its final status and says whether it completed or reached
 the deadline; completion wins when the final deadline-edge observation satisfies
 the judgment. A deadline
 remains a current observation rather than manufacturing a lifecycle arm.
-Interrupt and kill expose only honest settlement or
+The interrupt flag and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
 flagship's next action.
 
-A Schema-bearing Tell carries a provider answer contract. The contract may be
+Schema on an ask carries a provider answer contract. The contract may be
 the package's own schema value or any Standard Schema v1 value; a vendor value
 is normalized at admission, and decoding stays a caller-side operation over the
 exact answer. The contract remains inside simple JSON shape vocabulary: a

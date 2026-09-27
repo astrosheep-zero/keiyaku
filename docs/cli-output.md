@@ -121,7 +121,7 @@ interval never claims that a command is hung or alive. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt
 rather than replacing it with an early exit.
 
-An observing call, a bounded Tell, and a wait share one input-wait
+An observing call, an ask, and a wait share one input-wait
 presentation discipline, defined once: an identity frame opens on the progress
 channel, eligible timeline rows stream once each in retained order, live
 activity never contains thought narration, and one truthful conclusion follows

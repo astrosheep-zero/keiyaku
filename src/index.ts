@@ -15,6 +15,8 @@ export type {
   AkumaIdleOptions,
   AkumaIdleResult,
   AkumaSignalOptions,
+  AkumaAskOptions,
+  AkumaAskResult,
   AkumaTellOptions,
   InterruptReceipt,
   KillEvidence,

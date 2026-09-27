@@ -8,8 +8,6 @@ import test from "node:test";
 import { z } from "zod";
 import {
   Akuma,
-  AkumaBusyError,
-  AkumaDecodeError,
   AkumaProviderError,
   Schema,
   type AkumaIdleResult,
@@ -24,7 +22,7 @@ import {
   recordTellReceipt,
 } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
-import { executeTellWaitAkuma } from "../src/akuma/selection-execution.js";
+import { executeAskAkuma } from "../src/akuma/selection-execution.js";
 import { deferred, settlementProbe, waitForCondition } from "./support/process.js";
 import { type InvokedAkumaCommand } from "../src/cli/commands/akuma.js";
 import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
@@ -116,7 +114,7 @@ test("package root exposes the same public Akuma values without private mechanis
     assert.equal(name in root, false, name);
   }
   const schema: import("../src/index.js").Schema<{ ok: boolean }> = root.Schema.zod(z.object({ ok: z.boolean() }));
-  const options: import("../src/index.js").AkumaTellOptions<{ ok: boolean }> = { schema };
+  const options: import("../src/index.js").AkumaAskOptions<{ ok: boolean }> = { schema };
   assert.strictEqual(options.schema, schema);
   assert.deepEqual(schema.decode({ ok: true }), { ok: true });
 });
@@ -147,14 +145,14 @@ type WaitedTellFixture = {
   settle(): Promise<void>;
   withRuntime<T>(runtime: TellWakeRuntime, run: () => Promise<T>): Promise<T>;
 };
-type WaitedTellOptions = Omit<Parameters<typeof executeTellWaitAkuma>[0], "path" | "id">;
+type WaitedTellOptions = Omit<Parameters<typeof executeAskAkuma>[0], "path" | "id">;
 
 function waitTell(world: WaitedTellWorld, options: WaitedTellOptions) {
-  return executeTellWaitAkuma({ path: world.world, id: world.allocated.id, ...options });
+  return executeAskAkuma({ path: world.world, id: world.allocated.id, ...options });
 }
 
 async function withWaitedTellFixture<T>(run: (fixture: WaitedTellFixture) => Promise<T>): Promise<T> {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wait-"));
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-ask-"));
   const bodies: Promise<unknown>[] = [];
   const adapters = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
   const restore = installTellRuntime(fixtureRuntime(bodies, adapters));
@@ -260,7 +258,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     }));
     const answered = await born("a1000013", answering('{"ok":true}'));
     const command: InvokedAkumaCommand = {
-      command: "tell",
+      command: "ask",
       akuma: answered.allocated.id,
       interrupt: false,
       schema: schemaPath,
@@ -270,7 +268,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     };
     const result = await invokeAkuma(command, { path: answered.world, environment: {}, readStdin: async () => "" });
     assert.equal(result.kind, "akuma");
-    if (result.kind !== "akuma" || result.action !== "tell" || result.mode !== "wait")
+    if (result.kind !== "akuma" || result.action !== "ask")
       throw new Error("expected a waited Tell invocation result");
     assert.deepEqual(result.result.observation, { reason: "answered", answer: { ok: true } });
 
@@ -280,7 +278,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
       { path: invalid.world, environment: {}, readStdin: async () => "" },
     );
     assert.equal(invalidResult.kind, "akuma");
-    if (invalidResult.kind !== "akuma" || invalidResult.action !== "tell" || invalidResult.mode !== "wait")
+    if (invalidResult.kind !== "akuma" || invalidResult.action !== "ask")
       throw new Error("expected a waited Tell invocation result");
     assert.equal(invalidResult.result.observation.reason, "invalid-output");
     assert.equal(akumaExitCode(invalidResult), 2, "invalid schema output fails like an invalid call answer");
@@ -288,7 +286,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     const interrupt = await born("a1000012", answering("unused"));
     context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
     await assert.rejects(
-      executeTellWaitAkuma({ path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
+      executeAskAkuma({ path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
       (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
     );
   });
@@ -326,13 +324,26 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
   });
 });
 
-test("schema tell decodes JSON and typed failures stay distinct", async () => {
+test("standalone tell admits without awaiting while ask defaults to unbounded observation", async () => {
+  await withWaitedTellFixture(async ({ born, settle }) => {
+    const first = await born("a1000020", answering("first answer"));
+    const admitted = await first.akuma.tell("send only");
+    assert.equal(admitted.akuma, first.allocated.id);
+    assert.equal(admitted.tell.row.text, "send only");
+    await settle();
+    const second = await born("a1000021", answering("second answer"));
+    const asked = await second.akuma.ask("await answer");
+    assert.deepEqual(asked.observation, { reason: "answered", answer: "second answer" });
+  });
+});
+
+test("schema ask decodes JSON and typed failures stay distinct", async () => {
   await withWaitedTellFixture(async ({ born, settle }) => {
     const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
     const decoded = await born("a1000002", answering('{"ok":true}'));
-    const value = await decoded.akuma.tell("structured", { schema });
+    const value = await decoded.akuma.ask("structured", { schema });
     await settle();
-    assert.deepEqual(value, { ok: true });
+    assert.deepEqual(value.observation, { reason: "answered", answer: { ok: true } });
     const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
     assert.equal(fact?.kind, "tell");
     if (fact?.kind === "tell") {
@@ -341,10 +352,10 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
     }
 
     const invalid = await born("a1000003", answering("not-json"));
-    await assert.rejects(invalid.akuma.tell("structured", { schema }), AkumaDecodeError);
+    assert.deepEqual((await invalid.akuma.ask("structured", { schema })).observation.reason, "invalid-output");
 
     const mismatch = await born("a1000004", answering('{"ok":1}'));
-    await assert.rejects(mismatch.akuma.tell("structured", { schema }), AkumaDecodeError);
+    assert.deepEqual((await mismatch.akuma.ask("structured", { schema })).observation.reason, "invalid-output");
 
     const failing: ProviderAdapter = fixtureAdapter(async () => ({
       admission: { fence: "api-fail" },
@@ -357,80 +368,21 @@ test("schema tell decodes JSON and typed failures stay distinct", async () => {
       async abort() {},
     }));
     const failed = await born("a1000005", failing);
-    await assert.rejects(failed.akuma.tell("structured", { schema }), AkumaProviderError);
+    assert.deepEqual((await failed.akuma.ask("structured", { schema })).observation, { reason: "failed", diagnostic: "provider broke" });
   });
 });
 
-test("schema tell routes admission and preserves typed refusals without launching a Body", async (context) => {
+test("tell refuses schema before admission; ask checks options before addressing", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-api-routing-");
   const akuma = Akuma.select(await World.at(root), "aku/claude/a1000006");
   const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  const busy = new AkumaBusyError();
-  const tells: Parameters<AkumaHandle["tell"]>[] = [];
-  const interrupts: Parameters<AkumaHandle["interrupt"]>[] = [];
-  context.mock.method(AkumaHandle.prototype, "tell", async (...args: Parameters<AkumaHandle["tell"]>) => {
-    tells.push(args);
-    throw busy;
-  });
-  context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
-    interrupts.push(args);
-    return { kind: "unavailable", evidence: "hung" } as const;
-  });
-
-  // The API owns routing/translation; Heart and control suites own real busy/leash behavior.
-  await assert.rejects(akuma.tell("default", { schema }), (error) => error === busy);
-  await assert.rejects(
-    akuma.tell("explicit", { schema, interrupt: false, initiator: "api-caller" }),
-    (error) => error === busy,
-  );
-  assert.equal(interrupts.length, 0);
-  assert.equal(tells.length, 2);
-  for (const [index, args] of tells.entries()) {
-    assert.equal(args[0], index === 0 ? "default" : "explicit");
-    assert.match(args[1]!, /^[0-9a-f-]{36}$/u);
-    assert.deepEqual(args.slice(2), [
-      undefined,
-      undefined,
-      { schemaJson: schemaJsonText(schema), ...(index === 0 ? {} : { initiator: "api-caller" }) },
-    ]);
-  }
-  await assert.rejects(akuma.tell("interrupt", { schema, interrupt: true, initiator: "api-caller" }), {
-    name: "AkumaProviderError",
-    message: "schema interrupt unavailable: hung",
-  });
-  assert.equal(tells.length, 2);
-  assert.equal(interrupts.length, 1);
-  const [body, options] = interrupts[0]!;
-  assert.equal(body, "interrupt");
-  assert.match(options!.tellId!, /^[0-9a-f-]{36}$/u);
-  assert.deepEqual(options, {
-    tellId: options!.tellId,
-    schemaJson: schemaJsonText(schema),
-    initiator: "api-caller",
-  });
-  assert.equal(new Set([...tells.map((args) => args[1]), options!.tellId]).size, 3);
-});
-
-test("schema interrupt carries caller cancellation into its held control admission", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-api-schema-interrupt-cancel-");
-  const akuma = Akuma.select(await World.at(root), "aku/claude/a1000007");
-  const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+  await assert.rejects(akuma.tell("structured", { schema } as never), /use ask/u);
+  await assert.rejects(akuma.ask("structured", { timeoutMs: -1 }), /timeoutMs/u);
   const controller = new AbortController();
-  const reason = new Error("cancel held schema interrupt");
-  let received: AbortSignal | undefined;
-  context.mock.method(AkumaHandle.prototype, "interrupt", async (...args: Parameters<AkumaHandle["interrupt"]>) => {
-    const options = args[1];
-    assert.ok(options);
-    received = options.signal;
-    return await new Promise<never>((_resolve, reject) => {
-      options.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
-    });
-  });
-  const pending = akuma.tell("interrupt", { schema, interrupt: true, signal: controller.signal });
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  const reason = new Error("cancel before admission");
   controller.abort(reason);
-  await assert.rejects(pending, (error: unknown) => error === reason);
-  assert.strictEqual(received, controller.signal);
+  await assert.rejects(akuma.ask("structured", { schema, interrupt: true, signal: controller.signal }),
+    (error: unknown) => error === reason);
 });
 
 test("plain Tell preserves its admission while caller cancellation releases the wake wait", async () => {

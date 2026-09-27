@@ -4,8 +4,6 @@ import {
   type ActivityHistory,
   type OutcomeRow,
   type AkumaStatus,
-  type InterruptReceipt,
-  readBudgetedStatus,
   withoutReportedChanges,
 } from "../akuma/akuma.js";
 import { AkumaObservationError } from "../akuma/akuma-errors.js";
@@ -14,16 +12,17 @@ import { executionChannel, localExecutionContext, type ExecutionContext } from "
 import {
   requestForwardedSelectionKill,
   requestForwardedSelectionTell,
-  requestForwardedSelectionTellWait,
+  requestForwardedSelectionAsk,
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
 import {
   executeKillAkuma,
   executeTellAkuma,
-  executeTellWaitAkuma,
+  executeAskAkuma,
+  decodeAskObservation,
   executeWaitAkuma,
 } from "../akuma/selection-execution.js";
-import type { TellWaitObserver, WaitIdentityFacts, WaitObserver } from "../akuma/selection-execution.js";
+import type { AskObserver, WaitIdentityFacts, WaitObserver } from "../akuma/selection-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -46,9 +45,8 @@ import {
   parseAkumaObservation,
   type AkumaKillResult,
   type AkumaObservation,
-  type AkumaObservationStage,
   type AkumaTellResult,
-  type AkumaTellWaitResult,
+  type AkumaAskResult,
   type AkumaWaitResult,
 } from "../akuma/selection-observation.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -61,16 +59,16 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     signal?: AbortSignal;
   }>;
 
-export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
-export type AkumaTellWaitInput = AkumaAddressInput &
+export type AkumaTellInput = AkumaAddressInput & Readonly<{ body: string; interrupt?: boolean; initiator?: string; signal?: AbortSignal }>;
+export type AkumaAskInput<T = string> = AkumaAddressInput &
   Readonly<{
     body: string;
-    timeoutMs: number;
-    schema?: Schema<unknown>;
+    timeoutMs?: number;
+    schema?: Schema<T>;
     interrupt?: boolean;
     initiator?: string;
     signal?: AbortSignal;
-    observe?: TellWaitObserver;
+    observe?: AskObserver;
   }>;
 export type { TellResult, TellWake } from "../akuma/akuma.js";
 export type { CreatedTaskObservation } from "../task/created-observation.js";
@@ -80,18 +78,11 @@ export type {
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
-  AkumaTellWaitResult,
+  AkumaAskResult,
   AkumaUnobserved,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-export type AkumaInterruptInput = AkumaAddressInput &
-  Readonly<{ body: string; initiator?: string; signal?: AbortSignal }>;
 export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
-export type AkumaInterruptResult = Readonly<{
-  id: AkumaStatus["id"];
-  receipt: InterruptReceipt;
-  observation: AkumaObservationStage;
-}>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
     id?: string;
@@ -203,24 +194,6 @@ function waitIdentityFacts(
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
   return (await observeAkumaSet([status], path, repo))[0]!;
-}
-
-async function observeAkumaStage(
-  path: WorldRoot,
-  id: AkumaStatus["id"],
-  repo?: Repo,
-  admittedTellId?: string,
-): Promise<AkumaObservationStage> {
-  try {
-    const observed = await readBudgetedStatus(path, id, {
-      aperture: "receipt",
-      ...(admittedTellId === undefined ? {} : { admittedTellId }),
-    });
-    return { kind: "observed", ...(await observeAkuma(observed.status, path, repo)) };
-  } catch (error) {
-    if (error instanceof AkumaNotBornError) throw error;
-    return { kind: "unobserved", diagnostic: observationDiagnostic(error) };
-  }
 }
 
 async function observeAkumaSet(
@@ -438,11 +411,14 @@ export async function tellAkuma(
 ): Promise<AkumaTellResult> {
   const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
+    if (key === "schema") throw new TypeError("Akumas.tell does not accept schema; use Akumas.ask");
+    if (!["path", "akuma", "body", "repo", "interrupt", "initiator", "signal"].includes(key)) {
       throw new TypeError(`Akumas.tell input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
+    throw new TypeError("interrupt must be a boolean");
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
@@ -451,6 +427,7 @@ export async function tellAkuma(
       directory: channel.directory,
       target: addressed.id,
       body: values.body,
+      ...(input.interrupt === true ? { interrupt: true } : {}),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
@@ -460,90 +437,74 @@ export async function tellAkuma(
     path: addressed.path,
     id: addressed.id,
     body: values.body,
+    ...(input.interrupt === true ? { interrupt: true } : {}),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
 }
 
-function validateTellWaitInput(
+function validateAskInput(
   values: Record<string, unknown>,
-): asserts values is Record<string, unknown> & Pick<AkumaTellWaitInput, "body" | "timeoutMs"> {
+): asserts values is Record<string, unknown> & Pick<AkumaAskInput, "body" | "timeoutMs"> {
   for (const key of Object.keys(values)) {
     if (
       !["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal", "observe"].includes(
         key,
       )
     ) {
-      throw new TypeError(`Akumas tell wait input has unknown field: ${key}`);
+      throw new TypeError(`Akumas.ask input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  if (
+  if (values.timeoutMs !== undefined && (
     typeof values.timeoutMs !== "number" ||
     !Number.isFinite(values.timeoutMs) ||
     !Number.isInteger(values.timeoutMs) ||
     values.timeoutMs < 0
-  ) {
+  )) {
     throw new TypeError("timeoutMs must be a nonnegative finite millisecond duration");
   }
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
 }
 
-export async function tellWaitAkuma(
-  input: AkumaTellWaitInput,
+export async function askAkuma<T = string>(
+  input: AkumaAskInput<T>,
   execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaTellWaitResult> {
-  const values = requireInput(input, "Akumas tell wait input");
-  validateTellWaitInput(values);
+): Promise<AkumaAskResult<T>> {
+  const values = requireInput(input, "Akumas.ask input");
+  validateAskInput(values);
   const callerSignal = signal(values.signal);
   const channel = executionChannel(execution);
   if (channel.kind === "body-request") {
     // A forwarded Tell is resolved by its serving parent, so this process must
     // not prove the target against its own Heart files.
     const addressed = await resolveAkuma(directAddress(values));
-    return await requestForwardedSelectionTellWait({
+    const result = await requestForwardedSelectionAsk({
       directory: channel.directory,
       target: addressed.id,
       body: values.body,
-      timeoutMs: values.timeoutMs,
-      ...(input.schema === undefined ? {} : { schema: input.schema }),
+      ...(values.timeoutMs === undefined ? {} : { timeoutMs: values.timeoutMs }),
+      ...(input.schema === undefined ? {} : { schema: input.schema as Schema<unknown> }),
       ...(input.interrupt === true ? { interrupt: true } : {}),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(callerSignal === undefined ? {} : { signal: callerSignal }),
     });
+    return (input.schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, input.schema) }) as AkumaAskResult<T>;
   }
   const addressed = await addressAkuma(directAddress(values));
-  return await executeTellWaitAkuma({
+  const result = await executeAskAkuma({
     path: addressed.path,
     id: addressed.id,
     body: values.body,
-    timeoutMs: values.timeoutMs,
+    ...(values.timeoutMs === undefined ? {} : { timeoutMs: values.timeoutMs }),
     ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
     ...(input.interrupt === true ? { interrupt: true } : {}),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(input.observe === undefined ? {} : { onObserve: input.observe }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
   });
-}
-
-export async function interruptAkuma(input: AkumaInterruptInput): Promise<AkumaInterruptResult> {
-  const values = requireInput(input, "Akumas.interrupt input");
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "body", "repo", "initiator", "signal"].includes(key)) {
-      throw new TypeError(`Akumas.interrupt input has unknown field: ${key}`);
-    }
-  }
-  if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  const callerSignal = signal(values.signal);
-  const addressed = await addressAkuma(directAddress(values));
-  const handle = source(addressed.path).selectHandle({ id: addressed.id });
-  const receipt = await handle.interrupt(values.body, {
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-  });
-  const observation = await observeAkumaStage(addressed.path, addressed.id, values.repo as Repo | undefined);
-  return { id: addressed.id, receipt, observation };
+  return (input.schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, input.schema) }) as AkumaAskResult<T>;
 }
 
 function validateHistoryInput(values: Record<string, unknown>): void {

@@ -94,10 +94,11 @@ With no `body`, its observation is `born` and no Tell is admitted. With a
 `body`, `mode: "wait"` observes that Tell's answer and a schema decodes that
 same answer; a schema or wait without a body refuses before birth. For later
 turns, `Akuma.select(root, called.akuma)` reconnects to the same identity.
-Plain `tell` returns answer text; schema `tell` returns the decoded value, not
-a JSON string to scrape. Pass the schema directly; any Standard Schema v1 value
-works the same way. The explicit `Schema.zod(...)` wrapper still works, and
-`Schema.json(document, decode)` is the escape hatch for a caller-owned JSON
+`tell` admits an instruction and returns its receipt. `ask` admits and
+observes one Tell, returning an AskResult: check the answered arm before
+consuming its decoded answer. Pass the schema directly; any Standard Schema v1
+value works the same way. The explicit `Schema.zod(...)` wrapper still works,
+and `Schema.json(document, decode)` is the escape hatch for a caller-owned JSON
 Schema and custom decoder.
 
 Keep an answer contract inside simple JSON shape vocabulary: objects, arrays,
@@ -152,11 +153,13 @@ async function mapSettled(items, concurrency, run) {
 }
 
 await worker.idle(); // The previous answer can precede its Body's settlement.
-const { claims } = await worker.tell(
+const claimResult = await worker.ask(
   "From the owner documents already inspected, extract at most 12 concrete " +
   "implementation claims worth checking. Give each a unique id. Read only.",
   { schema: Claims },
 );
+if (claimResult.observation.reason !== "answered") throw new Error(JSON.stringify(claimResult.observation));
+const { claims } = claimResult.observation.answer;
 if (new Set(claims.map(c => c.id)).size !== claims.length) {
   throw new Error("Duplicate claim ids");
 }
@@ -211,10 +214,10 @@ pairwise comparisons, experiment queues, or adaptive sampling instead.
 - `Promise.all` rejects when one input rejects; it does not stop other Akuma.
   Use `Promise.allSettled` for a small batch when each result matters. Neither
   primitive limits concurrency; use a caller-owned pool for larger workloads.
-- Distinguish `AkumaDecodeError`, `AkumaProviderError`, and `AkumaBusyError`.
-  A schema mismatch, unavailable upstream model, and occupied worker call for
-  different decisions. Retry only when appropriate; another Tell is new work,
-  not a promise to reproduce the prior attempt without side effects.
+- An AskResult distinguishes provider failure and schema invalid-output from
+  an answered value. Handle its observation arm before using the answer;
+  admission or transport errors can still reject. Busy admission is a separate
+  refusal. Another Tell is new work, not a retry without side effects.
 - Serialize schema Tells to the same identity and let its Body settle with
   `idle()` before submitting the next one, including after a prompt-free call.
   An answer can become visible before Body settlement. Separate Akuma can run

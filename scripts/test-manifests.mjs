@@ -72,6 +72,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/library-akuma-creation.test.ts",
   "tests/library-concurrency-placement.test.ts",
   "tests/library-contract-operations.test.ts",
+  "tests/library-reconcile.test.ts",
   "tests/nuke.test.ts",
   "tests/package-consumers.test.ts",
   "tests/path-coordinates.test.ts",

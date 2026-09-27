@@ -17,11 +17,11 @@ import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import {
-  decodeTellWaitObservation,
-  observeAdmittedTellWaitAkuma,
-  type TellWaitObserver,
+  decodeAskObservation,
+  observeAdmittedAskAkuma,
+  type AskObserver,
 } from "../akuma/selection-execution.js";
-import type { AkumaTellWaitResult } from "../akuma/selection-observation.js";
+import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import type { TellResult } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
@@ -56,7 +56,7 @@ export type CallWaitHead = Readonly<{
 
 export type CallWaitObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"], head: CallWaitHead) => void | Promise<void>;
-  observe?: TellWaitObserver["observe"];
+  observe?: AskObserver["observe"];
 }>;
 
 export type CallInput = Readonly<{
@@ -83,7 +83,7 @@ export type CallObservation =
   | Readonly<{
       kind: "observed";
       tell: TellResult;
-      observation: AkumaTellWaitResult["observation"];
+      observation: AkumaAskResult["observation"];
       completedAt?: string | null;
     }>
   | Readonly<{ kind: "failed"; tellId: string; tell?: TellResult; failure: IntegrationFailure }>;
@@ -413,7 +413,7 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   const seat = callSeat(values.contract);
   const schema = values.schema as Schema<unknown> | undefined;
   const schemaJson = schema === undefined ? undefined : schemaJsonText(schema);
-  const observe = values.observe as TellWaitObserver | undefined;
+  const observe = values.observe as AskObserver | undefined;
   const initialTell =
     body === undefined
       ? undefined
@@ -575,7 +575,7 @@ async function detachCall(call: PromptedCall, admission: AdmittedCallTell): Prom
 async function observeCall(call: PromptedCall, admission: AdmittedCallTell): Promise<CallResult> {
   const { born, handle } = call;
   let tell: TellResult | undefined;
-  const onObserve: TellWaitObserver = {
+  const onObserve: AskObserver = {
     admitted: async (receipt, id) => {
       tell = receipt;
       await born.observe?.admitted?.(receipt, id, {
@@ -586,7 +586,7 @@ async function observeCall(call: PromptedCall, admission: AdmittedCallTell): Pro
     ...(born.observe?.observe === undefined ? {} : { observe: born.observe.observe }),
   };
   try {
-    const observed = await observeAdmittedTellWaitAkuma({
+    const observed = await observeAdmittedAskAkuma({
       path: born.path,
       id: handle.id,
       tellId: born.initialTell.tellId,
@@ -603,7 +603,7 @@ async function observeCall(call: PromptedCall, admission: AdmittedCallTell): Pro
         observation:
           born.initialTell.schema === undefined
             ? observed.observation
-            : decodeTellWaitObservation(observed.observation, born.initialTell.schema),
+            : decodeAskObservation(observed.observation, born.initialTell.schema),
         ...(observed.completedAt === undefined ? {} : { completedAt: observed.completedAt }),
       },
     };

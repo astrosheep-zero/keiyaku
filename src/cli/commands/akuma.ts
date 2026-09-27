@@ -29,7 +29,8 @@ export type ParsedAkumaCommand = Output &
         Readonly<{ prompt?: AkumaPromptSource }>)
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-    | (Readonly<{ command: "tell"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
+    | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
+    | (Readonly<{ command: "ask"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
     | (Readonly<{ command: "history"; last: boolean; id?: string; before?: number; since?: number; limit?: number }> &
         Addressed)
     | Readonly<{ command: "history"; contract: string }>
@@ -101,14 +102,26 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
-    purpose: "Send a prompt to an Akuma and wake it to respond.",
+    usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
+    purpose: "Admit a Tell for an Akuma.",
+    details: [
+      "Give <prompt> as one argument, or use - to read stdin.",
+      "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
+      "Use ask to observe an answer or supply a schema.",
+    ].join("\n"),
+  },
+  ask: {
+    arity: 1,
+    stdin: true,
+    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
+    usage: "ask <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
+    purpose: "Admit a Tell and observe its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
-      "--wait waits for the answer to this prompt, for the supplied duration after it is accepted.",
-      "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
+      "--wait bounds observation of this Tell's answer; admission is not withdrawn at the deadline.",
+      "Completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
   history: {
@@ -235,6 +248,8 @@ function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message:
       if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
       positionals.push(token);
     } else {
+      if (action === "tell" && (token === "--wait" || token === "--schema"))
+        fail(`tell ${token} is not supported; use ask ${token}`);
       index = scanNamedOption({ action, spec, argv, index }, flags, fail);
     }
   }
@@ -329,7 +344,7 @@ function parseAkumaHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "call" | "tell">,
+  action: Exclude<AkumaAction, "call" | "tell" | "ask">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
@@ -349,7 +364,7 @@ function parseAddressed(
 }
 
 function parsePrompted(
-  action: "call" | "tell",
+  action: "call" | "tell" | "ask",
   positionals: readonly string[],
   stdin: boolean,
   fail: (message: string) => never,
@@ -357,7 +372,7 @@ function parsePrompted(
   if (positionals.length < 1 || positionals.length > 2) fail(`${action} has invalid positional arguments`);
   const argument = positionals[1];
   if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
-  if (action === "tell" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
+  if (action !== "call" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
   return {
     subject: positionals[0]!,
     ...(stdin
@@ -375,10 +390,26 @@ function parseTell(
   output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "tell" }> {
-  const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "tell --schema requires a file", fail);
   return {
     command: "tell",
+    akuma: validateDirect(subject, fail),
+    interrupt: flags.interrupt === true,
+    prompt,
+    output,
+  };
+}
+
+function parseAsk(
+  flags: Readonly<Record<string, FlagValue>>,
+  subject: string,
+  prompt: AkumaPromptSource,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): Extract<ParsedAkumaCommand, { command: "ask" }> {
+  const schema =
+    flags.schema === undefined ? undefined : stringFlag(flags.schema, "ask --schema requires a file", fail);
+  return {
+    command: "ask",
     akuma: validateDirect(subject, fail),
     interrupt: flags.interrupt === true,
     ...(schema === undefined ? {} : { schema }),
@@ -446,11 +477,13 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   };
   const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
-  if (action === "call" || action === "tell") {
+  if (action === "call" || action === "tell" || action === "ask") {
     const parsed = parsePrompted(action, positionals, stdin, fail);
     return action === "call"
       ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
-      : parseTell(flags, parsed.subject, parsed.prompt!, output, fail);
+      : action === "tell"
+        ? parseTell(flags, parsed.subject, parsed.prompt!, output, fail)
+        : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
     fail(`${action} has invalid positional arguments`);

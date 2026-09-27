@@ -50,7 +50,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | task | Delegate to the separate Task command surface. | Task owns Task judgment and result semantics. |
-| call, fork, wait, tell, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
+| call, fork, wait, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
 
 In a declared direct-parent request channel, the CLI forwards only the
 caller-selected operation and the information needed to execute it locally.
@@ -72,12 +72,12 @@ Tasks through `Tasks.of(world).list`. Contract selector resolution continues
 to use a complete read where required; a bounded list never narrows selector
 meaning. The SDK exposes product `list` operations and no mixed `ls`.
 
-The call and tell edges may acquire a JSON Schema from a caller-selected file;
+The call and ask edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,
-tell, wait, history, and kill behavior remains unchanged.
+ask, tell, wait, history, and kill behavior remains unchanged.
 
-Call and Tell capture the submitting process's assigned Square identity at the
+Call, tell, and ask capture the submitting process's assigned Square identity at the
 invocation edge and pass it as optional input attribution, including through a
 direct-parent request. Missing or unusable Square identity leaves attribution
 absent and never refuses the operation. The Body does not rediscover the caller

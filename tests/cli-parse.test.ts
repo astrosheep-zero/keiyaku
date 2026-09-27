@@ -348,17 +348,24 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("tell parses optional exact-answer wait windows", () => {
-  assert.deepEqual(command(["tell", "@worker", "--wait", "0ms", "continue"]), {
+test("tell admits; ask parses optional observation windows and schema", () => {
+  assert.deepEqual(command(["tell", "@worker", "continue"]), {
     command: "tell",
+    akuma: "@worker",
+    interrupt: false,
+    prompt: { kind: "argument", value: "continue" },
+    output: "text",
+  });
+  assert.deepEqual(command(["ask", "@worker", "--wait", "0ms", "continue"]), {
+    command: "ask",
     akuma: "@worker",
     interrupt: false,
     timeoutMs: 0,
     prompt: { kind: "argument", value: "continue" },
     output: "text",
   });
-  assert.deepEqual(command(["tell", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
-    command: "tell",
+  assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
+    command: "ask",
     akuma: "aku/worker/1234abcd",
     interrupt: false,
     schema: "answer.json",
@@ -366,8 +373,14 @@ test("tell parses optional exact-answer wait windows", () => {
     prompt: { kind: "argument", value: "continue" },
     output: "text",
   });
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "later", "continue"]), /integer duration/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "1s", "continue"]), /use ask --wait/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--schema", "answer.json", "continue"]), /use ask --schema/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /use ask --wait/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--schema"]), /use ask --schema/u);
+  assert.throws(() => parseArgv(["ask", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
+  assert.throws(() => parseArgv(["ask", "@worker", "--wait", "later", "continue"]), /integer duration/u);
+  assert.throws(() => parseArgv(["ask", "@worker"]), /requires a prompt/u);
+  assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);
 });
 
 test("exact-one source selection and nonblank argv fail at parse", () => {

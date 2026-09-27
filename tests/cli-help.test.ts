@@ -39,7 +39,7 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
-  assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
+  assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
   assert.match(renderContractHelp("show"), /requirements and work guidance/u);
   assert.doesNotMatch(renderContractHelp("show"), /current state/u);

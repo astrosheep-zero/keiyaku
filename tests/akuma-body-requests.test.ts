@@ -47,7 +47,7 @@ import {
   selectionRequestCommands,
   type SelectionRequestPort,
 } from "../src/akuma/selection-request.js";
-import { isTellResult, isTellWaitResult, type AkumaTellResult } from "../src/akuma/selection-observation.js";
+import { isTellResult, isAskResult, type AkumaTellResult } from "../src/akuma/selection-observation.js";
 import {
   contractRequestCommand,
   contractRequestProtocol,
@@ -195,14 +195,14 @@ async function requestBodyTell(input: Readonly<{ directory: string; id?: string;
   });
 }
 
-async function requestBodyTellWait(
+async function requestBodyAsk(
   input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; timeoutMs: number }>,
 ) {
   return await requestBodyCommand({
     ...input,
-    command: selectionRequestProtocol("akuma.tell-wait"),
+    command: selectionRequestProtocol("akuma.ask"),
     value: {
-      action: "akuma.tell-wait",
+      action: "akuma.ask",
       target: input.target,
       body: input.body,
       timeoutMs: input.timeoutMs,
@@ -278,9 +278,9 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
       received.push(input.initiator);
       return {} as never;
     },
-    tellAnswer: async (input) => {
+    ask: async (input) => {
       received.push(input.initiator);
-      return "answer";
+      return {} as never;
     },
   };
   const facts: ExecutionFacts = {
@@ -290,13 +290,13 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
     signal: new AbortController().signal,
     admissionOpen: () => true,
   };
-  for (const action of ["akuma.tell", "akuma.tell-answer"] as const) {
+  for (const action of ["akuma.tell", "akuma.ask"] as const) {
     const command = selectionRequestCommand(action, port);
     const request = command.protocol.decodeRequest({
       target: "aku/worker/22222222",
       body: "continue",
       initiator: "Bob",
-      ...(action === "akuma.tell-answer" ? { schemaJson: "{}" } : {}),
+      ...(action === "akuma.ask" ? { schemaJson: "{}" } : {}),
     });
     assert.ok(request);
     await command.execute(request, facts);
@@ -307,7 +307,7 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
 test("selection request permissions stay separated by action", () => {
   assert.equal(selectionRequestProtocol("akuma.wait").isPermitted([]), true);
   assert.equal(selectionRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
-  assert.equal(selectionRequestProtocol("akuma.tell-answer").isPermitted(["akuma.tell"]), true);
+  assert.equal(selectionRequestProtocol("akuma.ask").isPermitted(["akuma.tell"]), true);
   assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.kill"]), true);
   assert.equal(selectionRequestProtocol("akuma.kill").isPermitted([]), false);
   assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
@@ -1525,13 +1525,13 @@ test("transport rejects malformed target sets and foreign World coordinates befo
 });
 
 test("bounded forwarded Tell admits once under the request identity", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-")));
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-")));
   const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
   const target = "aku/worker/22222222" as AkuId;
   let calls = 0;
   const pump = await openSelectionPump(parent, {
     ...unusedSelectionPort,
-    tellWait: async (input) => {
+    ask: async (input) => {
       calls += 1;
       return {
         akuma: input.target,
@@ -1557,21 +1557,21 @@ test("bounded forwarded Tell admits once under the request identity", async () =
     const outcomes = await Promise.all(
       [1, 2].map(
         async () =>
-          await requestBodyTellWait({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 }),
+          await requestBodyAsk({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 }),
       ),
     );
     const returned = outcomes.find((value) => value.kind === "returned");
     assert.equal(returned?.kind, "returned");
     if (returned?.kind === "returned") {
-      assert.equal(isTellWaitResult(returned.result), true);
-      if (!isTellWaitResult(returned.result)) throw new Error("expected a waited Tell result");
+      assert.equal(isAskResult(returned.result), true);
+      if (!isAskResult(returned.result)) throw new Error("expected a waited Tell result");
       assert.equal(returned.result.tell.admission.tellId, id);
       assert.deepEqual(returned.result.observation, { reason: "deadline" });
     }
     assert.equal(calls, 1);
     assert.deepEqual(
       outcomes.find((value) => value.kind === "reference"),
-      { kind: "reference", reference: { action: "akuma.tell-wait", target, tellId: id } },
+      { kind: "reference", reference: { action: "akuma.ask", target, tellId: id } },
     );
   } finally {
     await pump.close();
@@ -1580,7 +1580,7 @@ test("bounded forwarded Tell admits once under the request identity", async () =
 });
 
 test("a real delayed direct-parent waited Tell observes its exact answer", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-real-")));
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-real-")));
   const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
   const target = await born(root, "worker", "33333333");
   const bodies: Promise<unknown>[] = [];
@@ -1604,7 +1604,7 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   const pump = await openSelectionPump(parent, selectionRequestPort(root));
   try {
-    const pending = requestBodyTellWait({
+    const pending = requestBodyAsk({
       directory: pump.directory,
       target: target.id,
       body: "delayed direct",
@@ -1615,8 +1615,8 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     const outcome = await pending;
     assert.equal(outcome.kind, "returned");
     if (outcome.kind !== "returned") throw new Error("expected a returned waited Tell result");
-    assert.equal(isTellWaitResult(outcome.result), true);
-    if (!isTellWaitResult(outcome.result)) throw new Error("expected a waited Tell result");
+    assert.equal(isAskResult(outcome.result), true);
+    if (!isAskResult(outcome.result)) throw new Error("expected a waited Tell result");
     assert.deepEqual(outcome.result.observation, { reason: "answered", answer: "delayed direct answer" });
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
@@ -1628,8 +1628,8 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
 });
 
 test("the waited-Tell facade forwards to a serving parent when the caller World lacks the target", async () => {
-  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-facade-")));
-  const callerRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-wait-caller-")));
+  const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-facade-")));
+  const callerRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-caller-")));
   const parent = await born(parentRoot, "parent", "11111111", ["akuma.tell"]);
   const target = await born(parentRoot, "worker", "44444444");
   const bodies: Promise<unknown>[] = [];
@@ -1653,8 +1653,8 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot));
   try {
-    const parsed = parseArgv(["tell", target.id, "--wait", "10s", "facade delayed"]);
-    if (!("command" in parsed) || parsed.command.command !== "tell") throw new Error("expected a Tell command");
+    const parsed = parseArgv(["ask", target.id, "--wait", "10s", "facade delayed"]);
+    if (!("command" in parsed) || parsed.command.command !== "ask") throw new Error("expected an Ask command");
     const pending = invokeAkuma(parsed.command, {
       path: callerRoot,
       environment: {},
@@ -1664,7 +1664,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     await started.promise;
     finish.resolve({ kind: "answered", answer: "facade delayed answer", historyId: "facade-direct-history" });
     const result = await pending;
-    if (result.action !== "tell" || result.mode !== "wait") throw new Error("expected a bounded Tell result");
+    if (result.action !== "ask") throw new Error("expected an Ask result");
     assert.deepEqual(result.result.observation, { reason: "answered", answer: "facade delayed answer" });
     assert.equal(result.result.tell.row.text, "facade delayed");
     assert.equal(akumaRawAnswer(result), "facade delayed answer", "forwarded CLI preserves exact stdout bytes");

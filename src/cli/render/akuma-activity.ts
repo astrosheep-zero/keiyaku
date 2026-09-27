@@ -6,7 +6,7 @@ import type {
   CreatedTaskObservation,
   DispatchAssociation,
 } from "../../index.js";
-import type { AkumaTellWaitObservation } from "../../akuma/selection-observation.js";
+import type { AkumaAskObservation } from "../../akuma/selection-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/selection-execution.js";
@@ -1030,7 +1030,7 @@ function waitConclusionRow(
 }
 
 export function inputWaitConclusion(
-  observation: AkumaTellWaitObservation,
+  observation: AkumaAskObservation,
   input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number; status?: AkumaStatus }>,
 ): readonly string[] {
   const end = input.now ?? Date.now();
@@ -1168,7 +1168,7 @@ export type InputWaitConclusion =
   | Readonly<{ kind: "failed"; diagnostic: string }>
   | Readonly<{
       kind: "observed";
-      observation: AkumaTellWaitObservation;
+      observation: AkumaAskObservation;
       completedAt?: string | null;
     }>;
 
@@ -1428,8 +1428,7 @@ function answerBytes(answer: unknown, structured: boolean): string | undefined {
   return !structured && typeof answer === "string" ? answer : JSON.stringify(answer);
 }
 
-function tellAnswer(result: Extract<AkumaInvocationResult, { action: "tell" }>): string | undefined {
-  if (result.mode !== "wait") return undefined;
+function askAnswer(result: Extract<AkumaInvocationResult, { action: "ask" }>): string | undefined {
   if (result.result.observation.reason !== "answered") return "";
   return answerBytes(result.result.observation.answer, result.structured === true);
 }
@@ -1461,8 +1460,8 @@ function historyAnswer(result: Extract<AkumaInvocationResult, { action: "history
 
 export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
   switch (result.action) {
-    case "tell":
-      return tellAnswer(result);
+    case "ask":
+      return askAnswer(result);
     case "call":
       return callAnswer(result);
     case "wait":
@@ -1568,7 +1567,7 @@ export function historyText(
 }
 
 export function tellText(
-  result: Extract<AkumaInvocationResult, { action: "tell"; mode: "ordinary" }>,
+  result: Extract<AkumaInvocationResult, { action: "tell" }>,
   context: TextRenderContext,
   options: Readonly<{ identity?: boolean }> = {},
 ): string {

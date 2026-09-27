@@ -703,11 +703,9 @@ async function requestPump(
         tell: async () => {
           throw new Error("unexpected forwarded Tell");
         },
-        tellAnswer: async (input) =>
-          await PublicAkuma.select(root, input.target).tell(input.body, {
-            schema: Schema.json(JSON.parse(input.schemaJson) as Record<string, unknown>, (value) => value),
-            ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
-          }),
+        ask: async () => {
+          throw new Error("unexpected forwarded ask");
+        },
         kill: async () => {
           throw new Error("unexpected forwarded kill");
         },

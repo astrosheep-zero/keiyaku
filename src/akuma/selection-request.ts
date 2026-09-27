@@ -12,17 +12,17 @@ import {
   selectionResultSchemas,
   isKillResult,
   isTellResult,
-  isTellWaitResult,
+  isAskResult,
   isWaitResult,
   type AkumaKillResult,
   type AkumaTellResult,
-  type AkumaTellWaitResult,
+  type AkumaAskResult,
   type AkumaWaitResult,
 } from "./selection-observation.js";
 import { z } from "zod";
 import type { Schema } from "./schema.js";
 import { schemaJsonText } from "./schema.js";
-import { AkumaDecodeError, AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
+import { AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const selectionTargetsSchema = z
@@ -45,30 +45,20 @@ const waitRequestSchema = z
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
   }));
 const tellRequestSchema = z
-  .object({ target: akumaIdSchema, body: z.string(), initiator: nonblankTextSchema.optional() })
+  .object({ target: akumaIdSchema, body: z.string(), initiator: nonblankTextSchema.optional(), interrupt: z.boolean().optional() })
   .strict()
   .transform((request) => ({ action: "akuma.tell" as const, ...request }));
-const tellAnswerRequestSchema = z
+const askRequestSchema = z
   .object({
     target: akumaIdSchema,
     body: z.string(),
-    schemaJson: nonblankTextSchema,
-    initiator: nonblankTextSchema.optional(),
-    interrupt: z.boolean().optional(),
-  })
-  .strict()
-  .transform((request) => ({ action: "akuma.tell-answer" as const, ...request }));
-const tellWaitRequestSchema = z
-  .object({
-    target: akumaIdSchema,
-    body: z.string(),
-    timeoutMs: z.number().int().nonnegative(),
+    timeoutMs: z.number().int().nonnegative().optional(),
     schemaJson: nonblankTextSchema.optional(),
     initiator: nonblankTextSchema.optional(),
     interrupt: z.boolean().optional(),
   })
   .strict()
-  .transform((request) => ({ action: "akuma.tell-wait" as const, ...request }));
+  .transform((request) => ({ action: "akuma.ask" as const, ...request }));
 const killRequestSchema = z
   .object({ targets: selectionTargetsSchema })
   .strict()
@@ -77,8 +67,8 @@ const waitServiceSchema = z.object({ action: z.literal("akuma.wait") }).strict()
 const tellServiceSchema = z
   .object({ action: z.literal("akuma.tell"), target: akumaIdSchema, tellId: nonblankTextSchema })
   .strict();
-const tellWaitServiceSchema = z
-  .object({ action: z.literal("akuma.tell-wait"), target: akumaIdSchema, tellId: nonblankTextSchema })
+const askServiceSchema = z
+  .object({ action: z.literal("akuma.ask"), target: akumaIdSchema, tellId: nonblankTextSchema })
   .strict();
 const killServiceSchema = z
   .object({
@@ -127,13 +117,12 @@ export function decodeSelectionLiveFailure(value: unknown): Error | null {
 export type SelectionRequest =
   | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
   | z.infer<typeof tellRequestSchema>
-  | z.infer<typeof tellAnswerRequestSchema>
-  | z.infer<typeof tellWaitRequestSchema>
+  | z.infer<typeof askRequestSchema>
   | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
 export type SelectionService =
   | z.infer<typeof waitServiceSchema>
   | z.infer<typeof tellServiceSchema>
-  | z.infer<typeof tellWaitServiceSchema>
+  | z.infer<typeof askServiceSchema>
   | (Omit<z.infer<typeof killServiceSchema>, "results"> &
       Readonly<{ results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>);
 
@@ -153,32 +142,23 @@ export type SelectionRequestPort = Readonly<{
       tellId: string;
       recordedAt: string;
       initiator?: string;
-      signal: AbortSignal;
-    }>,
-  ): Promise<AkumaTellResult>;
-  tellAnswer?(
-    input: Readonly<{
-      target: AkumaStatus["id"];
-      body: string;
-      schemaJson: string;
-      initiator?: string;
       interrupt?: boolean;
       signal: AbortSignal;
     }>,
-  ): Promise<unknown>;
-  tellWait?(
+  ): Promise<AkumaTellResult>;
+  ask?(
     input: Readonly<{
       target: AkumaStatus["id"];
       body: string;
       tellId: string;
       recordedAt: string;
-      timeoutMs: number;
+      timeoutMs?: number;
       schemaJson?: string;
       initiator?: string;
       interrupt?: boolean;
       signal: AbortSignal;
     }>,
-  ): Promise<AkumaTellWaitResult>;
+  ): Promise<AkumaAskResult>;
   kill(
     input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>,
   ): Promise<
@@ -193,11 +173,9 @@ function decodeSelectionRequest(action: SelectionRequest["action"], value: unkno
       ? waitRequestSchema
       : action === "akuma.tell"
         ? tellRequestSchema
-        : action === "akuma.tell-answer"
-          ? tellAnswerRequestSchema
-          : action === "akuma.tell-wait"
-            ? tellWaitRequestSchema
-            : killRequestSchema;
+        : action === "akuma.ask"
+          ? askRequestSchema
+          : killRequestSchema;
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
@@ -206,10 +184,10 @@ function decodeSelectionService(action: SelectionRequest["action"], value: unkno
   const schema =
     action === "akuma.wait"
       ? waitServiceSchema
-      : action === "akuma.tell" || action === "akuma.tell-answer"
+      : action === "akuma.tell"
         ? tellServiceSchema
-        : action === "akuma.tell-wait"
-          ? tellWaitServiceSchema
+        : action === "akuma.ask"
+          ? askServiceSchema
           : killServiceSchema;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error("malformed stored Selection service evidence");
@@ -217,14 +195,13 @@ function decodeSelectionService(action: SelectionRequest["action"], value: unkno
 }
 
 function decodedSelectionResult(action: SelectionRequest["action"], value: unknown): unknown {
-  if (action === "akuma.tell-answer") return value;
   const schema =
     action === "akuma.wait"
       ? selectionResultSchemas.wait
       : action === "akuma.tell"
         ? selectionResultSchemas.tell
-        : action === "akuma.tell-wait"
-          ? selectionResultSchemas.tellWait
+        : action === "akuma.ask"
+          ? selectionResultSchemas.ask
           : selectionResultSchemas.kill;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`Akuma body request returned an invalid live result for ${action}`);
@@ -250,7 +227,7 @@ export function selectionRequestProtocol(
     decodeReference: (reference) => decodeSelectionService(action, reference),
     isPermitted: (allowed) =>
       action === "akuma.wait" ||
-      ((action === "akuma.tell" || action === "akuma.tell-answer" || action === "akuma.tell-wait") &&
+      ((action === "akuma.tell" || action === "akuma.ask") &&
         allowed.includes("akuma.tell")) ||
       (action === "akuma.kill" && allowed.includes("akuma.kill")),
   };
@@ -280,35 +257,22 @@ export function selectionRequestCommand(
             body: request.body,
             tellId: facts.id,
             ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
+            ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
             recordedAt: facts.admittedAt,
             signal: facts.signal,
           }),
           service: { action: request.action, target: request.target, tellId: facts.id },
         };
       }
-      if (request.action === "akuma.tell-answer") {
-        if (port.tellAnswer === undefined) throw new Error("schema answer Selection port is unavailable");
+      if (request.action === "akuma.ask") {
+        if (port.ask === undefined) throw new Error("bounded Tell Selection port is unavailable");
         return {
-          result: await port.tellAnswer({
-            target: request.target,
-            body: request.body,
-            schemaJson: request.schemaJson,
-            ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
-            ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
-            signal: facts.signal,
-          }),
-          service: { action: "akuma.tell", target: request.target, tellId: facts.id },
-        };
-      }
-      if (request.action === "akuma.tell-wait") {
-        if (port.tellWait === undefined) throw new Error("bounded Tell Selection port is unavailable");
-        return {
-          result: await port.tellWait({
+          result: await port.ask({
             target: request.target,
             body: request.body,
             tellId: facts.id,
             recordedAt: facts.admittedAt,
-            timeoutMs: request.timeoutMs,
+            ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
             ...(request.schemaJson === undefined ? {} : { schemaJson: request.schemaJson }),
             ...(request.initiator === undefined ? {} : { initiator: request.initiator }),
             ...(request.interrupt === undefined ? {} : { interrupt: request.interrupt }),
@@ -331,51 +295,14 @@ export function selectionRequestCommand(
 export function selectionRequestCommands(
   port: SelectionRequestPort,
 ): Readonly<
-  Record<"akuma.wait" | "akuma.tell" | "akuma.tell-answer" | "akuma.tell-wait" | "akuma.kill", ErasedRequestCommand>
+  Record<"akuma.wait" | "akuma.tell" | "akuma.ask" | "akuma.kill", ErasedRequestCommand>
 > {
   return {
     "akuma.wait": eraseRequestCommand(selectionRequestCommand("akuma.wait", port)),
     "akuma.tell": eraseRequestCommand(selectionRequestCommand("akuma.tell", port)),
-    "akuma.tell-answer": eraseRequestCommand(selectionRequestCommand("akuma.tell-answer", port)),
-    "akuma.tell-wait": eraseRequestCommand(selectionRequestCommand("akuma.tell-wait", port)),
+    "akuma.ask": eraseRequestCommand(selectionRequestCommand("akuma.ask", port)),
     "akuma.kill": eraseRequestCommand(selectionRequestCommand("akuma.kill", port)),
   };
-}
-
-export async function requestForwardedSelectionTellAnswer(
-  input: Readonly<{
-    directory: string;
-    target: AkumaStatus["id"];
-    body: string;
-    schema: Schema<unknown>;
-    initiator?: string;
-    interrupt?: boolean;
-    signal?: AbortSignal;
-  }>,
-): Promise<unknown> {
-  const response = await requestBodyCommand({
-    directory: input.directory,
-    command: selectionRequestProtocol("akuma.tell-answer"),
-    value: {
-      action: "akuma.tell-answer",
-      target: input.target,
-      body: input.body,
-      schemaJson: schemaJsonText(input.schema),
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
-    },
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-  if (response.kind !== "returned")
-    throw new Error("Akuma body request terminal schema answer cannot reproduce an expired live result");
-  try {
-    return input.schema.decode(response.result);
-  } catch (error) {
-    throw new AkumaDecodeError(
-      error instanceof Error ? error.message : "Answer failed schema decode",
-      typeof response.result === "string" ? response.result : JSON.stringify(response.result),
-    );
-  }
 }
 
 function forwardedSelectionCommandResult(
@@ -388,8 +315,8 @@ function forwardedSelectionCommandResult(
 ): AkumaTellResult;
 function forwardedSelectionCommandResult(
   response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
-  action: "akuma.tell-wait",
-): AkumaTellWaitResult;
+  action: "akuma.ask",
+): AkumaAskResult;
 function forwardedSelectionCommandResult(
   response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: "akuma.kill",
@@ -397,11 +324,11 @@ function forwardedSelectionCommandResult(
 function forwardedSelectionCommandResult(
   response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
   action: SelectionRequest["action"],
-): AkumaWaitResult | AkumaTellResult | AkumaTellWaitResult | AkumaKillResult {
+): AkumaWaitResult | AkumaTellResult | AkumaAskResult | AkumaKillResult {
   if (response.kind === "returned") {
     if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
     if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
-    if (action === "akuma.tell-wait" && isTellWaitResult(response.result)) return response.result;
+    if (action === "akuma.ask" && isAskResult(response.result)) return response.result;
     if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
     throw new Error(`transport integrity: request Selection ${action} returned an invalid live result`);
   }
@@ -437,6 +364,7 @@ export async function requestForwardedSelectionTell(
     target: AkumaStatus["id"];
     body: string;
     initiator?: string;
+    interrupt?: boolean;
     signal?: AbortSignal;
   }>,
 ): Promise<AkumaTellResult> {
@@ -448,39 +376,40 @@ export async function requestForwardedSelectionTell(
       target: input.target,
       body: input.body,
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.interrupt === true ? { interrupt: true } : {}),
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   return forwardedSelectionCommandResult(response, "akuma.tell");
 }
 
-export async function requestForwardedSelectionTellWait(
+export async function requestForwardedSelectionAsk(
   input: Readonly<{
     directory: string;
     target: AkumaStatus["id"];
     body: string;
-    timeoutMs: number;
+    timeoutMs?: number;
     schema?: Schema<unknown>;
     initiator?: string;
     interrupt?: boolean;
     signal?: AbortSignal;
   }>,
-): Promise<AkumaTellWaitResult> {
+): Promise<AkumaAskResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: selectionRequestProtocol("akuma.tell-wait"),
+    command: selectionRequestProtocol("akuma.ask"),
     value: {
-      action: "akuma.tell-wait",
+      action: "akuma.ask",
       target: input.target,
       body: input.body,
-      timeoutMs: input.timeoutMs,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedSelectionCommandResult(response, "akuma.tell-wait");
+  return forwardedSelectionCommandResult(response, "akuma.ask");
 }
 
 export async function requestForwardedSelectionKill(
