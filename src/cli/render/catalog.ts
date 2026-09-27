@@ -9,7 +9,7 @@ import {
   gitIdsInRow,
   targetFacts,
 } from "./contract-observation.js";
-import { safeText } from "./terminal.js";
+import { ageText, safeText } from "./terminal.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
 
 function akumaMark(life: string): string {
@@ -22,14 +22,7 @@ function akumaMark(life: string): string {
 
 function relativeAge(source: string | null, observedAt: string): string | null {
   if (source === null) return null;
-  const seconds = Math.floor((Date.parse(observedAt) - Date.parse(source)) / 1_000);
-  if (seconds < 0) return "now";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
+  return ageText(source, observedAt);
 }
 
 function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
@@ -68,13 +61,7 @@ function catalogMark(row: ContractRow): string {
 }
 
 function formatAge(source: string, observedAt: string): string {
-  const seconds = Math.floor((Date.parse(observedAt) - Date.parse(source)) / 1_000);
-  if (seconds < 0) return "future";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+  return ageText(source, observedAt, "future");
 }
 
 function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>): string {

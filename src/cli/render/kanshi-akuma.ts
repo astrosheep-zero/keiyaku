@@ -1,6 +1,7 @@
 import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import { snapshotActivityLines } from "./akuma-activity.js";
 import {
+  ageText,
   elapsedMilliseconds,
   entityLines,
   identityLine,
@@ -115,15 +116,7 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
 
 function formatAge(source: string | null | undefined, observedAt: string): string {
   if (source === null || source === undefined) return "—";
-  const sourceMs = Date.parse(source);
-  const observedMs = Date.parse(observedAt);
-  if (sourceMs > observedMs) return "now";
-  const seconds = Math.floor((observedMs - sourceMs) / 1_000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+  return ageText(source, observedAt);
 }
 
 export { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma };

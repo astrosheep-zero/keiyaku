@@ -284,6 +284,21 @@ export function elapsedMilliseconds(source: string | null | undefined, observedA
   return Math.max(0, observedMs - sourceMs);
 }
 
+/**
+ * Compact age wording shared by catalog and kanshi renderers. A source later than the
+ * observation is reported as `future`, so each surface chooses whether clock skew is
+ * ordinary ("now") or worth flagging ("future").
+ */
+export function ageText(source: string, observedAt: string, future: "now" | "future" = "now"): string {
+  const seconds = Math.floor((Date.parse(observedAt) - Date.parse(source)) / 1_000);
+  if (seconds < 0) return future;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
 export function tone(value: string, kind: SemanticTone, color: boolean): string {
   if (!color) return value;
   const code = kind === "dim" ? 2 : kind === "recent" ? 32 : kind === "attention" ? 33 : 31;
