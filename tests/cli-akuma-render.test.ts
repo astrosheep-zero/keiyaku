@@ -6,8 +6,10 @@ import {
   callObservationStream,
   DEFAULT_CONTEXT,
   frameRule,
-  mutationObservationStageText,
+  killResultText,
+  snapshotActivityLines,
   snapshotHeading,
+  snapshotText,
   tellText,
   waitObservationStream,
   waitText,
@@ -30,6 +32,7 @@ import {
   idleAkumaSnapshot,
   openAkumaSnapshot,
   AKUMA_ACTIVITY_AT,
+  reportedFileChange,
 } from "./support/kanshi-activity.js";
 
 function running(id: string, rows: readonly ActivityRow[]) {
@@ -54,13 +57,74 @@ function observed(status: AkumaStatus, rows: readonly ActivityRow[]) {
   return { status, rows, contract: { kind: "none" as const } };
 }
 
+test("status frame closes its timeline before references and ends at cwd", () => {
+  const id = "aku/worker/abcd1234";
+  const note: ActivityRow = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" };
+  const status = parseAkumaStatus({
+    id,
+    life: "running",
+    cwd: "/work/appointed",
+    allowed: [],
+    timeline: openAkumaSnapshot([{ kind: "row", row: note }], [reportedFileChange(1, "update", "/work/file")]),
+  });
+  const lines = snapshotText(
+    { status, contract: { kind: "failed", diagnostic: "lookup refused" } },
+    DEFAULT_CONTEXT,
+    { showAllowed: true },
+  ).split("\n");
+  assert.equal(lines[0], id);
+  assert.equal(lines[1], frameRule([id]));
+  assert.match(lines[2]!, /note +edited$/u);
+  assert.match(lines[3]!, /^\d{2}:\d{2} ● running$/u);
+  assert.ok(lines.indexOf("changes 1") > 3);
+  assert.ok(lines.some((line) => /^  ~ +\/work\/file$/u.test(line)));
+  assert.ok(lines.indexOf("allowed  none") > lines.indexOf("changes 1"));
+  assert.ok(lines.indexOf("! contract failed lookup refused") > lines.indexOf("changes 1"));
+  assert.equal(lines.at(-1), "cwd  /work/appointed");
+});
+
+test("quoted activity hard-wraps once, aligns continuations and truncates at a grapheme boundary", () => {
+  const row: ActivityRow = {
+    kind: "said",
+    sequence: 1,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "👩‍💻".repeat(45),
+  };
+  const lines = snapshotActivityLines(openAkumaSnapshot([{ kind: "row", row }]), { columns: 40, color: false });
+  assert.equal(lines.length, 2);
+  assert.equal((lines.join("\n").match(/“/gu) ?? []).length, 1);
+  assert.equal((lines.join("\n").match(/”/gu) ?? []).length, 1);
+  assert.match(lines[1]!, /^ {15}👩‍💻/u);
+  assert.match(lines[1]!, /…”$/u);
+  for (const line of lines) assert.ok(displayColumns(line) <= 40);
+});
+
+test("sleeping with a pending Tell concludes pending, not completed", () => {
+  const pending: ActivityRow = {
+    kind: "tell",
+    sequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    tellId: "tell/pending",
+    text: "follow up",
+    state: "pending",
+    deliveries: [],
+  };
+  const status = parseAkumaStatus({
+    id: "aku/worker/abcd1234",
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([{ kind: "row", row: pending }]),
+  });
+  assert.match(
+    snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT),
+    /⧗ tell +“follow up”\n\d{2}:\d{2} ⧗ pending tell$/u,
+  );
+});
+
 test("Akuma observation failures name the target and reason without carrier words", () => {
   const first = parseAkuId("aku/worker/abcd0102").id;
   const second = parseAkuId("aku/intern/33dd4670").id;
-  assert.equal(
-    mutationObservationStageText(first, { kind: "unobserved", diagnostic: "heart locked" }, DEFAULT_CONTEXT),
-    `× Akuma observation failed  ${first} — heart locked`,
-  );
   assert.equal(
     waitText(
       {
@@ -116,11 +180,11 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     body: result.body,
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
-  assert.match(tellText(ordinary, context), /⧖ tell +"continue"/u);
+  assert.match(tellText(ordinary, context), /✓ told +"continue"/u);
   const progress = waitedTellProgress(result.result, undefined, context);
-  assert.match(progress, /⧖ tell +"continue"/u);
+  assert.match(progress, /✓ told +"continue"/u);
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
-  assert.equal(progress.match(/⧖ tell +"continue"/gu)?.length, 1, "the admission row is not replayed");
+  assert.equal(progress.match(/✓ told +"continue"/gu)?.length, 1, "the admission row is not replayed");
   assert.match(progress, /✓ answered\n\n$/u, "the progress conclusion separates stdout answer bytes");
   const long = {
     ...ordinary,
@@ -136,9 +200,11 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     },
   };
   const receipt = tellText(long, context).split("\n");
-  assert.equal(receipt.length, 2, "identity and one Tell line only");
-  assert.match(receipt[1]!, /⧖ tell +"one line of caller input .*…"$/u);
-  assert.ok(displayColumns(receipt[1]!) <= 80);
+  assert.equal(receipt.length, 3, "frame head, rule and one Tell row only");
+  assert.equal(receipt[1], frameRule([result.result.akuma]));
+  assert.match(receipt[2]!, /✓ told +"one line of caller input .*…"$/u);
+  assert.doesNotMatch(receipt.join("\n"), /running|completed|pending tell/u);
+  assert.ok(displayColumns(receipt[2]!) <= 80);
   assert.match(
     tellText(
       { ...long, result: { ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } } },
@@ -146,6 +212,14 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     ),
     /⧗ tell/u,
   );
+  assert.match(
+    tellText(
+      { ...ordinary, result: { ...ordinary.result, tell: { ...ordinary.result.tell, wake: { kind: "failed", diagnostic: "wake refused" } } } },
+      context,
+    ),
+    /^\d{2}:\d{2} ! tell +"continue"\n! tell delivery failed · wake refused$/mu,
+  );
+  assert.equal(killResultText(result.result.akuma, "killed"), `${result.result.akuma}\n${frameRule([result.result.akuma])}\n\n✓ killed`);
   assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
   assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
 
@@ -204,8 +278,8 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
   const callTranscript = [...callFrame, callConclusion].join("\n");
   assert.equal(admission[0], id, "the shared stream opens the identity frame before the Tell receipt");
   assert.equal(admission[1], "─".repeat(displayColumns(id)));
-  assert.equal(tellTranscript.match(/tell +"continue"/gu)?.length, 1);
-  assert.ok(tellTranscript.indexOf("tell") > tellTranscript.indexOf(`${id}\n`));
+  assert.equal(tellTranscript.match(/told +"continue"/gu)?.length, 1);
+  assert.ok(tellTranscript.indexOf("told") > tellTranscript.indexOf(`${id}\n`));
   assert.equal(tellTranscript.split(id).length - 1, 1, "the transcript contains exactly one identity frame");
   assert.equal(callTranscript.match(/told +“continue”/gu)?.length, 1);
   assert.ok(callTranscript.indexOf("told") > callTranscript.indexOf(`${id}\n`));
@@ -378,6 +452,6 @@ test("plural wait attributes omitted spans and the scoreboard by identity tag", 
     unobserved: [],
   });
   assert.match(conclusion, /^      dead ⋮ 4 omitted$/mu);
-  assert.match(conclusion, /^\d{2}:\d{2} dead ● still running/mu);
-  assert.match(conclusion, /^\d{2}:\d{2} face ● still running/mu);
+  assert.match(conclusion, /^\d{2}:\d{2} dead ● running/mu);
+  assert.match(conclusion, /^\d{2}:\d{2} face ● running/mu);
 });

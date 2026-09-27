@@ -1,11 +1,6 @@
 import type { ActivityRow, AkumaStatus, KillEvidence, ReportedFileChange } from "../../akuma/akuma.js";
 import type { CallObservation } from "../../library/akuma-creation.js";
-import type {
-  AkumaObservation,
-  AkumaObservationStage,
-  CreatedTaskObservation,
-  DispatchAssociation,
-} from "../../index.js";
+import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
 import type { AkumaAskObservation } from "../../akuma/selection-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
@@ -86,14 +81,6 @@ function contractFacts(contract: DispatchAssociation): readonly string[] {
 
 function unobservedText(id: string, diagnostic: string): string {
   return `× Akuma observation failed  ${safeText(id)} — ${safeText(diagnostic)}`;
-}
-
-function lifeLabel(life: AkumaObservation["status"]["life"]): string {
-  if (life === "running") return "● running";
-  if (life === "asleep") return "✓ came back";
-  if (life === "killed") return "× killed";
-  if (life === "hung") return "? hung";
-  return "! stranded";
 }
 
 function clock(at: string): string {
@@ -185,7 +172,7 @@ function actionCell(head: string, verb: string, columns: number): string {
 }
 
 function continuationPrefix(): string {
-  return " ".repeat(TIME_WIDTH) + " │ " + " ".repeat(VERB_WIDTH) + " ";
+  return " ".repeat(TIME_WIDTH + 3 + VERB_WIDTH + 1);
 }
 
 /** Pad to a terminal-column width; raw string length is never the measuring stick. */
@@ -240,8 +227,7 @@ function sourceLayout(source: string, width: () => number, clock: { previous?: s
         verb,
         columns,
       ),
-    // Continuations blank the time and source columns and align under the mark.
-    continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
+    continuation: () => " ".repeat(TIME_WIDTH + 1 + width() + 3 + VERB_WIDTH + 1),
     marker: (count) => `${gutter()}⋮ ${count} omitted`,
     clock,
     singleLine: true,
@@ -255,16 +241,6 @@ function quotedBody(row: RenderRow): boolean {
     row.kind === "tell" ||
     (row.kind === "outcome" && row.outcome.kind === "answered")
   );
-}
-
-/** Quote every rendered body line, slicing each line's prefix by its display width. */
-function quoteLines(lines: readonly string[], prefix: string): readonly string[] {
-  const prefixWidth = displayColumns(prefix);
-  return lines.map((line) => {
-    const { text: head, rest: body } = takeDisplayColumns(line, prefixWidth);
-    if (body.length === 0) return line;
-    return `${head}“${body}”`;
-  });
 }
 
 function pathTail(path: string, maximum: number): string {
@@ -310,17 +286,6 @@ function renderPathPreview(
   return `${first}${base}${renderedDiagnostic}`;
 }
 
-function takeWordPrefix(value: string, maximum: number): Readonly<{ head: string; rest: string }> {
-  const taken = takeDisplayColumns(value, maximum);
-  if (taken.rest.length === 0) return { head: taken.text, rest: "" };
-  const split = taken.text.lastIndexOf(" ");
-  if (split <= 0) return { head: taken.text, rest: taken.rest };
-  return {
-    head: taken.text.slice(0, split).trimEnd(),
-    rest: `${taken.text.slice(split)}${taken.rest}`.trimStart(),
-  };
-}
-
 function renderRunCommand(
   first: string,
   continuation: string,
@@ -332,10 +297,10 @@ function renderRunCommand(
   const secondBudget = Math.max(0, columns - displayColumns(continuation));
   if (displayColumns(`${text}${suffix}`) <= firstBudget) return [`${first}${text}${suffix}`];
   const command = text.startsWith("$ ") ? text.slice(2) : text;
-  const firstPart = takeWordPrefix(command, Math.max(0, firstBudget - 3));
+  const firstPart = takeDisplayColumns(command, Math.max(0, firstBudget - 2));
   const restWidth = displayColumns(firstPart.rest) + displayColumns(suffix);
   if (restWidth <= secondBudget) {
-    return [`${first}$ ${firstPart.head}`, `${continuation}${firstPart.rest}${suffix}`];
+    return [`${first}$ ${firstPart.text}`, `${continuation}${firstPart.rest}${suffix}`];
   }
   const suffixBudget = Math.min(displayColumns(suffix), Math.max(0, secondBudget - 8));
   const keptSuffix = suffixBudget > 0 ? truncateDisplayText(suffix, suffixBudget) : "";
@@ -359,51 +324,48 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
   return toolContent(row, columns);
 }
 
-function renderSingleLineRow(
+/** Hard-slice payloads for every row layout without introducing new quote boundaries. */
+function wrapActivityBody(
   input: Readonly<{
-    row: RenderRow;
-    first: string;
-    value: ReturnType<typeof rowText>;
-    context: TextRenderContext;
-    quoted: boolean;
-    inFlightSay: boolean;
-  }>,
-): readonly string[] {
-  const { row, first, value, context, quoted, inFlightSay } = input;
-  const openQuote = row.kind === "said" && inFlightSay;
-  const quoteWidth = quoted ? (openQuote ? 1 : 2) : 0;
-  const remaining = context.columns - displayColumns(first) - quoteWidth;
-  const bodyText = rowBody(row, value.text, remaining);
-  const text = truncateDisplayText(bodyText, Math.max(0, remaining));
-  if (!quoted) return [text.length === 0 ? first.trimEnd() : `${first}${text}`];
-  return [`${first}"${text}${openQuote ? "" : '"'}`];
-}
-
-function renderMultilineRow(
-  input: Readonly<{
-    row: RenderRow;
+    text: string;
     first: string;
     continuation: string;
-    value: ReturnType<typeof rowText>;
-    context: TextRenderContext;
-    history: boolean;
-    quoted: boolean;
+    columns: number;
+    maxLines: number;
+    quote: string;
+    openQuote: boolean;
+    truncated: boolean;
   }>,
 ): readonly string[] {
-  const { row, first, continuation, value, context, history, quoted } = input;
-  const quoteWidth = quoted ? 2 : 0;
-  const remaining = context.columns - quoteWidth - displayColumns(first);
-  // A name that already fills its row spends the width whole; its arguments trim away entirely.
-  if (remaining <= 0) return [first.trimEnd()];
-  const bodyText = rowBody(row, value.text, remaining - displayColumns(value.suffix ?? ""));
-  const lines = renderBoundedTextBlock(bodyText, {
-    first,
-    continuation,
-    columns: context.columns - quoteWidth,
-    lines: history ? Number.MAX_SAFE_INTEGER : value.lines,
-    ...("truncated" in row && row.truncated === true ? { truncated: true } : {}),
-  });
-  return quoted ? quoteLines(lines, first) : lines;
+  let rest = safeText(input.text).replace(/\s+/gu, " ").trim();
+  const lines: string[] = [];
+  for (let index = 0; index < input.maxLines; index += 1) {
+    const prefix = index === 0 ? input.first : input.continuation;
+    if (rest.length === 0 && !input.quote && index === 0) return [prefix.trimEnd()];
+    const opening = input.quote && index === 0 ? input.quote : "";
+    const closing = input.quote && !input.openQuote ? (input.quote === "“" ? "”" : input.quote) : "";
+    const budget = Math.max(0, input.columns - displayColumns(prefix + opening + closing));
+    if (budget === 0) return lines.length === 0 ? [prefix.trimEnd()] : lines;
+    const fragment = activityFragment(rest, budget, index === input.maxLines - 1, input.truncated);
+    rest = fragment.remaining;
+    lines.push(`${prefix}${opening}${fragment.body}${rest.length === 0 ? closing : ""}`);
+    if (rest.length === 0) break;
+  }
+  return lines;
+}
+
+function activityFragment(
+  rest: string,
+  budget: number,
+  last: boolean,
+  forced: boolean,
+): Readonly<{ body: string; remaining: string }> {
+  const truncated = (forced && displayColumns(rest) <= budget) || (last && (forced || displayColumns(rest) > budget));
+  if (truncated) return { body: truncateDisplayText(`${rest}…`, budget), remaining: "" };
+  const body = takeDisplayColumns(rest, budget).text;
+  // A cluster wider than the available cells must not stall an unbounded history row.
+  if (body.length === 0 && rest.length > 0) return { body: truncateDisplayText(rest, budget), remaining: "" };
+  return { body, remaining: rest.slice(body.length) };
 }
 
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
@@ -421,10 +383,17 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
     ];
   }
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
-  const quoted = quotedBody(row);
-  return layout.singleLine === true
-    ? renderSingleLineRow({ row, first, value, context, quoted, inFlightSay })
-    : renderMultilineRow({ row, first, continuation, value, context, history: layout.history === true, quoted });
+  const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
+  return wrapActivityBody({
+    text: rowBody(row, value.text, available),
+    first,
+    continuation,
+    columns: context.columns,
+    maxLines: layout.singleLine === true ? 1 : layout.history === true ? Number.MAX_SAFE_INTEGER : value.lines,
+    quote: quotedBody(row) ? (layout.singleLine === true ? '"' : "“") : "",
+    openQuote: row.kind === "said" && inFlightSay,
+    truncated: "truncated" in row && row.truncated === true,
+  });
 }
 
 /** Snapshot and live streams select different rows, but render each selected row identically. */
@@ -822,12 +791,15 @@ export type WaitObservationStream = Readonly<{
 }>;
 
 function conclusionMarkVerb(
-  status: AkumaObservation["status"],
-  answered: boolean,
+  status: AkumaObservation["status"] | undefined,
+  outcome: "answered" | "failed" | "unanswered" | "life",
 ): Readonly<{ mark: string; verb: string }> {
-  if (failedOutcomeDiagnostic(status) !== undefined) return { mark: "!", verb: "failed" };
-  if (answered) return { mark: "✓", verb: "answered" };
-  if (status.life === "running") return { mark: "●", verb: "still running" };
+  if (outcome === "failed" || (status !== undefined && failedOutcomeDiagnostic(status) !== undefined))
+    return { mark: "!", verb: "failed" };
+  if (outcome === "answered") return { mark: "✓", verb: "answered" };
+  if (outcome === "unanswered") return { mark: "○", verb: "unanswered" };
+  if (status === undefined) return { mark: "⧗", verb: "pending tell" };
+  if (status.life === "running") return { mark: "●", verb: "running" };
   if (!defaultWaitComplete(status)) {
     return { mark: "⧗", verb: "pending tell" };
   }
@@ -1038,16 +1010,16 @@ export function inputWaitConclusion(
   const complete = observation.reason !== "deadline";
   const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
   const at = complete ? (Number.isFinite(pinned) ? pinned : undefined) : end;
-  const conclusion =
+  const conclusion = conclusionMarkVerb(
+    input.status,
     observation.reason === "answered"
-      ? { mark: "✓", verb: "answered" }
+      ? "answered"
       : observation.reason === "failed" || observation.reason === "invalid-output"
-        ? { mark: "!", verb: "failed" }
+        ? "failed"
         : observation.reason === "unanswered"
-          ? { mark: "○", verb: "unanswered" }
-          : input.status === undefined
-            ? { mark: "⧗", verb: "pending tell" }
-            : conclusionMarkVerb(input.status, false);
+          ? "unanswered"
+          : "life",
+  );
   return [
     waitConclusionRow({
       ...(at === undefined ? {} : { at }),
@@ -1113,15 +1085,15 @@ function concludeWaitStream(
     const status = observation.status;
     const complete = defaultWaitComplete(status);
     const at = complete ? (state.settledAt.get(id) ?? end) : end;
-    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
+    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined ? "answered" : "life");
     const target = multi ? ` ${padToDisplay(sourceTag(state, id), state.sourceWidth)}` : "";
     return [waitConclusionRow({ at, startedAt, complete, end, mark, verb, target })];
   });
   const answeredSingle =
     !multi && result.observations.length === 1 && statusAnswer(result.observations[0]!) !== undefined;
   const blocks = [
+    ...(conclusions.length > 0 ? [conclusions.join("\n")] : []),
     ...(unobservedLines.length > 0 ? [unobservedLines.join("\n")] : []),
-    ...(conclusions.length > 0 ? [(multi ? [""] : []).concat(conclusions).join("\n")] : []),
   ];
   const body = [...tail, ...blocks].join("\n");
   // One blank line keeps the bare stdout answer visually separate from the stream.
@@ -1226,7 +1198,7 @@ export function inputWaitStream(
     if (!admitted && !failedBeforeAdmission) throw new Error("input wait observed before admission");
     opened = true;
     const identity = head();
-    lines.push(...snapshotHeading(identity.id, identity.alias, identity.contract), ...identity.facts);
+    lines.push(...snapshotHeading(identity.id, identity.alias, identity.contract));
   };
   const observe: InputWaitStream["observe"] = (observation) => {
     const lines: string[] = [];
@@ -1252,6 +1224,7 @@ export function inputWaitStream(
           ...(lastStatus === undefined ? {} : { status: lastStatus }),
         }),
       );
+    lines.push(...head().facts);
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };
   return { admitted: admit, observe, conclude, opened: () => opened };
@@ -1287,7 +1260,7 @@ export function callObservationStream(
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
 
 function changeStat(change: RenderedFileChange): string {
-  return change.diffstat === undefined ? "+? -?" : `+${change.diffstat.added} -${change.diffstat.removed}`;
+  return change.diffstat === undefined ? "~" : `+${change.diffstat.added} -${change.diffstat.removed}`;
 }
 
 function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
@@ -1356,18 +1329,29 @@ function snapshotCore(
   view: SnapshotView,
   context: TextRenderContext,
   options: SnapshotCoreOptions,
-): Readonly<{ activity: readonly string[]; lines: readonly string[] }> {
+): Readonly<{ activity: readonly string[]; lines: readonly string[]; facts: readonly string[] }> {
   const activity = snapshotActivityLines(view.status.timeline, context);
   const facts = [
-    ...(view.status.cwd === undefined ? [] : [`cwd  ${safeText(view.status.cwd)}`]),
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
     ...contractFacts(view.contract),
     ...(options.facts ?? []),
+    ...(view.status.cwd === undefined ? [] : [`cwd  ${safeText(view.status.cwd)}`]),
   ];
   return {
     activity,
-    lines: [...snapshotHeading(view.status.id, options.alias, view.contract), ...facts, ...activity],
+    lines: [...snapshotHeading(view.status.id, options.alias, view.contract), ...activity],
+    facts,
   };
+}
+
+function snapshotConclusion(status: AkumaObservation["status"]): string {
+  const entries = status.timeline.entries;
+  const last =
+    status.timeline.kind === "idle" && status.timeline.outcome !== undefined
+      ? status.timeline.outcome
+      : [...entries].reverse().find((entry) => entry.kind === "row")?.row;
+  const { mark, verb } = conclusionMarkVerb(status, "life");
+  return `${last === undefined ? "unknown" : clock(last.at)} ${mark} ${verb}`;
 }
 
 export function snapshotText(
@@ -1379,21 +1363,12 @@ export function snapshotText(
   const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
   return [
     ...core.lines,
-    ...(core.activity.length > 0 && taskContext.length > 0 ? [""] : []),
-    ...taskContext,
+    snapshotConclusion(view.status),
+    ...(taskContext.length > 0 ? ["", ...taskContext] : []),
+    ...(view.status.timeline.reportedChanges.length > 0 || view.status.timeline.reportedChangesOmitted > 0 ? [""] : []),
     ...renderReportedChangeLines(view.status.timeline),
-    "",
-    lifeLabel(view.status.life),
+    ...(core.facts.length > 0 ? ["", ...core.facts] : []),
   ].join("\n");
-}
-
-function mutationSnapshotText(
-  view: SnapshotView,
-  context: TextRenderContext,
-  options: SnapshotCoreOptions & Readonly<{ showLife?: boolean }> = {},
-): string {
-  const core = snapshotCore(view, context, options);
-  return [...core.lines, ...(options.showLife === false ? [] : ["", lifeLabel(view.status.life)])].join("\n");
 }
 
 function killResultLabel(evidence: KillEvidence): string {
@@ -1405,16 +1380,6 @@ function killResultLabel(evidence: KillEvidence): string {
 
 export function killResultText(id: string, evidence: KillEvidence, alias?: string): string {
   return [...snapshotHeading(id, alias, undefined), "", killResultLabel(evidence)].join("\n");
-}
-
-export function mutationObservationStageText(
-  id: string,
-  observation: AkumaObservationStage,
-  context: TextRenderContext,
-  options: SnapshotCoreOptions & Readonly<{ showLife?: boolean }> = {},
-): string {
-  if (observation.kind === "unobserved") return unobservedText(id, observation.diagnostic);
-  return mutationSnapshotText(observation, context, options);
 }
 
 export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
@@ -1532,7 +1497,7 @@ export function waitText(
     const status = observation.status;
     const complete = defaultWaitComplete(status);
     const at = complete ? (settleMoment(status) ?? end) : end;
-    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined);
+    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined ? "answered" : "life");
     return [
       `${clockFromMs(at)} ${padToDisplay(waitIdentityTag(id, order), sourceWidth)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`,
     ];
@@ -1574,17 +1539,19 @@ export function tellText(
 ): string {
   const wake = result.result.tell.wake;
   const target = identity(result.result.akuma, result.alias);
+  const glyph = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
+  const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
   const row = groupedRows([result.result.tell.row], context, {
     ...plainLayout(),
-    head: (time, _glyph, _verb, columns) => eventPrefix(wake.kind === "held" ? "⧗" : "⧖", "tell", time, columns),
+    head: (time, _glyph, _verb, columns) => eventPrefix(glyph, verb, time, columns),
     singleLine: true,
   }).join("\n");
-  const identityLine = options.identity === false ? [] : [target];
+  const heading = options.identity === false ? [] : snapshotHeading(target, undefined, undefined);
   if (wake.kind === "failed") {
     const child = "child" in wake ? wake.child : undefined;
     const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
     return [
-      ...identityLine,
+      ...heading,
       row,
       ...renderBoundedTextBlock(failure, {
         first: "",
@@ -1594,5 +1561,5 @@ export function tellText(
       }),
     ].join("\n");
   }
-  return [...identityLine, row].join("\n");
+  return [...heading, row].join("\n");
 }

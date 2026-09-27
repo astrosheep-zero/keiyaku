@@ -65,6 +65,7 @@ test("call defaults to detached birth and rejects removed detach flags", () => {
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
   const text = renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }));
   assert.equal(text, [`${akuma}`, `└─ ${world}`].join("\n"));
+  assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached call has no timeline or observation conclusion");
   assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁/u);
 });
 

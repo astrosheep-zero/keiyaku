@@ -43,9 +43,13 @@ the integrated object, and the final lifecycle state is one explicit row. An
 incomplete placement keeps its tender and content-identity rows and its
 current diagnostic shape.
 
-A birth or admission receipt is the identity frame head alone: the complete
-identity roots one line, and each coordinate fact hangs as one tree branch
-beneath it. Labels, arrows, and key-value columns are not receipt vocabulary.
+A birth or admission receipt takes the admitted fact's native grammar and stops
+at that fact: identity uses a tree, a timeline admission uses a row, and Git
+movement uses a reference line. A frame rule appears only when content follows;
+no admission receipt adds an observation conclusion or claims a live state.
+The complete identity roots one line, and each coordinate fact hangs as one tree
+branch beneath it. Labels, arrows, and key-value columns are not receipt
+vocabulary.
 
 ## Shared rendering
 
@@ -114,6 +118,18 @@ recovery text keeps specific causes, capabilities, and coordinates; removing
 internal terminology never removes evidence. Presentation may densify and wrap
 for the terminal but cannot truncate a copyable identity or replace a public
 discriminant with decoration.
+
+An Akuma activity frame separates identity from its timeline: the frame boundary
+opens directly onto activity, and the shared life or input conclusion closes that
+timeline without an intervening section. Status uses the same completion judgment
+as wait, including a sleeping Akuma with an outstanding Tell. Only observing a
+wait can justify elapsed-duration text. Read-only reference facts follow the
+conclusion, with reported changes before diagnostics and the execution directory
+last; an unknown change size remains unknown rather than implying additions or
+removals. Across snapshot, history, compact, and attributed activity, bounded
+payloads use one quote boundary and blank, body-aligned continuations. They
+slice by whole grapheme cells without word-sensitive rearrangement and expose
+truncation at the end of the bounded payload.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual

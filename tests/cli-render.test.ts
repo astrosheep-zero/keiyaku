@@ -1812,7 +1812,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
 });
 
-test("a sleeping worker reports its return as a status life footer, not an outcome frame", () => {
+test("a sleeping worker ends its status timeline with the shared completion judgment", () => {
   const sleeping = parseAkumaStatus({
     id: "aku/worker/abcd0001",
     life: "asleep",
@@ -1820,7 +1820,8 @@ test("a sleeping worker reports its return as a status life footer, not an outco
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
   });
   const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
-  assert.match(snapshot, /^✓ came back$/mu);
+  assert.match(snapshot, /^\d{2}:\d{2} ✓ completed$/mu);
+  assert.match(snapshot, /✓ answer “the answer”\n\d{2}:\d{2} ✓ completed$/u);
 
   const returned = waitText(
     {
@@ -1836,7 +1837,7 @@ test("a sleeping worker reports its return as a status life footer, not an outco
     { columns: 80, color: false },
   );
   assert.match(returned, /^✓ answered aku\/worker\/abcd0001$/mu, "an outcome surface uses an outcome verb");
-  assert.doesNotMatch(returned, /came back/u, "the life label survives only in a status footer");
+  assert.doesNotMatch(returned, /came back/u, "the retired life label is absent");
 });
 
 test("status text and JSON report the Akuma execution workdir", () => {
@@ -2513,7 +2514,7 @@ test("an unfinished wait concludes with the running mark and waited duration, ne
     ],
     unobserved: [],
   };
-  assert.equal(stream.conclude(conclusion), `${clockAt(46_000)} ● still running — waited 45s`);
+  assert.equal(stream.conclude(conclusion), `${clockAt(46_000)} ● running — waited 45s`);
 });
 
 test("a streamed multi-target wait scoreboards without a count while a non-streamed one closes the same way", () => {
@@ -2557,7 +2558,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   const scoreboard = stream.conclude(conclusion);
   assert.equal(
     scoreboard,
-    `\n${clockAt(settledAtMs)} abcd0006 ✓ answered — 3m12s\n${clockAt(settledAtMs + 8_000)} abcd0007 ● still running — waited 3m20s`,
+    `${clockAt(settledAtMs)} abcd0006 ✓ answered — 3m12s\n${clockAt(settledAtMs + 8_000)} abcd0007 ● running — waited 3m20s`,
   );
   assert.doesNotMatch(scoreboard, /of \d+ done/u);
 
@@ -2582,7 +2583,7 @@ test("a streamed multi-target wait scoreboards without a count while a non-strea
   assert.doesNotMatch(multiText, /of \d+ done/u, "the bare completion count is replaced");
   assert.match(multiText, /^✓ answered aku\/worker\/abcd0006$/mu, "the detail blocks stay");
   const multiLines = multiText.split("\n");
-  assert.match(multiLines.at(-1)!, /● still running — waited \d+/u, "an unfinished row carries the elapsed wait");
+  assert.match(multiLines.at(-1)!, /● running — waited \d+/u, "an unfinished row carries the elapsed wait");
   assert.match(
     multiLines.at(-2)!,
     new RegExp(`^${clockAt(settledAtMs)} abcd0006 ✓ answered — 3m12s$`, "u"),
@@ -2662,7 +2663,7 @@ test("conclusion durations assert real waiting", () => {
   now = 46_000;
   assert.equal(
     unfinished.conclude({ reason: "deadline", observations: [observation(open)], unobserved: [] }),
-    `${clockAt(46_000)} ● still running — waited 45s`,
+    `${clockAt(46_000)} ● running — waited 45s`,
   );
 
   // The observing call shares the rule: a call already answered at its first look names no duration.
@@ -2924,7 +2925,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
   const observed = observedStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.equal(
     observed.at(-3),
-    `${clockAt(55_000)} ● still running — waited 15s`,
+    `${clockAt(55_000)} ● running — waited 15s`,
     "a caller deadline states the observed life rather than naming the deadline",
   );
 

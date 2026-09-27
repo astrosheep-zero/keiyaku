@@ -247,7 +247,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
     assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
     assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
-    assert.equal(unfinished.stderr.match(/● still running — waited /gu)?.length, 1, "one input-bound conclusion states the observed life");
+    assert.equal(unfinished.stderr.match(/● running — waited /gu)?.length, 1, "one input-bound conclusion states the observed life");
     const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
     assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
     assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
@@ -370,12 +370,12 @@ test("packaged plural waits attribute activity and close every target", { timeou
     assert.match(any.stderr, new RegExp(`${anySlowTag} +✓ answered — `, "mu"), "--any scored the answered target");
     assert.match(
       any.stderr,
-      new RegExp(`${anyNotesTag} +● still running — waited \\d+s`, "mu"),
+      new RegExp(`${anyNotesTag} +● running — waited \\d+s`, "mu"),
       "--any scored the running target",
     );
     const anyLines = any.stderr.split("\n");
     const anyScore =
-      anyLines.find((line) => new RegExp(`${anyNotesTag} +● still running — waited `, "u").test(line)) ??
+      anyLines.find((line) => new RegExp(`${anyNotesTag} +● running — waited `, "u").test(line)) ??
       assert.fail(`--any has its running conclusion:\n${any.stderr}`);
     assertAttributedInputAndLiveSays(any.stderr, anyNotesTag, anyScore, "--any");
     const anyAttempts = attributedAttemptNumbers(any.stderr, anySlowTag);
@@ -408,12 +408,12 @@ test("packaged plural waits attribute activity and close every target", { timeou
     );
     assert.match(
       all.stderr,
-      new RegExp(`${allNotesTag} +● still running — waited 2s`, "mu"),
+      new RegExp(`${allNotesTag} +● running — waited 2s`, "mu"),
       "--all scored the running target",
     );
     const allLines = all.stderr.split("\n");
     const allScore =
-      allLines.find((line) => new RegExp(`${allNotesTag} +● still running — waited `, "u").test(line)) ??
+      allLines.find((line) => new RegExp(`${allNotesTag} +● running — waited `, "u").test(line)) ??
       assert.fail(`--all has its running conclusion:\n${all.stderr}`);
     assertAttributedInputAndLiveSays(all.stderr, allNotesTag, allScore, "--all");
     assert.equal(all.stderr.match(/✓ answered/gu)?.length, 1, "every target closes exactly once");
