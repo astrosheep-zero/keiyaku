@@ -45,17 +45,75 @@ export type ReconcileCompletion = Readonly<{
 export type ReconcileLagScope = "none" | "reconciliation" | "placement" | "continuation";
 
 export function reconcileLagScope(lag: ReconcileCompletion["lag"][number]): ReconcileLagScope {
-  switch (lag.kind) {
+  let scope: ReconcileLagScope;
+  const kind = lag.kind;
+  switch (kind) {
     case "worktree-retained":
     case "unsealed-bytes":
-      return "none";
+      scope = "none";
+      break;
     case "worktree-follow-retained":
-      return "continuation";
+      scope = "continuation";
+      break;
     case "target-checkout-retained":
-      return "placement";
-    default:
-      return "reconciliation";
+      scope = "placement";
+      break;
+    case "worktree-hook-failed":
+    case "reconcile-failed":
+    case "contract-file-failed":
+      scope = "reconciliation";
+      break;
   }
+  if (
+    kind !== "worktree-retained" &&
+    kind !== "unsealed-bytes" &&
+    kind !== "worktree-follow-retained" &&
+    kind !== "target-checkout-retained" &&
+    kind !== "worktree-hook-failed" &&
+    kind !== "reconcile-failed" &&
+    kind !== "contract-file-failed"
+  ) {
+    const exhaustive: never = kind;
+    return exhaustive;
+  }
+  return scope;
+}
+
+/**
+ * Reconciliation lags are failures only when physical repair is incomplete.
+ * Retained lags (worktree-retained, worktree-follow-retained, and
+ * unsealed-bytes) are observable residue, not failed repair; target-checkout-
+ * retained and every *-failed lag are failures.
+ */
+export function reconcileLagIsFailure(lag: ReconcileCompletion["lag"][number]): boolean {
+  let failure: boolean;
+  const kind = lag.kind;
+  switch (kind) {
+    case "worktree-retained":
+    case "worktree-follow-retained":
+    case "unsealed-bytes":
+      failure = false;
+      break;
+    case "target-checkout-retained":
+    case "worktree-hook-failed":
+    case "reconcile-failed":
+    case "contract-file-failed":
+      failure = true;
+      break;
+  }
+  if (
+    kind !== "worktree-retained" &&
+    kind !== "worktree-follow-retained" &&
+    kind !== "unsealed-bytes" &&
+    kind !== "target-checkout-retained" &&
+    kind !== "worktree-hook-failed" &&
+    kind !== "reconcile-failed" &&
+    kind !== "contract-file-failed"
+  ) {
+    const exhaustive: never = kind;
+    return exhaustive;
+  }
+  return failure;
 }
 
 export function decodeReconciliationLag(value: unknown): ReconcileCompletion["lag"][number] {

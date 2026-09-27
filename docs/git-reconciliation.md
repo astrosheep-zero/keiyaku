@@ -23,6 +23,13 @@ every replay begins from durable facts and fresh topology, never a process-local
 receipt, progress marker, frozen hook list, detached runner, or recovery queue.
 Confirmed reset is a separate Git-owned operation, not reconciliation.
 
+Reconciliation lag failure semantics have one source of truth: the owner module's
+exhaustive classifier determines whether a lag is incomplete physical repair or
+observable retained residue. CLI rendering and process exit classification derive
+from that classifier; they do not infer failure from names or add exceptions.
+Extending the lag union therefore requires an explicit classification and
+rendering decision, and fails typecheck until both are made.
+
 ## Worktrees, Placement Recovery, And Custody
 
 For an active Contract, reconciliation repairs necessary custody and realizes
