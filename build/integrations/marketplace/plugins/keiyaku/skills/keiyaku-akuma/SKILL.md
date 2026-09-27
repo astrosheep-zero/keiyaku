@@ -31,6 +31,10 @@ Useful options:
 - `--contract <kei/...>` associates the Akuma with a Contract; it never selects an execution directory.
 - `--workdir <path>` chooses its execution directory; without it the call uses the invocation cwd.
 - `--allowed <product.action>` adds actions subject to the Akuma's restrictions.
+  Independent Contract review is not part of the ordinary delegation
+  baseline: a Reviewer that must record verdicts for a `reviewed` gate needs
+  `--allowed contract.review` at call time, or its `review` is refused and
+  the verdict never reaches the Contract.
 - `--schema <file>` requests a structured answer described by a JSON Schema.
 
 The selected Akuma name is a reusable worker configuration, not an individual.

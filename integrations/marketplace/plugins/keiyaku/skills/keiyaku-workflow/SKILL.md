@@ -91,7 +91,10 @@ keiyaku bind --gates reviewed -
 
 Gates are acceptance requirements, not work assignments. The Deliverer
 produces the candidate, the relevant producer supplies evidence, and the holder
-coordinates the remaining work.
+coordinates the remaining work. A Reviewer Akuma records its verdict with
+`review`, which requires the explicit `--allowed contract.review` grant at
+`call` time; without it the verdict is refused and the gate never receives
+evidence.
 
 ## 6. Delegate the Work
 
