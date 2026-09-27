@@ -13,9 +13,9 @@ import {
 import { isKeiyakuOwnedRef, type GitSnapshot, type GitOid } from "./repository.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import {
+  readBlobResults,
   readGitTreeSelection,
   withGitTargetedReadObservation,
-  type GitBlobResult,
   type GitDecodeChannel,
   type GitReadObservation,
   type GitTreeSelection,
@@ -424,18 +424,7 @@ export async function extendContractsForAdmissionAt(
 ): Promise<GitDecisionObservation> {
   const missing = ids.filter((id) => !observation.decision.has(id));
   if (missing.length === 0) return observation;
-  const readBlobsAt: GitReadObservation["readBlobs"] = async (oids) => {
-    const objects = await channel.readObjects(oids);
-    const blobs = new Map<GitOid, GitBlobResult>();
-    for (const [oid, object] of objects) {
-      if (object.kind === "missing") blobs.set(oid, object);
-      else {
-        if (object.type !== "blob") throw new AuthorityCorruptionError(`Git object is not a blob: ${oid}`);
-        blobs.set(oid, { kind: "present", bytes: object.bytes });
-      }
-    }
-    return blobs;
-  };
+  const readBlobsAt: GitReadObservation["readBlobs"] = async (oids) => await readBlobResults(channel, oids);
   const snapshot = observation.admission.snapshot;
   if (snapshot.tree === null) return observation;
   const selected = await readGitTreeSelection(channel, snapshot.tree, {

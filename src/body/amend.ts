@@ -11,7 +11,7 @@ import {
   sectionContent,
 } from "../markdown/query.js";
 import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
-import { decodeRegion, RegionDocumentError } from "./region.js";
+import { decodeRegionOrRefusal } from "./region.js";
 import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
 import { renderAmendedContractBody } from "./render.js";
 
@@ -70,15 +70,6 @@ function prose(document: DocumentNode, section: SectionNode, label: string): str
   const value = sectionContent(document, section);
   if (value.trim().length === 0) refusal(`${label} operation body must be nonblank`);
   return value;
-}
-
-function region(document: DocumentNode, section: SectionNode): readonly string[] {
-  try {
-    return decodeRegion(document, section);
-  } catch (error) {
-    if (error instanceof RegionDocumentError) refusal(error.message);
-    throw error;
-  }
 }
 
 function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
@@ -245,7 +236,7 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
     return;
   }
   if (target === "region") {
-    body.region = region(document, operation.section);
+    body.region = decodeRegionOrRefusal(document, operation.section);
     return;
   }
   if (target === "criteria") {

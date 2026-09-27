@@ -24,8 +24,8 @@ import {
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
-import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
-import { taskDispositionMark } from "./marks.js";
+import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
+import { akumaMark, contractMark, taskDispositionMark } from "./marks.js";
 import { dispositionText } from "./task.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
@@ -51,19 +51,6 @@ function contractStatusTone(row: ContractKanshiRow, observedAt: string): Semanti
     return "attention";
   const journalAge = elapsedMilliseconds(row.lastJournalAt, observedAt);
   return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;
-}
-
-function contractMark(row: ContractKanshiRow): string {
-  if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "×";
-  if (row.title === null) return "?";
-  if (
-    row.gates.reports.some((report) => report.current.kind === "attested" && report.current.verdict === "unsatisfied")
-  )
-    return "!";
-  if (row.targetLag.kind === "unknown") return "?";
-  if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
-  return "●";
 }
 
 function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {

@@ -4,7 +4,7 @@ import { decodeDocumentEnvelope } from "./envelope.js";
 import { directChildren, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
-import { decodeRegion, regionStructure, RegionDocumentError } from "./region.js";
+import { decodeRegionOrRefusal, regionStructure } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import type { VerificationDefinition } from "../verification/declaration.js";
 
@@ -72,15 +72,6 @@ function prose(document: DocumentNode, section: SectionNode): string {
   return value;
 }
 
-function region(document: DocumentNode, section: SectionNode): readonly string[] {
-  try {
-    return decodeRegion(document, section);
-  } catch (error) {
-    if (error instanceof RegionDocumentError) refusal(error.message);
-    throw error;
-  }
-}
-
 function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
   const structural = criteriaStructure(document, section);
   if (structural !== null) refusal(structural);
@@ -135,7 +126,7 @@ export function decodeContractDocument(
     context: prose(document, requiredSection(sections, "context")),
     objective: prose(document, requiredSection(sections, "objective")),
     design: prose(document, requiredSection(sections, "design")),
-    region: region(document, requiredSection(sections, "region")),
+    region: decodeRegionOrRefusal(document, requiredSection(sections, "region")),
     criteria: criteria(document, requiredSection(sections, "criteria")),
     verification: verificationSection === undefined ? [] : verification(document, verificationSection, options),
     extensions,

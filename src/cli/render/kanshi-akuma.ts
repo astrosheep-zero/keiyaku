@@ -1,5 +1,6 @@
 import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import { snapshotActivityLines } from "./akuma-activity.js";
+import { akumaMark } from "./marks.js";
 import {
   ageText,
   elapsedMilliseconds,
@@ -32,18 +33,6 @@ function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone 
   if (row.life === "asleep") return latestAge !== null && latestAge <= RECENT_TONE_MS ? "recent" : "dim";
   if (row.life === "running" && latestAge !== null && latestAge <= RECENT_TONE_MS) return "recent";
   return null;
-}
-
-function akumaMark(life: string): string {
-  return life === "running"
-    ? "●"
-    : life === "asleep"
-      ? "○"
-      : life === "killed"
-        ? "×"
-        : life === "stranded" || life === "stillborn" || life === "untidy"
-          ? "!"
-          : "?";
 }
 
 /** Bounded latest semantic entry, rendered by the same activity renderer as a targeted snapshot. */
@@ -119,4 +108,4 @@ function formatAge(source: string | null | undefined, observedAt: string): strin
   return ageText(source, observedAt);
 }
 
-export { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma };
+export { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma };

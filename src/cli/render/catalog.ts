@@ -1,5 +1,4 @@
 import type { Catalog } from "../catalog.js";
-import type { ContractRow } from "../../library/contract.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -10,15 +9,8 @@ import {
   targetFacts,
 } from "./contract-observation.js";
 import { ageText, safeText } from "./terminal.js";
+import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
-
-function akumaMark(life: string): string {
-  if (life === "running") return "●";
-  if (life === "asleep" || life === "unborn") return "○";
-  if (life === "killed") return "×";
-  if (life === "stillborn") return "!";
-  return "?";
-}
 
 function relativeAge(source: string | null, observedAt: string): string | null {
   if (source === null) return null;
@@ -49,17 +41,6 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
   return lines.join("\n");
 }
 
-function catalogMark(row: ContractRow): string {
-  if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "×";
-  if (row.title === null) return "?";
-  if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
-    return "!";
-  if (row.targetLag.kind === "unknown") return "?";
-  if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
-  return "●";
-}
-
 function formatAge(source: string, observedAt: string): string {
   return ageText(source, observedAt, "future");
 }
@@ -73,7 +54,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const header = "CONTRACTS // recent";
   const blocks = rows.map((row) => {
     const lines = [
-      `${catalogMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
+      `${contractMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
       ...candidateIntegrationFacts(row.delivery, row.verification, abbreviations).map((fact) => `  ${safeText(fact)}`),
       ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
       ...[],

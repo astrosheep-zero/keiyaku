@@ -20,7 +20,7 @@ import {
   waitedTellProgress,
 } from "../src/cli/render/akuma.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { akumaMark } from "../src/cli/render/kanshi-akuma.js";
+import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -221,6 +221,20 @@ test("Akuma presentation uses the settled six-mark vocabulary", () => {
   assert.equal(akumaMark("running"), "●");
   assert.equal(akumaMark("asleep"), "○");
   assert.equal(akumaMark("stranded"), "!");
+});
+
+test("Akuma life mark covers the full life vocabulary from one definition site", () => {
+  const expected = {
+    running: "●",
+    asleep: "○",
+    unborn: "○",
+    stranded: "!",
+    untidy: "!",
+    stillborn: "!",
+    killed: "×",
+    hung: "?",
+  } as const;
+  for (const [life, mark] of Object.entries(expected)) assert.equal(akumaMark(life as never), mark, life);
 });
 
 test("plural wait tags selected identities and keeps rows compact at 80 columns", () => {

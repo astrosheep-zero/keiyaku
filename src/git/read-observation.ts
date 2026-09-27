@@ -394,6 +394,27 @@ export async function withGitDecodeChannel<Value>(
   return result as Value;
 }
 
+/**
+ * Blob-only reads over a decode channel: a missing object stays missing, and a present
+ * non-blob object is authority corruption, never a silent skip.
+ */
+export async function readBlobResults(
+  channel: GitDecodeChannel,
+  oids: readonly GitOid[],
+): Promise<ReadonlyMap<GitOid, GitBlobResult>> {
+  if (oids.length === 0) return new Map();
+  const objects = await channel.readObjects(oids);
+  const blobs = new Map<GitOid, GitBlobResult>();
+  for (const [oid, object] of objects) {
+    if (object.kind === "missing") blobs.set(oid, object);
+    else {
+      if (object.type !== "blob") throw new AuthorityCorruptionError(`Git object is not a blob: ${oid}`);
+      blobs.set(oid, { kind: "present", bytes: object.bytes });
+    }
+  }
+  return blobs;
+}
+
 async function observeEpoch<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,
@@ -414,20 +435,6 @@ async function observeEpoch<Value>(
       refs.set(ref, resolved);
     }
     return await resolved;
-  };
-  const readBlobResults = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitBlobResult>> => {
-    assertActive();
-    if (oids.length === 0) return new Map();
-    const objects = await channel.readObjects(oids);
-    const blobs = new Map<GitOid, GitBlobResult>();
-    for (const [oid, object] of objects) {
-      if (object.kind === "missing") blobs.set(oid, object);
-      else {
-        if (object.type !== "blob") throw new AuthorityCorruptionError(`Git object is not a blob: ${oid}`);
-        blobs.set(oid, { kind: "present", bytes: object.bytes });
-      }
-    }
-    return blobs;
   };
 
   let result: Value | undefined;
@@ -452,7 +459,10 @@ async function observeEpoch<Value>(
       repository,
       snapshot,
       treeDirectories,
-      readBlobs: readBlobResults,
+      readBlobs: async (oids) => {
+        assertActive();
+        return await readBlobResults(channel, oids);
+      },
       resolveRef,
     } satisfies GitReadObservation;
     if (commit !== null) await readFormat(observation);

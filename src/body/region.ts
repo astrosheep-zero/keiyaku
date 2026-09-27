@@ -213,6 +213,16 @@ export function decodeRegion(_document: DocumentNode, section: SectionNode): rea
   return patterns.map((pattern) => compileRegionPattern(pattern).source);
 }
 
+/** Region decoding for body parsers: document errors surface as plain TypeError refusals. */
+export function decodeRegionOrRefusal(document: DocumentNode, section: SectionNode): readonly string[] {
+  try {
+    return decodeRegion(document, section);
+  } catch (error) {
+    if (error instanceof RegionDocumentError) throw new TypeError(error.message);
+    throw error;
+  }
+}
+
 export type RegionRelation = "same" | "mine-within-theirs" | "theirs-within-mine" | "intersect";
 
 function literalPrefixWithDeepTail(pattern: CompiledRegionPattern): readonly string[] | null {
