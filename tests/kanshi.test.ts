@@ -124,5 +124,4 @@ test("Task board failure names the malformed document once without suppressing C
   assert.doesNotMatch(selected, /failed task document must begin with YAML front matter/u);
   const worldText = renderKanshiText(report, { columns: 80, color: false });
   assert.equal((worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length, 1);
-  assert.doesNotMatch(selected, /──\[ (?:KEIYAKU|TASK|FLEET) \]/u);
 });

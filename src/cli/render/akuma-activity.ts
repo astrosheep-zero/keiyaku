@@ -60,8 +60,9 @@ function associatedContractId(contract: DispatchAssociation): string | undefined
   return contract.kind === "associated" ? contract.contractId : undefined;
 }
 
-export function associatedIdentity(id: string, alias?: string, _contract?: DispatchAssociation): string {
-  return identity(id, alias);
+export function associatedIdentity(id: string, alias?: string, contract?: DispatchAssociation): string {
+  const contractId = contract === undefined ? undefined : associatedContractId(contract);
+  return `${identity(id, alias)}${contractId === undefined ? "" : `\n└─ ${contractId}`}`;
 }
 
 export function snapshotHeading(

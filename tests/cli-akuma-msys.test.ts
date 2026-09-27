@@ -79,6 +79,20 @@ test("a contract-bound call receipt hangs contract and cwd as tree branches", ()
   assert.equal(text, [`${akuma} (@sapling)`, `├─ kei/tree-receipt`, `└─ ${world}`].join("\n"));
 });
 
+test("a dispatched fork receipt hangs its contract beneath the child identity", () => {
+  const child = "aku/worker/5678abcd" as AkuId;
+  const text = renderAkumaText(parseExecution(["fork", akuma, "--at", "turn/1"]).command, {
+    kind: "akuma",
+    action: "fork",
+    receipt: {
+      kind: "forked",
+      parent: akuma,
+      child,
+      dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
+    },
+  });
+  assert.equal(text, `${child}\n└─ kei/tree-receipt`);
+});
 
 function observingCall(
   observation: CallObservation,

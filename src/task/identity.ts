@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { contractSegment, type ContractId } from "../core/facts/types.js";
 import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
-import { normalizeIdentityStem } from "../identity/normalize.js";
+import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
 
 export type TaskId = `task/${string}`;
 export type TaskCoordinate = Readonly<{ namespace: readonly string[]; localId: string }>;
@@ -76,29 +76,17 @@ export function deriveLocalStem(title: string): string {
     fitted += `-${word}`;
     count = candidate;
   }
-  return fitPhysicalStem(fitted);
+  return fitIdentityStem({ stem: fitted, maxBytes: GENERATED_STEM_BYTES });
 }
 
 export function allocateLocalId(stem: string, occupied: ReadonlySet<string>): string {
   const seed = randomBytes(2).readUInt16BE(0);
   for (let offset = 0; offset <= 0xffff; offset += 1) {
     const suffix = ((seed + offset) & 0xffff).toString(16).padStart(4, "0");
-    const candidate = `${fitPhysicalStem(stem, suffix)}-${suffix}`;
+    const candidate = fitIdentityStem({ stem, maxBytes: TASK_LOCAL_ID_BYTES, suffix });
     if (!occupied.has(candidate)) return candidate;
   }
   throw new Error("task identity hexadecimal suffix space exhausted");
-}
-
-function fitPhysicalStem(stem: string, suffix?: string): string {
-  const maxBytes = suffix === undefined ? GENERATED_STEM_BYTES : TASK_LOCAL_ID_BYTES - Buffer.byteLength(`-${suffix}`);
-  let result = "";
-  for (const segment of new Intl.Segmenter("und", { granularity: "grapheme" }).segment(stem)) {
-    if (Buffer.byteLength(result + segment.segment) > maxBytes) break;
-    result += segment.segment;
-  }
-  result = result.replace(/[-.]+$/u, "");
-  if (result.length === 0) throw new TypeError("task title cannot fit the physical filename budget");
-  return result;
 }
 
 export function physicalTaskSegment(segment: string, maxBytes = TASK_LOCAL_ID_BYTES): string {
