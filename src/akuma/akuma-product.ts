@@ -15,6 +15,8 @@ import type {
 import { canonicalBirthCwd } from "./call-input.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
 import { rosterListRow, readAkumaBirthCwd } from "./akuma-observe.js";
+import { readAliases, type AliasBinding } from "../alias/index.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
 import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
 import { birthAkuma, launchAkuma } from "./publication.js";
@@ -206,15 +208,32 @@ async function knownAkuma(
   return { runRoot, rows };
 }
 
-async function readableRows(rows: readonly KnownAkuma[]): Promise<readonly AkumaListRowValue[]> {
+async function readableRows(
+  rows: readonly KnownAkuma[],
+  aliases: ReadonlyMap<string, readonly AkumaAlias[]>,
+): Promise<readonly AkumaListRowValue[]> {
   const loaded = await boundedMap(rows, async ({ id, paths }) => {
     try {
-      return await rosterListRow(paths, id);
+      return await rosterListRow(paths, id, aliases.get(id) ?? []);
     } catch {
       return null;
     }
   });
   return [...loaded].filter((row): row is AkumaListRowValue => row !== null);
+}
+
+function aliasesByAku(bindings: readonly AliasBinding[]): ReadonlyMap<string, readonly AkumaAlias[]> {
+  const byId = new Map<string, AkumaAlias[]>();
+  for (const binding of bindings) {
+    const aliases = byId.get(binding.akuId) ?? [];
+    aliases.push(binding.alias);
+    byId.set(binding.akuId, aliases);
+  }
+  return byId;
+}
+
+async function readAliasesByAku(world: WorldRoot): Promise<ReadonlyMap<string, readonly AkumaAlias[]>> {
+  return aliasesByAku(await readAliases(world));
 }
 
 class AkumaProduct {
@@ -287,7 +306,7 @@ class AkumaProduct {
     const known = await knownAkuma(this.path, selected);
     return {
       observedAt: new Date().toISOString(),
-      rows: [...(await readableRows(known.rows))].sort(compareRows),
+      rows: [...(await readableRows(known.rows, await readAliasesByAku(this.path)))].sort(compareRows),
       searched: [known.runRoot],
     };
   }
@@ -305,11 +324,12 @@ class AkumaProduct {
       bound: await mtimeBound(row.paths),
     }));
     const candidates = [...candidatesWithBounds].sort((left, right) => right.bound - left.bound);
+    const aliases = await readAliasesByAku(this.path);
     const readable: AkumaListRowValue[] = [];
     let cursor = 0;
     while (cursor < candidates.length) {
       const batch = candidates.slice(cursor, cursor + PAGE_POOL_SIZE);
-      readable.push(...(await readableRows(batch)));
+      readable.push(...(await readableRows(batch, aliases)));
       cursor += batch.length;
       const ranked = readable.sort(compareRows);
       const lookahead = ranked[limit];

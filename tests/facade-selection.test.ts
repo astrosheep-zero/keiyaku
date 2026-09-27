@@ -339,6 +339,14 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
   assert.equal(custodyReads, 0);
 });
 
+test("Akumas roster refuses a corrupt alias authority rather than hiding bindings", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-akuma-alias-corrupt-");
+  await answered(root, "worker", "00000003");
+  mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not json\n");
+  await assert.rejects(Akumas.of(await World.at(root)).list(), /invalid Alias JSON/u);
+});
+
 test("recent Akuma page prunes physical reads and preserves complete membership", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");

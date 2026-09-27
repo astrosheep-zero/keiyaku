@@ -22,6 +22,8 @@ import {
   type TurnLedger,
 } from "../src/akuma/projection.js";
 import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
+import { moveAlias } from "../src/alias/index.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
@@ -46,7 +48,7 @@ import { settings } from "../src/settings.js";
 import { Akumas } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { World } from "../src/world.js";
+import { World, type WorldRoot } from "../src/world.js";
 import type { AkumaHandle } from "../src/akuma/akuma-handle.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
@@ -1255,7 +1257,9 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.deepEqual((await world.list()).rows, []);
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
   await initializeHeart(allocated.paths);
+  await moveAlias({ world: root as WorldRoot, alias: parseAkumaAlias("@early"), akuId: allocated.id });
   assert.equal((await world.list()).rows[0]?.life, "unborn");
+  assert.deepEqual((await world.list()).rows[0]?.aliases, ["@early"]);
   assert.equal((await world.list({ archetype: "claude" })).rows[0]?.id, allocated.id);
   assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, []);
   await assert.rejects(world.list({ archetype: "not/a-name" }), /Akuma name/);
@@ -1770,7 +1774,7 @@ test("list silently skips identities whose compact row cannot be read", async (c
   });
 
   const world = await akumaAt(root);
-  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
+  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
   assert.equal(existsSync(noise), true);
 
   rmSync(heartCut.paths.directory, { recursive: true, force: true });
@@ -1789,7 +1793,7 @@ test("list silently skips identities whose compact row cannot be read", async (c
     ].join(""),
   );
   leash.close();
-  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
+  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
 });
 
 test("kill gives the Body a grace window to abort its owned provider session", async (context) => {

@@ -47,8 +47,9 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
       ...(lifeAge === null ? [] : [lifeAge]),
       ...(activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
     ];
+    const aliases = row.aliases.length === 0 ? "" : ` (${row.aliases.map((alias) => safeText(alias)).join(" ")})`;
     lines.push(
-      `${akumaMark(row.life)} ${safeText(row.id)} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
+      `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
     );
   }
   if (catalog.hasMore) lines.push("…");

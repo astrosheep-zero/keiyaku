@@ -125,7 +125,8 @@ view. Its order is the later of each readable Heart's life and activity evidence
 with complete identity breaking equal activity and untimestamped rows following
 timestamped rows. The observation says whether another readable member lies
 beyond its bounded result without claiming a total or a frozen continuation.
-It exposes born identity, frozen descriptive snapshots, life evidence, recent
+It exposes born identity, frozen descriptive snapshots, the World's current
+alias bindings naming each member, life evidence, recent
 activity and pending-tell information without loading each history. Recognized
 unborn or stillborn allocation state remains visible; a hard direct-read failure
 may omit that roster row without suppressing readable peers and without

@@ -2,6 +2,7 @@ import { type AkumaLife, type KillEvidence, type ResumeCoordinate } from "./hear
 export type { KillEvidence };
 import { parseAkuId, type AkuId } from "./identity.js";
 import { activitySnapshotSchema } from "./projection.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { allowedActionsSchema, type AllowedAction } from "./allowed.js";
@@ -24,6 +25,7 @@ export type AkumaListRow = Readonly<{
   lifeAt: string | null;
   lastActivityAt: string | null;
   pending: readonly string[];
+  aliases: readonly AkumaAlias[];
 }>;
 
 export const akumaIdSchema = z.string().transform((value, context) => {
@@ -60,6 +62,7 @@ export type * from "./projection.js";
 export type UnbornAkumaListRow = Readonly<{
   id: AkuId;
   life: "unborn" | "stillborn";
+  aliases: readonly AkumaAlias[];
   seal?: Readonly<{ evidence: string; at: string }>;
 }>;
 

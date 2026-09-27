@@ -195,11 +195,33 @@ test("catalog text renders only the selected identity layer", () => {
       root: worldRoot,
       archetype: "worker",
       observedAt: "2026-08-12T00:00:00.000Z",
-      rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn" }],
+      rows: [{ id: "aku/worker/deadbeef" as never, life: "unborn", aliases: [] }],
       searched: ["/world/.keiyaku/akuma/run"],
       hasMore: false,
     }),
     ["AKUMA // worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
+  );
+  assert.equal(
+    renderCatalogText({
+      kind: "akuma",
+      root: worldRoot,
+      archetype: "worker",
+      observedAt: "2026-08-12T00:00:00.000Z",
+      rows: [
+        {
+          id: "aku/worker/deadbeef" as never,
+          archetype: "worker",
+          life: "asleep",
+          lifeAt: "2026-08-11T23:00:00.000Z",
+          lastActivityAt: "2026-08-11T23:30:00.000Z",
+          pending: [],
+          aliases: ["@lead" as never, "@shadow" as never],
+        },
+      ],
+      searched: ["/world/.keiyaku/akuma/run"],
+      hasMore: false,
+    }),
+    ["AKUMA // worker", "", "○ aku/worker/deadbeef (@lead @shadow) · asleep · 1h · activity 30m"].join("\n"),
   );
 });
 
@@ -407,6 +429,7 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
     rows: Array.from({ length: 11 }, (_, index) => ({
       id: `aku/worker/${String(index).padStart(8, "0")}` as never,
       life: "unborn" as const,
+      aliases: [],
     })),
     searched: [],
     hasMore: true,
@@ -431,6 +454,7 @@ test("Akuma catalog renders future ages as now", () => {
     lifeAt: "2026-08-12T00:00:01.000Z",
     lastActivityAt: null,
     pending: [],
+    aliases: [],
   };
   const text = renderCatalogText({
     kind: "akuma",

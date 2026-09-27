@@ -24,10 +24,15 @@ import {
 import { resolveProviderExecution } from "./providers/index.js";
 import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import type { AkumaListRow, AkumaStatus, UnbornAkumaListRow } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 
-export async function rosterListRow(paths: AkumaPaths, expected: AkuId): Promise<AkumaListRow | UnbornAkumaListRow> {
+export async function rosterListRow(
+  paths: AkumaPaths,
+  expected: AkuId,
+  aliases: readonly AkumaAlias[] = [],
+): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul !== null) {
     const observed = await bornObservation(paths, expected, () => readHeart(paths), snapshot);
@@ -44,14 +49,17 @@ export async function rosterListRow(paths: AkumaPaths, expected: AkuId): Promise
       ),
       lastActivityAt: observed.snapshot.lastActivityAt,
       pending: observed.snapshot.pending.map((tell) => tell.id),
+      aliases,
     };
   }
   try {
-    if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn" };
+    if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn", aliases };
     const seal = await readSeal(paths);
-    return seal === null ? { id: expected, life: "unborn" } : { id: expected, life: "stillborn", seal };
+    return seal === null
+      ? { id: expected, life: "unborn", aliases }
+      : { id: expected, life: "stillborn", seal, aliases };
   } catch (error) {
-    if (isHeartAbsent(error)) return { id: expected, life: "unborn" };
+    if (isHeartAbsent(error)) return { id: expected, life: "unborn", aliases };
     throw error;
   }
 }
