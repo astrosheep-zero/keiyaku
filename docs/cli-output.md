@@ -55,6 +55,8 @@ keys render as words, as in `require branches up to date`.
 
 ## Shared rendering
 
+Each domain-state-to-mark mapping and refusal receipt assembly has one definition site; render surfaces consume that shared definition.
+
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
 into a positive result. The text vocabulary is closed and nine marks wide:

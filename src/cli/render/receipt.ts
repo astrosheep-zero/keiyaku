@@ -53,6 +53,19 @@ export function outcomeLines(
   return [`${base}`, `  contract  ${safeText(contract)}`];
 }
 
+export function refusalLines(
+  verb: string,
+  facts: readonly string[],
+  columns = DEFAULT_CLI_COLUMNS,
+  trailingFacts: readonly string[] = [],
+): string[] {
+  return [
+    ...outcomeLines("×", verb, "refused", undefined, columns),
+    ...facts.map((fact) => `  ${fact}`),
+    ...trailingFacts,
+  ];
+}
+
 export function titleLines(mark: string, title: string, contract: string, columns = DEFAULT_CLI_COLUMNS): string[] {
   const base = `${mark} ${title}`;
   const inline = `${base}  ${contract}`;

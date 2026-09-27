@@ -22,7 +22,9 @@ import type {
 } from "../../task/index.js";
 import type { TaskInvocationResult, TaskShowResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
-import { outcomeLines, receiptPayload } from "./receipt.js";
+import { outcomeLines, refusalLines, receiptPayload } from "./receipt.js";
+import { taskMark } from "./marks.js";
+export { taskMark } from "./marks.js";
 import { DEFAULT_CLI_COLUMNS, displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
@@ -54,17 +56,6 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
     "kind" in result &&
     (result.kind === "present" || result.kind === "absent" || result.kind === "failed")
   );
-}
-
-export function taskMark(word: string): string {
-  if (word === "in_progress") return "●";
-  if (word === "ready" || word === "open") return "○";
-  if (word === "blocked") return "‖";
-  if (word === "missing") return "!";
-  if (word === "on_hold") return "⧗";
-  if (word === "done") return "✓";
-  if (word === "drop") return "×";
-  return "?";
 }
 
 /** Task dispositions and relation states are snake_case facts; people read them as words. */
@@ -133,14 +124,15 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   if (result.kind === "retry") {
     return [...outcomeLines("?", verb, "retry", undefined, columns), result.reason].join("\n");
   }
-  const lines = [...outcomeLines("×", verb, "refused", undefined, columns)];
   const facts = projectRefusal(result.refusal);
-  lines.push(`  diagnostic  ${facts.diagnostic}`);
-  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
-  for (const item of facts.compositionDiagnostics ?? []) {
-    lines.push(`line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`);
-  }
-  return lines.join("\n");
+  return refusalLines(
+    verb,
+    [`diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])],
+    columns,
+    (facts.compositionDiagnostics ?? []).map(
+      (item) => `line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`,
+    ),
+  ).join("\n");
 }
 
 function edge(label: string, ref: TaskRef, mark?: string): string {
@@ -287,9 +279,11 @@ function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): 
   if (item.outcome.kind === "accepted") return `✓ ${verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  const lines = [`× ${verb} refused`, `  task  ${item.id}`, `  diagnostic  ${facts.diagnostic}`];
-  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
-  return lines.join("\n");
+  return refusalLines(
+    verb,
+    [`task  ${item.id}`, `diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])],
+    DEFAULT_CLI_COLUMNS,
+  ).join("\n");
 }
 
 function renderBatch(verb: string, batch: TaskBatchResult): string {
@@ -306,9 +300,7 @@ function composeDiffs(
 function stoppedLines(stopped: ComposeStop): string[] {
   if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
   const facts = projectRefusal(stopped);
-  const lines = [`× stopped refused`, `  diagnostic  ${facts.diagnostic}`];
-  for (const fact of facts.facts ?? []) lines.push(`  ${fact}`);
-  return lines;
+  return refusalLines("stopped", [`diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])], DEFAULT_CLI_COLUMNS);
 }
 
 function aliasLines(aliases: readonly Readonly<{ alias: string; taskId: string }>[]): readonly string[] {

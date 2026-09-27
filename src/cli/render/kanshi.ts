@@ -1,4 +1,4 @@
-import type { ContractKanshiRow, KanshiReport, TaskKanshiRow } from "../../kanshi/index.js";
+import type { ContractKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -25,6 +25,7 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 import { akumaMark, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
+import { taskDispositionMark } from "./marks.js";
 import { dispositionText } from "./task.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
@@ -63,13 +64,6 @@ function contractMark(row: ContractKanshiRow): string {
   if (row.targetLag.kind === "unknown") return "?";
   if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
   return "●";
-}
-
-function taskMark(row: TaskKanshiRow): string {
-  if (row.disposition === "done") return "✓";
-  if (row.disposition === "drop") return "×";
-  if (row.disposition === "on_hold") return "⧗";
-  return row.disposition === "in_progress" ? "●" : row.disposition === "blocked" ? "‖" : "○";
 }
 
 function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {
@@ -122,7 +116,7 @@ function linkedTask(report: KanshiReport, taskId: string): string {
   const task = report.tasks.value.rows.find((candidate) => candidate.id === taskId);
   return task === undefined
     ? `! ${taskId} · unavailable`
-    : `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)}`;
+    : `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)}`;
 }
 
 function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[]): string {
@@ -177,7 +171,8 @@ function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
     return [`failed ${row.namespaceTasks.failure.message}`];
   }
   return row.namespaceTasks.value.map(
-    (task) => `${taskMark(task)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
+    (task) =>
+      `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
   );
 }
 
@@ -318,7 +313,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     if (context.columns > NARROW_COLUMNS) {
       return [
         identityLine(
-          taskMark(row),
+          taskDispositionMark(row.disposition),
           row.id,
           `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title}${association}`,
         ),
@@ -326,7 +321,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
       ];
     }
     return entityLines({
-      mark: taskMark(row),
+      mark: taskDispositionMark(row.disposition),
       identity: row.id,
       state: `${dispositionText(row.disposition)} · P${row.priority}`,
       title: row.title,

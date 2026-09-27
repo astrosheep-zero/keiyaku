@@ -23,6 +23,7 @@ import {
   truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
+import { taskDispositionMark } from "./marks.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 const TIME_WIDTH = 5;
@@ -1283,14 +1284,6 @@ export function callObservationStream(
 }
 
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
-
-function taskDispositionMark(disposition: CreatedTaskRow["disposition"]): string {
-  if (disposition === "done") return "✓";
-  if (disposition === "drop") return "×";
-  if (disposition === "on_hold") return "⧗";
-  if (disposition === "in_progress") return "●";
-  return disposition === "blocked" ? "‖" : "○";
-}
 
 function changeStat(change: RenderedFileChange): string {
   return change.diffstat === undefined ? "+? -?" : `+${change.diffstat.added} -${change.diffstat.removed}`;
