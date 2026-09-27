@@ -173,16 +173,18 @@ not work assignments.
 
 ## 3. After Binding
 
-Read the receipt as the handoff. Keep the complete `kei/...` identity and note:
+Binding appoints one managed worktree for the `kei`. Read the receipt as the
+handoff. Keep the complete `kei/...` identity and note:
 
 - the holder;
-- the reported worktree, if one was created;
+- the appointed worktree path (absent when appointment lagged);
 - the target;
 - gates and prerequisites;
 - whether the `kei` is ready or waiting.
 
-If a worktree was created, work there. If the receipt is waiting, the stated
-prerequisites remain; do not bind a duplicate Contract.
+Work in the appointed worktree. When appointment lags, the receipt carries no
+path and the `kei` shows pending reconciliation instead. If the receipt is
+waiting, the stated prerequisites remain; do not bind a duplicate Contract.
 
 The holder now owns the lifecycle:
 
