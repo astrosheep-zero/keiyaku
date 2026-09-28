@@ -19,6 +19,7 @@ export type NukeResult =
   | Readonly<{
       kind: "success";
       world: WorldRoot;
+      removed: Readonly<{ refs: number; worktrees: number; tasks: number }>;
       seatClose?: readonly PrivateStateSeatCloseLag[];
     }>
   | Readonly<{
@@ -72,11 +73,12 @@ export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions)
   let seatClose: readonly PrivateStateSeatCloseLag[] | undefined;
   try {
     const deleteAkuma = await stopAkuma(value.world);
+    const removed = { refs: 0, worktrees: 0, tasks: 0 };
     let failed = false;
     let firstDiagnostic: unknown;
-    const attempt = async (owner: Promise<void>): Promise<void> => {
+    const attempt = async <T>(owner: Promise<T>, count: (value: T) => void): Promise<void> => {
       try {
-        await owner;
+        count(await owner);
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -85,19 +87,19 @@ export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions)
       }
     };
     await Promise.all([
-      attempt(deleteAkuma()),
-      attempt(
-        nukeGit(value.world, "git", gitOptions).then((outcome) => {
-          if (outcome.closeLag !== undefined) {
-            seatClose = appendPrivateStateSeatClose(seatClose, outcome.closeLag);
-          }
-        }),
-      ),
-      attempt(nukeTask(value.world)),
+      attempt(deleteAkuma(), () => undefined),
+      attempt(nukeGit(value.world, "git", gitOptions), (outcome) => {
+        removed.refs = outcome.value.refs;
+        removed.worktrees = outcome.value.worktrees;
+        if (outcome.closeLag !== undefined) seatClose = appendPrivateStateSeatClose(seatClose, outcome.closeLag);
+      }),
+      attempt(nukeTask(value.world), (count) => {
+        removed.tasks = count;
+      }),
     ]);
     if (failed) throw firstDiagnostic;
     await removeEmptyWorldMarker(value.world);
-    return withSeatClose({ kind: "success", world: value.world }, seatClose);
+    return withSeatClose({ kind: "success", world: value.world, removed }, seatClose);
   } catch (error) {
     return withSeatClose({ kind: "failed", world: value.world, diagnostic: diagnostic(error) }, seatClose);
   }

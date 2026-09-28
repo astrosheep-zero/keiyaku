@@ -10,6 +10,7 @@ import {
   titleLines,
 } from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
+import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { DEFAULT_CLI_COLUMNS, gitShortStat, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 const CHILD = "  ";
@@ -20,7 +21,12 @@ function workspaceEvidence(
   return [`${CHILD}workspace  ${workspace.kind}  ${safeText(workspace.path)}`];
 }
 
-function candidateLines(report: AuditReport, columns: number, addressed: string): readonly string[] {
+function candidateLines(
+  report: AuditReport,
+  columns: number,
+  addressed: string,
+  abbreviations: ReadonlyMap<string, string>,
+): readonly string[] {
   const candidate = report.candidate;
   const lines: string[] = [];
   if (candidate.kind === "blocked") {
@@ -30,9 +36,10 @@ function candidateLines(report: AuditReport, columns: number, addressed: string)
   }
   const identity = candidate.identity;
   receiptRow(lines, " ", "candidate", [{ text: "ready" }], columns);
-  lines.push(`${CHILD}tender commit  ${identity.tenderSnapshot}`);
-  lines.push(`${CHILD}integration commit  ${identity.integration.snapshot}`);
-  lines.push(`${CHILD}content identity (not commit)  ${identity.integration.changeId}`);
+  lines.push(`${CHILD}tender commit  ${displayGitId(identity.tenderSnapshot, abbreviations)}`);
+  lines.push(`${CHILD}integration commit  ${displayGitId(identity.integration.snapshot, abbreviations)}`);
+  if (!/^0{40}$/u.test(identity.integration.changeId))
+    lines.push(`${CHILD}content identity (not commit)  ${displayGitId(identity.integration.changeId, abbreviations)}`);
   lines.push(...workspaceEvidence(candidate.workspace));
   lines.push(...renderTextBlock(gitShortStat(candidate.scope), CHILD, columns));
   if (candidate.scope.paths !== undefined) {
@@ -50,8 +57,12 @@ function verificationLines(
   addressed: string,
 ): readonly string[] {
   const lines: string[] = [];
+  if (verification.kind === "undeclared") {
+    receiptRow(lines, " ", "verification", [{ text: "none declared" }], columns);
+    return lines;
+  }
   if (verification.kind === "not-run") {
-    receiptRow(lines, " ", "verification", [{ text: "not-run" }], columns);
+    receiptRow(lines, " ", "verification", [{ text: "not run" }], columns);
     return lines;
   }
   if (verification.kind === "stopped") {
@@ -65,7 +76,7 @@ function verificationLines(
   }
   receiptRow(
     lines,
-    verification.kind === "satisfied" ? " " : "!",
+    verification.kind === "satisfied" ? "✓" : "!",
     "verification",
     [{ text: verification.kind }, { text: `${verification.passed} of ${verification.total}` }],
     columns,
@@ -80,6 +91,7 @@ function admittedCandidateLines(report: AuditReport, columns: number): readonly 
   const delivery = report.delivery;
   if (delivery === undefined) return [];
   const verification = delivery.verification;
+  if (verification.kind === "undeclared") return [];
   const detail = verification.kind === "recorded" ? `${verification.kind} ${verification.verdict}` : verification.kind;
   const lines: string[] = [];
   receiptRow(
@@ -92,7 +104,13 @@ function admittedCandidateLines(report: AuditReport, columns: number): readonly 
   return lines;
 }
 
-function targetLines(target: AuditReport["target"], columns: number, addressed: string): readonly string[] {
+function targetLines(
+  report: AuditReport,
+  columns: number,
+  addressed: string,
+  abbreviations: ReadonlyMap<string, string>,
+): readonly string[] {
+  const target = report.target;
   const lines: string[] = [];
   if (target.kind === "not-observed") {
     receiptRow(lines, " ", "target", [{ text: "not-observed" }], columns);
@@ -103,7 +121,13 @@ function targetLines(target: AuditReport["target"], columns: number, addressed: 
       lines,
       " ",
       "target",
-      [{ text: "placeable" }, { text: target.ref, opaque: true }, { text: target.head, opaque: true }],
+      [
+        { text: "placeable" },
+        {
+          text: `${target.ref.replace(/^refs\/heads\//u, "")} @ ${displayGitId(target.head, abbreviations)}${report.targetLag?.kind === "counted" ? ` · behind ${report.targetLag.behind}` : report.targetLag?.kind === "unknown" ? " · behind unknown" : ""}`,
+          opaque: true,
+        },
+      ],
       columns,
     );
     return lines;
@@ -116,7 +140,10 @@ function targetLines(target: AuditReport["target"], columns: number, addressed: 
       [
         { text: "moved" },
         { text: target.ref, opaque: true },
-        { text: `${target.expected} -> ${target.observed}`, opaque: true },
+        {
+          text: `${displayGitId(target.expected, abbreviations)} -> ${target.observed === null ? "absent" : displayGitId(target.observed, abbreviations)}`,
+          opaque: true,
+        },
       ],
       columns,
     );
@@ -142,12 +169,23 @@ function obligationLines(result: AcceptedAuditResult, columns: number): readonly
 export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
   const report = result.report;
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
+  const ids: string[] =
+    report.candidate.kind === "ready"
+      ? [
+          report.candidate.identity.tenderSnapshot,
+          report.candidate.identity.integration.snapshot,
+          report.candidate.identity.integration.changeId,
+        ]
+      : [];
+  if (report.target.kind === "placeable") ids.push(report.target.head);
+  if (report.target.kind === "moved") ids.push(report.target.expected, report.target.observed ?? "");
+  const abbreviations = abbreviateGitIds(ids);
   return [
     ...titleLines("✓", "audit", result.contract, columns),
-    ...candidateLines(report, columns, result.contract),
+    ...candidateLines(report, columns, result.contract, abbreviations),
     ...admittedCandidateLines(report, columns),
     ...verificationLines(report.verification, columns, result.contract),
-    ...targetLines(report.target, columns, result.contract),
+    ...targetLines(report, columns, result.contract, abbreviations),
     ...obligationLines(result, columns),
   ].join("\n");
 }

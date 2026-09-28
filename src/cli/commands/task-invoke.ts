@@ -20,6 +20,7 @@ import {
 import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { observeTaskDetails } from "../../task/operations.js";
 import type { ParsedTaskCommand } from "./task.js";
+import type { TaskQueryExpression } from "./task-query.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import type { WorldRoot } from "../../world.js";
 import { localExecutionContext, type ExecutionContext } from "../../akuma/requests.js";
@@ -212,6 +213,20 @@ function readScope(
   return command.flags.world === true ? { scope: "world" } : { namespace: current ?? [] };
 }
 
+function querySelection(command: ParsedTaskCommand): TaskQueryExpression | undefined {
+  const state = (value: "done" | "drop", operator: "=" | "!="): TaskQueryExpression => ({
+    kind: "predicate",
+    predicate: { field: "state", operator, value },
+  });
+  const selection: TaskQueryExpression =
+    command.flags.all === true
+      ? { kind: "predicate", predicate: { field: "priority", operator: ">=", value: 0 } }
+      : command.flags.closed === true
+        ? { kind: "or", terms: [state("done", "="), state("drop", "=")] }
+        : { kind: "and", terms: [state("done", "!="), state("drop", "!=")] };
+  return command.where === undefined ? selection : { kind: "and", terms: [selection, command.where] };
+}
+
 async function invokeRead(
   tasks: TaskProduct,
   command: ParsedTaskCommand,
@@ -247,7 +262,7 @@ async function invokeRead(
       });
     case "query":
       return tasks.query({
-        ...(command.where === undefined ? {} : { where: command.where }),
+        ...(querySelection(command) === undefined ? {} : { where: querySelection(command)! }),
         ...readScope(command, current),
         ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),

@@ -119,7 +119,17 @@ export const taskUpdateResultSchema = z.union([
   z
     .object({
       kind: z.literal("accepted"),
-      value: z.object({ task: taskViewSchema, documentDiff: z.string() }).strict(),
+      value: z
+        .object({
+          task: taskViewSchema,
+          documentDiff: z.string(),
+          changedFields: z.array(
+            z
+              .object({ field: z.string(), action: z.enum(["added", "replaced", "cleared", "changed", "appended"]) })
+              .strict(),
+          ),
+        })
+        .strict(),
       cleanup: taskCleanupFailureSchema.optional(),
     })
     .strict()
@@ -166,7 +176,7 @@ const admissionsSchema = z.array(
 const documentChangesSchema = z.array(
   z.object({ taskId: taskMutationIdSchema, kind: z.enum(["created", "updated"]), documentDiff: z.string() }).strict(),
 );
-const compositionFactsSchema = { aliases: aliasesSchema, admissionOrder: taskIdsSchema };
+const compositionFactsSchema = { aliases: aliasesSchema, admissionOrder: taskIdsSchema, admissions: admissionsSchema };
 export const taskCompositionResultSchema = z.union([
   z
     .object({

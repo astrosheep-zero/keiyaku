@@ -1,6 +1,6 @@
 import type { Catalog } from "../catalog.js";
 import { abbreviateGitIds, contractBall, displayGitId, gitIdsInRow } from "./contract-observation.js";
-import { ageText, renderBoundedPayload, safeText } from "./terminal.js";
+import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
 
@@ -12,7 +12,7 @@ function relativeAge(source: string | null, observedAt: string): string | null {
 function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
   const rows = catalog.rows;
   if (rows.length === 0) {
-    return catalog.archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(catalog.archetype)}`;
+    return emptyCatalogue("akuma");
   }
   const lines = [catalog.archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(catalog.archetype)}`, ""];
   for (const row of rows) {
@@ -43,6 +43,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ...catalog.rows.flatMap(gitIdsInRow),
   ]);
   const rows = catalog.rows;
+  if (rows.length === 0) return emptyCatalogue("contracts");
   const header = "CONTRACTS // recent";
   const blocks = rows.map((row) => {
     const terminal = row.phase === "claimed" || row.phase === "abandoned";
@@ -82,20 +83,20 @@ export function renderCatalogText(catalog: Catalog): string {
     const namespace = catalog.namespace ?? [];
     const scope = namespace.length === 0 ? "root" : `namespace ${namespace.join("/")}`;
     const head = taskFrameHead("tasks", scope);
+    if (catalog.rows.length === 0) return emptyCatalogue("tasks");
     return [
       head,
-      ...(catalog.rows.length === 0
-        ? []
-        : catalog.rows.map(
-            (row) =>
-              `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
-          )),
+      ...catalog.rows.map(
+        (row) =>
+          `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
+      ),
       ...(catalog.hasMore ? ["…"] : []),
     ].join("\n");
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
     const head = "AKUMA NAMES // available";
+    if (catalog.rows.length === 0) return emptyCatalogue("akuma names");
     return [
       head,
       ...(catalog.rows.length === 0

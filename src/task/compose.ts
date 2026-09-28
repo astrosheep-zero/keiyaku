@@ -32,6 +32,7 @@ export type TaskDocumentChange = Readonly<{
 export type TaskCompositionFacts = Readonly<{
   aliases: readonly TaskCompositionAlias[];
   admissionOrder: readonly TaskId[];
+  admissions: readonly TaskCompositionAdmission[];
 }>;
 export type TaskCompositionResult =
   | Readonly<{
@@ -69,7 +70,7 @@ function currentTimestamp(): string {
 }
 
 function facts(plan: TaskCompositionPlan): TaskCompositionFacts {
-  return { aliases: plan.aliases, admissionOrder: plan.admissionOrder };
+  return { aliases: plan.aliases, admissionOrder: plan.admissionOrder, admissions: plannedResult(plan).admissions };
 }
 
 function reference(id: TaskId, remainingAliases: ReadonlyMap<TaskId, string>): string {

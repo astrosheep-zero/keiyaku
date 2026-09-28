@@ -18,7 +18,7 @@ import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
 import type { RefusedResult } from "../src/cli/result.js";
 import { renderRefusal } from "../src/cli/render/refusal.js";
-import { nukeExitCode } from "../src/cli/render/nuke.js";
+import { nukeExitCode, renderNukeText } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -168,7 +168,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     writeFileSync(join(orphanRun, "leash.db"), "orphan leash\n");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 3, worktrees: 1, tasks: 1 } });
     await running.body;
     assert.equal(existsSync(running.allocated.paths.heart), false);
     assert.equal(existsSync(running.allocated.paths.leash), false);
@@ -190,7 +190,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(readFileSync(join(unknownRun, "bytes.bin"), "utf8"), "foreign runtime\n");
     assert.equal(readFileSync(join(orphanRun, "leash.db"), "utf8"), "orphan leash\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -208,7 +208,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -217,7 +217,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.equal(existsSync(allocated.paths.requests), false);
     assert.equal(existsSync(allocated.paths.directory), false);
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
@@ -258,7 +258,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     const foreignByte = join(foreign, "foreign.txt");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 3, worktrees: 1, tasks: 1 } });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -276,7 +276,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -306,7 +306,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
     writeFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "sibling\n");
     mkdirSync(join(allocated.paths.requests, "other-dir"));
     writeFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "inside\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json")), false);
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json")), false);
     assert.equal(readFileSync(unknownFile, "utf8"), "keep-request-unknown\n");
@@ -325,7 +325,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
       mkdirSync(noncanonical);
       writeFileSync(join(noncanonical, "43333333-3333-4333-8333-333333333333.request.json"), "keep-noncanonical\n");
     }
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world });
+    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
     for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
       assert.equal(
         readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"),
@@ -585,19 +585,19 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       renderRefusal(requiredRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
-        "  diagnostic  nuke confirmation required",
         `  world  ${world}`,
         `  nuke  keiyaku nuke --confirm '${world}'`,
+        "  diagnostic  nuke confirmation required",
       ].join("\n"),
     );
     assert.equal(
       renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
-        "  diagnostic  nuke confirmation mismatch",
         `  world  ${world}`,
         "  confirmation  wrong",
         `  nuke  keiyaku nuke --confirm '${world}'`,
+        "  diagnostic  nuke confirmation mismatch",
       ].join("\n"),
     );
   } finally {
@@ -634,7 +634,15 @@ test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts
   assert.equal(stderr, "");
 });
 
+test("nuke receipt names confirmed removals and retained coordination locks", () => {
+  const text = renderNukeText({ kind: "success", world: "/world" as never, removed: { refs: 3, worktrees: 1, tasks: 2 } });
+  assert.match(text, /refs removed  3/u);
+  assert.match(text, /worktrees removed  1/u);
+  assert.match(text, /task stores removed  2/u);
+  assert.match(text, /locks  may remain · SQLite coordination files cannot be removed safely/u);
+});
+
 test("CLI nuke exit code reports owner failure", () => {
-  assert.equal(nukeExitCode({ kind: "success", world: "/world" as never }), 0);
+  assert.equal(nukeExitCode({ kind: "success", world: "/world" as never, removed: { refs: 0, worktrees: 0, tasks: 0 } }), 0);
   assert.equal(nukeExitCode({ kind: "failed", world: "/world" as never, diagnostic: "broken" }), 2);
 });

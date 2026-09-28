@@ -64,8 +64,10 @@ import type {
   UpdateTaskInput,
 } from "./operation-types.js";
 
-export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?: number }>): Promise<void> {
-  if ((await nukeTaskAuthority(world, options)) === "busy") throw new Error("Task reset lock contention");
+export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?: number }>): Promise<number> {
+  const result = await nukeTaskAuthority(world, options);
+  if (result === "busy") throw new Error("Task reset lock contention");
+  return result;
 }
 
 export type { TaskState } from "./document.js";
@@ -214,6 +216,34 @@ function updateDocument(board: TaskBoard, current: TaskDocument, input: UpdateTa
   };
 }
 
+function updateFieldChanges(
+  current: TaskDocument,
+  next: TaskDocument,
+  input: UpdateTaskInput,
+): Extract<TaskUpdateResult, { kind: "accepted" }>["value"]["changedFields"] {
+  const changes: Array<{ field: string; action: "added" | "replaced" | "cleared" | "changed" | "appended" }> = [];
+  for (const field of ["title", "body", "note", "priority", "needs", "parent", "supersedes", "relates"] as const) {
+    const before = current[field];
+    const after = next[field];
+    if (Array.isArray(before) && Array.isArray(after) ? before.join("\0") === after.join("\0") : before === after)
+      continue;
+    const action =
+      field === "body" && input.appendBody !== undefined && input.body === undefined
+        ? "appended"
+        : typeof before === "string" && typeof after === "string"
+          ? after.length === 0
+            ? "cleared"
+            : before.length === 0
+              ? "added"
+              : "replaced"
+          : field === "parent" && after === null
+            ? "cleared"
+            : "changed";
+    changes.push({ field, action });
+  }
+  return changes;
+}
+
 export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTaskInput): Promise<TaskUpdateResult> {
   const result = await withTaskLocks(
     { world, allocation: false, ids: [id], ...(input.signal === undefined ? {} : { signal: input.signal }) },
@@ -244,7 +274,11 @@ export async function updateTask(world: WorldRoot, id: TaskId, input: UpdateTask
       const label = `${id}.md`;
       return {
         kind: "accepted",
-        value: { task: taskView(next), documentDiff: documentDiff(label, label, before, after) },
+        value: {
+          task: taskView(next),
+          documentDiff: documentDiff(label, label, before, after),
+          changedFields: updateFieldChanges(current, next, input),
+        },
       };
     },
   );

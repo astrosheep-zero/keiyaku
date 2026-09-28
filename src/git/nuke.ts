@@ -133,7 +133,8 @@ async function deleteObservedStateRef(
   throw new Error("state-ref deletion outcome is unknown");
 }
 
-async function removeOwnedRefs(repository: GitRepository): Promise<void> {
+async function removeOwnedRefs(repository: GitRepository): Promise<number> {
+  let removed = 0;
   const roots = [DELIVERY_REF_NAMESPACE, CANDIDATE_PIN_REF_NAMESPACE] as const;
   for (const root of roots) {
     const refs = (await runGit(repository, ["for-each-ref", "--format=%(refname)", root]))
@@ -142,36 +143,47 @@ async function removeOwnedRefs(repository: GitRepository): Promise<void> {
       .filter((ref) => ref.length > root.length && ref.startsWith(`${root}/`));
     for (const ref of refs) {
       const oid = await readRef(repository, ref);
-      if (oid !== null) await deleteRefAt(repository, ref, oid);
+      if (oid !== null) {
+        await deleteRefAt(repository, ref, oid);
+        removed += 1;
+      }
     }
   }
+  return removed;
 }
 
 export async function nukeGit(
   world: WorldRoot,
   gitPath = "git",
   options?: Readonly<Pick<GitRepository, "onPrivateStateSeatContention" | "onPrivateStateSeatClose">>,
-): Promise<PrivateStateSeatOutcome<void>> {
+): Promise<PrivateStateSeatOutcome<Readonly<{ refs: number; worktrees: number }>>> {
   let repository: GitRepository;
   try {
     repository = { ...(await repositoryAt(world, gitPath)), ...options };
   } catch (error) {
-    if (error instanceof NoGitWorldError) return { value: undefined };
+    if (error instanceof NoGitWorldError) return { value: { refs: 0, worktrees: 0 } };
     throw error;
   }
   return await withPlaceAuthorityFence(repository, async (placeFence) => {
     const custody = await managedCustody(repository);
     return await withPrivateStatePublicationSeat(repository, async (seat) => {
+      let refs = 0;
+      let worktrees = 0;
       const state = await readRef(repository, GIT_REF);
-      if (state !== null) await deleteObservedStateRef(repository, state, seat);
+      if (state !== null) {
+        await deleteObservedStateRef(repository, state, seat);
+        refs += 1;
+      }
 
       for (const entry of custody.entries) {
         if (await removeManagedWorktree(repository, entry)) {
+          worktrees += 1;
           await releaseManagedWorktrees(repository, [entry.contract], placeFence);
         }
       }
       await nukeEmptyPlaceAuthority(repository, placeFence);
-      await removeOwnedRefs(repository);
+      refs += await removeOwnedRefs(repository);
+      return { refs, worktrees };
     });
   });
 }

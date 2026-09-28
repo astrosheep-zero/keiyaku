@@ -165,6 +165,40 @@ test("compose plan renders positions and titles instead of provisional Task ids"
   assert.doesNotMatch(text, /task\//u);
 });
 
+test("task receipts report fields and admissions without projection diffs", () => {
+  const task = {
+    id: "task/alpha" as never, namespace: [], title: "Alpha", state: "open" as const, priority: 2 as const,
+    needs: [], parent: null, supersedes: [], relates: [], note: "new note", body: "first line\nsecond line",
+    createdAt: "2026-08-12T00:00:00.123Z", updatedAt: "2026-08-12T00:01:00.456Z",
+  };
+  const update = renderTaskText(parseTaskCommand(["update", "task/alpha", "--note", "new note"]), {
+    kind: "accepted", value: {
+      task, documentDiff: "--- task/alpha.md\n+++ task/alpha.md\n+updatedAt: noise",
+      changedFields: [{ field: "note", action: "replaced" }],
+    },
+  });
+  assert.match(update, /^✓ updated  task\/alpha\n/mu);
+  assert.match(update, /^  note  replaced$/mu);
+  assert.doesNotMatch(update, /diff|updatedAt: noise/u);
+  const added = renderTaskText(parseTaskCommand(["add", "Alpha"]), { kind: "accepted", value: task });
+  assert.match(added, /^✓ added  task\/alpha/u);
+  const composed = renderTaskText(parseTaskCommand(["compose", "-"]), {
+    kind: "accepted", aliases: [{ alias: "alpha", taskId: task.id }], admissionOrder: [task.id],
+    admissions: [{ position: 1, kind: "new", title: "Alpha", alias: "alpha" }],
+    documentChanges: [{ taskId: task.id, kind: "created", documentDiff: "+updatedAt: noise" }],
+  });
+  assert.match(composed, /^✓ composed · 1 changed/mu);
+  assert.match(composed, /^admit 1  \+ Alpha  as \^alpha$/mu);
+  assert.doesNotMatch(composed, /diff|updatedAt/u);
+  const shown = renderTaskText(parseTaskCommand(["show", "task/alpha"]), {
+    task, needs: [], blockers: [], blocks: [], parent: null, children: [], supersedes: [], supersededBy: [], related: [],
+  });
+  assert.match(shown, /^  created  2026-08-12T00:00:00Z$/mu);
+  assert.match(shown, /^  updated  2026-08-12T00:01:00Z$/mu);
+  assert.match(shown, /^  note\n  new note/mu);
+  assert.match(shown, /^  body\n  first line/mu);
+});
+
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(
     renderCatalogText({
@@ -308,10 +342,10 @@ test("empty World status has one explicit empty row", () => {
   );
 });
 
-test("empty catalogues keep only their frame heads", () => {
+test("empty catalogues share a surface-named none state", () => {
   assert.equal(
     renderCatalogText({ kind: "tasks", root: worldRoot, namespace: [], rows: [], hasMore: false }),
-    "TASKS // root",
+    "tasks  none",
   );
   assert.equal(
     renderCatalogText({
@@ -322,7 +356,7 @@ test("empty catalogues keep only their frame heads", () => {
       rows: [],
       hasMore: false,
     }),
-    "CONTRACTS // recent",
+    "contracts  none",
   );
   assert.equal(
     renderCatalogText({
@@ -334,7 +368,7 @@ test("empty catalogues keep only their frame heads", () => {
       searched: [],
       hasMore: false,
     }),
-    "AKUMA // worker",
+    "akuma  none",
   );
 });
 
@@ -366,8 +400,10 @@ test("World roster names a bound Contract once without a bare unavailable parent
 test("Task family uses qualified empty frames and omits absent body facts", () => {
   const context = { columns: 120, color: false } as const;
   const empty = { kind: "accepted" as const, value: { rows: [], hasMore: false } };
-  assert.equal(renderTaskText(parseTaskCommand(["ls"]), empty, context), "TASKS // current namespace");
-  assert.equal(renderTaskText(parseTaskCommand(["ready"]), empty, context), "READY // current namespace");
+  assert.equal(renderTaskText(parseTaskCommand(["ls"]), empty, context), "tasks  none");
+  assert.equal(renderTaskText(parseTaskCommand(["ready"]), empty, context), "ready  none");
+  assert.equal(renderTaskText(parseTaskCommand(["blocked"]), empty, context), "blocked  none");
+  assert.equal(renderTaskText(parseTaskCommand(["query"]), empty, context), "query  none");
   const text = renderTaskText(
     parseTaskCommand(["ls"]),
     {
@@ -650,6 +686,13 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(tendered, /candidate  bbbbbbb/u);
   assert.match(tendered, /integration result  aaaaaaa/u);
   assert.doesNotMatch(tendered, /predecessor|method|content identity|behind/u);
+  const denied = show({
+    ...base, phase: "tendered", delivery,
+    gates: { satisfied: false, reports: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z", summary: "Fix missing coverage" } }] },
+  });
+  assert.match(denied, /review  ×  “Fix missing coverage”/u);
+  assert.equal((denied.match(/× reviewed/gu) ?? []).length, 1);
+  assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
   const blocked = show({
     ...base,
     phase: "tendered",
@@ -666,6 +709,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     target: "refs/heads/main",
     targetObservation: { head: tender, drift: true },
   });
+  assert.match(moved, /^  integration result  aaaaaaa · target moved since$/mu);
   assert.match(moved, /^  target moved  aaaaaaa -> bbbbbbb$/mu);
   assert.doesNotMatch(moved, /awaiting gates|awaiting prerequisites/u);
   const claimed = show({
@@ -674,8 +718,8 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     targetObservation: { head: tender, drift: true },
     targetLag: { kind: "counted", behind: 5, subject: { kind: "worktree", path: "/tmp/wt" } },
   });
-  assert.match(claimed, /✓ claimed · landed aaaaaaa/u);
-  assert.match(claimed, /when  5s/u);
+  assert.match(claimed, /landed  aaaaaaa/u);
+  assert.doesNotMatch(claimed, /when  5s/u);
   assert.match(claimed, /review  “/u);
   assert.match(claimed, /│ /u);
   assert.match(claimed, /…”/u);
@@ -688,7 +732,8 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(abandoned, /× abandoned/u);
   assert.match(abandoned, /note  “/u);
   assert.match(abandoned, /…”/u);
-  assert.doesNotMatch(abandoned, /worktree|candidate/u);
+  assert.doesNotMatch(abandoned, /worktree|candidate|when  /u);
+  assert.equal((abandoned.match(/× abandoned/gu) ?? []).length, 1);
   const world = show({ ...base, phase: "tendered", delivery }, "world");
   assert.match(world, /awaiting gates  ○ reviewed/u);
   assert.doesNotMatch(world, /tender commit|predecessor|method|content identity|behind/u);
@@ -751,7 +796,7 @@ test("every verb receipt states facts without journal rows or entry ids", () => 
   };
   const receipts: readonly InvocationResult[] = [
     { ...envelope, verb: "bind", target: null, overlaps: [] },
-    { ...envelope, verb: "amend", diff: "" },
+    { ...envelope, verb: "amend", diff: "", changes: {} },
     { ...envelope, verb: "arc", chapter: { seq: 2, title: "Second chapter" } },
     { ...envelope, verb: "abandon" },
     { ...envelope, verb: "deliver" },
@@ -782,12 +827,108 @@ test("opaque payloads preserve lines and name overflow", () => {
   assert.match(wrapped.at(-1) ?? "", /omitted/u);
 });
 
+test("amend receipt names gate and prerequisite changes even without document diff", () => {
+  const contract = contractId("kei/gate-only");
+  const base = receipt({ verb: "amend" as const, contract, diff: "", changes: {} });
+  assert.match(renderText(base), /✓ amended  kei\/gate-only\n  terms  unchanged/u);
+  const gates = renderText({ ...base, changes: { gates: ["reviewed", "holder-smelled"] } });
+  assert.match(gates, /✓ amended[\s\S]*gates  reviewed · holder-smelled/u);
+  assert.doesNotMatch(gates, /terms  unchanged/u);
+  assert.match(renderText({ ...base, changes: { after: [contractId("kei/prerequisite")] } }), /after  kei\/prerequisite/u);
+});
+
+test("amend terms diff keeps comparison headers without the banner or header whitespace", () => {
+  const diff = "===================================================================\n--- before\t\n+++ after\t\n@@ -1 +1 @@\n-old\n+new\n";
+  const text = renderText(receipt({ verb: "amend", contract: contractId("kei/diff"), diff, changes: {} }));
+  assert.match(text, /^✓ amended  kei\/diff\n  terms diff\n  --- before\n  \+\+\+ after\n  @@/u);
+  assert.doesNotMatch(text, /^  ===|before\t|after\t/mu);
+});
+
+test("receipt ids abbreviate in text, omit empty content, and remain full in JSON", () => {
+  const contract = contractId("kei/identity");
+  const tender = snapshotId("a".repeat(40));
+  const integration = snapshotId("b".repeat(40));
+  const result: InvocationResult = receipt({
+    verb: "deliver", contract, tenderSnapshot: tender,
+    integration: { changeId: changeId("0".repeat(40)) },
+    completion: { predecessor: tender, integration, target: "refs/heads/main" },
+  });
+  const text = renderText(result);
+  assert.match(text, /tender commit  aaaaaaa/u);
+  assert.match(text, /target  aaaaaaa\.\.bbbbbbb/u);
+  assert.match(text, /✓ claimed/u);
+  assert.doesNotMatch(text, /a{40}|b{40}|0{40}|content identity/u);
+  assert.equal(JSON.parse(JSON.stringify(result)).tenderSnapshot, tender);
+});
+
+test("audit declares Verification once and names target lag from its typed report", () => {
+  const contract = contractId("kei/audit-lag");
+  const head = snapshotId("a".repeat(40));
+  const integrated = snapshotId("b".repeat(40));
+  const base = receipt({
+    verb: "audit" as const, contract,
+    report: {
+      candidate: {
+        kind: "ready" as const, workspace: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" },
+        identity: {
+          tenderSnapshot: head, integration: { predecessor: head, snapshot: integrated, changeId: changeId("0".repeat(40)) },
+          method: "squash" as const, policy: { requireBranchesToBeUpToDate: false },
+        },
+        scope: { filesChanged: 0, insertions: 0, deletions: 0 },
+      },
+      delivery: { changeId: changeId("0".repeat(40)), relation: "identical" as const, verification: { kind: "undeclared" as const } },
+      verification: { kind: "undeclared" as const },
+      target: { kind: "placeable" as const, ref: "refs/heads/main", head },
+      targetLag: { kind: "counted" as const, behind: 3, subject: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" } },
+    },
+  });
+  const counted = renderText(base);
+  assert.match(counted, /^  verification  none declared$/mu);
+  assert.equal((counted.match(/verification/gu) ?? []).length, 1);
+  assert.match(counted, /^  target  placeable  main @ aaaaaaa · behind 3$/mu);
+  const unknown = renderText({ ...base, report: { ...base.report, targetLag: { kind: "unknown" as const } } });
+  assert.match(unknown, /^  target  placeable  main @ aaaaaaa · behind unknown$/mu);
+  assert.doesNotMatch(unknown, /behind 3|not.run|undeclared/u);
+});
+
+test("receipt hashes extend their prefixes when IDs collide within one receipt", () => {
+  const tender = snapshotId(`${"a".repeat(7)}0${"0".repeat(32)}`);
+  const integration = snapshotId(`${"a".repeat(7)}1${"0".repeat(32)}`);
+  const text = renderText(receipt({
+    verb: "deliver", contract: contractId("kei/hash-collision"), tenderSnapshot: tender,
+    integration: { changeId: changeId("0".repeat(40)) },
+    completion: { predecessor: tender, integration, target: "refs/heads/main" },
+  }));
+  assert.match(text, /tender commit  aaaaaaa0/u);
+  assert.match(text, /target  aaaaaaa0\.\.aaaaaaa1/u);
+});
+
+test("reconcile lists changed effects once with path last and no null sentinels", () => {
+  const ref = { kind: "ref" as const, name: "refs/keiyaku/delivery/example", action: "removed" as const, before: "a".repeat(40) as never, after: null };
+  const text = renderText({ kind: "reconcile", report: {
+    effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }], lag: [],
+    settlement: { actions: [], lags: [] },
+  } });
+  assert.equal(text, "✓ reconcile\n  effect  ref  removed · aaaaaaa  refs/keiyaku/delivery/example");
+  assert.doesNotMatch(text, /null/u);
+});
+
+
+test("reconcile recovery snapshots use receipt-length Git identities", () => {
+  const text = renderText({ kind: "reconcile", report: {
+    effects: [{ kind: "recovery-snapshot", action: "created", snapshot: snapshotId("f".repeat(40)), retention: "ephemeral" }],
+    lag: [], settlement: { actions: [], lags: [] },
+  } });
+  assert.match(text, /effect  recovery-snapshot  created  fffffff/u);
+  assert.doesNotMatch(text, /f{40}/u);
+});
+
 test("reconcile renders a healthy no-op compactly", () => {
   const result: InvocationResult = {
     kind: "reconcile",
     report: { effects: [], lag: [], settlement: { actions: [], lags: [] } },
   };
-  assert.equal(renderText(result), "✓ reconcile");
+  assert.equal(renderText(result), "✓ reconcile\n  already consistent");
 });
 
 test("reconcile failure renders mark and facts", () => {
@@ -799,7 +940,7 @@ test("reconcile failure renders mark and facts", () => {
       settlement: { actions: [], lags: [] },
     },
   };
-  assert.equal(renderText(result), "! reconcile  effect  git failed");
+  assert.equal(renderText(result), "✓ reconcile\n! reconcile  effect  git failed");
 });
 
 test("reconcile renders worktree hook failure as attention", () => {
@@ -928,7 +1069,7 @@ test("world reconcile failure renders its diagnostic", () => {
     kind: "reconcile",
     report: { kind: "world-observation-failed", diagnostic: "git failed" },
   };
-  assert.equal(renderText(result), "! reconcile  git failed");
+  assert.equal(renderText(result), "✓ reconcile\n! reconcile  git failed");
 });
 
 test("Verification create action names are safe in text receipts", () => {
@@ -1036,7 +1177,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
       "  workspace  worktree  /tmp/wt",
       "  no target",
       "! lag  private-state-seat-close-failed",
-      "diagnostic",
+      "  diagnostic",
       "  seat close failed after publication",
       "",
     ].join("\n"),
@@ -1278,7 +1419,7 @@ test("continuation checkout stop keeps its exact block after the dependent conte
     [
       "✓ delivered  kei/prerequisite-checkout",
       "  target  1111111..2222222  refs/heads/main",
-      "● claimed",
+      "✓ claimed",
       "! continuation  kei/stopped-checkout-dependent",
       "! checkout-not-followable",
       "  checkout  /repo/checkout",
@@ -1316,7 +1457,7 @@ test("deliver projects a ran Verification completion", () => {
       "✓ delivered  kei/completion",
       "  target  3333333..4444444  refs/heads/main",
       "  integration result  4444444 · verification satisfied",
-      "● claimed",
+      "✓ claimed",
     ].join("\n"),
   );
   assertModeWordingAbsent(text);
@@ -1356,7 +1497,7 @@ test("deliver renders claimed and stopped continuations from the accepted result
     [
       "✓ delivered  kei/prerequisite",
       "  target  5555555..6666666  refs/heads/main",
-      "● claimed",
+      "✓ claimed",
       "✓ continuation  complete  kei/claimed-dependent",
       "! kei/stopped-dependent  ·  gates unsatisfied",
       "  gate  reviewed  · missing",
@@ -1408,7 +1549,7 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       "  summary",
       "  [reused bash exit 1]",
       "",
-      "● claimed",
+      "✓ claimed",
     ].join("\n"),
   );
 });
@@ -1448,7 +1589,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
       facts,
       completion: { integration: secondIntegrated, predecessor: secondPredecessor, target: "refs/heads/main" },
     }),
-    ["✓ delivered  kei/reintegrated", "  target  target-3..integration-4  refs/heads/main", "● claimed"].join("\n"),
+    ["✓ delivered  kei/reintegrated", "  target  target-3..integration-4  refs/heads/main", "✓ claimed"].join("\n"),
   );
 
   assert.equal(
@@ -1487,10 +1628,10 @@ test("unmerged index paths render as a complete public refusal", () => {
     [
       "× deliver refused",
       "  contract  kei/conflicted",
-      "  diagnostic  unmerged paths",
       "  paths",
       "    a.txt",
       "    z.txt",
+      "  diagnostic  unmerged paths",
     ].join("\n"),
   );
 });
@@ -1567,6 +1708,19 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
   );
   assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
+});
+
+test("World answer previews keep the conclusion, while detail keeps its opening", () => {
+  const answer = `${"premise ".repeat(35)}conclusion: ship the fix`;
+  const snapshot = idleAkumaSnapshot([], answeredOutcome(1, answer));
+  const context = { columns: 70, color: false };
+  const board = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]), context).join("\n");
+  assert.match(board, /answer “\u2026/u);
+  assert.match(board, /conclusion: ship the fix”/u);
+  assert.doesNotMatch(board, /premise premise premise premise premise premise/u);
+  const detail = snapshotActivityLines(snapshot, context).join("\n");
+  assert.match(detail, /“premise premise/u);
+  assert.doesNotMatch(detail, /“\.\.\./u);
 });
 
 test("long read and edit previews keep path tails with range and diffstat detail", () => {

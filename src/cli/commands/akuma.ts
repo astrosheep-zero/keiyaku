@@ -91,7 +91,7 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <akuma-selector>... [--any | --all] [--timeout <duration>]",
+    usage: "wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
     purpose: "Wait for one or more Akumas to finish work.",
     details: [
       "The default mode is any; --all waits until every selected Akuma completes.",
@@ -155,7 +155,7 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <akuma-selector>...",
+    usage: "kill <aku/...|@alias>...",
     purpose: "Stop the selected Akuma's current work; it can be woken again with tell.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;

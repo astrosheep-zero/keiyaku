@@ -70,6 +70,28 @@ function builtCli(): string {
   );
 }
 
+test("task query defaults to active rows and opts into terminal rows", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-query-"));
+  try {
+    const added = runCli(root, ["task", "add", "Active", "--json"]);
+    assert.equal(added.status, 0, added.stderr);
+    const closed = runCli(root, ["task", "add", "Closed", "--json"]);
+    assert.equal(closed.status, 0, closed.stderr);
+    const id = JSON.parse(closed.stdout).value.id as string;
+    assert.equal(runCli(root, ["task", "done", id]).status, 0);
+    const query = (flags: readonly string[]) => {
+      const result = runCli(root, ["task", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
+      assert.equal(result.status, 0, result.stderr);
+      return (JSON.parse(result.stdout).value.value.rows as readonly { id: string }[]).map((row) => row.id);
+    };
+    assert.equal(query([]).length, 1);
+    assert.deepEqual(query(["--closed"]), [id]);
+    assert.equal(query(["--all"]).length, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a closed stdout pipe during a blocked large write exits silently", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-pipe-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));

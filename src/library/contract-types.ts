@@ -31,7 +31,13 @@ export type ContractHistory = Readonly<{
 }>;
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
 export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
-export type AmendResult = Readonly<MutationResult<void> & { documentDiff: string }> & AmendRegionObservation;
+export type AmendResult = Readonly<
+  MutationResult<void> & {
+    documentDiff: string;
+    changes: Readonly<{ gates?: readonly Gate[]; after?: readonly ContractId[] }>;
+  }
+> &
+  AmendRegionObservation;
 export type ReconcileReport = Readonly<{
   effects: readonly (ProtocolReconcileReport["effects"][number] | ContractFileEffect)[];
   lag: readonly (ProtocolReconcileReport["lag"][number] | ContractFileLag)[];

@@ -114,6 +114,7 @@ export function acceptedAmend(result: AmendResult, coordinate: ContractId): Acce
     ...acceptedEnvelope(result, coordinate),
     verb: "amend",
     diff: result.documentDiff,
+    changes: result.changes,
     ...acceptedAmendRegion(result),
   };
 }

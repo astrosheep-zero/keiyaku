@@ -155,10 +155,10 @@ test("integration refusal keeps its reason distinct from the target coordinate",
     120,
   );
   assert.deepEqual(lines, [
-    "  diagnostic  integration failed",
     "  contract  kei/conflict",
     "  reason  conflict",
     `  target  ${target}`,
+    "  diagnostic  integration failed",
   ]);
 });
 
@@ -280,11 +280,11 @@ function verifiedContractRow(): ContractKanshiRow {
   };
 }
 
-test("catalogue and Kanshi keep unattached verification independent", () => {
+test("terminal catalogue and Kanshi cards do not repeat unattached verification", () => {
   const row = verifiedContractRow();
   const observedAt = "2026-08-12T00:00:00.000Z";
   const catalog: Catalog = { kind: "contracts", root: "/repo", state: null, observedAt, rows: [row], hasMore: false };
-  assert.match(renderCatalogText(catalog), /^  verification satisfied · snapshot 4444444$/mu);
+  assert.doesNotMatch(renderCatalogText(catalog), /verification/u);
 
   const report: KanshiReport = {
     root: null,
@@ -297,9 +297,9 @@ test("catalogue and Kanshi keep unattached verification independent", () => {
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
   };
-  assert.match(
+  assert.doesNotMatch(
     renderKanshiText(report, { columns: 80, color: false }, "contract"),
-    /^  verification satisfied · snapshot 4444444$/mu,
+    /verification|candidate/u,
   );
 
   const bareRow = {
@@ -311,11 +311,10 @@ test("catalogue and Kanshi keep unattached verification independent", () => {
     contracts: { kind: "present", value: { root: "/repo", state: null, observedAt, rows: [bareRow], hasMore: false } },
   };
   const bareSelected = renderKanshiText(bareReport, { columns: 80, color: false }, "contract");
-  assert.match(bareSelected, /^  candidate  none\n  verification unsatisfied$/mu);
-  assert.doesNotMatch(bareSelected, /integration result/u);
+  assert.doesNotMatch(bareSelected, /candidate|verification|integration result/u);
 });
 
-test("catalogue and selected/world Kanshi fold verification into the delivery result", () => {
+test("selected tendered Kanshi folds matching verification into the integration result", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedContractRow(),
@@ -341,20 +340,16 @@ test("catalogue and selected/world Kanshi fold verification into the delivery re
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
   };
-  for (const output of [
-    renderCatalogText(catalog),
-    renderKanshiText(report, { columns: 120, color: false }, "contract"),
-  ]) {
-    assert.equal((output.match(/^  integration result  4444444 · verification satisfied$/gmu) ?? []).length, 1);
-    assert.doesNotMatch(output, /verification satisfied · on 4444444/u);
-    assert.match(output, /(?:^|\n)  predecessor  2222222$/mu);
-  }
+  const catalogText = renderCatalogText(catalog);
+  assert.doesNotMatch(catalogText, /integration result|predecessor|verification/u);
+  const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
+  assert.equal((selected.match(/^  integration result  4444444 · verification satisfied$/gmu) ?? []).length, 1);
+  assert.doesNotMatch(selected, /predecessor|verification satisfied · on 4444444/u);
   const world = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(world, /integration result  4444444 · verification satisfied/u);
-  assert.doesNotMatch(world, /verification satisfied · on 4444444/u);
+  assert.doesNotMatch(world, /integration result|verification satisfied/u);
 });
 
-test("stale delivery verification stays independent in catalogue and Kanshi", () => {
+test("selected tendered Kanshi keeps stale delivery verification independent", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedContractRow(),
@@ -386,18 +381,14 @@ test("stale delivery verification stays independent in catalogue and Kanshi", ()
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
   };
-  for (const output of [
-    renderCatalogText(catalog),
-    renderKanshiText(report, { columns: 120, color: false }, "contract"),
-  ]) {
-    assert.match(output, /(?:^|\n)  integration result  4444444$/mu);
-    assert.match(output, /(?:^|\n)  verification satisfied · snapshot 5555555$/mu);
-    assert.doesNotMatch(output, /integration result  4444444 · verification satisfied/u);
-  }
+  const catalogText = renderCatalogText(catalog);
+  assert.doesNotMatch(catalogText, /integration result|verification/u);
+  const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
+  assert.match(selected, /(?:^|\n)  integration result  4444444$/mu);
+  assert.match(selected, /(?:^|\n)  verification satisfied · snapshot 5555555$/mu);
+  assert.doesNotMatch(selected, /integration result  4444444 · verification satisfied/u);
   const world = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(world, /integration result  4444444/u);
-  assert.match(world, /verification satisfied · snapshot 5555555/u);
-  assert.doesNotMatch(world, /integration result  4444444 · verification satisfied/u);
+  assert.doesNotMatch(world, /integration result|verification satisfied/u);
 });
 
 test("audit separates its observation outcome from complete candidate coordinates", () => {
@@ -434,13 +425,13 @@ test("audit separates its observation outcome from complete candidate coordinate
     [
       "✓ audit  kei/audit",
       "  candidate  ready",
-      `  tender commit  ${"a".repeat(40)}`,
-      `  integration commit  ${"c".repeat(40)}`,
-      `  content identity (not commit)  ${"d".repeat(40)}`,
+      `  tender commit  ${"a".repeat(7)}`,
+      `  integration commit  ${"c".repeat(7)}`,
+      `  content identity (not commit)  ${"d".repeat(7)}`,
       "  workspace  worktree  /worktree",
       "  1 file changed, 2 insertions(+), 3 deletions(-)",
       `  ${path}`,
-      "  verification  not-run",
+      "  verification  not run",
       "  target  not-observed",
     ].join("\n"),
   );

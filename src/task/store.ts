@@ -271,7 +271,7 @@ function preserveCommittedResult<T>(result: T, errors: readonly unknown[]): T {
 export async function nukeTaskAuthority(
   world: WorldRoot,
   options?: Readonly<{ timeoutMs?: number }>,
-): Promise<void | "busy"> {
+): Promise<number | "busy"> {
   const directory = tasksDirectory(world);
   const lockOptions = options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
   const result = await withTaskLocks({ world, allocation: true, ids: [], ...lockOptions }, async () => {
@@ -280,18 +280,24 @@ export async function nukeTaskAuthority(
       Buffer.compare(Buffer.from(left), Buffer.from(right)),
     );
     return await withTaskLocks({ world, allocation: false, ids, ...lockOptions }, async () => {
+      let removed = 0;
       for (const candidate of candidates) {
         try {
           const resolved = await resolveAuthority(world, candidate.id, "read");
-          if (resolved.exists) await unlink(resolved.path);
+          if (resolved.exists) {
+            await unlink(resolved.path);
+            removed += 1;
+          }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
       }
       await removeEmptyTaskDirectories(directory, false);
+      return removed;
     });
   });
   if (result === "busy") return "busy";
+  return result;
 }
 
 export async function withTaskLocks<T>(

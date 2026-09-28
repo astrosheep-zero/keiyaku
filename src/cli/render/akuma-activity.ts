@@ -193,6 +193,8 @@ type RowLayout = Readonly<{
   compactRun?: true;
   /** Plural wait rows spend their full remaining width on one terminal line. */
   singleLine?: true;
+  /** World-board answer previews keep the conclusion at the tail. */
+  tailAnswer?: true;
   /** A plural wait shares one minute clock across all of its attributed rows. */
   clock?: { previous?: string };
 }>;
@@ -323,21 +325,40 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
   return toolContent(row, columns);
 }
 
+function tailAnswerPreview(first: string, text: string, columns: number): readonly string[] {
+  const readable = safeText(text).replace(/\s+/gu, " ").trim();
+  const budget = Math.max(0, columns - displayColumns(first + "“”"));
+  const tail = takeDisplayColumnsFromEnd(readable, budget).text;
+  const preview =
+    tail.length === readable.length ? tail : `…${takeDisplayColumnsFromEnd(readable, Math.max(0, budget - 1)).text}`;
+  return [`${first}“${preview}”`];
+}
+
+function toolOverflowPreview(
+  options: RowRenderOptions,
+  value: ReturnType<typeof rowText>,
+  columns: number,
+): readonly string[] | undefined {
+  const { tool, layout, first, continuation } = options;
+  if (tool?.overflow !== "command") return undefined;
+  if (layout.compactRun !== true) return renderRunCommand(first, continuation, value.text, value.suffix ?? "", columns);
+  const remaining = columns - displayColumns(first);
+  const suffix = value.suffix ?? "";
+  const withSuffix = remaining - displayColumns(suffix);
+  const showSuffix = suffix.length > 0 && withSuffix >= 6;
+  return [
+    `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
+  ];
+}
+
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
   const { layout, first, continuation, tool, inFlightSay = false } = options;
   const value = rowText(row, tool);
-  if (tool?.overflow === "command") {
-    if (layout.compactRun !== true)
-      return renderRunCommand(first, continuation, value.text, value.suffix ?? "", context.columns);
-    const remaining = context.columns - displayColumns(first);
-    const suffix = value.suffix ?? "";
-    const withSuffix = remaining - displayColumns(suffix);
-    const showSuffix = suffix.length > 0 && withSuffix >= 6;
-    return [
-      `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
-    ];
-  }
+  const overflow = toolOverflowPreview(options, value, context.columns);
+  if (overflow !== undefined) return overflow;
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
+  if (layout.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
+    return tailAnswerPreview(first, value.text, context.columns);
   const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
   return renderBoundedPayload({
     text: rowBody(row, value.text, available),
@@ -454,7 +475,7 @@ function coalesceAdjacentGaps(entries: readonly RenderEntry[]): readonly RenderE
 export function snapshotActivityLines(
   snapshot: RenderedSnapshot,
   context: TextRenderContext,
-  selection: Readonly<{ latest?: boolean }> = {},
+  selection: Readonly<{ latest?: boolean; tailAnswer?: true }> = {},
 ): readonly string[] {
   const entries = orderedSnapshotEntries(snapshot);
   if (selection.latest !== true) {
@@ -462,7 +483,12 @@ export function snapshotActivityLines(
     return groupedEntries(coalesceAdjacentGaps(full), context);
   }
   const latest = entries.filter((entry) => entry.kind === "row").at(-1);
-  return latest === undefined ? [] : groupedEntries([latest], context, compactLayout());
+  return latest === undefined
+    ? []
+    : groupedEntries([latest], context, {
+        ...compactLayout(),
+        ...(selection.tailAnswer === true ? { tailAnswer: true as const } : {}),
+      });
 }
 
 /** One command's append-only activity view, with a baseline and a final tail flush. */

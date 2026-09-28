@@ -22,10 +22,17 @@ import type {
 } from "../../task/index.js";
 import type { TaskInvocationResult, TaskShowResult, TaskWorldObservation } from "../commands/task-invoke.js";
 import type { ParsedTaskCommand } from "../commands/task.js";
-import { outcomeLines, refusalLines, receiptPayload } from "./receipt.js";
+import { outcomeLines, refusalLines, receiptPayload, receiptRow } from "./receipt.js";
 import { taskMark } from "./marks.js";
 export { taskMark } from "./marks.js";
-import { DEFAULT_CLI_COLUMNS, displayColumns, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
+import {
+  DEFAULT_CLI_COLUMNS,
+  displayColumns,
+  emptyCatalogue,
+  renderTextBlock,
+  safeText,
+  type TextRenderContext,
+} from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
 type TaskFailure =
@@ -197,6 +204,7 @@ function renderRows(
         ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
         : "current namespace";
   const heading = taskFrameHead(view, scope);
+  if (result.value.rows.length === 0) return emptyCatalogue(view);
   return [
     heading,
     ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),
@@ -204,12 +212,16 @@ function renderRows(
   ].join("\n");
 }
 
+function textTimestamp(timestamp: string): string {
+  return timestamp.replace(/\.\d+(?=Z$)/u, "");
+}
+
 function renderShowDetail(result: TaskDetail, columns: number): string {
   const task = result.task;
   const lines = [
     ...entityLines(stateEntity(task), columns),
-    `  created  ${task.createdAt}`,
-    `  updated  ${task.updatedAt}`,
+    `  created  ${textTimestamp(task.createdAt)}`,
+    `  updated  ${textTimestamp(task.updatedAt)}`,
     ...(task.createdBy === undefined ? [] : [`  created by  ${task.createdBy}`]),
   ];
   for (const need of result.needs.filter((item) => !item.released)) lines.push(edge("needs", need, "!"));
@@ -252,9 +264,27 @@ function renderDoctor(report: TaskDoctorReport): string {
   return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
 }
 
-function renderAcceptedMutation(verb: string, task: TaskView, columns: number, documentDiff?: string): string {
-  const lines = [...outcomeLines("✓", verb, "accepted", task.id, columns), ...entityLines(stateEntity(task), columns)];
-  if (documentDiff !== undefined) receiptPayload(lines, "diff", documentDiff);
+const PAST_VERBS: Readonly<Record<string, string>> = {
+  add: "added",
+  start: "started",
+  stop: "stopped",
+  hold: "held",
+  resume: "resumed",
+  done: "done",
+  drop: "dropped",
+  update: "updated",
+};
+
+function renderAcceptedMutation(
+  verb: string,
+  task: TaskView,
+  columns: number,
+  changes: Extract<TaskUpdateResult, { kind: "accepted" }>["value"]["changedFields"] = [],
+): string {
+  const lines: string[] = [];
+  receiptRow(lines, "✓", PAST_VERBS[verb] ?? verb, [{ text: task.id, opaque: true }], columns);
+  lines.push(...entityLines(stateEntity(task), columns));
+  for (const change of changes) lines.push(`  ${change.field}  ${change.action}`);
   return lines.join("\n");
 }
 
@@ -272,11 +302,11 @@ function renderMutation(
     );
   }
   const value = (result as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
-  return renderAcceptedMutation(command.action, value.task, columns, value.documentDiff);
+  return renderAcceptedMutation(command.action, value.task, columns, value.changedFields);
 }
 
 function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): string {
-  if (item.outcome.kind === "accepted") return `✓ ${verb}  ${item.id}`;
+  if (item.outcome.kind === "accepted") return `✓ ${PAST_VERBS[verb] ?? verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
   return refusalLines(
@@ -290,11 +320,13 @@ function renderBatch(verb: string, batch: TaskBatchResult): string {
   return batch.items.map((item) => renderBatchItem(verb, item)).join("\n");
 }
 
-function composeDiffs(
-  lines: string[],
-  changes: Extract<TaskCompositionResult, { kind: "accepted" }>["documentChanges"],
-): void {
-  for (const change of changes) receiptPayload(lines, `diff ${change.taskId}`, change.documentDiff);
+function admissionLines(
+  admissions: readonly Extract<TaskCompositionResult, { kind: "planned" }>["admissions"][number][],
+): string[] {
+  return admissions.map(
+    (admission) =>
+      `admit ${admission.position}  ${admission.kind === "new" ? "+" : `@${admission.taskId}`} ${safeText(admission.title)}${admission.kind === "new" && admission.alias !== undefined ? `  as ^${admission.alias}` : ""}`,
+  );
 }
 
 function stoppedLines(stopped: ComposeStop): string[] {
@@ -315,10 +347,7 @@ function renderPlan(result: Extract<TaskCompositionResult, { kind: "planned" }>)
   const lines = [
     `compose plan · ${result.admissionOrder.length} documents`,
     ...planAliasLines(result.aliases),
-    ...result.admissions.map(
-      (admission) =>
-        `admit ${admission.position}  ${admission.kind === "new" ? "+" : `@${admission.taskId}`} ${safeText(admission.title)}${admission.kind === "new" && admission.alias !== undefined ? `  as ^${admission.alias}` : ""}`,
-    ),
+    ...admissionLines(result.admissions),
   ];
   for (const body of result.bodies) {
     lines.push(`body ${body.position}  + ${safeText(body.title)} · ${body.bytes} bytes`);
@@ -332,9 +361,11 @@ function renderCompose(result: TaskCompositionResult, columns: number): string {
   if (result.kind === "incomplete") return "";
   if (result.kind === "planned") return renderPlan(result);
   if (result.kind !== "accepted") return renderFailure("compose", result, columns);
-  const lines = [`✓ compose accepted · ${result.documentChanges.length} changed`, ...aliasLines(result.aliases)];
-  composeDiffs(lines, result.documentChanges);
-  return lines.join("\n");
+  return [
+    `✓ composed · ${result.documentChanges.length} changed`,
+    ...aliasLines(result.aliases),
+    ...admissionLines(result.admissions),
+  ].join("\n");
 }
 
 export function renderTaskText(
@@ -396,9 +427,11 @@ function renderTaskValue(
 
 export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
   if (result.kind !== "incomplete") return "";
-  const lines = [`! compose incomplete  ${result.documentChanges.length} admitted`, ...stoppedLines(result.stopped)];
-  composeDiffs(lines, result.documentChanges);
-  return lines.join("\n");
+  return [
+    `! compose incomplete  ${result.documentChanges.length} admitted`,
+    ...admissionLines(result.admissions.slice(0, result.documentChanges.length)),
+    ...stoppedLines(result.stopped),
+  ].join("\n");
 }
 
 export function taskExitCode(result: TaskInvocationResult): number {

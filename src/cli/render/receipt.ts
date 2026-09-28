@@ -2,7 +2,14 @@ import type { ExecutionCleanup, ExecutionStop, ExecutionReceipt } from "../../in
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
 import type { Lag } from "../result.js";
 import { renderRefusalFacts } from "./refusal.js";
-import { DEFAULT_CLI_COLUMNS, displayColumns, renderOpaqueBlock, safeText, quotedText } from "./terminal.js";
+import {
+  DEFAULT_CLI_COLUMNS,
+  displayColumns,
+  orderRefusalFacts,
+  renderOpaqueBlock,
+  safeText,
+  quotedText,
+} from "./terminal.js";
 
 export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
 
@@ -36,7 +43,7 @@ export function receiptRow(
 }
 
 export function receiptPayload(lines: string[], label: string, payload: string): void {
-  lines.push(label, ...renderOpaqueBlock(payload, "  ", DEFAULT_CLI_COLUMNS), "");
+  lines.push(`  ${label.trim()}`, ...renderOpaqueBlock(payload, "  ", DEFAULT_CLI_COLUMNS), "");
 }
 
 export function outcomeLines(
@@ -59,11 +66,12 @@ export function refusalLines(
   columns = DEFAULT_CLI_COLUMNS,
   trailingFacts: readonly string[] = [],
 ): string[] {
-  return [
+  const lines = [
     ...outcomeLines("×", verb, "refused", undefined, columns),
-    ...facts.map((fact) => `  ${fact}`),
+    ...orderRefusalFacts(facts).map((fact) => `  ${fact}`),
     ...trailingFacts,
   ];
+  return lines;
 }
 
 export function titleLines(mark: string, title: string, contract: string, columns = DEFAULT_CLI_COLUMNS): string[] {

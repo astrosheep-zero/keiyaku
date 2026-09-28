@@ -39,8 +39,17 @@ candidate and shows recorded verification independently.
 A completed placement reads like Git movement, identically for a review and a
 deliver: the title states the verdict or delivery and the Contract, one row
 states the reference movement, satisfied Verification adds one fact row naming
-the integrated object, and the final lifecycle state is one explicit row. An
-incomplete placement keeps its tender and content-identity rows and its
+the integrated object, and the final lifecycle state is one explicit row. Receipt
+Git identities are abbreviated in text by the shared collision-aware display
+rule and remain full in JSON; absent content identity has no row. Amend receipts
+use a verb-past title, name gate and prerequisite changes independently, and
+reserve an unchanged-terms fact for a genuinely unchanged amendment. Their
+bounded terms comparison keeps only the comparison headers, without decorative
+banners or trailing header whitespace. Task mutation receipts use verb-past
+titles and field-level changes or admitted plan rows, never projection-file
+diffs. Task show timestamps omit millisecond precision in text; JSON retains
+full precision.
+An incomplete placement keeps its tender and content-identity rows and its
 current diagnostic shape.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
@@ -49,7 +58,8 @@ movement uses a reference line. A frame rule appears only when content follows;
 no admission receipt adds an observation conclusion or claims a live state.
 The complete identity roots one line, and each coordinate fact hangs as one tree
 branch beneath it. Labels, arrows, and key-value columns are not receipt
-vocabulary.
+vocabulary. Reset receipts enumerate owner-confirmed removals and explain
+retained coordination residue without claiming a world-wide transaction.
 
 ## Shared rendering
 
@@ -67,9 +77,11 @@ attention. Facts are labeled human facts, joined with one separator; key-value
 notation, banners, and bracket state alphabets are not text vocabulary. Git
 identities are short in text and full in JSON. Paths stay absolute and
 copyable where they are the answer, and stay out of board and catalogue rows
-where they are not. Absent facts are absent rows: an empty view keeps one
-blessed empty state; neither shape prints an observed timestamp, a zero count,
-or an empty container, and a present-but-empty section omits its header.
+where they are not. Absent facts are absent rows: an empty catalogue prints
+one shared surface-named `none` state without a bare header, while an empty
+world keeps its blessed world state; neither shape prints an observed timestamp,
+a zero count, or an empty container, and a present-but-empty section omits its
+header.
 
 A bounded catalogue signals its one public fact — that more rows exist —
 without adding counts, an exhaustive-mode claim, or a continuation
@@ -130,9 +142,14 @@ removals. Across observations, including Contract testimony and Akuma snapshot, 
 compact, and attributed activity, free text uses one bounded payload discipline:
 one quote boundary and │-railed, body-aligned continuations. Payloads slice by
 whole grapheme cells without word-sensitive rearrangement and expose truncation
-at the end. Selected Contract status foregrounds the phase's outcome or current
-work judgment; terminal status does not repeat delivery mechanics or workspace
-observation.
+at the end. World-board answer previews alone anchor to the tail with a leading
+omission mark when the head is cut; the selected Akuma detail keeps head-first
+wrapping. Selected Contract status foregrounds the phase's outcome or current
+work judgment; terminal status does not repeat delivery mechanics, workspace
+observation, its phase, or its age as bare rows beneath the header. When the
+target has moved, a tendered card labels its recorded integration as predating
+that movement. Audit states undeclared Verification once in human words and
+names observed target lag as counted or unknown when the target is placeable.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual

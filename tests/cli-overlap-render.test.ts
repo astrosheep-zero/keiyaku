@@ -70,16 +70,14 @@ test("overlap receipt renders containment trees with aligned leaves and truncati
       "",
       "  overlap  kei/overlap-render-peer-31ce",
       "    ≡  src/cli/render/**",
-      "    ⊂  src/cli/**",
-      "       └─ src/cli/parse.ts",
-      "    ⊂  tests/**",
-      "       ├─ src/cli/render/file-0.ts",
-      "       ├─ src/cli/render/file-1.ts",
-      "       ├─ src/cli/render/file-2.ts",
-      "       ├─ src/cli/render/file-3.ts",
-      "       ├─ src/cli/render/file-4.ts",
-      "       ├─ src/cli/render/file-5.ts",
-      "       └─ … (1 more)",
+      "    src/cli/parse.ts  ⊂  src/cli/**",
+      "    src/cli/render/file-0.ts  ⊂  tests/**",
+      "    src/cli/render/file-1.ts  ⊂  tests/**",
+      "    src/cli/render/file-2.ts  ⊂  tests/**",
+      "    src/cli/render/file-3.ts  ⊂  tests/**",
+      "    src/cli/render/file-4.ts  ⊂  tests/**",
+      "    src/cli/render/file-5.ts  ⊂  tests/**",
+      "    … (1 more)  ⊂  tests/**",
     ].join("\n"),
   );
 });
@@ -94,7 +92,7 @@ test("overlap receipt renders reversed containment and partial intersection", ()
       ],
     },
   ]);
-  assert.match(text, /    ⊃  src\/\*\*[\s\S]*       └─ src\/cli\/\*\*[\s\S]*    ∩  src\/\* · src\/\?\.ts/u);
+  assert.match(text, /    src\/cli\/\*\*  ⊂  src\/\*\*[\s\S]*    ∩  src\/\* · src\/\?\.ts/u);
   assert.doesNotMatch(text, /this|other/u);
 });
 

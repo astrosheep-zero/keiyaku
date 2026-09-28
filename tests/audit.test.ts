@@ -141,7 +141,7 @@ test("audit without Verification still returns an accepted ready candidate", asy
   assert.ok(result.value.candidate.kind === "ready", "expected result.value.candidate.kind = \"ready\"");
   assert.equal(result.value.candidate.identity.method, "squash");
   assert.equal("diff" in result.value.candidate, false);
-  assert.equal(result.value.verification.kind, "not-run");
+  assert.equal(result.value.verification.kind, "undeclared");
   assert.equal(result.value.target.kind, "not-observed");
 });
 

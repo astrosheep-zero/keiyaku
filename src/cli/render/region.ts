@@ -1,3 +1,4 @@
+import { emptyCatalogue } from "./terminal.js";
 import type { RegionOverlap, RegionRead, Section } from "../../kanshi/index.js";
 
 function overlapBlocks(overlaps: readonly RegionOverlap[]): readonly string[] {
@@ -17,7 +18,7 @@ function rows(section: Section<RegionRead>): readonly string[] {
   if (section.kind === "failed") return [`× region`, `  diagnostic  ${section.failure.message}`];
   const value = section.value;
   if (value.kind === "declarations") {
-    if (value.declarations.length === 0) return ["region  none"];
+    if (value.declarations.length === 0) return [emptyCatalogue("region")];
     return value.declarations.map(
       (declaration) => `region  ${declaration.contract}  ${declaration.patterns.join(" ")}`,
     );

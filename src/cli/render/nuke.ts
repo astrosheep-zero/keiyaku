@@ -6,7 +6,14 @@ export function renderNukeText(result: NukeResult): string {
       ? []
       : result.seatClose.flatMap((lag) => [`  lag  ${lag.kind}`, `  diagnostic  ${lag.diagnostic}`]);
   if (result.kind === "success") {
-    return [`✓ nuke  ${result.world}`, ...seatClose].join("\n");
+    return [
+      `✓ nuke  ${result.world}`,
+      `  refs removed  ${result.removed.refs}`,
+      `  worktrees removed  ${result.removed.worktrees}`,
+      `  task stores removed  ${result.removed.tasks}`,
+      "  locks  may remain · SQLite coordination files cannot be removed safely while concurrent writers may still hold them",
+      ...seatClose,
+    ].join("\n");
   }
   return [`× nuke  ${result.world}`, `  diagnostic  ${result.diagnostic}`, ...seatClose].join("\n");
 }

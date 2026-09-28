@@ -86,6 +86,7 @@ export type AcceptedAmendResult = AcceptedEnvelope &
   Readonly<{
     verb: "amend";
     diff: string;
+    changes: Readonly<{ gates?: readonly string[]; after?: readonly ContractId[] }>;
     target?: never;
     completion?: never;
     verification?: never;

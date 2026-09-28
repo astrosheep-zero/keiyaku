@@ -149,7 +149,7 @@ export const CONTRACT_COMMAND_SPECS = {
     flags: { json: "boolean" },
     usage: "status [<contract>|@name|<aku/...>]...",
     purpose: "Show the world overview or selected Contract and Akuma status.",
-    details: "Akuma entries show the directory each Akuma works in.",
+    details: "Akuma entries show the directory each Akuma was started in.",
   },
   show: {
     positional: "optional",

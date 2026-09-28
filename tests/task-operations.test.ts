@@ -92,10 +92,12 @@ test("note is replaceable authority and product timestamps advance only on chang
   assert.ok(replaced.value.task.updatedAt > added.value.updatedAt);
   assert.match(replaced.value.documentDiff, /-note: first/u);
   assert.match(replaced.value.documentDiff, /\+note: second/u);
+  assert.deepEqual(replaced.value.changedFields, [{ field: "note", action: "replaced" }]);
 
   const unchanged = await tasks.task({ id: added.value.id }).update({ note: "second" });
   assert.ok(unchanged.kind === "accepted", "expected unchanged.kind = \"accepted\"");
   assert.equal(unchanged.value.documentDiff, "");
+  assert.deepEqual(unchanged.value.changedFields, []);
   assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
 });
 

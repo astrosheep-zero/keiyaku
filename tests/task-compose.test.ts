@@ -155,6 +155,7 @@ test("empty compose has no admissions or document changes", async (t) => {
     kind: "accepted",
     aliases: [],
     admissionOrder: [],
+    admissions: [],
     documentChanges: [],
   });
   assert.deepEqual(await rows(product), []);

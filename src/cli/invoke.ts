@@ -411,12 +411,17 @@ async function invokeRegion(
   const report = await read({ kind: "declarations" });
   const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
-  if (report.contracts.kind !== "present" || report.contracts.value.rows.every((row) => row.id !== contract)) {
+  const { observeKeiyaku } = await import("../library/contract.js");
+  const observed = await observeKeiyaku({ repo, id: contract });
+  if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
     return {
       kind: "refused" as const,
       verb: "region",
-      contract: contract as ContractId,
-      refusal: { kind: "contract-missing" as const, contractId: contract as ContractId },
+      contract,
+      refusal: {
+        kind: observed.kind === "missing" ? ("contract-missing" as const) : ("terminal" as const),
+        contractId: contract,
+      },
     };
   }
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations") {

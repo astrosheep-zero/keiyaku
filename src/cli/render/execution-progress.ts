@@ -156,7 +156,7 @@ class VerificationLiveOutput {
 export function executionProgressLines(event: ExecutionEvent, context: TextRenderContext): readonly string[] {
   switch (event.kind) {
     case "admitted":
-      return [`✓ admitted ${event.fact.kind} · ${event.contractId}`];
+      return [`✓ admitted ${event.fact.kind === "bind" ? "terms" : event.fact.kind} · ${event.contractId}`];
     case "verification":
       return event.observation.kind === "output"
         ? outputLines(event.observation, context)

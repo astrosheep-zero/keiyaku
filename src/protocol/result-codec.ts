@@ -439,10 +439,14 @@ function decodeAuditBlockedCandidate(value: unknown): Extract<AuditReport["candi
 
 function decodeAuditVerification(value: unknown): AuditReport["verification"] {
   return first(value, [
-    (input): Extract<AuditReport["verification"], { kind: "not-run" }> => {
+    (
+      input,
+    ):
+      | Extract<AuditReport["verification"], { kind: "not-run" }>
+      | Extract<AuditReport["verification"], { kind: "undeclared" }> => {
       const object = record(input, ["kind"]);
-      if (object.kind !== "not-run") fail();
-      return { kind: "not-run" };
+      if (object.kind !== "not-run" && object.kind !== "undeclared") fail();
+      return { kind: object.kind };
     },
     (input): Extract<AuditReport["verification"], { kind: "stopped" }> => {
       const object = record(input, ["kind", "stop"]);
@@ -510,12 +514,30 @@ function decodeAuditDelivery(value: unknown): NonNullable<AuditReport["delivery"
   }
 }
 
+function decodeAuditTargetLag(value: unknown): NonNullable<AuditReport["targetLag"]> {
+  const object = record(value, ["kind"], ["behind", "subject"]);
+  if (object.kind === "none" && Object.keys(object).length === 1) return { kind: "none" };
+  if (object.kind !== "counted" && object.kind !== "unknown") fail();
+  const subject = object.subject === undefined ? undefined : record(object.subject, ["kind", "path"]);
+  if (subject !== undefined && subject.kind !== "worktree") fail();
+  const location =
+    subject === undefined ? {} : { subject: { kind: "worktree" as const, path: nonblank(subject.path) } };
+  if (object.kind === "unknown") {
+    if (object.behind !== undefined) fail();
+    return { kind: "unknown", ...location };
+  }
+  const behind = integer(object.behind);
+  if (behind < 0) fail();
+  return { kind: "counted", behind, ...location };
+}
+
 export function decodeAuditReport(value: unknown): AuditReport {
-  const object = record(value, ["candidate", "verification", "target"], ["delivery"]);
+  const object = record(value, ["candidate", "verification", "target"], ["delivery", "targetLag"]);
   return {
     candidate: first(object.candidate, [decodeAuditBlockedCandidate, decodeAuditReadyCandidate]),
     verification: decodeAuditVerification(object.verification),
     target: decodeAuditTarget(object.target),
+    ...(object.targetLag === undefined ? {} : { targetLag: decodeAuditTargetLag(object.targetLag) }),
     ...(object.delivery === undefined ? {} : { delivery: decodeAuditDelivery(object.delivery) }),
   };
 }

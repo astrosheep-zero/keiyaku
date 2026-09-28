@@ -41,7 +41,9 @@ function latestActivityLines(
   context: TextRenderContext,
 ): readonly string[] {
   const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
-  return snapshotActivityLines(snapshot, bounded, { latest: true }).map((line) => `${ACTIVITY_INDENT}${line}`);
+  return snapshotActivityLines(snapshot, bounded, { latest: true, tailAnswer: true }).map(
+    (line) => `${ACTIVITY_INDENT}${line}`,
+  );
 }
 
 function akumaLabel(row: AkumaKanshiRow): string {

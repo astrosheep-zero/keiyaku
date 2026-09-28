@@ -1,19 +1,37 @@
 import type { ReconcileReport } from "../../library/contract-types.js";
 import { reconcileLagIsFailure, type RepoReconcileReport } from "../../library/reconcile.js";
 import type { ReconcileResult } from "../result.js";
+import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { receiptPayload, receiptRow } from "./receipt.js";
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./terminal.js";
 
 type Effect = ReconcileReport["effects"][number];
 type ReconcileLag = ReconcileReport["lag"][number];
 
-function effectText(effect: Effect): readonly string[] {
-  return [
-    effect.kind,
-    ...Object.entries(effect)
-      .filter(([key]) => key !== "kind")
-      .map(([, item]) => String(item)),
-  ];
+function effectText(effect: Effect): readonly string[] | null {
+  if (effect.action === "unchanged") return null;
+  const ids =
+    effect.kind === "ref"
+      ? [effect.before ?? "", effect.after ?? ""]
+      : effect.kind === "worktree" && effect.action === "followed"
+        ? [effect.before, effect.after]
+        : effect.kind === "recovery-snapshot"
+          ? [effect.snapshot]
+          : [];
+  const abbreviations = abbreviateGitIds(ids);
+  const state =
+    effect.kind === "ref"
+      ? `${effect.action}${effect.before === null ? "" : ` · ${displayGitId(effect.before, abbreviations)}`}${effect.after === null ? "" : ` → ${displayGitId(effect.after, abbreviations)}`}`
+      : effect.kind === "worktree" && effect.action === "followed"
+        ? `followed · ${displayGitId(effect.before, abbreviations)} → ${displayGitId(effect.after, abbreviations)}`
+        : effect.action;
+  const path =
+    effect.kind === "ref"
+      ? effect.name
+      : effect.kind === "recovery-snapshot"
+        ? displayGitId(effect.snapshot, abbreviations)
+        : effect.path;
+  return [effect.kind, state, path];
 }
 
 function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: string | undefined): void {
@@ -97,13 +115,24 @@ function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: s
   }
 }
 
-function appendReport(lines: string[], report: ReconcileReport, columns: number, contract?: string): void {
+function appendReport(
+  lines: string[],
+  report: ReconcileReport,
+  columns: number,
+  seen: Set<string>,
+  contract?: string,
+): void {
   for (const effect of report.effects) {
+    const parts = effectText(effect);
+    if (parts === null) continue;
+    const key = JSON.stringify([contract, effect]);
+    if (seen.has(key)) continue;
+    seen.add(key);
     receiptRow(
       lines,
       " ",
       "effect",
-      effectText(effect).map((text) => ({ text, opaque: true })),
+      parts.map((text) => ({ text, opaque: true })),
       columns,
     );
   }
@@ -155,14 +184,16 @@ export function reconcileHasFailure(report: ReconcileReport | RepoReconcileRepor
 
 export function renderReconcile(result: ReconcileResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const lines: string[] = [];
+  const lines: string[] = ["✓ reconcile"];
+  const seen = new Set<string>();
   const report = result.report;
   if (isRepoReport(report)) {
     if (report.kind === "world-observation-failed") {
       receiptRow(lines, "!", "reconcile", [{ text: report.diagnostic, opaque: true }], columns);
       return lines.join("\n");
     }
-    for (const item of report.contracts) appendReport(lines, item.report, columns, item.contractId);
-  } else appendReport(lines, report, columns);
-  return lines.length === 0 ? "✓ reconcile" : lines.join("\n");
+    for (const item of report.contracts) appendReport(lines, item.report, columns, seen, item.contractId);
+  } else appendReport(lines, report, columns, seen);
+  if (lines.length === 1) lines.push("  already consistent");
+  return lines.join("\n");
 }

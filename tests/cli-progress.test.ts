@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import test from "node:test";
 import type { ExecutionEvent } from "../src/library/execution.js";
-import { ExecutionProgressRenderer } from "../src/cli/render/execution-progress.js";
+import { ExecutionProgressRenderer, executionProgressLines } from "../src/cli/render/execution-progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 
 class CapturedStream extends Writable {
@@ -92,6 +92,11 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
   assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · npm ci · 42s/u);
   assert.match(stream.text, /stdout\n  hello\n\r\x1b\[2Kverify/u);
   assert.match(stream.text, /verify  ✓ 1\/1 · 42s\n$/u);
+});
+
+test("admission progress names admitted terms, not a second bind", () => {
+  const event = { kind: "admitted", contractId: "kei/progress", fact: { kind: "bind" } } as ExecutionEvent;
+  assert.deepEqual(executionProgressLines(event, { columns: 80, color: false }), ["✓ admitted terms · kei/progress"]);
 });
 
 test("non-TTY progress does not repeat a phase coordinate", async () => {

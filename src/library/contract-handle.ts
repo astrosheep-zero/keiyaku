@@ -67,6 +67,17 @@ import type { LocalContractCompositionCapture } from "./contract.js";
 import { composeContractLibrary, type KeiyakuLibrary, type KeiyakuWithInput } from "./composition.js";
 type Review = OperationReview;
 
+function changedAmendTerms(before: ContractState["terms"], after: ContractState["terms"]): AmendResult["changes"] {
+  return {
+    ...(before.gates.length === after.gates.length && before.gates.every((gate, index) => gate === after.gates[index])
+      ? {}
+      : { gates: after.gates }),
+    ...(before.after.length === after.after.length && before.after.every((id, index) => id === after.after[index])
+      ? {}
+      : { after: after.after }),
+  };
+}
+
 const KEIYAKU_HANDLE = Symbol("Keiyaku handle");
 
 export class Keiyaku {
@@ -150,7 +161,6 @@ export class Keiyaku {
     const values = requireInput(input, "amend input");
     const hooks = worktreeHooksOption(values.hooks);
     const markdown = values.markdown === undefined ? undefined : requireMarkdown(values.markdown);
-    const actor = actorOption(values.actor);
     const gates = values.gates === undefined ? undefined : normalizedGates(values.gates);
     const prerequisites = values.after === undefined ? undefined : normalizedList(values.after, "after", contractId);
     if (markdown === undefined && gates === undefined && prerequisites === undefined) {
@@ -163,7 +173,7 @@ export class Keiyaku {
           scope: this.scope,
           channel,
           contractId: this.id,
-          ...actor,
+          ...actorOption(values.actor),
           deriveAmendment: (source) => {
             const amendment =
               markdown === undefined
@@ -205,6 +215,7 @@ export class Keiyaku {
         completed,
         document: decodeContractDocument(accepted.value.terms.document.bytes),
         changedSections,
+        changes: changedAmendTerms(accepted.value.source, accepted.value.terms),
         documentDiff: documentDiff(
           "before",
           "after",
@@ -222,6 +233,7 @@ export class Keiyaku {
     return {
       ...amendment.completed,
       documentDiff: amendment.documentDiff,
+      changes: amendment.changes,
       ...regionObservation,
     };
   }

@@ -1,5 +1,16 @@
 export const DEFAULT_CLI_COLUMNS = 100;
 
+export function emptyCatalogue(surface: string): string {
+  return `${surface}  none`;
+}
+
+export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
+  return [
+    ...facts.filter((fact) => !fact.startsWith("diagnostic  ") && !fact.startsWith("detail  ")),
+    ...facts.filter((fact) => fact.startsWith("diagnostic  ") || fact.startsWith("detail  ")),
+  ];
+}
+
 export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
 
 export type GitShortStat = Readonly<{

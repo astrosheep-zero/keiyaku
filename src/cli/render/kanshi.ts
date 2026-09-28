@@ -7,6 +7,7 @@ import {
   gateFact,
   gitIdsInRow,
   mergeSummary,
+  verificationFact,
 } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -141,25 +142,25 @@ function liveAlarms(row: ContractKanshiRow, report: KanshiReport): readonly stri
 
 function terminalFacts(
   row: ContractKanshiRow,
-  report: KanshiReport,
   context: TextRenderContext,
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
-  if (row.phase === "abandoned")
-    return [
-      "× abandoned",
-      `when  ${formatAge(row.phaseAt, report.observedAt)}`,
-      ...(row.abandonNote === undefined ? [] : payload("note", row.abandonNote, context)),
-    ];
+  if (row.phase === "abandoned") return row.abandonNote === undefined ? [] : payload("note", row.abandonNote, context);
   const integration = row.delivery?.integration.snapshot;
   const review = row.gates.reports.find((gate) => gate.gate === "reviewed");
   return [
-    `✓ claimed${integration === undefined ? "" : ` · landed ${displayGitId(integration, abbreviations)}`}`,
-    `when  ${formatAge(row.phaseAt, report.observedAt)}`,
+    ...(integration === undefined ? [] : [`landed  ${displayGitId(integration, abbreviations)}`]),
     ...(review?.current.kind === "attested" && review.current.summary !== undefined
       ? payload("review", review.current.summary, context)
       : []),
   ];
+}
+
+function staleVerificationFacts(row: ContractKanshiRow): readonly string[] {
+  if (row.verification?.kind !== "recorded" || row.verification.snapshot === row.delivery?.integration.snapshot)
+    return [];
+  const fact = verificationFact(row.verification);
+  return fact === undefined ? [] : [fact];
 }
 
 function renderSelectedContractRow(
@@ -181,8 +182,8 @@ function renderSelectedContractRow(
     }),
   ];
   if (row.phase === "claimed" || row.phase === "abandoned") {
-    const outcome = terminalFacts(row, report, context, abbreviations);
-    lines.push(...semanticBlock("outcome", outcome.slice(0, 2), context), ...outcome.slice(2));
+    const outcome = terminalFacts(row, context, abbreviations);
+    lines.push(...outcome.map((fact) => (fact.startsWith("  ") ? fact : `  ${safeText(fact)}`)));
     return lines;
   }
   if (row.phase === "bound") {
@@ -206,13 +207,29 @@ function renderSelectedContractRow(
           "candidate",
           [
             `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
-            `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}`,
+            `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
           ],
           context,
         ),
       );
     }
-    lines.push(...semanticBlock("gates", row.gates.reports.map(gateFact), context));
+    lines.push(...semanticBlock("verification", staleVerificationFacts(row), context));
+    const deniedReview = row.gates.reports.find(
+      (gate) => gate.gate === "reviewed" && gate.current.kind === "attested" && gate.current.verdict === "unsatisfied",
+    );
+    lines.push(
+      ...semanticBlock(
+        "gates",
+        row.gates.reports
+          .filter(
+            (gate) => gate !== deniedReview || gate.current.kind !== "attested" || gate.current.summary === undefined,
+          )
+          .map(gateFact),
+        context,
+      ),
+    );
+    if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
+      lines.push(...payload("review  ×", deniedReview.current.summary, context));
   }
   lines.push(...semanticBlock("alarms", liveAlarms(row, report), context));
   return lines;
@@ -227,7 +244,9 @@ function renderWorldContractRow(
   const abbreviations = gitAbbreviations(report);
   const contractFacts =
     row.phase === "claimed" || row.phase === "abandoned"
-      ? terminalFacts(row, report, context, abbreviations).slice(0, 1)
+      ? terminalFacts(row, context, abbreviations)
+          .filter((fact) => !fact.startsWith("  "))
+          .slice(0, 1)
       : [
           contractBall(row, abbreviations),
           ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),

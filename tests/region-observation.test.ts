@@ -2,6 +2,9 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
+import { invoke } from "../src/cli/invoke.js";
+import { parseArgv } from "../src/cli/parse.js";
+import { renderText } from "../src/cli/render/text.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
@@ -79,6 +82,20 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   ]);
   assert.equal("overlapFailure" in amended, false);
 });
+
+test("region names a terminal Contract instead of reporting it missing", async () => {
+  const repository = repositoryWithHead();
+  const bound = await bind(repository, "Terminal region", ["src/**"]);
+  const id = (await bound.keiyaku.state()).id;
+  await bound.keiyaku.abandon();
+  const parsed = parseArgv(["-C", repository.path, "region", id]);
+  if (!("command" in parsed)) throw new Error("region did not parse");
+  const result = await invoke(parsed, { cwd: repository.path });
+  assert.equal("kind" in result ? result.kind : undefined, "refused");
+  assert.match(renderText(result as never), /diagnostic  terminal/u);
+  assert.doesNotMatch(renderText(result as never), /contract missing/u);
+});
+
 
 test("post-admission observation failure preserves the admitted Contract without abandonment", async () => {
   const repository = repositoryWithHead();

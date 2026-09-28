@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
+import { renderText } from "../src/cli/render/text.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
@@ -14,6 +15,26 @@ function executable(argv: readonly string[]) {
   if (!("command" in parsed)) throw new Error("expected command invocation");
   return parsed;
 }
+
+test("amend names the missing Verification declaration required by verified", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const bound = await invoke(executable(["-C", raw.path, "bind", "--gates", "", "-"]), {
+    environment: {},
+    readStdin: async () => contractMarkdown("Without verification", {
+      Context: "Test gate requirement.", Objective: "Name absent Verification.",
+      Design: "Keep the declaration absent.", Region: "src/**",
+      Criteria: "### Gate\nState the reason.",
+    }),
+  });
+  assert.equal(bound.kind, "accepted");
+  if (bound.kind !== "accepted") return;
+  const result = await invoke(executable(["-C", raw.path, "amend", bound.contract, "--gates", "verified"]), {
+    environment: {}, readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
+  });
+  assert.equal(result.kind, "refused");
+  assert.match(renderText(result as never), /gate 'verified' requires a declared Verification; the Contract declares none/u);
+});
 
 test("CLI binds mixed gate selections and amends or binds an explicit empty selection", async () => {
   const raw = makeGitRepository();
@@ -60,6 +81,11 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
     },
   });
   assert.equal(amend.kind, "accepted");
+  if (amend.kind === "accepted" && amend.verb === "amend") {
+    assert.deepEqual(amend.changes.gates, []);
+    assert.match(renderText(amend), /✓ amended[\s\S]*gates  none/u);
+    assert.doesNotMatch(renderText(amend), /terms unchanged/u);
+  }
   assert.deepEqual(await gates(mixed), []);
   assert.deepEqual(await gates(await bind("")), []);
   assert.deepEqual(await gates(await bind(undefined)), ["verified"]);

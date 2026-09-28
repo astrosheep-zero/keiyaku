@@ -4,6 +4,7 @@ import {
   DEFAULT_CLI_COLUMNS,
   checkoutNotFollowableLines,
   gitShortStat,
+  orderRefusalFacts,
   renderOpaqueBlock,
   safeText,
   type TextRenderContext,
@@ -81,7 +82,7 @@ function renderDirtyRefusal(
 }
 
 // eslint-disable-next-line complexity -- one closed projection preserves every refusal fact.
-export function renderRefusalFacts(
+function refusalFacts(
   refusal: RenderableRefusal,
   indent: string,
   columns: number,
@@ -97,6 +98,12 @@ export function renderRefusalFacts(
         ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
         : []),
       `${indent}nuke  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
+    ];
+  }
+  if (refusal.kind === "verification-declaration-invalid") {
+    return [
+      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
+      `${indent}diagnostic  gate 'verified' requires a declared Verification; the Contract declares none`,
     ];
   }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
@@ -150,6 +157,17 @@ export function renderRefusalFacts(
   if ("diagnostic" in refusal && typeof refusal.diagnostic === "string")
     lines.push(`${indent}detail  ${safeText(refusal.diagnostic)}`);
   return lines;
+}
+
+export function renderRefusalFacts(
+  refusal: RenderableRefusal,
+  indent: string,
+  columns: number,
+  addressed?: string,
+): readonly string[] {
+  return orderRefusalFacts(
+    refusalFacts(refusal, indent, columns, addressed).map((line) => line.slice(indent.length)),
+  ).map((line) => `${indent}${line}`);
 }
 
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {

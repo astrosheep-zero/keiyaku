@@ -114,8 +114,16 @@ task add [--namespace <ns>] [--actor <actor>] -`,
   },
   query: {
     arity: [0, 0],
-    flags: { ...COMMON, where: "value", world: "boolean", sort: "value", limit: "value" },
-    usage: `task query [--where <expression>] [--world]
+    flags: {
+      ...COMMON,
+      where: "value",
+      world: "boolean",
+      closed: "boolean",
+      all: "boolean",
+      sort: "value",
+      limit: "value",
+    },
+    usage: `task query [--where <expression>] [--closed | --all] [--world]
   [--sort priority|created|updated|id] [--limit <n>]`,
     purpose: "Filter and sort Tasks with a boolean expression.",
     details: [
@@ -123,6 +131,7 @@ task add [--namespace <ns>] [--actor <actor>] -`,
       "operators: = != < > <= >= ~ and or not ( )",
       "sort: priority and created ascend; updated descends; id is lexical. Default: priority.",
       "--world lists every namespace in the current Task world.",
+      "By default only active Tasks match; --closed selects terminal Tasks, --all includes both.",
       "examples:",
       "  keiyaku task query --where 'priority <= 1 and ready' --world",
       "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
@@ -395,7 +404,8 @@ function validateTaskReadFlags(
   flags: Readonly<Record<string, TaskFlagValue>>,
   fail: (message: string) => never,
 ): void {
-  if (action === "ls" && flags.closed === true && flags.all === true) fail("--closed and --all are mutually exclusive");
+  if ((action === "ls" || action === "query") && flags.closed === true && flags.all === true)
+    fail("--closed and --all are mutually exclusive");
   if (action === "ls" && flags.world === true) {
     // An explicit selector is checked below, after positional shape is known.
   }

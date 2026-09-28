@@ -20,7 +20,16 @@ export type TaskOutcome<A> =
   | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;
 export type TaskMutationResult = TaskOutcome<TaskView>;
-export type TaskUpdateResult = TaskOutcome<Readonly<{ task: TaskView; documentDiff: string }>>;
+export type TaskUpdateResult = TaskOutcome<
+  Readonly<{
+    task: TaskView;
+    documentDiff: string;
+    changedFields: readonly Readonly<{
+      field: string;
+      action: "added" | "replaced" | "cleared" | "changed" | "appended";
+    }>[];
+  }>
+>;
 export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
 export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
 export type SettledTaskAction = "done";

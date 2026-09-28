@@ -209,7 +209,7 @@ test("ls parses only canonical identity directories", () => {
   assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
     command: { command: "ls", query: { kind: "akuma", archetype: "elite", limit: 40 }, output: "text" },
   });
-  assert.match(renderContractHelp("ls"), /ls "aku\/<archetype>\/\*"/u);
+  assert.match(renderContractHelp("ls"), /ls "aku\/<name>\/\*"/u);
   for (const path of [
     "keiy/",
     "@review",

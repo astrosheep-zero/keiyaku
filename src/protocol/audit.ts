@@ -3,6 +3,7 @@ import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { activeContract, documentIsCurrent } from "../core/facts/observation.js";
 import type { ChangeId, ContractState, DeliverData, EntryUlid, SnapshotId } from "../core/facts/types.js";
 import { adjudicateAuditTarget, type AuditTargetAnswer } from "../git/target-placement.js";
+import { observeTargetLag, type ContractTargetLag } from "../git/workspace.js";
 import { readManagedWorktreeAppointment, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
 import { accepted, admitted } from "./outcome.js";
@@ -35,11 +36,13 @@ export type AuditReport = Readonly<{
       }>;
   verification:
     | Readonly<{ kind: "not-run" }>
+    | Readonly<{ kind: "undeclared" }>
     | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
     | Readonly<{ kind: "reused"; entry: EntryUlid; verdict: "satisfied" | "unsatisfied"; summary?: string }>
     | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
   target: Readonly<{ kind: "not-observed" }> | AuditTargetAnswer;
+  targetLag?: ContractTargetLag;
   delivery?: Readonly<{
     changeId: ChangeId;
     relation: "identical" | "differs";
@@ -118,7 +121,9 @@ async function auditCandidateVerification(
 
 function auditVerificationAnswer(
   verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
+  declared: boolean,
 ): AuditReport["verification"] {
+  if (!declared) return { kind: "undeclared" };
   if (verified === undefined) return { kind: "not-run" };
   if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
   if (verified.reuse !== undefined) return { kind: "reused", ...verified.reuse };
@@ -226,16 +231,20 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
           prepared.data.integration.snapshot,
           derivation.verification.data,
         );
-  const verification = auditVerificationAnswer(verified);
+  const verification = auditVerificationAnswer(verified, derivation.verification.data !== null);
   const delivery = auditDeliveryRelation(
     verified?.admission?.state ?? state,
     prepared.data,
     derivation.verification.data !== null,
   );
+  const target = await auditTargetAnswer(input.scope, state, prepared.data);
+  const targetLag =
+    target.kind === "placeable" ? await observeTargetLag(input.scope, workspace.answer.path, target.head) : undefined;
   const value: AuditReport = {
     candidate,
     verification,
-    target: await auditTargetAnswer(input.scope, state, prepared.data),
+    target,
+    ...(targetLag === undefined ? {} : { targetLag }),
     ...(delivery === undefined ? {} : { delivery }),
   };
   return completedAudit(state, verified, value);

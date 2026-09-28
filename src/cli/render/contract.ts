@@ -24,6 +24,7 @@ import {
   stopLines,
   titleLines,
 } from "./receipt.js";
+import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
@@ -111,14 +112,14 @@ type OverlapPattern = RegionOverlap["patterns"][number];
 
 type OverlapGroup = Readonly<{
   identical: readonly string[];
-  contained: readonly Readonly<{ symbol: "⊂" | "⊃"; container: string; leaves: readonly string[] }>[];
+  contained: readonly Readonly<{ container: string; leaves: readonly string[] }>[];
   intersections: readonly Readonly<{ mine: string; theirs: string }>[];
 }>;
 
 function overlapGroup(patterns: readonly OverlapPattern[]): OverlapGroup {
   const identical: string[] = [];
   const identicalSeen = new Set<string>();
-  const contained = new Map<string, { symbol: "⊂" | "⊃"; container: string; leaves: string[] }>();
+  const contained = new Map<string, { container: string; leaves: string[] }>();
   const intersections: Array<{ mine: string; theirs: string }> = [];
   const intersectionSeen = new Set<string>();
 
@@ -131,13 +132,11 @@ function overlapGroup(patterns: readonly OverlapPattern[]): OverlapGroup {
       continue;
     }
     if (pattern.relation === "mine-within-theirs" || pattern.relation === "theirs-within-mine") {
-      const symbol = pattern.relation === "mine-within-theirs" ? "⊂" : "⊃";
       const container = pattern.relation === "mine-within-theirs" ? pattern.theirs : pattern.mine;
       const leaf = pattern.relation === "mine-within-theirs" ? pattern.mine : pattern.theirs;
-      const key = `${symbol}\u0000${container}`;
-      const entry = contained.get(key) ?? { symbol, container, leaves: [] };
+      const entry = contained.get(container) ?? { container, leaves: [] };
       if (!entry.leaves.includes(leaf)) entry.leaves.push(leaf);
-      contained.set(key, entry);
+      contained.set(container, entry);
       continue;
     }
     const key = `${pattern.mine}\u0000${pattern.theirs}`;
@@ -170,14 +169,10 @@ function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readon
     const bounded = group.identical.slice(0, 6);
     for (const pattern of bounded) lines.push(`    ${relation("≡")}  ${safeText(pattern)}`);
     if (group.identical.length > 6) lines.push(`    ${relation("≡")}  … (${group.identical.length - 6} more)`);
-    for (const { symbol, container, leaves } of group.contained) {
-      lines.push(`    ${relation(symbol)}  ${safeText(container)}`);
-      const boundedLeaves = leaves.slice(0, 6);
-      boundedLeaves.forEach((leaf, index) => {
-        const last = index === boundedLeaves.length - 1 && leaves.length <= 6;
-        lines.push(`       ${last ? "└─" : "├─"} ${safeText(leaf)}`);
-      });
-      if (leaves.length > 6) lines.push(`       └─ … (${leaves.length - 6} more)`);
+    for (const { container, leaves } of group.contained) {
+      for (const leaf of leaves.slice(0, 6))
+        lines.push(`    ${safeText(leaf)}  ${relation("⊂")}  ${safeText(container)}`);
+      if (leaves.length > 6) lines.push(`    … (${leaves.length - 6} more)  ${relation("⊂")}  ${safeText(container)}`);
     }
     for (const { mine, theirs } of group.intersections)
       lines.push(`    ${relation("∩")}  ${safeText(mine)} · ${safeText(theirs)}`);
@@ -270,10 +265,6 @@ function nonGatingVerificationLines(
   return lines;
 }
 
-function shortGitId(value: string): string {
-  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
-}
-
 /**
  * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
  * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
@@ -288,6 +279,11 @@ function completedPlacementLines(
 ): readonly string[] {
   const completion = result.completion;
   if (completion === undefined) return [];
+  const abbreviations = abbreviateGitIds([
+    completion.predecessor ?? "",
+    completion.integration,
+    ...(result.verb === "deliver" ? [result.tenderSnapshot ?? "", result.integration?.changeId ?? ""] : []),
+  ]);
   const lines: string[] = [];
   if (completion.predecessor !== undefined && completion.target !== undefined) {
     receiptRow(
@@ -295,7 +291,9 @@ function completedPlacementLines(
       " ",
       "target",
       [
-        { text: `${shortGitId(completion.predecessor)}..${shortGitId(completion.integration)}` },
+        {
+          text: `${displayGitId(completion.predecessor, abbreviations)}..${displayGitId(completion.integration, abbreviations)}`,
+        },
         { text: completion.target, opaque: true },
       ],
       columns,
@@ -306,13 +304,13 @@ function completedPlacementLines(
       lines,
       " ",
       "integration result",
-      [{ text: `${shortGitId(completion.integration)} · verification satisfied` }],
+      [{ text: `${displayGitId(completion.integration, abbreviations)} · verification satisfied` }],
       columns,
     );
   }
   lines.push(...nonGatingVerificationLines(result, columns));
   // Placement admission always admits the claim entry beside the movement, so a completed placement is claimed.
-  receiptRow(lines, "●", "claimed", [], columns);
+  receiptRow(lines, "✓", "claimed", [], columns);
   return lines;
 }
 
@@ -368,10 +366,20 @@ function renderAcceptedBind(result: AcceptedBindResult, columns: number, color: 
   return lines.join("\n");
 }
 
+function termsDiffText(diff: string): string {
+  return diff.replace(/^={3,}\r?\n/u, "").replace(/^((?:---|\+\+\+) [^\r\n]*)[ \t]+$/gmu, "$1");
+}
+
 function renderAcceptedAmend(result: AcceptedAmendResult, columns: number, color: boolean): string {
-  const changed = result.diff.length > 0;
-  const lines = titleLines("✓", changed ? "terms replaced" : "terms unchanged", result.contract, columns);
-  if (changed) receiptPayload(lines, "  terms diff", result.diff);
+  const documentChanged = result.diff.length > 0;
+  const changed = documentChanged || result.changes.gates !== undefined || result.changes.after !== undefined;
+  const lines = titleLines("✓", "amended", result.contract, columns);
+  if (!changed) receiptRow(lines, " ", "terms", [{ text: "unchanged" }], columns);
+  if (result.changes.gates !== undefined)
+    receiptRow(lines, " ", "gates", [{ text: result.changes.gates.join(" · ") || "none" }], columns);
+  if (result.changes.after !== undefined)
+    receiptRow(lines, " ", "after", [{ text: result.changes.after.join(" · ") || "none" }], columns);
+  if (documentChanged) receiptPayload(lines, "terms diff", termsDiffText(result.diff));
   lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
   return lines.join("\n");
 }
@@ -380,17 +388,34 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const complete = result.completion !== undefined;
   const title = complete ? "delivered" : "deliver incomplete";
   const lines = titleLines("✓", title, result.contract, columns);
+  const abbreviations = abbreviateGitIds([
+    result.tenderSnapshot ?? "",
+    result.integration?.changeId ?? "",
+    result.completion?.predecessor ?? "",
+    result.completion?.integration ?? "",
+  ]);
   if (result.leading !== undefined) {
     receiptRow(lines, " ", "leading", [{ text: result.leading.kind.replaceAll("-", " ") }], columns);
   }
   if (result.tenderSnapshot !== undefined)
-    receiptRow(lines, " ", "tender commit", [{ text: result.tenderSnapshot, opaque: true }], columns);
-  if (result.integration !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "tender commit",
+      [{ text: displayGitId(result.tenderSnapshot, abbreviations), opaque: true }],
+      columns,
+    );
+  if (result.integration !== undefined && !/^0{40}$/u.test(result.integration.changeId))
     receiptRow(
       lines,
       " ",
       "content identity (not commit)",
-      [{ text: result.integration.changeId, opaque: true }],
+      [
+        {
+          text: displayGitId(result.integration.changeId, abbreviations),
+          opaque: true,
+        },
+      ],
       columns,
     );
   if (complete) lines.push(...completedPlacementLines(result, columns));
