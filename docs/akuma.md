@@ -41,7 +41,7 @@ Stopping a Body preserves Soul, sessions, history, pending tells, and requests.
 
 ## Archetype And Placement
 
-An Archetype is call-time personality and provider configuration. Its exact
+An Archetype is call-time personality and provider configuration. Publicly these are Akuma names; the word Archetype never appears on the CLI face. Its exact
 Markdown grammar is edge detail; admission rejects malformed, unknown, or
 unsupported provider input before allocation. Later Archetype or Settings edits
 change only future births. A definition file joins the catalogue exactly when

@@ -56,6 +56,7 @@ import { renderTaskText } from "../src/cli/render/task.js";
 import { reuseLines } from "../src/cli/render/receipt.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { parseTaskCommand } from "../src/cli/commands/task.js";
+import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -187,7 +188,7 @@ test("catalog text renders only the selected identity layer", () => {
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
       hasMore: false,
     }),
-    ["ARCHETYPES // available", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["AKUMA NAMES // available", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderCatalogText({
@@ -223,6 +224,28 @@ test("catalog text renders only the selected identity layer", () => {
     }),
     ["AKUMA // worker", "", "○ aku/worker/deadbeef (@lead @shadow) · asleep · 1h · activity 30m"].join("\n"),
   );
+});
+
+test("ls help names Akuma names and states the catalog-vs-fleet mapping", () => {
+  const help = renderContractHelp("ls");
+  assert.doesNotMatch(help, /archetype/iu);
+  assert.ok(help.includes("ls aku[/] [--limit <count>]"));
+  assert.ok(help.includes("ls aku/<name>"));
+  assert.ok(help.includes('ls "aku/<name>/*"'));
+  assert.ok(help.includes('ls "aku/*/*"'));
+  assert.ok(help.includes("callable Akuma-name catalog"));
+  assert.ok(help.includes("living Akumas under one name"));
+  assert.ok(help.includes("every living Akuma"));
+});
+
+test("rendered Akuma catalog header names Akuma names, never archetype", () => {
+  const text = renderCatalogText({
+    kind: "archetypes",
+    rows: [{ name: "reviewer" }],
+    hasMore: false,
+  });
+  assert.ok(text.startsWith("AKUMA NAMES // available"));
+  assert.doesNotMatch(text, /archetype/iu);
 });
 
 test("root Task catalogue marks every disposition with its own state", () => {

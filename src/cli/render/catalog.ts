@@ -95,7 +95,7 @@ export function renderCatalogText(catalog: Catalog): string {
   }
   if (catalog.kind === "contracts") return renderContractCatalog(catalog);
   if (catalog.kind === "archetypes") {
-    const head = "ARCHETYPES // available";
+    const head = "AKUMA NAMES // available";
     return [
       head,
       ...(catalog.rows.length === 0
