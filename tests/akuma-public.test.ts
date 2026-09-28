@@ -205,7 +205,7 @@ test("malformed public history IDs refuse before Heart reads", async (context) =
   );
 });
 
-test("history completion keeps the start sequence and never remints", async () => {
+test("history moves a tool from its active start to its witnessed completion", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-history-remint-"));
   const born = await bornHistoryHandle(root, "c0000001");
   try {
@@ -220,6 +220,11 @@ test("history completion keeps the start sequence and never remints", async () =
       },
       at: "2026-08-10T00:00:02.000Z",
     });
+    const active = historyPage(await born.handle.history());
+    assert.deepEqual(
+      toolRow(active.rows).map((row) => row.sequence),
+      [start],
+    );
     const done = await appendActivity(born.allocated.paths, {
       turnSequence: born.turn.sequence,
       event: {
@@ -237,33 +242,90 @@ test("history completion keeps the start sequence and never remints", async () =
     const page = historyPage(await born.handle.history());
     const tools = toolRow(page.rows);
     assert.equal(tools.length, 1);
-    assert.equal(tools[0]?.sequence, 2);
+    assert.equal(tools[0]?.sequence, done);
+    const completed = page.rows.find((row) => row.kind === "tool");
+    assert.ok(completed?.kind === "tool" && completed.state !== "active" && completed.state !== "unsettled");
+    assert.equal(completed.at, "2026-08-10T00:00:03.000Z");
+    assert.equal(completed.durationMs, 1_000);
     assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
     assert.equal(
-      page.rows.some((row) => row.kind === "tool" && row.sequence === 3),
+      page.rows.some((row) => row.kind === "tool" && row.sequence === start),
       false,
     );
 
     const sinceStart = historyPage(await born.handle.history({ since: 2 }));
-    assert.equal(
-      sinceStart.rows.some((row) => row.kind === "tool"),
-      false,
+    assert.deepEqual(
+      toolRow(sinceStart.rows).map((row) => row.sequence),
+      [done],
     );
     assert.equal(
-      sinceStart.rows.some((row) => row.sequence === 3),
+      sinceStart.rows.some((row) => row.sequence === start),
       false,
     );
 
     const beforeDone = historyPage(await born.handle.history({ before: done }));
     assert.deepEqual(
       toolRow(beforeDone.rows).map((row) => row.sequence),
-      [2],
+      [],
     );
-    assert.equal(beforeDone.rows.filter((row) => row.kind === "tool").length, 1);
+    assert.deepEqual(
+      toolRow(historyPage(await born.handle.history()).rows).map((row) => row.sequence),
+      [done],
+    );
   } finally {
     born.holder.release();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("overlapping file tools order each Turn and reported changes by completion", () => {
+  const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
+  const file = (path: string): ToolCall => ({
+    kind: "fileChange",
+    changes: [{ op: "update", path, diffstat: { added: 1, removed: 0 } }],
+  });
+  const event = (sequence: number, phase: "started" | "completed", id: string, path: string) =>
+    activityFact(sequence, 1, at(sequence), {
+      type: "tool",
+      phase,
+      id,
+      name: "edit",
+      call: file(path),
+      ...(phase === "completed" ? { result: { status: "ok" as const } } : {}),
+    });
+  const facts: readonly TimelineFact[] = [
+    { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at(0) },
+    event(2, "started", "a", "src/a.ts"),
+    event(3, "started", "b", "src/b.ts"),
+    event(4, "completed", "b", "src/b.ts"),
+    activityFact(5, 1, at(5), { type: "note", text: "between completions" }),
+    event(6, "completed", "a", "src/a.ts"),
+  ];
+  const ledger = projectTurns(facts);
+  assert.deepEqual(
+    ledger.openTurn?.rows.map((row) => row.sequence),
+    [4, 5, 6],
+  );
+  assert.deepEqual(
+    ledger.rows.map((row) => row.sequence),
+    [1, 4, 5, 6],
+  );
+  const view = selectSnapshot(ledger, { aperture: "monitoring" }).snapshot;
+  assert.deepEqual(
+    view.reportedChanges.map((change) => [change.path, change.sequence, change.at]),
+    [
+      ["src/b.ts", 4, at(4)],
+      ["src/a.ts", 6, at(6)],
+    ],
+  );
+  assert.deepEqual(
+    selectHistory(ledger, { since: 4, limit: 20 }).rows.map((row) => row.sequence),
+    [5, 6],
+  );
+  const pruned = projectTurns(facts.filter((fact) => fact.sequence !== 2));
+  const completed = pruned.rows.find((row) => row.kind === "tool" && row.sequence === 6);
+  assert.ok(completed?.kind === "tool" && completed.state !== "active" && completed.state !== "unsettled");
+  assert.equal(completed.durationMs, undefined);
 });
 
 test("forward history reports a pruned interval after its cursor", async () => {
@@ -980,7 +1042,7 @@ test("reported file changes follow the open or latest closed frontier and aggreg
     }));
   const openLedger = projectTurns(facts);
   const openFrontier = openLedger.openTurn?.rows.find(
-    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6,
+    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 7,
   );
   assert.ok(openFrontier !== undefined && openFrontier.kind === "tool" && openFrontier.call.kind === "fileChange");
   (openFrontier.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
@@ -989,23 +1051,23 @@ test("reported file changes follow the open or latest closed frontier and aggreg
   assert.equal(open.kind, "open");
   assert.deepEqual(reported(open), [
     {
-      sequence: 6,
-      at: "2026-08-10T00:00:06.000Z",
+      sequence: 7,
+      at: "2026-08-10T00:00:07.000Z",
       op: "add",
       path: "src/created.ts",
       diffstat: { added: 4, removed: 0 },
     },
     {
-      sequence: 6,
-      at: "2026-08-10T00:00:06.000Z",
+      sequence: 7,
+      at: "2026-08-10T00:00:07.000Z",
       op: "delete",
       path: "src/removed.ts",
       diffstat: { added: 0, removed: 3 },
     },
-    { sequence: 6, at: "2026-08-10T00:00:06.000Z", op: "unspecified", path: "src/unknown.ts" },
+    { sequence: 7, at: "2026-08-10T00:00:07.000Z", op: "unspecified", path: "src/unknown.ts" },
     {
-      sequence: 6,
-      at: "2026-08-10T00:00:06.000Z",
+      sequence: 7,
+      at: "2026-08-10T00:00:07.000Z",
       op: "update",
       path: "src/repeated.ts",
       diffstat: { added: 3, removed: 1 },
@@ -1024,7 +1086,7 @@ test("reported file changes follow the open or latest closed frontier and aggreg
   const closedFrontier = closedLedger.turns.at(-1);
   assert.ok(closedFrontier?.kind === "closed");
   const closedChange = closedFrontier.rows.find(
-    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 6,
+    (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 7,
   );
   assert.ok(closedChange !== undefined && closedChange.kind === "tool" && closedChange.call.kind === "fileChange");
   (closedChange.call.changes[3] as unknown as { op: "unspecified" }).op = "unspecified";
@@ -1098,7 +1160,7 @@ test("reported file changes keep the newest five independently of ordinary omiss
   );
   assert.deepEqual(
     view.reportedChanges.map((change) => change.sequence),
-    [5, 5, 5, 5, 5],
+    [6, 6, 6, 6, 6],
   );
   assert.equal(view.reportedChanges.at(-1)?.op, "update");
   assert.equal(view.reportedChanges.at(-1)?.diffstat, undefined);

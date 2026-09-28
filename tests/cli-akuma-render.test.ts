@@ -290,7 +290,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
   assert.match(callConclusion, /✓ answered — 5s/u, "both adapters use the exact terminal completion time");
 });
 
-test("ask activity starts at its immediate Tell admission, not an older Turn opening or settling tool", () => {
+test("ask activity starts at admission and includes a later settlement of an older tool", () => {
   const id = parseAkuId("aku/worker/deadbeef").id;
   const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
   const opening: ActivityRow = { kind: "call", sequence: 1, turnSequence: 1, at: at(0), text: "original input" };
@@ -311,7 +311,7 @@ test("ask activity starts at its immediate Tell admission, not an older Turn ope
   };
   const later: ActivityRow = { kind: "note", sequence: 5, turnSequence: 1, at: at(4), text: "after ask" };
   const next: ActivityRow = { kind: "note", sequence: 6, turnSequence: 1, at: at(5), text: "new activity" };
-  const oldSettled = { ...completedTool(3, "bash", { kind: "run" as const, command: "old tool" }), at: at(2) };
+  const oldSettled = { ...completedTool(7, "bash", { kind: "run" as const, command: "old tool" }), at: at(6) };
   const status = (rows: readonly ActivityRow[]) =>
     parseAkumaStatus({
       id,
@@ -325,15 +325,17 @@ test("ask activity starts at its immediate Tell admission, not an older Turn ope
   const firstRows = [opening, oldNote, oldActive, tell.row, later];
   const first = stream.observe({ status: status(firstRows), rows: firstRows });
   assert.deepEqual(first, ["      ⋮ 1 omitted"], "only post-admission settled evidence counts as omitted");
-  const secondRows = [opening, oldNote, oldSettled, tell.row, later, next];
+  const secondRows = [opening, oldNote, tell.row, later, next, oldSettled];
   const second = stream.observe({ status: status(secondRows), rows: secondRows });
   assert.match(second.join("\n"), /new activity/u);
+  assert.match(second.join("\n"), /old tool/u);
   assert.deepEqual(stream.observe({ status: status(secondRows), rows: secondRows }), [], "later activity streams once");
   const conclusion = stream.conclude({ akuma: id, tell, observation: { reason: "answered", answer: "exact\nanswer" } });
   const transcript = [...admission, ...first, ...second, ...conclusion].join("\n");
   assert.equal((transcript.match(/new question/gu) ?? []).length, 1);
   assert.equal((transcript.match(/new activity/gu) ?? []).length, 1);
-  assert.doesNotMatch(transcript, /original input|before ask|old tool|after ask/u);
+  assert.doesNotMatch(transcript, /original input|before ask|after ask/u);
+  assert.equal(transcript.match(/old tool/gu)?.length, 1);
   assert.ok(transcript.indexOf("new question") < transcript.indexOf("new activity"));
   assert.match(transcript, /✓ answered\n\n$/u);
   assert.equal(

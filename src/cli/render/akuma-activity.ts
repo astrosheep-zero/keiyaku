@@ -481,7 +481,7 @@ type DeferredActivityEntry =
 type ActivityStreamState = {
   newestSettledSequence: number | undefined;
   admissionSequence: number | undefined;
-  mutableSequences: Set<number>;
+  pendingTellSequences: Set<number>;
   previousClock: string | undefined;
   renderedBoundaries: Set<number>;
   admittedTellSequences: Set<number>;
@@ -495,11 +495,6 @@ function isSettledStreamRow(row: RenderRow): boolean {
   return row.kind !== "tool" || (row.state !== "active" && row.state !== "unsettled");
 }
 
-/** A pending Tell or active tool retains its sequence when it later becomes eligible. */
-function isMutableStreamRow(row: RenderRow): boolean {
-  return (row.kind === "tell" && row.state === "pending") || (row.kind === "tool" && row.state === "active");
-}
-
 function settledRows(activity: RenderedActivity): readonly RenderRow[] {
   return activity.rows.filter(isSettledStreamRow);
 }
@@ -508,10 +503,14 @@ function isBoundedStreamTool(row: RenderRow): boolean {
   return row.kind === "tool";
 }
 
-function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
+function rememberPendingTells(state: ActivityStreamState, activity: RenderedActivity): void {
   for (const row of activity.rows)
-    if ((state.admissionSequence === undefined || row.sequence >= state.admissionSequence) && isMutableStreamRow(row))
-      state.mutableSequences.add(row.sequence);
+    if (
+      row.kind === "tell" &&
+      row.state === "pending" &&
+      (state.admissionSequence === undefined || row.sequence >= state.admissionSequence)
+    )
+      state.pendingTellSequences.add(row.sequence);
 }
 
 /** Count skipped settled rows within the eligible part of a seeded baseline. */
@@ -610,10 +609,10 @@ function observeActivitySnapshot(
 ): readonly string[] {
   const lines: string[] = [];
   const boundary = currentTurnBoundary(activity);
-  rememberMutableRows(state, activity);
+  rememberPendingTells(state, activity);
   // A row newly selected as this Turn's typed opening must still respect the
-  // settled cursor, even if its earlier pending form was remembered as mutable.
-  if (boundary !== undefined) state.mutableSequences.delete(boundary.row.sequence);
+  // settled cursor, even if its earlier pending form was remembered.
+  if (boundary !== undefined) state.pendingTellSequences.delete(boundary.row.sequence);
   const observedRows = settledRows(activity)
     .filter((row) => state.admissionSequence === undefined || row.sequence >= state.admissionSequence)
     .filter((row) => !state.admittedTellSequences.has(row.sequence))
@@ -625,12 +624,12 @@ function observeActivitySnapshot(
     )
     .filter(
       (row) =>
-        state.mutableSequences.has(row.sequence) ||
+        state.pendingTellSequences.has(row.sequence) ||
         state.newestSettledSequence === undefined ||
         row.sequence > state.newestSettledSequence,
     );
   if (observedRows.length === 0) return lines;
-  for (const row of observedRows) state.mutableSequences.delete(row.sequence);
+  for (const row of observedRows) state.pendingTellSequences.delete(row.sequence);
   state.newestSettledSequence = observedRows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
     state.newestSettledSequence ?? observedRows[0]!.sequence,
@@ -688,7 +687,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
   const state: ActivityStreamState = {
     newestSettledSequence: undefined,
     admissionSequence: undefined,
-    mutableSequences: new Set(),
+    pendingTellSequences: new Set(),
     previousClock: undefined,
     renderedBoundaries: new Set(),
     admittedTellSequences: new Set(),
@@ -719,7 +718,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       );
       if (omitted > 0) lines.push(layout.marker(omitted));
     }
-    rememberMutableRows(state, activity);
+    rememberPendingTells(state, activity);
     const rows = settledRows(activity);
     if (rows.length > 0)
       state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);

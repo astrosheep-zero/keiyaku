@@ -121,7 +121,6 @@ const completedToolRowSchema = z
     sequence: countSchema,
     turnSequence: countSchema,
     at: timestampSchema,
-    completedAt: timestampSchema.optional(),
     durationMs: z.number().finite().nonnegative().optional(),
     name: nonblankTextSchema,
     call: toolCallSchema,
@@ -393,10 +392,9 @@ function projectToolEvent(
   const durationMs = duration(started.at, fact.at);
   rows[index!] = {
     kind: "tool",
-    sequence: started.sequence,
+    sequence: fact.sequence,
     turnSequence: fact.turnSequence,
-    at: started.at,
-    completedAt: fact.at,
+    at: fact.at,
     ...(durationMs === undefined ? {} : { durationMs }),
     name: event.name,
     call: event.call,
@@ -438,7 +436,7 @@ function foldOutcomeVoice(
 }
 
 function finishTurn(turn: MutableTurn): ProjectedTurn {
-  const rows = foldOutcomeVoice(turn.rows, turn.outcome);
+  const rows = [...foldOutcomeVoice(turn.rows, turn.outcome)].sort((left, right) => left.sequence - right.sequence);
   if (turn.phase === "closed" && turn.outcome !== undefined) {
     return { kind: "closed", turn: turn.turn, rows: rows.map(demoteActive), outcome: turn.outcome };
   }

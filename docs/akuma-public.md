@@ -14,6 +14,11 @@ independent of Repo and selector composition.
 
 Status and history derive from one retained Heart timeline in durable sequence
 order. They do not join outcomes by timestamp or read a second Turn projection.
+Active tool work appears where it began; once its completion is witnessed, its
+single completed row appears where it finished in that same durable order.
+Elapsed time is derived only when the retained start remains available. History
+cursors, live observation, current-work selection, and reported changes consume
+that one completion-ordered interpretation without replaying the earlier start.
 A born status also observes the Soul's frozen action authority, so callers can
 inspect the granted extent without reconstructing it from mutable Archetype
 configuration or private custody. It also reports the Akuma's frozen execution

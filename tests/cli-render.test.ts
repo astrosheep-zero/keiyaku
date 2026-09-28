@@ -51,7 +51,11 @@ import type { Catalog } from "../src/cli/catalog.js";
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { renderAkumaJson, renderAkumaText, askProgressStream } from "../src/cli/render/akuma.js";
+import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
+import { activityFact } from "./support/akuma-fixtures.js";
+import type { TimelineFact } from "../src/akuma/heart/index.js";
+import { parseAkuId } from "../src/akuma/identity.js";
 import { renderTaskText } from "../src/cli/render/task.js";
 import { reuseLines } from "../src/cli/render/receipt.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
@@ -2316,7 +2320,7 @@ test("live companion preserves one evicted mutable row across a wait baseline", 
   assert.match(seeded.join("\n"), /companion opening[\s\S]*⋮ 1 omitted/u);
   assert.doesNotMatch(seeded.join("\n"), /baseline note|mutable tool/u);
 
-  const completed = completedTool(3, "bash", { kind: "run", command: "mutable tool" });
+  const completed = completedTool(8, "bash", { kind: "run", command: "mutable tool" });
   const fresh: ActivityRow = {
     kind: "note",
     sequence: 7,
@@ -2325,10 +2329,87 @@ test("live companion preserves one evicted mutable row across a wait baseline", 
     text: "fresh note",
   };
   const laterStatus = parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: idleAkumaSnapshot([]) });
-  const later = observed(laterStatus, { contract: { kind: "none" } }, [opening, completed, baseline, fresh]);
+  const later = observed(laterStatus, { contract: { kind: "none" } }, [opening, baseline, fresh, completed]);
   const text = stream.observe([later]).join("\n");
-  assert.match(text, /mutable tool[\s\S]*fresh note/u);
+  assert.match(text, /fresh note[\s\S]*mutable tool/u);
   assert.deepEqual(stream.observe([later]), []);
+});
+
+test("call, wait, and ask stream projected overlapping tool completions once in completion order", () => {
+  const id = parseAkuId("aku/worker/abcd0104").id;
+  const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
+  const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
+    activityFact(sequence, 1, at(sequence), {
+      type: "tool",
+      phase,
+      id: name,
+      name: "bash",
+      call: { kind: "run", command: name },
+      ...(phase === "completed" ? { result: { status: "ok" as const } } : {}),
+    });
+  const first: TimelineFact[] = [
+    { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at(1) },
+    { kind: "call", sequence: 2, turnSequence: 1, at: at(2), body: "first question" },
+    tool(3, "started", "A"),
+    {
+      kind: "tell",
+      sequence: 4,
+      id: "tell/overlap",
+      body: "another question",
+      recordedAt: at(4),
+      state: "told",
+      deliveries: [],
+    },
+    tool(5, "started", "B"),
+  ];
+  const second = [
+    ...first,
+    tool(6, "completed", "B"),
+    activityFact(7, 1, at(7), { type: "note", text: "between tools" }),
+  ];
+  const third = [...second, tool(8, "completed", "A")];
+  const projection = (facts: readonly TimelineFact[]) => {
+    const ledger = projectTurns(facts);
+    return {
+      status: parseAkumaStatus({
+        id,
+        life: "running",
+        allowed: [],
+        timeline: selectSnapshot(ledger, { aperture: "monitoring" }).snapshot,
+      }),
+      ordinarySelected: 0,
+      rows: ledger.rows,
+    };
+  };
+  const call = callObservationStream(
+    { columns: 120, color: false },
+    { id, contract: { kind: "none" }, facts: [] },
+    { now: () => Date.parse(at(1)) },
+  );
+  const wait = waitObservationStream({ columns: 120, color: false }, { now: () => Date.parse(at(1)) });
+  const ask = askProgressStream(undefined, undefined, { columns: 120, color: false });
+  const admissionRow = projection(first).rows.find((row) => row.kind === "tell");
+  assert.ok(admissionRow?.kind === "tell");
+  ask.admitted(
+    { admission: { fact: "recorded", tellId: "tell/overlap" }, row: admissionRow, wake: { kind: "told" } },
+    id,
+  );
+  const streams = [
+    (value: ReturnType<typeof projection>) => call.observe(value),
+    (value: ReturnType<typeof projection>) =>
+      wait.observe([observed(value.status, { contract: { kind: "none" } }, value.rows)]),
+    (value: ReturnType<typeof projection>) => ask.observe(value),
+  ];
+  for (const observe of streams) {
+    observe(projection(first));
+    const b = observe(projection(second)).join("\n");
+    const a = observe(projection(third)).join("\n");
+    assert.match(b, /\$ B[\s\S]*between tools/u);
+    assert.match(a, /\$ A/u);
+    assert.match(b, new RegExp(clockAt(Date.parse(at(6))), "u"));
+    assert.match(a, new RegExp(clockAt(Date.parse(at(8))), "u"));
+    assert.deepEqual(observe(projection(third)), []);
+  }
 });
 
 test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {
