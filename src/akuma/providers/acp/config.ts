@@ -5,13 +5,15 @@ export type AcpExecutionConfig = Readonly<{
   argvAfter: readonly string[];
   modelArg?: string;
   effortArg?: string;
+  modelConfigId?: string;
+  effortConfigId?: string;
   systemPromptArg?: string;
   systemPromptMode?: SystemPromptMode;
 }>;
 
 function argumentName(
   value: Readonly<Record<string, unknown>>,
-  key: "modelArg" | "effortArg" | "systemPromptArg",
+  key: "modelArg" | "effortArg" | "modelConfigId" | "effortConfigId" | "systemPromptArg",
 ): string | undefined {
   const selected = value[key];
   if (selected === undefined) return undefined;
@@ -21,13 +23,42 @@ function argumentName(
   return selected;
 }
 
+function validateSelectorMappings(
+  config: Readonly<{
+    modelArg: string | undefined;
+    effortArg: string | undefined;
+    modelConfigId: string | undefined;
+    effortConfigId: string | undefined;
+  }>,
+): void {
+  if (config.modelArg !== undefined && config.modelConfigId !== undefined) {
+    throw new TypeError("ACP provider config cannot map model to both an argument and a session option");
+  }
+  if (config.effortArg !== undefined && config.effortConfigId !== undefined) {
+    throw new TypeError("ACP provider config cannot map effort to both an argument and a session option");
+  }
+  if (config.modelConfigId !== undefined && config.modelConfigId === config.effortConfigId) {
+    throw new TypeError("ACP provider config model and effort must use different session options");
+  }
+}
+
 export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("ACP provider config must be an object");
   }
   const config = value as Readonly<Record<string, unknown>>;
   const unknown = Object.keys(config).find(
-    (key) => !["argvBefore", "argvAfter", "effortArg", "modelArg", "systemPromptArg", "systemPromptMode"].includes(key),
+    (key) =>
+      ![
+        "argvBefore",
+        "argvAfter",
+        "effortArg",
+        "modelArg",
+        "modelConfigId",
+        "effortConfigId",
+        "systemPromptArg",
+        "systemPromptMode",
+      ].includes(key),
   );
   if (unknown !== undefined) throw new TypeError(`ACP provider config has unknown field ${unknown}`);
   if (
@@ -44,6 +75,9 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
   }
   const modelArg = argumentName(config, "modelArg");
   const effortArg = argumentName(config, "effortArg");
+  const modelConfigId = argumentName(config, "modelConfigId");
+  const effortConfigId = argumentName(config, "effortConfigId");
+  validateSelectorMappings({ modelArg, effortArg, modelConfigId, effortConfigId });
   const systemPromptArg = argumentName(config, "systemPromptArg");
   const systemPromptMode = config.systemPromptMode;
   if (systemPromptMode !== undefined && systemPromptMode !== "append" && systemPromptMode !== "replace") {
@@ -57,6 +91,8 @@ export function decodeAcpConfig(value: unknown): AcpExecutionConfig {
     argvAfter: Object.freeze([...config.argvAfter] as string[]),
     ...(modelArg === undefined ? {} : { modelArg }),
     ...(effortArg === undefined ? {} : { effortArg }),
+    ...(modelConfigId === undefined ? {} : { modelConfigId }),
+    ...(effortConfigId === undefined ? {} : { effortConfigId }),
     ...(systemPromptArg === undefined ? {} : { systemPromptArg }),
     ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   });

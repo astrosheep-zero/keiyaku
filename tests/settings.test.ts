@@ -282,6 +282,26 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
   }
 });
 
+test("Archetype resolves Kimi ACP model and thinking selectors without a custom provider", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(
+      join(value.home, "akuma", "kimi.md"),
+      "---\nprovider: kimi\nmodel: kimi-code/kimi-for-coding\neffort: low\n---\n",
+    );
+    const loaded = await loadNamed(value, "kimi");
+    assert.deepEqual(loaded.provider, {
+      name: "kimi",
+      kind: "acp",
+      executable: "kimi",
+      config: { argvBefore: ["acp"], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+    });
+    assert.deepEqual(loaded.options, { model: "kimi-code/kimi-for-coding", effort: "low" });
+  } finally {
+    value.close();
+  }
+});
+
 test("Archetype resolves a second configured ACP execution without registry changes", async () => {
   const value = fixture();
   try {

@@ -505,7 +505,7 @@ test("provider answered results may omit an exact fork point", () => {
   assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
 });
 
-function fakeAcp(root: string, mode: "complete" | "cancel" | "reverse" | "prompt-error" = "complete") {
+function fakeAcp(root: string, mode: "complete" | "cancel" | "reverse" | "prompt-error" | "config" | "config-missing" = "complete") {
   const executable = join(root, "fake-acp.mjs");
   const log = join(root, "acp-log.jsonl");
   const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -517,6 +517,13 @@ import { spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as acp from ${JSON.stringify(sdk)};
 const log = (event) => appendFileSync(process.env.ACP_TEST_LOG, JSON.stringify(event) + "\\n");
+let selectedModel = "default";
+let selectedEffort = "max";
+const configOptions = () => [
+  { type: "select", id: "model", name: "Model", currentValue: selectedModel, options: [{ value: "default", name: "Default" }, { value: "k28", name: "K2.8" }] },
+  { type: "select", id: "thinking", name: "Thinking", currentValue: selectedEffort, options: selectedModel === "k28" ? [{ value: "low", name: "Low" }, { value: "max", name: "Max" }] : [{ value: "max", name: "Max" }] },
+];
+const sessionOptions = () => process.env.ACP_TEST_MODE === "config" ? { configOptions: configOptions() } : {};
 const app = acp.agent({ name: "fake-acp" })
   .onRequest(acp.methods.agent.initialize, ({ params }) => {
     log({ kind: "initialize", params });
@@ -528,11 +535,20 @@ const app = acp.agent({ name: "fake-acp" })
   })
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     log({ kind: "new", params });
-    return { sessionId: "fresh-session" };
+    return { sessionId: "fresh-session", ...sessionOptions() };
   })
   .onRequest(acp.methods.agent.session.load, ({ params }) => {
     log({ kind: "load", params });
-    return {};
+    return sessionOptions();
+  })
+  .onRequest(acp.methods.agent.session.setConfigOption, ({ params }) => {
+    log({ kind: "set-config", params });
+    if (process.env.ACP_TEST_MODE !== "config") throw new Error("session options unavailable");
+    const option = configOptions().find((entry) => entry.id === params.configId);
+    if (!option?.options.some((value) => value.value === params.value)) throw new Error("invalid session option");
+    if (params.configId === "model") selectedModel = params.value;
+    else selectedEffort = params.value;
+    return { configOptions: configOptions() };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     log({ kind: "prompt", params, argv: process.argv.slice(2), requests: process.env.AKUMA_REQUESTS });
@@ -688,6 +704,84 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
   const load = acpLog(fake.log).find((record) => record.kind === "load")!;
   assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
   assert.equal("_meta" in (load.params as object), false);
+});
+
+test("ACP applies model then effort session selectors before prompting on fresh and resumed sessions", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-config-");
+  const fake = fakeAcp(root, "config");
+  const execution = {
+    ...fake.execution,
+    config: { argvBefore: [fake.execution.config.argvBefore[0]!], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+  };
+  const provider = createAcpProvider(execution);
+  assert.deepEqual(provider.admitOptions({ model: "k28", effort: "low" }), {
+    kind: "admitted",
+    options: { model: "k28", effort: "low" },
+  });
+  const run = async (resume: boolean) => {
+    const attempt = resume
+      ? provider.resume!({
+          ...DRIVE_DEFAULTS,
+          body: "continue",
+          launchTells: [],
+          cwd: root,
+          options: { model: "k28", effort: "low" },
+          session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
+        })
+      : provider.start(freshInput("build", { cwd: root, options: { model: "k28", effort: "low" } }));
+    const drive = await attempt.result;
+    for await (const _event of drive.events) { /* drain */ }
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    await attempt.closed;
+  };
+  await run(false);
+  await run(true);
+  const records = acpLog(fake.log);
+  assert.deepEqual(records.map((record) => record.kind), [
+    "initialize", "new", "set-config", "set-config", "prompt",
+    "initialize", "load", "set-config", "set-config", "prompt",
+  ]);
+  for (const record of records.filter((entry) => entry.kind === "set-config")) {
+    const params = record.params as { sessionId: string; configId: string; value: string };
+    assert.equal(params.sessionId, records.indexOf(record) < 5 ? "fresh-session" : "retained-session");
+  }
+  assert.deepEqual(
+    records.filter((record) => record.kind === "set-config").map((record) => record.params),
+    [
+      { sessionId: "fresh-session", configId: "model", value: "k28" },
+      { sessionId: "fresh-session", configId: "thinking", value: "low" },
+      { sessionId: "retained-session", configId: "model", value: "k28" },
+      { sessionId: "retained-session", configId: "thinking", value: "low" },
+    ],
+  );
+  assert.deepEqual((records[4]!.params as { prompt: unknown }).prompt, [{ type: "text", text: "build" }]);
+});
+
+test("ACP refuses unavailable model and effort choices before sending a prompt", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-unavailable-");
+  const fake = fakeAcp(root, "config");
+  const provider = createAcpProvider({
+    ...fake.execution,
+    config: { argvBefore: [fake.execution.config.argvBefore[0]!], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+  });
+  const invalid = provider.start(freshInput("build", { cwd: root, options: { model: "k28", effort: "medium" } }));
+  await assert.rejects(invalid.result, /ACP effort value 'medium' is unavailable/u);
+  await invalid.closed;
+  assert.deepEqual(acpLog(fake.log).map((record) => record.kind), ["initialize", "new", "set-config"]);
+
+  const missing = fakeAcp(temporaryDirectory(context, "keiyaku-acp-missing-"), "config-missing");
+  const missingProvider = createAcpProvider({
+    ...missing.execution,
+    config: { argvBefore: [missing.execution.config.argvBefore[0]!], argvAfter: [], modelConfigId: "model" },
+  });
+  const attempt = missingProvider.start(freshInput("build", { cwd: root, options: { model: "k28" } }));
+  await assert.rejects(attempt.result, /ACP model option 'model' is unavailable/u);
+  await attempt.closed;
+  assert.deepEqual(acpLog(missing.log).map((record) => record.kind), ["initialize", "new"]);
+  assert.throws(
+    () => createAcpProvider({ ...fake.execution, config: { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" } }),
+    /cannot map model to both/u,
+  );
 });
 
 test("ACP forced disposal closes its owned process tree after standard session/cancel", async (context) => {

@@ -426,6 +426,11 @@ const BUILTIN_EXECUTIONS = {
   claude: { kind: "claude-agent-sdk" },
   "codex-app-server": { kind: "codex-app-server" },
   "opencode-sdk": { kind: "opencode-sdk" },
+  kimi: {
+    kind: "acp",
+    executable: "kimi",
+    config: { argvBefore: ["acp"], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+  },
   pi: { kind: "pi" },
   "grok-build": {
     kind: "grok-build",

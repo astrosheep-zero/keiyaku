@@ -45,6 +45,7 @@ type AcpModule = typeof import("@agentclientprotocol/sdk");
 type AcpLaunch = Readonly<{
   argv: readonly [string, ...string[]];
   env?: Readonly<Record<string, string>>;
+  sessionOptions?: readonly Readonly<{ field: "model" | "effort"; id: string; value: string }>[];
 }>;
 
 function diagnostic(acp: AcpModule, error: unknown): string {
@@ -88,6 +89,7 @@ async function establishSession(
   agent: AcpSdk.ClientContext,
   input: AcpStartInput,
   dependencies: AcpDependencies,
+  selections: NonNullable<AcpLaunch["sessionOptions"]>,
 ): Promise<string> {
   const initialized = await agent.request(acp.methods.agent.initialize, {
     protocolVersion: acp.PROTOCOL_VERSION,
@@ -96,23 +98,46 @@ async function establishSession(
   if (input.session.kind === "resume" && initialized.agentCapabilities?.loadSession !== true) {
     throw new Error("ACP agent does not advertise session/load");
   }
+  let sessionId: string;
+  let configOptions: AcpSdk.SessionConfigOption[] | null | undefined;
   if (input.session.kind === "fresh") {
-    return (
-      await agent.request(acp.methods.agent.session.new, {
-        cwd: input.cwd,
-        mcpServers: [],
-        ...requestMeta(dependencies.freshSessionMeta),
-      })
-    ).sessionId;
+    const created = await agent.request(acp.methods.agent.session.new, {
+      cwd: input.cwd,
+      mcpServers: [],
+      ...requestMeta(dependencies.freshSessionMeta),
+    });
+    sessionId = created.sessionId;
+    configOptions = created.configOptions;
+  } else {
+    const coordinate = input.session.coordinate.sessionId;
+    if (coordinate === undefined) throw new Error("ACP resume coordinate has no session id");
+    sessionId = coordinate;
+    const loaded = await agent.request(acp.methods.agent.session.load, {
+      cwd: input.cwd,
+      mcpServers: [],
+      sessionId,
+      ...requestMeta(dependencies.loadSessionMeta),
+    });
+    configOptions = loaded.configOptions;
   }
-  const sessionId = input.session.coordinate.sessionId;
-  if (sessionId === undefined) throw new Error("ACP resume coordinate has no session id");
-  await agent.request(acp.methods.agent.session.load, {
-    cwd: input.cwd,
-    mcpServers: [],
-    sessionId,
-    ...requestMeta(dependencies.loadSessionMeta),
-  });
+  for (const selection of selections) {
+    const selected = configOptions?.find((option) => option.id === selection.id);
+    if (selected?.type !== "select") throw new Error(`ACP ${selection.field} option '${selection.id}' is unavailable`);
+    const choices = selected.options.flatMap((option) => ("options" in option ? option.options : [option]));
+    if (selected.currentValue === selection.value) continue;
+    if (!choices.some((option) => option.value === selection.value)) {
+      throw new Error(`ACP ${selection.field} value '${selection.value}' is unavailable`);
+    }
+    const updated = await agent.request(acp.methods.agent.session.setConfigOption, {
+      sessionId,
+      configId: selection.id,
+      value: selection.value,
+    });
+    configOptions = updated.configOptions;
+    if (configOptions.find((option) => option.id === selection.id)?.currentValue !== selection.value) {
+      throw new Error(`ACP ${selection.field} option '${selection.id}' did not select '${selection.value}'`);
+    }
+  }
   return sessionId;
 }
 
@@ -245,7 +270,10 @@ export async function startAcpSession(
   );
   turn = createAcpTurn(acp, connection, dependencies.interpretTool);
   try {
-    sessionId = await abortable(establishSession(acp, connection.agent, input, dependencies), signal);
+    sessionId = await abortable(
+      establishSession(acp, connection.agent, input, dependencies, launch.sessionOptions ?? []),
+      signal,
+    );
     turn.events.emit({ type: "session", coordinate: { sessionId } });
     const session = beginAcpPrompt({ acp, agent: connection.agent }, child, turn, sessionId, input);
     return { session, agent: connection.agent, sessionId, open: turn.open };

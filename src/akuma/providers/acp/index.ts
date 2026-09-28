@@ -10,11 +10,11 @@ function optionAdmission(options: ProviderOptions, config: AcpExecutionConfig): 
   if (options.network !== undefined) {
     return { kind: "refused", diagnostic: "ACP provider does not support the network option" };
   }
-  if (options.model !== undefined && config.modelArg === undefined) {
-    return { kind: "refused", diagnostic: "ACP provider has no model argument mapping" };
+  if (options.model !== undefined && config.modelArg === undefined && config.modelConfigId === undefined) {
+    return { kind: "refused", diagnostic: "ACP provider has no model mapping" };
   }
-  if (options.effort !== undefined && config.effortArg === undefined) {
-    return { kind: "refused", diagnostic: "ACP provider has no effort argument mapping" };
+  if (options.effort !== undefined && config.effortArg === undefined && config.effortConfigId === undefined) {
+    return { kind: "refused", diagnostic: "ACP provider has no effort mapping" };
   }
   if (options.systemPrompt !== undefined && options.systemPrompt.length > 0) {
     if (config.systemPromptArg === undefined) {
@@ -40,8 +40,8 @@ function argv(
 ): readonly [string, ...string[]] {
   if (execution.executable === undefined) throw new Error("ACP provider execution requires executable");
   const values = [execution.executable, ...config.argvBefore];
-  if (options.model !== undefined) values.push(config.modelArg!, options.model);
-  if (options.effort !== undefined) values.push(config.effortArg!, options.effort);
+  if (options.model !== undefined && config.modelArg !== undefined) values.push(config.modelArg, options.model);
+  if (options.effort !== undefined && config.effortArg !== undefined) values.push(config.effortArg, options.effort);
   if (options.systemPrompt !== undefined && config.systemPromptArg !== undefined) {
     values.push(config.systemPromptArg, options.systemPrompt);
   }
@@ -56,6 +56,14 @@ export function createAcpProvider(execution: ProviderExecution, dependencies: Ac
     const launch = {
       argv: argv(execution, config, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
+      sessionOptions: [
+        ...(input.options.model === undefined || config.modelConfigId === undefined
+          ? []
+          : [{ field: "model" as const, id: config.modelConfigId, value: input.options.model }]),
+        ...(input.options.effort === undefined || config.effortConfigId === undefined
+          ? []
+          : [{ field: "effort" as const, id: config.effortConfigId, value: input.options.effort }]),
+      ],
     };
     return (await startAcpSession(launch, input, dependencies, custody)).session;
   };

@@ -61,6 +61,10 @@ Option admission happens once before identity allocation. Prompt and
 structured-answer changes apply only when the provider begins a new Turn,
 never as live-tell mutation. Persisted records are not rewritten during option
 admission.
+Where an agent offers session configuration selectors, the adapter applies
+admitted model and effort choices before the first prompt of each new or
+resumed native session. Missing choices and unconfirmed selections fail that
+attempt rather than silently running with the agent's default.
 
 Each drive receives the one Body Request channel as provider transport setup.
 This does not alter Library routing or permit recursive service. New provider
