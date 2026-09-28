@@ -584,7 +584,7 @@ test("request pump propagates permission errors while reading an enumerated requ
   }
 });
 
-test("request progress consumers receive the sequence-derived retained-window gap", async () => {
+test("request progress consumers receive the sequence-derived retained-window gap", async (t) => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-request-progress-gap-")));
   const parent = await born(root, "parent", "65432109");
   const { promise: published, resolve: started } = promiseBarrier<void>();
@@ -598,6 +598,17 @@ test("request progress consumers receive the sequence-derived retained-window ga
       return { result: "complete", service: "complete" };
     }),
   );
+  // The service publishes its burst asynchronously, so a consumer read that lands
+  // mid-write would observe a partial window, advance its observed sequence, and
+  // erase the gap. Hold consumer snapshot reads until the full window is durable so
+  // the success arm depends on the sequence, never on write scheduling.
+  const { promise: windowDurable, resolve: windowComplete } = promiseBarrier<void>();
+  const originalRead = fsPromises.readFile;
+  const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+    if (String(args[0]).endsWith(".progress.json")) await windowDurable;
+    return originalRead(...args);
+  });
+  syncBuiltinESMExports();
   const gaps: number[] = [];
   try {
     const request = requestBodyCommand({
@@ -606,7 +617,25 @@ test("request progress consumers receive the sequence-derived retained-window ga
       value: "run",
       onProgressGap: (count) => gaps.push(count),
     });
+    // The failure path releases the gate before the pump settles, so a request that
+    // never observes its gap cannot leave an unhandled rejection behind.
+    void request.catch(() => undefined);
     await published;
+    await waitFor("the durable full retained-window snapshot", async () => {
+      for (const name of await readdir(pump.directory)) {
+        if (!name.endsWith(".progress.json")) continue;
+        try {
+          const snapshot = JSON.parse(await originalRead(join(pump.directory, name), "utf8")) as {
+            events?: readonly { value?: unknown }[];
+          };
+          if (snapshot.events?.at(-1)?.value === REQUEST_PROGRESS_WINDOW + 3) return true;
+        } catch {
+          // A snapshot is only durable once its rename completes.
+        }
+      }
+      return false;
+    });
+    windowComplete();
     await waitFor("the retained-window progress gap", () => gaps.length === 1, {
       terminalState: settlementProbe(request, (settled) => `outcome ${settled.kind}`),
     });
@@ -614,6 +643,11 @@ test("request progress consumers receive the sequence-derived retained-window ga
     release();
     assert.equal((await request).kind, "returned");
   } finally {
+    // A missing gap must fail by name without stranding the service behind the gate.
+    windowComplete();
+    release();
+    mock.mock.restore();
+    syncBuiltinESMExports();
     await pump.close();
     rmSync(root, { recursive: true, force: true });
   }

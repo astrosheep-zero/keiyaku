@@ -60,8 +60,13 @@ function runCli(cwd: string, argv: readonly string[], input?: string) {
 }
 
 function builtCli(): string {
+  // The compile seam links .test-build/src to the real build/src, so a compiled test
+  // and a source test resolve the same built CLI through one relative path.
   return fileURLToPath(
-    new URL(import.meta.url.endsWith(".js") ? "../../build/src/cli/index.js" : "../build/src/cli/index.js", import.meta.url),
+    new URL(
+      import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../build/src/cli/index.js",
+      import.meta.url,
+    ),
   );
 }
 
@@ -78,14 +83,30 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   );
   let stderr = "";
   child.stderr?.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
+  // Register settlement before the blocked-write window: a child that exits early
+  // (for example when the compiled CLI cannot be resolved) must fail this test
+  // rather than escape an unregistered close listener and strand the awaiter.
+  let exitCode: number | null | undefined;
+  let exitError: Error | undefined;
+  const settled = new Promise<void>((resolve) => {
+    child.once("close", (code) => {
+      exitCode = code;
+      resolve();
+    });
+    child.once("error", (error) => {
+      exitError = error;
+      resolve();
+    });
+  });
   await new Promise<void>((resolve, reject) => {
     child.once("spawn", resolve);
     child.once("error", reject);
   });
   await new Promise((resolve) => setTimeout(resolve, 250));
   child.stdout?.destroy();
-  const status = await new Promise<number | null>((resolve) => child.on("close", (code) => resolve(code)));
-  assert.equal(status, 0);
+  await settled;
+  assert.equal(exitError, undefined, exitError?.message);
+  assert.equal(exitCode, 0);
   assert.equal(stderr, "");
 });
 
