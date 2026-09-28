@@ -815,6 +815,7 @@ function controlledAcpProcess(
     stallPrompt?: boolean;
     assistant?: string;
     interject?: "queued" | "rejected" | "pending";
+    broadcast?: boolean;
   }> = {},
 ): Readonly<{
   process: StdioProcess;
@@ -827,6 +828,7 @@ function controlledAcpProcess(
   emitAssistant(text: string): Promise<void>;
   resolvePrompt(): void;
   resolveInterject(): void;
+  emitInterjection(value: ControlledInterject): Promise<void>;
   resolveCleanup(): void;
   rejectCleanup(error: Error): void;
   readonly sessionNew: unknown;
@@ -845,6 +847,7 @@ function controlledAcpProcess(
   const interjections: ControlledInterject[] = [];
   let cancelled = 0;
   let emitAssistant!: (text: string) => Promise<void>;
+  let emitInterjection!: (value: ControlledInterject) => Promise<void>;
   let sessionNew: unknown;
   let sessionLoad: unknown;
   const cleanup = new Promise<void>((resolve, reject) => {
@@ -882,12 +885,14 @@ function controlledAcpProcess(
     });
   if (options.interject !== undefined) {
     app.onRequest<ControlledInterject, { status: "queued" }>(
-      "x.ai/interject",
+      "_x.ai/interject",
       (value) => value as ControlledInterject,
-      async ({ params }) => {
+      async ({ params, client }) => {
         interjections.push(params);
         startInterject();
+        emitInterjection = async (value) => await client.notify("_x.ai/session/interjection", value);
         if (options.interject === "rejected") throw new acp.RequestError(-32603, "interject rejected");
+        if (options.broadcast !== false) await emitInterjection(params);
         if (options.interject === "pending") await interject;
         return { status: "queued" };
       },
@@ -927,6 +932,7 @@ function controlledAcpProcess(
     emitAssistant: async (text) => await emitAssistant(text),
     resolvePrompt: finishPrompt,
     resolveInterject: finishInterject,
+    emitInterjection: async (value) => await emitInterjection(value),
     resolveCleanup,
     rejectCleanup,
     get sessionNew() {
@@ -951,7 +957,7 @@ const controlledGrokExecution = {
   executable: "grok",
 };
 
-test("Grok Build uses fixed launch arguments and admits queued interject on the live ACP connection", async () => {
+test("Grok Build uses fixed launch arguments and admits broadcast interject on the live ACP connection", async () => {
   const controlled = controlledAcpProcess({ stallPrompt: true, interject: "queued" });
   let spawned: readonly string[] = [];
   const provider = createGrokBuildProvider(controlledGrokExecution, {
@@ -1000,7 +1006,7 @@ test("Grok Build uses fixed launch arguments and admits queued interject on the 
 });
 
 test("Grok Build returns turn-ended when completion wins before interject acknowledgement", async () => {
-  const controlled = controlledAcpProcess({ stallPrompt: true, interject: "pending" });
+  const controlled = controlledAcpProcess({ stallPrompt: true, interject: "pending", broadcast: false });
   const drive = await createGrokBuildProvider(controlledGrokExecution, {
     spawnProcess: () => controlled.process,
   }).start(freshInput("build")).result;

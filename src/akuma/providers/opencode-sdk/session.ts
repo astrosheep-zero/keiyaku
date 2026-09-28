@@ -1,4 +1,5 @@
 import net from "node:net";
+import { randomBytes } from "node:crypto";
 import { abortable } from "../../abort.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
@@ -24,6 +25,15 @@ export type OpencodeSdkLoader = (
 >;
 
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
+
+export function messageId(sequence = 0): string {
+  const timestamp = BigInt(new Date().getTime()) * 0x1000n + BigInt(sequence);
+  const bytes = Buffer.alloc(6);
+  bytes.writeUIntBE(Number(timestamp & 0xffffffffffffn), 0, 6);
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const suffix = [...randomBytes(14)].map((byte) => alphabet[byte % alphabet.length]).join("");
+  return `msg_${bytes.toString("hex")}${suffix}`;
+}
 
 export function parseModel(model: string): Readonly<{ providerID: string; modelID: string }> {
   const slash = model.indexOf("/");

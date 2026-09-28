@@ -16,6 +16,8 @@
     "tests/akuma-schema.test.ts",
     "tests/akuma-public.test.ts",
     "tests/akuma-provider.test.ts",
+    "tests/grok-live-tell.test.ts",
+    "tests/opencode-live-tell.test.ts",
     "tests/akuma-identity.test.ts",
     "tests/akuma-physical.test.ts",
     "tests/plugin-square.test.ts",

@@ -31,6 +31,8 @@ export type AcpDependencies = Readonly<{
   interpretTool?: AcpToolInterpreter;
   freshSessionMeta?: AcpSessionMeta;
   loadSessionMeta?: AcpSessionMeta;
+  configureClient?: (client: AcpSdk.ClientApp) => void;
+  onTerminal?: () => void;
 }>;
 
 export type AcpLiveSession = Readonly<{
@@ -63,10 +65,13 @@ function diagnostic(acp: AcpModule, error: unknown): string {
 function createAcpClient(
   acp: AcpModule,
   onUpdate: (notification: AcpSdk.SessionNotification) => void,
+  configure?: (client: AcpSdk.ClientApp) => void,
 ): AcpSdk.ClientApp {
-  return acp
+  const client = acp
     .client({ name: "keiyaku" })
     .onNotification(acp.methods.client.session.update, ({ params }) => onUpdate(params));
+  configure?.(client);
+  return client;
 }
 
 function promptResult(response: AcpSdk.PromptResponse): TurnResult {
@@ -141,7 +146,12 @@ async function establishSession(
   return sessionId;
 }
 
-function createAcpTurn(acp: AcpModule, connection: AcpSdk.ClientConnection, interpret?: AcpToolInterpreter) {
+function createAcpTurn(
+  acp: AcpModule,
+  connection: AcpSdk.ClientConnection,
+  interpret?: AcpToolInterpreter,
+  onTerminal?: () => void,
+) {
   const events = new AgentEventChannel();
   let state = EMPTY_ACP_EVENT_STATE;
   let terminal = false;
@@ -158,6 +168,7 @@ function createAcpTurn(acp: AcpModule, connection: AcpSdk.ClientConnection, inte
   const finish = async (result: TurnResult, cleanup: () => Promise<void>): Promise<void> => {
     if (terminal) return;
     terminal = true;
+    onTerminal?.();
     let completionResult = result;
     const failCleanup = (error: unknown): void => {
       completionResult = { kind: "failed", diagnostic: `ACP cleanup failed: ${diagnostic(acp, error)}` };
@@ -260,15 +271,19 @@ export async function startAcpSession(
   });
   let sessionId: string | undefined;
   let turn!: ReturnType<typeof createAcpTurn>;
-  const connection = createAcpClient(acp, (notification) => {
-    if (notification.sessionId === sessionId) turn.update(notification.update);
-  }).connect(
+  const connection = createAcpClient(
+    acp,
+    (notification) => {
+      if (notification.sessionId === sessionId) turn.update(notification.update);
+    },
+    dependencies.configureClient,
+  ).connect(
     acp.ndJsonStream(
       Writable.toWeb(child.input) as WritableStream<Uint8Array>,
       Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
     ),
   );
-  turn = createAcpTurn(acp, connection, dependencies.interpretTool);
+  turn = createAcpTurn(acp, connection, dependencies.interpretTool, dependencies.onTerminal);
   try {
     sessionId = await abortable(
       establishSession(acp, connection.agent, input, dependencies, launch.sessionOptions ?? []),

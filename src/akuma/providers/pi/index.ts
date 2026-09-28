@@ -282,7 +282,7 @@ async function drivePi(
       const message: PiNativeMessage = {
         role: "user",
         content: [{ type: "text", text: tell.text }],
-        timestamp: Date.now(),
+        timestamp: new Date().getTime(),
       };
       return new Promise<TellSubmission>((resolve, reject) => {
         pendingTells.set(message, { id: tell.id, resolve });

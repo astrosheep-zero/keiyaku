@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   AgentEventChannel,
   createProviderAttempt,
@@ -10,7 +9,14 @@ import {
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { createEventState, mapEvent } from "./events.js";
-import { coordinate, loadOpencode, OPENCODE_SDK_PROVIDER, parseModel, type OpencodeSdkLoader } from "./session.js";
+import {
+  coordinate,
+  loadOpencode,
+  messageId,
+  OPENCODE_SDK_PROVIDER,
+  parseModel,
+  type OpencodeSdkLoader,
+} from "./session.js";
 
 type Input = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 export type OpencodeProviderTestOptions = Readonly<{ loader?: OpencodeSdkLoader }>;
@@ -89,7 +95,7 @@ function newest(rows: readonly MessageRow[]): MessageRow | undefined {
     if (latest === undefined) return row;
     const at = Number(object(row.info.time)?.created ?? 0);
     const latestAt = Number(object(latest.info.time)?.created ?? 0);
-    return at >= latestAt ? row : latest;
+    return at > latestAt || (at === latestAt && String(row.info.id) > String(latest.info.id)) ? row : latest;
   }, undefined);
 }
 async function readTurnResult(
@@ -100,7 +106,7 @@ async function readTurnResult(
     messageID: string;
     state: ReturnType<typeof createEventState>;
   }>,
-): Promise<TurnResult | undefined> {
+): Promise<TurnResult> {
   try {
     const response = await input.session.messages({
       path: { id: input.sessionId },
@@ -109,9 +115,12 @@ async function readTurnResult(
     });
     const rows = messageRows(response, input.sessionId);
     const user = rows.find((row) => row.info.role === "user" && row.info.id === input.messageID);
-    if (user === undefined) return undefined;
-    const userId = text(user?.info.id);
-    const assistant = newest(rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId));
+    if (user === undefined)
+      return { kind: "failed", diagnostic: "OpenCode completed without the admitted user message" };
+    const userId = text(user.info.id);
+    const assistant = newest(
+      rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId && row.info.summary !== true),
+    );
     const historyId = text(assistant?.info.id);
     if (input.state.failure !== undefined) return { kind: "failed", diagnostic: input.state.failure };
     if (assistant === undefined)
@@ -160,6 +169,64 @@ function startsTurn(value: unknown, sessionId: string, messageID: string): boole
     event?.type === "message.updated" && info?.sessionID === sessionId && info.role === "user" && info.id === messageID
   );
 }
+function recognizeAdmission(value: unknown, sessionId: string, admission: ReturnType<typeof liveAdmission>): void {
+  const event = object(value);
+  const properties = object(event?.properties);
+  const info = object(properties?.info);
+  if (
+    event?.type === "message.updated" &&
+    info?.sessionID === sessionId &&
+    info.role === "user" &&
+    typeof info.id === "string"
+  ) {
+    admission.admit(info.id);
+  }
+}
+
+type ObservedEvent = Readonly<{ active: boolean; busy: boolean; terminal: boolean; result?: TurnResult }>;
+function observeEvent(
+  input: Readonly<{
+    value: unknown;
+    sessionId: string;
+    messageID: string;
+    active: boolean;
+    busy: boolean;
+    admission: ReturnType<typeof liveAdmission>;
+    events: AgentEventChannel;
+    state: ReturnType<typeof createEventState>;
+    submissionState: { started: boolean };
+  }>,
+): ObservedEvent {
+  const observedSessionId = nativeSessionId(input.value);
+  if (observedSessionId !== undefined && observedSessionId !== input.sessionId) {
+    return { active: input.active, busy: input.busy, terminal: false };
+  }
+  const event = object(input.value);
+  const properties = scopedProperties(input.value, input.sessionId);
+  if (properties === undefined) {
+    if (input.active) mapEvent(input.value, input.events, input.state);
+    return { active: input.active, busy: input.busy, terminal: false };
+  }
+  const starts = !input.active && startsTurn(input.value, input.sessionId, input.messageID);
+  const active = input.active || starts;
+  const busy = starts ? false : input.busy;
+  recognizeAdmission(input.value, input.sessionId, input.admission);
+  const submittedError = event?.type === "session.error" && input.submissionState.started;
+  if (!active && !submittedError) return { active, busy, terminal: false };
+  mapEvent(input.value, input.events, input.state);
+  if (event?.type === "session.error") {
+    input.admission.end();
+    return {
+      active,
+      busy,
+      terminal: true,
+      result: { kind: "failed", diagnostic: input.state.failure ?? diagnostic(properties.error) },
+    };
+  }
+  const progress = nativeProgress(event?.type, properties, busy);
+  return { active, busy: progress.busy, terminal: progress.terminal };
+}
+
 async function observeTurn(
   input: Readonly<{
     iterator: AsyncIterator<unknown>;
@@ -167,6 +234,7 @@ async function observeTurn(
     sessionId: string;
     cwd: string;
     messageID: string;
+    admission: ReturnType<typeof liveAdmission>;
     events: AgentEventChannel;
     state: ReturnType<typeof createEventState>;
     submissionState: { started: boolean };
@@ -178,34 +246,67 @@ async function observeTurn(
     for (;;) {
       const next = await input.iterator.next();
       if (next.done) return { kind: "failed", diagnostic: "OpenCode event stream ended before Turn completion" };
-      const value = eventValue(next.value);
-      const observedSessionId = nativeSessionId(value);
-      if (observedSessionId !== undefined && observedSessionId !== input.sessionId) continue;
-      const event = object(value);
-      const properties = scopedProperties(value, input.sessionId);
-      if (properties === undefined) {
-        if (active) mapEvent(value, input.events, input.state);
-        continue;
-      }
-      if (startsTurn(value, input.sessionId, input.messageID)) {
-        active = true;
-        busy = false;
-      }
-      const submittedError = event?.type === "session.error" && input.submissionState.started;
-      if (!active && !submittedError) continue;
-      mapEvent(value, input.events, input.state);
-      if (event?.type === "session.error") {
-        return { kind: "failed", diagnostic: input.state.failure ?? diagnostic(properties.error) };
-      }
-      const progress = nativeProgress(event?.type, properties, busy);
-      busy = progress.busy;
-      if (!progress.terminal) continue;
-      const result = await readTurnResult(input);
-      if (result !== undefined) return result;
+      const observed = observeEvent({
+        value: eventValue(next.value),
+        sessionId: input.sessionId,
+        messageID: input.messageID,
+        active,
+        busy,
+        admission: input.admission,
+        events: input.events,
+        state: input.state,
+        submissionState: input.submissionState,
+      });
+      active = observed.active;
+      busy = observed.busy;
+      if (observed.result !== undefined) return observed.result;
+      if (!observed.terminal) continue;
+      input.admission.end();
+      return await readTurnResult({ ...input, messageID: input.admission.latest() });
     }
   } catch (error) {
     return { kind: "failed", diagnostic: `OpenCode event stream failed: ${diagnostic(error)}` };
+  } finally {
+    input.admission.end();
   }
+}
+
+function liveAdmission(initial: string) {
+  let latest = initial;
+  let ended = false;
+  const pending = new Map<
+    string,
+    { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
+  >();
+  const wait = (id: string) => {
+    if (ended) return Promise.resolve({ kind: "turn-ended" } as const);
+    return new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+    });
+  };
+  return {
+    initial: wait(initial),
+    latest: () => latest,
+    open: () => !ended,
+    wait,
+    admit(id: string) {
+      const waiter = pending.get(id);
+      if (waiter === undefined || ended) return;
+      pending.delete(id);
+      latest = id;
+      waiter.resolve({ kind: "accepted", fence: id });
+    },
+    fail(id: string, error: unknown) {
+      pending.get(id)?.reject(error);
+      pending.delete(id);
+    },
+    end() {
+      if (ended) return;
+      ended = true;
+      for (const waiter of pending.values()) waiter.resolve({ kind: "turn-ended" });
+      pending.clear();
+    },
+  };
 }
 
 function terminalSettlement(
@@ -297,6 +398,63 @@ async function openDriveSession(
   return { session, sessionId };
 }
 
+function createLiveSession(
+  input: Readonly<{
+    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
+    sessionId: string;
+    cwd: string;
+    promptBody(messageID: string, text: string): ReturnType<typeof promptBody>;
+    admission: ReturnType<typeof liveAdmission>;
+    nextMessageId(): string;
+    events: AgentEventChannel;
+    completion: Promise<TurnResult>;
+    abortController: AbortController;
+    close: () => Promise<void>;
+    finish(result: TurnResult): Promise<void>;
+  }>,
+): Session {
+  let submissions: Promise<void> = input.admission.initial.then(() => undefined);
+  const submit = (tell: Readonly<{ id: string; text: string }>) => {
+    const submission = async () => {
+      if (!input.admission.open()) return { kind: "turn-ended" } as const;
+      const receipt = input.admission.wait(tell.id);
+      void input.session
+        .promptAsync({
+          path: { id: input.sessionId },
+          query: { directory: input.cwd },
+          body: input.promptBody(tell.id, tell.text),
+          throwOnError: true,
+        })
+        .catch((error: unknown) => input.admission.fail(tell.id, error));
+      return await receipt;
+    };
+    const next = submissions.then(submission);
+    submissions = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+  return {
+    admission: { fence: input.sessionId },
+    events: input.events,
+    completion: input.completion,
+    tell: (tell) => submit({ ...tell, id: input.nextMessageId() }),
+    abort: async () => {
+      input.admission.end();
+      input.abortController.abort();
+      void input.session
+        .abort({ path: { id: input.sessionId }, query: { directory: input.cwd }, throwOnError: true })
+        .catch(() => undefined);
+      await input.finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
+    },
+    forceDispose: () => {
+      input.admission.end();
+      return forceDisposeOpencode(input.abortController, input.close, input.finish);
+    },
+  };
+}
+
 async function drive(
   execution: ProviderExecution,
   input: Input,
@@ -320,7 +478,10 @@ async function drive(
 
     const events = new AgentEventChannel();
     const state = createEventState(sessionId);
-    const messageID = `msg_${randomUUID().replaceAll("-", "")}`;
+    const messageSequence = { value: 0 };
+    const nextMessageId = () => messageId(messageSequence.value++);
+    const messageID = nextMessageId();
+    const admission = liveAdmission(messageID);
     const submissionState = { started: false };
     events.emit({ type: "session", coordinate: coordinate(sessionId) });
     const streamResult = await runtime.client.event.subscribe({ query: { directory: input.cwd } });
@@ -336,6 +497,7 @@ async function drive(
       sessionId,
       cwd: input.cwd,
       messageID,
+      admission,
       events,
       state,
       submissionState,
@@ -349,20 +511,19 @@ async function drive(
     });
     abortController.signal.throwIfAborted();
     void observation.then(finish);
-    signal.removeEventListener("abort", abortSetup);
-    return {
-      admission: { fence: sessionId },
+    return createLiveSession({
+      session,
+      sessionId,
+      cwd: input.cwd,
+      promptBody: (messageID, text) => promptBody({ ...input, body: text, launchTells: [] }, messageID),
+      admission,
+      nextMessageId,
       events,
       completion,
-      abort: async () => {
-        abortController.abort();
-        void session
-          .abort({ path: { id: sessionId }, query: { directory: input.cwd }, throwOnError: true })
-          .catch(() => undefined);
-        await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
-      },
-      forceDispose: () => forceDisposeOpencode(abortController, closeOnce, finish),
-    };
+      abortController,
+      close: closeOnce,
+      finish,
+    });
   } catch (error) {
     signal.removeEventListener("abort", abortSetup);
     stopIterator(iterator);

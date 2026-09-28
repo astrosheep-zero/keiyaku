@@ -10,15 +10,14 @@ import {
   type AcpToolUpdate,
 } from "../acp/core.js";
 
-const INTERJECT_METHOD = "x.ai/interject";
+const INTERJECT_METHOD = "_x.ai/interject";
+const INTERJECTION_METHOD = "_x.ai/session/interjection";
 
 type InterjectParams = Readonly<{
   sessionId: string;
   text: string;
   interjectionId: string;
 }>;
-
-type InterjectResponse = Readonly<{ status: "queued" }>;
 
 function nonblank(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
@@ -133,21 +132,41 @@ function argv(execution: ProviderExecution, options: ProviderOptions): readonly 
   return values as [string, ...string[]];
 }
 
-function withInterject(live: AcpLiveSession): Session {
+function withInterject(
+  live: AcpLiveSession,
+  pending: Map<
+    string,
+    { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
+  >,
+): Session {
   return {
     ...live.session,
-    tell: async (tell) => {
-      if (!live.open()) return { kind: "turn-ended" };
-      const response = await live.agent.request<InterjectResponse, InterjectParams>(INTERJECT_METHOD, {
-        sessionId: live.sessionId,
-        text: tell.text,
-        interjectionId: tell.id,
+    tell: (tell) => {
+      if (!live.open()) return Promise.resolve({ kind: "turn-ended" } as const);
+      const existing = pending.get(tell.id);
+      if (existing !== undefined) throw new Error("Grok Build duplicate pending interjection id");
+      const receipt = new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) => {
+        pending.set(tell.id, { resolve, reject });
       });
-      if (!live.open()) return { kind: "turn-ended" };
-      if (response === null || typeof response !== "object" || response.status !== "queued") {
-        throw new Error("Grok Build interject did not return queued");
-      }
-      return { kind: "accepted", fence: tell.id };
+      void live.agent
+        .request<Readonly<{ status: "queued" }>, InterjectParams>(INTERJECT_METHOD, {
+          sessionId: live.sessionId,
+          text: tell.text,
+          interjectionId: tell.id,
+        })
+        .then(
+          (response) => {
+            if (response?.status !== "queued" && pending.has(tell.id)) {
+              pending.get(tell.id)?.reject(new Error("Grok Build interject did not return queued"));
+              pending.delete(tell.id);
+            }
+          },
+          (error: unknown) => {
+            pending.get(tell.id)?.reject(error);
+            pending.delete(tell.id);
+          },
+        );
+      return receipt;
     },
   };
 }
@@ -158,24 +177,45 @@ export function createGrokBuildProvider(
 ): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("Grok Build provider execution requires executable");
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
+    const pending = new Map<
+      string,
+      { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
+    >();
+    let live: AcpLiveSession | undefined;
     const launch = {
       argv: argv(execution, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
     };
     const sessionMeta = grokSessionMeta(execution.config, input.options);
-    return withInterject(
-      await startAcpSession(
-        launch,
-        input,
-        {
-          ...dependencies,
-          interpretTool: interpretGrokTool,
-          freshSessionMeta: { ...(dependencies.freshSessionMeta ?? {}), ...(sessionMeta.freshSessionMeta ?? {}) },
-          loadSessionMeta: { ...(dependencies.loadSessionMeta ?? {}), ...(sessionMeta.loadSessionMeta ?? {}) },
+    live = await startAcpSession(
+      launch,
+      input,
+      {
+        ...dependencies,
+        configureClient: (client) => {
+          client.onNotification<InterjectParams>(
+            INTERJECTION_METHOD,
+            (value) => value as InterjectParams,
+            ({ params }) => {
+              if (params.sessionId !== live?.sessionId) return;
+              const waiter = pending.get(params.interjectionId);
+              if (waiter === undefined) return;
+              pending.delete(params.interjectionId);
+              waiter.resolve({ kind: "accepted", fence: params.interjectionId });
+            },
+          );
         },
-        custody,
-      ),
+        onTerminal: () => {
+          for (const waiter of pending.values()) waiter.resolve({ kind: "turn-ended" });
+          pending.clear();
+        },
+        interpretTool: interpretGrokTool,
+        freshSessionMeta: { ...(dependencies.freshSessionMeta ?? {}), ...(sessionMeta.freshSessionMeta ?? {}) },
+        loadSessionMeta: { ...(dependencies.loadSessionMeta ?? {}), ...(sessionMeta.loadSessionMeta ?? {}) },
+      },
+      custody,
     );
+    return withInterject(live, pending);
   };
   return {
     admitOptions: optionAdmission,
