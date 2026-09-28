@@ -228,3 +228,4 @@ export async function bindKeiyaku(
 }
 
 export { parseMarkdownBindDocument } from "./contract-bind.js";
+export { decodeArcDocument as parseMarkdownArcDocument } from "../body/arc.js";

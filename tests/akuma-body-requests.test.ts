@@ -1934,7 +1934,7 @@ test("forwarded fatal receipts survive unproven transport without claiming no pr
         contract,
         entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
         at: "2026-09-05T00:00:00.000Z",
-        data: { seq: 1, title: "test", objective: "test", brief: "test" },
+        data: { seq: 1, title: "test", body: "test" },
       },
     ],
     cleanup: [],

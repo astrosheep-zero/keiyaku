@@ -128,7 +128,13 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "required",
     flags: { actor: "value", json: "boolean" },
     usage: "arc [<contract>|@<contract>] [--actor <actor>] -",
-    purpose: "Add a progress note to a Contract's work history (an Arc).",
+    purpose: "Name the current chapter of a Contract's story (a story arc).",
+    details: [
+      "stdin is one nonblank H1 chapter name followed by any Markdown body, including none:",
+      "  # <chapter name>",
+      "  <freeform body, optional>",
+      "The chapter frames dispatched work; Contract acceptance remains unchanged.",
+    ].join("\n"),
   },
   abandon: {
     positional: "optional",

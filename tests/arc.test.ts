@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeArcDocument } from "../src/body/arc.js";
 import { renderContractBody } from "../src/body/render.js";
+import { renderContractHistory } from "../src/cli/render/contract-history.js";
+import { renderContractGuidance } from "../src/contract-guidance.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
@@ -57,8 +59,11 @@ function bind(suffix = "AA") {
 }
 
 function arc(seq: number, suffix: string) {
-  return entry("arc", { seq, title: `Chapter ${seq}`, objective: `Objective ${seq}`, brief: `Brief ${seq}` }, suffix);
+  return entry("arc", { seq, title: `Chapter ${seq}`, body: `Body ${seq}` }, suffix);
 }
+
+const legacyArcBytes =
+  '{"at":"2026-08-06T00:00:00Z","contract":"kei/arc-test","data":{"brief":"Brief 1","objective":"Objective 1","seq":1,"title":"Chapter 1"},"entry":"01ARZ3NDEKTSV4RRFFQ69G5FAB","kind":"arc","v":1}\n';
 
 function arcDocument(title = "Chapter One"): string {
   return [
@@ -83,20 +88,22 @@ function contractDocument(title: string): string {
   });
 }
 
-test("Arc Markdown accepts only a title, Objective, and Brief", () => {
+test("Arc Markdown accepts a chapter name and arbitrary or empty body", () => {
   const decoded = decodeArcDocument(arcDocument());
   assert.equal(decoded.title, "Chapter One");
-  assert.equal(decoded.objective.trim(), "Move the coherent work forward.");
-  assert.equal(decoded.brief.trim(), "Dispatch the next bounded implementation.");
-  assert.throws(
-    () => decodeArcDocument(`---\nkind: arc\n---\n${arcDocument()}`),
-    (error: unknown) =>
-      error instanceof TypeError && error.message.includes("arc document may not contain frontmatter"),
-  );
-  assert.throws(
-    () => decodeArcDocument(`${arcDocument()}## Delivery\nnot allowed\n`),
-    (error: unknown) => error instanceof TypeError && error.message.includes("arc document does not allow ## Delivery"),
-  );
+  assert.equal(decoded.body, "\n## Objective\nMove the coherent work forward.\n\n## Brief\nDispatch the next bounded implementation.\n");
+  assert.deepEqual(decodeArcDocument("# Empty"), { title: "Empty", body: "" });
+  assert.deepEqual(decodeArcDocument("# Flexible\nBefore any H2.\n\n## Delivery\nDone.\n"), {
+    title: "Flexible", body: "Before any H2.\n\n## Delivery\nDone.\n",
+  });
+  for (const malformed of ["", "#  \n", "## Section\nbody", "# One\n# Two\n", "before\n# Name", `---\nkind: arc\n---\n${arcDocument()}`]) {
+    assert.throws(
+      () => decodeArcDocument(malformed),
+      (error: unknown) => error instanceof TypeError &&
+        error.message.includes("exactly one nonblank H1 chapter name") &&
+        error.message.includes("freeform Markdown body (which may be empty)"),
+    );
+  }
 });
 
 test("Arc facts round trip canonically and fold only exact sequences", () => {
@@ -104,9 +111,12 @@ test("Arc facts round trip canonically and fold only exact sequences", () => {
   assert.deepEqual(decodeJournal(encodeEntry(first)), [first]);
   assert.throws(() => decodeJournal(encodeEntry(first).replace('"seq":1', '"seq":0')), /data\.arc\.seq/);
 
+  const freeform = entry("arc", { seq: 2, title: "Freeform", body: "" }, "AC");
+  assert.deepEqual(decodeJournal(encodeEntry(freeform)), [freeform]);
+  assert.throws(() => decodeJournal(encodeEntry(freeform).replace('"body":""', '"body":"","brief":"extra"')), /unknown field/);
   const before = foldJournal(id, [bind()]);
   assert.equal(before.currentArc, undefined);
-  const folded = foldJournal(id, [bind(), first, arc(2, "AC")]);
+  const folded = foldJournal(id, [bind(), first, freeform]);
   assert.equal(folded.currentArc?.data.seq, 2);
   assert.throws(() => foldJournal(id, [bind(), arc(2, "AD")]), /arc sequence must be 1/);
   assert.throws(() => foldJournal(id, [bind(), first, arc(3, "AE")]), /arc sequence must be 2/);
@@ -120,7 +130,7 @@ test("Arc decision refuses terminal contracts", () => {
     input: {
       contractId: id,
       at: "2026-08-06T00:00:00Z",
-      data: { title: "No Chapter", objective: "No objective", brief: "No brief" },
+      data: { title: "No Chapter", body: "" },
     },
     attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAH")] },
     observation: new Map<ContractId, typeof terminal | null>([[id, terminal]]),
@@ -157,7 +167,7 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const before = await command(["status", contract]);
   assert.doesNotMatch(JSON.stringify(before), /currentArc/);
 
-  const admitted = await command(["arc", contract, "-"], arcDocument("CLI Chapter"));
+  const admitted = await command(["arc", contract, "-"], "# CLI Chapter\nAny text before a section.\n\n## Delivery\nDone.\n");
   assert.equal("kind" in admitted ? admitted.kind : undefined, "accepted");
   if (!("kind" in admitted) || admitted.kind !== "accepted" || !("verb" in admitted) || admitted.verb !== "arc") {
     throw new Error("arc did not return an accepted result");
@@ -170,8 +180,18 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const state = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(state?.currentArc?.data.seq, 1);
   assert.equal(state?.currentArc?.data.title, "CLI Chapter");
-
-  const second = await command(["arc", contract, "-"], arcDocument("CLI Chapter Two"));
+  assert.deepEqual(state?.currentArc?.data, { seq: 1, title: "CLI Chapter", body: "Any text before a section.\n\n## Delivery\nDone.\n" });
+  for (const malformed of ["#  \n", ""]) {
+    const invalid = await command(["arc", contract, "-"], malformed);
+    assert.equal("kind" in invalid ? invalid.kind : undefined, "refused");
+    if ("kind" in invalid && invalid.kind === "refused") {
+      assert.deepEqual(invalid.refusal, {
+        kind: "invalid-document",
+        diagnostic: "arc document requires exactly one nonblank H1 chapter name (# <name>) followed by a freeform Markdown body (which may be empty)",
+      });
+    }
+  }
+  const second = await command(["arc", contract, "-"], "# CLI Chapter Two");
   assert.equal("kind" in second ? second.kind : undefined, "accepted");
   if (!("kind" in second) || second.kind !== "accepted" || !("verb" in second) || second.verb !== "arc") {
     throw new Error("second arc did not return an accepted result");
@@ -179,6 +199,7 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   const secondState = (await observeContract(await repositoryAt(repository.path), contract)).state;
   assert.equal(secondState?.currentArc?.data.seq, 2);
   assert.equal(secondState?.currentArc?.data.title, "CLI Chapter Two");
+  assert.deepEqual(secondState?.currentArc?.data, { seq: 2, title: "CLI Chapter Two", body: "" });
 
   const after = await command(["status", contract]);
   assert.equal("kind" in after ? after.kind : undefined, "status");
@@ -191,8 +212,39 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   assert.match(JSON.stringify(after), new RegExp(contract));
   assert.doesNotMatch(renderContractBody(body), /\n## Arc\n/);
   assert.match(renderContractBody(body, secondState?.currentArc?.data), /## Arc\n\n### Sequence\n\n2/);
-  assert.match(
-    renderContractBody(body, secondState?.currentArc?.data),
-    /### Brief\n\nDispatch the next bounded implementation\./,
-  );
+  assert.match(renderContractBody(body, secondState?.currentArc?.data), /### Body$/m);
+  assert.doesNotMatch(renderContractBody(body, secondState?.currentArc?.data), /### Brief/);
+});
+
+test("stored old-shape arc bytes normalize at decode and render as one chapter body", () => {
+  const legacy = decodeJournal(legacyArcBytes)[0];
+  assert.deepEqual(legacy, entry("arc", { seq: 1, title: "Chapter 1", body: "Objective 1\n\nBrief 1" }, "AB"));
+  assert.equal(encodeEntry(legacy!), encodeEntry(entry("arc", { seq: 1, title: "Chapter 1", body: "Objective 1\n\nBrief 1" }, "AB")));
+  assert.throws(() => decodeJournal(legacyArcBytes.replace('"brief":"Brief 1","objective":"Objective 1"', '"objective":"Objective 1","brief":"Brief 1"')), /not canonical/);
+  if (legacy?.kind !== "arc") throw new Error("missing legacy arc");
+  const current = foldJournal(id, [bind(), legacy]);
+  const guidance = renderContractGuidance(current);
+  const rendered = renderContractBody(body, current.currentArc?.data);
+  const history = renderContractHistory({ id, state: initial, events: [{ source: "journal", fact: legacy }] });
+  for (const text of [guidance.slice(guidance.indexOf("## Arc")), rendered.slice(rendered.indexOf("## Arc")), history]) {
+    assert.match(text, /Objective 1[\s\S]*Brief 1/);
+    assert.doesNotMatch(text, /## Objective|## Brief/);
+  }
+  assert.match(history, /  body\n  \u2502 Objective 1/);
+  assert.doesNotMatch(history, /\nobjective\n|\nbrief\n|\n\n$/);
+});
+
+test("freeform and empty chapters render as one bounded history payload", () => {
+  const freeform = entry("arc", { seq: 1, title: "Freeform", body: "\n## Delivery\n\nFirst line.\nSecond line.\n" }, "AB");
+  const empty = entry("arc", { seq: 2, title: "Empty", body: "" }, "AC");
+  const history = renderContractHistory({
+    id, state: initial,
+    events: [{ source: "journal", fact: freeform }, { source: "journal", fact: empty }],
+  });
+  assert.match(history, /  title  Freeform\n  body\n  \u2502 ## Delivery\n  \u2502/);
+  assert.match(history, /  \u2502 First line\.\n  \u2502 Second line\./);
+  assert.match(history, /  title  Empty$/);
+  assert.doesNotMatch(history, /  title  Empty\n  body/);
+  assert.doesNotMatch(history, /\n\n\n/);
+  assert.match(renderContractGuidance(foldJournal(id, [bind(), freeform])), /### Body\n\n## Delivery/);
 });

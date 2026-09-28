@@ -1,12 +1,12 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
 import { activeContract } from "../facts/observation.js";
-import { contractId, type ActorId, type ArcData, type ContractId, type JournalEntry } from "../facts/types.js";
+import { contractId, type ActorId, type ContractId, type JournalEntry } from "../facts/types.js";
 
 export type ArcInput = Readonly<{
   contractId: ContractId;
   actor?: ActorId;
   at: string;
-  data: Readonly<Omit<ArcData, "seq">>;
+  data: Readonly<{ title: string; body: string }>;
 }>;
 
 export type ArcRefusal = Readonly<{
@@ -42,8 +42,7 @@ export function decideArc({ input, attempt, observation }: DecideInput<ArcInput>
     data: {
       seq: (current.currentArc?.data.seq ?? 0) + 1,
       title: input.data.title,
-      objective: input.data.objective,
-      brief: input.data.brief,
+      body: input.data.body,
     },
   };
   return {

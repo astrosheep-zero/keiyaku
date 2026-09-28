@@ -171,7 +171,8 @@ function validateAttestation(value: unknown, path: string): AttestationData {
 
 function validateArc(value: unknown, path: string): ArcData {
   const object = requireRecord(value, path);
-  requireKeys(object, ["seq", "title", "objective", "brief"], path);
+  const freeform = "body" in object;
+  requireKeys(object, freeform ? ["seq", "title", "body"] : ["seq", "title", "objective", "brief"], path);
   const seq = object.seq;
   if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 1) {
     fail(`${path}.seq`, "expected a positive safe integer");
@@ -179,8 +180,9 @@ function validateArc(value: unknown, path: string): ArcData {
   return {
     seq,
     title: stringValue(object.title, `${path}.title`),
-    objective: stringValue(object.objective, `${path}.objective`),
-    brief: stringValue(object.brief, `${path}.brief`),
+    body: freeform
+      ? stringValue(object.body, `${path}.body`, false)
+      : `${stringValue(object.objective, `${path}.objective`)}\n\n${stringValue(object.brief, `${path}.brief`)}`,
   };
 }
 
@@ -324,7 +326,7 @@ function decodeEntry(line: string): JournalEntry {
     throw new AuthorityCorruptionError("journal entry is not valid JSON", { cause: error });
   }
   const entry = validateEntry(value);
-  if (canonicalJson(entry) !== body) throw new AuthorityCorruptionError("journal entry is not canonical");
+  if (canonicalJson(value) !== body) throw new AuthorityCorruptionError("journal entry is not canonical");
   return entry;
 }
 

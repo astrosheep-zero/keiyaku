@@ -124,13 +124,9 @@ function renderArc(arc: ArcData): string {
     "",
     arc.title.trimEnd(),
     "",
-    "### Objective",
+    "### Body",
     "",
-    arc.objective.trimEnd(),
-    "",
-    "### Brief",
-    "",
-    arc.brief.trimEnd(),
+    arc.body.replace(/^(?:\r?\n)+/u, "").trimEnd(),
   ].join("\n");
 }
 

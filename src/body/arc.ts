@@ -1,36 +1,29 @@
-import type { ArcData } from "../core/facts/types.js";
-import { sectionContent } from "../markdown/query.js";
-import type { DocumentNode, SectionNode } from "../markdown/types.js";
-import { decodeDocumentEnvelope } from "./envelope.js";
+import { parseToAST } from "../markdown/parse.js";
+import { indexDocument, indexedHeadings } from "../markdown/query.js";
+import type { SectionNode } from "../markdown/types.js";
 
-function refusal(message: string): never {
-  throw new TypeError(message);
-}
+const ARC_SHAPE =
+  "arc document requires exactly one nonblank H1 chapter name (# <name>) followed by a freeform Markdown body (which may be empty)";
 
-function requiredProse(
-  document: DocumentNode,
-  sections: ReadonlyMap<string, SectionNode>,
-  name: "objective" | "brief",
-): string {
-  const section = sections.get(name);
-  if (section === undefined) refusal(`arc document is missing ## ${name[0]!.toUpperCase()}${name.slice(1)}`);
-  const value = sectionContent(document, section);
-  if (value.trim().length === 0) refusal(`arc section '${section.title}' is empty`);
-  return value;
-}
-
-export function decodeArcDocument(source: string): Readonly<Omit<ArcData, "seq">> {
-  const { document, title, sections } = decodeDocumentEnvelope(source, "arc");
-  if (title.title.trim().length === 0) refusal("arc title must be nonblank");
-  for (const [name, section] of sections) {
-    if (name !== "objective" && name !== "brief") {
-      refusal(`arc document does not allow ## ${section.title}`);
-    }
+export function decodeArcDocument(source: string): Readonly<{ title: string; body: string }> {
+  let document: ReturnType<typeof parseToAST>;
+  try {
+    document = parseToAST(source);
+  } catch {
+    throw new TypeError(ARC_SHAPE);
   }
-
-  return {
-    title: title.title,
-    objective: requiredProse(document, sections, "objective"),
-    brief: requiredProse(document, sections, "brief"),
-  };
+  const titles = indexedHeadings(indexDocument(document), { level: 1 }).filter(
+    (node): node is SectionNode => node.type === "section",
+  );
+  const title = titles[0];
+  if (
+    document.frontmatter !== undefined ||
+    titles.length !== 1 ||
+    title === undefined ||
+    title.title.trim().length === 0 ||
+    source.slice(0, title.span.start).trim().length !== 0
+  ) {
+    throw new TypeError(ARC_SHAPE);
+  }
+  return { title: title.title, body: source.slice(title.contentStart) };
 }

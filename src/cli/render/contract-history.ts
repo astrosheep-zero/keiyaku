@@ -1,5 +1,6 @@
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
 import { receiptPayload } from "./receipt.js";
+import { renderOpaqueBlock, DEFAULT_CLI_COLUMNS } from "./terminal.js";
 
 function journalCount(events: readonly ContractHistoryEvent[], source: ContractHistoryEvent["source"]): number {
   return events.filter((event) => event.source === source).length;
@@ -87,8 +88,8 @@ function journalBody(fact: Fact): readonly string[] {
       return [`  delivery  ${fact.data.delivery}`];
     case "arc": {
       const lines = [`  sequence  ${String(fact.data.seq)}`, `  title  ${fact.data.title}`];
-      receiptPayload(lines, "objective", fact.data.objective);
-      receiptPayload(lines, "brief", fact.data.brief);
+      const body = fact.data.body.replace(/^(?:\r?\n)+/u, "").trimEnd();
+      if (body.length > 0) lines.push("  body", ...renderOpaqueBlock(body, "  │ ", DEFAULT_CLI_COLUMNS));
       return lines;
     }
     case "abandoned": {

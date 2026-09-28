@@ -56,7 +56,7 @@ test("a preparation spent by a concurrent publication restarts with a fresh atte
       input: {
         contractId: id,
         at: "2026-08-06T00:00:03Z",
-        data: { title: "Fresh observation", objective: "Restart the spent preparation", brief: "Discard the offer." },
+        data: { title: "Fresh observation", body: "Restart the spent preparation\nDiscard the offer." },
       },
       channel,
       repository: capability,

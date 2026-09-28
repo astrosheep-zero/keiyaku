@@ -374,6 +374,47 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
   }
 });
 
+test("arc help gives the complete chapter grammar and the shipped source avoids banned vocabulary", () => {
+  const help = runCli(process.cwd(), ["arc", "--help"]);
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /named|Name|chapter name/iu);
+  assert.match(help.stdout, /story arc/u);
+  assert.match(help.stdout, /one nonblank H1|nonblank H1/u);
+  assert.match(help.stdout, /freeform body, optional/u);
+  const source = fileURLToPath(new URL("../src", import.meta.url));
+  const scan = spawnSync("rg", ["-ni", "arc admitted", source], { encoding: "utf8" });
+  assert.equal(scan.status, 1, scan.stdout || scan.stderr);
+});
+
+test("malformed arc document is a substantive refusal with the full grammar", () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const markdown = [
+    "# Arc refusal",
+    "## Context", "Context.",
+    "## Objective", "Objective.",
+    "## Design", "Design.",
+    "## Region", "src/**",
+    "## Criteria", "### Works", "Works.",
+  ].join("\n");
+  const bound = runCli(repository.path, ["bind", "--gates", "", "--json", "-"], markdown);
+  assert.equal(bound.status, 0, bound.stdout + bound.stderr);
+  const id = JSON.parse(bound.stdout).contract as string;
+  for (const document of ["", "#  \n", "## Missing name\n"]) {
+    const text = runCli(repository.path, ["arc", id, "-"], document);
+    assert.equal(text.status, 1, text.stdout + text.stderr);
+    assert.equal(text.stderr, "");
+    assert.match(text.stdout, /^× arc refused$/mu);
+    assert.match(text.stdout, /diagnostic  invalid document/u);
+    assert.match(text.stdout, /exactly one nonblank H1 chapter name/u);
+    assert.match(text.stdout, /freeform Markdown body \(which may be empty\)/u);
+  }
+  const json = runCli(repository.path, ["arc", id, "--json", "-"], "# \n");
+  assert.equal(json.status, 1);
+  assert.equal(JSON.parse(json.stdout).refusal.kind, "invalid-document");
+  rmSync(repository.path, { recursive: true, force: true });
+});
+
 test("malformed bind is a substantive refusal on stdout with its draft", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-refusal-"));
   const result = runCli(cwd, ["bind", "-"], "not valid bind markdown\n");

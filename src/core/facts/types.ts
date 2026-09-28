@@ -152,12 +152,7 @@ export type ClaimedData = Readonly<{
   delivery: EntryUlid;
 }>;
 
-export type ArcData = Readonly<{
-  seq: number;
-  title: string;
-  objective: string;
-  brief: string;
-}>;
+export type ArcData = Readonly<{ seq: number; title: string; body: string }>;
 
 export type AbandonedData = Readonly<{
   note?: string;

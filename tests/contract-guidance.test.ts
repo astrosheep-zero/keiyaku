@@ -72,10 +72,11 @@ test("guidance inserts the current Arc before Fulfillment", () => {
       contract: contractId("kei/guidance"),
       entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
       at: "2026-08-13T00:00:00.000Z",
-      data: { seq: 2, title: "Second", objective: "Continue.", brief: "Do the next coherent work." },
+      data: { seq: 2, title: "Second", body: "Continue.\n\nDo the next coherent work." },
     }),
   );
 
   assert.match(guidance, /^## Arc\n\n### Sequence\n\n2$/m);
+  assert.match(guidance, /### Body\n\nContinue\.\n\nDo the next coherent work\./);
   assert.ok(guidance.indexOf("## Arc") < guidance.indexOf("## Fulfillment"));
 });

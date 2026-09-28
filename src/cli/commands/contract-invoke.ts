@@ -282,6 +282,34 @@ async function contractLibrary(input: ContractMutationInput, parsed: ExistingCom
   });
 }
 
+async function invokeArc(seat: ExistingSeat, edge: InvocationEdge): Promise<InvocationResult> {
+  const markdown = await edge.readStdin();
+  const { parseMarkdownArcDocument } = await import("../../library/contract.js");
+  try {
+    parseMarkdownArcDocument(markdown);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    return {
+      kind: "refused",
+      verb: "arc",
+      contract: seat.id,
+      refusal: { kind: "invalid-document", diagnostic: error.message },
+    };
+  }
+  const { acceptedArc, resultFromMutationCall } = await import("../accepted.js");
+  return resultFromMutationCall(
+    "arc",
+    () =>
+      seat.contract.arc({
+        markdown,
+        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+        ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
+      }),
+    (result) => acceptedArc(result, seat.id),
+    { coordinate: seat.id },
+  );
+}
+
 export async function invokeContractMutation(input: ContractMutationInput): Promise<InvocationResult> {
   const { parsed, repo, edge, configuration, hooks } = input;
   if (parsed.command === "bind") return invokeBind(input);
@@ -314,21 +342,8 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
       return invokeDeliver(parsed, seat, edge);
     case "review":
       return invokeReview(parsed, seat, edge);
-    case "arc": {
-      const markdown = await edge.readStdin();
-      const { acceptedArc, resultFromMutationCall } = await import("../accepted.js");
-      return resultFromMutationCall(
-        "arc",
-        () =>
-          contract.arc({
-            markdown,
-            ...(actor === undefined ? {} : { actor }),
-            ...(hooks === undefined ? {} : { hooks }),
-          }),
-        (result) => acceptedArc(result, id),
-        { coordinate: id },
-      );
-    }
+    case "arc":
+      return invokeArc(seat, edge);
     case "abandon": {
       const { acceptedAbandon, resultFromMutationCall } = await import("../accepted.js");
       return resultFromMutationCall(

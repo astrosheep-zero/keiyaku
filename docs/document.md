@@ -45,8 +45,9 @@ operation sections is refused. Untouched source terms retain their identity. An
 amendment never silently retargets its supplied terms to a later document:
 document currency is judged by the lifecycle decision.
 
-An arc is a title, objective, and brief naming the current narrative chapter of
-one active Contract. It frames the currently dispatched work without splitting
+An arc names the current narrative chapter of one active Contract and carries
+an optional freeform body. Earlier admitted chapters remain readable in that
+same form. An arc frames the currently dispatched work without splitting
 acceptance, gates, or settlement into a second lifecycle. Arc sequence and
 terminal legality belong to [lifecycle.md](lifecycle.md).
 

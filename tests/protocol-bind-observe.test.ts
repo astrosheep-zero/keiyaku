@@ -261,7 +261,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         input: {
           contractId: id,
           at: "2026-08-06T00:00:00Z",
-          data: { title: "Atomic companion", objective: "Publish together", brief: "Use one root CAS." },
+          data: { title: "Atomic companion", body: "Publish together\nUse one root CAS." },
         },
         attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
         observation: observation.decision,
@@ -319,7 +319,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       input: {
         contractId: id,
         at: "2026-08-06T00:00:00Z",
-        data: { title: "Losing companion", objective: "Lose one CAS", brief: "Leave no partial fact." },
+        data: { title: "Losing companion", body: "Lose one CAS\nLeave no partial fact." },
       },
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
       observation: observation.decision,
@@ -422,7 +422,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       input: {
         contractId: id,
         at: "2026-08-06T00:00:00Z",
-        data: { title: "Remain active", objective: "Classify folded state", brief: "Keep the journal active." },
+        data: { title: "Remain active", body: "Classify folded state\nKeep the journal active." },
       },
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
       observation: activeObservation.decision,

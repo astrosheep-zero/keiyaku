@@ -760,7 +760,7 @@ test("every verb receipt states facts without journal rows or entry ids", () => 
   }
   assert.equal(
     renderText(receipts[2]!),
-    ["✓ entered chapter 2  kei/receipt-vocabulary", "  chapter  2  ·  Second chapter"].join("\n"),
+    "✓ entered chapter 2 · Second chapter  kei/receipt-vocabulary",
   );
 });
 

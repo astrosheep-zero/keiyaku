@@ -45,7 +45,7 @@ function admission(before: ContractCheckpoint, sequence: number): AcceptedProtoc
     contract: before.state.id,
     entry: entryUlid(`${"0".repeat(24)}${name}`),
     at: "2026-09-05T00:00:00.000Z",
-    data: { seq: sequence, title: name, objective: "fixture", brief: "fixture" },
+    data: { seq: sequence, title: name, body: "fixture" },
   };
   return {
     kind: "accepted",

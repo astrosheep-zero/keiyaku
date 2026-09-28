@@ -46,10 +46,8 @@ function arcSection(arc: ArcData): string {
     String(arc.seq),
     "### Title",
     content(arc.title),
-    "### Objective",
-    content(arc.objective),
-    "### Brief",
-    content(arc.brief),
+    "### Body",
+    content(arc.body.replace(/^(?:\r?\n)+/u, "")),
   ].join("\n\n");
 }
 

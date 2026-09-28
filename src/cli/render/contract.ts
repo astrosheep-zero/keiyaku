@@ -422,12 +422,10 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
 }
 
 function renderAcceptedArc(result: AcceptedArcResult, columns: number): string {
-  const lines = titleLines("✓", `entered chapter ${result.chapter.seq}`, result.contract, columns);
-  receiptRow(
-    lines,
-    " ",
-    "chapter",
-    [{ text: String(result.chapter.seq) }, { text: "·" }, { text: result.chapter.title }],
+  const lines = titleLines(
+    "✓",
+    `entered chapter ${result.chapter.seq} · ${result.chapter.title}`,
+    result.contract,
     columns,
   );
   lines.push(...recordBlock(result, columns));

@@ -68,7 +68,7 @@ function selectedStdinDiagnostic(command: Exclude<ParsedCommand, { command: "ins
       if (command.forkOf !== undefined) return undefined;
       return `${command.command} requires a nonblank stdin document`;
     case "arc":
-      return `${command.command} requires a nonblank stdin document`;
+      return undefined;
     case "amend":
       return command.stdin === true ? "amend requires a nonblank stdin document" : undefined;
     case "review":
