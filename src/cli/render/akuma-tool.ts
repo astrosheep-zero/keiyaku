@@ -173,6 +173,11 @@ function commonOtherText(row: ToolRow): string | undefined {
   return undefined;
 }
 
+/** The one diffstat renderer: unknown stays unknown, known renders compact additions and removals. */
+export function renderDiffstat(diffstat: Readonly<{ added: number; removed: number }> | undefined): string {
+  return diffstat === undefined ? "~" : `+${diffstat.added} -${diffstat.removed}`;
+}
+
 function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolCore {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files" };
@@ -194,9 +199,7 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
         { added: 0, removed: 0 },
       )
     : undefined;
-  const detail = `${call.changes.length === 1 ? "" : " ..."} — ${
-    totals === undefined ? "+? -?" : `+${totals.added} -${totals.removed}`
-  }`;
+  const detail = `${call.changes.length === 1 ? "" : " ..."} — ${renderDiffstat(totals)}`;
   return { label, text: `${before}${path}${detail}`, pathPreview: { before, path, detail } };
 }
 

@@ -127,7 +127,7 @@ wait can justify elapsed-duration text. Read-only reference facts follow the
 conclusion, with reported changes before diagnostics and the execution directory
 last; an unknown change size remains unknown rather than implying additions or
 removals. Across snapshot, history, compact, and attributed activity, bounded
-payloads use one quote boundary and blank, body-aligned continuations. They
+payloads use one quote boundary and │-railed, body-aligned continuations. They
 slice by whole grapheme cells without word-sensitive rearrangement and expose
 truncation at the end of the bounded payload.
 

@@ -1,4 +1,4 @@
-import type { ActivityRow, AkumaStatus, KillEvidence, ReportedFileChange } from "../../akuma/akuma.js";
+import type { ActivityRow, AkumaStatus, KillEvidence } from "../../akuma/akuma.js";
 import type { CallObservation } from "../../library/akuma-creation.js";
 import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
 import type { AkumaAskObservation } from "../../akuma/selection-observation.js";
@@ -6,7 +6,7 @@ import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
 import type { WaitObservedAkuma } from "../../akuma/selection-execution.js";
 import type { ParsedCommand } from "../parse.js";
-import { toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
+import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
@@ -39,12 +39,10 @@ const RECENT_TOOL_BUDGET = 2;
 
 type StatusTimeline = AkumaObservation["status"]["timeline"];
 type StatusTimelineEntry = StatusTimeline["entries"][number];
-type StatusReportedFileChange = StatusTimeline["reportedChanges"][number];
 type RenderRow = ActivityRow | Extract<StatusTimelineEntry, { kind: "row" }>["row"];
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
-type RenderedFileChange = ReportedFileChange | StatusReportedFileChange;
 type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
 function identity(id: string, alias?: string): string {
@@ -172,7 +170,7 @@ function actionCell(head: string, verb: string, columns: number): string {
 }
 
 function continuationPrefix(): string {
-  return " ".repeat(TIME_WIDTH + 3 + VERB_WIDTH + 1);
+  return " ".repeat(TIME_WIDTH) + " │ " + " ".repeat(VERB_WIDTH) + " ";
 }
 
 /** Pad to a terminal-column width; raw string length is never the measuring stick. */
@@ -227,7 +225,7 @@ function sourceLayout(source: string, width: () => number, clock: { previous?: s
         verb,
         columns,
       ),
-    continuation: () => " ".repeat(TIME_WIDTH + 1 + width() + 3 + VERB_WIDTH + 1),
+    continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
     marker: (count) => `${gutter()}⋮ ${count} omitted`,
     clock,
     singleLine: true,
@@ -1259,16 +1257,17 @@ export function callObservationStream(
 
 type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
 
-function changeStat(change: RenderedFileChange): string {
-  return change.diffstat === undefined ? "~" : `+${change.diffstat.added} -${change.diffstat.removed}`;
-}
-
 function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
   if (snapshot.reportedChanges.length === 0 && snapshot.reportedChangesOmitted === 0) return [];
-  const width = snapshot.reportedChanges.reduce((max, change) => Math.max(max, changeStat(change).length), 0);
+  const width = snapshot.reportedChanges.reduce(
+    (max, change) => Math.max(max, renderDiffstat(change.diffstat).length),
+    0,
+  );
   return [
     `changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`,
-    ...snapshot.reportedChanges.map((change) => `  ${changeStat(change).padEnd(width)}  ${safeText(change.path)}`),
+    ...snapshot.reportedChanges.map(
+      (change) => `  ${renderDiffstat(change.diffstat).padEnd(width)}  ${safeText(change.path)}`,
+    ),
     ...(snapshot.reportedChangesOmitted > 0 ? [`  ⋮ ${snapshot.reportedChangesOmitted} more files`] : []),
   ];
 }

@@ -13,7 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { bodyProcessInput, CONTROL_RESPONSE_MS, LEASH_HELD_EXIT, handoffPendingTells } from "../src/akuma/body.js";
+import {
+  bodyProcessInput,
+  CONTROL_RESPONSE_MS,
+  LEASH_HELD_EXIT,
+  handoffPendingTells,
+  spawnAkumaBody,
+} from "../src/akuma/body.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
@@ -1752,5 +1758,43 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     assert.equal(failed?.end?.outcome.kind, "failed");
   } finally {
     await removeDrivenBodyFixture(root);
+  }
+});
+
+test("spawn ENOENT diagnosis preserves the original failure as cause", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-body-spawn-cause-"));
+  const liveExecPath = process.execPath;
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "ca5e0001" });
+    await initializeHeart(allocated.paths);
+    const vanishedCwd = join(root, "vanished-cwd");
+    const vanishedExecutable = join(root, "vanished-runtime", "keiyaku-body");
+    Object.defineProperty(process, "execPath", { value: vanishedExecutable, configurable: true });
+    await assert.rejects(
+      spawnAkumaBody({
+        paths: allocated.paths,
+        seed: {
+          id: allocated.id,
+          archetype: "claude",
+          provider: { name: "claude", kind: "claude-agent-sdk" },
+          options: {},
+          origin: { kind: "direct" },
+          cwd: vanishedCwd,
+          allowed: ALLOWED_ACTIONS,
+        },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Body spawn failed/);
+        assert.equal((error as NodeJS.ErrnoException).code, "ENOENT");
+        const cause = (error as Error & { cause?: unknown }).cause as NodeJS.ErrnoException | undefined;
+        assert.ok(cause !== undefined, "diagnosis preserves the original ENOENT as cause");
+        assert.equal(cause.code, "ENOENT");
+        return true;
+      },
+    );
+  } finally {
+    Object.defineProperty(process, "execPath", { value: liveExecPath, configurable: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });

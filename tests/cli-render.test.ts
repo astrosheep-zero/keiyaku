@@ -1543,8 +1543,8 @@ test("settled file changes retain exact stats or show unknown stats", () => {
   const lines = snapshotActivityLines(snapshot, { columns: 120, color: false });
 
   assert.ok(lines.some((line) => line.includes("src/exact.ts — +2 -1")));
-  assert.ok(lines.some((line) => line.includes("src/unknown.ts — +? -?")));
-  assert.ok(lines.some((line) => line.includes("2 files · src/known.ts ... — +? -?")));
+  assert.ok(lines.some((line) => line.includes("src/unknown.ts — ~")));
+  assert.ok(lines.some((line) => line.includes("2 files · src/known.ts ... — ~")));
 });
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {

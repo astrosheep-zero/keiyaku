@@ -271,13 +271,17 @@ async function diagnoseSpawnEnoent(
     missing.push(
       `waking process executable ${executable} no longer exists (the host likely removed the running process binary)`,
     );
-  const remedy =
-    noCwd && !noExecutable
-      ? "kill this Akuma and call a fresh one; a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git"
-      : !noCwd && noExecutable
-        ? "re-enter with a fresh CLI process and retry, or kill this Akuma and call a fresh one"
-        : "kill this Akuma and call a fresh one; a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git, and a missing executable likely means the host removed the running process binary: re-enter with a fresh CLI process and retry";
-  const error = new Error(`Body spawn failed: ${missing.join(" and ")}; ${remedy}`);
+  const remedies: string[] = [];
+  if (noCwd)
+    remedies.push(
+      "a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git",
+    );
+  if (noExecutable)
+    remedies.push(
+      "a missing executable likely means the host removed the running process binary: re-enter with a fresh CLI process and retry",
+    );
+  const remedy = `kill this Akuma and call a fresh one; ${remedies.join("; ")}`;
+  const error = new Error(`Body spawn failed: ${missing.join(" and ")}; ${remedy}`, { cause });
   (error as NodeJS.ErrnoException).code = "ENOENT";
   return error;
 }

@@ -95,7 +95,7 @@ test("quoted activity hard-wraps once, aligns continuations and truncates at a g
   assert.equal(lines.length, 2);
   assert.equal((lines.join("\n").match(/“/gu) ?? []).length, 1);
   assert.equal((lines.join("\n").match(/”/gu) ?? []).length, 1);
-  assert.match(lines[1]!, /^ {15}👩‍💻/u);
+  assert.match(lines[1]!, /^ {5} │ {8}👩‍💻/u);
   assert.match(lines[1]!, /…”$/u);
   for (const line of lines) assert.ok(displayColumns(line) <= 40);
 });
@@ -454,4 +454,39 @@ test("plural wait attributes omitted spans and the scoreboard by identity tag", 
   assert.match(conclusion, /^      dead ⋮ 4 omitted$/mu);
   assert.match(conclusion, /^\d{2}:\d{2} dead ● running/mu);
   assert.match(conclusion, /^\d{2}:\d{2} face ● running/mu);
+});
+
+test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
+  const status = parseAkumaStatus({
+    id: "aku/worker/abcd1234",
+    life: "running",
+    allowed: [],
+    timeline: openAkumaSnapshot([], [
+      reportedFileChange(1, "update", "/work/unknown"),
+      { ...reportedFileChange(2, "update", "/work/known"), diffstat: { added: 3, removed: 1 } },
+    ]),
+  });
+  const text = snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT);
+  assert.ok(text.split("\n").some((line) => /^  ~ +\/work\/unknown$/u.test(line)), text);
+  assert.ok(text.split("\n").some((line) => /^  \+3 -1 +\/work\/known$/u.test(line)), text);
+  assert.doesNotMatch(text, /\+\? -\?/u);
+});
+
+test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
+  const lines = snapshotActivityLines(
+    openAkumaSnapshot([
+      { kind: "row", row: completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }) },
+      {
+        kind: "row",
+        row: completedTool(2, "edit", {
+          kind: "fileChange",
+          changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
+        }),
+      },
+    ]),
+    { columns: 120, color: false },
+  ).join("\n");
+  assert.match(lines, /src\/unknown\.ts — ~/u);
+  assert.match(lines, /src\/known\.ts — \+2 -1/u);
+  assert.doesNotMatch(lines, /\+\? -\?/u);
 });
