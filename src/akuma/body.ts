@@ -1,5 +1,4 @@
 import { appendFile, stat } from "node:fs/promises";
-import { basename, delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
@@ -228,90 +227,66 @@ const DEFAULT_RUNTIME: Omit<BodyRuntime, "world"> = {
 };
 
 /**
- * The runtime executable this process recorded at its birth. A package-manager
- * upgrade can remove the file under a live process, so a wake re-resolves that
- * record instead of surfacing a bare missing-file launch failure.
+ * The Body spawn executable is the waking process's own executable, resolved
+ * at use time. There is no recorded path and no re-resolution chain: when the
+ * file is genuinely gone the spawn fails honestly and the wake diagnostic
+ * names the missing piece.
  */
-const RECORDED_RUNTIME = process.execPath;
-
-type RuntimeEnvironment = Readonly<{
-  /** The current process executable, preferred only while it is a different live value. */
-  current?: string;
-  /** The present PATH used to resolve the recorded executable basename. */
-  path?: string | undefined;
-  exists?: (path: string) => boolean | Promise<boolean>;
-}>;
-
-/** One Body launch's runtime input: the runtime recorded for it and its resolution environment. */
-export type BodyLaunchRuntime = Readonly<{
-  recorded?: string;
-  environment?: RuntimeEnvironment;
-}>;
-
-async function runtimeFileExists(path: string): Promise<boolean> {
+async function executableMissing(path: string): Promise<boolean> {
   try {
-    return (await stat(path)).isFile();
+    return !(await stat(path)).isFile();
   } catch {
+    return true;
+  }
+}
+
+async function frozenCwdMissing(path: string): Promise<boolean> {
+  try {
+    await stat(path);
     return false;
-  }
-}
-
-async function runtimeCommandOnPath(
-  command: string,
-  path: string | undefined,
-  exists: (path: string) => boolean | Promise<boolean>,
-): Promise<string | null> {
-  if (command.length === 0 || command.includes("/") || command.includes("\\")) return null;
-  for (const directory of (path ?? "").split(delimiter)) {
-    if (directory.length === 0) continue;
-    const candidate = join(directory, command);
-    if (await exists(candidate)) return candidate;
-  }
-  return null;
-}
-
-class StaleRuntimeError extends Error {
-  constructor(recorded: string, current: string, command: string) {
-    super(
-      `recorded Body runtime ${recorded} no longer exists and re-resolution failed: neither this process executable ` +
-        `${current} nor the command "${command}" on PATH names an existing file; kill this Akuma and call a fresh one`,
-    );
-    this.name = "StaleRuntimeError";
+  } catch {
+    return true;
   }
 }
 
 /**
- * Resolve the runtime executable a Body spawn will use. The path recorded for
- * this process's birth wins while it exists. Once it is gone, wake re-resolves
- * the runtime before any spawn can fail: the current process executable while
- * that is a different live value, then the recorded executable basename on the
- * present PATH. An unresolvable runtime refuses with the stale record, the
- * failed re-resolution, and the kill-and-call-fresh remedy.
+ * Diagnose an ENOENT Body spawn failure by checking the attempted executable
+ * and the frozen execution cwd separately. The message names the genuinely
+ * missing piece(s) with the kill-and-call-fresh remedy; a missing cwd likely
+ * means its Contract was claimed and the worktree cleaned up. When both
+ * pieces still exist the original failure passes through unchanged, as does
+ * any non-ENOENT spawn failure.
  */
-export async function resolveRuntimeExecutable(
-  recorded: string = RECORDED_RUNTIME,
-  environment: RuntimeEnvironment = {},
-): Promise<string> {
-  const exists = environment.exists ?? runtimeFileExists;
-  if (await exists(recorded)) return recorded;
-  const current = environment.current ?? process.execPath;
-  const command = basename(recorded);
-  const reResolved =
-    (current !== recorded && (await exists(current)) ? current : null) ??
-    (await runtimeCommandOnPath(command, environment.path ?? process.env.PATH, exists));
-  if (reResolved === null) throw new StaleRuntimeError(recorded, current, command);
-  return reResolved;
+async function diagnoseSpawnEnoent(
+  input: Readonly<{ argv: readonly string[]; cwd: string }>,
+  cause: unknown,
+): Promise<Error> {
+  const executable = input.argv[0] ?? process.execPath;
+  const cwd = input.cwd;
+  const [noExecutable, noCwd] = await Promise.all([executableMissing(executable), frozenCwdMissing(cwd)]);
+  if (!noExecutable && !noCwd) return cause instanceof Error ? cause : new Error(String(cause));
+  const missing: string[] = [];
+  if (noCwd) missing.push(`frozen execution directory ${cwd} no longer exists`);
+  if (noExecutable)
+    missing.push(
+      `waking process executable ${executable} no longer exists (the host likely removed the running process binary)`,
+    );
+  const remedy =
+    noCwd && !noExecutable
+      ? "kill this Akuma and call a fresh one; a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git"
+      : !noCwd && noExecutable
+        ? "re-enter with a fresh CLI process and retry, or kill this Akuma and call a fresh one"
+        : "kill this Akuma and call a fresh one; a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git, and a missing executable likely means the host removed the running process binary: re-enter with a fresh CLI process and retry";
+  const error = new Error(`Body spawn failed: ${missing.join(" and ")}; ${remedy}`);
+  (error as NodeJS.ErrnoException).code = "ENOENT";
+  return error;
 }
 
-export async function bodyProcessInput(
-  launch: BodyLaunch,
-  bodyModuleUrl = import.meta.url,
-  runtime: BodyLaunchRuntime = {},
-) {
+export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
   const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
   const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
   if (actorId === undefined) throw new Error("Akuma wake has no born soul");
-  const executable = await resolveRuntimeExecutable(runtime.recorded, runtime.environment);
+  const executable = process.execPath;
   const source = bodyModuleUrl.endsWith(".ts");
   const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
   return {
@@ -765,8 +740,14 @@ export async function driveAkumaBody(
   }
 }
 
-export async function spawnAkumaBody(launch: BodyLaunch, runtime: BodyLaunchRuntime = {}): Promise<OwnedProcess> {
-  return await spawnDetachedProcess(await bodyProcessInput(launch, import.meta.url, runtime));
+export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> {
+  const input = await bodyProcessInput(launch, import.meta.url);
+  try {
+    return await spawnDetachedProcess(input);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+    throw await diagnoseSpawnEnoent(input, error);
+  }
 }
 
 export async function runAkumaBody(

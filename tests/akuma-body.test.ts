@@ -204,7 +204,6 @@ test("Body launch and provider setup isolate parent harness identity without mut
         },
       },
       import.meta.url,
-      { recorded: process.execPath },
     );
     for (const key of PARENT_HARNESS_KEYS) {
       assert.equal(input.env[key], undefined);

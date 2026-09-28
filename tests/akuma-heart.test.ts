@@ -5,8 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync, rmSync,
-  unlinkSync,
-  writeFileSync
+  unlinkSync
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +14,7 @@ import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
-import { LEASH_HELD_EXIT, resolveRuntimeExecutable, spawnAkumaBody } from "../src/akuma/body.js";
+import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -341,74 +340,100 @@ test("latest admitted Turn attribution is scoped to the exact Body", async () =>
     value.close();
   }
 });
-test("runtime resolution re-resolves a displaced record and refuses with the stale path and remedy", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-stale-runtime-");
-  const bin = join(root, "bin");
-  const replaced = join(bin, "node");
-  const displaced = join(root, "retired-runtime", "node");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(replaced, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const live = (path: string) => path === replaced;
-  // A record still on disk wins as it stands.
-  assert.equal(await resolveRuntimeExecutable(replaced, { current: displaced, path: bin, exists: live }), replaced);
-  // A displaced record re-resolves to the current process executable...
-  assert.equal(await resolveRuntimeExecutable(displaced, { current: replaced, path: bin, exists: live }), replaced);
-  // ...and, when the current process executable is that same vanished value, to the recorded
-  // command name on the present PATH instead of the gone value again.
-  assert.equal(await resolveRuntimeExecutable(displaced, { current: displaced, path: bin, exists: live }), replaced);
-  // A record with no live file and no PATH command refuses with the stale path, the failed
-  // re-resolution, and the kill-and-call-fresh remedy, never a bare launch absence.
-  const vanished = join(root, "vanished-runtime", "keiyaku-body");
-  await assert.rejects(
-    resolveRuntimeExecutable(vanished, { current: vanished, path: bin, exists: live }),
-    (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      assert.match(message, /no longer exists/);
-      assert.match(message, /re-resolution failed/);
-      assert.match(message, /kill this Akuma and call a fresh one/);
-      assert.doesNotMatch(message, /ENOENT/);
-      return true;
-    },
-  );
+test("wake names the missing frozen execution directory instead of a bare spawn absence", async () => {
+  const value = await fixture();
+  const vanishedCwd = join(value.root, "vanished-cwd");
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, { ...value.soul, cwd: vanishedCwd });
+    born.release();
+    const result = await tellFixture(value, {
+      body: "continue",
+      tellId: "tell-missing-cwd",
+      recordedAt: value.soul.createdAt,
+    });
+    assert.equal(result.wake.kind, "failed");
+    const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
+    assert.ok(diagnostic.includes(vanishedCwd), diagnostic);
+    assert.match(diagnostic, /frozen execution directory/);
+    assert.match(diagnostic, /no longer exists/);
+    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
+    const heart = await readHeart(value.allocated.paths);
+    assert.deepEqual(
+      heart.pending.map((tell) => tell.id),
+      ["tell-missing-cwd"],
+    );
+    assert.equal(heart.latestBody, null);
+  } finally {
+    value.close();
+  }
 });
 
-test("wake reports the typed stale-runtime refusal instead of a bare launch absence", async () => {
+test("wake names the missing waking executable instead of a bare spawn absence", async () => {
   const value = await fixture();
-  const vanished = join(value.root, "vanished-runtime", "keiyaku-body");
-  const emptyBin = join(value.root, "empty-bin");
-  mkdirSync(emptyBin, { recursive: true });
+  const vanishedExecutable = join(value.root, "vanished-runtime", "keiyaku-body");
+  const liveExecPath = process.execPath;
+  Object.defineProperty(process, "execPath", { value: vanishedExecutable, configurable: true });
   try {
     const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await born.birth(value.allocated.paths, value.soul);
     born.release();
     const result = await tellFixture(value, {
       body: "continue",
-      tellId: "tell-unresolvable-runtime",
+      tellId: "tell-missing-executable",
       recordedAt: value.soul.createdAt,
-      runtime: {
-        async spawn(paths): Promise<OwnedProcess> {
-          // The production launch refuses when no runtime resolves, before any spawn happens.
-          return await spawnAkumaBody(
-            { paths, refuseIfHeld: true },
-            { recorded: vanished, environment: { current: vanished, path: emptyBin } },
-          );
-        },
-      },
     });
     assert.equal(result.wake.kind, "failed");
     const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
-    assert.ok(diagnostic.includes(vanished), diagnostic);
+    assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
+    assert.match(diagnostic, /waking process executable/);
     assert.match(diagnostic, /no longer exists/);
-    assert.match(diagnostic, /re-resolution failed/);
     assert.match(diagnostic, /kill this Akuma and call a fresh one/);
-    assert.doesNotMatch(diagnostic, /ENOENT/);
+    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
     const heart = await readHeart(value.allocated.paths);
     assert.deepEqual(
       heart.pending.map((tell) => tell.id),
-      ["tell-unresolvable-runtime"],
+      ["tell-missing-executable"],
     );
     assert.equal(heart.latestBody, null);
   } finally {
+    Object.defineProperty(process, "execPath", { value: liveExecPath, configurable: true });
+    value.close();
+  }
+});
+
+test("wake names both missing pieces when the executable and frozen directory are gone", async () => {
+  const value = await fixture();
+  const vanishedCwd = join(value.root, "vanished-cwd");
+  const vanishedExecutable = join(value.root, "vanished-runtime", "keiyaku-body");
+  const liveExecPath = process.execPath;
+  Object.defineProperty(process, "execPath", { value: vanishedExecutable, configurable: true });
+  try {
+    const born = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await born.birth(value.allocated.paths, { ...value.soul, cwd: vanishedCwd });
+    born.release();
+    const result = await tellFixture(value, {
+      body: "continue",
+      tellId: "tell-missing-both",
+      recordedAt: value.soul.createdAt,
+    });
+    assert.equal(result.wake.kind, "failed");
+    const diagnostic = result.wake.kind === "failed" ? result.wake.diagnostic : "";
+    assert.ok(diagnostic.includes(vanishedCwd), diagnostic);
+    assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
+    assert.match(diagnostic, /frozen execution directory/);
+    assert.match(diagnostic, /waking process executable/);
+    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
+    const heart = await readHeart(value.allocated.paths);
+    assert.deepEqual(
+      heart.pending.map((tell) => tell.id),
+      ["tell-missing-both"],
+    );
+    assert.equal(heart.latestBody, null);
+  } finally {
+    Object.defineProperty(process, "execPath", { value: liveExecPath, configurable: true });
     value.close();
   }
 });
