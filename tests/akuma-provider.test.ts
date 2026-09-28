@@ -28,7 +28,13 @@ import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
-import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
+import {
+  composeHeadlessPermissionConfig,
+  loadOpencode,
+  OPENCODE_SDK_PROVIDER,
+  type OpencodeSdkLoader,
+  type OpencodeSdkSession,
+} from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
@@ -38,7 +44,7 @@ import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/pro
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
-import { waitForCondition } from "./support/process.js";
+import { waitForCondition, waitForFixtureFile } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
   signal: new AbortController().signal,
@@ -1180,6 +1186,74 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   assert.equal(JSON.stringify(observed).includes("secret"), false);
   assert.equal(fake.closed(), 1);
   assert.equal(fake.executions[0]!.env?.[AKUMA_REQUESTS_ENV], "/tmp/requests");
+});
+
+test("OpenCode composes the headless permission base layer beneath caller config", () => {
+  assert.deepEqual(composeHeadlessPermissionConfig(), {
+    permission: { external_directory: "allow", doom_loop: "allow", read: "allow", question: "deny" },
+  });
+  assert.deepEqual(
+    composeHeadlessPermissionConfig({
+      model: "provider/model",
+      permission: { external_directory: { "/narrow/**": "allow" }, question: "allow", edit: "deny" },
+    }),
+    {
+      model: "provider/model",
+      permission: {
+        external_directory: { "/narrow/**": "allow" },
+        doom_loop: "allow",
+        read: "allow",
+        question: "allow",
+        edit: "deny",
+      },
+    },
+  );
+  assert.deepEqual(composeHeadlessPermissionConfig({ permission: "allow" }), { permission: "allow" });
+  const caller = { permission: { question: "allow" } };
+  composeHeadlessPermissionConfig(caller);
+  assert.deepEqual(caller, { permission: { question: "allow" } });
+});
+
+test("OpenCode always carries the headless permission base layer into the spawned server environment", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-opencode-headless-");
+  const recorded = join(root, "environment.json");
+  const executable = join(root, "opencode");
+  writeFileSync(
+    executable,
+    [
+      "#!/usr/bin/env node",
+      "const { writeFileSync } = require('node:fs');",
+      `writeFileSync(${JSON.stringify(recorded)}, JSON.stringify(process.env));`,
+      "setInterval(() => {}, 1000);",
+    ].join("\n"),
+  );
+  chmodSync(executable, 0o755);
+  const spawnedEnvironment = async (env?: Readonly<Record<string, string>>) => {
+    rmSync(recorded, { force: true });
+    const controller = new AbortController();
+    const loading = loadOpencode({
+      execution: {
+        name: OPENCODE_SDK_PROVIDER,
+        kind: "opencode-sdk",
+        executable,
+        ...(env === undefined ? {} : { env }),
+      },
+      cwd: root,
+      signal: controller.signal,
+    });
+    await waitForFixtureFile(recorded);
+    controller.abort();
+    await assert.rejects(loading, /aborted/u);
+    return JSON.parse(readFileSync(recorded, "utf8")) as Record<string, string>;
+  };
+
+  const base = await spawnedEnvironment();
+  assert.deepEqual(JSON.parse(base.OPENCODE_CONFIG_CONTENT ?? "null"), {
+    permission: { external_directory: "allow", doom_loop: "allow", read: "allow", question: "deny" },
+  });
+  const literal = '{"permission":{"question":"allow"}}';
+  const overridden = await spawnedEnvironment({ OPENCODE_CONFIG_CONTENT: literal });
+  assert.equal(overridden.OPENCODE_CONFIG_CONTENT, literal);
 });
 
 test("OpenCode start and resume reject closed when readiness cleanup fails", async () => {

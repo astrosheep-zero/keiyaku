@@ -31,6 +31,40 @@ export function parseModel(model: string): Readonly<{ providerID: string; modelI
   return { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
 }
 
+/**
+ * Permission classes whose upstream defaults can await a human reply. A headless
+ * server has no reply channel, so such a pending ask never settles.
+ *
+ * Verified against the installed opencode 1.18.33 agent permission ruleset: the
+ * primary agents start from `{"*":"allow"}` with `external_directory` and
+ * `doom_loop` set to ask, `read` set to ask for `.env` files, and `question`
+ * allowed (the question tool awaits an answer by semantics). Every other class
+ * matches the allow-all rule and cannot await.
+ */
+const HEADLESS_PERMISSION_BASE: Readonly<Record<string, string>> = Object.freeze({
+  external_directory: "allow",
+  doom_loop: "allow",
+  read: "allow",
+  question: "deny",
+});
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Compose the config handed to a headless opencode server. The permission base
+ * layer fills only the classes the caller leaves unspecified: an explicit caller
+ * permission key wins per key and every non-permission key passes through
+ * untouched. A caller that supplies a non-object `permission` shorthand states
+ * the whole policy and keeps it.
+ */
+export function composeHeadlessPermissionConfig(config?: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const permission = config?.permission;
+  if (permission !== undefined && !isRecord(permission)) return { ...config };
+  return { ...config, permission: { ...HEADLESS_PERMISSION_BASE, ...permission } };
+}
+
 export type OpencodeRuntime = Readonly<{
   client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
   close: () => Promise<void>;
@@ -106,7 +140,7 @@ export async function loadOpencode(
     env: akumaExecutionEnvironment(
       process.env,
       {
-        ...(execution.config === undefined ? {} : { OPENCODE_CONFIG_CONTENT: JSON.stringify(execution.config) }),
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(composeHeadlessPermissionConfig(execution.config)),
         ...execution.env,
       },
       requests,

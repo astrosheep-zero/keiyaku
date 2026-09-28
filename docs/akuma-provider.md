@@ -30,6 +30,32 @@ Missing receipt evidence remains missing; adapters and Body do not synthesize it
 An adapter without resume starts fresh only when no durable native resume promise
 exists. An adapter without fork offers no emulation or capability registry.
 
+## Headless Permission Baseline
+
+An opencode-sdk spawn is headless: no channel can answer a native permission
+ask, so an unanswered ask never settles, its tool call stays running, and the
+Turn never resolves. Every spawn therefore composes a base permission layer
+before the native server starts, making a human-reply wait impossible by
+construction rather than by caller-configuration luck.
+
+The baseline resolves to allow every action permission whose native default can
+ask for a human decision — external-directory access outside the worktree,
+continuation after repeated identical failures, and reads the native defaults
+gate behind an ask — and refuses the question tool, whose Turn then fails fast
+instead of waiting for an answer that cannot come. The class list is evidence
+from the installed opencode version, not a stored schema: in 1.18.33 the primary
+agents begin from an allow-all rule with `external_directory` and `doom_loop`
+set to ask, `read` set to ask for env files, and `question` allowed by the
+tool's awaiting semantics; every other class matches the allow-all rule and
+cannot await. A provider version bump re-opens the list.
+
+Explicit settings keep per-key precedence: a caller permission key replaces the
+baseline class it names, so a project may narrow — a project-root whitelist, or
+re-enabling the question tool — through its own settings. The baseline only
+fills classes the caller leaves unspecified, and non-permission configuration
+passes through untouched. An execution environment layer may replace the whole
+composed config variable; that remains the documented escape hatch.
+
 ## Narration And Admission
 
 Adapters translate native events into bounded provider-neutral narration, drop
