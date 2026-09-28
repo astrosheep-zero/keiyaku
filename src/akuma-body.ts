@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
@@ -59,6 +61,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
         ...(input.message === undefined ? {} : { message: input.message }),
         includeDirty: input.includeDirty,
         materializeConflict: input.materializeConflict,
+        ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
         requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
         hooks: worktreeHooksFrom({ settings: configuration }),
         signal: input.signal,
@@ -92,18 +95,6 @@ function taskMutationRequestPort(): TaskMutationRequestPort {
   };
 }
 
-const encoded = process.argv[2];
-if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
-const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
-const mappedHome = process.env.KEIYAKU_HOME?.trim();
-const mappedGitPath = process.env.KEIYAKU_GIT_PATH;
-if (mappedGitPath !== undefined && mappedGitPath.trim().length === 0) {
-  throw new TypeError("KEIYAKU_GIT_PATH requires a nonblank value");
-}
-const configuration = {
-  ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
-  ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
-};
 export async function externalRequestCommandsFor(
   launch: BodyLaunch,
   processConfiguration: BodyProcessConfiguration,
@@ -124,5 +115,30 @@ export async function externalRequestCommandsFor(
   };
 }
 
-const { world, commands: externalCommands } = await externalRequestCommandsFor(launch, configuration);
-if ((await runAkumaBody(launch, world, externalCommands)) === "held") process.exitCode = LEASH_HELD_EXIT;
+function bodyProcessConfiguration(): BodyProcessConfiguration {
+  const mappedHome = process.env.KEIYAKU_HOME?.trim();
+  const mappedGitPath = process.env.KEIYAKU_GIT_PATH;
+  if (mappedGitPath !== undefined && mappedGitPath.trim().length === 0) {
+    throw new TypeError("KEIYAKU_GIT_PATH requires a nonblank value");
+  }
+  return {
+    ...(mappedHome === undefined || mappedHome.length === 0 ? {} : { home: mappedHome }),
+    ...(mappedGitPath === undefined ? {} : { gitPath: mappedGitPath }),
+  };
+}
+
+async function runBodyEntrypoint(): Promise<void> {
+  const encoded = process.argv[2];
+  if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
+  const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
+  const { world, commands } = await externalRequestCommandsFor(launch, bodyProcessConfiguration());
+  if ((await runAkumaBody(launch, world, commands)) === "held") process.exitCode = LEASH_HELD_EXIT;
+}
+
+/** Only the spawned entrypoint launches a Body; importing this module composes commands without side effects. */
+function invokedAsBodyEntrypoint(): boolean {
+  const entry = process.argv[1];
+  return entry !== undefined && resolve(entry) === resolve(fileURLToPath(import.meta.url));
+}
+
+if (invokedAsBodyEntrypoint()) await runBodyEntrypoint();

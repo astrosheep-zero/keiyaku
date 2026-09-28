@@ -13,6 +13,8 @@ public verb, generic messaging surface, or multi-hop forwarding.
 
 Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
 execution carries only request-service facts and never transports product capabilities.
+Forwarded verbs carry their flags verbatim; a flag dropped in transport is a product bug, not
+transport discretion.
 
 Completion kind is a static descriptor fact: a command completes either with a child reference or with opaque service evidence,
 and its descriptor exposes only that kind's projection.

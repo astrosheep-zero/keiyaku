@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
+import { externalRequestCommandsFor } from "../src/akuma-body.js";
+import { allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { World } from "../src/world.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -40,6 +44,48 @@ async function bindAndCommit(options: { gates: readonly string[]; verification: 
 function assertRuntimeStop(value: unknown): void {
   assert.ok(value !== undefined && typeof value === "object" && "failure" in value);
   assert.equal((value as { failure: unknown }).failure, "environment-failure");
+}
+
+/**
+ * The production parent-Body contract port, reached through the same entrypoint composition the
+ * spawned Body uses. Importing the module must compose commands without launching a Body.
+ */
+async function forwardedDeliverChannel(repositoryRoot: string) {
+  const world = await World.at(repositoryRoot);
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "f0d0a001" });
+  const { commands } = await externalRequestCommandsFor({ paths: allocated.paths }, {});
+  const command = commands["contract.deliver"];
+  if (command === undefined || command.completion !== "service")
+    throw new Error("contract.deliver is not a service request command");
+  return async (contractId: string, overwrite: boolean) => {
+    const request = command.resolve({
+      repoRoot: repositoryRoot,
+      contractId,
+      includeDirty: false,
+      materializeConflict: false,
+      overwrite,
+    });
+    assert.ok(request !== null, "forwarded deliver payload is rejected by its owner");
+    const served = await request.execute({
+      id: randomUUID(),
+      admittedAt: "2026-09-28T10:00:00.000Z",
+      requester: allocated.id,
+      signal: new AbortController().signal,
+      admissionOpen: () => true,
+    });
+    const service = JSON.parse(served.serviceJson) as { kind?: unknown; deliveryFactId?: unknown };
+    assert.equal(service.kind, "accepted-reference", served.serviceJson);
+    assert.ok(typeof service.deliveryFactId === "string", served.serviceJson);
+    return { result: served.result, deliveryFactId: service.deliveryFactId };
+  };
+}
+
+function acceptedDeliveryValue(result: unknown): Record<string, unknown> {
+  assert.ok(result !== null && typeof result === "object");
+  const record = result as { kind?: unknown; value?: unknown };
+  assert.equal(record.kind, "accepted", JSON.stringify(result));
+  assert.ok(record.value !== null && typeof record.value === "object");
+  return record.value as Record<string, unknown>;
 }
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
@@ -118,5 +164,36 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.ok(blocked.kind === "accepted", JSON.stringify(blocked));
     assert.equal(blocked.value.verificationReuse?.verdict, "unsatisfied");
     assert.equal((await verified.keiyaku.state()).terminal, null);
+  });
+
+  test("a forwarded deliver carries overwrite through the parent Body port", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({
+      gates: ["verified"],
+      verification: "exit 0",
+      runtimeStop: true,
+    });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    const deliver = await forwardedDeliverChannel(repository.path);
+
+    const first = await deliver(state.id, false);
+    const firstValue = acceptedDeliveryValue(first.result);
+    assertRuntimeStop(firstValue.verification);
+    assert.equal((await keiyaku.state()).terminal, null, "the stopped Verification keeps the Contract nonterminal");
+
+    writeFileSync(join(worktree, "candidate.txt"), "replacement\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
+
+    const reused = await deliver(state.id, false);
+    assert.equal(reused.deliveryFactId, first.deliveryFactId, "overwrite=false reuses the admitted candidate");
+    const reusedValue = acceptedDeliveryValue(reused.result);
+    assert.deepEqual(reusedValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
+    assert.deepEqual(reusedValue.integration, firstValue.integration, "overwrite=false keeps the old tender bytes");
+
+    const replaced = await deliver(state.id, true);
+    assert.notEqual(replaced.deliveryFactId, first.deliveryFactId, "overwrite=true admits a new deliver fact");
+    const replacedValue = acceptedDeliveryValue(replaced.result);
+    assert.notDeepEqual(replacedValue.integration, firstValue.integration, "overwrite=true captures the new bytes");
+    assert.equal((await keiyaku.state()).terminal, null);
   });
 });
