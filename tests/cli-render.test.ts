@@ -2446,6 +2446,23 @@ test("a newly eligible say flushes a crowded tail with edits under ordinary tool
   assert.equal(text.split("flush-now").length - 1, 1);
 });
 
+test("a say flushes the pending tail without renewing one wait's tool budget", () => {
+  const tool = (sequence: number) =>
+    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
+  const say = (sequence: number, text: string) =>
+    snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
+  const rows = [tool(1), tool(2), tool(3), say(4, "checkpoint"), tool(5), tool(6), tool(7), tool(8)];
+  const stream = activityStream({ columns: 120, color: false });
+  const before = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 4))));
+  const after = stream(liveActivity(idleAkumaSnapshot(rows)));
+  const text = [...before, ...after, ...stream.flush()].join("\n");
+
+  for (const sequence of [1, 2, 3, 7, 8]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  for (const sequence of [5, 6]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.match(text, /checkpoint/u);
+  assert.equal((text.match(/⋮ 2 omitted/gu) ?? []).length, 1);
+});
+
 test("a plural wait gives each target its own whole-command tool budget", () => {
   const first = "aku/worker/abcd0034";
   const second = "aku/worker/abcd0035";

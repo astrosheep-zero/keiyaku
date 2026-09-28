@@ -643,7 +643,6 @@ function observeActivitySnapshot(
     if (row.kind === "said") {
       lines.push(...flushActivityTail(state, context, layout));
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
-      state.openingTools = 0;
       continue;
     }
     if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {

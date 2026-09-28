@@ -155,7 +155,8 @@ exact terminal Turn — Akuma-wide idle never stands in for it — and stdout
 carries that answer once, byte-exact, and nothing else on deadline or failure.
 The stream restates the timeline's own rows rather than inventing a private
 vocabulary and never replays a settled row; omissions between evidence spans
-are marked opaquely rather than rewritten. A plural observation attributes
+are marked opaquely rather than rewritten. A spoken update remains visible but
+does not renew the observation's tool-detail budget. A plural observation attributes
 every semantic row to a stable compact source tag resolved from the
 observation seam, and closes with an attributed scoreboard in the same order;
 a failure fact for an unobserved member keeps that member's complete identity.
