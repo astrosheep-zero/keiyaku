@@ -19,6 +19,7 @@ import {
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
+  type TellSubmission,
   type TurnResult,
 } from "../../provider.js";
 import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
@@ -108,6 +109,7 @@ type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNull
 
 type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
 type PiNativeSession = PiCreatedSession["session"];
+type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
 type PiDriveState = {
   terminalFailure: string | null;
   abortRequest?: Promise<void>;
@@ -192,33 +194,63 @@ async function drivePi(
     aborting: false,
     settled: false,
   };
+  const pendingTells = new Map<PiNativeMessage, Readonly<{ id: string; resolve(submission: TellSubmission): void }>>();
+  const endPendingTells = (): void => {
+    for (const waiter of pendingTells.values()) waiter.resolve({ kind: "turn-ended" });
+    pendingTells.clear();
+  };
   let settleCompletion!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
     settleCompletion = resolve;
   });
-  const unsubscribe = native.subscribe((event) => {
-    if (event.type === "agent_end" && !event.willRetry) state.terminalFailure = piTerminalFailure(event.messages);
-    for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
-  });
+  const agent = native.agent;
+  let unsubscribeAgent: (() => void) | undefined;
+  let unsubscribe!: () => void;
+  try {
+    unsubscribeAgent = agent?.subscribe((event) => {
+      if (event.type === "message_end") {
+        const waiter = pendingTells.get(event.message);
+        if (waiter !== undefined) {
+          pendingTells.delete(event.message);
+          waiter.resolve({ kind: "accepted", fence: `${native.sessionId}:${waiter.id}` });
+        }
+      }
+    });
+    unsubscribe = native.subscribe((event) => {
+      if (event.type === "agent_end" && !event.willRetry) {
+        state.terminalFailure = piTerminalFailure(event.messages);
+      }
+      for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
+    });
+  } catch (error) {
+    try {
+      unsubscribeAgent?.();
+    } finally {
+      native.dispose();
+    }
+    throw error;
+  }
   const settle = (result: TurnResult): Promise<void> => {
     if (state.settled) return closed;
     state.settled = true;
+    endPendingTells();
     let failure: unknown;
     try {
       unsubscribe();
     } catch (error) {
       failure = error;
-    } finally {
-      try {
-        events.end();
-      } finally {
-        settleCompletion(result);
-        try {
-          native.dispose();
-        } catch (error) {
-          failure ??= error;
-        }
-      }
+    }
+    try {
+      unsubscribeAgent?.();
+    } catch (error) {
+      failure ??= error;
+    }
+    events.end();
+    settleCompletion(result);
+    try {
+      native.dispose();
+    } catch (error) {
+      failure ??= error;
     }
     if (failure === undefined) settleRetired();
     else failRetired(failure);
@@ -245,6 +277,27 @@ async function drivePi(
     admission: { fence: native.sessionId },
     events,
     completion,
+    ...(agent === undefined
+      ? {}
+      : {
+          tell: (tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission> => {
+            if (state.settled) return Promise.resolve({ kind: "turn-ended" });
+            const message: PiNativeMessage = {
+              role: "user",
+              content: [{ type: "text", text: tell.text }],
+              timestamp: Date.now(),
+            };
+            return new Promise<TellSubmission>((resolve, reject) => {
+              pendingTells.set(message, { id: tell.id, resolve });
+              try {
+                agent.steer(message);
+              } catch (error) {
+                pendingTells.delete(message);
+                reject(error);
+              }
+            });
+          },
+        }),
     abort: () => {
       state.abortRequest ??= (async () => {
         if (state.settled) return;

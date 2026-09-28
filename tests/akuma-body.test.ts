@@ -21,6 +21,7 @@ import {
   spawnAkumaBody,
 } from "../src/akuma/body.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
+import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import {
@@ -878,6 +879,141 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     releaseEvents();
     await body;
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+  } finally {
+    await removeDrivenBodyFixture(root);
+  }
+});
+
+test("Pi native steer evidence keeps a Tell in its current Body and Turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-steer-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "pi", draw: () => "1a2b3c41" });
+    await initializeHeart(allocated.paths);
+    const { promise: released, resolve: release } = promiseBarrier<void>();
+    const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
+    let steered: { role: string; content: unknown } | undefined;
+    const manager = { getLeafId: () => "pi-answer" };
+    const session = {
+      sessionFile: "/sessions/pi-body.jsonl", sessionId: "pi-body", sessionManager: manager,
+      agent: {
+        subscribe(listener: (event: { type: string; message?: unknown }) => void) {
+          nativeListeners.add(listener);
+          return () => { nativeListeners.delete(listener); };
+        },
+        steer(message: { role: string; content: unknown }) { steered = message; },
+      },
+      subscribe(listener: (event: { type: string; message?: unknown; messages?: unknown[]; willRetry?: boolean }) => void) {
+        this.listener = listener;
+        return () => { this.listener = undefined; };
+      },
+      listener: undefined as ((event: { type: string; message?: unknown; messages?: unknown[]; willRetry?: boolean }) => void) | undefined,
+      async prompt() {
+        await released;
+        this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "steered answer" }] } });
+      },
+      async abort() { release(); },
+      dispose() {},
+    };
+    const sdk = {
+      createAgentSession: async () => ({ session }),
+      createBashToolDefinition: () => ({}),
+      DefaultResourceLoader: class { async reload() {} },
+      getAgentDir: () => "/agent",
+      ModelRuntime: { create: async () => ({ getModel: () => undefined }) },
+      SessionManager: { create: () => manager, open: () => manager },
+    } as unknown as PiSdk;
+    const body = runAkumaBody(normalizeLaunch({
+      paths: allocated.paths,
+      seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
+      initialBody: "work",
+    }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
+    await waitUntilLatestBody(allocated.paths, body);
+    await recordTell(allocated.paths, { id: "pi-live", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z" });
+    await waitForCondition("Pi to queue the native steer", () => steered !== undefined, { terminalState: settlementProbe(body, () => "Body settled before native steer") });
+    assert.deepEqual(steered?.content, [{ type: "text", text: "steer" }]);
+    assert.equal((await readTell(allocated.paths, "pi-live"))?.state, "pending");
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    session.listener?.({ type: "agent_end", messages: [], willRetry: false });
+    assert.equal((await readTell(allocated.paths, "pi-live"))?.state, "pending");
+    for (const listener of nativeListeners) listener({ type: "message_end", message: steered });
+    await waitForCondition("Pi native evidence to settle the Tell", async () =>
+      (await readTell(allocated.paths, "pi-live"))?.state === "told", { terminalState: settlementProbe(body, () => "Body settled before native evidence") });
+    const turnSequence = (await readTell(allocated.paths, "pi-live"))?.binding?.turnSequence;
+    assert.equal(turnSequence, 2);
+    release();
+    await body;
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readTurn(allocated.paths, turnSequence!))?.end?.outcome.kind, "answered");
+    assert.equal(nativeListeners.size, 0);
+  } finally {
+    await removeDrivenBodyFixture(root);
+  }
+});
+
+test("Pi native end without steer evidence carries the pending Tell to the next Turn", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-late-"));
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "pi", draw: () => "1a2b3c42" });
+    await initializeHeart(allocated.paths);
+    const { promise: released, resolve: release } = promiseBarrier<void>();
+    const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
+    const prompts: string[] = [];
+    let steered = false;
+    let sessions = 0;
+    const manager = { getLeafId: () => `pi-answer-${sessions}` };
+    const sdk = {
+      createAgentSession: async () => {
+        sessions += 1;
+        const first = sessions === 1;
+        const session = {
+          sessionFile: "/sessions/pi-late.jsonl", sessionId: `pi-${sessions}`, sessionManager: manager,
+          agent: {
+            subscribe(listener: (event: { type: string; message?: unknown }) => void) {
+              if (first) nativeListeners.add(listener);
+              return () => { nativeListeners.delete(listener); };
+            },
+            steer() { steered = true; },
+          },
+          subscribe(listener: (event: { type: string; message?: unknown }) => void) {
+            this.listener = listener;
+            return () => { this.listener = undefined; };
+          },
+          listener: undefined as ((event: { type: string; message?: unknown }) => void) | undefined,
+          async prompt(text: string) {
+            prompts.push(text);
+            if (first) await released;
+            this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
+          },
+          async abort() { release(); },
+          dispose() {},
+        };
+        return { session };
+      },
+      createBashToolDefinition: () => ({}),
+      DefaultResourceLoader: class { async reload() {} },
+      getAgentDir: () => "/agent",
+      ModelRuntime: { create: async () => ({ getModel: () => undefined }) },
+      SessionManager: { create: () => manager, open: () => manager },
+    } as unknown as PiSdk;
+    const body = runAkumaBody(normalizeLaunch({
+      paths: allocated.paths,
+      seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
+      initialBody: "work",
+    }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
+    await waitUntilLatestBody(allocated.paths, body);
+    await recordTell(allocated.paths, { id: "pi-late", body: "late input", recordedAt: "2026-08-08T00:00:01.000Z" });
+    await waitForCondition("Pi to queue the late steer", () => steered, { terminalState: settlementProbe(body, () => "Body settled before native steer") });
+    for (const listener of nativeListeners) listener({ type: "agent_end" });
+    assert.equal((await readTell(allocated.paths, "pi-late"))?.state, "pending");
+    release();
+    await expectBodySettles(body, "Pi Body did not start the next Turn after native end");
+    const tell = await readTell(allocated.paths, "pi-late");
+    assert.equal(tell?.state, "told");
+    assert.deepEqual(tell?.deliveries.map((delivery) => delivery.route), ["launch"]);
+    assert.equal(sessions, 2);
+    assert.deepEqual(prompts, ["work", "late input"]);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal(nativeListeners.size, 0);
   } finally {
     await removeDrivenBodyFixture(root);
   }

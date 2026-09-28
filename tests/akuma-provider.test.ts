@@ -1079,6 +1079,10 @@ type FakePiObservation = {
   aborted: number;
   disposed: number;
   prompt?: string;
+  steered: Record<string, unknown>[];
+  emitNative(event: Record<string, unknown>): void;
+  finishPrompt(): void;
+  agentListeners: number;
   bash?: {
     cwd: string;
     options: Parameters<PiSdk["createBashToolDefinition"]>[1];
@@ -1094,9 +1098,23 @@ function fakePiSdk(
     waitForAbort?: boolean;
     promptNeverSettles?: boolean;
     abortNeverSettles?: boolean;
+    waitForRelease?: boolean;
+    subscriptionFailure?: boolean;
   } = {},
 ): { sdk: PiSdk; seen: FakePiObservation } {
-  const seen: FakePiObservation = { aborted: 0, disposed: 0 };
+  const nativeListeners = new Set<(event: Record<string, unknown>) => void>();
+  let emitSession = (_event: Record<string, unknown>) => {};
+  let releasePrompt = () => {};
+  const promptReleased = new Promise<void>((resolve) => { releasePrompt = resolve; });
+  const seen: FakePiObservation = {
+    aborted: 0, disposed: 0, steered: [],
+    emitNative: (event) => {
+      if (event.type === "agent_end") emitSession({ ...event, messages: [], willRetry: event.willRetry === true });
+      for (const listener of nativeListeners) listener(event);
+    },
+    finishPrompt: () => releasePrompt(),
+    get agentListeners() { return nativeListeners.size; },
+  };
   const manager = {
     getLeafId: () => (input.historyId === undefined ? "entry-final" : input.historyId),
     createBranchedSession: (id: string) => {
@@ -1108,7 +1126,15 @@ function fakePiSdk(
     sessionFile: "/sessions/pi.jsonl",
     sessionId: "pi-session",
     sessionManager: manager,
+    agent: {
+      subscribe(listener: (event: Record<string, unknown>) => void) {
+        nativeListeners.add(listener);
+        return () => { nativeListeners.delete(listener); };
+      },
+      steer(message: Record<string, unknown>) { seen.steered.push(message); },
+    },
     subscribe(listener: (event: Record<string, unknown>) => void) {
+      if (input.subscriptionFailure === true) throw new Error("Pi subscription failed");
       this.listener = listener;
       return () => {
         this.listener = undefined;
@@ -1123,6 +1149,7 @@ function fakePiSdk(
         await new Promise<void>((resolve) => {
           this.resolveAbort = resolve;
         });
+      if (input.waitForRelease === true) await promptReleased;
       for (const event of input.events ?? []) this.listener?.(event);
     },
     resolveAbort: undefined as (() => void) | undefined,
@@ -1135,6 +1162,7 @@ function fakePiSdk(
       seen.disposed += 1;
     },
   };
+  emitSession = (event) => session.listener?.(event);
   class ResourceLoader {
     constructor(options?: Record<string, unknown>) {
       if (options !== undefined) seen.loader = options;
@@ -1527,7 +1555,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     }),
   );
   const drive = await attempt.result;
-  assert.equal(drive.tell, undefined);
+  assert.equal(typeof drive.tell, "function");
   const events = [];
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
@@ -1573,6 +1601,92 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   });
   assert.equal(fake.seen.disposed, 1);
   await attempt.closed;
+});
+
+test("Pi live tells require exact native message evidence, not queue acknowledgement", async () => {
+  const fake = fakePiSdk({
+    waitForRelease: true,
+    events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "after steering" }] } }],
+  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir() }),
+  );
+  const drive = await attempt.result;
+  let firstResult: unknown;
+  let secondResult: unknown;
+  const first = drive.tell!({ id: "first", text: "same text" }).then((result) => { firstResult = result; return result; });
+  const second = drive.tell!({ id: "second", text: "same text" }).then((result) => { secondResult = result; return result; });
+  assert.equal(fake.seen.steered.length, 2);
+  assert.notEqual(fake.seen.steered[0], fake.seen.steered[1]);
+  assert.deepEqual(fake.seen.steered.map((message) => message.content), [
+    [{ type: "text", text: "same text" }], [{ type: "text", text: "same text" }],
+  ]);
+  fake.seen.emitNative({ type: "message_end", message: { ...fake.seen.steered[0] } });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(firstResult, undefined);
+  assert.equal(secondResult, undefined);
+  fake.seen.emitNative({ type: "message_end", message: fake.seen.steered[1] });
+  assert.deepEqual(await second, { kind: "accepted", fence: "pi-session:second" });
+  assert.equal(firstResult, undefined);
+  fake.seen.emitNative({ type: "agent_end", willRetry: true });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(firstResult, undefined);
+  fake.seen.emitNative({ type: "agent_end", messages: [] });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(firstResult, undefined, "a non-retry agent_end can still continue within the native prompt");
+  fake.seen.emitNative({ type: "message_end", message: fake.seen.steered[0] });
+  assert.deepEqual(await first, { kind: "accepted", fence: "pi-session:first" });
+  fake.seen.finishPrompt();
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "after steering", historyId: "entry-final" });
+  await attempt.closed;
+  assert.equal(fake.seen.agentListeners, 0);
+  assert.deepEqual(await drive.tell!({ id: "late", text: "later" }), { kind: "turn-ended" });
+  assert.equal(fake.seen.steered.length, 2);
+});
+
+test("Pi returns turn-ended for an unmatched steer only after native prompt settlement", async () => {
+  const fake = fakePiSdk({
+    waitForRelease: true,
+    events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }],
+  });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir() }),
+  );
+  const drive = await attempt.result;
+  let result: unknown;
+  const pending = drive.tell!({ id: "late", text: "unobserved" }).then((value) => { result = value; return value; });
+  fake.seen.emitNative({ type: "agent_end", messages: [] });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(result, undefined);
+  fake.seen.finishPrompt();
+  assert.deepEqual(await pending, { kind: "turn-ended" });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+  await attempt.closed;
+  assert.equal(fake.seen.agentListeners, 0);
+});
+
+test("Pi disposal releases native live tell waiters", async () => {
+  const fake = fakePiSdk({ promptNeverSettles: true });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir() }),
+  );
+  const drive = await attempt.result;
+  const pending = drive.tell!({ id: "pending", text: "steer" });
+  await attempt.forceDispose();
+  assert.deepEqual(await pending, { kind: "turn-ended" });
+  await attempt.closed;
+  assert.equal(fake.seen.agentListeners, 0);
+});
+
+test("Pi retires its native subscription when session setup fails", async () => {
+  const fake = fakePiSdk({ subscriptionFailure: true });
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("work", { cwd: tmpdir() }),
+  );
+  await assert.rejects(attempt.result, /Pi subscription failed/u);
+  await attempt.closed;
+  assert.equal(fake.seen.agentListeners, 0);
+  assert.equal(fake.seen.disposed, 1);
 });
 
 test("Pi retains write targets as conservative file changes without inventing diffstat", async () => {
