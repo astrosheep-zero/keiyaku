@@ -138,6 +138,49 @@ function writeProgress(body: string): void {
   process.stderr.write(body.endsWith("\n") ? body : `${body}\n`);
 }
 
+class LiveProgressFrame {
+  private lines: readonly string[] = [];
+
+  constructor(private readonly stream: NodeJS.WriteStream) {}
+
+  append(body: string): void {
+    if (body.length === 0) return;
+    this.clear();
+    writeProgress(body);
+    this.draw();
+  }
+
+  update(lines: readonly string[]): void {
+    if (this.stream.isTTY !== true) return;
+    this.clear();
+    this.lines = lines;
+    this.draw();
+  }
+
+  finish(body: string): void {
+    this.clear();
+    this.lines = [];
+    writeProgress(body);
+  }
+
+  private draw(): void {
+    if (this.stream.isTTY !== true || this.lines.length === 0) return;
+    this.stream.write(this.lines.join("\n"));
+  }
+
+  private clear(): void {
+    if (this.stream.isTTY !== true || this.lines.length === 0) return;
+    if (this.lines.length > 1) this.stream.write(`\u001b[${this.lines.length - 1}A`);
+    this.stream.write("\r");
+    for (let index = 0; index < this.lines.length; index += 1) {
+      this.stream.write("\u001b[2K");
+      if (index < this.lines.length - 1) this.stream.write("\n");
+    }
+    if (this.lines.length > 1) this.stream.write(`\u001b[${this.lines.length - 1}A`);
+    this.stream.write("\r");
+  }
+}
+
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
@@ -164,6 +207,7 @@ async function promptBody(command: Readonly<{ prompt: AkumaPromptSource }>, inpu
  */
 function waitObserver(
   stream: ReturnType<typeof waitObservationStream>,
+  frame: LiveProgressFrame,
   onSelected?: (selected: readonly WaitSelectedIdentity[]) => void,
 ): WaitObserver {
   return {
@@ -173,7 +217,8 @@ function waitObserver(
     },
     observe: (observed) => {
       const lines = stream.observe(observed);
-      if (lines.length > 0) writeProgress(lines.join("\n"));
+      if (lines.length > 0) frame.append(lines.join("\n"));
+      frame.update(stream.frame());
     },
   };
 }
@@ -184,12 +229,13 @@ async function invokeWait(
 ): Promise<AkumaInvocationResult> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   const stream = command.output === "text" ? waitObservationStream(resultContext()) : undefined;
+  const frame = new LiveProgressFrame(process.stderr);
   const startedAt = Date.now();
   let selection: readonly WaitSelectedIdentity[] | undefined;
   const observer =
     stream === undefined
       ? undefined
-      : waitObserver(stream, (selected) => {
+      : waitObserver(stream, frame, (selected) => {
           selection = selected;
         });
   const result = await waitAkuma(
@@ -210,7 +256,7 @@ async function invokeWait(
   };
   if (stream !== undefined && stream.streamed()) {
     const closing = stream.conclude(result);
-    if (closing.length > 0) writeProgress(closing);
+    frame.finish(closing);
     return {
       kind: "akuma",
       action: "wait",
@@ -260,6 +306,7 @@ async function invokeAsk(
     command.output === "text" && channel.kind === "local"
       ? askProgressStream(undefined, alias, resultContext())
       : undefined;
+  const frame = new LiveProgressFrame(process.stderr);
   const result = await akumas(input).ask({
     ...(await inputInitiator(input)),
     akuma: command.akuma,
@@ -273,13 +320,21 @@ async function invokeAsk(
       ? {}
       : {
           observe: {
-            admitted: (tell, id) => writeProgress(progress.admitted(tell, id).join("\n")),
-            observe: (observation) => writeProgress(progress.observe(observation).join("\n")),
+            admitted: (tell, id) => {
+              const lines = progress.admitted(tell, id);
+              if (lines.length > 0) frame.append(lines.join("\n"));
+              frame.update(progress.frame());
+            },
+            observe: (observation) => {
+              const lines = progress.observe(observation);
+              if (lines.length > 0) frame.append(lines.join("\n"));
+              frame.update(progress.frame());
+            },
           },
         }),
   });
   const rendered = result;
-  if (progress !== undefined) writeProgress(progress.conclude(rendered).join("\n"));
+  if (progress !== undefined) frame.finish(progress.conclude(rendered).join("\n"));
   else if (command.output === "text" && channel.kind === "body-request")
     writeProgress(waitedTellProgress(rendered, alias, resultContext()));
   return {
@@ -391,6 +446,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
         ...callSignalOption(input.signal),
       };
       let stream: ReturnType<typeof callObservationStream> | undefined;
+      const frame = new LiveProgressFrame(process.stderr);
       const observing = command.mode === "wait" && command.output === "text";
       const observe: CallRequest["observe"] = observing
         ? {
@@ -398,10 +454,12 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
               stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
                 admittedAt: tell.row.at,
               });
+              frame.update(stream.frame());
             },
             observe: (observation) => {
               const lines = stream?.observe(observation) ?? [];
-              if (lines.length > 0) writeProgress(lines.join("\n"));
+              if (lines.length > 0) frame.append(lines.join("\n"));
+              if (stream !== undefined) frame.update(stream.frame());
             },
           }
         : undefined;
@@ -413,7 +471,7 @@ export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInp
       });
       let streamed = stream !== undefined;
       if (stream !== undefined) {
-        writeProgress(stream.conclude(result.observation));
+        frame.finish(stream.conclude(result.observation));
       } else if (observing && result.observation.kind === "failed") {
         const fallback = inputWaitStream(
           resultContext(),

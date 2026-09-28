@@ -1835,7 +1835,7 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     roster.slice(-bounded.length),
     bounded.map((line) => `  ${line}`),
   );
-  assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
+  assert.match(roster.at(-1)!, /│ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
@@ -1925,7 +1925,7 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(roster, /✓ custom-tool/u);
+  assert.match(roster, /│ custom-tool/u);
 });
 
 test("generic tool rows preserve semantic and common summaries", () => {
@@ -1960,7 +1960,7 @@ test("generic tool rows preserve semantic and common summaries", () => {
   assert.doesNotMatch(text, /newest first · 20 rows/u);
   for (const name of ["mystery", "silent", "get_context_remaining"])
     assert.ok(
-      lines.some((line) => new RegExp(`✓ ${name}$`, "u").test(line)),
+      lines.some((line) => new RegExp(`│ ${name}$`, "u").test(line)),
       `${name} with empty or absent arguments renders no summary`,
     );
 });
@@ -2156,7 +2156,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /● run    \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /\? run    \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -2327,7 +2327,8 @@ test("status renders selected activity evidence while preserving history and com
       1,
       `selected ${command} renders once`,
     );
-  assert.match(statusText, /● run    \$ c9/u, "the active final tool remains visible");
+  assert.match(statusText, /\? run    \$ c9/u, "the active final tool remains visible as unsettled");
+  assert.doesNotMatch(statusText, /● run\s+\$/u, "status never asserts live activity");
   assert.doesNotMatch(statusText, /omitted/u, "status does not re-fold the selected tool evidence");
   assert.ok(statusText.indexOf("$ c4") < statusText.indexOf("between"));
   assert.ok(statusText.indexOf("between") < statusText.indexOf("$ c5"));
@@ -2410,6 +2411,7 @@ test("status renders selected activity evidence while preserving history and com
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
   assert.match(historyText, /      ⋮ 55 earlier events · showing last 12/u);
   assert.doesNotMatch(historyText, /earlier turns/u);
+  assert.doesNotMatch(historyText, /●/u, "history never asserts live activity");
   for (const command of ["c4", "c5", "c6", "c7"])
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
@@ -2531,7 +2533,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
     openingSequence: 4,
   };
   const wakeSnapshot = snapshotActivityLines(woken, context).join("\n");
-  assert.match(wakeSnapshot, /^\d{2}:\d{2} ✓ told +“resume with the new direction”/mu);
+  assert.match(wakeSnapshot, /^\d{2}:\d{2} │ told +“resume with the new direction”/mu);
   assert.ok(wakeSnapshot.indexOf("resume with the new direction") < wakeSnapshot.indexOf("after-wake"));
   assert.equal((wakeSnapshot.match(/resume with the new direction/gu) ?? []).length, 1);
   const wakeStatusText = snapshotText(
@@ -2547,7 +2549,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   const wakeOpening = wakeWait
     .observe([observed(parseAkumaStatus({ id: "aku/worker/abcd0102", life: "running", allowed: [], timeline: woken }))])
     .join("\n");
-  assert.match(wakeOpening, /✓ told +“resume with the new direction”/u);
+  assert.match(wakeOpening, /│ told +“resume with the new direction”/u);
   assert.doesNotMatch(wakeOpening, /after-wake/u);
 });
 
@@ -2727,6 +2729,27 @@ test("narrative selection is partition-invariant and repeated pending snapshots 
     return [...lines, ...stream.flush()];
   };
   assert.deepEqual(render([rows.length]), render([4, 1, 2, 1, 2, 2]));
+});
+
+test("live activity keeps unsettled rows in the frame and accounts for them on close", () => {
+  const active = snapshotRow(activeTool(1, "bash", { kind: "run", command: "slow" }));
+  const complete = snapshotRow(completedTool(2, "bash", { kind: "run", command: "slow" }));
+  const stream = activityStream({ columns: 120, color: false });
+
+  assert.deepEqual(stream(liveActivity(openAkumaSnapshot([active]))), []);
+  assert.match(stream.frame().join("\n"), /● run +\$ slow/u);
+
+  const settled = stream(liveActivity(idleAkumaSnapshot([complete]))).join("\n");
+  assert.match(settled, /│ run +\$ slow/u);
+  assert.equal(stream.frame().length, 0);
+  assert.deepEqual(stream.flush(), []);
+
+  const unresolved = activityStream({ columns: 120, color: false });
+  unresolved(liveActivity(openAkumaSnapshot([active])));
+  const closing = unresolved.flush().join("\n");
+  assert.match(closing, /\? run +\$ slow/u);
+  assert.equal((closing.match(/\$ slow/gu) ?? []).length, 1);
+  assert.deepEqual(unresolved.flush(), []);
 });
 
 test("a live activity stream skips thoughts while advancing its sequence cursor", () => {
@@ -2977,7 +3000,10 @@ test("an unfinished wait concludes with the running mark and waited duration, ne
     ],
     unobserved: [],
   };
-  assert.equal(stream.conclude(conclusion), `${clockAt(46_000)} ● running — waited 45s`);
+  assert.equal(
+    stream.conclude(conclusion),
+    `18:00 ? say    “still working”\n${clockAt(46_000)} ● running — waited 45s`,
+  );
 });
 
 test("a streamed multi-target wait scoreboards without a count while a non-streamed one closes the same way", () => {
@@ -3115,7 +3141,7 @@ test("conclusion durations assert real waiting", () => {
   during.observe([observed(answered)]);
   assert.equal(
     during.conclude({ reason: "completed", observations: [observation(answered)], unobserved: [] }),
-    `${clockAt(settledAtMs)} ✓ answered — 5s\n\n`,
+    `${clockAt(settledAtMs)} ? say    “working”\n${clockAt(settledAtMs)} ✓ answered — 5s\n\n`,
   );
 
   // Unfinished: the row keeps its elapsed wait.
@@ -3126,7 +3152,7 @@ test("conclusion durations assert real waiting", () => {
   now = 46_000;
   assert.equal(
     unfinished.conclude({ reason: "deadline", observations: [observation(open)], unobserved: [] }),
-    `${clockAt(46_000)} ● running — waited 45s`,
+    `18:00 ? say    “working”\n${clockAt(46_000)} ● running — waited 45s`,
   );
 
   // The observing call shares the rule: a call already answered at its first look names no duration.
@@ -3360,12 +3386,12 @@ test("a streamed observing call opens one framed head and never replays a settle
   const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
   const text = stream.observe(live(growing)).join("\n");
   assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
-  assert.match(text, /✓ run +\$ first/u);
+  assert.match(text, /│ run +\$ first/u);
   assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
   const conclusion = stream.conclude(callObservation({ reason: "answered", answer: "the answer" }));
-  assert.equal(conclusion, `${clockAt(settledAtMs)} ✓ answered — 4s\n\n`);
+  assert.equal(conclusion, `      ? run    \$ second\n${clockAt(settledAtMs)} ✓ answered — 4s\n\n`);
   assert.doesNotMatch(conclusion, /the answer|└─ kei\/demo|@scout/u, "no head or answer replay");
 });
 

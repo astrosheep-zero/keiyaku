@@ -39,6 +39,11 @@ fact read and Turn projection. That transient companion preserves final forms
 that a later bounded status no longer selects, including rows of a newly idle
 Turn. It neither widens a status nor enters a public wait or call result.
 
+Active tools and in-flight speech belong only to a live stream's redrawable
+frame. Append-only output admits activity only after settlement; closing
+accounts for every row still in flight with an explicit unknown (`?`) row.
+Status and history are frozen projections, so they never assert liveness.
+
 For an open Turn, the public timeline projector selects and retains its opening
 input as current work independently of the ordinary-detail budget. Its retained
 call wins; only without that call, the earliest retained settled Tell delivered

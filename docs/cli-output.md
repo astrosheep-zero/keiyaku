@@ -64,8 +64,11 @@ retained coordination residue without claiming a world-wide transaction.
 
 Each domain-state-to-mark mapping and refusal receipt assembly has one
 definition site; render surfaces consume that shared definition and never
-re-derive it. `●` asserts liveness and belongs on live surfaces; what live rows
-may enter the scrollback is a separate Contract's architecture, not settled here.
+re-derive it. `●` asserts liveness and belongs only to a redrawable live frame;
+settled intermediate activity uses the plain `│` rail, including successful
+non-final tool and Tell settlements; a successful final row uses `✓` at most
+once per stream, failures use `!`, and unresolved activity closes as `?`. History
+and status never contain `●`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
@@ -163,11 +166,13 @@ rather than replacing it with an early exit.
 
 An observing call, an ask, and a wait share one input-wait
 presentation discipline, defined once: an identity frame opens on the progress
-channel, eligible timeline rows stream once each in retained order, live
-activity never contains thought narration, and one truthful conclusion follows
-the shared clock, mark, verb, and duration grammar. For an ask, live activity
-begins at its already-rendered Tell admission; earlier work remains available
-through status and history. A caller deadline concludes on the target's observed
+channel, eligible timeline rows stream once each in retained order, active
+activity stays in the redrawable frame until it settles, and one truthful
+conclusion follows the shared clock, mark, verb, and duration grammar. Closing
+accounts for every row still in flight with `?`; history and status never assert
+liveness. For an ask, live activity begins at its already-rendered Tell
+admission; earlier work remains available through status and history. A caller
+deadline concludes on the target's observed
 life rather than naming the deadline; the explicit reason stays in JSON. The
 observed answer belongs to its input's
 exact terminal Turn — Akuma-wide idle never stands in for it — and stdout

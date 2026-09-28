@@ -23,6 +23,7 @@ import { safeText, type TextRenderContext } from "./terminal.js";
 export type AskProgress = Readonly<{
   admitted: (tell: TellResult, id: AkuId) => readonly string[];
   observe: (observation: LiveStatusObservation) => readonly string[];
+  frame: () => readonly string[];
   conclude: (result: AkumaAskResult) => readonly string[];
 }>;
 
@@ -62,6 +63,7 @@ export function askProgressStream(
       });
     },
     observe: (observation) => stream.observe(observation),
+    frame: () => stream.frame(),
     conclude: (result) => [
       stream.conclude({
         kind: "observed",

@@ -101,14 +101,13 @@ function label(row: RenderRow, tool?: ToolRepr): string {
   return tool!.label;
 }
 
-function mark(row: RenderRow): "│" | "●" | "⧗" | "✓" | "!" | "?" {
+function mark(row: RenderRow, live = false): "│" | "●" | "⧗" | "✓" | "!" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
-  if (row.kind === "tell" && row.state === "told") return "✓";
   if (row.kind === "tell" && row.state === "pending") return "⧗";
   if (row.kind === "tool") {
-    if (row.state === "active") return "●";
+    if (row.state === "active") return live ? "●" : "?";
     if (row.state === "unsettled") return "?";
-    return row.state.status === "ok" ? "✓" : "!";
+    return row.state.status === "ok" ? "│" : "!";
   }
   return "│";
 }
@@ -373,27 +372,42 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
 }
 
 /** Snapshot and live streams select different rows, but render each selected row identically. */
+type TimelineRenderOptions = Readonly<{
+  inFlightSay?: boolean;
+  live?: boolean;
+  unsettled?: boolean;
+}>;
+
 function renderTimelineRow(
   row: RenderRow,
   context: TextRenderContext,
   layout: RowLayout,
   time: string | undefined,
-  inFlightSay = false,
+  options: TimelineRenderOptions = {},
 ): readonly string[] {
+  const { inFlightSay = false, live = false, unsettled = false } = options;
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
+  const glyph = inFlightSay ? (live ? "●" : "?") : unsettled ? "?" : mark(row, live);
   return renderRow(row, context, {
     layout,
-    first: layout.head(time, inFlightSay ? "●" : mark(row), label(row, tool), context.columns),
+    first: layout.head(time, glyph, label(row, tool), context.columns),
     continuation: layout.continuation(),
     tool,
     inFlightSay,
   });
 }
 
+type GroupedEntryOptions = Readonly<{
+  live?: boolean;
+  inFlightSay?: (row: RenderRow) => boolean;
+  unsettled?: (row: RenderRow) => boolean;
+}>;
+
 function groupedEntries(
   entries: readonly RenderEntry[],
   context: TextRenderContext,
   layout: RowLayout = plainLayout(),
+  options: GroupedEntryOptions = {},
 ): readonly string[] {
   const lines: string[] = [];
   let previousClock: string | undefined;
@@ -405,7 +419,13 @@ function groupedEntries(
     const row = entry.row;
     const at = clock(row.at);
     const changed = previousClock === undefined || at !== previousClock;
-    lines.push(...renderTimelineRow(row, context, layout, changed ? at : undefined));
+    lines.push(
+      ...renderTimelineRow(row, context, layout, changed ? at : undefined, {
+        inFlightSay: options.inFlightSay?.(row) ?? false,
+        live: options.live === true,
+        unsettled: options.unsettled?.(row) ?? false,
+      }),
+    );
     previousClock = at;
   }
   return lines;
@@ -496,6 +516,8 @@ export type ActivityStream = ((activity: RenderedActivity) => readonly string[])
   Readonly<{
     /** Establish a wait baseline without spending the command's live tool budget. */
     seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly string[];
+    /** Current live rows for the redrawable frame; never part of append-only output. */
+    frame: () => readonly string[];
     /** Emit the deferred tail exactly once before the command's conclusion. */
     flush: () => readonly string[];
   }>;
@@ -513,6 +535,7 @@ type ActivityStreamState = {
   admittedTellSequences: Set<number>;
   openingTools: number;
   deferred: DeferredActivityEntry[];
+  liveRows: Map<number, RenderRow>;
 };
 
 function isSettledStreamRow(row: RenderRow): boolean {
@@ -521,8 +544,18 @@ function isSettledStreamRow(row: RenderRow): boolean {
   return row.kind !== "tool" || (row.state !== "active" && row.state !== "unsettled");
 }
 
+function sameTool(left: RenderRow, right: RenderRow): boolean {
+  return (
+    left.kind === "tool" &&
+    right.kind === "tool" &&
+    left.turnSequence === right.turnSequence &&
+    left.name === right.name &&
+    JSON.stringify(left.call) === JSON.stringify(right.call)
+  );
+}
+
 function settledRows(activity: RenderedActivity): readonly RenderRow[] {
-  return activity.rows.filter(isSettledStreamRow);
+  return activity.rows.filter((row) => isSettledStreamRow(row) && !inFlightSay(activity, row));
 }
 
 function isBoundedStreamTool(row: RenderRow): boolean {
@@ -550,6 +583,7 @@ type StreamRowRenderOptions = Readonly<{
   context: TextRenderContext;
   layout: RowLayout;
   inFlightSay?: boolean;
+  unsettled?: boolean;
 }>;
 
 function renderStreamRow(
@@ -558,11 +592,16 @@ function renderStreamRow(
   lines: string[],
   options: StreamRowRenderOptions,
 ): void {
-  const { context, layout, inFlightSay = false } = options;
+  const { context, layout, inFlightSay = false, unsettled = false } = options;
   const at = clock(row.at);
   const previousClock = layout.clock?.previous ?? state.previousClock;
   const changed = previousClock === undefined || at !== previousClock;
-  lines.push(...renderTimelineRow(row, context, layout, changed ? at : undefined, inFlightSay));
+  lines.push(
+    ...renderTimelineRow(row, context, layout, changed ? at : undefined, {
+      inFlightSay,
+      unsettled,
+    }),
+  );
   if (layout.clock !== undefined) layout.clock.previous = at;
   else state.previousClock = at;
 }
@@ -627,6 +666,21 @@ function renderCurrentTurnBoundary(
   return boundary;
 }
 
+function rememberLiveRows(state: ActivityStreamState, activity: RenderedActivity): void {
+  for (const row of activity.rows) {
+    if (row.kind === "tool" && row.state === "active") state.liveRows.set(row.sequence, row);
+    else if (row.kind === "said" && inFlightSay(activity, row)) state.liveRows.set(row.sequence, row);
+    else if (row.kind === "tool" && isSettledStreamRow(row)) {
+      for (const [sequence, live] of state.liveRows) {
+        if (sameTool(live, row)) {
+          state.liveRows.delete(sequence);
+          break;
+        }
+      }
+    } else if (isSettledStreamRow(row)) state.liveRows.delete(row.sequence);
+  }
+}
+
 function observeActivitySnapshot(
   state: ActivityStreamState,
   activity: RenderedActivity,
@@ -654,6 +708,7 @@ function observeActivitySnapshot(
         state.newestSettledSequence === undefined ||
         row.sequence > state.newestSettledSequence,
     );
+  rememberLiveRows(state, activity);
   if (observedRows.length === 0) return lines;
   for (const row of observedRows) state.pendingTellSequences.delete(row.sequence);
   state.newestSettledSequence = observedRows.reduce(
@@ -719,6 +774,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     admittedTellSequences: new Set(),
     openingTools: 0,
     deferred: [],
+    liveRows: new Map(),
   };
   const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly string[] => {
     const lines: string[] = [];
@@ -736,6 +792,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       if (alreadyRenderedSequence !== undefined && boundary.row.sequence <= alreadyRenderedSequence)
         state.renderedBoundaries.add(boundary.turnSequence);
       else renderCurrentTurnBoundary(state, activity, lines, context, layout);
+      rememberLiveRows(state, activity);
       const omitted = baselineOmissionCount(
         activity,
         alreadyRenderedSequence === undefined
@@ -745,6 +802,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       if (omitted > 0) lines.push(layout.marker(omitted));
     }
     rememberPendingTells(state, activity);
+    rememberLiveRows(state, activity);
     const rows = settledRows(activity);
     if (rows.length > 0)
       state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
@@ -752,8 +810,29 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
   };
   const observe = (activity: RenderedActivity): readonly string[] =>
     observeActivitySnapshot(state, activity, context, layout);
-  const flush = (): readonly string[] => flushActivityTail(state, context, layout);
-  return Object.assign(observe, { seed, flush });
+  const frame = (): readonly string[] =>
+    groupedEntries(
+      [...state.liveRows.values()]
+        .sort((left, right) => left.sequence - right.sequence)
+        .map((row) => ({ kind: "row", row })),
+      context,
+      layout,
+      { live: true, inFlightSay: (row) => row.kind === "said" },
+    );
+  const flush = (): readonly string[] => {
+    const lines = [...flushActivityTail(state, context, layout)];
+    for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
+      const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;
+      renderStreamRow(state, unresolved, lines, {
+        context,
+        layout,
+        unsettled: true,
+      });
+    }
+    state.liveRows.clear();
+    return lines;
+  };
+  return Object.assign(observe, { seed, frame, flush });
 }
 
 /** What a wait conclusion renders over: its observed and unobserved members. */
@@ -775,6 +854,8 @@ export type WaitObservationStream = Readonly<{
   select: (selected: readonly WaitSelectedIdentity[]) => void;
   /** One observation round; returns the head frames and newly settled rows to print. */
   observe: (observed: readonly WaitObservedAkuma[]) => readonly string[];
+  /** Current live rows from all selected streams; never part of append-only output. */
+  frame: () => readonly string[];
   /** The wait's closing scoreboard, or the empty string when there is nothing to print. */
   conclude: (result: WaitConclusionResult) => string;
   streamed: () => boolean;
@@ -1115,8 +1196,9 @@ export function waitObservationStream(
   };
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
     observeWaitRound(state, round, context, now);
+  const frame = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.frame());
   const conclude = (result: WaitConclusionResult): string => concludeWaitStream(state, result, startedAt, now);
-  return { select, observe, conclude, streamed: () => state.observed };
+  return { select, observe, frame, conclude, streamed: () => state.observed };
 }
 
 /** The identity a streamed observing call's head frame renders from its resolved birth. */
@@ -1138,12 +1220,15 @@ export type InputWaitConclusion =
 export type InputWaitStream = Readonly<{
   admitted: (input: Readonly<{ at?: string; sequence?: number; rows: readonly string[] }>) => readonly string[];
   observe: (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>) => readonly string[];
+  /** Current live rows for the redrawable frame; never part of append-only output. */
+  frame: () => readonly string[];
   conclude: (result: InputWaitConclusion) => string;
   opened: () => boolean;
 }>;
 
 export type CallObservationStream = Readonly<{
   observe: InputWaitStream["observe"];
+  frame: InputWaitStream["frame"];
   conclude: (observation: CallObservation) => string;
   opened: InputWaitStream["opened"];
 }>;
@@ -1200,6 +1285,7 @@ export function inputWaitStream(
     cursorSeeded = true;
     return lines;
   };
+  const frame: InputWaitStream["frame"] = () => activity.frame();
   const conclude: InputWaitStream["conclude"] = (result) => {
     const lines: string[] = [];
     open(lines, result.kind === "failed");
@@ -1217,7 +1303,7 @@ export function inputWaitStream(
     lines.push(...head().facts);
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };
-  return { admitted: admit, observe, conclude, opened: () => opened };
+  return { admitted: admit, observe, frame, conclude, opened: () => opened };
 }
 
 export function callObservationStream(
@@ -1233,6 +1319,7 @@ export function callObservationStream(
   stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
   return {
     observe: stream.observe,
+    frame: stream.frame,
     conclude: (observation) => {
       if (observation.kind === "failed")
         return stream.conclude({ kind: "failed", diagnostic: observation.failure.diagnostic });
