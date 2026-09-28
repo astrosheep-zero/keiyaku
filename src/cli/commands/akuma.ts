@@ -50,6 +50,8 @@ type AkumaCommandSpec = Readonly<{
   details?: string;
 }>;
 
+const EXTRA_ALLOWED_ACTIONS = ALLOWED_ACTIONS.filter((action) => !DEFAULT_ALLOWED_ACTIONS.includes(action));
+
 const AKUMA_COMMAND_SPECS = {
   call: {
     arity: 1,
@@ -72,8 +74,10 @@ const AKUMA_COMMAND_SPECS = {
       "--contract assigns the Akuma work from that Contract; it does not choose where the Akuma works.",
       "--workdir selects where the Akuma works; relative paths start from your current directory. Without it, the current directory is used.",
       "--alias <name> gives the new Akuma the selector @name; use it instead of aku/<id>.",
-      `Available actions: ${ALLOWED_ACTIONS.join(", ")}.`,
       `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
+      ...(EXTRA_ALLOWED_ACTIONS.length === 0
+        ? []
+        : [`Also available with --allowed: ${EXTRA_ALLOWED_ACTIONS.join(", ")}.`]),
       "Repeated --allowed adds actions to the selected Akuma's allowed actions; it cannot remove inherited permissions.",
       "If no actions are configured, defaults apply; an explicitly empty list allows none.",
       "An Akuma started by another Akuma can use only actions its parent can use. status <aku/...|@alias> shows that Akuma's allowed actions.",
@@ -143,7 +147,8 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { at: "value", json: "boolean" },
     usage: "fork <aku/...|@alias> --at <historyId>",
-    purpose: "Create a new Akuma from one retained answered turn.",
+    purpose: "Create a new Akuma from an answered turn.",
+    details: "--at takes a retained answered turn id (turn/<n>); find one with history.",
   },
   kill: {
     arity: "one-or-more",

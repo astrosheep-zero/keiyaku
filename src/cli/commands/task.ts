@@ -79,6 +79,8 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
   [--body <text>]
 task add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create a Task from flags or a Task document on stdin.",
+    details:
+      "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
   },
   show: {
     arity: [1, Number.POSITIVE_INFINITY],

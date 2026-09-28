@@ -114,7 +114,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "optional",
     flags: { satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
     usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -)",
-    purpose: "Record whether a Contract meets its acceptance criteria based on the current work.",
+    purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",
       "--satisfied means every acceptance criterion is met. It records the verdict and requests integration; if the candidate, prerequisites, and gates are ready, this invocation integrates and claims the Contract. Otherwise the Contract stays active.",
@@ -151,6 +151,7 @@ export const CONTRACT_COMMAND_SPECS = {
     flags: { json: "boolean" },
     usage: "show [<contract>|@<contract>]",
     purpose: "Show one Contract's requirements and work guidance.",
+    details: "Without a selector, shows the current worktree's Contract.",
   },
   ls: {
     positional: "optional",
@@ -158,17 +159,18 @@ export const CONTRACT_COMMAND_SPECS = {
     flags: { limit: "value", json: "boolean" },
     usage:
       'ls task[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<akuma>[/] [--limit <count>]\nls "aku/<archetype>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]',
-    purpose: "List Tasks, Contracts, or Akumas in a selected scope.",
+    purpose: "List Tasks, Contracts, or Akumas.",
   },
   audit: {
     positional: "optional",
     stdin: "none",
     flags: { "include-dirty": "boolean", "show-diff": "boolean", json: "boolean" },
     usage: "audit [<contract>|@<contract>] [--include-dirty] [--show-diff]",
-    purpose: "Preview what would happen if you delivered a Contract now; progress is on stderr.",
+    purpose: "Preview what would happen if you delivered a Contract now.",
     details: [
       "--include-dirty checks all non-ignored worktree changes, staged or not.",
       "--show-diff includes the proposed candidate diff when one can be prepared.",
+      "Progress appears on stderr; stdout contains one final result.",
     ].join("\n"),
   },
   reconcile: {
@@ -176,7 +178,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { "retry-hooks": "boolean", json: "boolean" },
     usage: "reconcile [<contract>|@<contract>] [--retry-hooks]",
-    purpose: "Restore a Contract's Git workspace from its recorded state, or reconcile workspaces across this World.",
+    purpose: "Restore a Contract's Git workspace from its recorded state, or all of this World's.",
     details:
       "--retry-hooks reruns configured setup commands even when a Contract workspace already exists; otherwise they run when reconciliation creates it.",
   },
@@ -185,7 +187,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { confirm: "value", json: "boolean" },
     usage: "nuke [--confirm <world-directory>]",
-    purpose: "Remove Keiyaku-owned data from a confirmed World.",
+    purpose: "Remove Keiyaku-owned data from this World.",
     details:
       "Stops Akumas and removes this World's Tasks and Keiyaku-created worktrees and Git references. --confirm must exactly match this World's directory; source files are not deleted.",
   },
@@ -201,7 +203,8 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { path: "repeat-value", json: "boolean" },
     usage: "region [<contract>]\nregion --path <pattern> [--path <pattern> ...]",
-    purpose: "Show declared Contract file patterns, optionally for selected paths.",
+    purpose: "Show declared Contract write patterns — all, one Contract's, or those overlapping given paths.",
+    details: "Check overlap before starting parallel work.",
   },
 } as const satisfies Readonly<Record<string, ContractCommandSpec>>;
 
