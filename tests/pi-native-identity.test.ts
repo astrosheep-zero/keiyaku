@@ -32,6 +32,10 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
     sessionFile: "/sessions/native.jsonl",
     sessionId: "native-child-session",
     sessionManager: manager,
+    agent: {
+      subscribe: () => () => {},
+      steer: () => {},
+    },
     subscribe: () => () => {},
     prompt: async () => {},
     abort: async () => {},

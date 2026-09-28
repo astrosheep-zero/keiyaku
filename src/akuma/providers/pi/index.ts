@@ -207,7 +207,7 @@ async function drivePi(
   let unsubscribeAgent: (() => void) | undefined;
   let unsubscribe!: () => void;
   try {
-    unsubscribeAgent = agent?.subscribe((event) => {
+    unsubscribeAgent = agent.subscribe((event) => {
       if (event.type === "message_end") {
         const waiter = pendingTells.get(event.message);
         if (waiter !== undefined) {
@@ -277,27 +277,23 @@ async function drivePi(
     admission: { fence: native.sessionId },
     events,
     completion,
-    ...(agent === undefined
-      ? {}
-      : {
-          tell: (tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission> => {
-            if (state.settled) return Promise.resolve({ kind: "turn-ended" });
-            const message: PiNativeMessage = {
-              role: "user",
-              content: [{ type: "text", text: tell.text }],
-              timestamp: Date.now(),
-            };
-            return new Promise<TellSubmission>((resolve, reject) => {
-              pendingTells.set(message, { id: tell.id, resolve });
-              try {
-                agent.steer(message);
-              } catch (error) {
-                pendingTells.delete(message);
-                reject(error);
-              }
-            });
-          },
-        }),
+    tell: (tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission> => {
+      if (state.settled) return Promise.resolve({ kind: "turn-ended" });
+      const message: PiNativeMessage = {
+        role: "user",
+        content: [{ type: "text", text: tell.text }],
+        timestamp: Date.now(),
+      };
+      return new Promise<TellSubmission>((resolve, reject) => {
+        pendingTells.set(message, { id: tell.id, resolve });
+        try {
+          agent.steer(message);
+        } catch (error) {
+          pendingTells.delete(message);
+          reject(error);
+        }
+      });
+    },
     abort: () => {
       state.abortRequest ??= (async () => {
         if (state.settled) return;
