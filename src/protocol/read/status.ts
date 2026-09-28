@@ -28,7 +28,7 @@ import {
 } from "../../core/facts/types.js";
 import { projectBoundedList, type BoundedList } from "../../bounded-list.js";
 
-export type ContractPhase = "waiting" | "bound" | "tendered" | "claimed" | "abandoned";
+export type ContractPhase = "bound" | "tendered" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
 
 export type ContractGateCurrent = GateCurrent;
@@ -75,6 +75,7 @@ export type ContractRow = Readonly<{
   target: string | null;
   targetLag: ContractTargetLag;
   delivery: DeliverData | null;
+  abandonNote?: string;
   targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
   verification?: ContractVerificationStatus;
   gates: Readonly<{
@@ -120,8 +121,7 @@ function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
   if (state.delivery !== null) return "tendered";
-  if (state.bound !== null) return "bound";
-  return "waiting";
+  return "bound";
 }
 
 function verificationFor(
@@ -144,8 +144,8 @@ function verificationFor(
   return state.delivery === null ? undefined : { kind: "unrecorded" };
 }
 
-export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery" | "bound">, bindAt: string): string {
-  return state.terminal?.at ?? state.delivery?.at ?? state.bound?.at ?? bindAt;
+export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery">, bindAt: string): string {
+  return state.terminal?.at ?? state.delivery?.at ?? bindAt;
 }
 
 export function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string {
@@ -267,6 +267,9 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
       state.delivery === null || state.currentIntegration === null
         ? null
         : { ...state.delivery.data, integration: state.currentIntegration },
+    ...(state.terminal?.kind === "abandoned" && state.terminal.data.note !== undefined
+      ? { abandonNote: state.terminal.data.note }
+      : {}),
     targetObservation,
     ...(verification === undefined ? {} : { verification }),
     gates: {

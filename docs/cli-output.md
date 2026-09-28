@@ -126,10 +126,13 @@ as wait, including a sleeping Akuma with an outstanding Tell. Only observing a
 wait can justify elapsed-duration text. Read-only reference facts follow the
 conclusion, with reported changes before diagnostics and the execution directory
 last; an unknown change size remains unknown rather than implying additions or
-removals. Across snapshot, history, compact, and attributed activity, bounded
-payloads use one quote boundary and │-railed, body-aligned continuations. They
-slice by whole grapheme cells without word-sensitive rearrangement and expose
-truncation at the end of the bounded payload.
+removals. Across observations, including Contract testimony and Akuma snapshot, history,
+compact, and attributed activity, free text uses one bounded payload discipline:
+one quote boundary and │-railed, body-aligned continuations. Payloads slice by
+whole grapheme cells without word-sensitive rearrangement and expose truncation
+at the end. Selected Contract status foregrounds the phase's outcome or current
+work judgment; terminal status does not repeat delivery mechanics or workspace
+observation.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual

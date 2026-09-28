@@ -474,7 +474,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   const row: ContractRow = {
     id: contractId("kei/selected-contract"),
     title: "Selected Contract",
-    phase: "waiting",
+    phase: "bound",
     phaseAt: "2026-08-12T00:00:00.000Z",
     lastJournalAt: "2026-08-12T00:00:00.000Z",
     disposition: "active",
@@ -501,11 +501,11 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     },
     after: [
       { contractId: contractId("kei/claimed-prerequisite"), endpoint: { kind: "claimed" } },
-      { contractId: contractId("kei/active-prerequisite"), endpoint: { kind: "active", phase: "waiting" } },
+      { contractId: contractId("kei/active-prerequisite"), endpoint: { kind: "active", phase: "bound" } },
       { contractId: contractId("kei/abandoned-prerequisite"), endpoint: { kind: "abandoned" } },
       { contractId: contractId("kei/missing-prerequisite"), endpoint: { kind: "missing" } },
     ],
-    dependents: [{ contractId: contractId("kei/dependent-contract"), phase: "waiting" }],
+    dependents: [{ contractId: contractId("kei/dependent-contract"), phase: "bound" }],
   };
   const catalog: Catalog = {
     kind: "contracts",
@@ -517,23 +517,12 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   };
   const text = renderCatalogText(catalog);
 
-  assert.doesNotMatch(text, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(text, /^CONTRACTS \/\/ recent$/mu);
-  assert.doesNotMatch(text, /observed  /u);
-  assert.match(text, /! kei\/selected-contract · waiting · 0s · Selected Contract/u);
-  assert.match(text, /^  candidate  none\n  target  none$/mu);
-  assert.doesNotMatch(text, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
-  assert.doesNotMatch(text, /worktree clean|tender |integration |merge /u);
+  assert.match(text, /! kei\/selected-contract · bound · 0s · Selected Contract/u);
+  assert.match(text, /awaiting delivery/u);
+  assert.doesNotMatch(text, /tender commit|predecessor|method|content identity|behind|workspace/u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
-  assert.match(text, /✓ reviewed  × verified  ! security · stale  ○ manual/u);
-  assert.match(text, /after  kei\/claimed-prerequisite · claimed/u);
-  assert.match(text, /blocked by  kei\/active-prerequisite · waiting/u);
-  assert.match(text, /blocked by  kei\/abandoned-prerequisite · abandoned/u);
-  assert.match(text, /blocked by  kei\/missing-prerequisite · missing/u);
-  assert.match(text, /dependents  kei\/dependent-contract \(waiting\)/u);
-  assert.equal((text.match(/…/gu) ?? []).length, 1);
-  assert.equal(text.endsWith("…"), true);
   assert.doesNotMatch(text, /not shown|full|next:|--all/u);
+  assert.equal(text.endsWith("…"), true);
 
   const snap = snapshotId("b".repeat(40));
   const delivered = renderCatalogText({
@@ -552,13 +541,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.doesNotMatch(delivered, /^\d+ active · \d+ candidates?$/mu);
-  assert.match(
-    delivered,
-    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-selected-contract\n  verification unrecorded\n  target  none$/mu,
-  );
-  assert.match(delivered, /^  verification unrecorded$/mu);
-  assert.doesNotMatch(delivered, /○ no candidate · ● candidate|satisfied  \[✗\] unsatisfied/u);
+  assert.match(delivered, /awaiting verification/u);
+  assert.doesNotMatch(delivered, /tender commit|predecessor|content identity|method|behind/u);
 
   const expected = snapshotId("b".repeat(40));
   const observed = snapshotId("c".repeat(40));
@@ -580,10 +564,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(
-    moved,
-    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-target-moved\n  target  main @ ccccccc · behind 0\n  lag worktree  \/repo\/\.keiyaku\/wt\/catalog\n  target moved  bbbbbbb -> ccccccc$/mu,
-  );
+  assert.match(moved, /awaiting gates/u);
+  assert.doesNotMatch(moved, /tender commit|predecessor|content identity|behind/u);
 
   const disappeared = renderCatalogText({
     ...catalog,
@@ -603,10 +585,86 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(
-    disappeared,
-    /^  candidate  present\n  tender commit  bbbbbbb\n  integration result  bbbbbbb\n  predecessor  bbbbbbb\n  method  squash\n  content identity \(not commit\)  chg-target-null\n  target  main · head absent · behind unknown\n  target moved  bbbbbbb -> absent$/mu,
-  );
+  assert.match(disappeared, /awaiting gates/u);
+  assert.doesNotMatch(disappeared, /tender commit|predecessor|content identity|behind/u);
+});
+
+test("Contract status cards collapse terminal mechanics and bound testimony like Akuma answers", () => {
+  const integration = snapshotId("a".repeat(40));
+  const tender = snapshotId("b".repeat(40));
+  const long = "👩‍💻".repeat(120);
+  const base = {
+    ...catalogRow(),
+    phase: "bound" as const,
+    disposition: "active" as const,
+    worktreePath: "/tmp/wt",
+    delivery: null,
+    gates: { satisfied: false, reports: [{ gate: "reviewed", current: { kind: "missing" as const } }] },
+  };
+  const delivery = {
+    tenderSnapshot: tender,
+    integration: { predecessor: tender, snapshot: integration, changeId: changeId("chg-card") },
+    method: "squash" as const,
+    policy: { requireBranchesToBeUpToDate: false },
+  };
+  const show = (row: ContractRow, selection: "world" | "contract" = "contract") =>
+    renderKanshiText({
+      ...akumaWorldReport([]),
+      observedAt: "2026-08-12T00:00:05.000Z",
+      contracts: { kind: "present", value: { root: "/repo", state: null, observedAt: "2026-08-12T00:00:05.000Z", rows: [{ ...row, holder: { kind: "none" }, roster: [] }] } },
+    }, { columns: 60, color: false }, selection);
+  const bound = show(base);
+  assert.match(bound, /⧗ bound · 5s/u);
+  assert.match(bound, /○ reviewed/u);
+  assert.match(bound, /awaiting delivery/u);
+  assert.match(bound, /worktree  \/tmp\/wt/u);
+  const tendered = show({ ...base, phase: "tendered", delivery });
+  assert.match(tendered, /awaiting gates  ○ reviewed/u);
+  assert.match(tendered, /candidate  bbbbbbb/u);
+  assert.match(tendered, /integration result  aaaaaaa/u);
+  assert.doesNotMatch(tendered, /predecessor|method|content identity|behind/u);
+  const blocked = show({
+    ...base,
+    phase: "tendered",
+    delivery,
+    gates: { satisfied: true, reports: [] },
+    after: [{ contractId: contractId("kei/other"), endpoint: { kind: "active", phase: "bound" } }],
+  });
+  assert.match(blocked, /^  awaiting prerequisites  blocked by  kei\/other · bound$/mu);
+  const moved = show({
+    ...base,
+    phase: "tendered",
+    delivery,
+    gates: { satisfied: true, reports: [] },
+    target: "refs/heads/main",
+    targetObservation: { head: tender, drift: true },
+  });
+  assert.match(moved, /^  target moved  aaaaaaa -> bbbbbbb$/mu);
+  assert.doesNotMatch(moved, /awaiting gates|awaiting prerequisites/u);
+  const claimed = show({
+    ...base, phase: "claimed", disposition: "terminal", delivery,
+    gates: { satisfied: true, reports: [{ gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary: long } }] },
+    targetObservation: { head: tender, drift: true },
+    targetLag: { kind: "counted", behind: 5, subject: { kind: "worktree", path: "/tmp/wt" } },
+  });
+  assert.match(claimed, /✓ claimed · landed aaaaaaa/u);
+  assert.match(claimed, /when  5s/u);
+  assert.match(claimed, /review  “/u);
+  assert.match(claimed, /│ /u);
+  assert.match(claimed, /…”/u);
+  assert.doesNotMatch(claimed, /tender commit|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
+  const answer = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(2, long)), { columns: 60, color: false }).join("\n");
+  assert.match(answer, /“/u);
+  assert.match(answer, /│ /u);
+  assert.match(answer, /…”/u);
+  const abandoned = show({ ...base, phase: "abandoned", disposition: "terminal", abandonNote: long });
+  assert.match(abandoned, /× abandoned/u);
+  assert.match(abandoned, /note  “/u);
+  assert.match(abandoned, /…”/u);
+  assert.doesNotMatch(abandoned, /worktree|candidate/u);
+  const world = show({ ...base, phase: "tendered", delivery }, "world");
+  assert.match(world, /awaiting gates  ○ reviewed/u);
+  assert.doesNotMatch(world, /tender commit|predecessor|method|content identity|behind/u);
 });
 
 function catalogRow(verification?: ContractRow["verification"]): ContractRow {
@@ -643,14 +701,15 @@ test("recorded verification names the snapshot the verdict covers", () => {
     ],
     hasMore: false,
   };
-  assert.match(renderCatalogText(catalog), /^  verification satisfied · snapshot 4444444$/mu);
+  assert.match(renderCatalogText(catalog), /✓ claimed/u);
+  assert.doesNotMatch(renderCatalogText(catalog), /verification|snapshot 4444444/u);
 
   const bare = renderCatalogText({
     ...catalog,
     rows: [catalogRow({ kind: "recorded", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" })],
   });
-  assert.match(bare, /^  verification unsatisfied$/mu);
-  assert.doesNotMatch(bare, / · snapshot /u);
+  assert.match(bare, /✓ claimed/u);
+  assert.doesNotMatch(bare, /verification|snapshot/u);
 });
 
 test("every verb receipt states facts without journal rows or entry ids", () => {

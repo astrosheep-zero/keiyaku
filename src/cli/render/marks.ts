@@ -38,8 +38,7 @@ export function contractMark(row: ContractRow): string {
   if (row.gates.reports.some((gate) => gate.current.kind === "attested" && gate.current.verdict === "unsatisfied"))
     return "!";
   if (row.targetLag.kind === "unknown") return "?";
-  if (row.phase === "waiting" || row.phase === "tendered") return "⧗";
-  return "●";
+  return "⧗";
 }
 
 /** The board's derived dispositions have their own exhaustive source lock. */

@@ -2,13 +2,11 @@ import type { ContractKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import {
   abbreviateGitIds,
   afterWording,
-  candidateIntegrationFacts,
-  dependentWording,
+  contractBall,
   displayGitId,
   gateFact,
   gitIdsInRow,
   mergeSummary,
-  targetFacts,
 } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -17,20 +15,21 @@ import {
   identityLine,
   plumbFacts,
   RECENT_TONE_MS,
+  renderBoundedPayload,
   renderSectionBlock,
-  linkedEntityLines,
   safeText,
   tone,
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
 import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
-import { akumaMark, contractMark, taskDispositionMark } from "./marks.js";
+import { contractMark, taskDispositionMark } from "./marks.js";
 import { dispositionText } from "./task.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
 
 function contractHasError(row: ContractKanshiRow): boolean {
+  if (row.phase === "claimed" || row.phase === "abandoned") return row.title === null;
   return (
     row.title === null ||
     row.gates.reports.some(
@@ -47,8 +46,7 @@ function contractStatusTone(row: ContractKanshiRow, observedAt: string): Semanti
   if (contractHasError(row)) return "alert";
   const phaseAge = elapsedMilliseconds(row.phaseAt, observedAt);
   if (row.phase === "tendered" && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS) return "attention";
-  if ((row.phase === "waiting" || row.phase === "bound") && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS)
-    return "attention";
+  if (row.phase === "bound" && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS) return "attention";
   const journalAge = elapsedMilliseconds(row.lastJournalAt, observedAt);
   return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;
 }
@@ -73,29 +71,9 @@ function workspaceState(row: ContractKanshiRow): string {
   return counts.length === 0 ? "workspace  dirty" : `workspace  dirty · ${counts.join(" · ")}`;
 }
 
-function mergeFacts(
-  row: ContractKanshiRow,
-  selected: boolean,
-  abbreviations: ReadonlyMap<string, string>,
-): readonly string[] {
-  const observation = row.workspaceObservation;
-  const summary = mergeSummary(observation);
-  if (
-    summary === undefined ||
-    (observation.kind !== "clean" && observation.kind !== "dirty") ||
-    observation.merge === null
-  )
-    return [];
-  if (!selected) return [summary];
-  const paths = observation.merge.unmergedPaths;
-  return [
-    summary,
-    `merge head  ${displayGitId(observation.merge.head, abbreviations)}`,
-    ...(paths.length === 0 ? ["unmerged paths  none"] : paths.map((path) => `unmerged path  ${path}`)),
-    ...(observation.merge.handoffBase === undefined
-      ? []
-      : ["saved  worktree bytes before projection", `handoff base  ${observation.merge.handoffBase}`]),
-  ];
+function mergeFacts(row: ContractKanshiRow): readonly string[] {
+  const summary = mergeSummary(row.workspaceObservation);
+  return summary === undefined ? [] : [summary];
 }
 
 function linkedTask(report: KanshiReport, taskId: string): string {
@@ -106,27 +84,10 @@ function linkedTask(report: KanshiReport, taskId: string): string {
     : `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)}`;
 }
 
-function linkedAkuma(report: KanshiReport, id: string, aliases: readonly string[]): string {
-  const alias = aliases.length === 0 ? "" : ` (${aliases.join(" ")})`;
-  if (report.akuma.kind !== "present") return `! ${id}${alias} · unavailable`;
-  const akuma = report.akuma.value.rows.find((candidate) => candidate.id === id);
-  return akuma === undefined
-    ? `! ${id}${alias} · unavailable`
-    : `${akumaMark(akuma.life)} ${id}${alias} · ${akuma.life} · ${formatAge("lifeAt" in akuma ? akuma.lifeAt : null, report.observedAt)}`;
-}
-
 type AkumaAttachmentRow = Extract<KanshiReport["akuma"], { kind: "present" }>["value"]["rows"][number];
 
 function isTerminalAkuma(life: string): boolean {
   return life === "killed" || life === "stillborn";
-}
-
-function linkedFacts(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
-  const linked: string[] = [];
-  if (row.holder.kind === "held") linked.push(linkedTask(report, row.holder.taskId));
-  if (row.holder.kind === "unavailable") linked.push("! task · unavailable");
-  for (const attached of row.roster) linked.push(linkedAkuma(report, attached.id, attached.aliases));
-  return linked;
 }
 
 function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): string | undefined {
@@ -151,16 +112,54 @@ function semanticBlock(_name: string, facts: readonly string[], _context: TextRe
   return facts.map((fact) => `  ${safeText(fact)}`);
 }
 
-function namespaceTaskFacts(row: ContractKanshiRow): readonly string[] {
-  if (row.namespaceTasks === undefined) return [];
-  if (row.namespaceTasks.kind === "absent") return [];
-  if (row.namespaceTasks.kind === "failed") {
-    return [`failed ${row.namespaceTasks.failure.message}`];
-  }
-  return row.namespaceTasks.value.map(
-    (task) =>
-      `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)} · P${task.priority} · ${task.title}`,
-  );
+function payload(label: string, text: string, context: TextRenderContext): readonly string[] {
+  return renderBoundedPayload({
+    text,
+    first: `  ${label}  `,
+    continuation: "    │ ",
+    columns: context.columns,
+    maxLines: 3,
+    quote: "“",
+    openQuote: false,
+    truncated: false,
+  });
+}
+
+function liveAlarms(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
+  return [
+    ...mergeFacts(row),
+    ...(row.holder.kind === "unavailable" ? ["task unavailable"] : []),
+    ...(row.holder.kind === "held" && linkedTask(report, row.holder.taskId).startsWith("!")
+      ? ["task unavailable"]
+      : []),
+    ...(row.issue === undefined ? [] : ["pending reconciliation"]),
+    ...(row.workspaceObservation.kind === "failed" || row.workspaceObservation.kind === "unavailable"
+      ? [workspaceState(row)]
+      : []),
+  ].map((alarm) => `! ${alarm}`);
+}
+
+function terminalFacts(
+  row: ContractKanshiRow,
+  report: KanshiReport,
+  context: TextRenderContext,
+  abbreviations: ReadonlyMap<string, string>,
+): readonly string[] {
+  if (row.phase === "abandoned")
+    return [
+      "× abandoned",
+      `when  ${formatAge(row.phaseAt, report.observedAt)}`,
+      ...(row.abandonNote === undefined ? [] : payload("note", row.abandonNote, context)),
+    ];
+  const integration = row.delivery?.integration.snapshot;
+  const review = row.gates.reports.find((gate) => gate.gate === "reviewed");
+  return [
+    `✓ claimed${integration === undefined ? "" : ` · landed ${displayGitId(integration, abbreviations)}`}`,
+    `when  ${formatAge(row.phaseAt, report.observedAt)}`,
+    ...(review?.current.kind === "attested" && review.current.summary !== undefined
+      ? payload("review", review.current.summary, context)
+      : []),
+  ];
 }
 
 function renderSelectedContractRow(
@@ -181,43 +180,41 @@ function renderSelectedContractRow(
       context,
     }),
   ];
-  lines.push(...semanticBlock("after", row.after.map(afterWording), context));
-  lines.push(...semanticBlock("dependents", row.dependents.map(dependentWording), context));
-  const gateFacts = row.gates.reports.flatMap((gate) => [
-    `${gateFact(gate)}${gate.current.kind === "attested" ? ` · ${formatAge(gate.current.at, report.observedAt)}` : ""}`,
-    ...(gate.current.kind === "attested" && gate.current.summary !== undefined
-      ? [`summary  ${gate.gate} · ${gate.current.summary}`]
-      : []),
-  ]);
-  lines.push(...semanticBlock("gates", gateFacts, context));
-  lines.push(
-    ...semanticBlock(
-      "candidate/integration",
-      candidateIntegrationFacts(row.delivery, row.verification, abbreviations),
-      context,
-    ),
-  );
-  lines.push(...semanticBlock("target", targetFacts(row, abbreviations), context));
-  const workspaceFacts = [workspaceState(row)];
-  if (
-    row.workspaceObservation.kind !== "unappointed" &&
-    row.workspaceObservation.kind !== "failed" &&
-    row.workspaceObservation.location.kind === "worktree"
-  ) {
-    workspaceFacts.push(`worktree  ${row.workspaceObservation.location.path}`);
+  if (row.phase === "claimed" || row.phase === "abandoned") {
+    const outcome = terminalFacts(row, report, context, abbreviations);
+    lines.push(...semanticBlock("outcome", outcome.slice(0, 2), context), ...outcome.slice(2));
+    return lines;
   }
-  lines.push(
-    ...semanticBlock("workspace/merge", [...workspaceFacts, ...mergeFacts(row, true, abbreviations)], context),
-  );
-  const attachments = [...linkedFacts(row, report)];
-  if (row.issue !== undefined)
-    lines.push(...plumbFacts([`lag  target-checkout-retained · ${row.issue.target}`], context.columns));
-  lines.push(...linkedEntityLines(attachments, context.columns));
-  lines.push(...semanticBlock("namespace tasks", namespaceTaskFacts(row), context));
-  const observation = row.workspaceObservation;
-  if ((observation.kind === "clean" || observation.kind === "dirty") && observation.merge?.recovery !== undefined) {
-    lines.push(`  deliver  ${safeText(observation.merge.recovery.deliver)} · reads worktree bytes, not index`);
+  if (row.phase === "bound") {
+    lines.push(...semanticBlock("gates", row.gates.reports.map(gateFact), context));
+    lines.push(
+      ...semanticBlock(
+        "prerequisites",
+        row.after.filter((edge) => edge.endpoint.kind !== "claimed").map(afterWording),
+        context,
+      ),
+    );
+    lines.push(...semanticBlock("ball", [contractBall(row, abbreviations)], context));
+    const akuma = linkedAkumaSummary(row, report);
+    if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
+    if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
+  } else {
+    lines.push(...semanticBlock("ball", [contractBall(row, abbreviations)], context));
+    if (row.delivery !== null) {
+      lines.push(
+        ...semanticBlock(
+          "candidate",
+          [
+            `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
+            `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}`,
+          ],
+          context,
+        ),
+      );
+    }
+    lines.push(...semanticBlock("gates", row.gates.reports.map(gateFact), context));
   }
+  lines.push(...semanticBlock("alarms", liveAlarms(row, report), context));
   return lines;
 }
 
@@ -228,28 +225,23 @@ function renderWorldContractRow(
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
   const abbreviations = gitAbbreviations(report);
-  const contractFacts = [
-    ...candidateIntegrationFacts(row.delivery, row.verification, abbreviations),
-    ...targetFacts(row, abbreviations),
-    ...[],
-    ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
-    ...row.after.map(afterWording),
-    ...(row.dependents.length === 0 ? [] : [`dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
-    ...row.gates.reports.map(gateFact),
-  ];
-  const linkedFacts = [
-    ...(row.holder.kind === "held" ? [linkedTask(report, row.holder.taskId)] : []),
-    ...(row.holder.kind === "unavailable" ? ["! task · unavailable"] : []),
-  ];
+  const contractFacts =
+    row.phase === "claimed" || row.phase === "abandoned"
+      ? terminalFacts(row, report, context, abbreviations).slice(0, 1)
+      : [
+          contractBall(row, abbreviations),
+          ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
+          ...liveAlarms(row, report),
+        ];
   const statusTone = contractStatusTone(row, report.observedAt);
   return entityLines({
     mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
     identity: row.id,
-    state: `${row.phase} · ${formatAge(row.lastJournalAt, report.observedAt)}`,
+    state: `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`,
     title,
     facts: contractFacts,
     context,
-  }).concat(linkedEntityLines(linkedFacts, context.columns));
+  });
 }
 
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {

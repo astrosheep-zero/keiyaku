@@ -6,9 +6,10 @@ owned by [model.md](model.md); Markdown is owned by [document.md](document.md).
 
 ## Contract Lifecycle
 
-A Contract moves from waiting through its delivery phase to either claimed or
-abandoned. Terminal state is a journal-derived read model, never a separate
-record. Binding fixes coordinates and initial terms. Amendment may replace
+A Contract moves from bound through tendered to either claimed or abandoned.
+Binding alone places the Contract in its bound phase; there is no pre-phase.
+Terminal state is a journal-derived read model, never a separate record.
+Binding fixes coordinates and initial terms. Amendment may replace
 active terms, including declared dependencies and gates, but can neither change
 coordinates nor reopen a terminal Contract. The first delivery transition
 records the independent bound milestone; binding and amendment do not create it

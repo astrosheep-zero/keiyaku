@@ -82,14 +82,14 @@ test("git repository resolution rejects omitted and empty coordinates", async ()
 test("public Contract rows select the source entry for every phase", async () => {
   const repository = repositoryWithMain();
   const ids = {
-    waiting: await bind(repository, "Phase waiting", "worktree"),
+    fresh: await bind(repository, "Phase fresh", "worktree"),
     bound: await bind(repository, "Phase bound", "worktree"),
     tendered: await bind(repository, "Phase tendered", "worktree"),
     claimed: await bind(repository, "Phase claimed", "worktree"),
     abandoned: await bind(repository, "Phase abandoned", "worktree"),
   };
   const times = {
-    waiting: firstJournalAt(repository, ids.waiting),
+    fresh: firstJournalAt(repository, ids.fresh),
     bound: "2026-08-12T00:01:00.000Z",
     tendered: "2026-08-12T00:02:00.000Z",
     claimed: "2026-08-12T00:03:00.000Z",
@@ -177,8 +177,8 @@ test("public Contract rows select the source entry for every phase", async () =>
   repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
 
   const expected = [
-    [ids.waiting, "waiting", times.waiting],
-    [ids.bound, "bound", times.bound],
+    [ids.fresh, "bound", times.fresh],
+    [ids.bound, "bound", firstJournalAt(repository, ids.bound)],
     [ids.tendered, "tendered", times.tendered],
     [ids.claimed, "claimed", times.claimed],
     [ids.abandoned, "abandoned", times.abandoned],
@@ -326,14 +326,14 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
   const row = board.rows.find((candidate) => candidate.id === dependent);
   assert.deepEqual(row?.after, [
     { contractId: claimed, endpoint: { kind: "claimed" } },
-    { contractId: active, endpoint: { kind: "active", phase: "waiting" } },
+    { contractId: active, endpoint: { kind: "active", phase: "bound" } },
     { contractId: abandoned, endpoint: { kind: "abandoned" } },
     { contractId: missing, endpoint: { kind: "missing" } },
   ]);
   assert.deepEqual(board.rows.find((candidate) => candidate.id === active)?.dependents, [
-    { contractId: alpha, phase: "waiting" },
-    { contractId: dependent, phase: "waiting" },
-    { contractId: zulu, phase: "waiting" },
+    { contractId: alpha, phase: "bound" },
+    { contractId: dependent, phase: "bound" },
+    { contractId: zulu, phase: "bound" },
   ]);
   assert.equal(
     board.rows.some((candidate) => candidate.id === claimed || candidate.id === abandoned),

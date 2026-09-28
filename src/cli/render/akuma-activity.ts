@@ -11,6 +11,7 @@ import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
   renderBoundedTextBlock,
+  renderBoundedPayload,
   safeText,
   takeDisplayColumns,
   takeDisplayColumnsFromEnd,
@@ -322,50 +323,6 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
   return toolContent(row, columns);
 }
 
-/** Hard-slice payloads for every row layout without introducing new quote boundaries. */
-function wrapActivityBody(
-  input: Readonly<{
-    text: string;
-    first: string;
-    continuation: string;
-    columns: number;
-    maxLines: number;
-    quote: string;
-    openQuote: boolean;
-    truncated: boolean;
-  }>,
-): readonly string[] {
-  let rest = safeText(input.text).replace(/\s+/gu, " ").trim();
-  const lines: string[] = [];
-  for (let index = 0; index < input.maxLines; index += 1) {
-    const prefix = index === 0 ? input.first : input.continuation;
-    if (rest.length === 0 && !input.quote && index === 0) return [prefix.trimEnd()];
-    const opening = input.quote && index === 0 ? input.quote : "";
-    const closing = input.quote && !input.openQuote ? (input.quote === "“" ? "”" : input.quote) : "";
-    const budget = Math.max(0, input.columns - displayColumns(prefix + opening + closing));
-    if (budget === 0) return lines.length === 0 ? [prefix.trimEnd()] : lines;
-    const fragment = activityFragment(rest, budget, index === input.maxLines - 1, input.truncated);
-    rest = fragment.remaining;
-    lines.push(`${prefix}${opening}${fragment.body}${rest.length === 0 ? closing : ""}`);
-    if (rest.length === 0) break;
-  }
-  return lines;
-}
-
-function activityFragment(
-  rest: string,
-  budget: number,
-  last: boolean,
-  forced: boolean,
-): Readonly<{ body: string; remaining: string }> {
-  const truncated = (forced && displayColumns(rest) <= budget) || (last && (forced || displayColumns(rest) > budget));
-  if (truncated) return { body: truncateDisplayText(`${rest}…`, budget), remaining: "" };
-  const body = takeDisplayColumns(rest, budget).text;
-  // A cluster wider than the available cells must not stall an unbounded history row.
-  if (body.length === 0 && rest.length > 0) return { body: truncateDisplayText(rest, budget), remaining: "" };
-  return { body, remaining: rest.slice(body.length) };
-}
-
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
   const { layout, first, continuation, tool, inFlightSay = false } = options;
   const value = rowText(row, tool);
@@ -382,7 +339,7 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
   }
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
   const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
-  return wrapActivityBody({
+  return renderBoundedPayload({
     text: rowBody(row, value.text, available),
     first,
     continuation,

@@ -30,6 +30,9 @@ The bare World Contract section is likewise a recent bounded catalogue. A
 selected Contract retains its exact owner observation, so the convenience of a
 World aperture never weakens the detail that selection asks the Contract owner
 to explain.
+Its judgment is phase-driven: active Contracts foreground the outstanding hand
+and acceptance evidence, while terminal Contracts foreground the settled outcome.
+The World Contract section offers the same concise judgment at catalogue scale.
 An association outside that aperture is unavailable rather than missing; Kanshi
 uses missing only when the Contract observation is complete enough to establish
 absence.

@@ -1,14 +1,6 @@
 import type { Catalog } from "../catalog.js";
-import {
-  abbreviateGitIds,
-  afterWording,
-  candidateIntegrationFacts,
-  dependentWording,
-  gateFact,
-  gitIdsInRow,
-  targetFacts,
-} from "./contract-observation.js";
-import { ageText, safeText } from "./terminal.js";
+import { abbreviateGitIds, contractBall, displayGitId, gitIdsInRow } from "./contract-observation.js";
+import { ageText, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
 
@@ -53,14 +45,33 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
   const rows = catalog.rows;
   const header = "CONTRACTS // recent";
   const blocks = rows.map((row) => {
+    const terminal = row.phase === "claimed" || row.phase === "abandoned";
+    const outcome =
+      row.phase === "claimed"
+        ? `✓ claimed${row.delivery === null ? "" : ` · landed ${displayGitId(row.delivery.integration.snapshot, abbreviations)}`}`
+        : "× abandoned";
+    const review = row.gates.reports.find((gate) => gate.gate === "reviewed");
+    const testimony =
+      row.phase === "claimed" && review?.current.kind === "attested"
+        ? review.current.summary
+        : row.phase === "abandoned"
+          ? row.abandonNote
+          : undefined;
     const lines = [
       `${contractMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      ...candidateIntegrationFacts(row.delivery, row.verification, abbreviations).map((fact) => `  ${safeText(fact)}`),
-      ...targetFacts(row, abbreviations).map((fact) => `  ${safeText(fact)}`),
-      ...[],
-      ...row.after.map((edge) => `  ${afterWording(edge)}`),
-      ...(row.dependents.length === 0 ? [] : [`  dependents  ${row.dependents.map(dependentWording).join(" · ")}`]),
-      ...(row.gates.reports.length === 0 ? [] : [`  ${row.gates.reports.map(gateFact).join("  ")}`]),
+      `  ${terminal ? outcome : contractBall(row, abbreviations)}`,
+      ...(testimony === undefined
+        ? []
+        : renderBoundedPayload({
+            text: testimony,
+            first: `  ${row.phase === "claimed" ? "review" : "note"}  `,
+            continuation: "    │ ",
+            columns: 100,
+            maxLines: 3,
+            quote: "“",
+            openQuote: false,
+            truncated: false,
+          })),
     ];
     return lines.join("\n");
   });

@@ -75,6 +75,23 @@ export function mergeSummary(observation: ContractWorkspaceObservation): string 
   return count > 0 ? `merge conflict in worktree (${count} paths)` : "merge in progress (resolution staged)";
 }
 
+export function missingGates(row: ContractRow): readonly string[] {
+  return row.gates.reports
+    .filter((gate) => gate.current.kind !== "attested" || gate.current.verdict !== "satisfied")
+    .map(gateFact);
+}
+
+export function contractBall(row: ContractRow, abbreviations: ReadonlyMap<string, string>): string {
+  if (row.phase === "bound") return "awaiting delivery";
+  if (row.verification?.kind === "unrecorded") return "awaiting verification";
+  const missing = missingGates(row);
+  if (missing.length > 0) return `awaiting gates  ${missing.join("  ")}`;
+  const blockers = row.after.filter((edge) => edge.endpoint.kind !== "claimed");
+  if (blockers.length > 0) return `awaiting prerequisites  ${blockers.map(afterWording).join(" · ")}`;
+  if (row.targetObservation?.drift === true) return targetMovementFacts(row, abbreviations)[0] ?? "target moved";
+  return "awaiting placement";
+}
+
 export function abbreviateGitIds(ids: readonly string[]): ReadonlyMap<string, string> {
   const unique = [...new Set(ids.filter((id) => GIT_OBJECT_ID.test(id)))];
   let length = 7;
