@@ -103,11 +103,11 @@ const AKUMA_COMMAND_SPECS = {
     stdin: true,
     flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
     usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
-    purpose: "Admit a Tell for an Akuma.",
+    purpose: "Tell an Akuma something without waiting for its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
-      "Use ask to observe an answer or supply a schema.",
+      "Use ask to block for the answer or supply a schema.",
     ].join("\n"),
   },
   ask: {
@@ -115,12 +115,12 @@ const AKUMA_COMMAND_SPECS = {
     stdin: true,
     flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
     usage: "ask <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
-    purpose: "Admit a Tell and observe its answer.",
+    purpose: "Ask an Akuma and block until it answers.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
-      "--wait bounds observation of this Tell's answer; admission is not withdrawn at the deadline.",
+      "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
       "Completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
