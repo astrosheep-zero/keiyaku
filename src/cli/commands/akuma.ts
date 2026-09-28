@@ -68,6 +68,7 @@ const AKUMA_COMMAND_SPECS = {
       "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
     purpose: "Call an Akuma into the world.",
     details: [
+      "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
       "--schema and --wait require a prompt.",
       "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",

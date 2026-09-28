@@ -41,6 +41,10 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
+  assert.match(
+    renderAkumaHelp("call"),
+    /keiyaku ls aku\/ to find visible Akuma names; hidden definitions can still be called by name/u,
+  );
   assert.match(renderContractHelp("show"), /requirements and work guidance/u);
   assert.doesNotMatch(renderContractHelp("show"), /current state/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
