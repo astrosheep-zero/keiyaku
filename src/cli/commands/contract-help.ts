@@ -194,7 +194,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { json: "boolean" },
     usage: "settings",
-    purpose: "Show effective Settings (user + project, read-only)",
+    purpose: "Show effective Settings (user + project, read-only).",
   },
   region: {
     positional: "optional",

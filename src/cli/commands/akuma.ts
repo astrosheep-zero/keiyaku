@@ -90,7 +90,6 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Wait for one or more Akumas to finish work.",
     details: [
       "The default mode is any; --all waits until every selected Akuma completes.",
-      "--all waits until every selected Akuma completes.",
       "An already completed member counts immediately, so repeating a selection can return at once.",
       "Akuma names, completed activity, and the final result stream on stderr.",
       "A streamed plural wait leaves stdout empty, and so does a single wait with no answer.",
