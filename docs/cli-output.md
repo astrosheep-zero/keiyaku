@@ -148,9 +148,11 @@ An observing call, an ask, and a wait share one input-wait
 presentation discipline, defined once: an identity frame opens on the progress
 channel, eligible timeline rows stream once each in retained order, live
 activity never contains thought narration, and one truthful conclusion follows
-the shared clock, mark, verb, and duration grammar. A caller deadline
-concludes on the target's observed life rather than naming the deadline; the
-explicit reason stays in JSON. The observed answer belongs to its input's
+the shared clock, mark, verb, and duration grammar. For an ask, live activity
+begins at its already-rendered Tell admission; earlier work remains available
+through status and history. A caller deadline concludes on the target's observed
+life rather than naming the deadline; the explicit reason stays in JSON. The
+observed answer belongs to its input's
 exact terminal Turn — Akuma-wide idle never stands in for it — and stdout
 carries that answer once, byte-exact, and nothing else on deadline or failure.
 The stream restates the timeline's own rows rather than inventing a private

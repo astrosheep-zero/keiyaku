@@ -480,6 +480,7 @@ type DeferredActivityEntry =
 
 type ActivityStreamState = {
   newestSettledSequence: number | undefined;
+  admissionSequence: number | undefined;
   mutableSequences: Set<number>;
   previousClock: string | undefined;
   renderedBoundaries: Set<number>;
@@ -508,21 +509,23 @@ function isBoundedStreamTool(row: RenderRow): boolean {
 }
 
 function rememberMutableRows(state: ActivityStreamState, activity: RenderedActivity): void {
-  for (const row of activity.rows) if (isMutableStreamRow(row)) state.mutableSequences.add(row.sequence);
+  for (const row of activity.rows)
+    if ((state.admissionSequence === undefined || row.sequence >= state.admissionSequence) && isMutableStreamRow(row))
+      state.mutableSequences.add(row.sequence);
 }
 
-/** A seeded wait counts its skipped settled companion evidence after its typed opening. */
-function baselineOmissionCount(activity: RenderedActivity, boundary: CurrentTurnBoundary): number {
-  let afterBoundary = false;
-  let count = 0;
-  for (const row of activity.rows) {
-    if (!afterBoundary) {
-      if (row.sequence === boundary.row.sequence) afterBoundary = true;
-      continue;
-    }
-    if (isSettledStreamRow(row)) count += 1;
-  }
-  return count;
+/** Count skipped settled rows within the eligible part of a seeded baseline. */
+function baselineOmissionCount(
+  activity: RenderedActivity,
+  after: number,
+  before?: number,
+): number {
+  return activity.rows.filter(
+    (row) =>
+      row.sequence > after &&
+      (before === undefined || row.sequence < before) &&
+      isSettledStreamRow(row),
+  ).length;
 }
 
 type StreamRowRenderOptions = Readonly<{
@@ -619,6 +622,7 @@ function observeActivitySnapshot(
   // settled cursor, even if its earlier pending form was remembered as mutable.
   if (boundary !== undefined) state.mutableSequences.delete(boundary.row.sequence);
   const observedRows = settledRows(activity)
+    .filter((row) => state.admissionSequence === undefined || row.sequence >= state.admissionSequence)
     .filter((row) => !state.admittedTellSequences.has(row.sequence))
     .filter(
       (row) =>
@@ -690,6 +694,7 @@ function flushActivityTail(
 export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
   const state: ActivityStreamState = {
     newestSettledSequence: undefined,
+    admissionSequence: undefined,
     mutableSequences: new Set(),
     previousClock: undefined,
     renderedBoundaries: new Set(),
@@ -699,13 +704,26 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
   };
   const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly string[] => {
     const lines: string[] = [];
-    if (alreadyRenderedSequence !== undefined) state.admittedTellSequences.add(alreadyRenderedSequence);
+    if (alreadyRenderedSequence !== undefined) {
+      state.admissionSequence = alreadyRenderedSequence;
+      state.admittedTellSequences.add(alreadyRenderedSequence);
+    }
     const boundary = currentTurnBoundary(activity);
     const unseenBoundary = boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence);
     if (unseenBoundary) {
-      if (boundary.row.sequence === alreadyRenderedSequence) state.renderedBoundaries.add(boundary.turnSequence);
+      if (alreadyRenderedSequence !== undefined && boundary.row.sequence > alreadyRenderedSequence) {
+        const beforeBoundary = baselineOmissionCount(activity, alreadyRenderedSequence, boundary.row.sequence);
+        if (beforeBoundary > 0) lines.push(layout.marker(beforeBoundary));
+      }
+      if (alreadyRenderedSequence !== undefined && boundary.row.sequence <= alreadyRenderedSequence)
+        state.renderedBoundaries.add(boundary.turnSequence);
       else renderCurrentTurnBoundary(state, activity, lines, context, layout);
-      const omitted = baselineOmissionCount(activity, boundary);
+      const omitted = baselineOmissionCount(
+        activity,
+        alreadyRenderedSequence === undefined
+          ? boundary.row.sequence
+          : Math.max(boundary.row.sequence, alreadyRenderedSequence),
+      );
       if (omitted > 0) lines.push(layout.marker(omitted));
     }
     rememberMutableRows(state, activity);
