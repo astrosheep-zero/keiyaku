@@ -515,16 +515,9 @@ function rememberMutableRows(state: ActivityStreamState, activity: RenderedActiv
 }
 
 /** Count skipped settled rows within the eligible part of a seeded baseline. */
-function baselineOmissionCount(
-  activity: RenderedActivity,
-  after: number,
-  before?: number,
-): number {
+function baselineOmissionCount(activity: RenderedActivity, after: number, before?: number): number {
   return activity.rows.filter(
-    (row) =>
-      row.sequence > after &&
-      (before === undefined || row.sequence < before) &&
-      isSettledStreamRow(row),
+    (row) => row.sequence > after && (before === undefined || row.sequence < before) && isSettledStreamRow(row),
   ).length;
 }
 
