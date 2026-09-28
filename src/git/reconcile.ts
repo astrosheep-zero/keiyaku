@@ -62,7 +62,7 @@ type ReconcileInput = Readonly<{
   place?: string;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
-type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string }>;
+type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string; diagnostic?: string }>;
 type WorktreeFollowRetained = Readonly<{
   kind: "worktree-follow-retained";
   path: string;
@@ -181,7 +181,12 @@ async function removeCollectableScratch(
 ): Promise<void> {
   for (const removal of await removeCollectableScratchWorktrees(repository, topology.paths)) {
     effects.push({ kind: "worktree", path: removal.path, action: removal.action });
-    if (removal.retained) lag.push({ kind: "worktree-retained", path: removal.path });
+    if (removal.retained)
+      lag.push({
+        kind: "worktree-retained",
+        path: removal.path,
+        ...(removal.diagnostic === undefined ? {} : { diagnostic: removal.diagnostic }),
+      });
   }
 }
 

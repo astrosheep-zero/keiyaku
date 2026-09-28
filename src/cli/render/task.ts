@@ -67,7 +67,7 @@ function isWorldObservation(result: TaskInvocationResult): result is TaskWorldOb
 
 /** Task dispositions and relation states are snake_case facts; people read them as words. */
 export function dispositionText(word: string): string {
-  return word.replaceAll("_", " ");
+  return word === "drop" ? "dropped" : word.replaceAll("_", " ");
 }
 
 function priorityText(priority: number | null): string {
@@ -134,7 +134,7 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
   const facts = projectRefusal(result.refusal);
   return refusalLines(
     verb,
-    [`diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])],
+    [`reason  ${facts.diagnostic}`, ...(facts.facts ?? [])],
     columns,
     (facts.compositionDiagnostics ?? []).map(
       (item) => `line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`,
@@ -311,7 +311,7 @@ function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): 
   const facts = projectRefusal(item.outcome.refusal);
   return refusalLines(
     verb,
-    [`task  ${item.id}`, `diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])],
+    [`task  ${item.id}`, `reason  ${facts.diagnostic}`, ...(facts.facts ?? [])],
     DEFAULT_CLI_COLUMNS,
   ).join("\n");
 }
@@ -332,7 +332,7 @@ function admissionLines(
 function stoppedLines(stopped: ComposeStop): string[] {
   if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
   const facts = projectRefusal(stopped);
-  return refusalLines("stopped", [`diagnostic  ${facts.diagnostic}`, ...(facts.facts ?? [])], DEFAULT_CLI_COLUMNS);
+  return refusalLines("stopped", [`reason  ${facts.diagnostic}`, ...(facts.facts ?? [])], DEFAULT_CLI_COLUMNS);
 }
 
 function aliasLines(aliases: readonly Readonly<{ alias: string; taskId: string }>[]): readonly string[] {
@@ -377,7 +377,7 @@ export function renderTaskText(
     if (result.kind === "absent") return "task world absent";
     if (result.kind === "failed") {
       const lines: string[] = ["task world failed"];
-      receiptPayload(lines, "diagnostic", result.failure.message);
+      receiptPayload(lines, "reason", result.failure.message);
       return lines.join("\n");
     }
     result = result.value;

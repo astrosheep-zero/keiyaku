@@ -58,7 +58,7 @@ completed effects and is retried under the World-owned confirmation rule.
 
 ## Delivery And Placement
 
-Git prepares tenders, target-specific integration commits, content identity from
+Git prepares tenders, target-specific integration results, content identity from
 patch-id (not a commit), recorded delivery diffs, and disposable Verification
 scratch custody.
 It returns mechanical data or typed failures; it does not judge Contract

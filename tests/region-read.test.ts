@@ -223,6 +223,6 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(report.region?.kind, "failed");
     const failed = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
     assert.equal(failed.kind, "region");
-    if (failed.kind === "region") assert.match(renderText(failed), /^× region\n  diagnostic  /);
+    if (failed.kind === "region") assert.match(renderText(failed), /^× region\n  reason  /);
   });
 });

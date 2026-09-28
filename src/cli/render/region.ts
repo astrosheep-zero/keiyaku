@@ -15,7 +15,7 @@ function overlapBlocks(overlaps: readonly RegionOverlap[]): readonly string[] {
 
 function rows(section: Section<RegionRead>): readonly string[] {
   if (section.kind === "absent") return [];
-  if (section.kind === "failed") return [`× region`, `  diagnostic  ${section.failure.message}`];
+  if (section.kind === "failed") return [`× region`, `  reason  ${section.failure.message}`];
   const value = section.value;
   if (value.kind === "declarations") {
     if (value.declarations.length === 0) return [emptyCatalogue("region")];

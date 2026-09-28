@@ -101,12 +101,12 @@ function label(row: RenderRow, tool?: ToolRepr): string {
   return tool!.label;
 }
 
-function mark(row: RenderRow): "│" | "⧖" | "⧗" | "✓" | "!" | "?" {
+function mark(row: RenderRow): "│" | "●" | "⧗" | "✓" | "!" | "?" {
   if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
   if (row.kind === "tell" && row.state === "told") return "✓";
   if (row.kind === "tell" && row.state === "pending") return "⧗";
   if (row.kind === "tool") {
-    if (row.state === "active") return "⧖";
+    if (row.state === "active") return "●";
     if (row.state === "unsettled") return "?";
     return row.state.status === "ok" ? "✓" : "!";
   }
@@ -383,7 +383,7 @@ function renderTimelineRow(
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   return renderRow(row, context, {
     layout,
-    first: layout.head(time, inFlightSay ? "⧖" : mark(row), label(row, tool), context.columns),
+    first: layout.head(time, inFlightSay ? "●" : mark(row), label(row, tool), context.columns),
     continuation: layout.continuation(),
     tool,
     inFlightSay,

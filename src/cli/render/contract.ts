@@ -35,7 +35,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number): readonly string[] {
   if (detail.kind === "publication-failed") {
-    return [...renderOpaqueBlock("publication-failed", indent, columns), ...["diagnostic", "", detail.diagnostic, ""]];
+    return [...renderOpaqueBlock("publication-failed", indent, columns), ...["reason", "", detail.diagnostic, ""]];
   }
   return renderOpaqueBlock(detail.kind, indent, columns);
 }
@@ -68,7 +68,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       [{ text: `target-checkout-retained ${lag.target} ${lag.path}`, opaque: true }],
       columns,
     );
-    receiptPayload(lines, "diagnostic", lag.diagnostic);
+    receiptPayload(lines, "reason", lag.diagnostic);
   } else if (lag.kind === "worktree-hook-failed") {
     receiptRow(
       lines,
@@ -91,10 +91,10 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
       [{ text: `contract-file-failed ${lag.worktree} ${lag.path}`, opaque: true }],
       columns,
     );
-    receiptPayload(lines, "diagnostic", lag.diagnostic);
+    receiptPayload(lines, "reason", lag.diagnostic);
   } else {
     receiptRow(lines, "!", "lag", [{ text: `reconcile-failed ${lag.stage}`, opaque: true }], columns);
-    receiptPayload(lines, "diagnostic", lag.diagnostic);
+    receiptPayload(lines, "reason", lag.diagnostic);
   }
   return lines;
 }
@@ -104,7 +104,7 @@ function settlementLagRows(lag: AcceptedEnvelope["settlementLags"][number], colu
   receiptRow(lines, "!", "settlement", [{ text: lag.surface.replaceAll("-", " ") }], columns);
   if (lag.taskId !== undefined) receiptRow(lines, " ", "task", [{ text: lag.taskId, opaque: true }], columns);
   if (lag.path !== undefined) receiptRow(lines, " ", "path", [{ text: lag.path, opaque: true }], columns);
-  receiptPayload(lines, "diagnostic", lag.diagnostic);
+  receiptPayload(lines, "reason", lag.diagnostic);
   return lines;
 }
 
@@ -207,12 +207,28 @@ function acceptedRecord(
 function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly string[] {
   const obligations: string[] = [];
   if (result.lag !== undefined) {
-    for (const lag of result.lag) pushBlock(obligations, lagRows(lag, columns));
+    for (const lag of result.lag) {
+      if (
+        lag.kind === "worktree-retained" ||
+        lag.kind === "worktree-follow-retained" ||
+        lag.kind === "unsealed-bytes" ||
+        lag.kind === "target-checkout-retained"
+      )
+        continue;
+      pushBlock(obligations, lagRows(lag, columns));
+    }
   }
   for (const lag of result.settlementLags) {
     pushBlock(obligations, settlementLagRows(lag, columns));
   }
-  pushBlock(obligations, executionCleanupLines(result.cleanup ?? [], columns, result.contract));
+  pushBlock(
+    obligations,
+    executionCleanupLines(
+      (result.cleanup ?? []).filter((issue) => issue.kind !== "worktree-leak"),
+      columns,
+      result.contract,
+    ),
+  );
   pushBlock(obligations, executionStopLines(result.executionStops ?? [], columns));
   return obligations;
 }
@@ -226,7 +242,7 @@ function acceptedDeviations(
   if (result.overlaps !== undefined) pushBlock(deviations, overlapRows(result.overlaps, color));
   if (result.overlapFailure !== undefined) {
     receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
-    receiptPayload(deviations, "diagnostic", result.overlapFailure);
+    receiptPayload(deviations, "reason", result.overlapFailure);
   }
   return deviations;
 }
@@ -358,7 +374,7 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
 function renderAcceptedBind(result: AcceptedBindResult, columns: number, color: boolean): string {
   const lines = titleLines("✓", "bound", result.contract, columns);
   if (result.workspace !== undefined)
-    receiptRow(lines, " ", "workspace", [{ text: "worktree" }, { text: result.workspace.path, opaque: true }], columns);
+    receiptRow(lines, " ", "worktree", [{ text: result.workspace.path, opaque: true }], columns);
   if (result.target === null) receiptRow(lines, " ", "no target", [], columns);
   else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
   for (const warning of result.warnings ?? []) receiptRow(lines, "!", "region warning", [{ text: warning }], columns);
@@ -386,8 +402,7 @@ function renderAcceptedAmend(result: AcceptedAmendResult, columns: number, color
 
 function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
   const complete = result.completion !== undefined;
-  const title = complete ? "delivered" : "deliver incomplete";
-  const lines = titleLines("✓", title, result.contract, columns);
+  const lines = titleLines("✓", "delivered", result.contract, columns);
   const abbreviations = abbreviateGitIds([
     result.tenderSnapshot ?? "",
     result.integration?.changeId ?? "",
@@ -401,7 +416,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
     receiptRow(
       lines,
       " ",
-      "tender commit",
+      "candidate",
       [{ text: displayGitId(result.tenderSnapshot, abbreviations), opaque: true }],
       columns,
     );
@@ -449,7 +464,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
 function renderAcceptedArc(result: AcceptedArcResult, columns: number): string {
   const lines = titleLines(
     "✓",
-    `entered chapter ${result.chapter.seq} · ${result.chapter.title}`,
+    `chapter ${result.chapter.seq} opened · ${result.chapter.title}`,
     result.contract,
     columns,
   );

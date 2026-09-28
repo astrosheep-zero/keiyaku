@@ -27,6 +27,7 @@ export type ContractHistoryEvent =
 export type ContractHistory = Readonly<{
   id: ContractId;
   state: SnapshotId;
+  workspace?: Readonly<{ kind: "worktree"; path: string }>;
   events: readonly ContractHistoryEvent[];
 }>;
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;

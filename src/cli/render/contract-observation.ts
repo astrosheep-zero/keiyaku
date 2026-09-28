@@ -49,7 +49,7 @@ export function candidateIntegrationFacts(
       : "";
   return [
     candidateFact(delivery),
-    `tender commit  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
+    `candidate  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
     `integration result  ${integration}${foldedVerification}`,
     `predecessor  ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
     `method  ${delivery.method}`,

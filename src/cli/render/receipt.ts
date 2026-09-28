@@ -88,7 +88,7 @@ export function hookFailureSummary(failure: HookFailure): string {
 }
 
 export function appendHookPayload(lines: string[], failure: HookFailure): void {
-  if (failure.kind === "spawn-error") receiptPayload(lines, "diagnostic", failure.diagnostic);
+  if (failure.kind === "spawn-error") receiptPayload(lines, "reason", failure.diagnostic);
   if (!("stdout" in failure)) return;
   if (failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
   if (failure.stderr !== undefined && failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
@@ -221,9 +221,9 @@ export function stopLines(
     appendHookPayload(lines, stop.detail);
   }
   if ("retry" in stop && stop.retry?.kind === "publication-failed") {
-    receiptPayload(lines, "diagnostic", stop.retry.diagnostic);
+    receiptPayload(lines, "reason", stop.retry.diagnostic);
   } else if ("failure" in stop && "diagnostic" in stop) {
-    receiptPayload(lines, "diagnostic", stop.diagnostic);
+    receiptPayload(lines, "reason", stop.diagnostic);
   }
   return lines;
 }
@@ -253,8 +253,8 @@ export function leakLines(
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "!", "leak", [{ text: "worktree" }, { text: leak.path, opaque: true }], columns);
-  receiptPayload(lines, "diagnostic", leak.diagnostic);
+  receiptRow(lines, " ", "verification scratch kept at", [{ text: leak.path, opaque: true }], columns);
+  receiptPayload(lines, "reason", leak.diagnostic);
   return lines;
 }
 
@@ -265,7 +265,7 @@ export function seatCloseLines(
   const lines: string[] = [];
   for (const lag of seatClose) {
     receiptRow(lines, "!", "lag", [{ text: lag.kind }], columns);
-    receiptPayload(lines, "diagnostic", lag.diagnostic);
+    receiptPayload(lines, "reason", lag.diagnostic);
   }
   return lines;
 }
@@ -274,7 +274,7 @@ export function executionStopLines(stops: readonly ExecutionStop[], columns: num
   const lines: string[] = [];
   for (const stop of stops) {
     receiptRow(lines, "!", stop.stage, [{ text: stop.reason }, { text: stop.contractId, opaque: true }], columns);
-    receiptPayload(lines, "diagnostic", stop.diagnostic);
+    receiptPayload(lines, "reason", stop.diagnostic);
   }
   return lines;
 }
@@ -311,7 +311,7 @@ export function executionFailureLines(
     [{ text: category }, { text: receipt.contractId, opaque: true }],
     columns,
   );
-  receiptPayload(lines, "diagnostic", diagnostic);
+  receiptPayload(lines, "reason", diagnostic);
   lines.push(
     ...executionStopLines(receipt.executionStops, columns),
     ...executionCleanupLines(receipt.cleanup, columns, receipt.contractId),

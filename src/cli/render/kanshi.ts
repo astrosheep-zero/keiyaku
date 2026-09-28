@@ -46,7 +46,7 @@ function contractHasError(row: ContractKanshiRow): boolean {
 function contractStatusTone(row: ContractKanshiRow, observedAt: string): SemanticTone | null {
   if (contractHasError(row)) return "alert";
   const phaseAge = elapsedMilliseconds(row.phaseAt, observedAt);
-  if (row.phase === "tendered" && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS) return "attention";
+  if (row.phase === "delivered" && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS) return "attention";
   if (row.phase === "bound" && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS) return "attention";
   const journalAge = elapsedMilliseconds(row.lastJournalAt, observedAt);
   return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;

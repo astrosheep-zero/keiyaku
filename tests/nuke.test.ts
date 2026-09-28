@@ -585,19 +585,19 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       renderRefusal(requiredRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
+        "  reason  nuke confirmation required",
         `  world  ${world}`,
-        `  nuke  keiyaku nuke --confirm '${world}'`,
-        "  diagnostic  nuke confirmation required",
+        `  option  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
     );
     assert.equal(
       renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
       [
         "× nuke refused",
+        "  reason  nuke confirmation mismatch",
         `  world  ${world}`,
         "  confirmation  wrong",
-        `  nuke  keiyaku nuke --confirm '${world}'`,
-        "  diagnostic  nuke confirmation mismatch",
+        `  option  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
     );
   } finally {
@@ -628,9 +628,9 @@ test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts
     rmSync(world, { recursive: true, force: true });
   }
   assert.match(stdout, /^× nuke refused$/mu);
-  assert.match(stdout, /^  diagnostic  nuke confirmation required$/mu);
+  assert.match(stdout, /^  reason  nuke confirmation required$/mu);
   assert.match(stdout, /^  world  /mu);
-  assert.match(stdout, /^  nuke  keiyaku nuke --confirm /mu);
+  assert.match(stdout, /^  option  keiyaku nuke --confirm /mu);
   assert.equal(stderr, "");
 });
 

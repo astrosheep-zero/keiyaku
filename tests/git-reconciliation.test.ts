@@ -28,16 +28,16 @@ function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: str
 }
 
 type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
-type TenderedReviewGatedTargetTemplate = Readonly<{
+type DeliveredReviewGatedTargetTemplate = Readonly<{
   repository: TestGitRepository;
   id: ContractId;
   workspaceHead: ReturnType<typeof snapshotId>;
   generatedFiles: readonly GeneratedWorktreeFile[];
 }>;
 
-let tenderedReviewGatedTargetTemplate: Promise<TenderedReviewGatedTargetTemplate> | undefined;
+let deliveredReviewGatedTargetTemplate: Promise<DeliveredReviewGatedTargetTemplate> | undefined;
 
-async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewGatedTargetTemplate> {
+async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
@@ -70,13 +70,13 @@ async function buildTenderedReviewGatedTargetTemplate(): Promise<TenderedReviewG
   return { repository, id: contractId, workspaceHead, generatedFiles };
 }
 
-async function tenderedReviewGatedTargetFixture() {
-  const templatePromise = (tenderedReviewGatedTargetTemplate ??= buildTenderedReviewGatedTargetTemplate());
-  let template: TenderedReviewGatedTargetTemplate;
+async function deliveredReviewGatedTargetFixture() {
+  const templatePromise = (deliveredReviewGatedTargetTemplate ??= buildDeliveredReviewGatedTargetTemplate());
+  let template: DeliveredReviewGatedTargetTemplate;
   try {
     template = await templatePromise;
   } catch (error) {
-    if (tenderedReviewGatedTargetTemplate === templatePromise) tenderedReviewGatedTargetTemplate = undefined;
+    if (deliveredReviewGatedTargetTemplate === templatePromise) deliveredReviewGatedTargetTemplate = undefined;
     throw error;
   }
   const repository = snapshotGitRepository(template.repository);
@@ -135,7 +135,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   });
 
   test("rewritten target history retains owned refs with unchanged effects", async () => {
-    const { contract, repository } = await tenderedReviewGatedTargetFixture();
+    const { contract, repository } = await deliveredReviewGatedTargetFixture();
     writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "target only"]);
@@ -164,7 +164,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   });
 
   test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
-    const { contract, repository } = await tenderedReviewGatedTargetFixture();
+    const { contract, repository } = await deliveredReviewGatedTargetFixture();
     await contract.review({ verdict: "satisfied" });
     const state = await contract.state();
     assert.equal(state.terminal?.kind, "claimed");

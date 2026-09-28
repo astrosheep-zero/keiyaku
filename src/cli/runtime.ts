@@ -220,9 +220,9 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
   const { AkumaArchetypeError } = await import("../akuma/archetype.js");
   if (error instanceof AkumaArchetypeError) {
     if (command.command === "call") {
-      return `× call refused\n  diagnostic  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`;
+      return `× call refused\n  reason  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`;
     }
-    return `× ${command.command} failed\n  diagnostic  ${safeText(error.message)}`;
+    return `× ${command.command} failed\n  reason  ${safeText(error.message)}`;
   }
   const { KeiyakuRefused } = await import("../library/refusal.js");
   if (error instanceof KeiyakuRefused) {
@@ -236,7 +236,7 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
       ...renderRefusalFacts(error.refusal, "  ", displayContext().columns, contract),
     ].join("\n");
   }
-  return `× ${command.command} failed\n  diagnostic  ${safeText(diagnostic)}`;
+  return `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`;
 }
 
 // eslint-disable-next-line complexity, max-lines-per-function -- the process edge keeps one truthful cleanup boundary.
@@ -299,7 +299,7 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
               archetype: error.archetype,
               available: "keiyaku ls aku/",
             })
-          : `× call refused\n  diagnostic  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`,
+          : `× call refused\n  reason  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`,
       );
       return 1;
     }

@@ -341,7 +341,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
       error instanceof CliUsageError &&
       error.diagnostic === "--task requires a value" &&
       error.message.includes("× usage  keiyaku bind") &&
-      error.message.includes("  diagnostic  --task requires a value") &&
+      error.message.includes("  reason  --task requires a value") &&
       error.message.includes("  accepts  keiyaku bind ") &&
       error.message.includes("  help  keiyaku bind --help") &&
       !error.message.includes("Contract — standing acceptance"),
@@ -354,7 +354,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
       error.message ===
         [
           "× usage  keiyaku",
-          "  diagnostic  --repo may appear only once",
+          "  reason  --repo may appear only once",
           "  accepts  keiyaku <command> [options]",
           "  help  keiyaku --help",
         ].join("\n"),
@@ -385,7 +385,7 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     assert.equal(text.stderr, "");
     assert.equal(
       text.stdout,
-      ["× show refused", "  contract  kei/missing", "  diagnostic  contract missing"].join("\n") + "\n",
+      ["× show refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
     );
     const json = run(["--json"]);
     assert.equal(json.status, 1);
@@ -427,7 +427,7 @@ test("malformed arc document is a substantive refusal with the full grammar", ()
     assert.equal(text.status, 1, text.stdout + text.stderr);
     assert.equal(text.stderr, "");
     assert.match(text.stdout, /^× arc refused$/mu);
-    assert.match(text.stdout, /diagnostic  invalid document/u);
+    assert.match(text.stdout, /reason  invalid document/u);
     assert.match(text.stdout, /exactly one nonblank H1 chapter name/u);
     assert.match(text.stdout, /freeform Markdown body \(which may be empty\)/u);
   }
@@ -442,7 +442,7 @@ test("malformed bind is a substantive refusal on stdout with its draft", async (
   const result = runCli(cwd, ["bind", "-"], "not valid bind markdown\n");
   assert.equal(result.status, 1);
   assert.match(result.stdout, /^× bind refused$/mu);
-  assert.match(result.stdout, /^  diagnostic  invalid document$/mu);
+  assert.match(result.stdout, /^  reason  invalid document$/mu);
   assert.equal(result.stderr, "");
   rmSync(cwd, { recursive: true, force: true });
 });
@@ -478,7 +478,7 @@ test("blank stdin remains a visible usage diagnostic and performs no operation",
     (error: unknown) =>
       error instanceof CliUsageError &&
       error.diagnostic === "bind requires a nonblank stdin document" &&
-      error.message.includes("  diagnostic  bind requires a nonblank stdin document") &&
+      error.message.includes("  reason  bind requires a nonblank stdin document") &&
       error.message.includes("  accepts  keiyaku bind ") &&
       error.message.includes("  help  keiyaku bind --help"),
   );
@@ -490,7 +490,7 @@ test("settings and duplicate-flag diagnostics stay visible", () => {
     (error: unknown) =>
       error instanceof CliUsageError &&
       error.diagnostic === "duplicate option: --all" &&
-      error.message.includes("  diagnostic  duplicate option: --all") &&
+      error.message.includes("  reason  duplicate option: --all") &&
       error.message.includes("  help  keiyaku install --help"),
   );
 });

@@ -173,11 +173,11 @@ function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: st
   );
   assert.match(
     stderr,
-    new RegExp(`^.*${tag} +⧖ say +"attempt \\d+`, "mu"),
+    new RegExp(`^.*${tag} +● say +"attempt \\d+`, "mu"),
     `${mode} streamed in-flight say evidence for its source:\n${stderr}`,
   );
 
-  const rowMarker = new RegExp(`^.*${tag} +(✓|⧖|│|⧗|!|\\?|×|⋮) `, "u");
+  const rowMarker = new RegExp(`^.*${tag} +(✓|●|│|⧗|!|\\?|×|⋮) `, "u");
   const rows = stderr.split("\n").filter((line) => rowMarker.test(line));
   assert.ok(rows.length >= 2, `${mode} streamed attributed activity rows:\n${stderr}`);
   for (const row of rows) {
@@ -582,7 +582,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
       "failure opens the known child identity once",
     );
     assert.match(failed.stderr, /! error recorded Tell .* missing from Heart/u);
-    assert.doesNotMatch(failed.stderr, /⧖ tell/u, "a birth reference does not claim Tell admission");
+    assert.doesNotMatch(failed.stderr, /● tell/u, "a birth reference does not claim Tell admission");
   } finally {
     await pump.close();
     leash.release();

@@ -92,7 +92,7 @@ test("region names a terminal Contract instead of reporting it missing", async (
   if (!("command" in parsed)) throw new Error("region did not parse");
   const result = await invoke(parsed, { cwd: repository.path });
   assert.equal("kind" in result ? result.kind : undefined, "refused");
-  assert.match(renderText(result as never), /diagnostic  terminal/u);
+  assert.match(renderText(result as never), /reason  terminal/u);
   assert.doesNotMatch(renderText(result as never), /contract missing/u);
 });
 

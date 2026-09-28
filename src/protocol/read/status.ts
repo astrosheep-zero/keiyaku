@@ -28,7 +28,7 @@ import {
 } from "../../core/facts/types.js";
 import { projectBoundedList, type BoundedList } from "../../bounded-list.js";
 
-export type ContractPhase = "bound" | "tendered" | "claimed" | "abandoned";
+export type ContractPhase = "bound" | "delivered" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
 
 export type ContractGateCurrent = GateCurrent;
@@ -120,7 +120,7 @@ function titleFor(document: ReturnType<typeof decodeContractDocument> | undefine
 function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
-  if (state.delivery !== null) return "tendered";
+  if (state.delivery !== null) return "delivered";
   return "bound";
 }
 

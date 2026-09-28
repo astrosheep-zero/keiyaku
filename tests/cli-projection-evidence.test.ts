@@ -155,10 +155,10 @@ test("integration refusal keeps its reason distinct from the target coordinate",
     120,
   );
   assert.deepEqual(lines, [
+    "  reason  integration failed",
     "  contract  kei/conflict",
     "  reason  conflict",
     `  target  ${target}`,
-    "  diagnostic  integration failed",
   ]);
 });
 
@@ -222,6 +222,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
   const history: ContractHistory = {
     id,
     state: snapshotId("private-state"),
+    workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/history" },
     events: facts.map((fact) => ({ source: "journal", fact })),
   };
   const output = renderText({ kind: "contract-history", history });
@@ -233,12 +234,12 @@ test("Contract history keeps event evidence and commit labels without exposing d
       `${at} bind · ${entries[0]} · reviewer`,
       "  start commit  start",
       "  target  refs/heads/main",
-      "  workspace  worktree",
+      "  worktree  /repo/.keiyaku/wt/history",
       `${at} amend · ${entries[1]} · reviewer`,
       `${at} deliver · ${entries[2]} · reviewer`,
-      "  tender commit  tender",
+      "  candidate  tender",
       "  predecessor commit  predecessor",
-      "  integration commit  integration",
+      "  integration result  integration",
       "  content identity (not commit)  content-id",
       "  method  squash",
       "  require branches up to date  false",
@@ -314,11 +315,11 @@ test("terminal catalogue and Kanshi cards do not repeat unattached verification"
   assert.doesNotMatch(bareSelected, /candidate|verification|integration result/u);
 });
 
-test("selected tendered Kanshi folds matching verification into the integration result", () => {
+test("selected delivered Kanshi folds matching verification into the integration result", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedContractRow(),
-    phase: "tendered",
+    phase: "delivered",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
       integration: {
@@ -349,11 +350,11 @@ test("selected tendered Kanshi folds matching verification into the integration 
   assert.doesNotMatch(world, /integration result|verification satisfied/u);
 });
 
-test("selected tendered Kanshi keeps stale delivery verification independent", () => {
+test("selected delivered Kanshi keeps stale delivery verification independent", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedContractRow(),
-    phase: "tendered",
+    phase: "delivered",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
       integration: {
@@ -425,10 +426,10 @@ test("audit separates its observation outcome from complete candidate coordinate
     [
       "✓ audit  kei/audit",
       "  candidate  ready",
-      `  tender commit  ${"a".repeat(7)}`,
-      `  integration commit  ${"c".repeat(7)}`,
+      `  candidate  ${"a".repeat(7)}`,
+      `  integration result  ${"c".repeat(7)}`,
       `  content identity (not commit)  ${"d".repeat(7)}`,
-      "  workspace  worktree  /worktree",
+      "  worktree  /worktree",
       "  1 file changed, 2 insertions(+), 3 deletions(-)",
       `  ${path}`,
       "  verification  not run",

@@ -92,40 +92,40 @@ function refusalFacts(
   if (refusal.kind === "nuke-confirmation-mismatch" || refusal.kind === "nuke-confirmation-required") {
     const world = safeText(refusal.world);
     return [
-      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
       `${indent}world  ${world}`,
       ...(refusal.kind === "nuke-confirmation-mismatch"
         ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
         : []),
-      `${indent}nuke  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
+      `${indent}option  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
     ];
   }
   if (refusal.kind === "verification-declaration-invalid") {
     return [
       ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
-      `${indent}diagnostic  gate 'verified' requires a declared Verification; the Contract declares none`,
+      `${indent}reason  gate 'verified' requires a declared Verification; the Contract declares none`,
     ];
   }
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "unmerged-paths") {
-    return [`${indent}diagnostic  ${refusalWords(refusal.kind)}`, ...collectionLines("paths", refusal.paths, indent)];
+    return [`${indent}reason  ${refusalWords(refusal.kind)}`, ...collectionLines("paths", refusal.paths, indent)];
   }
   if (refusal.kind === "integration-failed") {
     const lines = [
-      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
       ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
     ];
     lines.push(`${indent}reason  ${safeText(refusal.reason)}`, `${indent}target  ${safeText(refusal.targetHead)}`);
     if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflicts", refusal.conflictPaths, indent));
     if ("recovery" in refusal && refusal.recovery !== undefined) {
-      lines.push(`${indent}materialize  ${safeText(refusal.recovery.materialize)}`);
-      lines.push(`${indent}deliver  ${safeText(refusal.recovery.deliver)}`);
+      lines.push(`${indent}option  materialize  ${safeText(refusal.recovery.materialize)}`);
+      lines.push(`${indent}option  deliver  ${safeText(refusal.recovery.deliver)}`);
     }
     return lines;
   }
   if (refusal.kind === "merge-state-present") {
     return [
-      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
       ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
       `${indent}workspace kind  ${refusal.workspace.kind}`,
       `${indent}workspace  ${safeText(refusal.workspace.path)}`,
@@ -133,7 +133,7 @@ function refusalFacts(
   }
   if (refusal.kind === "integration-unsupported") {
     return [
-      `${indent}diagnostic  ${refusalWords(refusal.kind)}`,
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
       ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
       `${indent}required Git  ${safeText(refusal.requiredGit)}`,
     ];
@@ -141,7 +141,7 @@ function refusalFacts(
   if (refusal.kind === "checkout-not-followable") {
     return checkoutNotFollowableLines(refusal);
   }
-  const lines = [`${indent}diagnostic  ${refusalWords(refusal.kind)}`];
+  const lines = [`${indent}reason  ${refusalWords(refusal.kind)}`];
   if (identity !== undefined) lines.push(`${indent}contract  ${safeText(identity)}`);
   if ("taskId" in refusal && typeof refusal.taskId === "string")
     lines.push(`${indent}task  ${safeText(refusal.taskId)}`);
@@ -196,7 +196,7 @@ export function renderConflictMaterialized(
     `${indent}handoff base  ${shortGitId(result.handoffBase)}`,
     ...collectionLines("conflicts", result.conflictPaths, indent),
     `${indent}workspace  ${safeText(result.workspace.path)}`,
-    `${indent}deliver  ${safeText(result.recovery.deliver)} · reads worktree bytes, not index`,
+    `${indent}option  deliver  ${safeText(result.recovery.deliver)} · reads worktree bytes, not index`,
   ].join("\n");
 }
 

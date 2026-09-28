@@ -18,7 +18,7 @@ const CHILD = "  ";
 function workspaceEvidence(
   workspace: Extract<AuditReport["candidate"], { kind: "ready" }>["workspace"],
 ): readonly string[] {
-  return [`${CHILD}workspace  ${workspace.kind}  ${safeText(workspace.path)}`];
+  return [`${CHILD}worktree  ${safeText(workspace.path)}`];
 }
 
 function candidateLines(
@@ -36,8 +36,8 @@ function candidateLines(
   }
   const identity = candidate.identity;
   receiptRow(lines, " ", "candidate", [{ text: "ready" }], columns);
-  lines.push(`${CHILD}tender commit  ${displayGitId(identity.tenderSnapshot, abbreviations)}`);
-  lines.push(`${CHILD}integration commit  ${displayGitId(identity.integration.snapshot, abbreviations)}`);
+  lines.push(`${CHILD}candidate  ${displayGitId(identity.tenderSnapshot, abbreviations)}`);
+  lines.push(`${CHILD}integration result  ${displayGitId(identity.integration.snapshot, abbreviations)}`);
   if (!/^0{40}$/u.test(identity.integration.changeId))
     lines.push(`${CHILD}content identity (not commit)  ${displayGitId(identity.integration.changeId, abbreviations)}`);
   lines.push(...workspaceEvidence(candidate.workspace));
@@ -71,7 +71,7 @@ function verificationLines(
   if (verification.kind === "reused") {
     receiptRow(lines, " ", "verification", [{ text: "reused" }, { text: verification.verdict }], columns);
     lines.push(...reuseLines(verification, columns));
-    if (verification.summary !== undefined) receiptPayload(lines, "summary", verification.summary);
+    if (verification.summary !== undefined) receiptPayload(lines, "summary", auditSummary(verification.summary));
     return lines;
   }
   receiptRow(
@@ -82,9 +82,17 @@ function verificationLines(
     columns,
   );
   if (verification.summary !== undefined) {
-    receiptPayload(lines, "summary", verification.summary);
+    receiptPayload(lines, "summary", auditSummary(verification.summary));
   }
   return lines;
+}
+
+function auditSummary(summary: string): string {
+  return summary.replace(
+    /\[(\d+) (bash|zsh|pwsh) exit (-?\d+)( output-truncated)?\]/gu,
+    (_, number: string, executor: string, exit: string, truncated: string | undefined) =>
+      `declaration ${number} · ${executor} exit ${exit}${truncated ?? ""}`,
+  );
 }
 
 function admittedCandidateLines(report: AuditReport, columns: number): readonly string[] {
@@ -151,7 +159,7 @@ function targetLines(
   }
   if (target.kind === "failed") {
     receiptRow(lines, "!", "target", [{ text: "failed" }], columns);
-    receiptPayload(lines, "diagnostic", target.diagnostic);
+    receiptPayload(lines, "reason", target.diagnostic);
     return lines;
   }
   receiptRow(lines, "!", "target", [{ text: "refused" }], columns);
@@ -161,7 +169,11 @@ function targetLines(
 
 function obligationLines(result: AcceptedAuditResult, columns: number): readonly string[] {
   return [
-    ...executionCleanupLines(result.cleanup ?? [], columns, result.contract),
+    ...executionCleanupLines(
+      (result.cleanup ?? []).filter((issue) => issue.kind !== "worktree-leak"),
+      columns,
+      result.contract,
+    ),
     ...executionStopLines(result.executionStops ?? [], columns),
   ];
 }

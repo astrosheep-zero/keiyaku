@@ -39,6 +39,7 @@ import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
 import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
+import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { reconcileInput, type ReconcileInput } from "./repo.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { auditContract, type AuditInput } from "./audit.js";
@@ -133,7 +134,13 @@ export class Keiyaku {
           if (left.source !== right.source) return left.source === "journal" ? -1 : 1;
           return 0;
         });
-        return { id: this.id, state: mintSnapshotId(commit), events };
+        const workspace = await readManagedWorktreeAppointment(this.scope, this.id);
+        return {
+          id: this.id,
+          state: mintSnapshotId(commit),
+          ...(workspace.kind === "appointed" ? { workspace: { kind: "worktree" as const, path: workspace.path } } : {}),
+          events,
+        };
       }),
     );
   }

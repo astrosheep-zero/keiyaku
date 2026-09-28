@@ -33,6 +33,7 @@ type CollectableScratchRemoval = Readonly<{
   path: string;
   action: "removed" | "unchanged";
   retained: boolean;
+  diagnostic?: string;
 }>;
 
 function scratchPath(): string {
@@ -80,8 +81,13 @@ export async function removeCollectableScratchWorktrees(
         await runGit(repository, ["worktree", "remove", "--force", scratch.path]);
         paths.delete(scratch.path);
         removals.push({ path: scratch.path, action: "removed", retained: false });
-      } catch {
-        removals.push({ path: scratch.path, action: "unchanged", retained: true });
+      } catch (error) {
+        removals.push({
+          path: scratch.path,
+          action: "unchanged",
+          retained: true,
+          diagnostic: error instanceof Error ? error.message : String(error),
+        });
       }
     } finally {
       scratch.release();

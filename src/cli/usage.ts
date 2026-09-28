@@ -51,11 +51,11 @@ export function renderUsageMessage(
   kind: "usage" | "selector" = "usage",
 ): string {
   if (guide === undefined) {
-    return `× ${kind}\n  diagnostic  ${diagnostic}`;
+    return `× ${kind}\n  reason  ${diagnostic}`;
   }
   const lines = [`× ${kind}  ${guide.scope}`];
   if (!guide.hideDiagnostic && diagnostic.length > 0) {
-    lines.push(`  diagnostic  ${diagnostic}`);
+    lines.push(`  reason  ${diagnostic}`);
   }
   if (guide.given !== undefined) {
     lines.push(`  given  ${guide.given}`);

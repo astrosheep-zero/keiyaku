@@ -4,7 +4,7 @@ export function renderNukeText(result: NukeResult): string {
   const seatClose =
     result.seatClose === undefined || result.seatClose.length === 0
       ? []
-      : result.seatClose.flatMap((lag) => [`  lag  ${lag.kind}`, `  diagnostic  ${lag.diagnostic}`]);
+      : result.seatClose.flatMap((lag) => [`  lag  ${lag.kind}`, `  reason  ${lag.diagnostic}`]);
   if (result.kind === "success") {
     return [
       `✓ nuke  ${result.world}`,
@@ -15,7 +15,7 @@ export function renderNukeText(result: NukeResult): string {
       ...seatClose,
     ].join("\n");
   }
-  return [`× nuke  ${result.world}`, `  diagnostic  ${result.diagnostic}`, ...seatClose].join("\n");
+  return [`× nuke  ${result.world}`, `  reason  ${result.diagnostic}`, ...seatClose].join("\n");
 }
 
 export function nukeExitCode(result: NukeResult): number {

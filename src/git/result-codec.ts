@@ -251,8 +251,12 @@ export function decodeGitReconcileLag(value: unknown): ReconcileLag {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail();
   const kind = (value as Record<string, unknown>).kind;
   if (kind === "worktree-retained") {
-    const object = record(value, ["kind", "path"]);
-    return { kind: "worktree-retained", path: nonblank(object.path) };
+    const object = record(value, ["kind", "path"], ["diagnostic"]);
+    return {
+      kind: "worktree-retained",
+      path: nonblank(object.path),
+      ...(object.diagnostic === undefined ? {} : { diagnostic: nonblank(object.diagnostic) }),
+    };
   }
   if (kind === "worktree-follow-retained") {
     const object = record(value, ["kind", "path", "tender", "head", "reason"], ["paths"]);

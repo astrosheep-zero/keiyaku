@@ -445,7 +445,7 @@ test("plural wait tags selected identities and keeps rows compact at 80 columns"
     observed(running(second, [secondBase, sameMinuteNote]), [secondBase, sameMinuteNote]),
   ]);
   assert.equal(rows.length, 2, "plural activity rows never wrap");
-  assert.match(rows[0]!, /^\d{2}:\d{2} dead ⧖ say    "/u);
+  assert.match(rows[0]!, /^\d{2}:\d{2} dead ● say    "/u);
   assert.equal(rows[0]!.endsWith("…"), true, "an in-flight say ends in one trailing ellipsis");
   assert.equal((rows[0]!.match(/"/gu) ?? []).length, 1, "the in-flight quote remains open");
   assert.match(rows[1]!, /^      face │ note   same minute$/u, "the stream-global minute keeps its blank time column");
@@ -508,7 +508,7 @@ test("plural wait closes settled said rows but leaves in-flight said rows open",
     observed(running(first, [firstBase, inFlight]), [firstBase, inFlight]),
     observed(settled(second, [complete]), [complete]),
   ]);
-  assert.match(rows[0]!, /^\d{2}:\d{2} dead ⧖ say    "/u);
+  assert.match(rows[0]!, /^\d{2}:\d{2} dead ● say    "/u);
   assert.equal(rows[0]!.endsWith("…"), true, "an in-flight say has no closing quote");
   assert.match(rows[1]!, /^      face │ say    "/u);
   assert.equal(rows[1]!.endsWith('…"'), true, "a settled say closes its quote after truncation");

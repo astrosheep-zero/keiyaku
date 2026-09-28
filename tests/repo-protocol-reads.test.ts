@@ -84,14 +84,14 @@ test("public Contract rows select the source entry for every phase", async () =>
   const ids = {
     fresh: await bind(repository, "Phase fresh", "worktree"),
     bound: await bind(repository, "Phase bound", "worktree"),
-    tendered: await bind(repository, "Phase tendered", "worktree"),
+    delivered: await bind(repository, "Phase delivered", "worktree"),
     claimed: await bind(repository, "Phase claimed", "worktree"),
     abandoned: await bind(repository, "Phase abandoned", "worktree"),
   };
   const times = {
     fresh: firstJournalAt(repository, ids.fresh),
     bound: "2026-08-12T00:01:00.000Z",
-    tendered: "2026-08-12T00:02:00.000Z",
+    delivered: "2026-08-12T00:02:00.000Z",
     claimed: "2026-08-12T00:03:00.000Z",
     abandoned: "2026-08-12T00:04:00.000Z",
   };
@@ -120,13 +120,13 @@ test("public Contract rows select the source entry for every phase", async () =>
       policy: { requireBranchesToBeUpToDate: false },
     },
   });
-  const tenderedDelivery = deliverEntry(ids.tendered, times.tendered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
+  const deliveredDelivery = deliverEntry(ids.delivered, times.delivered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
   const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
   const additions = new Map<ContractId, readonly JournalEntry[]>([
     [ids.bound, [boundEntry(ids.bound, times.bound, "01ARZ3NDEKTSV4RRFFQ69G5FBB")]],
     [
-      ids.tendered,
-      [boundEntry(ids.tendered, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), tenderedDelivery],
+      ids.delivered,
+      [boundEntry(ids.delivered, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), deliveredDelivery],
     ],
     [
       ids.claimed,
@@ -179,7 +179,7 @@ test("public Contract rows select the source entry for every phase", async () =>
   const expected = [
     [ids.fresh, "bound", times.fresh],
     [ids.bound, "bound", firstJournalAt(repository, ids.bound)],
-    [ids.tendered, "tendered", times.tendered],
+    [ids.delivered, "delivered", times.delivered],
     [ids.claimed, "claimed", times.claimed],
     [ids.abandoned, "abandoned", times.abandoned],
   ] as const;
@@ -203,9 +203,9 @@ test("public Contract rows select the source entry for every phase", async () =>
       channel,
     }),
   );
-  const tendered = board.rows.find((row) => row.id === ids.tendered);
-  assert.equal(tendered?.phase, "tendered");
-  assert.equal(JSON.parse(JSON.stringify(tendered)).phase, "tendered");
+  const delivered = board.rows.find((row) => row.id === ids.delivered);
+  assert.equal(delivered?.phase, "delivered");
+  assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "delivered");
   const catalog = renderCatalogText({
     kind: "contracts",
     root: board.root,
@@ -214,7 +214,7 @@ test("public Contract rows select the source entry for every phase", async () =>
     rows: board.rows,
     hasMore: false,
   });
-  assert.match(catalog, new RegExp(`${ids.tendered} · tendered · .* · Phase tendered`, "u"));
+  assert.match(catalog, new RegExp(`${ids.delivered} · delivered · .* · Phase delivered`, "u"));
 });
 
 test("Contract boards preserve endpoint kinds and lexical active reverse dependents", async () => {

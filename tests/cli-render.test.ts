@@ -314,7 +314,10 @@ test("root Task catalogue marks every disposition with its own state", () => {
     renderCatalogText(catalog),
     [
       "TASKS // root",
-      ...cases.map(([state, mark]) => `${mark} task/${state} · ${state.replaceAll("_", " ")} · P1 — ${state}`),
+      ...cases.map(
+        ([state, mark]) =>
+          `${mark} task/${state} · ${state === "drop" ? "dropped" : state.replaceAll("_", " ")} · P1 — ${state}`,
+      ),
     ].join("\n"),
   );
 });
@@ -582,7 +585,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
 
   assert.match(text, /! kei\/selected-contract · bound · 0s · Selected Contract/u);
   assert.match(text, /awaiting delivery/u);
-  assert.doesNotMatch(text, /tender commit|predecessor|method|content identity|behind|workspace/u);
+  assert.doesNotMatch(text, /candidate|predecessor|method|content identity|behind|workspace/u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
   assert.doesNotMatch(text, /not shown|full|next:|--all/u);
   assert.equal(text.endsWith("…"), true);
@@ -593,7 +596,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     rows: [
       {
         ...row,
-        phase: "tendered",
+        phase: "delivered",
         verification: { kind: "unrecorded" },
         delivery: {
           tenderSnapshot: snap,
@@ -605,7 +608,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     ],
   });
   assert.match(delivered, /awaiting verification/u);
-  assert.doesNotMatch(delivered, /tender commit|predecessor|content identity|method|behind/u);
+  assert.doesNotMatch(delivered, /candidate|predecessor|content identity|method|behind/u);
 
   const expected = snapshotId("b".repeat(40));
   const observed = snapshotId("c".repeat(40));
@@ -617,7 +620,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
         target: "refs/heads/main",
         targetLag: { kind: "counted", behind: 0, subject: { kind: "worktree", path: "/repo/.keiyaku/wt/catalog" } },
         targetObservation: { head: observed, drift: true },
-        phase: "tendered",
+        phase: "delivered",
         delivery: {
           tenderSnapshot: expected,
           integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-moved") },
@@ -628,7 +631,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     ],
   });
   assert.match(moved, /awaiting gates/u);
-  assert.doesNotMatch(moved, /tender commit|predecessor|content identity|behind/u);
+  assert.doesNotMatch(moved, /candidate|predecessor|content identity|behind/u);
 
   const disappeared = renderCatalogText({
     ...catalog,
@@ -638,7 +641,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
         target: "refs/heads/main",
         targetLag: { kind: "unknown" },
         targetObservation: { head: null, drift: true },
-        phase: "tendered",
+        phase: "delivered",
         delivery: {
           tenderSnapshot: expected,
           integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-null") },
@@ -649,7 +652,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     ],
   });
   assert.match(disappeared, /awaiting gates/u);
-  assert.doesNotMatch(disappeared, /tender commit|predecessor|content identity|behind/u);
+  assert.doesNotMatch(disappeared, /candidate|predecessor|content identity|behind/u);
 });
 
 test("Contract status cards collapse terminal mechanics and bound testimony like Akuma answers", () => {
@@ -671,23 +674,37 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     policy: { requireBranchesToBeUpToDate: false },
   };
   const show = (row: ContractRow, selection: "world" | "contract" = "contract") =>
-    renderKanshiText({
-      ...akumaWorldReport([]),
-      observedAt: "2026-08-12T00:00:05.000Z",
-      contracts: { kind: "present", value: { root: "/repo", state: null, observedAt: "2026-08-12T00:00:05.000Z", rows: [{ ...row, holder: { kind: "none" }, roster: [] }] } },
-    }, { columns: 60, color: false }, selection);
+    renderKanshiText(
+      {
+        ...akumaWorldReport([]),
+        observedAt: "2026-08-12T00:00:05.000Z",
+        contracts: {
+          kind: "present",
+          value: {
+            root: "/repo",
+            state: null,
+            observedAt: "2026-08-12T00:00:05.000Z",
+            rows: [{ ...row, holder: { kind: "none" }, roster: [] }],
+          },
+        },
+      },
+      { columns: 60, color: false },
+      selection,
+    );
   const bound = show(base);
   assert.match(bound, /⧗ bound · 5s/u);
   assert.match(bound, /○ reviewed/u);
   assert.match(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
-  const tendered = show({ ...base, phase: "tendered", delivery });
-  assert.match(tendered, /awaiting gates  ○ reviewed/u);
-  assert.match(tendered, /candidate  bbbbbbb/u);
-  assert.match(tendered, /integration result  aaaaaaa/u);
-  assert.doesNotMatch(tendered, /predecessor|method|content identity|behind/u);
+  const delivered = show({ ...base, phase: "delivered", delivery });
+  assert.match(delivered, /awaiting gates  ○ reviewed/u);
+  assert.match(delivered, /candidate  bbbbbbb/u);
+  assert.match(delivered, /integration result  aaaaaaa/u);
+  assert.doesNotMatch(delivered, /predecessor|method|content identity|behind/u);
   const denied = show({
-    ...base, phase: "tendered", delivery,
+    ...base,
+    phase: "delivered",
+    delivery,
     gates: { satisfied: false, reports: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z", summary: "Fix missing coverage" } }] },
   });
   assert.match(denied, /review  ×  “Fix missing coverage”/u);
@@ -695,7 +712,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
   const blocked = show({
     ...base,
-    phase: "tendered",
+    phase: "delivered",
     delivery,
     gates: { satisfied: true, reports: [] },
     after: [{ contractId: contractId("kei/other"), endpoint: { kind: "active", phase: "bound" } }],
@@ -703,7 +720,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(blocked, /^  awaiting prerequisites  blocked by  kei\/other · bound$/mu);
   const moved = show({
     ...base,
-    phase: "tendered",
+    phase: "delivered",
     delivery,
     gates: { satisfied: true, reports: [] },
     target: "refs/heads/main",
@@ -713,8 +730,19 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(moved, /^  target moved  aaaaaaa -> bbbbbbb$/mu);
   assert.doesNotMatch(moved, /awaiting gates|awaiting prerequisites/u);
   const claimed = show({
-    ...base, phase: "claimed", disposition: "terminal", delivery,
-    gates: { satisfied: true, reports: [{ gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary: long } }] },
+    ...base,
+    phase: "claimed",
+    disposition: "terminal",
+    delivery,
+    gates: {
+      satisfied: true,
+      reports: [
+        {
+          gate: "reviewed",
+          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary: long },
+        },
+      ],
+    },
     targetObservation: { head: tender, drift: true },
     targetLag: { kind: "counted", behind: 5, subject: { kind: "worktree", path: "/tmp/wt" } },
   });
@@ -723,8 +751,11 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(claimed, /review  “/u);
   assert.match(claimed, /│ /u);
   assert.match(claimed, /…”/u);
-  assert.doesNotMatch(claimed, /tender commit|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
-  const answer = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(2, long)), { columns: 60, color: false }).join("\n");
+  assert.doesNotMatch(claimed, /candidate|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
+  const answer = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(2, long)), {
+    columns: 60,
+    color: false,
+  }).join("\n");
   assert.match(answer, /“/u);
   assert.match(answer, /│ /u);
   assert.match(answer, /…”/u);
@@ -734,9 +765,9 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(abandoned, /…”/u);
   assert.doesNotMatch(abandoned, /worktree|candidate|when  /u);
   assert.equal((abandoned.match(/× abandoned/gu) ?? []).length, 1);
-  const world = show({ ...base, phase: "tendered", delivery }, "world");
+  const world = show({ ...base, phase: "delivered", delivery }, "world");
   assert.match(world, /awaiting gates  ○ reviewed/u);
-  assert.doesNotMatch(world, /tender commit|predecessor|method|content identity|behind/u);
+  assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
 });
 
 function catalogRow(verification?: ContractRow["verification"]): ContractRow {
@@ -807,10 +838,7 @@ test("every verb receipt states facts without journal rows or entry ids", () => 
     assert.doesNotMatch(text, /journal/u, text);
     assert.doesNotMatch(text, new RegExp(entry, "u"), text);
   }
-  assert.equal(
-    renderText(receipts[2]!),
-    "✓ entered chapter 2 · Second chapter  kei/receipt-vocabulary",
-  );
+  assert.equal(renderText(receipts[2]!), "✓ chapter 2 opened · Second chapter  kei/receipt-vocabulary");
 });
 
 test("opaque payloads preserve lines and name overflow", () => {
@@ -825,6 +853,111 @@ test("opaque payloads preserve lines and name overflow", () => {
   const wrapped = renderOpaqueBlock("x".repeat(8_000), "  ", 80);
   assert.equal(wrapped.length, 100);
   assert.match(wrapped.at(-1) ?? "", /omitted/u);
+});
+
+test("reconcile reports retained workspace and failed cleanup in human words", () => {
+  const result: InvocationResult = {
+    kind: "reconcile",
+    report: {
+      effects: [],
+      lag: [
+        { kind: "worktree-retained", path: "/tmp/wt", diagnostic: "scratch removal failed" },
+        {
+          kind: "worktree-hook-failed",
+          phase: "destroy",
+          path: "/tmp/wt",
+          command: 0,
+          name: "cleanup",
+          failure: { kind: "exit", code: 7, stdout: "", stderr: "", truncated: false },
+        },
+      ],
+      settlement: { actions: [], lags: [] },
+    },
+  };
+  const text = renderText(result);
+  assert.match(text, /^  worktree retained at  \/tmp\/wt$/mu);
+  assert.match(text, /^  reason  scratch removal failed$/mu);
+  assert.match(text, /! reconcile  hook  destroy  \/tmp\/wt  cleanup  command 0  exit 7/u);
+  assert.doesNotMatch(text, /!.*worktree-retained/u);
+});
+
+test("verb receipts keep retained workspace and scratch residue in typed results only", () => {
+  for (const verb of ["amend", "review", "deliver"] as const) {
+    const contract = contractId("kei/residue");
+    const base = {
+      contract,
+      lag: [{ kind: "worktree-retained" as const, path: "/tmp/wt", affects: "none" as const }] as const,
+      cleanup: [
+        {
+          kind: "worktree-leak" as const,
+          contractId: contract,
+          leak: { path: "/tmp/scratch", diagnostic: "cleanup failed" },
+        },
+      ],
+    };
+    const result: InvocationResult =
+      verb === "amend"
+        ? receipt({ ...base, verb, diff: "", changes: {}, overlaps: [] })
+        : verb === "review"
+          ? receipt({ ...base, verb, verdict: "satisfied" })
+          : receipt({ ...base, verb });
+    const text = renderText(result);
+    assert.doesNotMatch(text, /lag  worktree|leak  worktree|\/tmp\//u);
+    assert.equal(base.cleanup[0]?.kind, "worktree-leak");
+  }
+});
+
+test("audit verification summary names declarations without changing raw evidence", () => {
+  const summary = "[1 bash exit 1]";
+  const result = receipt({
+    verb: "audit",
+    contract: contractId("kei/missing"),
+    report: {
+      candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: contractId("kei/missing") } },
+      verification: { kind: "unsatisfied", passed: 0, total: 1, summary },
+      target: { kind: "not-observed" },
+    },
+  });
+  assert.match(renderText(result), /declaration 1 · bash exit 1/u);
+  assert.doesNotMatch(renderText(result), /\[1 bash exit 1\]/u);
+  assert.equal(
+    result.report.verification.kind === "unsatisfied" ? result.report.verification.summary : undefined,
+    summary,
+  );
+});
+
+test("refusals use reason and option for missing contract and nuke confirmation", () => {
+  const missing = renderText({
+    kind: "refused",
+    verb: "show",
+    refusal: { kind: "contract-missing", contractId: contractId("kei/missing") },
+  });
+  assert.match(missing, /reason  contract missing/u);
+  const nuke = renderText({
+    kind: "refused",
+    verb: "nuke",
+    refusal: { kind: "nuke-confirmation-required", world: "/repo" },
+  });
+  assert.match(nuke, /reason  nuke confirmation required/u);
+  assert.match(nuke, /option  keiyaku nuke --confirm '\/repo'/u);
+});
+
+test("query displays dropped while the Task state remains drop", () => {
+  const row = {
+    id: "task/dropped" as never,
+    title: "Retired",
+    priority: 1 as const,
+    state: "drop" as const,
+    disposition: "drop" as const,
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    bodyPresent: false,
+  };
+  const text = renderTaskText(parseTaskCommand(["query"]), {
+    kind: "accepted",
+    value: { rows: [row], hasMore: false },
+  });
+  assert.match(text, /task\/dropped · dropped · P1/u);
+  assert.equal(row.state, "drop");
 });
 
 test("amend receipt names gate and prerequisite changes even without document diff", () => {
@@ -854,7 +987,7 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
     completion: { predecessor: tender, integration, target: "refs/heads/main" },
   });
   const text = renderText(result);
-  assert.match(text, /tender commit  aaaaaaa/u);
+  assert.match(text, /candidate  aaaaaaa/u);
   assert.match(text, /target  aaaaaaa\.\.bbbbbbb/u);
   assert.match(text, /✓ claimed/u);
   assert.doesNotMatch(text, /a{40}|b{40}|0{40}|content identity/u);
@@ -899,7 +1032,7 @@ test("receipt hashes extend their prefixes when IDs collide within one receipt",
     integration: { changeId: changeId("0".repeat(40)) },
     completion: { predecessor: tender, integration, target: "refs/heads/main" },
   }));
-  assert.match(text, /tender commit  aaaaaaa0/u);
+  assert.match(text, /candidate  aaaaaaa0/u);
   assert.match(text, /target  aaaaaaa0\.\.aaaaaaa1/u);
 });
 
@@ -981,8 +1114,8 @@ test("reconcile renders target checkout retention as attention", () => {
     },
   };
   const text = renderText(result);
-  assert.match(text, /! reconcile  target-checkout-retained  target refs\/heads\/main  path \/repo\/file/u);
-  assert.match(text, /diagnostic checkout failed/u);
+  assert.match(text, /! target checkout kept at  \/repo\/file  · refs\/heads\/main/u);
+  assert.match(text, /  reason  checkout failed/u);
 });
 
 test("reconcile renders private-state seat-close failure and diagnostic", () => {
@@ -1000,7 +1133,7 @@ test("reconcile renders private-state seat-close failure and diagnostic", () => 
   };
   const text = renderText(result);
   assert.match(text, /! settlement  private-state-seat-close-failed/u);
-  assert.match(text, /! diagnostic  could not close publication seat/u);
+  assert.match(text, /! reason  could not close publication seat/u);
 });
 
 test("reconcile hook payloads preserve lines and remain bounded", () => {
@@ -1060,7 +1193,7 @@ test("reconcile renders contract-file and settlement failures", () => {
     },
   };
   const text = renderText(result);
-  assert.match(text, /! reconcile  contract-file-failed  worktree \/tmp\/wt  path \.keiyaku\/KEIYAKU\.md/u);
+  assert.match(text, /! contract file unavailable  \/tmp\/wt  · \.keiyaku\/KEIYAKU\.md/u);
   assert.match(text, /! settlement  surface task  contractId kei\/example  diagnostic task failed/u);
 });
 
@@ -1137,11 +1270,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
   };
   assert.equal(
     renderText({ ...envelope, verb: "deliver" }),
-    [
-      "✓ deliver incomplete  kei/followed",
-      "  candidate  kept",
-      "! lag  worktree follow retained  ·  head moved  ·  /tmp/wt",
-    ].join("\n"),
+    ["✓ delivered  kei/followed", "  candidate  kept"].join("\n"),
   );
   assert.deepEqual(envelope.lag[0], {
     kind: "worktree-follow-retained",
@@ -1174,10 +1303,10 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     renderText(result),
     [
       "✓ bound  kei/bound",
-      "  workspace  worktree  /tmp/wt",
+      "  worktree  /tmp/wt",
       "  no target",
       "! lag  private-state-seat-close-failed",
-      "  diagnostic",
+      "  reason",
       "  seat close failed after publication",
       "",
     ].join("\n"),
@@ -1216,14 +1345,14 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
   };
 
   const text = renderText(result);
-  assert.match(text, /tender commit  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
+  assert.match(text, /candidate  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
   assert.match(text, /leading\s+already admitted/u);
   assert.doesNotMatch(text, /01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
   assert.doesNotMatch(text, /journal-blob-oid/u);
   assert.doesNotMatch(text, /ref updated|contract-file|worktree unchanged/u);
   assert.doesNotMatch(text, /ephemeral/u);
   assert.match(text, /recovery snapshot  recovery/u);
-  assert.match(text, /unsealed bytes  \/repo\/\.keiyaku\/wt\/contract/u);
+  assert.doesNotMatch(text, /unsealed bytes|\/repo\/\.keiyaku\/wt\/contract/u);
   assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
 
@@ -1249,7 +1378,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   assert.equal(
     renderText(deliver),
     [
-      "✓ deliver incomplete  kei/waiting-on-prerequisites",
+      "✓ delivered  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
       "  prerequisite  kei/active-prerequisite  ·  active",
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
@@ -1300,7 +1429,7 @@ test("direct gate stops render the sole placement report without another read", 
       }),
     ),
     [
-      "✓ deliver incomplete  kei/waiting-on-gates",
+      "✓ delivered  kei/waiting-on-gates",
       "! gates unsatisfied",
       "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
@@ -1608,7 +1737,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
       },
     }),
     [
-      "✓ deliver incomplete  kei/reintegrated",
+      "✓ delivered  kei/reintegrated",
       "! target  moved · re-integrated x2",
       "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
       "  candidate  kept",
@@ -1628,10 +1757,10 @@ test("unmerged index paths render as a complete public refusal", () => {
     [
       "× deliver refused",
       "  contract  kei/conflicted",
+      "  reason  unmerged paths",
       "  paths",
       "    a.txt",
       "    z.txt",
-      "  diagnostic  unmerged paths",
     ].join("\n"),
   );
 });
@@ -1662,7 +1791,7 @@ test("materialized conflict text keeps the exact recovery projection", () => {
       "    a.txt",
       "    b.txt",
       "  workspace  /repo/.keiyaku/wt/x",
-      "  deliver  deliver --include-dirty · reads worktree bytes, not index",
+      "  option  deliver  deliver --include-dirty · reads worktree bytes, not index",
     ].join("\n"),
   );
   assert.equal(JSON.parse(JSON.stringify(result)).handoffBase, result.handoffBase);
@@ -2027,7 +2156,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /⧖ run    \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /● run    \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -2198,7 +2327,7 @@ test("status renders selected activity evidence while preserving history and com
       1,
       `selected ${command} renders once`,
     );
-  assert.match(statusText, /⧖ run    \$ c9/u, "the active final tool remains visible");
+  assert.match(statusText, /● run    \$ c9/u, "the active final tool remains visible");
   assert.doesNotMatch(statusText, /omitted/u, "status does not re-fold the selected tool evidence");
   assert.ok(statusText.indexOf("$ c4") < statusText.indexOf("between"));
   assert.ok(statusText.indexOf("between") < statusText.indexOf("$ c5"));
@@ -3252,9 +3381,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
   assert.ok(runningStream.opened());
 
   const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
-  observedStream.observe(
-    live(parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) })),
-  );
+  observedStream.observe(live(parseAkumaStatus({ id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) })));
   now = 55_000;
   const observed = observedStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.equal(

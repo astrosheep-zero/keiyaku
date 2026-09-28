@@ -38,14 +38,14 @@ function subjectSnapshot(subject: string): string | undefined {
   return undefined;
 }
 
-function journalBody(fact: Fact): readonly string[] {
+function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: string }>): readonly string[] {
   switch (fact.kind) {
     case "bind": {
       const { coordinates, terms } = fact.data;
       return [
         `  start commit  ${shortId(coordinates.start)}`,
         ...(coordinates.target === undefined ? [] : [`  target  ${coordinates.target}`]),
-        `  workspace  ${coordinates.workspace}`,
+        `  ${workspace === undefined ? "worktree" : `worktree  ${workspace.path}`}`,
         ...listFact("gates", terms.gates),
         ...listFact("after", terms.after),
       ];
@@ -57,9 +57,9 @@ function journalBody(fact: Fact): readonly string[] {
     case "deliver": {
       const { tenderSnapshot, integration, method, policy } = fact.data;
       return [
-        `  tender commit  ${shortId(tenderSnapshot)}`,
+        `  candidate  ${shortId(tenderSnapshot)}`,
         `  predecessor commit  ${shortId(integration.predecessor)}`,
-        `  integration commit  ${shortId(integration.snapshot)}`,
+        `  integration result  ${shortId(integration.snapshot)}`,
         `  content identity (not commit)  ${integration.changeId}`,
         `  method  ${method}`,
         `  require branches up to date  ${String(policy.requireBranchesToBeUpToDate)}`,
@@ -68,7 +68,7 @@ function journalBody(fact: Fact): readonly string[] {
     case "reintegrated":
       return [
         `  predecessor commit  ${shortId(fact.data.predecessor)}`,
-        `  integration commit  ${shortId(fact.data.snapshot)}`,
+        `  integration result  ${shortId(fact.data.snapshot)}`,
       ];
     case "attestation": {
       const snapshot = subjectSnapshot(fact.data.subject);
@@ -101,9 +101,12 @@ function journalBody(fact: Fact): readonly string[] {
   }
 }
 
-function contractHistoryEventLines(event: ContractHistoryEvent): readonly string[] {
+function contractHistoryEventLines(
+  event: ContractHistoryEvent,
+  workspace?: Readonly<{ kind: "worktree"; path: string }>,
+): readonly string[] {
   if (event.source === "dispatch") return [`${event.dispatch.dispatchedAt} dispatch · ${event.dispatch.akuId}`];
-  return [journalHead(event.fact), ...journalBody(event.fact)];
+  return [journalHead(event.fact), ...journalBody(event.fact, workspace)];
 }
 
 export function renderContractHistory(history: ContractHistory): string {
@@ -116,6 +119,6 @@ export function renderContractHistory(history: ContractHistory): string {
   return [
     `history  ${history.id}${counts.length === 0 ? "" : ` · ${counts.join(" · ")}`}`,
     "",
-    ...history.events.flatMap(contractHistoryEventLines),
+    ...history.events.flatMap((event) => contractHistoryEventLines(event, history.workspace)),
   ].join("\n");
 }

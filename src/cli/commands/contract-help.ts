@@ -133,7 +133,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "stdin is one nonblank H1 chapter name followed by any Markdown body, including none:",
       "  # <chapter name>",
       "  <freeform body, optional>",
-      "The chapter frames dispatched work; Contract acceptance remains unchanged.",
+      "The chapter frames dispatched work; the receipt states that the chapter opened. Contract acceptance remains unchanged.",
     ].join("\n"),
   },
   abandon: {

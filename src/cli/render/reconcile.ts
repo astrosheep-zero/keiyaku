@@ -60,7 +60,7 @@ function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: s
       const output = "stdout" in failure.failure ? failure.failure.stdout : undefined;
       const error = "stderr" in failure.failure ? failure.failure.stderr : undefined;
       if (failure.failure.kind === "spawn-error") {
-        receiptRow(lines, "!", "diagnostic", [{ text: failure.failure.diagnostic, opaque: true }], columns);
+        receiptRow(lines, "!", "reason", [{ text: failure.failure.diagnostic, opaque: true }], columns);
       }
       if (output !== undefined && output.length > 0) receiptPayload(lines, "stdout", output);
       if (error !== undefined && error.length > 0) receiptPayload(lines, "stderr", error);
@@ -80,26 +80,48 @@ function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: s
       );
       break;
     case "worktree-retained":
+      receiptRow(lines, " ", "worktree retained at", [{ text: lag.path, opaque: true }], columns);
+      if (lag.diagnostic !== undefined)
+        receiptRow(lines, " ", "reason", [{ text: lag.diagnostic, opaque: true }], columns);
+      break;
     case "worktree-follow-retained":
-    case "unsealed-bytes":
-    case "target-checkout-retained":
-    case "contract-file-failed": {
-      const details = Object.entries(lag)
-        .filter(([key]) => key !== "kind")
-        .map(([key, value]) => ({ text: `${key} ${String(value)}`, opaque: true }));
       receiptRow(
         lines,
-        "!",
-        "reconcile",
-        [
-          ...(contract === undefined ? [] : [{ text: contract, opaque: true }]),
-          { text: lag.kind, opaque: true },
-          ...details,
-        ],
+        " ",
+        "worktree follow kept at",
+        [{ text: lag.path, opaque: true }, { text: `· ${lag.reason.replaceAll("-", " ")}` }],
         columns,
       );
       break;
-    }
+    case "unsealed-bytes":
+      receiptRow(lines, " ", "unsealed bytes kept at", [{ text: lag.path, opaque: true }], columns);
+      break;
+    case "target-checkout-retained":
+      receiptRow(
+        lines,
+        "!",
+        "target checkout kept at",
+        [
+          { text: lag.path, opaque: true },
+          { text: `· ${lag.target}`, opaque: true },
+        ],
+        columns,
+      );
+      receiptRow(lines, " ", "reason", [{ text: lag.diagnostic, opaque: true }], columns);
+      break;
+    case "contract-file-failed":
+      receiptRow(
+        lines,
+        "!",
+        "contract file unavailable",
+        [
+          { text: lag.worktree, opaque: true },
+          { text: `· ${lag.path}`, opaque: true },
+        ],
+        columns,
+      );
+      receiptRow(lines, " ", "reason", [{ text: lag.diagnostic, opaque: true }], columns);
+      break;
   }
   if (
     kind !== "worktree-hook-failed" &&
@@ -153,7 +175,7 @@ function appendReport(
   }
   for (const failure of report.settlement?.seatClose ?? []) {
     receiptRow(lines, "!", "settlement", [{ text: failure.kind, opaque: true }], columns);
-    receiptRow(lines, "!", "diagnostic", [{ text: failure.diagnostic, opaque: true }], columns);
+    receiptRow(lines, "!", "reason", [{ text: failure.diagnostic, opaque: true }], columns);
   }
 }
 

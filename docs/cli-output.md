@@ -20,7 +20,7 @@ the classification or its exit mapping is a product change, and ordinary
 receipt text never carries the numeric map.
 
 Substantive refusals use one text grammar: a denied-verdict title naming the
-verb, a labeled diagnostic fact with machine kinds rendered as words, and
+verb, a labeled reason with machine kinds rendered as words, and
 labeled entity/state facts where present. Usage refusals retain their compact
 usage grammar. Operation and recovery handles do not prescribe a working
 directory; any workspace coordinate is a separate fact for the caller to use.
@@ -28,8 +28,8 @@ directory; any workspace coordinate is a separate fact for the caller to use.
 Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions
 between success, substantive refusal, retryable conflict, absent authority,
-and operational failure. Text labels name a candidate's tender and its
-integrated object, distinguish content identity from commit identity, and keep
+and operational failure. Text labels name a candidate and its integration result,
+distinguish content identity from commit identity, and keep
 journal blobs, entry ids, and record-field enumeration out of ordinary text —
 evidence handles live in JSON and `history` alone. Recorded verification folds
 into a delivery row only when its snapshot matches; otherwise it remains an
@@ -48,9 +48,8 @@ bounded terms comparison keeps only the comparison headers, without decorative
 banners or trailing header whitespace. Task mutation receipts use verb-past
 titles and field-level changes or admitted plan rows, never projection-file
 diffs. Task show timestamps omit millisecond precision in text; JSON retains
-full precision.
-An incomplete placement keeps its tender and content-identity rows and its
-current diagnostic shape.
+full precision. An incomplete placement keeps its candidate and content-identity
+rows and its current reason for waiting.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
 at that fact: identity uses a tree, a timeline admission uses a row, and Git
@@ -65,7 +64,8 @@ retained coordination residue without claiming a world-wide transaction.
 
 Each domain-state-to-mark mapping and refusal receipt assembly has one
 definition site; render surfaces consume that shared definition and never
-re-derive it.
+re-derive it. `●` asserts liveness and belongs on live surfaces; what live rows
+may enter the scrollback is a separate Contract's architecture, not settled here.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
@@ -109,7 +109,7 @@ when it differs from the state age. Activity previews keep observed source
 punctuation, apply only terminal-safe handling, whitespace folding, and
 width-aware truncation, and never rewrite what an Akuma said. Width is counted
 in terminal cells for whole grapheme clusters. Task dispositions render as
-words wherever task rows appear.
+words wherever task rows appear; the stored dropping state reads as dropped.
 
 Known Akuma selection conditions render as one compact caller fact naming the
 coordinate and the useful relation; they do not expose Heart birth terminology,
@@ -147,7 +147,7 @@ omission mark when the head is cut; the selected Akuma detail keeps head-first
 wrapping. Selected Contract status foregrounds the phase's outcome or current
 work judgment; terminal status does not repeat delivery mechanics, workspace
 observation, its phase, or its age as bare rows beneath the header. When the
-target has moved, a tendered card labels its recorded integration as predating
+target has moved, a delivered card labels its recorded integration as predating
 that movement. Audit states undeclared Verification once in human words and
 names observed target lag as counted or unknown when the target is placeable.
 
