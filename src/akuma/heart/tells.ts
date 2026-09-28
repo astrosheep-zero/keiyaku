@@ -289,6 +289,25 @@ export function insertTellBindingFact(
   }
 }
 
+export function turnParticipants(database: DatabaseSync, turnSequence: number): readonly string[] {
+  const rows = database
+    .prepare(
+      `SELECT turns.initiator AS owner, tells.initiator AS teller
+       FROM turns
+       LEFT JOIN tell_bindings ON tell_bindings.turn_sequence = turns.sequence
+       LEFT JOIN tells ON tells.id = tell_bindings.tell_id
+       WHERE turns.sequence = ?
+       ORDER BY tell_bindings.sequence`,
+    )
+    .all(turnSequence) as { owner: string | null; teller: string | null }[];
+  const participants = new Set<string>();
+  for (const row of rows) {
+    if (row.owner) participants.add(row.owner);
+    if (row.teller) participants.add(row.teller);
+  }
+  return [...participants];
+}
+
 export function drainPendingTells(
   pending: readonly TellFact[],
   activeTurnSequences: readonly number[] = [],

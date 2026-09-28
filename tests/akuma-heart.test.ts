@@ -35,7 +35,7 @@ import {
   probeLeash,
   pauseRequested,
   readHeart,
-  readForkPoint, readLatestTurnForBody, readTell, readRequest,
+  readForkPoint, readLatestTurnForBody, readTell, readRequest, readTurnParticipants,
   recordSession,
   recordTell as heartRecordTell,
   recordTellDeliveries,
@@ -296,6 +296,43 @@ test("tell admission shares activity order and delivery witnesses fold without m
     assert.equal((await readHeart(value.allocated.paths)).pending.length, 0);
     body.release();
   } finally {
+    value.close();
+  }
+});
+
+test("Turn participants follow binding order across live and launch routes without replacing ownership", async () => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, initiator: "Alice" });
+    assert.deepEqual(await readTurnParticipants(paths, turn.sequence), ["Alice"]);
+    assert.deepEqual(await readTurnParticipants(paths, 999), []);
+    for (const [id, initiator] of [
+      ["live", "Bob"],
+      ["anonymous", undefined],
+      ["launch", "Carol"],
+      ["duplicate", "Alice"],
+      ["repeated", "Bob"],
+    ] as const) {
+      await heartRecordTell(paths, { kind: "tell", id, body: id, recordedAt: at, ...(initiator ? { initiator } : {}) });
+      await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: [id], boundAt: at });
+    }
+    await recordTellDeliveries(paths, [
+      { tellId: "live", route: "live", turnSequence: turn.sequence, fence: "live", receipt: "required", deliveredAt: at },
+      { tellId: "launch", route: "launch", turnSequence: turn.sequence, fence: "launch", deliveredAt: at },
+    ]);
+    assert.deepEqual(await readTurnParticipants(paths, turn.sequence), ["Alice", "Bob", "Carol"]);
+    assert.equal((await readTurn(paths, turn.sequence))?.initiator, "Alice");
+    const ownerless = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    assert.deepEqual(await readTurnParticipants(paths, ownerless.sequence), []);
+    await bindTellsToTurn(paths, { turnSequence: ownerless.sequence, tellIds: ["live"], boundAt: at });
+    assert.deepEqual(await readTurnParticipants(paths, ownerless.sequence), ["Bob"]);
+  } finally {
+    leash.release();
     value.close();
   }
 });

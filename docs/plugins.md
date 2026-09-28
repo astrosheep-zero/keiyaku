@@ -52,9 +52,10 @@ in the submitting session. This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
 When an admitted call has a current Square caller, the call observation also
 establishes that caller's route before later outcome observation. Turn outcomes
-address only the initiator carried by that Turn's signal, never a caller
-captured from the producing process. An absent initiator
-produces an unaddressed outcome rather than a fallback mention.
+address every participant carried by the Turn's signal, never a caller captured
+from the producing process. The opening initiator remains the owner, not the
+entire audience. No participants produces an unaddressed outcome rather than a
+fallback mention.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention
@@ -100,9 +101,8 @@ The call-admission producer owns this signal's delivery.
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
 Akuma and Turn sequence and carries the committed answered or failed outcome
-and the Turn's optional initiator; it does not expose provider or continuation
-custody. Plugins cannot participate
-in providers, generic lifecycle verbs, operation inputs, or Settlement. In
+and the Turn's optional owner and participant audience; it does not expose
+provider or continuation custody. Plugins cannot participate in providers, generic lifecycle verbs, operation inputs, or Settlement. In
 particular, plugin delivery does not make birth reversible, add a pre-Body
 listener, or create rollback or cross-process continuation behavior.
 
@@ -111,10 +111,10 @@ that Body fact is durable. The signal identifies the Akuma and Body sequence
 and carries the terminal reason, including hung custody. It observes that Body
 only; a successor may already be running when the signal is delivered, and the
 signal does not redefine it as an Akuma-wide idle notification. When a Body-end
-observer needs to name the latest admitted input, it may use only the optional
-initiator of the latest admitted Turn belonging to that exact Body. A missing
-Turn or an unattributed latest Turn remains unaddressed; an earlier Turn,
+observer needs to name the latest admitted input, it may use only the owner and
+participants of the latest admitted Turn belonging to that exact Body. A missing
+Turn or one with no participants remains unaddressed; an earlier Turn,
 process environment, and launch context are not fallback owners. Square's
-interruption notice is best-effort and may suppress a same-recipient failed
-Turn notice within one process activation, but it creates no durable receipt or
-replay guarantee.
+interruption notice is best-effort and suppresses already-notified failed-Turn
+recipients individually within one process activation, without a durable receipt
+or replay guarantee.

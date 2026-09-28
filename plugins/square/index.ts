@@ -82,7 +82,7 @@ function calledExpression(signal: PluginSignalMap["akuma.called"]): string {
 
 type BodyNotificationState = {
   tail: Promise<void>;
-  failedRecipients: Set<string | undefined>;
+  failedRecipients: Set<string>;
 };
 
 function bodyNotificationKey(signal: Pick<PluginSignalMap["akuma.body-ended"], "akumaId" | "bodySequence">): string {
@@ -136,7 +136,7 @@ const plugin: KeiyakuPlugin = {
     const expressAsAkuma = async (
       akumaId: string,
       expression: string,
-      initiator: string | undefined,
+      participants: readonly string[] | undefined,
       cancellation?: AbortSignal,
     ): Promise<boolean> => {
       cancellation?.throwIfAborted();
@@ -146,7 +146,7 @@ const plugin: KeiyakuPlugin = {
         const joined = await square.implicitJoin(akumaId);
         if (joined.state === "done" || joined.participant === undefined) return false;
         cancellation?.throwIfAborted();
-        await joined.participant.express(expression, initiator === undefined ? {} : { mentions: [initiator] });
+        await joined.participant.express(expression, participants?.length ? { mentions: [...participants] } : {});
         return true;
       } finally {
         await square.close();
@@ -155,11 +155,12 @@ const plugin: KeiyakuPlugin = {
     const expressTurnOutcome = (
       signal: PluginSignalMap["akuma.turn-outcome"],
       cancellation?: AbortSignal,
-    ): Promise<boolean> => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.initiator, cancellation);
+    ): Promise<boolean> => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.participants, cancellation);
     const expressBodyEnd = (
       signal: PluginSignalMap["akuma.body-ended"],
+      participants: readonly string[],
       cancellation?: AbortSignal,
-    ): Promise<boolean> => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), signal.initiator, cancellation);
+    ): Promise<boolean> => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), participants, cancellation);
     let caller: string | undefined;
     try {
       caller = squareAssignedParticipantName(environment);
@@ -192,7 +193,7 @@ const plugin: KeiyakuPlugin = {
             // A late express may resolve after this handler lost authority; without a
             // revalidation it would suppress an authorized Body-end notice it never owned.
             cancellation?.throwIfAborted();
-            state.failedRecipients.add(signal.initiator);
+            for (const participant of signal.participants ?? []) state.failedRecipients.add(participant);
           });
         },
         async "akuma.body-ended"(signal, cancellation) {
@@ -200,8 +201,9 @@ const plugin: KeiyakuPlugin = {
           await serializeBodyNotification(bodyNotifications, signal, async (state) => {
             try {
               if (signal.end === "exited" || signal.end === "put-down") return;
-              if (state.failedRecipients.has(signal.initiator)) return;
-              await expressBodyEnd(signal, cancellation);
+              const remaining = (signal.participants ?? []).filter((participant) => !state.failedRecipients.has(participant));
+              if ((signal.participants?.length ?? 0) > 0 && remaining.length === 0) return;
+              await expressBodyEnd(signal, remaining, cancellation);
             } finally {
               if (bodyNotifications.get(key) === state) bodyNotifications.delete(key);
             }

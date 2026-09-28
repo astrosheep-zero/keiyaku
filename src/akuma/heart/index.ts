@@ -59,6 +59,7 @@ import {
   tellDispositionResolved,
   tellFact,
   tellIdsForFence,
+  turnParticipants,
 } from "./tells.js";
 import {
   activityFactSlice,
@@ -443,6 +444,10 @@ export async function failOpenBoundTurns(
 
 export async function readTurn(paths: AkumaPaths, sequence: number): Promise<TurnFact | null> {
   return await withReadOnlyHeart(paths, (heart) => turnFact(heart, sequence));
+}
+
+export async function readTurnParticipants(paths: AkumaPaths, sequence: number): Promise<readonly string[]> {
+  return await withReadOnlyHeart(paths, (heart) => turnParticipants(heart, sequence));
 }
 
 export async function readLatestTurnForBody(paths: AkumaPaths, bodySequence: number): Promise<TurnFact | null> {

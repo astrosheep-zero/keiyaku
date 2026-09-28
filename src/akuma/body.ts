@@ -22,6 +22,7 @@ import {
   readOpenPendingTellDisposition,
   readTell,
   readTurn,
+  readTurnParticipants,
   readNonterminalRequests,
   resolvePendingTellDisposition,
   type PendingTellDisposition,
@@ -396,6 +397,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
       try {
         const turn = await readTurn(launch.paths, turnSequence);
         if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
+        const participants = await readTurnParticipants(launch.paths, turnSequence);
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
@@ -409,6 +411,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
             bodySequence: turn.bodySequence,
             turnSequence,
             ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+            ...(participants.length === 0 ? {} : { participants }),
             outcome:
               outcome.outcome === "answered"
                 ? { kind: "answered", text: outcome.answer }
@@ -435,7 +438,9 @@ function bodyEndEmitter(
   return (bodySequence, end, diagnostic) =>
     (async () => {
       try {
-        const initiator = (await readLatestTurnForBody(launch.paths, bodySequence))?.initiator;
+        const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
+        const initiator = latestTurn?.initiator;
+        const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
         plugins ??= pluginRuntime({
           world: await World.at(worldRootForAkumaPaths(launch.paths)),
           reportDiagnostic,
@@ -448,6 +453,7 @@ function bodyEndEmitter(
             bodySequence,
             end,
             ...(initiator === undefined ? {} : { initiator }),
+            ...(participants.length === 0 ? {} : { participants }),
             ...(diagnostic === undefined ? {} : { diagnostic }),
             ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
           },

@@ -24,6 +24,7 @@ export type PluginSignalMap = Readonly<{
     bodySequence: number;
     turnSequence: number;
     initiator?: string;
+    participants?: readonly string[];
     outcome: PluginOutcome;
     contractId?: string;
   }>;
@@ -32,6 +33,7 @@ export type PluginSignalMap = Readonly<{
     bodySequence: number;
     end: PluginBodyEnd;
     initiator?: string;
+    participants?: readonly string[];
     diagnostic?: string;
     contractId?: string;
   }>;

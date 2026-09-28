@@ -87,9 +87,11 @@ a witnessed Body remains already killed.
 Tell admission retains its optional submitting initiator alongside its input;
 reusing the same Tell identity cannot replace that attribution. Turn admission
 retains the opening input's initiator independently of later Tell retention,
-Body succession, or the process producing its outcome. An observer may read the
+Body succession, or the process producing its outcome. Binding a Tell to a Turn
+adds its attributed initiator to that Turn's participant audience without
+replacing the opening ownership attribution. An observer may read the
 latest admitted Turn of one exact Body after that Body's terminal fact is durable;
-no Turn, or a latest Turn without an initiator, yields no attribution and never
+no Turn, or a latest Turn without participants, yields no audience and never
 falls back to an earlier Turn or runtime context.
 
 Tell facts retain admission and only named delivery/terminal-receipt witnesses.

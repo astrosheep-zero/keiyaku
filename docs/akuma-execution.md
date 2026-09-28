@@ -15,8 +15,11 @@ retire only provider custody it directly owns and exit.
 An input may carry its submitting initiator for outcome addressing. A Turn
 freezes that identity from its opening call or, without a call, its first
 launch Tell. Later coalesced inputs and live steering do not replace the Turn's
-initiator. A subsequent Turn takes its own opening input's identity, including
-explicit absence; it never inherits the birth caller or the Body environment.
+single owner. A Turn's audience includes that opening identity and the
+initiators of every Tell bound to it, without duplicates. Live steering and
+launch routing decide how input enters the Turn, never who hears its outcome.
+A subsequent Turn takes its own opening input's identity, including explicit
+absence; it never inherits the birth caller or the Body environment.
 This attribution grants no permission and does not affect execution.
 
 A Body begins with ordinary host configuration but establishes an isolated

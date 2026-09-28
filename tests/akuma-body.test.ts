@@ -501,6 +501,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
           turnSequence: 1,
           outcome: { kind: "answered", text: "done" },
           initiator: "Alice",
+          participants: ["Alice"],
           contractId: "kei/example",
         },
         outcomes: [
@@ -552,6 +553,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         turnSequence: sequences[1],
         outcome: { kind: "answered", text: "adjusted" },
         initiator: "Bob",
+        participants: ["Bob", "Carol"],
       },
       outcomes: [
         {
@@ -572,6 +574,12 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
       body: "continue without attribution",
       recordedAt: "2026-08-08T00:00:03.000Z",
     });
+    await recordTell(allocated.paths, {
+      id: "plugin-attributed-after-unattributed",
+      body: "also continue",
+      initiator: "Dana",
+      recordedAt: "2026-08-08T00:00:03.001Z",
+    });
     await driveAkumaBody(
       { paths: allocated.paths, initiator: "Alice" },
       adapter({
@@ -583,6 +591,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     );
     assert.equal(recorder.observations.length, 3);
     assert.equal("initiator" in recorder.observations[2]!.signal, false);
+    assert.deepEqual(recorder.observations[2]!.signal.kind === "akuma.turn-outcome" ? recorder.observations[2]!.signal.participants : null, ["Dana"]);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });
@@ -657,6 +666,12 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
+    await recordTell(allocated.paths, {
+      id: "body-end-teller",
+      body: "extra input",
+      initiator: "Carol",
+      recordedAt: "2026-08-08T00:00:00.500Z",
+    });
     await driveAkumaBody(
       claudeBodyLaunch(allocated, root, "second", { initiator: "Bob" }),
       adapter({
@@ -666,6 +681,12 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       }),
       { now: () => "2026-08-08T00:00:01.000Z" },
     );
+    await recordTell(allocated.paths, {
+      id: "body-end-ownerless-teller",
+      body: "third input",
+      initiator: "Dana",
+      recordedAt: "2026-08-08T00:00:01.500Z",
+    });
     await driveAkumaBody(
       claudeBodyLaunch(allocated, root, "third"),
       adapter({
@@ -691,9 +712,9 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
     );
 
     assert.deepEqual(recorder.signals, [
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", initiator: "Alice" },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", initiator: "Bob" },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", initiator: "Alice", participants: ["Alice"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", initiator: "Bob", participants: ["Bob", "Carol"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", participants: ["Dana"] },
       { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "broke-off" },
     ]);
   } finally {
@@ -707,6 +728,15 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4d" });
     await initializeHeart(allocated.paths);
+    configureTurnOutcomePlugins(root);
+    const recorder: TurnOutcomePluginRecorder = {
+      activations: 0,
+      observations: [],
+      async observe(signal) {
+        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
+      },
+    };
+    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const { promise: receiptReleased, resolve: releaseReceipt } = promiseBarrier<void>();
     const { promise: observed, resolve: tellObserved } = promiseBarrier<void>();
@@ -743,20 +773,39 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
         };
       },
     };
-    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), live, {
+    const launch = claudeBodyLaunch(allocated, root, "work", { initiator: "Alice" });
+    const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+    try {
+      await leash.birth(allocated.paths, { ...launch.seed!, createdAt: "2026-08-08T00:00:00.000Z" });
+    } finally {
+      leash.release();
+    }
+    await recordTell(allocated.paths, {
+      id: "tell-launch",
+      body: "coalesced",
+      initiator: "Carol",
+      recordedAt: "2026-08-08T00:00:00.000Z",
+    });
+    const body = driveAkumaBody(launch, live, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
+      initiator: "Bob",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
     await observed;
     releaseEvents();
     await body;
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+    assert.deepEqual(recorder.observations.map(({ signal }) => signal.kind === "akuma.turn-outcome" ? {
+      initiator: signal.initiator,
+      participants: signal.participants,
+    } : null), [{ initiator: "Alice", participants: ["Alice", "Carol", "Bob"] }]);
   } finally {
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     await removeDrivenBodyFixture(root);
   }
 });

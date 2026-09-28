@@ -98,6 +98,7 @@ type SquareNotificationFixture = Readonly<{
     initiator: string | undefined,
     reason: string,
     cancellation?: AbortSignal,
+    participants?: readonly string[],
   ): Promise<void>;
   answeredTurn(
     akumaId: string,
@@ -106,6 +107,7 @@ type SquareNotificationFixture = Readonly<{
     initiator: string | undefined,
     text: string,
     cancellation?: AbortSignal,
+    participants?: readonly string[],
   ): Promise<void>;
   bodyEnd(
     akumaId: string,
@@ -114,6 +116,7 @@ type SquareNotificationFixture = Readonly<{
     initiator?: string,
     diagnostic?: string,
     cancellation?: AbortSignal,
+    participants?: readonly string[],
   ): Promise<void>;
   expressions(): Promise<readonly CapturedExpression[]>;
   bodies(): Promise<readonly string[]>;
@@ -154,7 +157,7 @@ async function withSquareNotificationFixture<T>(
       async admit(initiator) {
         await initiating({ kind: "akuma.initiating", initiator });
       },
-      async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation) {
+      async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation, participants) {
         await turn(
           {
             kind: "akuma.turn-outcome",
@@ -162,12 +165,13 @@ async function withSquareNotificationFixture<T>(
             bodySequence,
             turnSequence,
             ...optionalInitiator(initiator),
+            ...(participants === undefined && initiator === undefined ? {} : { participants: participants ?? [initiator!] }),
             outcome: { kind: "failed", reason },
           },
           cancellation,
         );
       },
-      async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation) {
+      async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation, participants) {
         await turn(
           {
             kind: "akuma.turn-outcome",
@@ -175,12 +179,13 @@ async function withSquareNotificationFixture<T>(
             bodySequence,
             turnSequence,
             ...optionalInitiator(initiator),
+            ...(participants === undefined && initiator === undefined ? {} : { participants: participants ?? [initiator!] }),
             outcome: { kind: "answered", text },
           },
           cancellation,
         );
       },
-      async bodyEnd(akumaId, bodySequence, end, initiator, diagnostic, cancellation) {
+      async bodyEnd(akumaId, bodySequence, end, initiator, diagnostic, cancellation, participants) {
         await bodyEnd(
           {
             kind: "akuma.body-ended",
@@ -188,6 +193,7 @@ async function withSquareNotificationFixture<T>(
             bodySequence,
             end,
             ...optionalInitiator(initiator),
+            ...(participants === undefined && initiator === undefined ? {} : { participants: participants ?? [initiator!] }),
             ...optionalDiagnostic(diagnostic),
           },
           cancellation,
@@ -289,6 +295,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       bodySequence: 1,
       turnSequence: 1,
       initiator: "Alice",
+      participants: ["Alice"],
       outcome: { kind: "answered", text: "done" },
       contractId: "kei/example",
     });
@@ -298,6 +305,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       bodySequence: 1,
       turnSequence: 2,
       initiator: "Bob",
+      participants: ["Bob"],
       outcome: { kind: "answered", text: "adjusted" },
       contractId: "kei/example",
     });
@@ -413,6 +421,24 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
   });
 });
 
+test("Square addresses all Turn participants and suppresses only already-notified Body recipients", async () => {
+  await withSquareNotificationFixture("audience", async (fixture) => {
+    await fixture.admit("Carol");
+    await fixture.admit("Dana");
+    await fixture.failedTurn("aku/group", 1, 1, "Alice", "failed", undefined, ["Alice", "Bob", "Carol"]);
+    await fixture.bodyEnd("aku/group", 1, "broke-off", "Alice", "stopped", undefined, ["Alice", "Bob", "Carol", "Dana"]);
+    await fixture.failedTurn("aku/silent-owner", 2, 2, undefined, "failed", undefined, ["Bob"]);
+    await fixture.bodyEnd("aku/silent-owner", 2, "hung", undefined, undefined, undefined, ["Bob"]);
+    await fixture.answeredTurn("aku/no-audience", 3, 3, "Alice", "done", undefined, []);
+    assert.deepEqual(await fixture.expressions(), [
+      captured("aku/group", "aku/group turn/1 (@Alice)\n× failed\nignore if you have already seen this.", ["Alice", "Bob", "Carol"]),
+      captured("aku/group", "aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
+      captured("aku/silent-owner", "aku/silent-owner turn/2\n× failed\nignore if you have already seen this.", ["Bob"]),
+      captured("aku/no-audience", "aku/no-audience turn/3 (@Alice)\n✓ came back\nignore if you have already seen this."),
+    ]);
+  });
+});
+
 test("same-Body notifications serialize while distinct Bodies overlap", async () => {
   await withSquareNotificationFixture("serialize", async (fixture) => {
     const failedExpression = captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]);
@@ -514,7 +540,7 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
         akumaId: "aku/worker",
         bodySequence: 1,
         turnSequence: index + 1,
-        ...(initiator === undefined ? {} : { initiator }),
+        ...(initiator === undefined ? {} : { initiator, participants: [initiator] }),
         outcome: { kind: "failed", reason: "fixture failure" },
       });
     }

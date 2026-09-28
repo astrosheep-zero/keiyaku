@@ -95,7 +95,7 @@ const plugin = {
         const ledger = hostLedger(environment);
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         const bodyNotifications = new Map();
-        const expressAsAkuma = async (akumaId, expression, initiator, cancellation) => {
+        const expressAsAkuma = async (akumaId, expression, participants, cancellation) => {
             cancellation?.throwIfAborted();
             const square = await openSquare(path, environment, ledger, wakeTransport);
             try {
@@ -104,15 +104,15 @@ const plugin = {
                 if (joined.state === "done" || joined.participant === undefined)
                     return false;
                 cancellation?.throwIfAborted();
-                await joined.participant.express(expression, initiator === undefined ? {} : { mentions: [initiator] });
+                await joined.participant.express(expression, participants?.length ? { mentions: [...participants] } : {});
                 return true;
             }
             finally {
                 await square.close();
             }
         };
-        const expressTurnOutcome = (signal, cancellation) => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.initiator, cancellation);
-        const expressBodyEnd = (signal, cancellation) => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), signal.initiator, cancellation);
+        const expressTurnOutcome = (signal, cancellation) => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.participants, cancellation);
+        const expressBodyEnd = (signal, participants, cancellation) => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), participants, cancellation);
         let caller;
         try {
             caller = squareAssignedParticipantName(environment);
@@ -151,7 +151,8 @@ const plugin = {
                         // A late express may resolve after this handler lost authority; without a
                         // revalidation it would suppress an authorized Body-end notice it never owned.
                         cancellation?.throwIfAborted();
-                        state.failedRecipients.add(signal.initiator);
+                        for (const participant of signal.participants ?? [])
+                            state.failedRecipients.add(participant);
                     });
                 },
                 async "akuma.body-ended"(signal, cancellation) {
@@ -160,9 +161,10 @@ const plugin = {
                         try {
                             if (signal.end === "exited" || signal.end === "put-down")
                                 return;
-                            if (state.failedRecipients.has(signal.initiator))
+                            const remaining = (signal.participants ?? []).filter((participant) => !state.failedRecipients.has(participant));
+                            if ((signal.participants?.length ?? 0) > 0 && remaining.length === 0)
                                 return;
-                            await expressBodyEnd(signal, cancellation);
+                            await expressBodyEnd(signal, remaining, cancellation);
                         }
                         finally {
                             if (bodyNotifications.get(key) === state)
