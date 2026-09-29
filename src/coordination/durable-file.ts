@@ -41,34 +41,6 @@ export async function replaceFileDurably(path: string, bytes: string | Uint8Arra
 
 export type DerivedFileAction = "created" | "updated" | "unchanged";
 
-export async function createFileDurablyExclusive(
-  path: string,
-  bytes: string | Uint8Array,
-  mode = 0o600,
-): Promise<boolean> {
-  const parent = dirname(path);
-  await mkdir(parent, { recursive: true });
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(path, "wx", mode);
-    writeFileSync(descriptor, bytes);
-    fsyncSync(descriptor);
-    closeSync(descriptor);
-    descriptor = undefined;
-    syncDirectory(parent);
-    return true;
-  } catch (error) {
-    if (descriptor !== undefined) closeSync(descriptor);
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-    try {
-      await unlink(path);
-    } catch {
-      /* absent or best-effort cleanup */
-    }
-    throw error;
-  }
-}
-
 export async function repairDerivedFile(path: string, bytes: string | Uint8Array): Promise<DerivedFileAction> {
   const expected = Buffer.from(bytes);
   await mkdir(dirname(path), { recursive: true });
