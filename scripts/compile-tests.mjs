@@ -80,10 +80,10 @@ for (const file of globSync([
 // Execute the actual release modules and plugin, not a second source compilation.
 // Tests also read repository documents by their source-relative path, so project
 // `docs` the same way: one repository document, source and compiled layouts alike.
-for (const [directory, target] of [
+for (const [directory, target] of /** @type {ReadonlyArray<readonly [string, string]>} */ ([
   ["src", "build/src"],
   ["plugins", "plugins"],
   ["docs", "docs"],
-]) {
+])) {
   symlinkSync(resolve(target), `.test-build/${directory}`, "junction");
 }
