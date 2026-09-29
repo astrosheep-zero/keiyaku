@@ -531,3 +531,10 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.throws(() => parseArgv(["bind", "-", "-C", "/one", "--cwd", "/two"]), /-C\/--cwd may appear only once/u);
   assert.throws(() => parseArgv(["bind", "-", "--repo"]), /--repo requires a path/u);
 });
+
+test("history keeps the id conflict ahead of an invalid limit and id", () => {
+  assert.throws(
+    () => parseArgv(["history", "aku/worker/1234abcd", "--id", "not-a-turn", "--limit", "0"]),
+    /history --id cannot be combined with --last, --before, --since, or --limit/u,
+  );
+});

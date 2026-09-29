@@ -88,6 +88,17 @@ export function isBlankInput(value: string): boolean {
   return value.trim().length === 0;
 }
 
+/** Run Settings-backed consumption at the edge, refusing a Settings failure as usage. */
+export function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Error): T {
+  try {
+    return run();
+  } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
+    if (error instanceof ErrorType) throw new CliUsageError(error.message);
+    throw error;
+  }
+}
+
 export function usageLine(usage: string): string {
   return usage
     .split("\n")

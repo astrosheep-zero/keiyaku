@@ -1,9 +1,8 @@
-import { resolveActor } from "../actor.js";
+import { actorFromEdge } from "../actor.js";
 import type { ContractExecution, ExecutionEvent } from "../../library/execution.js";
-import { CliUsageError } from "../usage.js";
+import { consumeSettings } from "../usage.js";
 import type { InvocationResult } from "../result.js";
 import type { ParsedCommand } from "../parse.js";
-import type { SelectedContract } from "../selectors.js";
 import type { ActorId, ContractId, Keiyaku as KeiyakuContract, KeiyakuLibrary } from "../../index.js";
 import type { WorktreeHooks } from "../../library/configuration.js";
 import type { Repo } from "../../library/repo.js";
@@ -45,25 +44,6 @@ export type ContractMutationInput = Readonly<{
   execution: ExecutionContext;
 }>;
 
-function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
-  try {
-    return resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    throw new CliUsageError(error instanceof Error ? error.message : String(error));
-  }
-}
-
-function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Error): T {
-  try {
-    return run();
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (error instanceof ErrorType) throw new CliUsageError(error.message);
-    throw error;
-  }
-}
-
 async function selectedGates(value: Settings, names?: readonly string[]) {
   const { gatesFrom, SettingsError } = await import("../../library/configuration.js");
   return consumeSettings(
@@ -75,24 +55,6 @@ async function selectedGates(value: Settings, names?: readonly string[]) {
 async function selectedGitPolicy(value: Settings): Promise<boolean> {
   const { requireBranchesToBeUpToDateFrom, SettingsError } = await import("../../library/configuration.js");
   return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }), SettingsError);
-}
-
-async function selectContract(
-  repo: Repo,
-  selector: string | undefined,
-  scope: string,
-  library: KeiyakuLibrary,
-): Promise<SelectedContract> {
-  const { contractFromInput, resolveContextualContract } = await import("../selectors.js");
-  const id =
-    selector !== undefined && !selector.startsWith("@")
-      ? contractFromInput(repo, selector).id
-      : resolveContextualContract(
-          await (await import("../../library/contract.js")).listCompleteContractBoard(repo),
-          selector,
-          scope,
-        );
-  return { id, contract: library.select({ repo, id }) };
 }
 
 function draftWarning(error: unknown): Readonly<{ warning: string }> {
@@ -209,9 +171,15 @@ async function existingSeat(
   library: KeiyakuLibrary,
 ): Promise<ExistingSeat> {
   const { repo, edge, scope, hooks } = input;
-  const { id, contract } = await selectContract(repo, parsed.contract, scope, library);
+  const { resolveContractId } = await import("../selectors.js");
+  const id = await resolveContractId(repo, parsed.contract, scope);
   const actor = "actor" in parsed ? actorFromEdge(parsed.actor, edge.environment) : undefined;
-  return { contract, id, ...(actor === undefined ? {} : { actor }), ...(hooks === undefined ? {} : { hooks }) };
+  return {
+    id,
+    contract: library.select({ repo, id }),
+    ...(actor === undefined ? {} : { actor }),
+    ...(hooks === undefined ? {} : { hooks }),
+  };
 }
 
 async function invokeDeliver(

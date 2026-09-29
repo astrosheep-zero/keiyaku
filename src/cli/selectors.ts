@@ -67,6 +67,13 @@ export function resolveContextualContract(
   return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);
 }
 
+/** Resolve one explicit, short, or worktree-contextual selector to its Contract id. */
+export async function resolveContractId(repo: Repo, selector: string | undefined, scope: string): Promise<ContractId> {
+  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector).id;
+  const { listCompleteContractBoard } = await import("../library/contract.js");
+  return resolveContextualContract(await listCompleteContractBoard(repo), selector, scope);
+}
+
 export function canonicalContractSelector(selector: string): ContractId {
   try {
     identitySegments({ family: "kei", value: selector });

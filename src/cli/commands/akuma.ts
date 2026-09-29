@@ -194,10 +194,6 @@ export function renderAkumaHelp(action: AkumaAction): string {
   return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
 }
 
-export function renderAkumaUsage(action: AkumaAction): string {
-  return usageLine(AKUMA_COMMAND_SPECS[action].usage);
-}
-
 export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
   return commandGuide(action, AKUMA_COMMAND_SPECS[action].usage);
 }
@@ -336,6 +332,15 @@ function parseHistory(
   return parseAkumaHistory(selector, flags, output, fail);
 }
 
+function refuseHistoryIdConflict(
+  flags: Readonly<Record<string, FlagValue>>,
+  bounded: boolean,
+  fail: (message: string) => never,
+): void {
+  if (flags.id !== undefined && (flags.last === true || bounded))
+    fail("history --id cannot be combined with --last, --before, --since, or --limit");
+}
+
 function parseAkumaHistory(
   selector: string,
   flags: Readonly<Record<string, FlagValue>>,
@@ -346,8 +351,7 @@ function parseAkumaHistory(
   const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
   if (flags.before !== undefined && flags.since !== undefined)
     fail("history --before and --since are mutually exclusive");
-  if (flags.id !== undefined && (flags.last === true || bounded))
-    fail("history --id cannot be combined with --last, --before, --since, or --limit");
+  refuseHistoryIdConflict(flags, bounded, fail);
   if (flags.last === true && bounded) fail("history --last cannot be combined with --before, --since, or --limit");
   const limit = flags.limit === undefined ? undefined : positiveIndex(flags.limit, "--limit", fail);
   if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");

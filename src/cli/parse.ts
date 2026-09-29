@@ -2,7 +2,6 @@ import {
   isTaskAction,
   parseTaskCommand,
   renderTaskHelp,
-  renderTaskUsage,
   taskUsageGuide,
   type ParsedTaskCommand,
   type TaskAction,
@@ -13,7 +12,6 @@ import {
   parseAkumaCommand,
   renderAkumaHelp,
   renderAkumaRootRows,
-  renderAkumaUsage,
   type AkumaAction,
   type ParsedAkumaCommand,
 } from "./commands/akuma.js";
@@ -28,7 +26,6 @@ import {
   CONTRACT_COMMAND_SPECS,
   parseContractCommand,
   renderContractHelp as renderContractHelpForOwner,
-  renderContractUsage,
   type ContractCommand as Command,
   type ContractCommandSpec as CommandSpec,
   type ParsedContractParts,
@@ -119,17 +116,6 @@ function renderHelpText(help: string, columns: number | undefined): string {
       return renderTextBlock(body, indent, columns);
     })
     .join("\n");
-}
-
-function contractUsage(command: Command): string {
-  return renderContractUsage(command);
-}
-
-export function renderCommandUsage(command: ParsedCommand): string {
-  if (command.command === "install") return renderInstallHelp();
-  if (command.command === "task") return renderTaskUsage(command.action);
-  if (isAkumaAction(command.command)) return renderAkumaUsage(command.command);
-  return contractUsage(command.command);
 }
 
 export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {

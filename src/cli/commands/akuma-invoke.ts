@@ -426,74 +426,80 @@ async function invokeKill(
   };
 }
 
+async function invokeCall(
+  command: Extract<InvokedAkumaCommand, { command: "call" }>,
+  input: InvokeInput,
+): Promise<AkumaInvocationResult> {
+  const body = command.prompt === undefined ? undefined : await promptBody({ prompt: command.prompt }, input);
+  const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const caller = akumas(input);
+  const request: CallRequest = {
+    ...(await inputInitiator(input)),
+    archetype: command.archetype,
+    ...(body === undefined ? {} : { body }),
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
+    ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
+    ...(input.contract === undefined ? {} : { contract: input.contract }),
+    ...(command.alias === undefined ? {} : { alias: command.alias }),
+    ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+    ...(schema === undefined ? {} : { schema }),
+    ...callSignalOption(input.signal),
+  };
+  let stream: ReturnType<typeof callObservationStream> | undefined;
+  const frame = new LiveProgressFrame(process.stderr);
+  const observing = command.mode === "wait" && command.output === "text";
+  const observe: CallRequest["observe"] = observing
+    ? {
+        admitted: (tell, id, head) => {
+          stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
+            admittedAt: tell.row.at,
+          });
+          frame.update(stream.frame());
+        },
+        observe: (observation) => {
+          const lines = stream?.observe(observation) ?? [];
+          if (lines.length > 0) frame.append(lines.join("\n"));
+          if (stream !== undefined) frame.update(stream.frame());
+        },
+      }
+    : undefined;
+  const result = await caller.call({
+    ...request,
+    mode: command.mode,
+    ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+    ...(observe === undefined ? {} : { observe }),
+  });
+  let streamed = stream !== undefined;
+  if (stream !== undefined) {
+    frame.finish(stream.conclude(result.observation));
+  } else if (observing && result.observation.kind === "failed") {
+    const fallback = inputWaitStream(
+      resultContext(),
+      () =>
+        callObservationHead({
+          akuma: result.akuma,
+          dispatch: result.dispatch,
+          alias: result.alias,
+        }),
+      { cursor: "empty", answerSeparator: true },
+    );
+    writeProgress(fallback.conclude({ kind: "failed", diagnostic: result.observation.failure.diagnostic }));
+    streamed = true;
+  }
+  return {
+    kind: "akuma",
+    action: "call",
+    result,
+    world: input.path,
+    ...(streamed ? { streamed: true } : {}),
+  };
+}
+
 export async function invokeAkuma(command: InvokedAkumaCommand, input: InvokeInput): Promise<AkumaInvocationResult> {
   switch (command.command) {
-    case "call": {
-      const body = command.prompt === undefined ? undefined : await promptBody({ prompt: command.prompt }, input);
-      const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-      const caller = akumas(input);
-      const request: CallRequest = {
-        ...(await inputInitiator(input)),
-        archetype: command.archetype,
-        ...(body === undefined ? {} : { body }),
-        ...(input.home === undefined ? {} : { home: input.home }),
-        ...(input.settings === undefined ? {} : { settings: input.settings }),
-        ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
-        ...(input.contract === undefined ? {} : { contract: input.contract }),
-        ...(command.alias === undefined ? {} : { alias: command.alias }),
-        ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
-        ...(schema === undefined ? {} : { schema }),
-        ...callSignalOption(input.signal),
-      };
-      let stream: ReturnType<typeof callObservationStream> | undefined;
-      const frame = new LiveProgressFrame(process.stderr);
-      const observing = command.mode === "wait" && command.output === "text";
-      const observe: CallRequest["observe"] = observing
-        ? {
-            admitted: (tell, id, head) => {
-              stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
-                admittedAt: tell.row.at,
-              });
-              frame.update(stream.frame());
-            },
-            observe: (observation) => {
-              const lines = stream?.observe(observation) ?? [];
-              if (lines.length > 0) frame.append(lines.join("\n"));
-              if (stream !== undefined) frame.update(stream.frame());
-            },
-          }
-        : undefined;
-      const result = await caller.call({
-        ...request,
-        mode: command.mode,
-        ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-        ...(observe === undefined ? {} : { observe }),
-      });
-      let streamed = stream !== undefined;
-      if (stream !== undefined) {
-        frame.finish(stream.conclude(result.observation));
-      } else if (observing && result.observation.kind === "failed") {
-        const fallback = inputWaitStream(
-          resultContext(),
-          () =>
-            callObservationHead({
-              akuma: result.akuma,
-              dispatch: result.dispatch,
-              alias: result.alias,
-            }),
-          { cursor: "empty", answerSeparator: true },
-        );
-        writeProgress(fallback.conclude({ kind: "failed", diagnostic: result.observation.failure.diagnostic }));
-        streamed = true;
-      }
-      return {
-        kind: "akuma",
-        action: "call",
-        result,
-        world: input.path,
-        ...(streamed ? { streamed: true } : {}),
-      };
-    }
+    case "call":
+      return await invokeCall(command, input);
     case "wait":
       return await invokeWait(command, input);
     case "tell":

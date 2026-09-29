@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { resolveActor } from "./actor.js";
+import { actorFromEdge } from "./actor.js";
 import type { ExecutionEvent } from "../library/execution.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
@@ -13,7 +13,7 @@ import {
   type ParsedCommand,
   type ParsedExecution,
 } from "./parse.js";
-import { isBlankInput } from "./usage.js";
+import { consumeSettings, isBlankInput } from "./usage.js";
 import type { InvocationResult, RegionResult, RefusedResult } from "./result.js";
 import type { SelectedContract } from "./selectors.js";
 import type { ActorId, ContractId } from "../index.js";
@@ -109,7 +109,6 @@ async function withAcquiredStdin(
 }
 
 export type SettingsInvocationResult = Readonly<{ kind: "settings"; value: Settings }>;
-export type GuidanceInvocationResult = Readonly<{ kind: "guidance"; contract: ContractId; guidance: string }>;
 
 async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
   const { settings } = await import("../settings.js");
@@ -137,27 +136,6 @@ async function contractSettings(
   return { configuration, hooks: consumeSettings(() => worktreeHooksFrom({ settings: configuration }), SettingsError) };
 }
 
-function consumeSettings<T>(run: () => T, ErrorType: new (message: string) => Error): T {
-  try {
-    return run();
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (error instanceof ErrorType) throw new CliUsageError(error.message);
-    throw error;
-  }
-}
-
-function actorFromEdge(actor: string | undefined, environment: NodeJS.ProcessEnv): ActorId | undefined {
-  let resolved: ActorId | undefined;
-  try {
-    resolved = resolveActor({ env: environment, ...(actor === undefined ? {} : { actor }) });
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    throw new CliUsageError(error instanceof Error ? error.message : String(error));
-  }
-  return resolved;
-}
-
 function taskActor(
   command: Extract<ParsedCommand, { command: "task" }>,
   runtime: InvokeRuntime,
@@ -177,11 +155,9 @@ function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
 }
 
 async function selectContract(repo: Repo, selector: string | undefined, scope: string): Promise<SelectedContract> {
-  const { contractFromInput, resolveContextualContract } = await import("./selectors.js");
-  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector);
-  const { listCompleteContractBoard } = await import("../library/contract.js");
-  const id = resolveContextualContract(await listCompleteContractBoard(repo), selector, scope);
-  return contractFromInput(repo, id);
+  const { contractFromInput, resolveContractId } = await import("./selectors.js");
+  const id = await resolveContractId(repo, selector, scope);
+  return { id, contract: contractFromInput(repo, id).contract };
 }
 
 type AkumaEdgeInput = Readonly<{
