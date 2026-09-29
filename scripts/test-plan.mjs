@@ -85,7 +85,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/dependency-currentness.test.ts": 200,
   "tests/dispatch-alias.test.ts": 3600,
   "tests/duration.test.ts": 200,
-  "tests/facade-fleet.test.ts": 9000,
+  "tests/facade-selection.test.ts": 9000,
   "tests/fold.test.ts": 200,
   "tests/git-change-id.test.ts": 2700,
   "tests/git-delivery.test.ts": 11600,

@@ -78,6 +78,12 @@ for (const file of globSync([
   writeFileSync(output, transformTypeScript(readFileSync(file, "utf8"), pathToFileURL(resolve(file)).href, file));
 }
 // Execute the actual release modules and plugin, not a second source compilation.
-for (const directory of ["src", "plugins"]) {
-  symlinkSync(resolve(directory === "src" ? "build/src" : "plugins"), `.test-build/${directory}`, "junction");
+// Tests also read repository documents by their source-relative path, so project
+// `docs` the same way: one repository document, source and compiled layouts alike.
+for (const [directory, target] of [
+  ["src", "build/src"],
+  ["plugins", "plugins"],
+  ["docs", "docs"],
+]) {
+  symlinkSync(resolve(target), `.test-build/${directory}`, "junction");
 }

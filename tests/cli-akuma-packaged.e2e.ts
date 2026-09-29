@@ -165,7 +165,7 @@ function attributedAttemptNumbers(stderr: string, tag: string): readonly number[
 }
 
 function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: string, mode: string): void {
-  const queuedPrompt = new RegExp(`^.*${tag} +✓ told +"prompt"$`, "gmu");
+  const queuedPrompt = new RegExp(`^.*${tag} +│ told +"prompt"$`, "gmu");
   assert.equal(
     stderr.match(queuedPrompt)?.length,
     1,
@@ -173,7 +173,7 @@ function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: st
   );
   assert.match(
     stderr,
-    new RegExp(`^.*${tag} +● say +“attempt \\d+`, "mu"),
+    new RegExp(`^.*${tag} +│ say +“attempt \\d+`, "mu"),
     `${mode} streamed in-flight say evidence for its source:\n${stderr}`,
   );
 
@@ -225,7 +225,7 @@ test("packaged prompt-free call births without admitting a Tell", { timeout: 120
     const born = await runPackagedCli(["-C", world, "call", "worker"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
     assert.match(born.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu, "the final receipt exposes the born identity");
-    assert.ok(born.stdout.includes(`  cwd  ${world}`), "the final receipt includes the execution cwd");
+    assert.ok(born.stdout.split("\n").includes(`└─ ${world}`), "the identity tree branch carries the execution cwd");
     assert.equal(born.stderr, "", "prompt-free birth has no progress or Tell output");
     assert.doesNotMatch(born.stdout, /tell/u, "prompt-free birth admits no Tell");
   } finally {
@@ -238,7 +238,7 @@ test("packaged observing calls stream one framed session and one conclusion per 
   const { root, world, env } = observingWorld();
   try {
     const unfinished = await runPackagedCli(
-      ["-C", world, "call", "worker", "--wait", "2s", "--alias", "@notes", "prompt"],
+      ["-C", world, "call", "worker", "--wait", "10s", "--alias", "@notes", "prompt"],
       { cwd: world, env },
     );
     assert.equal(unfinished.code, 0, unfinished.stderr);
