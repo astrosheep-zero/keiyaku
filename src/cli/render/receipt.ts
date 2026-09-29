@@ -114,33 +114,45 @@ function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: numbe
   return lines;
 }
 
-function gateRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
+/** Requirement names speak as plain event nouns; the "gate" class word never prints on a receipt. */
+function eventNoun(gate: string): string {
+  if (gate === "reviewed") return "review";
+  if (gate === "verified") return "verification";
+  return gate;
+}
+
+/** Only a recorded unsatisfied verdict alarms; missing and stale requirements fold into the await line. */
+function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
   if (!("refusal" in stop) || stop.refusal?.kind !== "gates-unsatisfied") return [];
   const lines: string[] = [];
   for (const report of stop.refusal.unmet) {
     const { gate, current } = report;
-    if (current.kind === "attested") {
-      receiptRow(
-        lines,
-        " ",
-        "gate",
-        [{ text: gate, opaque: true }, { text: "·" }, { text: current.verdict }, { text: `· at ${current.at}` }],
-        columns,
-      );
-      if (current.summary !== undefined) receiptPayload(lines, `  summary ${gate}`, current.summary);
-    } else if (current.kind === "stale") {
-      receiptRow(
-        lines,
-        " ",
-        "gate",
-        [{ text: gate, opaque: true }, { text: "· stale" }, { text: `· prior ${current.priorVerdict}` }],
-        columns,
-      );
-    } else {
-      receiptRow(lines, " ", "gate", [{ text: gate, opaque: true }, { text: "· missing" }], columns);
-    }
+    if (current.kind !== "attested") continue;
+    receiptRow(
+      lines,
+      "!",
+      eventNoun(gate),
+      [{ text: `· ${current.verdict}` }, { text: `· at ${current.at}` }],
+      columns,
+    );
+    if (current.summary !== undefined) receiptPayload(lines, `  summary ${gate}`, current.summary);
   }
   return lines;
+}
+
+/**
+ * The pending margin statement: the not-yet-happened requirements a refused placement awaits. A gate in stale
+ * state awaits the same event; when every unmet gate already holds a recorded verdict there is nothing pending and
+ * the line is omitted.
+ */
+export function gatesAwaitLines(placement: VerificationStop | PlacementStop | undefined): readonly string[] {
+  if (placement === undefined || !("refusal" in placement) || placement.refusal?.kind !== "gates-unsatisfied")
+    return [];
+  const events = placement.refusal.unmet
+    .filter((report) => report.current.kind !== "attested")
+    .map((report) => eventNoun(report.gate));
+  if (events.length === 0) return [];
+  return [`⧗ awaiting ${events.length > 3 ? `${events.length} gates` : events.join(", ")}`];
 }
 
 function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved" }>): readonly ReceiptSegment[] {
@@ -168,7 +180,6 @@ function directStopName(stop: VerificationStop | PlacementStop): string {
 function refusalEvidence(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
   const lines: string[] = [];
   lines.push(...prerequisiteRows(stop, columns));
-  lines.push(...gateRows(stop, columns));
   if (!("refusal" in stop) || stop.refusal === undefined) return lines;
   const refusal = stop.refusal;
   if (refusal.kind === "integration-failed") {
@@ -221,6 +232,25 @@ export function stopLines(
     if (dependent !== undefined) segments.push({ text: "·" }, { text: dependent, opaque: true });
     receiptRow(lines, "?", "retry", segments, columns);
     if (stop.retry.kind === "publication-failed") receiptPayload(lines, "reason", stop.retry.diagnostic);
+    return lines;
+  }
+  if ("refusal" in stop && stop.refusal?.kind === "gates-unsatisfied") {
+    // The refused placement never prints its refusal kind: the per-gate alarms and the target's non-movement
+    // carry the story, and the caller closes the receipt with the awaiting margin line.
+    const lines: string[] = [];
+    if (dependent === undefined) {
+      if (stop.refusal.target !== undefined)
+        receiptRow(
+          lines,
+          " ",
+          "target",
+          [{ text: stop.refusal.target, opaque: true }, { text: "· unchanged" }],
+          columns,
+        );
+    } else {
+      receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: "gates unmet" }], columns);
+    }
+    lines.push(...gateAlarmRows(stop, columns));
     return lines;
   }
   const lines: string[] = [];

@@ -1684,46 +1684,129 @@ test("a satisfied review whose placement fails names the satisfied fact once and
   assert.doesNotMatch(text, /placement|continuation|reconciliation/u, "no internal phase name appears");
 });
 
-test("direct gate stops render the sole placement report without another read", () => {
-  const contract = contractId("kei/waiting-on-gates");
-  assert.equal(
-    renderText(
-      receipt({
-        verb: "deliver",
-        contract,
-        placement: {
-          refusal: {
-            kind: "gates-unsatisfied",
-            contractId: contract,
-            unmet: [
-              {
-                gate: gate("verified"),
-                current: {
-                  kind: "attested",
-                  verdict: "unsatisfied",
-                  summary: "[1 bash exit 1]",
-                  at: "2026-08-01T00:00:00.000Z",
-                },
+test("a gates-refused placement names the target's non-movement and lets recorded verdicts alarm", () => {
+  const contract = contractId("kei/blocked-review");
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          target: "refs/heads/main",
+          unmet: [
+            {
+              gate: gate("verified"),
+              current: {
+                kind: "attested",
+                verdict: "unsatisfied",
+                summary: "[1 bash exit 1]",
+                at: "2026-08-01T00:00:00.000Z",
               },
-              { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
-              { gate: gate("manual"), current: { kind: "missing" } },
-            ],
-          },
+            },
+            { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
+            { gate: gate("manual"), current: { kind: "missing" } },
+          ],
         },
-      }),
-    ),
+      },
+    }),
+  );
+  assert.equal(
+    text,
     [
-      "✓ delivered  kei/waiting-on-gates",
-      "! gates unsatisfied",
-      "  gate  verified  ·  unsatisfied  · at 2026-08-01T00:00:00.000Z",
+      "✓ delivered  kei/blocked-review",
+      "  target  refs/heads/main  · unchanged",
+      "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
       "  [1 bash exit 1]",
       "",
-      "  gate  reviewed  · stale  · prior satisfied",
-      "  gate  manual  · missing",
+      "  candidate  kept",
+      "⧗ awaiting review, manual",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(text, /gate/u, "the gate class word leaves the receipt");
+  assert.doesNotMatch(text, /gates unsatisfied|gates-unsatisfied/u, "no refusal kind prints");
+});
+
+test("a gates-refused placement awaits each not-yet-happened requirement as a plain noun", () => {
+  const contract = contractId("kei/two-missing");
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          target: "refs/heads/main",
+          unmet: [
+            { gate: gate("reviewed"), current: { kind: "missing" } },
+            { gate: gate("verified"), current: { kind: "stale", priorVerdict: "satisfied" } },
+          ],
+        },
+      },
+    }),
+  );
+  assert.equal(text.split("\n").at(-1), "⧗ awaiting review, verification", "a stale requirement folds into the same await");
+});
+
+test("four or more awaited requirements bound the margin line", () => {
+  const contract = contractId("kei/many-missing");
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          target: "refs/heads/main",
+          unmet: ["a", "b", "c", "d"].map((name) => ({
+            gate: gate(name),
+            current: { kind: "missing" as const },
+          })),
+        },
+      },
+    }),
+  );
+  assert.equal(text.split("\n").at(-1), "⧗ awaiting 4 gates");
+});
+
+test("a gates-refused placement whose unmet requirements all hold verdicts omits the await line", () => {
+  const contract = contractId("kei/recorded-only");
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      placement: {
+        refusal: {
+          kind: "gates-unsatisfied",
+          contractId: contract,
+          target: "refs/heads/main",
+          unmet: [
+            { gate: gate("verified"), current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-01T00:00:00.000Z" } },
+          ],
+        },
+      },
+    }),
+  );
+  assert.equal(
+    text,
+    [
+      "✓ delivered  kei/recorded-only",
+      "  target  refs/heads/main  · unchanged",
+      "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  candidate  kept",
     ].join("\n"),
   );
+  assert.doesNotMatch(text, /awaiting/u, "nothing is pending when every unmet requirement holds a verdict");
+});
+
+test("an unsatisfied review attempts no placement and carries no target row", () => {
+  const contract = contractId("kei/review-unsatisfied");
+  const text = renderText(receipt({ verb: "review", contract, verdict: "unsatisfied" }));
+  assert.doesNotMatch(text, /target/u);
 });
 
 test("completion stops project every checkout-followability refusal fact", () => {
@@ -2138,8 +2221,7 @@ test("deliver renders accepted and stopped continuations from the accepted resul
       "  target  5555555..6666666  refs/heads/main",
       "✓ accepted",
       "✓ dependent  complete  kei/claimed-dependent",
-      "! kei/stopped-dependent  ·  gates unsatisfied",
-      "  gate  reviewed  · missing",
+      "⧗ kei/stopped-dependent  ·  gates unmet",
     ].join("\n"),
   );
 });

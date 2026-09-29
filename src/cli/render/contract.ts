@@ -16,6 +16,7 @@ import {
   appendHookPayload,
   executionCleanupLines,
   executionStopLines,
+  gatesAwaitLines,
   hookFailureSummary,
   outcomeLines,
   receiptPayload,
@@ -514,6 +515,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   lines.push(...continuationLines(result, columns));
   lines.push(...(complete ? obligationLines(result, columns) : recordBlock(result, columns)));
   lines.push(...worktreeRetirementLines(result, columns));
+  lines.push(...gatesAwaitLines(result.placement));
   return lines.join("\n");
 }
 
@@ -529,6 +531,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
   lines.push(...continuationLines(result, columns));
   lines.push(...obligationLines(result, columns));
   lines.push(...worktreeRetirementLines(result, columns));
+  lines.push(...gatesAwaitLines(result.placement));
   return lines.join("\n");
 }
 

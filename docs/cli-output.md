@@ -58,7 +58,17 @@ banners or trailing header whitespace. Task mutation receipts use verb-past
 titles and field-level changes or admitted plan rows, never projection-file
 diffs. Task show timestamps omit millisecond precision in text; JSON retains
 full precision. An incomplete placement keeps its candidate and content-identity
-rows and its current reason for waiting.
+rows and its current reason for waiting. A placement receipt has three
+registers: landed states the reference movement and closes on `accepted`,
+pending states the target's non-movement in the movement row's slot and closes
+on the hourglass margin line `⧗ awaiting <events>`, and failed keeps its stop
+rows. The pending line names the not-yet-happened requirements as plain event
+nouns with no `gate` class word, and is omitted when every unmet requirement
+already holds a recorded verdict; such a verdict alarms as its own row with its
+timestamp and payload instead of being restated there. Requirement states are
+met or unmet while recorded verdicts are satisfied or unsatisfied. A dependent
+stop on unmet requirements speaks the same pending vocabulary in its
+continuation line. Internal refusal kinds never print on receipts.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
 at that fact: identity uses a tree, a timeline admission uses a row, and Git

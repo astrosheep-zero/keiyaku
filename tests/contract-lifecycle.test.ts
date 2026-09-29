@@ -19,13 +19,14 @@ function runtimeStopSettings(): string {
   });
 }
 
-async function bindAndCommit(options: { gates: readonly string[]; verification: string; runtimeStop?: boolean }) {
+async function bindAndCommit(options: { gates: readonly string[]; verification: string; runtimeStop?: boolean; target?: string }) {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(options.verification),
     workspace: "worktree",
     gates: options.gates,
+    ...(options.target === undefined ? {} : { target: options.target }),
   });
   const state = await bound.keiyaku.state();
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
@@ -122,6 +123,20 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const reviewed = await keiyaku.review({ verdict: "satisfied" });
     assert.equal(reviewed.kind, "accepted");
     assert.equal((await keiyaku.state()).terminal?.kind, "claimed");
+  });
+
+  test("a refused placement on a targeted Contract names the reference it attempted", async () => {
+    const { keiyaku } = await bindAndCommit({
+      gates: ["reviewed"],
+      verification: "exit 0",
+      target: "refs/heads/main",
+    });
+    const delivered = await keiyaku.deliver();
+    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+    const placement = delivered.value.placement;
+    assert.ok(placement !== undefined && "refusal" in placement);
+    assert.equal(placement.refusal.kind, "gates-unsatisfied");
+    if (placement.refusal.kind === "gates-unsatisfied") assert.equal(placement.refusal.target, "refs/heads/main");
   });
 
   test("verified blocks an unsatisfied Verification", async () => {

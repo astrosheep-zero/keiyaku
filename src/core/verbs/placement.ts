@@ -23,6 +23,8 @@ export type PlacementRefusal =
       kind: "gates-unsatisfied";
       contractId: ContractId;
       unmet: readonly GateReport[];
+      /** The reference the refused placement attempted to advance, when the Contract has one. */
+      target?: string;
     }>
   | Readonly<{
       kind: "prerequisites-unsatisfied";
@@ -43,14 +45,19 @@ export function decodePlacementRefusal(value: unknown): PlacementRefusal {
     }
   }
   if (object.kind === "gates-unsatisfied") {
-    if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet"))
+    if (
+      Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet" && key !== "target")
+    )
       throw new Error("malformed placement refusal");
     if (!Array.isArray(object.unmet)) throw new Error("malformed placement refusal");
+    if (object.target !== undefined && (typeof object.target !== "string" || object.target.length === 0))
+      throw new Error("malformed placement refusal");
     try {
       return {
         kind: "gates-unsatisfied",
         contractId: contractId(String(object.contractId)),
         unmet: object.unmet.map(decodeGateReport),
+        ...(object.target === undefined ? {} : { target: object.target }),
       };
     } catch {
       throw new Error("malformed placement refusal");
@@ -120,7 +127,15 @@ export function decidePlacement({
     const unmetGates = gates.reports.filter(
       (report) => report.current.kind !== "attested" || report.current.verdict !== "satisfied",
     );
-    return { kind: "refused", refusal: { kind: "gates-unsatisfied", contractId: id, unmet: unmetGates } };
+    return {
+      kind: "refused",
+      refusal: {
+        kind: "gates-unsatisfied",
+        contractId: id,
+        unmet: unmetGates,
+        ...(current.coordinates.target === undefined ? {} : { target: current.coordinates.target }),
+      },
+    };
   }
 
   const claimed: JournalEntry = {
