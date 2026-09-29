@@ -1,4 +1,4 @@
-import { receipt } from "./support/cli-fixtures.js";
+import { contractCatalog, contractRow, kanshiReport, receipt } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
@@ -20,8 +20,7 @@ import {
 } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
-import type { Catalog } from "../src/cli/catalog.js";
-import type { ContractKanshiRow, KanshiReport } from "../src/kanshi/index.js";
+import type { ContractKanshiRow } from "../src/kanshi/index.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { Settings } from "../src/settings.js";
 import {
@@ -256,58 +255,30 @@ test("Contract history keeps event evidence and commit labels without exposing d
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].fact.data.terms.document.key, "private-document-blob");
 });
 
-function verifiedContractRow(): ContractKanshiRow {
-  const integration = snapshotId("4".repeat(40));
-  return {
-    id: contractId("kei/verified-commit"),
-    title: "Verified commit",
-    phase: "claimed",
-    phaseAt: "2026-08-12T00:00:00.000Z",
-    lastJournalAt: "2026-08-12T00:00:00.000Z",
-    disposition: "terminal",
-    workspace: "worktree",
-    worktreePath: null,
-    workspaceObservation: { kind: "unappointed" },
-    target: "refs/heads/main",
-    targetLag: { kind: "none" },
-    delivery: null,
-    targetObservation: null,
-    verification: { kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration },
-    gates: { satisfied: true, reports: [] },
-    after: [],
-    dependents: [],
-    holder: { kind: "none" },
-    roster: [],
-  };
-}
+const verifiedRow = (): ContractKanshiRow =>
+  contractRow({
+    verification: { kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: snapshotId("4".repeat(40)) },
+  });
 
 test("terminal catalogue and Kanshi cards do not repeat unattached verification", () => {
-  const row = verifiedContractRow();
-  const observedAt = "2026-08-12T00:00:00.000Z";
-  const catalog: Catalog = { kind: "contracts", root: "/repo", state: null, observedAt, rows: [row], hasMore: false };
+  const row = verifiedRow();
+  const catalog = contractCatalog([row]);
   assert.doesNotMatch(renderCatalogText(catalog), /verification/u);
 
-  const report: KanshiReport = {
-    root: null,
-    observedAt,
-    branch: null,
-    contracts: {
-      kind: "present",
-      value: { root: "/repo", state: null, observedAt, rows: [row], hasMore: false },
-    },
-    tasks: { kind: "absent" },
-    akuma: { kind: "absent" },
-  };
+  const report = kanshiReport({
+    kind: "present",
+    value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
+  });
   assert.doesNotMatch(renderKanshiText(report, { columns: 80, color: false }, "contract"), /verification|candidate/u);
 
   const bareRow = {
     ...row,
-    verification: { kind: "recorded" as const, verdict: "unsatisfied" as const, at: observedAt },
+    verification: { kind: "recorded" as const, verdict: "unsatisfied" as const, at: catalog.observedAt },
   };
-  const bareReport: KanshiReport = {
-    ...report,
-    contracts: { kind: "present", value: { root: "/repo", state: null, observedAt, rows: [bareRow], hasMore: false } },
-  };
+  const bareReport = kanshiReport({
+    kind: "present",
+    value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [bareRow], hasMore: false },
+  });
   const bareSelected = renderKanshiText(bareReport, { columns: 80, color: false }, "contract");
   assert.doesNotMatch(bareSelected, /candidate|verification|integration result/u);
 });
@@ -315,7 +286,7 @@ test("terminal catalogue and Kanshi cards do not repeat unattached verification"
 test("selected delivered Kanshi folds matching verification into the integration result", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
-    ...verifiedContractRow(),
+    ...verifiedRow(),
     phase: "delivered",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
@@ -328,16 +299,11 @@ test("selected delivered Kanshi folds matching verification into the integration
       policy: { requireBranchesToBeUpToDate: false },
     },
   };
-  const observedAt = "2026-08-12T00:00:00.000Z";
-  const catalog: Catalog = { kind: "contracts", root: "/repo", state: null, observedAt, rows: [row], hasMore: false };
-  const report: KanshiReport = {
-    root: null,
-    observedAt,
-    branch: null,
-    contracts: { kind: "present", value: { root: "/repo", state: null, observedAt, rows: [row], hasMore: false } },
-    tasks: { kind: "absent" },
-    akuma: { kind: "absent" },
-  };
+  const catalog = contractCatalog([row]);
+  const report = kanshiReport({
+    kind: "present",
+    value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
+  });
   const catalogText = renderCatalogText(catalog);
   assert.doesNotMatch(catalogText, /integration result|predecessor|verification/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
@@ -350,7 +316,7 @@ test("selected delivered Kanshi folds matching verification into the integration
 test("selected delivered Kanshi keeps stale delivery verification independent", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
-    ...verifiedContractRow(),
+    ...verifiedRow(),
     phase: "delivered",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
@@ -369,16 +335,11 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
       snapshot: snapshotId("5".repeat(40)),
     },
   };
-  const observedAt = "2026-08-12T00:00:00.000Z";
-  const catalog: Catalog = { kind: "contracts", root: "/repo", state: null, observedAt, rows: [row], hasMore: false };
-  const report: KanshiReport = {
-    root: null,
-    observedAt,
-    branch: null,
-    contracts: { kind: "present", value: { root: "/repo", state: null, observedAt, rows: [row], hasMore: false } },
-    tasks: { kind: "absent" },
-    akuma: { kind: "absent" },
-  };
+  const catalog = contractCatalog([row]);
+  const report = kanshiReport({
+    kind: "present",
+    value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
+  });
   const catalogText = renderCatalogText(catalog);
   assert.doesNotMatch(catalogText, /integration result|verification/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");

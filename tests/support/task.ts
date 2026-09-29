@@ -11,7 +11,10 @@ export function taskDocument(
     title: string;
     state?: TaskDocument["state"];
     priority?: TaskDocument["priority"];
+    needs?: TaskDocument["needs"];
     createdBy?: string;
+    createdAt?: string;
+    updatedAt?: string;
   }>,
 ): TaskDocument {
   return {
@@ -21,13 +24,13 @@ export function taskDocument(
     note: "",
     state: input.state ?? "open",
     priority: input.priority ?? 2,
-    needs: [],
+    needs: input.needs ?? [],
     parent: null,
     supersedes: [],
     relates: [],
     ...(input.createdBy === undefined ? {} : { createdBy: input.createdBy }),
-    createdAt: "2026-08-17T00:00:00.000Z",
-    updatedAt: "2026-08-17T00:00:00.000Z",
+    createdAt: input.createdAt ?? "2026-08-17T00:00:00.000Z",
+    updatedAt: input.updatedAt ?? "2026-08-17T00:00:00.000Z",
   };
 }
 

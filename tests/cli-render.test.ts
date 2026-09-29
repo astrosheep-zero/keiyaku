@@ -1,4 +1,4 @@
-import { receipt } from "./support/cli-fixtures.js";
+import { contractCatalog, contractRow, receipt } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -7,6 +7,7 @@ import { changeId, contractHead, contractId, entryUlid, gate, snapshotId, type C
 import type { GateReport } from "../src/core/facts/gate.js";
 import type { CandidateCompletion } from "../src/protocol/completion.js";
 import type { InvocationResult } from "../src/cli/result.js";
+import type { ReconcileReport } from "../src/library/contract-types.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import type { CallObservation } from "../src/library/akuma-creation.js";
 import {
@@ -64,6 +65,7 @@ import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { renderTaskText } from "../src/cli/render/task.js";
+import type { TaskId, TaskRow } from "../src/task/index.js";
 import { reuseLines } from "../src/cli/render/receipt.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
@@ -147,6 +149,20 @@ function callObservation(
     },
     observation,
     completedAt,
+  };
+}
+
+/** One rendered Task row; scenario deltas are explicit overrides. */
+function taskRow(overrides: Partial<TaskRow> = {}): TaskRow {
+  return {
+    id: "task/row" as TaskId,
+    title: "Task",
+    state: "open",
+    priority: 2,
+    disposition: "ready",
+    updatedAt: "2026-08-12T00:00:00.000Z",
+    bodyPresent: false,
+    ...overrides,
   };
 }
 
@@ -299,16 +315,11 @@ test("a task title wraps its em-dash and title as one unit", () => {
       kind: "accepted",
       value: {
         rows: [
-          {
+          taskRow({
             id: "task/usability/a-very-long-task-title-that-cannot-fit-here" as never,
             title:
               "a very long task title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
-            state: "open",
-            priority: 2,
-            disposition: "ready",
-            updatedAt: "2026-08-12T00:00:00.000Z",
-            bodyPresent: false,
-          },
+          }),
         ],
         hasMore: false,
       },
@@ -396,17 +407,7 @@ test("catalog text renders only the selected identity layer", () => {
       kind: "tasks",
       root: "/world" as never,
       namespace: [],
-      rows: [
-        {
-          id: "task/catalog-row" as never,
-          title: "Catalog row",
-          state: "open",
-          priority: 2,
-          disposition: "ready",
-          updatedAt: "2026-08-12T00:00:00.000Z",
-          bodyPresent: false,
-        },
-      ],
+      rows: [taskRow({ id: "task/catalog-row" as never, title: "Catalog row" })],
       hasMore: true,
     }),
     ["TASKS // root", "○ task/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
@@ -491,15 +492,15 @@ test("root Task catalogue marks every disposition with its own state", () => {
     root: worldRoot,
     namespace: [],
     hasMore: false,
-    rows: cases.map(([disposition]) => ({
-      id: `task/${disposition}` as never,
-      title: disposition,
-      priority: 1,
-      state: disposition === "ready" || disposition === "blocked" ? "open" : disposition,
-      disposition,
-      updatedAt: "2026-08-12T00:00:00.000Z",
-      bodyPresent: false,
-    })),
+    rows: cases.map(([disposition]) =>
+      taskRow({
+        id: `task/${disposition}` as never,
+        title: disposition,
+        priority: 1,
+        state: disposition === "ready" || disposition === "blocked" ? "open" : disposition,
+        disposition,
+      }),
+    ),
   };
   assert.equal(
     renderCatalogText(catalog),
@@ -541,17 +542,7 @@ test("empty catalogues share a surface-named none state", () => {
     renderCatalogText({ kind: "tasks", root: worldRoot, namespace: [], rows: [], hasMore: false }),
     "tasks  none",
   );
-  assert.equal(
-    renderCatalogText({
-      kind: "contracts",
-      root: "/repo",
-      state: null,
-      observedAt: "2026-08-12T00:00:00.000Z",
-      rows: [],
-      hasMore: false,
-    }),
-    "contracts  none",
-  );
+  assert.equal(renderCatalogText(contractCatalog([])), "contracts  none");
   assert.equal(
     renderCatalogText({
       kind: "akuma",
@@ -603,17 +594,7 @@ test("Task family uses qualified empty frames and omits absent body facts", () =
     {
       kind: "accepted",
       value: {
-        rows: [
-          {
-            id: "task/no-body" as never,
-            title: "No body",
-            state: "open",
-            priority: 1,
-            disposition: "ready",
-            updatedAt: "2026-08-12T00:00:00.000Z",
-            bodyPresent: false,
-          },
-        ],
+        rows: [taskRow({ id: "task/no-body" as never, title: "No body", priority: 1 })],
         hasMore: false,
       },
     },
@@ -628,36 +609,23 @@ test("Task catalogue rows omit absent body facts", () => {
     kind: "tasks",
     root: worldRoot,
     namespace: [],
-    rows: [
-      {
-        id: "task/no-body" as never,
-        title: "No body",
-        state: "open",
-        priority: 1,
-        disposition: "ready",
-        updatedAt: "2026-08-12T00:00:00.000Z",
-        bodyPresent: false,
-      },
-    ],
+    rows: [taskRow({ id: "task/no-body" as never, title: "No body", priority: 1 })],
     hasMore: false,
   });
   assert.doesNotMatch(text, /no body/u);
 });
 
 test("World status task rows state a Contract association only when one exists", () => {
-  const taskRow = {
+  const row = taskRow({
     id: "task/standalone" as never,
     title: "Standalone task",
-    state: "open" as const,
-    priority: 1 as const,
-    disposition: "ready" as const,
+    priority: 1,
     updatedAt: "2026-01-01T09:00:00.000Z",
-    bodyPresent: false,
-  };
+  });
   const text = renderKanshiText(
     {
       ...akumaWorldReport([]),
-      tasks: { kind: "present", value: { root: worldRoot, rows: [taskRow], hasMore: false } },
+      tasks: { kind: "present", value: { root: worldRoot, rows: [row], hasMore: false } },
     },
     { columns: 120, color: false },
   );
@@ -728,15 +696,11 @@ test("Akuma catalog renders future ages as now", () => {
 
 test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
   const state = snapshotId("a".repeat(40));
-  const row: ContractRow = {
+  const row = contractRow({
     id: contractId("kei/selected-contract"),
     title: "Selected Contract",
     phase: "bound",
-    phaseAt: "2026-08-12T00:00:00.000Z",
-    lastJournalAt: "2026-08-12T00:00:00.000Z",
     disposition: "active",
-    workspace: "worktree",
-    worktreePath: null,
     workspaceObservation: {
       kind: "clean",
       location: { kind: "worktree", path: "/tmp/wt" },
@@ -744,9 +708,6 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       merge: null,
     },
     target: null,
-    targetLag: { kind: "none" },
-    delivery: null,
-    targetObservation: null,
     gates: {
       satisfied: false,
       reports: [
@@ -763,15 +724,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       { contractId: contractId("kei/missing-prerequisite"), endpoint: { kind: "missing" } },
     ],
     dependents: [{ contractId: contractId("kei/dependent-contract"), phase: "bound" }],
-  };
-  const catalog: Catalog = {
-    kind: "contracts",
-    root: "/repo",
-    state,
-    observedAt: "2026-08-12T00:00:00.000Z",
-    rows: [row],
-    hasMore: true,
-  };
+  });
+  const catalog = contractCatalog([row], { state, hasMore: true });
   const text = renderCatalogText(catalog);
 
   assert.match(text, /! kei\/selected-contract · 0s · Selected Contract/u);
@@ -992,40 +946,14 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
 });
 
-function catalogRow(verification?: ContractRow["verification"]): ContractRow {
-  return {
-    id: contractId("kei/verified-commit"),
-    title: "Verified commit",
-    phase: "claimed",
-    phaseAt: "2026-08-12T00:00:00.000Z",
-    lastJournalAt: "2026-08-12T00:00:00.000Z",
-    disposition: "terminal",
-    workspace: "worktree",
-    worktreePath: null,
-    workspaceObservation: { kind: "unappointed" },
-    target: "refs/heads/main",
-    targetLag: { kind: "none" },
-    delivery: null,
-    targetObservation: null,
-    ...(verification === undefined ? {} : { verification }),
-    gates: { satisfied: true, reports: [] },
-    after: [],
-    dependents: [],
-  };
-}
+const catalogRow = (verification?: ContractRow["verification"]): ContractRow =>
+  contractRow(verification === undefined ? {} : { verification });
 
 test("recorded verification names the snapshot the verdict covers", () => {
   const integration = snapshotId("4".repeat(40));
-  const catalog: Catalog = {
-    kind: "contracts",
-    root: "/repo",
-    state: null,
-    observedAt: "2026-08-12T00:00:00.000Z",
-    rows: [
-      catalogRow({ kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration }),
-    ],
-    hasMore: false,
-  };
+  const catalog = contractCatalog([
+    catalogRow({ kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration }),
+  ]);
   assert.match(renderCatalogText(catalog), /✓ accepted/u);
   assert.doesNotMatch(renderCatalogText(catalog), /verification|snapshot 4444444/u);
 
@@ -1077,25 +1005,26 @@ test("opaque payloads preserve lines and name overflow", () => {
   assert.match(wrapped.at(-1) ?? "", /omitted/u);
 });
 
+/** One typed reconcile result over an explicit report delta; omitted sections stay empty. */
+const reconcile = (report: Partial<ReconcileReport>): InvocationResult => ({
+  kind: "reconcile",
+  report: { effects: [], lag: [], settlement: { actions: [], lags: [] }, ...report },
+});
+
 test("reconcile reports retained workspace and failed cleanup in human words", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        { kind: "worktree-retained", path: "/tmp/wt", diagnostic: "scratch removal failed" },
-        {
-          kind: "worktree-hook-failed",
-          phase: "destroy",
-          path: "/tmp/wt",
-          command: 0,
-          name: "cleanup",
-          failure: { kind: "exit", code: 7, stdout: "", stderr: "", truncated: false },
-        },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
-  };
+  const result = reconcile({
+    lag: [
+      { kind: "worktree-retained", path: "/tmp/wt", diagnostic: "scratch removal failed" },
+      {
+        kind: "worktree-hook-failed",
+        phase: "destroy",
+        path: "/tmp/wt",
+        command: 0,
+        name: "cleanup",
+        failure: { kind: "exit", code: 7, stdout: "", stderr: "", truncated: false },
+      },
+    ],
+  });
   const text = renderText(result);
   assert.match(text, /^  worktree retained at  \/tmp\/wt$/mu);
   assert.match(text, /^  reason  scratch removal failed$/mu);
@@ -1165,15 +1094,7 @@ test("refusals use reason and option for missing contract and nuke confirmation"
 });
 
 test("query displays dropped while the Task state remains drop", () => {
-  const row = {
-    id: "task/dropped" as never,
-    title: "Retired",
-    priority: 1 as const,
-    state: "drop" as const,
-    disposition: "drop" as const,
-    updatedAt: "2026-08-12T00:00:00.000Z",
-    bodyPresent: false,
-  };
+  const row = taskRow({ id: "task/dropped" as never, title: "Retired", priority: 1, state: "drop", disposition: "drop" });
   const text = renderTaskText(parseTaskCommand(["query"]), {
     kind: "accepted",
     value: { rows: [row], hasMore: false },
@@ -1288,137 +1209,99 @@ test("reconcile lists changed effects once with path last and no null sentinels"
     before: "a".repeat(40) as never,
     after: null,
   };
-  const text = renderText({
-    kind: "reconcile",
-    report: {
-      effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }],
-      lag: [],
-      settlement: { actions: [], lags: [] },
-    },
-  });
+  const text = renderText(
+    reconcile({ effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }] }),
+  );
   assert.equal(text, "✓ reconcile\n  effect  ref  removed · aaaaaaa  refs/keiyaku/delivery/example");
   assert.doesNotMatch(text, /null/u);
 });
 
 test("reconcile recovery snapshots use receipt-length Git identities", () => {
-  const text = renderText({
-    kind: "reconcile",
-    report: {
+  const text = renderText(
+    reconcile({
       effects: [
         { kind: "recovery-snapshot", action: "created", snapshot: snapshotId("f".repeat(40)), retention: "ephemeral" },
       ],
-      lag: [],
-      settlement: { actions: [], lags: [] },
-    },
-  });
+    }),
+  );
   assert.match(text, /effect  recovery-snapshot  created  fffffff/u);
   assert.doesNotMatch(text, /f{40}/u);
 });
 
 test("reconcile renders a healthy no-op compactly", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: { effects: [], lag: [], settlement: { actions: [], lags: [] } },
-  };
+  const result = reconcile({});
   assert.equal(renderText(result), "✓ reconcile\n  already consistent");
 });
 
 test("reconcile failure renders mark and facts", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [{ kind: "reconcile-failed", stage: "effect", diagnostic: "git failed" }],
-      settlement: { actions: [], lags: [] },
-    },
-  };
+  const result = reconcile({ lag: [{ kind: "reconcile-failed", stage: "effect", diagnostic: "git failed" }] });
   assert.equal(renderText(result), "✓ reconcile\n! reconcile  effect  git failed");
 });
 
 test("reconcile renders worktree hook failure as attention", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        {
-          kind: "worktree-hook-failed",
-          phase: "create",
-          path: "/tmp/wt",
-          command: 0,
-          name: "prepare",
-          failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
-        },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
-  };
+  const result = reconcile({
+    lag: [
+      {
+        kind: "worktree-hook-failed",
+        phase: "create",
+        path: "/tmp/wt",
+        command: 0,
+        name: "prepare",
+        failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
+      },
+    ],
+  });
   assert.match(renderText(result), /! reconcile  hook  create  \/tmp\/wt  prepare  command 0  exit 7/u);
 });
 
 test("reconcile renders target checkout retention as attention", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        {
-          kind: "target-checkout-retained",
-          target: "refs/heads/main",
-          path: "/repo/file",
-          diagnostic: "checkout failed",
-        },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
-  };
+  const result = reconcile({
+    lag: [
+      {
+        kind: "target-checkout-retained",
+        target: "refs/heads/main",
+        path: "/repo/file",
+        diagnostic: "checkout failed",
+      },
+    ],
+  });
   const text = renderText(result);
   assert.match(text, /! target checkout kept at  \/repo\/file  · refs\/heads\/main/u);
   assert.match(text, /  reason  checkout failed/u);
 });
 
 test("reconcile renders private-state seat-close failure and diagnostic", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [],
-      settlement: {
-        actions: [],
-        lags: [],
-        seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
-      },
+  const result = reconcile({
+    settlement: {
+      actions: [],
+      lags: [],
+      seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
     },
-  };
+  });
   const text = renderText(result);
   assert.match(text, /! settlement  private-state-seat-close-failed/u);
   assert.match(text, /! reason  could not close publication seat/u);
 });
 
 test("reconcile hook payloads preserve lines and remain bounded", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        {
-          kind: "worktree-hook-failed",
-          phase: "destroy",
-          path: "/tmp/wt",
-          command: 1,
-          name: "cleanup",
-          failure: {
-            kind: "exit",
-            code: 9,
-            stdout: "",
-            stderr: `${"line\n".repeat(100)}tail`,
-            truncated: false,
-          },
+  const result = reconcile({
+    lag: [
+      {
+        kind: "worktree-hook-failed",
+        phase: "destroy",
+        path: "/tmp/wt",
+        command: 1,
+        name: "cleanup",
+        failure: {
+          kind: "exit",
+          code: 9,
+          stdout: "",
+          stderr: `${"line\n".repeat(100)}tail`,
+          truncated: false,
         },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
-  };
+      },
+    ],
+  });
   const lines = renderText(result).split("\n");
   assert.equal(lines.filter((line) => line.startsWith("  ")).length <= 101, true);
   assert.equal(lines.includes("  line"), true);
@@ -1431,26 +1314,22 @@ test("reconcile hook payloads preserve lines and remain bounded", () => {
 });
 
 test("reconcile renders contract-file and settlement failures", () => {
-  const result: InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        { kind: "contract-file-failed", worktree: "/tmp/wt", path: ".keiyaku/KEIYAKU.md", diagnostic: "write failed" },
+  const result = reconcile({
+    lag: [
+      { kind: "contract-file-failed", worktree: "/tmp/wt", path: ".keiyaku/KEIYAKU.md", diagnostic: "write failed" },
+    ],
+    settlement: {
+      actions: [],
+      lags: [
+        {
+          kind: "settlement-failed",
+          surface: "task",
+          contractId: contractId("kei/example"),
+          diagnostic: "task failed",
+        },
       ],
-      settlement: {
-        actions: [],
-        lags: [
-          {
-            kind: "settlement-failed",
-            surface: "task",
-            contractId: contractId("kei/example"),
-            diagnostic: "task failed",
-          },
-        ],
-      },
     },
-  };
+  });
   const text = renderText(result);
   assert.match(text, /! contract file unavailable  \/tmp\/wt  · \.keiyaku\/KEIYAKU\.md/u);
   assert.match(text, /! settlement  surface task  contractId kei\/example  diagnostic task failed/u);

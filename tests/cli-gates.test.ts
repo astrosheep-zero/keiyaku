@@ -2,19 +2,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
+import { executable } from "./support/cli-fixtures.js";
 import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
 import { renderText } from "../src/cli/render/text.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-
-function executable(argv: readonly string[]) {
-  const parsed = parseArgv(argv);
-  if (!("command" in parsed)) throw new Error("expected command invocation");
-  return parsed;
-}
 
 test("amend names the missing Verification declaration required by verified", async () => {
   const raw = makeGitRepository();

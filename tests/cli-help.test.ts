@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
+import { captureOutput } from "./support/cli-fixtures.js";
 import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
@@ -67,25 +68,10 @@ test("help projections reflow at the requested terminal width without splitting 
 });
 
 test("help is stdout zero and does not enter an absent world", async () => {
-  let stdout = "";
-  let stderr = "";
-  const writeStdout = process.stdout.write;
-  const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderr += String(chunk);
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    const exit = await main(["-C", "/definitely/absent/keiyaku-world", "task", "unknown", "--json", "-", "--help"]);
-    assert.equal(exit, 0);
-  } finally {
-    process.stdout.write = writeStdout;
-    process.stderr.write = writeStderr;
-  }
+  const { exit, stdout, stderr } = await captureOutput(() =>
+    main(["-C", "/definitely/absent/keiyaku-world", "task", "unknown", "--json", "-", "--help"]),
+  );
+  assert.equal(exit, 0);
   assert.match(stdout, /^usage  keiyaku task <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
@@ -111,24 +97,8 @@ test("version is stdout zero and does not enter an absent world", () => {
 });
 
 test("bare ls is a compact usage refusal even when its cwd cannot be read", async () => {
-  let stdout = "";
-  let stderr = "";
-  const writeStdout = process.stdout.write;
-  const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderr += String(chunk);
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    assert.equal(await main(["-C", "/definitely/absent/keiyaku-world", "ls"]), 64);
-  } finally {
-    process.stdout.write = writeStdout;
-    process.stderr.write = writeStderr;
-  }
+  const { exit, stdout, stderr } = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "ls"]));
+  assert.equal(exit, 64);
   assert.equal(stdout, "");
   assert.match(stderr, /× usage  keiyaku ls/u);
   assert.match(stderr, /ls requires a selector/u);

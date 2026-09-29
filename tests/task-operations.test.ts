@@ -1,4 +1,5 @@
 import { deferred as promiseBarrier } from "./support/process.js";
+import { taskDocument } from "./support/task.js";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -362,20 +363,8 @@ test("bounded Task query filters before limit and parent views recurse", async (
 test("Task row views share the bounded-list contract and complete their graph judgment first", async () => {
   const { root, tasks } = await world();
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-  const document = (id: TaskId, needs: readonly TaskId[] = []): TaskDocument => ({
-    id,
-    title: id,
-    body: "",
-    note: "",
-    state: "open",
-    priority: 2,
-    needs,
-    parent: null,
-    supersedes: [],
-    relates: [],
-    createdAt: "2026-08-31T00:00:00.000Z",
-    updatedAt: "2026-08-31T00:00:00.000Z",
-  });
+  const document = (id: TaskId, needs: readonly TaskId[] = []): TaskDocument =>
+    taskDocument({ id, title: id, needs, createdAt: "2026-08-31T00:00:00.000Z", updatedAt: "2026-08-31T00:00:00.000Z" });
   for (let index = 0; index < 51; index += 1) {
     const ready = `task/ready-${String(index).padStart(2, "0")}` as TaskId;
     const blocked = `task/blocked-${String(index).padStart(2, "0")}` as TaskId;

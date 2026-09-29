@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
+import { captureOutput } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,29 +16,6 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { akumaFailureProjection, invocationExitCode } from "../src/cli/runtime.js";
 import { contractId } from "../src/core/facts/types.js";
-
-async function captureMain(
-  argv: readonly string[],
-): Promise<Readonly<{ exit: number; stdout: string; stderr: string }>> {
-  let stdout = "";
-  let stderr = "";
-  const writeStdout = process.stdout.write;
-  const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderr += String(chunk);
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    return { exit: await main(argv), stdout, stderr };
-  } finally {
-    process.stdout.write = writeStdout;
-    process.stderr.write = writeStderr;
-  }
-}
 
 function runCli(cwd: string, argv: readonly string[], input?: string) {
   // A caller inside an Akuma Body carries AKUMA_REQUESTS and would forward the
@@ -509,7 +487,7 @@ test("settings and duplicate-flag diagnostics stay visible", () => {
 
 test("usage refusal exits 64 without touching an absent world", async () => {
   const cwd = join(mkdtempSync(join(tmpdir(), "keiyaku-usage-")), "missing-world");
-  const result = await captureMain(["-C", cwd, "nonsense"]);
+  const result = await captureOutput(() => main(["-C", cwd, "nonsense"]));
   assert.equal(result.exit, 64);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /^× usage  keiyaku$/mu);

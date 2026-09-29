@@ -9,19 +9,13 @@ import { invoke as invokeRaw } from "../src/cli/invoke.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
 import { renderText } from "../src/cli/render/text.js";
-import { parseArgv } from "../src/cli/parse.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 import { startContractExecution, type ExecutionEvent } from "../src/library/execution.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
+import { executable } from "./support/cli-fixtures.js";
 import { contractMarkdown } from "./support/markdown.js";
-
-function executable(argv: readonly string[]) {
-  const parsed = parseArgv(argv);
-  if (!("command" in parsed)) throw new Error("expected command invocation");
-  return parsed;
-}
 
 function markdown(script: string): string {
   return contractMarkdown("CLI verification", {

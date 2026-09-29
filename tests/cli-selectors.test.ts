@@ -8,6 +8,7 @@ import { resolveContextualContract, resolveKanshiContract } from "../src/cli/sel
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { invoke } from "../src/cli/invoke.js";
 import { makeGitRepository } from "./support/git.js";
+import { contractRow, kanshiReport as sharedKanshiReport } from "./support/cli-fixtures.js";
 import { rmSync } from "node:fs";
 
 const active = "kei/active-contract" as ContractId;
@@ -18,14 +19,11 @@ function board(): ContractKanshiBoard {
     state: null,
     observedAt: "2026-08-12T00:00:00.000Z",
     rows: [
-      {
+      contractRow({
         id: active,
         title: "Active contract",
         phase: "bound",
-        phaseAt: "2026-08-12T00:00:00.000Z",
-        lastJournalAt: "2026-08-12T00:00:00.000Z",
         disposition: "active",
-        workspace: "worktree",
         worktreePath: "/repo/.keiyaku/wt/active-contract",
         workspaceObservation: {
           kind: "clean",
@@ -33,16 +31,8 @@ function board(): ContractKanshiBoard {
           counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
           merge: null,
         },
-        target: "refs/heads/main",
         targetLag: { kind: "counted", behind: 0 },
-        delivery: null,
-        targetObservation: null,
-        gates: { reports: [], satisfied: true },
-        after: [],
-        dependents: [],
-        holder: { kind: "none" },
-        roster: [],
-      },
+      }),
     ],
   };
 }
@@ -68,16 +58,8 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
   }
 });
 
-function kanshiReport(contracts: KanshiReport["contracts"]): KanshiReport {
-  return {
-    root: "/repo" as WorldRoot,
-    observedAt: "2026-08-12T00:00:00.000Z",
-    branch: null,
-    contracts,
-    tasks: { kind: "absent" },
-    akuma: { kind: "absent" },
-  };
-}
+const kanshiReport = (contracts: KanshiReport["contracts"]): KanshiReport =>
+  sharedKanshiReport(contracts, { root: "/repo" as WorldRoot });
 
 test("missing Contract selectors refuse uniformly across read and reconcile verbs", async () => {
   const repo = makeGitRepository();

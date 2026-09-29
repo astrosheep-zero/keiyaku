@@ -29,6 +29,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
+import { captureOutput } from "./support/cli-fixtures.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
@@ -607,26 +608,14 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
 
 test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts", async () => {
   const world = await testWorld();
-  let stdout = "";
-  let stderr = "";
-  const writeStdout = process.stdout.write;
-  const writeStderr = process.stderr.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    stdout += String(chunk);
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array) => {
-    stderr += String(chunk);
-    return true;
-  }) as typeof process.stderr.write;
-  try {
-    const exit = await main(["-C", world, "nuke"]);
-    assert.equal(exit, 1);
-  } finally {
-    process.stdout.write = writeStdout;
-    process.stderr.write = writeStderr;
-    rmSync(world, { recursive: true, force: true });
-  }
+  const { exit, stdout, stderr } = await captureOutput(async () => {
+    try {
+      return await main(["-C", world, "nuke"]);
+    } finally {
+      rmSync(world, { recursive: true, force: true });
+    }
+  });
+  assert.equal(exit, 1);
   assert.match(stdout, /^× nuke refused$/mu);
   assert.match(stdout, /^  reason  nuke confirmation required$/mu);
   assert.match(stdout, /^  world  /mu);
