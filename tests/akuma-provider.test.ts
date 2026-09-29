@@ -116,6 +116,13 @@ async function drainChannel(channel: AgentEventChannel): Promise<readonly AgentE
   return events;
 }
 
+/** Drain one provider attempt's event stream for later assertion. */
+async function collectEvents(events: AsyncIterable<AgentEvent>): Promise<readonly AgentEvent[]> {
+  const collected: AgentEvent[] = [];
+  for await (const event of events) collected.push(event);
+  return collected;
+}
+
 function acpToolUpdate(
   sessionUpdate: "tool_call" | "tool_call_update",
   toolCallId: string,
@@ -641,8 +648,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       requests: { dir: join(root, "requests") },
     }),
   ).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionId: "fresh-session" } },
@@ -703,8 +709,7 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
     options: {},
     session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
   }).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "retained-session" } });
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
   const load = acpLog(fake.log).find((record) => record.kind === "load")!;
@@ -795,8 +800,7 @@ test("ACP forced disposal closes its owned process tree after standard session/c
   const fake = fakeAcp(root, "cancel");
   const drive = await createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root })).result;
   await drive.forceDispose();
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
   assert.equal((await drive.completion).kind, "failed");
   const descendant = acpLog(fake.log).find((record) => record.kind === "descendant")!;
@@ -1050,8 +1054,7 @@ test("ACP ignores assistant updates after terminal prompt evidence", async () =>
     freshInput("build"),
   ).result;
   const events = (async () => {
-    const observed = [];
-    for await (const event of drive.events) observed.push(event);
+    const observed = await collectEvents(drive.events);
     return observed;
   })();
   await controlled.cleanupStarted;
@@ -1210,8 +1213,7 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
     freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }], requests: { dir: "/tmp/requests" } }),
   ).result;
   assert.equal(drive.admission.fence, "session-fresh");
-  const observed = [];
-  for await (const event of drive.events) observed.push(event);
+  const observed = await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "message-1" });
   assert.deepEqual(
     observed.map((event) => event.type),
@@ -1562,8 +1564,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   );
   const drive = await attempt.result;
   assert.equal(typeof drive.tell, "function");
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
     { type: "thought", text: "consider" },
@@ -1902,8 +1903,7 @@ test("Pi omits Gemini's empty tool-use text placeholder from narration", async (
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
     freshInput("wait", { cwd: "/work" }),
   ).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
     { type: "thought", text: "inspect" },
@@ -1932,8 +1932,7 @@ test("Pi does not treat a tool-use message as the final answer", async () => {
   const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
     freshInput("wait", { cwd: "/work" }),
   ).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
     { type: "thought", text: "inspect" },
@@ -1957,9 +1956,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
     options: {},
     session: { kind: "resume", coordinate: { sessionFile: "/sessions/source.jsonl" } },
   }).result;
-  for await (const _event of drive.events) {
-    /* drain */
-  }
+  await collectEvents(drive.events);
   await drive.completion;
   assert.equal(fake.seen.opened, "/sessions/source.jsonl");
   assert.deepEqual(
@@ -1998,9 +1995,7 @@ test("Pi installs the request-scoped Bash tool without changing the default tool
       requests: { dir: "/work/requests" },
     }),
   ).result;
-  for await (const _event of drive.events) {
-    /* drain */
-  }
+  await collectEvents(drive.events);
   await drive.completion;
   assert.equal(fake.seen.options?.tools, undefined);
   const customTools = fake.seen.options?.customTools;
@@ -2374,8 +2369,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   }));
   const drive = await provider.start(freshInput("observe", { cwd: "/work" })).result;
   assert.equal(typeof drive.tell, "function");
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
 
   assert.deepEqual(events.slice(0, 5), [
     { type: "session", coordinate: { sessionId: "session-events" } },
@@ -2498,8 +2492,7 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
     ),
   ]);
   assert.deepEqual(completion, { kind: "answered", answer: "done", historyId: "assistant-before-terminal" });
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionId: "session-terminal-gate" } },
     { type: "assistant", text: "before" },
@@ -2569,8 +2562,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     requests: { dir: requestDirectory },
     session: { kind: "fresh" },
   }).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "codex answer", historyId: "turn-1" });
   assert.deepEqual(events[0], { type: "session", coordinate: { sessionId: "thread-fresh" } });
   assert.ok(events.some((event) => event.type === "assistant" && event.text === "codex answer"));
@@ -2666,8 +2658,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
   const root = temporaryDirectory(context, "keiyaku-codex-observations-");
   const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
   const drive = await provider.start(freshInput("observe", { cwd: root })).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
 
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionId: "thread-fresh" } },
@@ -2706,8 +2697,7 @@ test("Codex ignores notifications from a spawned child thread", async (context) 
   const root = temporaryDirectory(context, "keiyaku-codex-foreign-thread-");
   const provider = createCodexAppServerProvider(fakeCodex(root, "foreign-thread").executable);
   const drive = await provider.start(freshInput("delegate", { cwd: root })).result;
-  const events = [];
-  for await (const event of drive.events) events.push(event);
+  const events = await collectEvents(drive.events);
 
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionId: "thread-fresh" } },
@@ -2728,9 +2718,7 @@ test("Codex terminal drain has a bounded fallback for a hung producer", async (c
   const started = performance.now();
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
   assert.ok(performance.now() - started < 2_000);
-  for await (const _event of drive.events) {
-    /* drain */
-  }
+  await collectEvents(drive.events);
 });
 
 test("Codex admission failures preserve the original diagnostic", async () => {
@@ -2765,9 +2753,7 @@ test("Codex app-server abort interrupts and releases its owned child", async (co
   const provider = createCodexAppServerProvider(fake.executable);
   const drive = await provider.start(freshInput("wait", { cwd: root })).result;
   await drive.abort();
-  for await (const _event of drive.events) {
-    /* drain */
-  }
+  await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server interrupted" });
 });
 

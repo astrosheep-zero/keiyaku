@@ -13,7 +13,6 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
 import {
   akumaCallRequestCommands,
@@ -27,16 +26,14 @@ import {
   endTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
-  initializeHeart,
   projectTell,
   readHeart,
   readSoul,
   readTell,
   readTurn,
   recordTell,
-  type Soul,
 } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
+import { parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
@@ -48,7 +45,7 @@ import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { Akumas, bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
-  cleanupSpawnCapableFixture,
+  cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
   installAkumaBodyPidReceipt,
   waitForFixtureFile,
@@ -56,6 +53,7 @@ import {
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
 import { AkumaComposition as Akuma, AkumaHandle, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 
@@ -247,13 +245,7 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreEmptyPublicationBarrier();
       restoreBodyPidReceipt();
@@ -322,13 +314,7 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
       await wake?.catch(() => undefined);
       const releasePath = join(emptyPublicationBarrier, "release");
       if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreEmptyPublicationBarrier();
       restoreBodyPidReceipt();
@@ -376,13 +362,7 @@ test("schema Akumas.call preserves its child when initial Tell admission fails",
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();
@@ -440,13 +420,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       await pump.close();
       leash.release();
@@ -638,13 +612,7 @@ test("ordinary Akumas.call stays bound to its first Turn when a later Turn settl
     operationFailed = false;
   } finally {
     try {
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();
@@ -665,20 +633,12 @@ async function requestPump(
   spawn: RequestSpawn = defaultRequestSpawn,
   admitInitialTell?: (input: InitialTellAdmissionRequest) => Promise<CallInitialTellAdmission>,
 ) {
-  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
-  await initializeHeart(parent.paths);
-  const soul: Soul = {
-    id: parent.id,
+  const { soul, leash, ...parent } = await bornDirectAkuma({
+    root,
     archetype: "parent",
-    provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed: ALLOWED_ACTIONS,
+    draw: "1234abcd",
     createdAt: "2026-08-11T00:00:00.000Z",
-  };
-  const leash = (await HeldAkumaLeash.try(parent.paths))!;
-  await leash.birth(parent.paths, soul);
+  });
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
     allowed: soul.allowed,
@@ -814,13 +774,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   } finally {
     try {
       await bound?.keiyaku.abandon({ hooks: { create: [], destroy: [] } }).catch(() => undefined);
-      const cleanup = await cleanupSpawnCapableFixture({
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
-      if (cleanup.kind === "retained") t.diagnostic(`retained fixture ${raw.path}: ${cleanup.diagnostic}`);
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();

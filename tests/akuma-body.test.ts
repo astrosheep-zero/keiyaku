@@ -1,6 +1,6 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { claudeBodyLaunch } from "./support/akuma-fixtures.js";
+import { allocatedHeart, claudeBodyLaunch, recordTell } from "./support/akuma-fixtures.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
@@ -28,7 +28,6 @@ import {
   HeldAkumaLeash,
   activitySlice,
   admitRequest, decidePendingTellDisposition,
-  initializeHeart,
   pauseRequested,
   probeLeash,
   resolvePendingTellDisposition,
@@ -234,6 +233,19 @@ async function committedTurnSequences(paths: Parameters<typeof activitySlice>[0]
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.turnSequence);
 }
 
+/** Install one turn-outcome recorder that snapshots the scenario Heart on every observation. */
+function installTurnOutcomeRecorder(paths: Parameters<typeof outcomes>[0]): TurnOutcomePluginRecorder {
+  const recorder: TurnOutcomePluginRecorder = {
+    activations: 0,
+    observations: [],
+    async observe(signal) {
+      this.observations.push({ signal, outcomes: await outcomes(paths) });
+    },
+  };
+  turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+  return recorder;
+}
+
 function sessionResource(session: Session) {
   const { promise: closed, resolve: settleClosed } = promiseBarrier<void>();
   void session.completion.then(() => settleClosed(), () => settleClosed());
@@ -264,6 +276,14 @@ type FixtureProviderAdapter = Omit<ProviderAdapter, "start" | "resume"> & {
     input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
   ) => Promise<FixtureSession> | ProviderAttempt<FixtureSession>;
 };
+
+/** One scenario provider that admits every option; its session body stays at the call site. */
+function scenarioProvider(
+  start: FixtureProviderAdapter["start"],
+  extra: Omit<FixtureProviderAdapter, "admitOptions" | "start"> = {},
+): FixtureProviderAdapter {
+  return { admitOptions: (options) => ({ kind: "admitted", options }), start, ...extra };
+}
 
 type FixtureSession = Omit<Session, "forceDispose"> & { forceDispose?: () => Promise<void> };
 
@@ -315,17 +335,6 @@ async function driveAkumaBody(
   else await runAkumaBody(normalized, bodyAdapter(adapter), runtime);
 }
 
-async function removeDrivenBodyFixture(root: string): Promise<void> {
-  rmSync(root, { recursive: true, force: true });
-}
-
-async function recordTell(
-  paths: Parameters<typeof heartRecordTell>[0],
-  tell: Readonly<{ id: string; body: string; recordedAt: string; initiator?: string }>,
-) {
-  return await heartRecordTell(paths, { kind: "tell", ...tell });
-}
-
 function unresolved<T = never>(): Promise<T> {
   return new Promise<T>(() => undefined);
 }
@@ -344,14 +353,9 @@ function hangingSession(fence: string, abort: () => Promise<void> = async () => 
 }
 
 function hangingAdapter(fence: string, abort?: () => Promise<void>): FixtureProviderAdapter {
-  return {
-    admitOptions(options) {
-      return { kind: "admitted", options };
-    },
-    async start() {
+  return scenarioProvider(async () => {
       return hangingSession(fence, abort);
-    },
-  };
+  });
 }
 
 function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>, root: string): FixtureBodyLaunch {
@@ -416,7 +420,7 @@ function adapter(
       }>
     >;
   }>,
-): ProviderAdapter {
+): FixtureProviderAdapter {
   const drive = async (
     call: Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
   ) => {
@@ -444,29 +448,17 @@ function adapter(
       async forceDispose() {},
     };
   };
-  return {
-    admitOptions(options) {
-      return { kind: "admitted", options };
-    },
-    start: (input) => sessionAttempt(async () => await drive(input)),
+  return scenarioProvider((input) => sessionAttempt(async () => await drive(input)), {
     resume: (input) => sessionAttempt(async () => await drive(input)),
-  };
+  });
 }
 
 test("turn-outcome plugins observe every committed answered Turn exactly once", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-answered-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abce" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1234abce");
     configureTurnOutcomePlugins(root);
-    const recorder: TurnOutcomePluginRecorder = {
-      activations: 0,
-      observations: [],
-      async observe(signal) {
-        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
-      },
-    };
-    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+    const recorder = installTurnOutcomeRecorder(allocated.paths);
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
     const launch: FixtureBodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
@@ -602,17 +594,9 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
 test("turn-outcome plugins observe a committed failed Turn without changing it", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-failed-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcf" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1234abcf");
     configureTurnOutcomePlugins(root);
-    const recorder: TurnOutcomePluginRecorder = {
-      activations: 0,
-      observations: [],
-      async observe(signal) {
-        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
-      },
-    };
-    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+    const recorder = installTurnOutcomeRecorder(allocated.paths);
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
 
@@ -647,8 +631,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
 test("body-ended plugins attribute only the exact Body's latest admitted Turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-body-end-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "b0d1e2f3" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "b0d1e2f3");
     configureBodyEndPlugins(root);
     const recorder: BodyEndPluginRecorder = {
       signals: [],
@@ -727,25 +710,13 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
 test("live receipt persistence waits for its Body-scoped delivery mapping", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-tell-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4d" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c4d");
     configureTurnOutcomePlugins(root);
-    const recorder: TurnOutcomePluginRecorder = {
-      activations: 0,
-      observations: [],
-      async observe(signal) {
-        this.observations.push({ signal, outcomes: await outcomes(allocated.paths) });
-      },
-    };
-    turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder = recorder;
+    const recorder = installTurnOutcomeRecorder(allocated.paths);
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const { promise: receiptReleased, resolve: releaseReceipt } = promiseBarrier<void>();
     const { promise: observed, resolve: tellObserved } = promiseBarrier<void>();
-    const live: FixtureProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      async start() {
+    const live: FixtureProviderAdapter = scenarioProvider(async () => {
         return {
           admission: { fence: "initial-turn" },
           events: {
@@ -772,8 +743,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
           },
           async abort() {},
         };
-      },
-    };
+    });
     const launch = claudeBodyLaunch(allocated, root, "work", { initiator: "Alice" });
     const leash = (await HeldAkumaLeash.try(allocated.paths))!;
     try {
@@ -807,22 +777,17 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     } : null), [{ initiator: "Alice", participants: ["Alice", "Carol", "Bob"] }]);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("a receipt-free live acknowledgement settles the tell in the current Body", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-ack-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "codex", draw: () => "1a2b3c40" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "codex", "1a2b3c40");
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const { promise: observed, resolve: tellObserved } = promiseBarrier<void>();
-    const live: FixtureProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      start() {
+    const live: FixtureProviderAdapter = scenarioProvider(() => {
         return sessionAttempt(async () => ({
           admission: { fence: "initial-turn" },
           events: {
@@ -843,8 +808,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
           async abort() {},
           async forceDispose() {},
         }));
-      },
-    };
+    });
     const body = driveAkumaBody(
       {
         paths: allocated.paths,
@@ -880,15 +844,14 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     await body;
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("Pi native steer evidence keeps a Tell in its current Body and Turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-steer-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "pi", draw: () => "1a2b3c41" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "pi", "1a2b3c41");
     const { promise: released, resolve: release } = promiseBarrier<void>();
     const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
     let steered: { role: string; content: unknown } | undefined;
@@ -946,15 +909,14 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     assert.equal((await readTurn(allocated.paths, turnSequence!))?.end?.outcome.kind, "answered");
     assert.equal(nativeListeners.size, 0);
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("Pi native end without steer evidence carries the pending Tell to the next Turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-late-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "pi", draw: () => "1a2b3c42" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "pi", "1a2b3c42");
     const { promise: released, resolve: release } = promiseBarrier<void>();
     const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
     const prompts: string[] = [];
@@ -1015,15 +977,14 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
     assert.equal(nativeListeners.size, 0);
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("a failed release recovery spawn records Heart undelivered disposition", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-release-spawn-failure-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c45" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "acp", "1a2b3c45");
     let spawnAttempts = 0;
     const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("release-spawn-failure"), {
       now: () => "2026-08-08T00:00:00.000Z",
@@ -1050,15 +1011,14 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
     assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
     assert.match(readFileSync(allocated.paths.log, "utf8"), /pending Tell disposition undelivered: spawn denied/);
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("duplicate wake after a recorded successor disposition does not create a second Body", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-duplicate-wake-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c46" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "acp", "1a2b3c46");
     let spawnCount = 0;
     const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("duplicate-wake"), {
       now: () => "2026-08-08T00:00:00.000Z",
@@ -1101,15 +1061,14 @@ test("duplicate wake after a recorded successor disposition does not create a se
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 2);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("successor Body record before admission failure yields Heart undelivered for the snapshot", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-successor-admission-fail-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c52" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "acp", "1a2b3c52");
     const emptyLog = { path: allocated.paths.log, from: 0, to: 0 };
     let spawnAttempts = 0;
     const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("parent-before-successor-fail"), {
@@ -1119,14 +1078,9 @@ test("successor Body record before admission failure yields Heart undelivered fo
         const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
           void driveAkumaBody(
             launch,
-            {
-              admitOptions(options) {
-                return { kind: "admitted", options };
-              },
-              async start() {
+            scenarioProvider(async () => {
                 throw new Error("native admission refused after body record");
-              },
-            },
+            }),
             { now: () => "2026-08-08T00:00:02.000Z" },
           ).finally(() => resolve({ code: 1, signal: null, log: emptyLog }));
         });
@@ -1157,14 +1111,13 @@ test("successor Body record before admission failure yields Heart undelivered fo
       /pending Tell disposition undelivered: pre-admission exit 1/,
     );
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("concurrent handoff before ending-body leash release does not consume the snapshot", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-concurrent-leash-handoff-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c53" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "acp", "1a2b3c53");
   const seed = {
     id: allocated.id,
     archetype: "acp",
@@ -1218,8 +1171,7 @@ test("concurrent handoff before ending-body leash release does not consume the s
 
 test("open disposition referencing a missing Tell is Heart corruption, not proven", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-disposition-missing-tell-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "acp", draw: () => "1a2b3c54" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "acp", "1a2b3c54");
   const seed = {
     id: allocated.id,
     archetype: "acp",
@@ -1276,17 +1228,12 @@ test("open disposition referencing a missing Tell is Heart corruption, not prove
 test("receipt persistence failure aborts the Session and terminates the Body", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-receipt-failure-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let aborted = false;
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
+      scenarioProvider(async () => {
           return {
             admission: { fence: "launch" },
             events: {
@@ -1306,8 +1253,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
               releaseEvents();
             },
           };
-        },
-      },
+      }),
       {
         now: () => "2026-08-08T00:00:00.000Z",
       },
@@ -1321,25 +1267,20 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
       diagnostic: "tell receipt has no delivery mapping",
     });
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("request-pump failure aborts the Session and closes request transport", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-failure-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let aborted = false;
     let directory!: string;
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start(input) {
+      scenarioProvider(async (input) => {
           directory = input.requests!.dir;
           return {
             admission: { fence: "launch" },
@@ -1355,8 +1296,7 @@ test("request-pump failure aborts the Session and closes request transport", asy
               releaseEvents();
             },
           };
-        },
-      },
+      }),
       {
         now: () => "2026-08-08T00:00:00.000Z",
       },
@@ -1379,26 +1319,21 @@ test("request-pump failure aborts the Session and closes request transport", asy
       diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
     });
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("request-pump failure aborts pending ProviderAdapter.start and closes transport", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-setup-failure-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1a2b3c4e" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let directory!: string;
     const { promise: started, resolve: setupStarted } = promiseBarrier<void>();
     const { promise: setupAbortObserved, resolve: setupAborted } = promiseBarrier<void>();
     let setupAbortReason: unknown;
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start(input) {
+      scenarioProvider(async (input) => {
           directory = input.requests!.dir;
           setupStarted();
           await new Promise<never>((_resolve, reject) => {
@@ -1413,8 +1348,7 @@ test("request-pump failure aborts pending ProviderAdapter.start and closes trans
             );
           });
           throw new Error("unreachable setup continuation");
-        },
-      },
+      }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
 
@@ -1435,15 +1369,14 @@ test("request-pump failure aborts pending ProviderAdapter.start and closes trans
       diagnostic: "ENOTDIR: not a directory, scandir '" + directory + "'",
     });
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("an answer without an admitted or resumed session is retained as a failed turn", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-sessionless-answer-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "decafbad" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "decafbad");
     await driveAkumaBody(
       claudeBodyLaunch(allocated, root, "start"),
       adapter({
@@ -1461,15 +1394,14 @@ test("an answer without an admitted or resumed session is retained as a failed t
     });
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("a successor admits through the leash without reconstructing custody of an untidy predecessor", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-orphan-stop-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "a1b2c3d4" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "a1b2c3d4");
     const soul = {
       id: allocated.id,
       archetype: "claude",
@@ -1524,30 +1456,24 @@ test("a successor admits through the leash without reconstructing custody of an 
     });
     assert.equal(snapshot.latestBody?.end, "exited");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("pause aborts stalled provider setup and records clean Body settlement", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-setup-pause-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffed00" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffed00");
     const { promise: started, resolve: setupStarted } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start(input) {
+      scenarioProvider(async (input) => {
           setupStarted();
           await new Promise<void>((_resolve, reject) => {
             input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true });
           });
           throw new Error("unreachable setup continuation");
-        },
-      },
+      }),
       {
         now: () => "2026-08-08T00:00:00.000Z",
       },
@@ -1563,15 +1489,14 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     assert.deepEqual(await outcomes(allocated.paths), []);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("pause interrupts pre-drive reserved-request recovery", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-settlement-pause-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffed01" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffed01");
     const soul = {
       id: allocated.id,
       archetype: "claude",
@@ -1593,8 +1518,7 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       admittedAt: "2026-08-08T00:00:01.000Z",
       permitted: true,
     });
-    const child = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => "c0ffed02" });
-    await initializeHeart(child.paths);
+    const child = await allocatedHeart(root, "worker", "c0ffed02");
     await reserveRequest(allocated.paths, requestId, child.id);
     const childLeash = (await HeldAkumaLeash.try(child.paths))!;
     try {
@@ -1632,23 +1556,18 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       childLeash.release();
     }
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("pause aborts the current drive and records the body as put down", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-pause-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee00" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffee00");
     let aborted = false;
     let forced = false;
     const { promise: completion, resolve: settle } = promiseBarrier<TurnResult>();
-    const running: FixtureProviderAdapter = {
-      admitOptions(options) {
-        return { kind: "admitted", options };
-      },
-      async start() {
+    const running: FixtureProviderAdapter = scenarioProvider(async () => {
         return {
           admission: { fence: "pause-fixture-turn" },
           events: {
@@ -1669,8 +1588,7 @@ test("pause aborts the current drive and records the body as put down", async ()
             settle({ kind: "failed", diagnostic: "paused" });
           },
         };
-      },
-    };
+    });
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
@@ -1687,22 +1605,17 @@ test("pause aborts the current drive and records the body as put down", async ()
     assert.equal(await pauseRequested(allocated.paths), true);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("forced disposal failure records hung and broke-off before the Body returns", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hung-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee06" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffee06");
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
+      scenarioProvider(async () => {
           return {
             admission: { fence: "hung-fixture-turn" },
             events: {
@@ -1718,8 +1631,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
               throw new Error("forced disposal failed");
             },
           };
-        },
-      },
+      }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
     await waitUntilLatestBody(allocated.paths, body);
@@ -1733,24 +1645,19 @@ test("forced disposal failure records hung and broke-off before the Body returns
     assert.equal(heart.latestBody?.end, "broke-off");
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("provider closure failure enters Body supervision before session completion", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-closed-failure-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee07" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffee07");
     const { promise: closed, reject: rejectClosed } = promiseBarrier<void>();
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        start() {
+      scenarioProvider(() => {
           markStarted();
           return {
             result: Promise.resolve({
@@ -1768,8 +1675,7 @@ test("provider closure failure enters Body supervision before session completion
             async abort() {},
             async forceDispose() {},
           };
-        },
-      },
+      }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
     await waitUntilLatestBody(allocated.paths, body);
@@ -1783,7 +1689,7 @@ test("provider closure failure enters Body supervision before session completion
     });
     assert.equal(heart.latestBody?.end, "broke-off");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1791,8 +1697,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-violating-tell-"));
   let releaseTell: (() => void) | undefined;
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "c0ffee02" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "c0ffee02");
     let aborted = false;
     const { promise: started, resolve: tellStarted } = promiseBarrier<void>();
     const tellReleased = new Promise<void>((resolve) => {
@@ -1803,11 +1708,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     let successorSpawns = 0;
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
+      scenarioProvider(async () => {
           return {
             admission: { fence: "violating-tell-turn" },
             events: {
@@ -1827,8 +1728,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
               settle({ kind: "failed", diagnostic: "paused" });
             },
           };
-        },
-      },
+      }),
       {
         now: () => new Date().toISOString(),
         async spawnBody() {
@@ -1864,15 +1764,14 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
   } finally {
     releaseTell?.();
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("schema Turn malformed JSON is invalid-output and open bound Turns fail when Body is put down", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-invalid-output-"));
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "bad00001" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "bad00001");
     const schemaJson = '{"type":"object"}';
     const born = (await HeldAkumaLeash.try(allocated.paths))!;
     await born.birth(allocated.paths, {
@@ -1895,11 +1794,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     });
     await driveAkumaBody(
       { paths: allocated.paths },
-      {
-        admitOptions(options) {
-          return { kind: "admitted", options };
-        },
-        async start() {
+      scenarioProvider(async () => {
           return {
             admission: { fence: "bad-json" },
             events: {
@@ -1910,8 +1805,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
             completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "history-bad" }),
             async abort() {},
           };
-        },
-      },
+      }),
       { now: () => "2026-08-08T00:00:02.000Z" },
     );
     const tell = await readTell(allocated.paths, "schema-bad");
@@ -1942,7 +1836,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     const failed = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
     assert.equal(failed?.end?.outcome.kind, "failed");
   } finally {
-    await removeDrivenBodyFixture(root);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -1950,8 +1844,7 @@ test("spawn ENOENT diagnosis preserves the original failure as cause", async () 
   const root = mkdtempSync(join(tmpdir(), "keiyaku-body-spawn-cause-"));
   const liveExecPath = process.execPath;
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "ca5e0001" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(root, "claude", "ca5e0001");
     const vanishedCwd = join(root, "vanished-cwd");
     const vanishedExecutable = join(root, "vanished-runtime", "keiyaku-body");
     Object.defineProperty(process, "execPath", { value: vanishedExecutable, configurable: true });

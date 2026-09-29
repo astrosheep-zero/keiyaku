@@ -157,6 +157,20 @@ export type SpawnCapableFixtureCleanup =
   | Readonly<{ kind: "removed" }>
   | Readonly<{ kind: "retained"; diagnostic: string }>;
 
+/** Run the spawn-capable fixture cleanup and report a retained tree through the test context. */
+export async function cleanupSpawnCapableFixtureForTest(
+  test: TestContext,
+  input: Readonly<{
+    fixturePath: string;
+    pidReceiptPath: string;
+    timeoutMs?: number;
+    operationFailed: boolean;
+  }>,
+): Promise<void> {
+  const cleanup = await cleanupSpawnCapableFixture(input);
+  if (cleanup.kind === "retained") test.diagnostic(`retained fixture ${input.fixturePath}: ${cleanup.diagnostic}`);
+}
+
 export async function cleanupSpawnCapableFixture(
   input: Readonly<{
     fixturePath: string;

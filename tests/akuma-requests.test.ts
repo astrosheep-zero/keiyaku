@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { allocatedHeart, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { AkumaComposition as Akuma, recordCallInitialTell } from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -14,7 +15,6 @@ import {
   HeldAkumaLeash,
   admitRequest,
   beginRequest,
-  initializeHeart,
   readRequest,
   readSeal,
   readSoul,
@@ -60,21 +60,39 @@ async function akumaAt(root: string, requestDirectory?: string) {
 
 async function fixture(allowed?: Soul["allowed"]) {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
-  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
-  await initializeHeart(parent.paths);
-  const soul: Soul = {
-    id: parent.id,
-    archetype: "parent",
-    provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed: allowed ?? ALLOWED_ACTIONS,
-    createdAt: "2026-08-09T00:00:00.000Z",
-  };
-  const leash = (await HeldAkumaLeash.try(parent.paths))!;
-  await leash.birth(parent.paths, soul);
-  return { root, parent, soul, leash, close: () => rmSync(root, { recursive: true, force: true }) };
+  const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "1234abcd", allowed, createdAt: "2026-08-09T00:00:00.000Z" });
+  return { root, parent, soul: parent.soul, leash: parent.leash, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** Publish one worker under the fixture root; the launch body stays at the call site. */
+function publishWorker(
+  root: string,
+  signal: AbortSignal | undefined,
+  launch: (allocated: Awaited<ReturnType<typeof allocatedHeart>>) => Promise<OwnedProcess | void>,
+) {
+  return publishAkuma({ worldPath: root, archetype: "worker", ...(signal === undefined ? {} : { signal }), launch });
+}
+
+/** Open one call-request pump over the fixture parent; scenario time and spawn stay explicit. */
+async function openCallPump(
+  value: Awaited<ReturnType<typeof fixture>>,
+  spawn: Parameters<typeof akumaCallRequestCommands>[0]["spawn"],
+  now = "2026-08-09T00:00:01.000Z",
+): Promise<BodyRequestPump> {
+  return await BodyRequestPump.open({
+    paths: value.parent.paths,
+    allowed: value.soul.allowed,
+    bodySequence: 1,
+    now: () => now,
+    commands: akumaCallRequestCommands({
+      world: value.root,
+      paths: value.parent.paths,
+      parent: value.soul,
+      admitInitialTell: recordCallInitialTell(value.root),
+      spawn,
+    }),
+    signal: new AbortController().signal,
+  });
 }
 
 test("cancelled publication returns born when Soul appears during termination behind a successor leash", async () => {
@@ -87,11 +105,7 @@ test("cancelled publication returns born when Soul appears during termination be
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let successor: HeldAkumaLeash | undefined;
   try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
+    const publication = publishWorker(root, controller.signal, async (allocated) => {
         childPaths = allocated.paths;
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
         const child: OwnedProcess = {
@@ -119,7 +133,6 @@ test("cancelled publication returns born when Soul appears during termination be
         };
         launched();
         return child;
-      },
     });
     await launchStarted;
     controller.abort(new Error("cancelled publication"));
@@ -144,11 +157,7 @@ test("cancelled publication waits for an already-born child to exit before relea
   const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
   let terminated = false;
   let released = false;
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       await leash.birth(allocated.paths, {
         id: allocated.id,
@@ -173,7 +182,6 @@ test("cancelled publication waits for an already-born child to exit before relea
       };
       launched();
       return child;
-    },
   });
   await launchStarted;
   controller.abort(new Error("cancel born pending exit"));
@@ -193,11 +201,7 @@ test("cancelled publication terminates its child, observes Seal, and then reject
   let terminateCount = 0;
   let releaseCount = 0;
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       const child: OwnedProcess = {
@@ -217,7 +221,6 @@ test("cancelled publication terminates its child, observes Seal, and then reject
       };
       launched();
       return child;
-    },
   });
   await launchStarted;
   controller.abort(reason);
@@ -257,11 +260,7 @@ test("cancelled publication remains pending with child custody until termination
       resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
   });
   let releaseCount = 0;
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       const child: OwnedProcess = {
         pid: 4248,
@@ -276,7 +275,6 @@ test("cancelled publication remains pending with child custody until termination
       };
       launched();
       return child;
-    },
   });
   await launchStarted;
   controller.abort(new Error("cancelled publication"));
@@ -292,25 +290,12 @@ test("reserved child request is adjudicated from child Soul after publication fa
   const value = await fixture(["akuma.call"]);
   value.leash.release();
   const id = randomUUID();
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-26T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async (launch) => {
-        const leash = (await HeldAkumaLeash.try(launch.paths))!;
-        await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-26T00:00:02.000Z" });
-        leash.release();
-        throw new Error("publication exit evidence unavailable");
-      },
-    }),
-    signal: new AbortController().signal,
-  });
+  const pump = await openCallPump(value, async (launch) => {
+    const leash = (await HeldAkumaLeash.try(launch.paths))!;
+    await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-08-26T00:00:02.000Z" });
+    leash.release();
+    throw new Error("publication exit evidence unavailable");
+  }, "2026-08-26T00:00:01.000Z");
   try {
     const child = await requestBodyCall({
       directory: pump.directory,
@@ -359,24 +344,11 @@ test("a closed request channel does not report a reserved child as voided", asyn
   value.leash.release();
   const id = randomUUID();
   let childLeash: HeldAkumaLeash | null = null;
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-26T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async (launch) => {
-        childLeash = await HeldAkumaLeash.try(launch.paths);
-        assert.notEqual(childLeash, null);
-        throw new Error("publication failed after reservation");
-      },
-    }),
-    signal: new AbortController().signal,
-  });
+  const pump = await openCallPump(value, async (launch) => {
+    childLeash = await HeldAkumaLeash.try(launch.paths);
+    assert.notEqual(childLeash, null);
+    throw new Error("publication failed after reservation");
+  }, "2026-08-26T00:00:01.000Z");
   try {
     const request = requestBodyCall({
       directory: pump.directory,
@@ -425,11 +397,7 @@ test("publication releases process custody after bounded observation of unsettle
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
   try {
-    const publication = publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      signal: controller.signal,
-      async launch(allocated) {
+    const publication = publishWorker(root, controller.signal, async (allocated) => {
         childPaths = allocated.paths;
         held = (await HeldAkumaLeash.try(allocated.paths))!;
         started();
@@ -441,7 +409,6 @@ test("publication releases process custody after bounded observation of unsettle
             released = true;
           },
         } satisfies OwnedProcess;
-      },
     });
     await launchStarted;
     controller.abort(reason);
@@ -476,20 +443,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
   mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   process.env.HOME = home;
-  const first = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-09T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"),
-    }),
-    signal: new AbortController().signal,
-  });
+  const first = await openCallPump(value, async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"));
   try {
     const child = await (
       await akumaAt(value.root, first.directory)
@@ -541,21 +495,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
 
 test("Heart refuses a disabled call before child publication", async () => {
   const value = await fixture([]);
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-09T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async () => {
-        assert.fail("disabled request reached child publication");
-      },
-    }),
-    signal: new AbortController().signal,
+  const pump = await openCallPump(value, async () => {
+    assert.fail("disabled request reached child publication");
   });
   try {
     await assert.rejects(
@@ -591,14 +532,10 @@ test("publication preserves a Body failure that occurs before birth", async (con
   const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-failure-"));
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   await assert.rejects(
-    publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      async launch(allocated) {
+    publishWorker(root, undefined, async (allocated) => {
         childPaths = allocated.paths;
         await assert.rejects(driveAkumaBody({ paths: allocated.paths }), /Akuma wake has no born soul/u);
         assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
-      },
     }),
     /Akuma wake has no born soul/u,
   );
@@ -646,17 +583,13 @@ test("publication prefers an already-settled parent exit over a pre-written non-
     release: () => {},
   };
   await assert.rejects(
-    publishAkuma({
-      worldPath: root,
-      archetype: "worker",
-      async launch(allocated) {
+    publishWorker(root, undefined, async (allocated) => {
         childPaths = allocated.paths;
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
         await leash.sealIfUnborn(allocated.paths, { evidence: "body failure", at: new Date().toISOString() });
         leash.release();
         resolveExit(exit);
         return child;
-      },
     }),
     (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
   );
@@ -675,11 +608,7 @@ test("cancelled publication closes a live child before releasing its custody", a
       resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
   });
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       const child: OwnedProcess = {
@@ -696,7 +625,6 @@ test("cancelled publication closes a live child before releasing its custody", a
       };
       launched();
       return child;
-    },
   });
   await launchStarted;
   controller.abort(new Error("cancel live birth"));
@@ -713,11 +641,7 @@ test("cancelled publication records a termination rejection and still seals befo
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
   const { promise: launchStarted, resolve: started } = promiseBarrier<void>();
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       started();
@@ -736,7 +660,6 @@ test("cancelled publication records a termination rejection and still seals befo
           released = true;
         },
       } satisfies OwnedProcess;
-    },
   });
   await launchStarted;
   controller.abort(reason);
@@ -752,11 +675,7 @@ test("cancelled publication records an exit rejection and still seals before rel
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   let released = false;
   const { promise: launchStarted, resolve: started } = promiseBarrier<void>();
-  const publication = publishAkuma({
-    worldPath: root,
-    archetype: "worker",
-    signal: controller.signal,
-    async launch(allocated) {
+  const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       started();
@@ -770,7 +689,6 @@ test("cancelled publication records an exit rejection and still seals before rel
           released = true;
         },
       } satisfies OwnedProcess;
-    },
   });
   await launchStarted;
   controller.abort(reason);
@@ -791,20 +709,7 @@ test("a drive serves Body Requests through transport while Heart remains authori
     "---\nprovider: codex-app-server\n---\nWork.\n",
   );
   process.env.HOME = home;
-  const pump = await BodyRequestPump.open({
-    paths: value.parent.paths,
-    allowed: value.soul.allowed,
-    bodySequence: 1,
-    now: () => "2026-08-09T00:00:01.000Z",
-    commands: akumaCallRequestCommands({
-      world: value.root,
-      paths: value.parent.paths,
-      parent: value.soul,
-      admitInitialTell: recordCallInitialTell(value.root),
-      spawn: async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"),
-    }),
-    signal: new AbortController().signal,
-  });
+  const pump = await openCallPump(value, async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"));
   try {
     const childId = (
       await (
@@ -931,8 +836,7 @@ test("a new body settles old requests by observation without replay", async () =
       admittedAt: "2026-08-09T00:00:02.000Z",
       permitted: true,
     });
-    const born = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000012" });
-    await initializeHeart(born.paths);
+    const born = await allocatedHeart(value.root, "worker", "00000012");
     await reserveRequest(value.parent.paths, bornId, born.id);
     const bornLeash = (await HeldAkumaLeash.try(born.paths))!;
     await bornLeash.birth(born.paths, {
@@ -951,8 +855,7 @@ test("a new body settles old requests by observation without replay", async () =
       admittedAt: "2026-08-09T00:00:03.000Z",
       permitted: true,
     });
-    const unborn = await allocateAkumaDirectory({ worldRoot: value.root, archetype: "worker", draw: () => "00000013" });
-    await initializeHeart(unborn.paths);
+    const unborn = await allocatedHeart(value.root, "worker", "00000013");
     await reserveRequest(value.parent.paths, unbornId, unborn.id);
 
     const mismatchId = "00000000-0000-4000-8000-000000000014";
@@ -963,12 +866,7 @@ test("a new body settles old requests by observation without replay", async () =
       admittedAt: "2026-08-09T00:00:04.000Z",
       permitted: true,
     });
-    const mismatch = await allocateAkumaDirectory({
-      worldRoot: value.root,
-      archetype: "worker",
-      draw: () => "00000014",
-    });
-    await initializeHeart(mismatch.paths);
+    const mismatch = await allocatedHeart(value.root, "worker", "00000014");
     await reserveRequest(value.parent.paths, mismatchId, mismatch.id);
     const mismatchLeash = (await HeldAkumaLeash.try(mismatch.paths))!;
     await mismatchLeash.birth(mismatch.paths, {

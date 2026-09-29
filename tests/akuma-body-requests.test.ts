@@ -1,3 +1,4 @@
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { waitForCondition as waitFor, settlementProbe } from "./support/process.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
@@ -14,13 +15,12 @@ import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall 
 import {
   HeldAkumaLeash,
   admitRequest,
-  initializeHeart,
   readHeart,
   readRequest,
   stopRequested,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
+import { type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { AkumaNotBornError, AkumaObservationError } from "../src/akuma/akuma-errors.js";
 import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
@@ -69,22 +69,9 @@ function callTell(body = ""): Readonly<{ tellId: string; body: string }> {
 }
 
 async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => draw });
-  await initializeHeart(allocated.paths);
-  const soul: Soul = {
-    id: allocated.id,
-    archetype,
-    provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed,
-    createdAt: "2026-08-18T00:00:00.000Z",
-  };
-  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-  await leash.birth(allocated.paths, soul);
+  const { leash, ...value } = await bornDirectAkuma({ root, archetype, draw, allowed, createdAt: "2026-08-18T00:00:00.000Z" });
   leash.release();
-  return { ...allocated, soul };
+  return value;
 }
 
 async function openSelectionPump(

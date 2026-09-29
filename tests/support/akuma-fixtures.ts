@@ -18,6 +18,40 @@ type AllocatedAkuma = Awaited<ReturnType<typeof allocateAkumaDirectory>>;
 type ActivityFact = Extract<TimelineFact, { kind: "activity" }>;
 type TurnEndFact = Extract<TimelineFact, { kind: "turn-end" }>;
 
+/** Allocate one Akuma directory under a World root and initialize its Heart. */
+export async function allocatedHeart(root: string, archetype: string, draw: string) {
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => draw });
+  await initializeHeart(allocated.paths);
+  return allocated;
+}
+
+/** Allocate, initialize, and birth one direct-origin Soul under a caller-held leash. */
+export async function bornDirectAkuma(
+  input: Readonly<{
+    root: string;
+    archetype: string;
+    draw: string;
+    createdAt: string;
+    allowed?: Soul["allowed"] | undefined;
+    provider?: Soul["provider"];
+  }>,
+) {
+  const allocated = await allocatedHeart(input.root, input.archetype, input.draw);
+  const soul: Soul = {
+    id: allocated.id,
+    archetype: input.archetype,
+    provider: input.provider ?? { name: "codex-app-server", kind: "codex-app-server" },
+    options: {},
+    cwd: input.root,
+    origin: { kind: "direct" },
+    allowed: input.allowed ?? ALLOWED_ACTIONS,
+    createdAt: input.createdAt,
+  };
+  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+  await leash.birth(allocated.paths, soul);
+  return { ...allocated, soul, leash };
+}
+
 /** Keep the data under test explicit; only the repeated carrier shape lives here. */
 export function activityFact(
   sequence: number,
@@ -85,7 +119,7 @@ export async function bornBody(root: string, suffix: string, createdAt: string) 
 /** Admit one scenario Tell through Heart; identity, body, and time stay explicit. */
 export async function recordTell(
   paths: Parameters<typeof heartRecordTell>[0],
-  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
+  tell: Readonly<{ id: string; body: string; recordedAt: string; initiator?: string }>,
 ) {
   return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
