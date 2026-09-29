@@ -241,70 +241,66 @@ export function decodeAuditTargetAnswer(value: unknown): AuditTargetAnswer {
   return { kind: "failed", diagnostic: nonblank(object.diagnostic) };
 }
 
-export function decodeGitReconcileLag(value: unknown): ReconcileLag {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail();
-  const kind = (value as Record<string, unknown>).kind;
-  if (kind === "worktree-retained") {
-    const object = record(value, ["kind", "path"], ["diagnostic"]);
-    return {
-      kind: "worktree-retained",
-      path: nonblank(object.path),
-      ...(object.diagnostic === undefined ? {} : { diagnostic: nonblank(object.diagnostic) }),
-    };
-  }
-  if (kind === "worktree-follow-retained") {
-    const object = record(value, ["kind", "path", "tender", "head", "reason"], ["paths"]);
-    if (
-      object.reason !== "head-moved" &&
-      object.reason !== "head-attached" &&
-      object.reason !== "operation-in-progress" &&
-      object.reason !== "unsupported-parent-shape"
-    )
-      fail();
-    const lag: Extract<ReconcileLag, { kind: "worktree-follow-retained" }> = {
-      kind: "worktree-follow-retained",
-      path: nonblank(object.path),
-      tender: decodeGitSnapshotId(object.tender),
-      head: decodeGitSnapshotId(object.head),
-      reason: object.reason,
-      ...(object.paths === undefined ? {} : { paths: strings(object.paths) }),
-    };
-    return lag;
-  }
-  if (kind === "unsealed-bytes") {
-    const object = record(value, ["kind", "path", "paths"], ["head"]);
-    const lag: UnsealedBytes = {
-      kind: "unsealed-bytes",
-      path: nonblank(object.path),
-      paths: strings(object.paths),
-      ...(object.head === undefined ? {} : { head: decodeGitSnapshotId(object.head) }),
-    };
-    return lag;
-  }
-  if (kind === "target-checkout-retained") {
-    const object = record(value, ["kind", "path", "target", "diagnostic"]);
-    const lag: TargetCheckoutLag = {
-      kind: "target-checkout-retained",
-      path: nonblank(object.path),
-      target: nonblank(object.target),
-      diagnostic: nonblank(object.diagnostic),
-    };
-    return lag;
-  }
-  if (kind === "reconcile-failed") {
-    const object = record(value, ["kind", "stage", "diagnostic"]);
-    if (object.stage !== "observation" && object.stage !== "effect") fail();
-    const lag: ReconcileFailure = {
-      kind: "reconcile-failed",
-      stage: object.stage,
-      diagnostic: nonblank(object.diagnostic),
-    };
-    return lag;
-  }
+function decodeWorktreeRetainedLag(value: unknown): Extract<ReconcileLag, { kind: "worktree-retained" }> {
+  const object = record(value, ["kind", "path"], ["diagnostic"]);
+  return {
+    kind: "worktree-retained",
+    path: nonblank(object.path),
+    ...(object.diagnostic === undefined ? {} : { diagnostic: nonblank(object.diagnostic) }),
+  };
+}
+
+function decodeWorktreeFollowRetainedLag(
+  value: unknown,
+): Extract<ReconcileLag, { kind: "worktree-follow-retained" }> {
+  const object = record(value, ["kind", "path", "tender", "head", "reason"], ["paths"]);
+  if (
+    object.reason !== "head-moved" &&
+    object.reason !== "head-attached" &&
+    object.reason !== "operation-in-progress" &&
+    object.reason !== "unsupported-parent-shape"
+  )
+    fail();
+  return {
+    kind: "worktree-follow-retained",
+    path: nonblank(object.path),
+    tender: decodeGitSnapshotId(object.tender),
+    head: decodeGitSnapshotId(object.head),
+    reason: object.reason,
+    ...(object.paths === undefined ? {} : { paths: strings(object.paths) }),
+  };
+}
+
+function decodeUnsealedBytesLag(value: unknown): UnsealedBytes {
+  const object = record(value, ["kind", "path", "paths"], ["head"]);
+  return {
+    kind: "unsealed-bytes",
+    path: nonblank(object.path),
+    paths: strings(object.paths),
+    ...(object.head === undefined ? {} : { head: decodeGitSnapshotId(object.head) }),
+  };
+}
+
+function decodeTargetCheckoutRetainedLag(value: unknown): TargetCheckoutLag {
+  const object = record(value, ["kind", "path", "target", "diagnostic"]);
+  return {
+    kind: "target-checkout-retained",
+    path: nonblank(object.path),
+    target: nonblank(object.target),
+    diagnostic: nonblank(object.diagnostic),
+  };
+}
+
+function decodeReconcileFailureLag(value: unknown): ReconcileFailure {
+  const object = record(value, ["kind", "stage", "diagnostic"]);
+  if (object.stage !== "observation" && object.stage !== "effect") fail();
+  return { kind: "reconcile-failed", stage: object.stage, diagnostic: nonblank(object.diagnostic) };
+}
+
+function decodeWorktreeHookLag(value: unknown): WorktreeHookLag {
   const object = record(value, ["kind", "phase", "path", "command", "name", "failure"]);
-  if (object.kind !== "worktree-hook-failed") fail();
   if (object.phase !== "create" && object.phase !== "destroy") fail();
-  const lag: WorktreeHookLag = {
+  return {
     kind: "worktree-hook-failed",
     phase: object.phase,
     path: nonblank(object.path),
@@ -312,5 +308,16 @@ export function decodeGitReconcileLag(value: unknown): ReconcileLag {
     name: nonblank(object.name),
     failure: decodeHookFailure(object.failure),
   };
-  return lag;
+}
+
+export function decodeGitReconcileLag(value: unknown): ReconcileLag {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail();
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "worktree-retained") return decodeWorktreeRetainedLag(value);
+  if (kind === "worktree-follow-retained") return decodeWorktreeFollowRetainedLag(value);
+  if (kind === "unsealed-bytes") return decodeUnsealedBytesLag(value);
+  if (kind === "target-checkout-retained") return decodeTargetCheckoutRetainedLag(value);
+  if (kind === "reconcile-failed") return decodeReconcileFailureLag(value);
+  if (kind !== "worktree-hook-failed") fail();
+  return decodeWorktreeHookLag(value);
 }

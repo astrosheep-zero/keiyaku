@@ -21,8 +21,6 @@ import {
   type ContractWorktreeResult,
 } from "../contract-worktree.js";
 import { decodeGitReconcileLag } from "../git/result-codec.js";
-import { ownerSchema } from "./result-codec.js";
-import { z } from "zod";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -41,83 +39,45 @@ export type ReconcileCompletion = Readonly<{
   retainedWorktree?: string;
 }>;
 
-/**
- * Identifies the next independently retryable action for a reconciliation lag.
- * Retained terminal bytes are observable residue, not a blocker for another
- * action.
- */
 export type ReconcileLagScope = "none" | "reconciliation" | "placement" | "continuation";
 
-export function reconcileLagScope(lag: ReconcileCompletion["lag"][number]): ReconcileLagScope {
-  let scope: ReconcileLagScope;
-  const kind = lag.kind;
-  switch (kind) {
-    case "worktree-retained":
-    case "unsealed-bytes":
-      scope = "none";
-      break;
-    case "worktree-follow-retained":
-      scope = "continuation";
-      break;
-    case "target-checkout-retained":
-      scope = "placement";
-      break;
-    case "worktree-hook-failed":
-    case "reconcile-failed":
-    case "contract-file-failed":
-      scope = "reconciliation";
-      break;
-  }
-  if (
-    kind !== "worktree-retained" &&
-    kind !== "unsealed-bytes" &&
-    kind !== "worktree-follow-retained" &&
-    kind !== "target-checkout-retained" &&
-    kind !== "worktree-hook-failed" &&
-    kind !== "reconcile-failed" &&
-    kind !== "contract-file-failed"
-  ) {
-    const exhaustive: never = kind;
-    return exhaustive;
-  }
-  return scope;
-}
+type ReconcileLagClassification = Readonly<{ scope: ReconcileLagScope; failure: boolean }>;
 
 /**
- * Reconciliation lags are failures only when physical repair is incomplete.
- * Retained lags (worktree-retained, worktree-follow-retained, and
- * unsealed-bytes) are observable residue, not failed repair; target-checkout-
- * retained and every *-failed lag are failures.
+ * The one owner mapping for combined reconciliation lags. `scope` identifies the
+ * next independently retryable action; `failure` is true only when physical
+ * repair is incomplete. Retained lags (worktree-retained, worktree-follow-
+ * retained, and unsealed-bytes) are observable residue, not failed repair;
+ * target-checkout-retained and every *-failed lag are failures.
  */
-export function reconcileLagIsFailure(lag: ReconcileCompletion["lag"][number]): boolean {
-  let failure: boolean;
-  const kind = lag.kind;
+function classifyReconcileLag(kind: ReconcileCompletion["lag"][number]["kind"]): ReconcileLagClassification {
   switch (kind) {
     case "worktree-retained":
-    case "worktree-follow-retained":
     case "unsealed-bytes":
-      failure = false;
-      break;
+      return { scope: "none", failure: false };
+    case "worktree-follow-retained":
+      return { scope: "continuation", failure: false };
     case "target-checkout-retained":
+      return { scope: "placement", failure: true };
     case "worktree-hook-failed":
     case "reconcile-failed":
     case "contract-file-failed":
-      failure = true;
-      break;
+      return { scope: "reconciliation", failure: true };
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
-  if (
-    kind !== "worktree-retained" &&
-    kind !== "worktree-follow-retained" &&
-    kind !== "unsealed-bytes" &&
-    kind !== "target-checkout-retained" &&
-    kind !== "worktree-hook-failed" &&
-    kind !== "reconcile-failed" &&
-    kind !== "contract-file-failed"
-  ) {
-    const exhaustive: never = kind;
-    return exhaustive;
-  }
-  return failure;
+}
+
+/** Identifies the next independently retryable action for a reconciliation lag. */
+export function reconcileLagScope(lag: ReconcileCompletion["lag"][number]): ReconcileLagScope {
+  return classifyReconcileLag(lag.kind).scope;
+}
+
+/** True only when a reconciliation lag means physical repair is incomplete. */
+export function reconcileLagIsFailure(lag: ReconcileCompletion["lag"][number]): boolean {
+  return classifyReconcileLag(lag.kind).failure;
 }
 
 export function decodeReconciliationLag(value: unknown): ReconcileCompletion["lag"][number] {
@@ -127,11 +87,6 @@ export function decodeReconciliationLag(value: unknown): ReconcileCompletion["la
     return decodeContractFileLag(value);
   }
 }
-
-export const reconciliationLagSchema = ownerSchema(
-  decodeReconciliationLag,
-  "expected reconciliation lag",
-) satisfies z.ZodType<ReconcileCompletion["lag"][number]>;
 
 export type RepoContractReconcileReport = ReconcileCompletion;
 
@@ -269,6 +224,43 @@ async function appointForContract(
   }
 }
 
+type TerminalReconcilePhase = Readonly<{
+  cleanup: ReconcileReport | null;
+  worktree: ReturnType<typeof terminalWorktreeOutcome>;
+  release: ContractFileLag | undefined;
+}>;
+
+async function finishTerminalReconcile(
+  input: ReconcileOptions & Readonly<{ contractId: ContractId }>,
+  retained: Awaited<ReturnType<typeof reconcileOperation>>,
+  appointed: Readonly<{ place?: string }>,
+): Promise<TerminalReconcilePhase> {
+  const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
+  const worktree = terminalWorktreeOutcome(input.scope, cleanup?.report, appointed.place);
+  const release = releaseEligible(retained.state, cleanup?.report, appointed.place !== undefined)
+    ? await releaseAppointments(input.scope, [input.contractId])
+    : undefined;
+  return { cleanup: cleanup?.report ?? null, worktree, release };
+}
+
+function assembleReconcile(
+  retained: ReconcileReport,
+  projection: ContractWorktreeResult,
+  settlement: SettlementReport,
+  terminal: TerminalReconcilePhase,
+): ReconcileCompletion {
+  const { cleanup, worktree, release } = terminal;
+  const hookRuns = [...(retained.hookRuns ?? []), ...(cleanup?.hookRuns ?? [])];
+  return {
+    effects: [...retained.effects, ...projection.effects, ...(cleanup?.effects ?? [])],
+    lag: [...retained.lag, ...projection.lag, ...(cleanup?.lag ?? []), ...(release === undefined ? [] : [release])],
+    settlement,
+    ...(hookRuns.length === 0 ? {} : { hookRuns }),
+    ...(worktree?.kind === "retired" ? { retiredWorktree: worktree.place } : {}),
+    ...(worktree?.kind === "retained" ? { retainedWorktree: worktree.path } : {}),
+  };
+}
+
 export async function completeReconcile(
   input: ReconcileOptions &
     Readonly<{
@@ -298,25 +290,8 @@ export async function completeReconcile(
     state: retained.state,
     effects: retained.report.effects,
   });
-  const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
-  const worktree = terminalWorktreeOutcome(input.scope, cleanup?.report, appointment.place);
-  const release = releaseEligible(retained.state, cleanup?.report, appointment.place !== undefined)
-    ? await releaseAppointments(input.scope, [input.contractId])
-    : undefined;
-  const hookRuns = [...(retained.report.hookRuns ?? []), ...(cleanup?.report.hookRuns ?? [])];
-  return {
-    effects: [...retained.report.effects, ...projection.effects, ...(cleanup?.report.effects ?? [])],
-    lag: [
-      ...retained.report.lag,
-      ...projection.lag,
-      ...(cleanup?.report.lag ?? []),
-      ...(release === undefined ? [] : [release]),
-    ],
-    settlement,
-    ...(hookRuns.length === 0 ? {} : { hookRuns }),
-    ...(worktree?.kind === "retired" ? { retiredWorktree: worktree.place } : {}),
-    ...(worktree?.kind === "retained" ? { retainedWorktree: worktree.path } : {}),
-  };
+  const terminal = await finishTerminalReconcile(input, retained, appointed);
+  return assembleReconcile(retained.report, projection, settlement, terminal);
 }
 
 function attachReleaseLag(
