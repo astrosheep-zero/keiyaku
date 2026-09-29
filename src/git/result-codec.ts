@@ -250,9 +250,7 @@ function decodeWorktreeRetainedLag(value: unknown): Extract<ReconcileLag, { kind
   };
 }
 
-function decodeWorktreeFollowRetainedLag(
-  value: unknown,
-): Extract<ReconcileLag, { kind: "worktree-follow-retained" }> {
+function decodeWorktreeFollowRetainedLag(value: unknown): Extract<ReconcileLag, { kind: "worktree-follow-retained" }> {
   const object = record(value, ["kind", "path", "tender", "head", "reason"], ["paths"]);
   if (
     object.reason !== "head-moved" &&
