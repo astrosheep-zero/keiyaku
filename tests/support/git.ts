@@ -177,18 +177,20 @@ export function snapshotGitRepository(source: TestGitRepository): TestGitReposit
   return { path, run };
 }
 
-export function cloneGitRepository(source: TestGitRepository): TestGitRepository {
-  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-clone-")));
-  const path = realpathSync(directory);
-  execFileSync("git", ["clone", "--quiet", source.path, path]);
-  execFileSync("git", ["-C", path, "fetch", "--quiet", "origin", "refs/heads/keiyaku-state:refs/heads/keiyaku-state"]);
-  const run = (args: readonly string[], input?: string | Uint8Array): string =>
-    execFileSync("git", ["-C", path, ...args], { input, encoding: "utf8" }).toString();
-  return { path, run };
+export function repositoryWithCommit(): TestGitRepository {
+  const repository = makeGitRepository();
+  repository.run(["config", "user.name", "Keiyaku Test"]);
+  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
+  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
+  return repository;
 }
 
-export function gitRepositoryPath(): string {
-  return realpathSync(ownFixtureRoot(mkdtempSync(join(tmpdir(), "keiyaku-v4-"))));
+export function deliveryRefFor(contract: ContractId): string {
+  return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
+}
+
+export function candidatePinRefFor(contract: ContractId): string {
+  return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
 }
 
 export function observeContract(repository: GitRepository, id: ContractId) {

@@ -55,6 +55,10 @@ function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<st
   };
 }
 
+function refusesDelivery(value: Record<string, unknown> = {}, extras: Record<string, unknown> = {}): void {
+  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery(value, extras)).success, false);
+}
+
 test("accepted delivery round-trips owner settlement, verification, placement, cleanup, and continuation fields", () => {
   const result = acceptedDelivery(
     {
@@ -144,59 +148,39 @@ test("forwarded reconciliation lags preserve their repair scope", () => {
 });
 
 test("malformed settlement lag and extra envelope fields are transport-integrity refusals", () => {
-  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { settlementLags: [{}] })).success, false);
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({}, { settlementLags: [{ kind: "settlement-failed", surface: "task", diagnostic: "lag" }] }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery(
-        {},
+  refusesDelivery({}, { settlementLags: [{}] });
+  refusesDelivery({}, { settlementLags: [{ kind: "settlement-failed", surface: "task", diagnostic: "lag" }] });
+  refusesDelivery(
+    {},
+    {
+      settlementLags: [
         {
-          settlementLags: [
-            {
-              kind: "settlement-failed",
-              surface: "task",
-              contractId: contract,
-              taskId: "task/Forwarding",
-              diagnostic: "lag",
-            },
-          ],
+          kind: "settlement-failed",
+          surface: "task",
+          contractId: contract,
+          taskId: "task/Forwarding",
+          diagnostic: "lag",
         },
-      ),
-    ).success,
-    false,
+      ],
+    },
   );
   assert.equal(deliveryResultSchema.safeParse({ ...acceptedDelivery(), extra: true }).success, false);
-  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({ extra: true })).success, false);
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery(
-        {},
+  refusesDelivery({ extra: true });
+  refusesDelivery(
+    {},
+    {
+      lags: [
         {
-          lags: [
-            {
-              kind: "target-checkout-retained",
-              path: "/tmp/main",
-              target: "refs/heads/main",
-              diagnostic: "dirty",
-              affects: "none",
-            },
-          ],
+          kind: "target-checkout-retained",
+          path: "/tmp/main",
+          target: "refs/heads/main",
+          diagnostic: "dirty",
+          affects: "none",
         },
-      ),
-    ).success,
-    false,
+      ],
+    },
   );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({}, { pending: [{ surface: "cleanup", required: false, extra: true }] }),
-    ).success,
-    false,
-  );
+  refusesDelivery({}, { pending: [{ surface: "cleanup", required: false, extra: true }] });
 });
 
 test("refusal, retry, review, audit, and materialized conflict variants round-trip", () => {
@@ -383,72 +367,47 @@ test("union branches refuse keys that belong to a different arm", () => {
     }).success,
     false,
   );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({
-        placement: { failure: "target-placement-failed", diagnostic: "blocked", extra: true },
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({
-        placement: {
-          refusal: {
-            kind: "gates-unsatisfied",
-            contractId: contract,
-            unmet: [{ gate: "reviewed", current: { kind: "missing" } }],
-            extra: true,
-          },
-        },
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({
-        placement: {
-          refusal: {
-            kind: "prerequisites-unsatisfied",
-            contractId: contract,
-            unmet: [{ contractId: contract, state: "missing" }],
-            extra: true,
-          },
-        },
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({
-        placement: {
-          refusal: {
-            kind: "prerequisites-unsatisfied",
-            contractId: contract,
-            unmet: [{ contractId: contract, state: "missing", extra: true }],
-          },
-        },
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({
-        placement: {
-          refusal: {
-            kind: "gates-unsatisfied",
-            contractId: contract,
-            unmet: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "t", extra: true } }],
-          },
-        },
-      }),
-    ).success,
-    false,
-  );
+  refusesDelivery({
+    placement: { failure: "target-placement-failed", diagnostic: "blocked", extra: true },
+  });
+  refusesDelivery({
+    placement: {
+      refusal: {
+        kind: "gates-unsatisfied",
+        contractId: contract,
+        unmet: [{ gate: "reviewed", current: { kind: "missing" } }],
+        extra: true,
+      },
+    },
+  });
+  refusesDelivery({
+    placement: {
+      refusal: {
+        kind: "prerequisites-unsatisfied",
+        contractId: contract,
+        unmet: [{ contractId: contract, state: "missing" }],
+        extra: true,
+      },
+    },
+  });
+  refusesDelivery({
+    placement: {
+      refusal: {
+        kind: "prerequisites-unsatisfied",
+        contractId: contract,
+        unmet: [{ contractId: contract, state: "missing", extra: true }],
+      },
+    },
+  });
+  refusesDelivery({
+    placement: {
+      refusal: {
+        kind: "gates-unsatisfied",
+        contractId: contract,
+        unmet: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "t", extra: true } }],
+      },
+    },
+  });
 });
 
 function acceptedAudit(target: Record<string, unknown>) {
@@ -470,53 +429,34 @@ function acceptedAudit(target: Record<string, unknown>) {
   };
 }
 
+function refusesAudit(target: Record<string, unknown>): void {
+  assert.equal(auditResultSchema.safeParse(acceptedAudit(target)).success, false);
+}
+
 test("audit target and git lag arms refuse keys that belong to a different arm", () => {
-  assert.equal(auditResultSchema.safeParse(acceptedAudit({ kind: "not-observed", diagnostic: "no" })).success, false);
-  assert.equal(
-    auditResultSchema.safeParse(
-      acceptedAudit({ kind: "placeable", ref: "refs/heads/main", head: snapshot, diagnostic: "no" }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    auditResultSchema.safeParse(
-      acceptedAudit({
-        kind: "moved",
-        ref: "refs/heads/main",
-        expected: snapshot,
-        observed: null,
-        diagnostic: "no",
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    auditResultSchema.safeParse(acceptedAudit({ kind: "failed", diagnostic: "boom", ref: "refs/heads/main" })).success,
-    false,
-  );
-  assert.equal(
-    auditResultSchema.safeParse(
-      acceptedAudit({
-        kind: "refused",
-        refusal: {
-          kind: "checkout-not-followable",
-          contractId: contract,
-          target: "refs/heads/main",
-          path: "/tmp/worktree",
-          reason: "staged",
-          paths: ["a"],
-        },
-        diagnostic: "no",
-      }),
-    ).success,
-    false,
-  );
-  assert.equal(
-    deliveryResultSchema.safeParse(
-      acceptedDelivery({}, { lags: [{ kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" }] }),
-    ).success,
-    false,
-  );
+  refusesAudit({ kind: "not-observed", diagnostic: "no" });
+  refusesAudit({ kind: "placeable", ref: "refs/heads/main", head: snapshot, diagnostic: "no" });
+  refusesAudit({
+    kind: "moved",
+    ref: "refs/heads/main",
+    expected: snapshot,
+    observed: null,
+    diagnostic: "no",
+  });
+  refusesAudit({ kind: "failed", diagnostic: "boom", ref: "refs/heads/main" });
+  refusesAudit({
+    kind: "refused",
+    refusal: {
+      kind: "checkout-not-followable",
+      contractId: contract,
+      target: "refs/heads/main",
+      path: "/tmp/worktree",
+      reason: "staged",
+      paths: ["a"],
+    },
+    diagnostic: "no",
+  });
+  refusesDelivery({}, { lags: [{ kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" }] });
 });
 
 import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";

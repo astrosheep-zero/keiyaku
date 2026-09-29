@@ -4,7 +4,6 @@ import promises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku } from "../src/index.js";
 import { gate } from "../src/core/facts/types.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -15,64 +14,14 @@ import { observeTargetPlacement } from "../src/git/target-placement.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
 import {
-  appointedWorktreePath,
-  cachedRepoAt,
   cachedRepositoryAt,
-  type TestGitRepository,
   waitForFile,
   withGitShim,
 } from "./support/git.js";
-import { repositoryWithMain } from "./support/library-verbs.js";
-
-const TARGET_FILES = {
-  "delivered.txt": "base\n",
-  "local.txt": "base\n",
-};
-
-function document(title = "Target checkout placement"): string {
-  return [
-    `# ${title}`,
-    "",
-    "## Context",
-    "A target branch may already be checked out.",
-    "",
-    "## Objective",
-    "Keep the checked-out target coherent with placement.",
-    "",
-    "## Design",
-    "Fence publication and Git-native follow.",
-    "",
-    "## Region",
-    "~~~",
-    "delivered.txt",
-    "~~~",
-    "",
-    "## Criteria",
-    "### Preserve bytes",
-    "The journal admits and the checkout follows or stays behind.",
-    "",
-  ].join("\n");
-}
-
-async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
-  const bound = await Keiyaku.with().bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    workspace: "worktree",
-    target: "refs/heads/main",
-    gates,
-  });
-  const contract = bound.keiyaku;
-  const state = await contract.state();
-  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-  writeFileSync(resolve(path, "delivered.txt"), "candidate\n");
-  repository.run(["-C", path, "add", "delivered.txt"]);
-  repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
-  return { contract, id: state.id, path };
-}
+import { managedCandidate, repositoryWithMain, TARGET_PLACEMENT_FILES } from "./support/library-verbs.js";
 
 async function readyPlacementFixture() {
-  const repository = repositoryWithMain({ files: TARGET_FILES });
+  const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
   const value = { repository, ...(await managedCandidate(repository, ["reviewed"])) };
   await value.contract.deliver();
   await value.contract.review({ verdict: "unsatisfied" });

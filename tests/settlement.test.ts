@@ -4,24 +4,12 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { Keiyaku } from "../src/index.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { readTaskHoldersAt } from "../src/settlement/holder.js";
 import { settle } from "../src/settlement/settle.js";
-
-type AcceptedDelivery = Exclude<
-  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
-  { kind: "integration-conflict-materialized" }
->;
-
-function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if (result.kind === "integration-conflict-materialized") {
-    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
-  }
-  return result;
-}
 
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
@@ -31,6 +19,7 @@ import {
   makeGitRepository,
   withGitShim,
 } from "./support/git.js";
+import { acceptedDelivery } from "./support/library-verbs.js";
 
 function repository() {
   const value = makeGitRepository();

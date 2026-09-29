@@ -14,15 +14,7 @@ import {
   consumeGitStdout, runGitWithEnvironment,
   withGitAbortSignal
 } from "../src/git/process.js";
-import { makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
-
-function repositoryWithCommit() {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Keiyaku Test"]);
-  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  return repository;
-}
+import { repositoryWithCommit, waitForFile, withGitShim } from "./support/git.js";
 
 test("state commit construction warns while ordinary commit messages stay unchanged", async () => {
   const raw = repositoryWithCommit();

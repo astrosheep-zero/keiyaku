@@ -9,15 +9,7 @@ import { GitPlumbingError, runGitPipe } from "../src/git/process.js";
 import { captureWorkspaceTree } from "../src/git/workspace.js";
 import { worktreeChangeId } from "../src/git/integration.js";
 import { mintSnapshotId } from "../src/git/identity.js";
-import { makeGitRepository, protocolContractId, waitForFile } from "./support/git.js";
-
-function repositoryWithCommit() {
-  const repository = makeGitRepository();
-  repository.run(["config", "user.name", "Keiyaku Test"]);
-  repository.run(["config", "user.email", "keiyaku@example.invalid"]);
-  repository.run(["commit", "--quiet", "--allow-empty", "-m", "initial"]);
-  return repository;
-}
+import { protocolContractId, repositoryWithCommit, waitForFile } from "./support/git.js";
 
 test("change identity streams a large binary patch without retaining the patch in Node", async (t) => {
   const repository = repositoryWithCommit();

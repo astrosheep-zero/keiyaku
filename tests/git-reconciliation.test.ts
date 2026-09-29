@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
-import { appointedWorktreePath, snapshotGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+import {
+  appointedWorktreePath,
+  candidatePinRefFor,
+  captureWorktreeFiles,
+  deliveryRefFor,
+  restoreWorktreeFiles,
+  snapshotGitRepository,
+  type TestGitRepository,
+  type WorktreeFixtureFile,
+  withGitShim,
+} from "./support/git.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
-
-function deliveryRefFor(contract: ContractId): string {
-  return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
-}
-
-function candidatePinRefFor(contract: ContractId): string {
-  return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
-}
 
 function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: string): boolean {
   return effects.some(
@@ -27,12 +29,11 @@ function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: str
   );
 }
 
-type GeneratedWorktreeFile = Readonly<{ path: string; bytes: Buffer; mode: number }>;
 type DeliveredReviewGatedTargetTemplate = Readonly<{
   repository: TestGitRepository;
   id: ContractId;
   workspaceHead: ReturnType<typeof snapshotId>;
-  generatedFiles: readonly GeneratedWorktreeFile[];
+  generatedFiles: readonly WorktreeFixtureFile[];
 }>;
 
 let deliveredReviewGatedTargetTemplate: Promise<DeliveredReviewGatedTargetTemplate> | undefined;
@@ -54,18 +55,7 @@ async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredRevie
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   await contract.deliver();
   const workspaceHead = snapshotId(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim());
-  const generatedFiles = [
-    ".keiyaku/.gitignore",
-    ".keiyaku/KEIYAKU.md",
-    ".agents/skills/keiyaku-deliver/.gitignore",
-    ".agents/skills/keiyaku-deliver/SKILL.md",
-    ".agents/skills/keiyaku-review/.gitignore",
-    ".agents/skills/keiyaku-review/SKILL.md",
-  ].map((path) => ({
-    path,
-    bytes: readFileSync(join(worktree, path)),
-    mode: statSync(join(worktree, path)).mode & 0o777,
-  }));
+  const generatedFiles = captureWorktreeFiles(worktree);
   repository.run(["worktree", "remove", "--force", worktree]);
   return { repository, id: contractId, workspaceHead, generatedFiles };
 }
@@ -82,12 +72,7 @@ async function deliveredReviewGatedTargetFixture() {
   const repository = snapshotGitRepository(template.repository);
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), template.id);
   repository.run(["worktree", "add", "--detach", worktree, template.workspaceHead]);
-  for (const generated of template.generatedFiles) {
-    const path = join(worktree, generated.path);
-    mkdirSync(join(worktree, ...generated.path.split("/").slice(0, -1)), { recursive: true });
-    writeFileSync(path, generated.bytes);
-    chmodSync(path, generated.mode);
-  }
+  restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
   const contract = Keiyaku.with().select({ repo, id: template.id });
   return { contract, repository, worktree };

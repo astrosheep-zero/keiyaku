@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test, { describe } from "node:test";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { prepareReview } from "../src/protocol/review.js";
@@ -21,26 +21,20 @@ import { readRef } from "../src/git/repository.js";
 import { readDeliveryDiff } from "../src/git/integration.js";
 import { followDependentManagedWorktree } from "../src/git/workspace.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
   appointedWorktreePath,
   cachedRepositoryAt,
+  candidatePinRefFor,
+  deliveryRefFor,
   makeGitRepository,
   observeContract,
   snapshotGitRepository,
   type TestGitRepository,
   withGitShim,
 } from "./support/git.js";
-
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
-
-function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if (result.kind === "integration-conflict-materialized") {
-    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
-  }
-  return result;
-}
+import { acceptedDelivery, repositoryWithMain } from "./support/library-verbs.js";
 
 function contractBody(): string {
   return contractMarkdown("Delivery patch identity", {
@@ -54,32 +48,6 @@ function contractBody(): string {
 
 function preparationCoordinates(state: NonNullable<Awaited<ReturnType<typeof observeContract>>["state"]>) {
   return { contractId: state.id, coordinates: state.coordinates };
-}
-
-const fixtureTemplates = new Map<string, TestGitRepository>();
-
-function deliveryFixture(files: Readonly<Record<string, string>> = {}, message = "initial"): TestGitRepository {
-  const key = JSON.stringify({
-    files: Object.entries(files).sort(([left], [right]) => left.localeCompare(right)),
-    message,
-  });
-  let template = fixtureTemplates.get(key);
-  if (template === undefined) {
-    template = makeGitRepository();
-    for (const [path, contents] of Object.entries(files)) {
-      const target = join(template.path, path);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, contents);
-    }
-    if (Object.keys(files).length === 0) {
-      template.run(["commit", "--allow-empty", "--quiet", "-m", message]);
-    } else {
-      template.run(["add", "--", ...Object.keys(files)]);
-      template.run(["commit", "--quiet", "-m", message]);
-    }
-    fixtureTemplates.set(key, template);
-  }
-  return snapshotGitRepository(template);
 }
 
 type PostBindTemplate = Readonly<{
@@ -100,7 +68,8 @@ async function buildPostBindTemplate(
   target: "targetless" | "targeted",
   gates: readonly string[],
 ): Promise<PostBindTemplate> {
-  const repository = target === "targetless" ? deliveryFixture() : deliveryFixture({ "shared.txt": "base\n" });
+  const repository =
+    target === "targetless" ? repositoryWithMain() : repositoryWithMain({ files: { "shared.txt": "base\n" } });
   if (target === "targetless") {
     repository.run(["config", "user.name", "Test User"]);
     repository.run(["config", "user.email", "test@example.com"]);
@@ -163,14 +132,6 @@ async function preparedDelivery(repository: TestGitRepository, id: ContractId) {
   return prepared.data;
 }
 
-function deliveryRefFor(contract: ContractId): string {
-  return `refs/keiyaku/delivery/kei-${contract.slice("kei/".length)}`;
-}
-
-function candidatePinRefFor(contract: ContractId): string {
-  return `refs/keiyaku/candidate/kei-${contract.slice("kei/".length)}`;
-}
-
 function commitSignature(repository: TestGitRepository, commit: string): readonly string[] {
   return repository.run(["show", "-s", "--format=%an%x00%ae%x00%cn%x00%ce%x00%aI%x00%cI", commit]).trim().split("\0");
 }
@@ -180,13 +141,13 @@ async function targetedContract(gates: readonly string[] = []) {
 }
 
 async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
-  const repository = deliveryFixture(
-    {
+  const repository = repositoryWithMain({
+    files: {
       ".gitignore": ignore,
       "artifact/tracked.txt": "tracked\n",
     },
-    "tracked directory",
-  );
+    message: "tracked directory",
+  });
   const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
@@ -202,12 +163,29 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
   return { contract: bound.keiyaku, repository, worktree };
 }
 
+async function preparedAuditTarget() {
+  const { repository, preparation, worktree } = await targetedContract();
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
+  const git = await cachedRepositoryAt(repository.path);
+  const prepared = await prepareDelivery(git, preparation, {
+    title: "Delivery patch identity",
+    document: contractBody(),
+  });
+  assert.ok(prepared.kind === "prepared", "expected prepared.kind = \"prepared\"");
+  const targetName = preparation.coordinates.target;
+  assert.notEqual(targetName, undefined);
+  if (targetName === undefined) throw new Error("targeted contract has no target");
+  return { repository, preparation, git, prepared, targetName, expected: prepared.data.integration.predecessor };
+}
+
 // Each case owns a separate repository and scoped fault injection, never a process-wide mock.
 describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
 
   test("delivery fixtures snapshot independent initial repositories", () => {
-    const first = deliveryFixture({ "fixture.txt": "template\n" });
-    const second = deliveryFixture({ "fixture.txt": "template\n" });
+    const first = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
+    const second = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
     assert.notEqual(first.path, second.path);
     assert.equal(existsSync(join(second.path, ".git", "objects", "info", "alternates")), false);
     assert.equal(second.run(["remote"]).trim(), "");
@@ -217,7 +195,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     first.run(["commit", "--quiet", "-m", "changed fixture"]);
     first.run(["config", "test.fixture", "changed"]);
 
-    const third = deliveryFixture({ "fixture.txt": "template\n" });
+    const third = repositoryWithMain({ files: { "fixture.txt": "template\n" } });
     for (const repository of [second, third]) {
       assert.equal(readFileSync(join(repository.path, "fixture.txt"), "utf8"), "template\n");
       assert.equal(repository.run(["log", "-1", "--format=%s"]).trim(), "initial");
@@ -425,20 +403,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   });
 
   test("audit target adjudicator reports initial movement without observing followability", async () => {
-    const { repository, preparation, worktree } = await targetedContract();
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
-    const git = await cachedRepositoryAt(repository.path);
-    const prepared = await prepareDelivery(git, preparation, {
-      title: "Delivery patch identity",
-      document: contractBody(),
-    });
-    assert.ok(prepared.kind === "prepared", "expected prepared.kind = \"prepared\"");
-    const targetName = preparation.coordinates.target;
-    assert.notEqual(targetName, undefined);
-    if (targetName === undefined) return;
-    const expected = prepared.data.integration.predecessor;
+    const { repository, preparation, git, prepared, targetName, expected } = await preparedAuditTarget();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "move-target"]);
     const observed = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
@@ -472,20 +437,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   });
 
   test("audit target adjudicator reobserves movement after followability", async () => {
-    const { repository, preparation, worktree } = await targetedContract();
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "disjoint candidate"]);
-    const git = await cachedRepositoryAt(repository.path);
-    const prepared = await prepareDelivery(git, preparation, {
-      title: "Delivery patch identity",
-      document: contractBody(),
-    });
-    assert.ok(prepared.kind === "prepared", "expected prepared.kind = \"prepared\"");
-    const targetName = preparation.coordinates.target;
-    assert.notEqual(targetName, undefined);
-    if (targetName === undefined) return;
-    const expected = prepared.data.integration.predecessor;
+    const { repository, preparation, git, prepared, targetName, expected } = await preparedAuditTarget();
 
     const answer = await withGitShim(
       [

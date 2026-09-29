@@ -1,10 +1,9 @@
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
-import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { gate, type ContractId } from "../src/core/facts/types.js";
@@ -25,22 +24,12 @@ import {
   type TestGitRepository,
   withGitShim,
 } from "./support/git.js";
-import { repositoryWithMain } from "./support/library-verbs.js";
-
-const TARGET_FILES = {
-  "delivered.txt": "base\n",
-  "local.txt": "base\n",
-};
-
-function document(title = "Target checkout placement"): string {
-  return contractMarkdown(title, {
-    Context: "A target branch may already be checked out.",
-    Objective: "Keep the checked-out target coherent with placement.",
-    Design: "Fence publication and Git-native follow.",
-    Region: "~~~\ndelivered.txt\n~~~",
-    Criteria: "### Preserve bytes\nThe journal admits and the checkout follows or stays behind.\n",
-  });
-}
+import {
+  acceptedDelivery,
+  managedCandidate,
+  repositoryWithMain,
+  TARGET_PLACEMENT_FILES,
+} from "./support/library-verbs.js";
 
 type ManagedCandidateTemplate = Readonly<{
   repository: TestGitRepository;
@@ -49,35 +38,9 @@ type ManagedCandidateTemplate = Readonly<{
   generatedFiles: readonly WorktreeFixtureFile[];
 }>;
 
-type AcceptedDelivery = Exclude<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "integration-conflict-materialized" }>;
-
-function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if (result.kind === "integration-conflict-materialized") {
-    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
-  }
-  return result;
-}
-
 const TEMPLATE_CANDIDATE_REF = "refs/heads/keiyaku-test-template-candidate";
 const ordinaryCandidateTemplates = new Map<string, Promise<ManagedCandidateTemplate>>();
 let claimedUnfollowedCandidateTemplate: Promise<ManagedCandidateTemplate> | undefined;
-
-async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
-  const bound = await Keiyaku.with().bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    workspace: "worktree",
-    target: "refs/heads/main",
-    gates,
-  });
-  const contract = bound.keiyaku;
-  const state = await contract.state();
-  const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-  writeFileSync(resolve(path, "delivered.txt"), "candidate\n");
-  repository.run(["-C", path, "add", "delivered.txt"]);
-  repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
-  return { contract, id: state.id, path };
-}
 
 function captureManagedCandidateTemplate(
   repository: TestGitRepository,
@@ -91,7 +54,7 @@ function captureManagedCandidateTemplate(
 }
 
 async function buildOrdinaryCandidateTemplate(gates: readonly string[]): Promise<ManagedCandidateTemplate> {
-  const repository = repositoryWithMain({ files: TARGET_FILES });
+  const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
   const candidate = await managedCandidate(repository, gates);
   return captureManagedCandidateTemplate(repository, candidate);
 }

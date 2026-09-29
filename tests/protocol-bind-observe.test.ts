@@ -138,6 +138,17 @@ function terms(after: readonly ContractId[]) {
   } as const;
 }
 
+async function boundObservedContract(repository: TestGitRepository) {
+  const bound = await Keiyaku.with().bind({
+    repo: await cachedRepoAt(repository.path),
+    markdown: contractBody(),
+    workspace: "worktree",
+  });
+  const id = (await bound.keiyaku.state()).id;
+  const git = await repositoryAt(repository.path);
+  return { bound, id, git };
+}
+
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
 describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
   test("observes a targetless detached bind snapshot", async () => {
@@ -246,13 +257,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("admission publishes a journal append and opaque companion in one Git snapshot", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: contractBody(),
-      workspace: "worktree",
-    });
-    const id = (await bound.keiyaku.state()).id;
-    const git = await repositoryAt(repository.path);
+    const { id, git } = await boundObservedContract(repository);
     const { before, result } = await withGitDecodeChannel(git, async (channel) => {
       const observation = await observeContractsForAdmissionAt(git, channel, [id]);
       const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
@@ -305,13 +310,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: contractBody(),
-      workspace: "worktree",
-    });
-    const id = (await bound.keiyaku.state()).id;
-    const git = await repositoryAt(repository.path);
+    const { id, git } = await boundObservedContract(repository);
     const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
     const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
     assert.ok(before);
@@ -368,14 +367,8 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("rejects a foreign-contract journal entry before publication", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: contractBody(),
-      workspace: "worktree",
-    });
-    const id = (await bound.keiyaku.state()).id;
+    const { id, git } = await boundObservedContract(repository);
     const foreign = contractId("kei/foreign-admission-entry");
-    const git = await repositoryAt(repository.path);
     const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
     const decision = decideAbandon({
       input: { contractId: id, at: "2026-08-06T00:00:00Z" },
@@ -407,13 +400,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("classifies the candidate journal from its folded terminal state", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: contractBody(),
-      workspace: "worktree",
-    });
-    const id = (await bound.keiyaku.state()).id;
-    const git = await repositoryAt(repository.path);
+    const { id, git } = await boundObservedContract(repository);
 
     const activeObservation = await withGitDecodeChannel(git, (channel) =>
       observeContractsForAdmissionAt(git, channel, [id]),
@@ -544,13 +531,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("public reconcile and admission observation retain canonical journal validation", async () => {
     const repository = repositoryWithHead();
-    const bound = await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: contractBody(),
-      workspace: "worktree",
-    });
-    const id = (await bound.keiyaku.state()).id;
-    const git = await repositoryAt(repository.path);
+    const { bound, id, git } = await boundObservedContract(repository);
     const snapshot = await readGit(git);
     const path = contractJournalPath(id);
     const journal = snapshot.paths.get(path);
