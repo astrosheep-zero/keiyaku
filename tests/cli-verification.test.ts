@@ -67,7 +67,7 @@ async function bindCandidate(script: string, gates: readonly string[] = ["verifi
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   raw.run(["-C", worktree, "add", "candidate.txt"]);
   raw.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  return { raw, id };
+  return { raw, id, worktree };
 }
 
 async function bindAndDeliver(script: string, gates: readonly string[] = ["verified"]) {
@@ -97,9 +97,7 @@ test("deliver adapts a successful Verification result through the CLI", async ()
 });
 
 test("a blocked deliver names the verified snapshot and the accepting review lands it", async () => {
-  const { raw, id } = await bindCandidate("printf 'verified-output\\n'", ["reviewed"]);
-  const repository = await repositoryAt(raw.path);
-  const worktree = await appointedWorktreePath(repository, id);
+  const { raw, id, worktree } = await bindCandidate("printf 'verified-output\\n'", ["reviewed"]);
 
   const blocked = await invokeRaw(executable(["-C", raw.path, "deliver", id]), { environment: {} });
   const blockedText = renderText(blocked as unknown as InvocationResult, { columns: 200, color: false });

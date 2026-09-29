@@ -85,21 +85,6 @@ function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | 
   };
 }
 
-/**
- * The completed placement's movement identity — the reference it advanced and the head it advanced from — is part
- * of the public accepted shape, so a receipt states the movement without rebuilding it from facts or folded state.
- */
-function acceptedCompletion(completion: Delivery["completion"]): Delivery["completion"] {
-  if (completion === undefined) return undefined;
-  return {
-    integration: completion.integration,
-    ...(completion.predecessor === undefined ? {} : { predecessor: completion.predecessor }),
-    ...(completion.target === undefined ? {} : { target: completion.target }),
-    ...(completion.scope === undefined ? {} : { scope: completion.scope }),
-    ...(completion.verification === undefined ? {} : { verification: completion.verification }),
-  };
-}
-
 function acceptedRegion(result: BindResult): RegionObservation {
   if (result.overlapFailure !== undefined) return { overlapFailure: result.overlapFailure };
   return { overlaps: result.overlaps };
@@ -135,7 +120,6 @@ export function acceptedAmend(result: AmendResult, coordinate: ContractId): Acce
 export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: ContractId): AcceptedDeliverResult {
   const value = result.value;
   const attestation = attestationFor(result.facts, "verified", coordinate);
-  const completion = acceptedCompletion(value.completion);
   const verificationVerdict =
     value.completion?.verification?.verdict ?? attestation?.data.verdict ?? value.verificationReuse?.verdict;
   return {
@@ -144,7 +128,7 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
     tenderSnapshot: value.tenderSnapshot,
     integration: { changeId: value.integration.changeId },
     ...(value.leading === undefined ? {} : { leading: value.leading }),
-    ...(completion === undefined ? {} : { completion }),
+    ...(value.completion === undefined ? {} : { completion: value.completion }),
     ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
@@ -160,7 +144,6 @@ export function acceptedReview(result: MutationResult<Review>, coordinate: Contr
   const reviewAttestation = attestationFor(result.facts, "reviewed", coordinate);
   if (reviewAttestation === undefined) throw new Error("accepted review is missing its attestation fact");
   const verificationAttestation = attestationFor(result.facts, "verified", coordinate);
-  const completion = acceptedCompletion(value.completion);
   const verificationVerdict =
     value.completion?.verification?.verdict ??
     verificationAttestation?.data.verdict ??
@@ -169,7 +152,7 @@ export function acceptedReview(result: MutationResult<Review>, coordinate: Contr
     ...acceptedEnvelope(result, coordinate),
     verb: "review",
     verdict: reviewAttestation.data.verdict,
-    ...(completion === undefined ? {} : { completion }),
+    ...(value.completion === undefined ? {} : { completion: value.completion }),
     ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),

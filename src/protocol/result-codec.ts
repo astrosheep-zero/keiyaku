@@ -254,11 +254,17 @@ export function decodeVerificationReuse(value: unknown): CurrentVerifiedAttestat
   };
 }
 
+/** The provenance pair every verification verdict carries; both decoders below reject the same value set. */
+function decodeVerdictProvenance(object: Record<string, unknown>): Pick<VerificationSubject, "mode" | "verdict"> {
+  const { mode, verdict } = object;
+  if (mode !== "ran" && mode !== "reused") fail();
+  if (verdict !== "satisfied" && verdict !== "unsatisfied") fail();
+  return { mode, verdict };
+}
+
 export function decodeVerificationSubject(value: unknown): VerificationSubject {
   const object = record(value, ["snapshot", "mode", "verdict"]);
-  if (object.mode !== "ran" && object.mode !== "reused") fail();
-  if (object.verdict !== "satisfied" && object.verdict !== "unsatisfied") fail();
-  return { snapshot: decodeSnapshotId(object.snapshot), mode: object.mode, verdict: object.verdict };
+  return { snapshot: decodeSnapshotId(object.snapshot), ...decodeVerdictProvenance(object) };
 }
 
 function decodePlacementStepRefusal(value: unknown) {
@@ -350,36 +356,26 @@ export function decodeVerificationCleanupFailure(value: unknown): VerificationCl
   return { phase: "destroy", name: nonblank(object.name), detail: decodeHookFailure(object.detail) };
 }
 
+function decodeCompletionScope(value: unknown) {
+  const scope = record(value, ["filesChanged", "insertions", "deletions"]);
+  return {
+    filesChanged: integer(scope.filesChanged),
+    insertions: integer(scope.insertions),
+    deletions: integer(scope.deletions),
+  };
+}
+
 export function decodeCandidateCompletion(value: unknown): CandidateCompletion {
   const object = record(value, ["integration"], ["predecessor", "target", "scope", "verification"]);
-  const completion: CandidateCompletion = {
+  return {
     integration: decodeSnapshotId(object.integration),
     ...(object.predecessor === undefined ? {} : { predecessor: decodeSnapshotId(object.predecessor) }),
     ...(object.target === undefined ? {} : { target: nonblank(object.target) }),
-    ...(object.scope === undefined
-      ? {}
-      : {
-          scope: (() => {
-            const scope = record(object.scope, ["filesChanged", "insertions", "deletions"]);
-            return {
-              filesChanged: integer(scope.filesChanged),
-              insertions: integer(scope.insertions),
-              deletions: integer(scope.deletions),
-            };
-          })(),
-        }),
+    ...(object.scope === undefined ? {} : { scope: decodeCompletionScope(object.scope) }),
     ...(object.verification === undefined
       ? {}
-      : {
-          verification: (() => {
-            const verification = record(object.verification, ["mode", "verdict"]);
-            if (verification.mode !== "ran" && verification.mode !== "reused") fail();
-            if (verification.verdict !== "satisfied" && verification.verdict !== "unsatisfied") fail();
-            return { mode: verification.mode, verdict: verification.verdict };
-          })(),
-        }),
+      : { verification: decodeVerdictProvenance(record(object.verification, ["mode", "verdict"])) }),
   };
-  return completion;
 }
 
 export function decodeCompletionEvidence(value: unknown): CompletionEvidence {

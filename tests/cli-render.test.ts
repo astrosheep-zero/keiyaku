@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, entryUlid, gate, snapshotId, type ContractId } from "../src/core/facts/types.js";
+import type { GateReport } from "../src/core/facts/gate.js";
+import type { CandidateCompletion } from "../src/protocol/completion.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
 import type { CallObservation } from "../src/library/akuma-creation.js";
@@ -1684,34 +1686,51 @@ test("a satisfied review whose placement fails names the satisfied fact once and
   assert.doesNotMatch(text, /placement|continuation|reconciliation/u, "no internal phase name appears");
 });
 
+/** The placement movement the campaign's receipt pins share; overrides state only what a pin makes unique. */
+function movement(overrides: Partial<CandidateCompletion> = {}): CandidateCompletion {
+  return {
+    integration: snapshotId("4".repeat(40)),
+    predecessor: snapshotId("3".repeat(40)),
+    target: "refs/heads/main",
+    ...overrides,
+  };
+}
+
+/** A satisfied review receipt rendered; values state only what the pin makes unique. */
+function reviewText<const T extends Record<string, unknown>>(contract: ContractId, values: T) {
+  return renderText(receipt({ verb: "review", contract, verdict: "satisfied", ...values }));
+}
+
+/** A deliver receipt rendered; values state only what the pin makes unique. */
+function deliverText<const T extends Record<string, unknown>>(contract: ContractId, values: T) {
+  return renderText(receipt({ verb: "deliver", contract, ...values }));
+}
+
+/** An abandon receipt rendered; the retired or retained worktree states what the pin makes unique. */
+function abandonText<const T extends Record<string, unknown>>(contract: ContractId, values: T) {
+  return renderText(receipt({ verb: "abandon", contract, ...values }));
+}
+
+/** An attested unsatisfied requirement state; the optional summary is the pin's payload. */
+function attestedUnsatisfied(summary?: string): GateReport["current"] {
+  const current = { kind: "attested" as const, verdict: "unsatisfied" as const, at: "2026-08-01T00:00:00.000Z" };
+  return summary === undefined ? current : { ...current, summary };
+}
+
+/** A gates-refused deliver receipt rendered; pins differ only in the requirements they hand over. */
+function blockedText(slug: string, unmet: readonly GateReport[]) {
+  const contract = contractId(slug);
+  return deliverText(contract, {
+    placement: { refusal: { kind: "gates-unsatisfied", contractId: contract, target: "refs/heads/main", unmet } },
+  });
+}
+
 test("a gates-refused placement names the target's non-movement and lets recorded verdicts alarm", () => {
-  const contract = contractId("kei/blocked-review");
-  const text = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      placement: {
-        refusal: {
-          kind: "gates-unsatisfied",
-          contractId: contract,
-          target: "refs/heads/main",
-          unmet: [
-            {
-              gate: gate("verified"),
-              current: {
-                kind: "attested",
-                verdict: "unsatisfied",
-                summary: "[1 bash exit 1]",
-                at: "2026-08-01T00:00:00.000Z",
-              },
-            },
-            { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
-            { gate: gate("manual"), current: { kind: "missing" } },
-          ],
-        },
-      },
-    }),
-  );
+  const text = blockedText("kei/blocked-review", [
+    { gate: gate("verified"), current: attestedUnsatisfied("[1 bash exit 1]") },
+    { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
+    { gate: gate("manual"), current: { kind: "missing" } },
+  ]);
   assert.equal(
     text,
     [
@@ -1730,67 +1749,23 @@ test("a gates-refused placement names the target's non-movement and lets recorde
 });
 
 test("a gates-refused placement awaits each not-yet-happened requirement as a plain noun", () => {
-  const contract = contractId("kei/two-missing");
-  const text = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      placement: {
-        refusal: {
-          kind: "gates-unsatisfied",
-          contractId: contract,
-          target: "refs/heads/main",
-          unmet: [
-            { gate: gate("reviewed"), current: { kind: "missing" } },
-            { gate: gate("verified"), current: { kind: "stale", priorVerdict: "satisfied" } },
-          ],
-        },
-      },
-    }),
-  );
+  const text = blockedText("kei/two-missing", [
+    { gate: gate("reviewed"), current: { kind: "missing" } },
+    { gate: gate("verified"), current: { kind: "stale", priorVerdict: "satisfied" } },
+  ]);
   assert.equal(text.split("\n").at(-1), "⧗ awaiting review, verification", "a stale requirement folds into the same await");
 });
 
 test("four or more awaited requirements bound the margin line", () => {
-  const contract = contractId("kei/many-missing");
-  const text = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      placement: {
-        refusal: {
-          kind: "gates-unsatisfied",
-          contractId: contract,
-          target: "refs/heads/main",
-          unmet: ["a", "b", "c", "d"].map((name) => ({
-            gate: gate(name),
-            current: { kind: "missing" as const },
-          })),
-        },
-      },
-    }),
+  const text = blockedText(
+    "kei/many-missing",
+    ["a", "b", "c", "d"].map((name) => ({ gate: gate(name), current: { kind: "missing" as const } })),
   );
   assert.equal(text.split("\n").at(-1), "⧗ awaiting 4 gates");
 });
 
 test("a gates-refused placement whose unmet requirements all hold verdicts omits the await line", () => {
-  const contract = contractId("kei/recorded-only");
-  const text = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      placement: {
-        refusal: {
-          kind: "gates-unsatisfied",
-          contractId: contract,
-          target: "refs/heads/main",
-          unmet: [
-            { gate: gate("verified"), current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-01T00:00:00.000Z" } },
-          ],
-        },
-      },
-    }),
-  );
+  const text = blockedText("kei/recorded-only", [{ gate: gate("verified"), current: attestedUnsatisfied() }]);
   assert.equal(
     text,
     [
@@ -1811,13 +1786,6 @@ test("an unsatisfied review attempts no placement and carries no target row", ()
 
 test("completion stops project an ignored-checkout refusal fact", () => {
   const contract = contractId("kei/checkout-followability");
-  const envelope = {
-    kind: "accepted" as const,
-    contract,
-    head: contractHead("head"),
-    facts: [],
-    settlementLags: [],
-  };
   const text = [
     "! checkout-not-followable",
     "  checkout  /repo/checkout",
@@ -1827,9 +1795,7 @@ test("completion stops project an ignored-checkout refusal fact", () => {
     "    ignored.tmp",
     '    quote"path.tmp',
   ];
-  const rendered = renderText({
-    ...envelope,
-    verb: "deliver",
+  const rendered = deliverText(contract, {
     placement: {
       refusal: {
         kind: "checkout-not-followable",
@@ -1840,7 +1806,7 @@ test("completion stops project an ignored-checkout refusal fact", () => {
         paths: ["ignored.tmp", 'quote"path.tmp'],
       },
     },
-  } as InvocationResult);
+  });
   const renderedLines = rendered.split("\n");
   const start = renderedLines.indexOf("! checkout-not-followable");
   assert.notEqual(start, -1);
@@ -1981,20 +1947,9 @@ test("deliver projects a ran Verification completion", () => {
 });
 
 test("placement receipts name reused provenance in the audit surface's vocabulary", () => {
-  const contract = contractId("kei/placement-reuse");
-  const text = renderText(
-    receipt({
-      verb: "review",
-      contract,
-      verdict: "satisfied",
-      completion: {
-        integration: snapshotId("4".repeat(40)),
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-        verification: { mode: "reused", verdict: "satisfied" },
-      },
-    }),
-  );
+  const text = reviewText(contractId("kei/placement-reuse"), {
+    completion: movement({ verification: { mode: "reused", verdict: "satisfied" } }),
+  });
   assert.equal(
     text,
     [
@@ -2010,15 +1965,11 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
   const contract = contractId("kei/standalone-subject");
   const integration = snapshotId("a".repeat(40));
   assert.equal(
-    renderText(
-      receipt({
-        verb: "deliver",
-        contract,
-        tenderSnapshot: snapshotId("b".repeat(40)),
-        integration: { changeId: changeId("c".repeat(40)) },
-        verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
-      }),
-    ),
+    deliverText(contract, {
+      tenderSnapshot: snapshotId("b".repeat(40)),
+      integration: { changeId: changeId("c".repeat(40)) },
+      verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+    }),
     [
       "✓ delivered  kei/standalone-subject",
       "  candidate  bbbbbbb",
@@ -2027,142 +1978,79 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
       "  candidate  kept",
     ].join("\n"),
   );
-  const fresh = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      verificationSubject: { snapshot: integration, mode: "ran", verdict: "unsatisfied" },
-    }),
-  );
+  const fresh = deliverText(contract, {
+    verificationSubject: { snapshot: integration, mode: "ran", verdict: "unsatisfied" },
+  });
   assert.match(fresh, /^  integration result  aaaaaaa · verification unsatisfied$/mu);
   assert.equal((fresh.match(/integration result/gu) ?? []).length, 1);
 });
 
 test("a placed deliver keeps the verdict on the placement integration row only", () => {
-  const contract = contractId("kei/one-row");
   const integration = snapshotId("4".repeat(40));
-  const text = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      completion: {
-        integration,
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-        verification: { mode: "reused", verdict: "satisfied" },
-      },
-      verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
-    }),
-  );
+  const text = deliverText(contractId("kei/one-row"), {
+    completion: movement({ verification: { mode: "reused", verdict: "satisfied" } }),
+    verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+  });
   assert.equal((text.match(/integration result/gu) ?? []).length, 1);
   assert.match(text, /^  integration result  4444444 · verification reused satisfied$/mu);
 });
 
 test("terminal receipts name the retired worktree last", () => {
-  const review = renderText(
-    receipt({
-      verb: "review",
-      contract: contractId("kei/retired-review"),
-      verdict: "satisfied",
-      completion: {
-        integration: snapshotId("4".repeat(40)),
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-        verification: { mode: "ran", verdict: "satisfied" },
-      },
-      retiredWorktree: "fridge",
-    }),
-  );
+  const review = reviewText(contractId("kei/retired-review"), {
+    completion: movement({ verification: { mode: "ran", verdict: "satisfied" } }),
+    retiredWorktree: "fridge",
+  });
   assert.match(review, /^  worktree  fridge retired$/mu);
   assert.match(review, /retired$/u);
-  const abandoned = renderText(
-    receipt({ verb: "abandon", contract: contractId("kei/retired-abandon"), retiredWorktree: "shed" }),
-  );
+  const abandoned = abandonText(contractId("kei/retired-abandon"), { retiredWorktree: "shed" });
   assert.match(abandoned, /^  worktree  shed retired$/mu);
-  const active = renderText(receipt({ verb: "review", contract: contractId("kei/active"), verdict: "satisfied" }));
+  const active = reviewText(contractId("kei/active"), {});
   assert.doesNotMatch(active, /retired/u);
 });
 
 test("a terminal receipt names a retained worktree in place of the obituary", () => {
-  const retained = renderText(
-    receipt({
-      verb: "abandon",
-      contract: contractId("kei/retained-abandon"),
-      retainedWorktree: "/repo/.keiyaku/wt/fridge",
-    }),
-  );
+  const retained = abandonText(contractId("kei/retained-abandon"), { retainedWorktree: "/repo/.keiyaku/wt/fridge" });
   assert.match(retained, /^! lag  worktree retained  \/repo\/\.keiyaku\/wt\/fridge$/mu);
   assert.doesNotMatch(retained, /retired/u);
-  const preexisting = renderText(
-    receipt({
-      verb: "review",
-      contract: contractId("kei/preexisting-residue"),
-      verdict: "satisfied",
-      lag: [{ kind: "worktree-retained", path: "/tmp/wt", affects: "none" }],
-    }),
-  );
+  const preexisting = reviewText(contractId("kei/preexisting-residue"), {
+    lag: [{ kind: "worktree-retained", path: "/tmp/wt", affects: "none" }],
+  });
   assert.doesNotMatch(preexisting, /lag  worktree|\/tmp\//u, "pre-existing residue stays typed-only");
 });
 
 test("a terminal receipt names each checkout its own follow left behind", () => {
-  const contract = contractId("kei/retained-checkout");
-  const text = renderText(
-    receipt({
-      verb: "review",
-      contract,
-      verdict: "satisfied",
-      completion: {
-        integration: snapshotId("4".repeat(40)),
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-      },
-      retainedCheckouts: [
-        { path: "/repo", target: "refs/heads/main" },
-        { path: "/repo/.keiyaku/wt/fridge", target: "refs/heads/main" },
-      ],
-      retiredWorktree: "shed",
-    }),
-  );
+  const text = reviewText(contractId("kei/retained-checkout"), {
+    completion: movement(),
+    retainedCheckouts: ["/repo", "/repo/.keiyaku/wt/fridge"].map((path) => ({ path, target: "refs/heads/main" })),
+    retiredWorktree: "shed",
+  });
   assert.match(text, /^✓ accepted$/mu);
   assert.match(text, /^! lag  checkout behind  \/repo  · refs\/heads\/main$/mu);
   assert.match(text, /^! lag  checkout behind  \/repo\/\.keiyaku\/wt\/fridge  · refs\/heads\/main$/mu);
   assert.match(text, /^  worktree  shed retired$/mu);
   assert.doesNotMatch(text, /target-checkout-retained/u, "the raw kind never prints");
-  const preexisting = renderText(
-    receipt({
-      verb: "review",
-      contract: contractId("kei/preexisting-checkout-residue"),
-      verdict: "satisfied",
-      lag: [
-        {
-          kind: "target-checkout-retained",
-          path: "/repo",
-          target: "refs/heads/main",
-          diagnostic: "kept",
-          affects: "placement",
-        },
-      ],
-    }),
-  );
+  const preexisting = reviewText(contractId("kei/preexisting-checkout-residue"), {
+    lag: [
+      {
+        kind: "target-checkout-retained",
+        path: "/repo",
+        target: "refs/heads/main",
+        diagnostic: "kept",
+        affects: "placement",
+      },
+    ],
+  });
   assert.doesNotMatch(preexisting, /checkout behind|\/repo/u, "pre-existing checkout residue stays typed-only");
 });
 
 test("a completed placement names the landed diff's shape through the shared diffstat rule", () => {
   const contract = contractId("kei/landed-shape");
-  const text = renderText(
-    receipt({
-      verb: "review",
-      contract,
-      verdict: "satisfied",
-      completion: {
-        integration: snapshotId("4".repeat(40)),
-        predecessor: snapshotId("3".repeat(40)),
-        target: "refs/heads/main",
-        scope: { filesChanged: 3, insertions: 4, deletions: 1 },
-        verification: { mode: "ran", verdict: "satisfied" },
-      },
+  const text = reviewText(contract, {
+    completion: movement({
+      scope: { filesChanged: 3, insertions: 4, deletions: 1 },
+      verification: { mode: "ran", verdict: "satisfied" },
     }),
-  );
+  });
   assert.equal(
     text,
     [
@@ -2173,26 +2061,17 @@ test("a completed placement names the landed diff's shape through the shared dif
       "✓ accepted",
     ].join("\n"),
   );
-  const single = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      completion: {
-        integration: snapshotId("6".repeat(40)),
-        predecessor: snapshotId("5".repeat(40)),
-        target: "refs/heads/main",
-        scope: { filesChanged: 1, insertions: 2, deletions: 0 },
-      },
+  const single = deliverText(contract, {
+    completion: movement({
+      integration: snapshotId("6".repeat(40)),
+      predecessor: snapshotId("5".repeat(40)),
+      scope: { filesChanged: 1, insertions: 2, deletions: 0 },
     }),
-  );
+  });
   assert.ok(single.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 2, removed: 0 })}`));
-  const unplaced = renderText(
-    receipt({
-      verb: "deliver",
-      contract,
-      verificationSubject: { snapshot: snapshotId("a".repeat(40)), mode: "ran", verdict: "satisfied" },
-    }),
-  );
+  const unplaced = deliverText(contract, {
+    verificationSubject: { snapshot: snapshotId("a".repeat(40)), mode: "ran", verdict: "satisfied" },
+  });
   assert.doesNotMatch(unplaced, /changes/u, "a deliver without placement carries no changes row");
 });
 

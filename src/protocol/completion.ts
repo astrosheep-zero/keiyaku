@@ -172,7 +172,6 @@ async function completedResult(
   if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
   const target = state.coordinates.target;
   const predecessor = state.currentIntegration?.predecessor;
-  // The landed shape is a read of the recorded integration pair, captured here; the receipt renderer holds no repository.
   const scope =
     predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
   // Never attach a superseded run's verdict to the final integration.
@@ -200,13 +199,7 @@ async function completedResult(
         ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
         ...(scope === undefined
           ? {}
-          : {
-              scope: {
-                filesChanged: scope.filesChanged,
-                insertions: scope.insertions,
-                deletions: scope.deletions,
-              },
-            }),
+          : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
         ...(verification === undefined ? {} : { verification }),
       },
       ...(current === undefined || verification?.mode !== "reused" ? {} : { verificationReuse: current }),
