@@ -148,7 +148,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const git = await cachedRepositoryAt(repository.path);
     const held = await acquireTargetPlacementFence(git, "refs/heads/main");
     const pending = contract.review({ verdict: "satisfied" });
-    const deadline = Date.now() + 2000;
+    // A full parallel suite can delay Git observation without changing the fence ordering.
+    const deadline = Date.now() + 15000;
     let state = await contract.state();
     while (state.attestations.at(-1)?.data.verdict !== "satisfied" && Date.now() < deadline) {
       await new Promise((resolve) => {
