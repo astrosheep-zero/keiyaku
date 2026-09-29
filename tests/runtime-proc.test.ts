@@ -1,5 +1,4 @@
-import { temporaryDirectory } from "./support/process.js";
-import { deferred as promiseBarrier } from "./support/process.js";
+import { deferred as promiseBarrier, killFixtureProcess, restoreEnvironment, temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -44,9 +43,12 @@ function ownedChild(pid: number): ChildProcess & { pid: number } {
   return Object.assign(new EventEmitter(), { pid, exitCode: null, signalCode: null }) as ChildProcess & { pid: number };
 }
 
-function restoreEnvironment(name: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
+function descendantParent(descendant: string): string {
+  return [
+    'const { spawn } = require("node:child_process");',
+    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
+    "setInterval(() => {}, 1_000);",
+  ].join(" ");
 }
 
 test("fixture file barriers observe present and later files and reject missing evidence", async (context) => {
@@ -476,22 +478,26 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
   }
 }
 
-async function expectLaterTerminateIsInert(owned: Awaited<ReturnType<typeof spawnDetachedProcess>>): Promise<void> {
+async function expectNoTerminationSignals(pid: number, run: () => Promise<void>): Promise<void> {
   let signals = 0;
   const originalKill = process.kill;
-  const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-    if ((pid === owned.pid || pid === -owned.pid) && signal !== 0) signals += 1;
-    return originalKill(pid, signal as NodeJS.Signals);
+  process.kill = ((target: number, signal?: NodeJS.Signals | number) => {
+    if ((target === pid || target === -pid) && signal !== 0) signals += 1;
+    return originalKill(target, signal as NodeJS.Signals);
   }) as typeof process.kill;
-  process.kill = kill;
   try {
-    await owned.terminate();
-    await owned.terminate(true);
+    await run();
   } finally {
     process.kill = originalKill;
   }
   assert.equal(signals, 0);
 }
+
+const expectLaterTerminateIsInert = (owned: Awaited<ReturnType<typeof spawnDetachedProcess>>): Promise<void> =>
+  expectNoTerminationSignals(owned.pid, async () => {
+    await owned.terminate();
+    await owned.terminate(true);
+  });
 
 test("runProcess returns terminal diagnostics from both streams", async () => {
   const outcome = await runProcess(
@@ -716,11 +722,7 @@ test("runProcess timeout closes the directly-owned helper boundary", async () =>
     "setInterval(() => {}, 1_000);",
   ].join(" ");
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-"));
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
+  const parent = descendantParent(descendant);
   const ready = waitForOutputLine("descendant/ready", "timeout helper did not signal readiness", 5_000);
   let pending: ReturnType<typeof consumeProcessStdout> | undefined;
   const output: string[] = [];
@@ -782,13 +784,7 @@ test("Unix natural leader exit cleans a surviving descendant once", async (t) =>
     await waitForProcessExit(descendantPid);
     await expectLaterTerminateIsInert(ownedProcess);
   } finally {
-    if (descendantPid !== undefined) {
-      try {
-        process.kill(descendantPid, "SIGKILL");
-      } catch {
-        /* already stopped */
-      }
-    }
+    killFixtureProcess(descendantPid);
     if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
@@ -824,13 +820,7 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
     await ownedProcess.exited;
     await expectLaterTerminateIsInert(ownedProcess);
   } finally {
-    if (descendantPid !== undefined) {
-      try {
-        process.kill(descendantPid, "SIGKILL");
-      } catch {
-        /* already stopped */
-      }
-    }
+    killFixtureProcess(descendantPid);
     if (owned !== undefined) await owned.terminate(true).catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
@@ -867,13 +857,7 @@ test("runProcess timeout settles after cleaning inherited pipes from an owned gr
     assert.ok(performance.now() - started < 9_000);
     await waitForProcessExit(descendantPid);
   } finally {
-    if (descendantPid !== undefined) {
-      try {
-        process.kill(descendantPid, "SIGKILL");
-      } catch {
-        /* already stopped */
-      }
-    }
+    killFixtureProcess(descendantPid);
     if (pending !== undefined) await pending;
     rmSync(root, { recursive: true, force: true });
   }
@@ -887,11 +871,7 @@ test("runProcess cancellation closes the directly-owned helper boundary", async 
     "setTimeout(() => process.exit(99), 2_000);",
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
+  const parent = descendantParent(descendant);
   const controller = new AbortController();
   const ready = waitForOutputLine(
     "descendant/ready",
@@ -929,11 +909,7 @@ test("LineRpcProcess close closes the directly-owned helper boundary", async () 
     "setTimeout(() => process.exit(99), 2_000);",
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
+  const parent = descendantParent(descendant);
   let rpc: LineRpcProcess | undefined;
   let closed = false;
   let ready!: () => void;
@@ -1104,11 +1080,7 @@ test("StdioProcess close terminates its complete helper tree", async () => {
     'process.stdout.write("descendant/ready\\n");',
     "setInterval(() => {}, 1_000);",
   ].join(" ");
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    `spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
+  const parent = descendantParent(descendant);
   let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
   let closed = false;
   const ready = waitForOutputLine("descendant/ready", "stdio helper did not signal readiness");
@@ -1246,20 +1218,10 @@ test("an owned process capability is inert after termination and repeated termin
     const ownedProcess = owned;
     await ownedProcess.terminate();
     terminated = true;
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -ownedProcess.pid && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
+    await expectNoTerminationSignals(ownedProcess.pid, async () => {
       await ownedProcess.terminate();
       await ownedProcess.terminate();
-    } finally {
-      process.kill = originalKill;
-    }
-    assert.equal(signals, 0);
+    });
   } finally {
     if (!terminated) await owned?.terminate(true);
     rmSync(root, { recursive: true, force: true });
@@ -1279,20 +1241,10 @@ test("an owned process capability is inert after release and repeated terminate"
     const ownedProcess = owned;
     ownedProcess.release();
     released = true;
-    let signals = 0;
-    const originalKill = process.kill;
-    const kill = ((pid: number, signal?: NodeJS.Signals | number) => {
-      if (pid === -ownedProcess.pid && signal !== 0) signals += 1;
-      return originalKill(pid, signal as NodeJS.Signals);
-    }) as typeof process.kill;
-    process.kill = kill;
-    try {
+    await expectNoTerminationSignals(ownedProcess.pid, async () => {
       await ownedProcess.terminate();
       await ownedProcess.terminate();
-    } finally {
-      process.kill = originalKill;
-    }
-    assert.equal(signals, 0);
+    });
   } finally {
     if (owned !== undefined && released) {
       try {

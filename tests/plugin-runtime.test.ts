@@ -50,6 +50,11 @@ function writePlugin(root: string, name: string, source: string): void {
   writeFileSync(join(root, "plugins", `${name}.mjs`), source);
 }
 
+function writeProjectPlugins(root: string, plugins: Readonly<Record<string, unknown>>): void {
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins }));
+}
+
 function trace(path: string): readonly string[] {
   return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean) : [];
 }
@@ -110,16 +115,10 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
         },
       }),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          alpha: { package: "./plugins/alpha.mjs", config: { trace: output, label: "project-alpha" } },
-          beta: { package: "./plugins/beta.mjs", config: { trace: output, label: "beta" } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output, label: "project-alpha" } },
+      beta: { package: "./plugins/beta.mjs", config: { trace: output, label: "beta" } },
+    });
 
     const world = await World.at(value.root);
     const diagnostics: string[] = [];
@@ -172,17 +171,11 @@ test("plugin activation stages handlers and isolates import and activation failu
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          broken: { package: "./plugins/broken.mjs", config: { trace: output } },
-          missing: { package: "./plugins/not-found.mjs" },
-          working: { package: "./plugins/working.mjs", config: { trace: output } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      broken: { package: "./plugins/broken.mjs", config: { trace: output } },
+      missing: { package: "./plugins/not-found.mjs" },
+      working: { package: "./plugins/working.mjs", config: { trace: output } },
+    });
 
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({
@@ -244,11 +237,7 @@ test("plugin runtime resolves bare package exports with the ESM import condition
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({ plugins: { conditional: { package: "conditional-plugin", config: { trace: output } } } }),
-    );
+    writeProjectPlugins(value.root, { conditional: { package: "conditional-plugin", config: { trace: output } } });
 
     await pluginRuntime({ world: await World.at(value.root) });
 
@@ -293,20 +282,14 @@ test("plugin writable paths reject traversal, management custody, duplicate name
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          case: { package: "./plugins/case.mjs" },
-          duplicate: { package: "./plugins/duplicate.mjs" },
-          reserved: { package: "./plugins/reserved.mjs" },
-          symlink: { package: "./plugins/symlink.mjs" },
-          traversal: { package: "./plugins/traversal.mjs" },
-          valid: { package: "./plugins/valid.mjs", config: { trace: output } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      case: { package: "./plugins/case.mjs" },
+      duplicate: { package: "./plugins/duplicate.mjs" },
+      reserved: { package: "./plugins/reserved.mjs" },
+      symlink: { package: "./plugins/symlink.mjs" },
+      traversal: { package: "./plugins/traversal.mjs" },
+      valid: { package: "./plugins/valid.mjs", config: { trace: output } },
+    });
 
     const world = await World.at(value.root);
     const diagnostics: string[] = [];
@@ -352,16 +335,10 @@ test("hanging activation is bounded independently and does not replay an emissio
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
-          working: { package: "./plugins/working.mjs", config: { trace: output } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
+      working: { package: "./plugins/working.mjs", config: { trace: output } },
+    });
 
     const diagnostics: string[] = [];
     const advance = deadlineClock(context);
@@ -415,16 +392,10 @@ test("hanging handler is cancelled at the delivery bound without blocking anothe
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
-          working: { package: "./plugins/working.mjs", config: { trace: output } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
+      working: { package: "./plugins/working.mjs", config: { trace: output } },
+    });
 
     const diagnostics: string[] = [];
     const unhandled: unknown[] = [];
@@ -486,16 +457,10 @@ test("a timed-out handler does not share cancellation with another handler", { t
         "};",
       ].join("\n"),
     );
-    mkdirSync(join(value.root, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(value.root, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        plugins: {
-          first: { package: "./plugins/first.mjs", config: { trace: output, cancellationKey } },
-          second: { package: "./plugins/second.mjs", config: { trace: output, cancellationKey } },
-        },
-      }),
-    );
+    writeProjectPlugins(value.root, {
+      first: { package: "./plugins/first.mjs", config: { trace: output, cancellationKey } },
+      second: { package: "./plugins/second.mjs", config: { trace: output, cancellationKey } },
+    });
 
     const advance = deadlineClock(context);
     const runtime = await pluginRuntime({ world: await World.at(value.root) });
@@ -533,16 +498,10 @@ test("completed plugin emissions leave no timeout keeping their process alive", 
       'export default { manifest: { id: "completed", apiVersion: 1 }, activate(context) { return { signals: { "akuma.called": async () => { appendFileSync(context.config.trace, "called\\n"); }, "akuma.body-ended": () => { appendFileSync(context.config.trace, "body-ended\\n"); } } }; } };',
     ].join("\n"),
   );
-  mkdirSync(join(value.root, ".keiyaku"));
-  writeFileSync(
-    join(value.root, ".keiyaku", "settings.json"),
-    JSON.stringify({
-      plugins: {
-        square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
-        completed: { package: "./plugins/completed.mjs", config: { trace: outputPath } },
-      },
-    }),
-  );
+  writeProjectPlugins(value.root, {
+    square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+    completed: { package: "./plugins/completed.mjs", config: { trace: outputPath } },
+  });
   const source = `
     import { pluginRuntime } from ${JSON.stringify(new URL("../src/plugin/runtime.js", import.meta.url).href)};
     import { World } from ${JSON.stringify(new URL("../src/world.js", import.meta.url).href)};

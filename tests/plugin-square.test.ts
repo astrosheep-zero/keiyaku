@@ -7,9 +7,17 @@ import { Square } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
-import { deferred as promiseBarrier } from "./support/process.js";
+import { deferred as promiseBarrier, restoreEnvironmentValues } from "./support/process.js";
 
 const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
+
+function activateSquare(world: string): ReturnType<typeof squarePlugin.activate> {
+  return squarePlugin.activate({
+    world: world as WorldRoot,
+    config: undefined,
+    writablePath: () => join(world, ".square"),
+  });
+}
 
 // The Square plugin reads process.env directly, so the surrounding harness must not
 // be able to contribute a caller identity the fixture did not choose.
@@ -23,12 +31,6 @@ function ambientSessionIdentity(): Readonly<Record<string, string | undefined>> 
   );
 }
 
-function restoreEnvironment(values: Readonly<Record<string, string | undefined>>): void {
-  for (const [name, value] of Object.entries(values)) {
-    if (value === undefined) delete process.env[name];
-    else process.env[name] = value;
-  }
-}
 async function expressions(
   path: string,
 ): Promise<readonly Readonly<{ actor: string; body: string; mentions: readonly string[] }>[]> {
@@ -142,11 +144,7 @@ async function withSquareNotificationFixture<T>(
     mkdirSync(join(root, ".square"), { recursive: true });
     process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const instance = await squarePlugin.activate({
-      world: root as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
+    const instance = await activateSquare(root);
     const turn = instance.signals?.["akuma.turn-outcome"];
     const bodyEnd = instance.signals?.["akuma.body-ended"];
     const initiating = instance.signals?.["akuma.initiating"];
@@ -208,7 +206,7 @@ async function withSquareNotificationFixture<T>(
     for (const initiator of initiators ?? ["Alice", "Bob"]) await fixture.admit(initiator);
     return await callback(fixture);
   } finally {
-    restoreEnvironment(prior);
+    restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
 }
@@ -259,11 +257,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       process.env.SQUARE_CODEX_BIN = fakeCodex;
       process.env.SQUARE_CODEX_QUEUE_LOG = codexQueueLog;
     }
-    const instance = await squarePlugin.activate({
-      world: root as unknown as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
+    const instance = await activateSquare(root);
     const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
     assert.ok(instance.signals?.["akuma.body-ended"]);
@@ -277,11 +271,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     process.env.CODEX_THREAD_ID = "teller";
     process.env.SQUARE_PARTICIPANT_NAME = "Bob";
-    const teller = await squarePlugin.activate({
-      world: root as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
+    const teller = await activateSquare(root);
     await teller.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Bob" });
     if (process.platform !== "win32") {
       writeFileSync(
@@ -348,11 +338,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     delete process.env.OPENCODE_SESSION_ID;
     delete process.env.PI_SESSION_ID;
     delete process.env.SQUARE_PARTICIPANT_NAME;
-    const fallback = await squarePlugin.activate({
-      world: root as unknown as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
+    const fallback = await activateSquare(root);
     const fallbackHandler = fallback.signals?.["akuma.turn-outcome"];
     assert.ok(fallbackHandler);
     assert.ok(fallback.signals?.["akuma.body-ended"]);
@@ -396,7 +382,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       await square.close();
     }
   } finally {
-    restoreEnvironment(prior);
+    restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -519,19 +505,11 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
     mkdirSync(join(root, ".square"), { recursive: true });
     for (const initiator of ["Alice", "Bob"]) {
       process.env.SQUARE_PARTICIPANT_NAME = initiator;
-      const submitter = await squarePlugin.activate({
-        world: root as WorldRoot,
-        config: undefined,
-        writablePath: () => join(root, ".square"),
-      });
+      const submitter = await activateSquare(root);
       await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });
     }
     process.env.SQUARE_PARTICIPANT_NAME = "OriginalCaller";
-    const instance = await squarePlugin.activate({
-      world: root as WorldRoot,
-      config: undefined,
-      writablePath: () => join(root, ".square"),
-    });
+    const instance = await activateSquare(root);
     const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
     for (const [index, initiator] of ["Alice", "Bob", undefined].entries()) {
@@ -565,7 +543,7 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
       ],
     );
   } finally {
-    restoreEnvironment(prior);
+    restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -591,11 +569,7 @@ test("the Square plugin uses the submitting cwd without PWD and honors a local-l
     delete process.env.SQUARE_HOST_LEDGER_LOCAL;
     process.env.SQUARE_PARTICIPANT_NAME = "fixture-no-pwd";
     process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const instance = await squarePlugin.activate({
-      world: world as unknown as WorldRoot,
-      config: undefined,
-      writablePath: () => join(world, ".square"),
-    });
+    const instance = await activateSquare(world);
     const handler = instance.signals?.["akuma.called"];
     assert.ok(handler);
     await handler({
@@ -612,11 +586,7 @@ test("the Square plugin uses the submitting cwd without PWD and honors a local-l
     const override = join(root, "override-ledger");
     process.env.SQUARE_HOST_LEDGER_LOCAL = override;
     process.env.SQUARE_PARTICIPANT_NAME = "fixture-override";
-    const overridden = await squarePlugin.activate({
-      world: world as unknown as WorldRoot,
-      config: undefined,
-      writablePath: () => join(world, ".square"),
-    });
+    const overridden = await activateSquare(world);
     const overrideHandler = overridden.signals?.["akuma.called"];
     assert.ok(overrideHandler);
     await overrideHandler({
@@ -628,7 +598,7 @@ test("the Square plugin uses the submitting cwd without PWD and honors a local-l
     assert.match(readFileSync(overridePresence, "utf8"), /fixture-override/u);
   } finally {
     process.chdir(priorCwd);
-    restoreEnvironment(prior);
+    restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
 });

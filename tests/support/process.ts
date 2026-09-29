@@ -245,3 +245,24 @@ export function temporaryDirectory(context: TestContext, prefix: string): string
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 }
+
+/** Restore one environment variable to its snapshot, deleting it when it was unset. */
+export function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
+
+/** Restore every named variable in a previously captured snapshot. */
+export function restoreEnvironmentValues(values: Readonly<Record<string, string | undefined>>): void {
+  for (const [name, value] of Object.entries(values)) restoreEnvironment(name, value);
+}
+
+/** Best-effort fixture cleanup after the child may have stopped on its own. */
+export function killFixtureProcess(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    /* already stopped */
+  }
+}

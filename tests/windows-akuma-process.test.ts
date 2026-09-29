@@ -14,7 +14,9 @@ import {
   appendNodeOptionsImport,
   cleanupSpawnCapableFixture,
   installAkumaBodyPidReceipt,
+  killFixtureProcess,
   removeTempDirectory,
+  restoreEnvironmentValues,
   waitForProcessExit as waitForExit,
 } from "./support/process.js";
 
@@ -40,11 +42,6 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return readFileSync(path, "utf8");
-}
-
-function restoreEnvironment(name: string, value: string | undefined): void {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
 }
 
 test("the Windows release launcher is a GUI-subsystem x64 PE", async (t) => {
@@ -147,14 +144,8 @@ test("retained launch returns the target pid and release leaves it alive", async
     await new Promise((resolve) => setTimeout(resolve, 100));
     process.kill(pid, 0);
   } finally {
-    if (pid !== undefined) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* already reaped */
-      }
-      await waitForExit(pid);
-    }
+    killFixtureProcess(pid);
+    if (pid !== undefined) await waitForExit(pid);
     await removeTempDirectory(root);
   }
 });
@@ -168,13 +159,13 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
   const bodyPidReceipt = join(root, "body-pids");
   const fixtureFile = pathToFileURL(resolve("tests/support/openai-completion-fetch-fixture.mjs")).href;
   const environment = {
-    agentDir: process.env.PI_CODING_AGENT_DIR,
-    offline: process.env.PI_OFFLINE,
-    skipVersionCheck: process.env.PI_SKIP_VERSION_CHECK,
-    telemetry: process.env.PI_TELEMETRY,
-    openaiApiKey: process.env.OPENAI_API_KEY,
-    nodeOptions: process.env.NODE_OPTIONS,
-    receipt: process.env.KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+    PI_OFFLINE: process.env.PI_OFFLINE,
+    PI_SKIP_VERSION_CHECK: process.env.PI_SKIP_VERSION_CHECK,
+    PI_TELEMETRY: process.env.PI_TELEMETRY,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    NODE_OPTIONS: process.env.NODE_OPTIONS,
+    KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT: process.env.KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT,
   };
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(root);
@@ -257,13 +248,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();
-      restoreEnvironment("PI_CODING_AGENT_DIR", environment.agentDir);
-      restoreEnvironment("PI_OFFLINE", environment.offline);
-      restoreEnvironment("PI_SKIP_VERSION_CHECK", environment.skipVersionCheck);
-      restoreEnvironment("PI_TELEMETRY", environment.telemetry);
-      restoreEnvironment("OPENAI_API_KEY", environment.openaiApiKey);
-      restoreEnvironment("NODE_OPTIONS", environment.nodeOptions);
-      restoreEnvironment("KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT", environment.receipt);
+      restoreEnvironmentValues(environment);
     }
   }
 });
@@ -292,14 +277,8 @@ test("Windows retained launch returns while its target remains long-lived", asyn
     assert.equal(pid, owned.pid);
     owned.release();
   } finally {
-    if (pid !== undefined) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        /* already reaped */
-      }
-      await waitForExit(pid);
-    }
+    killFixtureProcess(pid);
+    if (pid !== undefined) await waitForExit(pid);
     await removeTempDirectory(root);
   }
 });
