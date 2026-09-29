@@ -379,13 +379,6 @@ export function plumbFacts(facts: readonly string[], columns: number): readonly 
   return lines;
 }
 
-export function linkedEntityLines(facts: readonly string[], _columns: number): readonly string[] {
-  return facts
-    .map(safeText)
-    .filter((fact) => fact.length > 0)
-    .map((fact) => `  │ ${fact}`);
-}
-
 export function identityLine(mark: string, identity: string, extra = ""): string {
   return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
 }

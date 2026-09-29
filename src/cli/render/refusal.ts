@@ -1,6 +1,7 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
 import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
 import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
+import { shortGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
   checkoutNotFollowableLines,
@@ -27,10 +28,6 @@ function wrap(lines: string[], text: string, indent: string, columns: number): v
 function collectionLines(name: string, members: readonly string[], indent: string): readonly string[] {
   if (members.length === 0) return [];
   return [`${indent}${name}`, ...members.map((member) => `${indent}  ${safeText(member)}`)];
-}
-
-function shortGitId(value: string): string {
-  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
 }
 
 function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {

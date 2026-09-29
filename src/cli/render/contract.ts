@@ -466,19 +466,14 @@ function renderAcceptedAmend(result: AcceptedAmendResult, columns: number, color
   return lines.join("\n");
 }
 
-function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
-  const complete = result.completion !== undefined;
-  const lines = titleLines("✓", "delivered", result.contract, columns);
-  const abbreviations = abbreviateGitIds([
-    result.tenderSnapshot ?? "",
-    result.integration?.changeId ?? "",
-    result.verificationSubject?.snapshot ?? "",
-    result.completion?.predecessor ?? "",
-    result.completion?.integration ?? "",
-  ]);
-  if (result.leading !== undefined) {
+function deliverIdentityLines(
+  result: AcceptedDeliverResult,
+  abbreviations: ReadonlyMap<string, string>,
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  if (result.leading !== undefined)
     receiptRow(lines, " ", "leading", [{ text: result.leading.kind.replaceAll("-", " ") }], columns);
-  }
   if (result.tenderSnapshot !== undefined)
     receiptRow(
       lines,
@@ -492,18 +487,27 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
       lines,
       " ",
       "content identity (not commit)",
-      [
-        {
-          text: displayGitId(result.integration.changeId, abbreviations),
-          opaque: true,
-        },
-      ],
+      [{ text: displayGitId(result.integration.changeId, abbreviations), opaque: true }],
       columns,
     );
+  return lines;
+}
+
+function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): string {
+  const complete = result.completion !== undefined;
+  const lines = titleLines("✓", "delivered", result.contract, columns);
+  const abbreviations = abbreviateGitIds([
+    result.tenderSnapshot ?? "",
+    result.integration?.changeId ?? "",
+    result.verificationSubject?.snapshot ?? "",
+    result.completion?.predecessor ?? "",
+    result.completion?.integration ?? "",
+  ]);
+  lines.push(...deliverIdentityLines(result, abbreviations, columns));
   if (complete) lines.push(...completedPlacementLines(result, columns));
   else {
     const subject = result.verificationSubject;
-    if (subject !== undefined) {
+    if (subject !== undefined)
       receiptRow(
         lines,
         " ",
@@ -517,20 +521,17 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
         ],
         columns,
       );
-    }
     lines.push(...movementLines(result, columns));
   }
-  if (result.verification !== undefined) {
-    lines.push(...stopLines(result.verification, columns, result.contract));
-  }
-  if (!complete && result.placement !== undefined) {
-    lines.push(...stopLines(result.placement, columns, result.contract));
-  }
+  if (result.verification !== undefined) lines.push(...stopLines(result.verification, columns, result.contract));
+  if (!complete && result.placement !== undefined) lines.push(...stopLines(result.placement, columns, result.contract));
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
-  lines.push(...continuationLines(result, columns));
-  lines.push(...(complete ? obligationLines(result, columns) : recordBlock(result, columns)));
-  lines.push(...worktreeRetirementLines(result, columns));
-  lines.push(...gatesAwaitLines(result.placement));
+  lines.push(
+    ...continuationLines(result, columns),
+    ...(complete ? obligationLines(result, columns) : recordBlock(result, columns)),
+    ...worktreeRetirementLines(result, columns),
+    ...gatesAwaitLines(result.placement),
+  );
   return lines.join("\n");
 }
 

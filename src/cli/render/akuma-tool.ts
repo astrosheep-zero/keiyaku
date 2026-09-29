@@ -27,10 +27,6 @@ export function toolContent(row: ToolRow, columns: number): string {
   return `${truncateDisplayText(text, width)}${diagnostic}`;
 }
 
-export function toolLabel(row: ToolRow): string {
-  return toolCore(row).label;
-}
-
 /** The trailing failure, duration, or message clause one settled tool row carries, otherwise the empty string. */
 export function toolDiagnostic(row: ToolRow): string {
   const suffix = result(row);

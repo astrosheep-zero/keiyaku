@@ -1,14 +1,8 @@
-import type {
-  ContractAfterEdge,
-  ContractDependent,
-  ContractGateReport,
-  ContractRow,
-  ContractWorkspaceObservation,
-} from "../../index.js";
+import type { ContractAfterEdge, ContractGateReport, ContractRow, ContractWorkspaceObservation } from "../../index.js";
 
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
 
-function shortGitId(value: string): string {
+export function shortGitId(value: string): string {
   return GIT_OBJECT_ID.test(value) ? value.slice(0, 7) : value;
 }
 
@@ -50,10 +44,6 @@ export function gateFact(report: ContractGateReport): string {
   return `${gateGlyph(report)} ${gateDisplayName(report.gate)}${report.current.kind === "stale" ? " · stale" : ""}`;
 }
 
-export function candidateFact(delivery: ContractRow["delivery"]): string {
-  return `candidate  ${delivery === null ? "none" : "present"}`;
-}
-
 export function verificationFact(status: ContractRow["verification"]): string | undefined {
   if (status === undefined) return undefined;
   if (status.kind === "recorded")
@@ -61,39 +51,10 @@ export function verificationFact(status: ContractRow["verification"]): string | 
   return `verification ${status.kind}`;
 }
 
-export function candidateIntegrationFacts(
-  delivery: ContractRow["delivery"],
-  verification: ContractRow["verification"],
-  abbreviations: ReadonlyMap<string, string>,
-): readonly string[] {
-  const verificationLine = verificationFact(verification);
-  if (delivery === null) {
-    return [candidateFact(delivery), ...(verificationLine === undefined ? [] : [verificationLine])];
-  }
-  const integration = displayGitId(delivery.integration.snapshot, abbreviations);
-  const foldedVerification =
-    verification?.kind === "recorded" && verification.snapshot === delivery.integration.snapshot
-      ? ` · verification ${verification.verdict}`
-      : "";
-  return [
-    candidateFact(delivery),
-    `candidate  ${displayGitId(delivery.tenderSnapshot, abbreviations)}`,
-    `integration result  ${integration}${foldedVerification}`,
-    `predecessor  ${displayGitId(delivery.integration.predecessor, abbreviations)}`,
-    `method  ${delivery.method}`,
-    `content identity (not commit)  ${delivery.integration.changeId}`,
-    ...(foldedVerification.length === 0 && verificationLine !== undefined ? [verificationLine] : []),
-  ];
-}
-
 export function afterWording(edge: ContractAfterEdge): string {
   if (edge.endpoint.kind === "claimed") return `after  ${edge.contractId} · ${lifecycleWord("claimed")}`;
   const condition = edge.endpoint.kind === "active" ? edge.endpoint.phase : edge.endpoint.kind;
   return `blocked by  ${edge.contractId} · ${condition}`;
-}
-
-export function dependentWording(dependent: ContractDependent): string {
-  return `${dependent.contractId} (${lifecycleWord(dependent.phase)})`;
 }
 
 export function mergeSummary(observation: ContractWorkspaceObservation): string | undefined {
@@ -130,26 +91,6 @@ export function gitIdsInRow(row: ContractRow): readonly string[] {
 export function displayGitId(value: string, abbreviations: ReadonlyMap<string, string>): string {
   const rendered = abbreviations.get(value) ?? value;
   return GIT_OBJECT_ID.test(rendered) ? rendered.slice(0, 7) : rendered;
-}
-
-export function targetFacts(row: ContractRow, abbreviations: ReadonlyMap<string, string>): readonly string[] {
-  if (row.target === null) return ["target  none"];
-  const name = row.target.startsWith("refs/heads/") ? row.target.slice("refs/heads/".length) : row.target;
-  const head = row.targetObservation?.head;
-  const coordinate = head ? ` @ ${displayGitId(head, abbreviations)}` : head === null ? " · head absent" : "";
-  const lag =
-    row.targetLag.kind === "unknown"
-      ? " · behind unknown"
-      : row.targetLag.kind === "counted"
-        ? ` · behind ${row.targetLag.behind}`
-        : "";
-  const subject =
-    row.targetLag.kind === "unknown" || row.targetLag.kind === "counted" ? row.targetLag.subject : undefined;
-  return [
-    `target  ${name}${coordinate}${lag}`,
-    ...(subject === undefined || subject.path === row.worktreePath ? [] : [`lag worktree  ${subject.path}`]),
-    ...targetMovementFacts(row, abbreviations),
-  ];
 }
 
 /** Render the pinned delivery target and the same-epoch observed target head. */

@@ -207,52 +207,62 @@ function refusalEvidence(stop: VerificationStop | PlacementStop, columns: number
   return lines;
 }
 
-export function stopLines(
-  stop: VerificationStop | PlacementStop,
+type Stop = VerificationStop | PlacementStop;
+
+function checkoutNotFollowableStopLines(
+  stop: Stop,
   columns: number,
   addressed: string,
-  dependent?: string,
-): readonly string[] {
-  if ("refusal" in stop && stop.refusal?.kind === "checkout-not-followable") {
-    const checkout = renderRefusalFacts(stop.refusal, "", columns, addressed);
-    if (dependent === undefined) return checkout;
-    const lines: string[] = [];
-    receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }], columns);
-    return [...lines, ...checkout];
-  }
-  if ("failure" in stop && stop.failure === "target-placement-failed") {
-    const lines: string[] = [];
-    receiptRow(lines, "×", "not accepted", dependent === undefined ? [] : [{ text: dependent, opaque: true }], columns);
-    receiptPayload(lines, "reason", stop.diagnostic);
-    return lines;
-  }
-  if ("retry" in stop && stop.retry !== undefined) {
-    const lines: string[] = [];
-    const segments: ReceiptSegment[] = [{ text: stop.retry.kind.replaceAll("-", " ") }];
-    if (dependent !== undefined) segments.push({ text: "·" }, { text: dependent, opaque: true });
-    receiptRow(lines, "?", "retry", segments, columns);
-    if (stop.retry.kind === "publication-failed") receiptPayload(lines, "reason", stop.retry.diagnostic);
-    return lines;
-  }
-  if ("refusal" in stop && stop.refusal?.kind === "gates-unsatisfied") {
-    // The refused placement never prints its refusal kind: the per-gate alarms and the target's non-movement
-    // carry the story, and the caller closes the receipt with the awaiting margin line.
-    const lines: string[] = [];
-    if (dependent === undefined) {
-      if (stop.refusal.target !== undefined)
-        receiptRow(
-          lines,
-          " ",
-          "target",
-          [{ text: stop.refusal.target, opaque: true }, { text: "· unchanged" }],
-          columns,
-        );
-    } else {
-      receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: "gates unmet" }], columns);
-    }
-    lines.push(...gateAlarmRows(stop, columns));
-    return lines;
-  }
+  dependent: string | undefined,
+): readonly string[] | undefined {
+  if (!("refusal" in stop) || stop.refusal?.kind !== "checkout-not-followable") return undefined;
+  const checkout = renderRefusalFacts(stop.refusal, "", columns, addressed);
+  if (dependent === undefined) return checkout;
+  const lines: string[] = [];
+  receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }], columns);
+  return [...lines, ...checkout];
+}
+
+function targetPlacementFailedStopLines(
+  stop: Stop,
+  columns: number,
+  dependent: string | undefined,
+): readonly string[] | undefined {
+  if (!("failure" in stop) || stop.failure !== "target-placement-failed") return undefined;
+  const lines: string[] = [];
+  receiptRow(lines, "×", "not accepted", dependent === undefined ? [] : [{ text: dependent, opaque: true }], columns);
+  receiptPayload(lines, "reason", stop.diagnostic);
+  return lines;
+}
+
+function retryStopLines(stop: Stop, columns: number, dependent: string | undefined): readonly string[] | undefined {
+  if (!("retry" in stop) || stop.retry === undefined) return undefined;
+  const lines: string[] = [];
+  const segments: ReceiptSegment[] = [{ text: stop.retry.kind.replaceAll("-", " ") }];
+  if (dependent !== undefined) segments.push({ text: "·" }, { text: dependent, opaque: true });
+  receiptRow(lines, "?", "retry", segments, columns);
+  if (stop.retry.kind === "publication-failed") receiptPayload(lines, "reason", stop.retry.diagnostic);
+  return lines;
+}
+
+function gatesUnsatisfiedStopLines(
+  stop: Stop,
+  columns: number,
+  dependent: string | undefined,
+): readonly string[] | undefined {
+  if (!("refusal" in stop) || stop.refusal?.kind !== "gates-unsatisfied") return undefined;
+  // The refused placement never prints its refusal kind: the per-gate alarms and the target's non-movement
+  // carry the story, and the caller closes the receipt with the awaiting margin line.
+  const lines: string[] = [];
+  const target = stop.refusal.target;
+  if (dependent !== undefined) receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: "gates unmet" }], columns);
+  else if (target !== undefined)
+    receiptRow(lines, " ", "target", [{ text: target, opaque: true }, { text: "· unchanged" }], columns);
+  lines.push(...gateAlarmRows(stop, columns));
+  return lines;
+}
+
+function directStopLines(stop: Stop, columns: number, dependent: string | undefined): readonly string[] {
   const lines: string[] = [];
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: directStopName(stop) }];
   if ("failure" in stop && stop.failure === "target-moved") segments.push(...targetMovedDetail(stop));
@@ -268,6 +278,21 @@ export function stopLines(
     receiptPayload(lines, "reason", stop.diagnostic);
   }
   return lines;
+}
+
+export function stopLines(
+  stop: VerificationStop | PlacementStop,
+  columns: number,
+  addressed: string,
+  dependent?: string,
+): readonly string[] {
+  return (
+    checkoutNotFollowableStopLines(stop, columns, addressed, dependent) ??
+    targetPlacementFailedStopLines(stop, columns, dependent) ??
+    retryStopLines(stop, columns, dependent) ??
+    gatesUnsatisfiedStopLines(stop, columns, dependent) ??
+    directStopLines(stop, columns, dependent)
+  );
 }
 
 export function cleanupLines(

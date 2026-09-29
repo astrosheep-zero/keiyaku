@@ -34,38 +34,43 @@ function effectText(effect: Effect): readonly string[] | null {
   return [effect.kind, state, path];
 }
 
+type WorktreeHookLag = Extract<ReconcileLag, { kind: "worktree-hook-failed" }>;
+
+function worktreeHookLagRows(
+  lines: string[],
+  lag: WorktreeHookLag,
+  columns: number,
+  contract: string | undefined,
+): void {
+  receiptRow(
+    lines,
+    "!",
+    "reconcile",
+    [
+      ...(contract === undefined ? [] : [{ text: contract, opaque: true }]),
+      { text: "hook", opaque: true },
+      { text: lag.phase, opaque: true },
+      { text: lag.path, opaque: true },
+      { text: lag.name, opaque: true },
+      { text: `command ${lag.command}`, opaque: true },
+      { text: lag.failure.kind === "exit" ? `exit ${lag.failure.code}` : lag.failure.kind, opaque: true },
+    ],
+    columns,
+  );
+  const output = "stdout" in lag.failure ? lag.failure.stdout : undefined;
+  const error = "stderr" in lag.failure ? lag.failure.stderr : undefined;
+  if (lag.failure.kind === "spawn-error") {
+    receiptRow(lines, "!", "reason", [{ text: lag.failure.diagnostic, opaque: true }], columns);
+  }
+  if (output !== undefined && output.length > 0) receiptPayload(lines, "stdout", output);
+  if (error !== undefined && error.length > 0) receiptPayload(lines, "stderr", error);
+}
+
 function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: string | undefined): void {
-  const kind = lag.kind;
   switch (lag.kind) {
-    case "worktree-hook-failed": {
-      const failure = lag;
-      receiptRow(
-        lines,
-        "!",
-        "reconcile",
-        [
-          ...(contract === undefined ? [] : [{ text: contract, opaque: true }]),
-          { text: "hook", opaque: true },
-          { text: failure.phase, opaque: true },
-          { text: failure.path, opaque: true },
-          { text: failure.name, opaque: true },
-          { text: `command ${failure.command}`, opaque: true },
-          {
-            text: failure.failure.kind === "exit" ? `exit ${failure.failure.code}` : failure.failure.kind,
-            opaque: true,
-          },
-        ],
-        columns,
-      );
-      const output = "stdout" in failure.failure ? failure.failure.stdout : undefined;
-      const error = "stderr" in failure.failure ? failure.failure.stderr : undefined;
-      if (failure.failure.kind === "spawn-error") {
-        receiptRow(lines, "!", "reason", [{ text: failure.failure.diagnostic, opaque: true }], columns);
-      }
-      if (output !== undefined && output.length > 0) receiptPayload(lines, "stdout", output);
-      if (error !== undefined && error.length > 0) receiptPayload(lines, "stderr", error);
+    case "worktree-hook-failed":
+      worktreeHookLagRows(lines, lag, columns, contract);
       break;
-    }
     case "reconcile-failed":
       receiptRow(
         lines,
@@ -122,18 +127,10 @@ function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: s
       );
       receiptRow(lines, " ", "reason", [{ text: lag.diagnostic, opaque: true }], columns);
       break;
-  }
-  if (
-    kind !== "worktree-hook-failed" &&
-    kind !== "reconcile-failed" &&
-    kind !== "worktree-retained" &&
-    kind !== "worktree-follow-retained" &&
-    kind !== "unsealed-bytes" &&
-    kind !== "target-checkout-retained" &&
-    kind !== "contract-file-failed"
-  ) {
-    const exhaustive: never = kind;
-    return exhaustive;
+    default: {
+      const exhaustive: never = lag;
+      return exhaustive;
+    }
   }
 }
 

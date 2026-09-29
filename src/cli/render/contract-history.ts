@@ -1,6 +1,6 @@
 import { parseAkuId } from "../../akuma/identity.js";
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
-import { lifecycleWord } from "./contract-observation.js";
+import { lifecycleWord, shortGitId } from "./contract-observation.js";
 import { receiptPayload } from "./receipt.js";
 import { renderOpaqueBlock, DEFAULT_CLI_COLUMNS } from "./terminal.js";
 
@@ -16,10 +16,6 @@ function journalHead(fact: Fact): string {
 
 function listFact(label: string, values: readonly string[]): readonly string[] {
   return values.length === 0 ? [] : [`  ${label}  ${values.join(" · ")}`];
-}
-
-function shortId(value: string): string {
-  return /^[0-9a-f]{40}$/iu.test(value) ? value.slice(0, 7) : value;
 }
 
 /**
@@ -45,7 +41,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
     case "bind": {
       const { coordinates, terms } = fact.data;
       return [
-        `  start commit  ${shortId(coordinates.start)}`,
+        `  start commit  ${shortGitId(coordinates.start)}`,
         ...(coordinates.target === undefined ? [] : [`  target  ${coordinates.target}`]),
         `  ${workspace === undefined ? "worktree" : `worktree  ${workspace.path}`}`,
         ...listFact("gates", terms.gates),
@@ -59,9 +55,9 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
     case "deliver": {
       const { tenderSnapshot, integration, method, policy } = fact.data;
       return [
-        `  candidate  ${shortId(tenderSnapshot)}`,
-        `  predecessor commit  ${shortId(integration.predecessor)}`,
-        `  integration result  ${shortId(integration.snapshot)}`,
+        `  candidate  ${shortGitId(tenderSnapshot)}`,
+        `  predecessor commit  ${shortGitId(integration.predecessor)}`,
+        `  integration result  ${shortGitId(integration.snapshot)}`,
         `  content identity (not commit)  ${integration.changeId}`,
         `  method  ${method}`,
         `  require branches up to date  ${String(policy.requireBranchesToBeUpToDate)}`,
@@ -69,15 +65,17 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
     }
     case "reintegrated":
       return [
-        `  predecessor commit  ${shortId(fact.data.predecessor)}`,
-        `  integration result  ${shortId(fact.data.snapshot)}`,
+        `  predecessor commit  ${shortGitId(fact.data.predecessor)}`,
+        `  integration result  ${shortGitId(fact.data.snapshot)}`,
       ];
     case "attestation": {
       const snapshot = subjectValue(fact.data.subject, "snapshot");
       const lines = [
         `  gate  ${fact.data.gate}`,
         `  verdict  ${fact.data.verdict}`,
-        snapshot === undefined ? "  subject  verification" : `  subject  verification  · snapshot ${shortId(snapshot)}`,
+        snapshot === undefined
+          ? "  subject  verification"
+          : `  subject  verification  · snapshot ${shortGitId(snapshot)}`,
       ];
       if (fact.data.summary !== undefined) {
         const clipped =
@@ -155,7 +153,7 @@ function bindLine(bind: Extract<Fact, { kind: "bind" }>, dispatch: ContractHisto
       alias = "";
     }
   }
-  return `bound to ${target} @ ${shortId(bind.data.coordinates.start)}${gateFact}${alias}`;
+  return `bound to ${target} @ ${shortGitId(bind.data.coordinates.start)}${gateFact}${alias}`;
 }
 
 /**
@@ -199,13 +197,13 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
     case "deliver": {
       const verdict = latestVerification(beat)?.data.verdict;
       return [
-        `${clock(first)} delivered ${shortId(fact.data.tenderSnapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
+        `${clock(first)} delivered ${shortGitId(fact.data.tenderSnapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
       ];
     }
     case "reintegrated": {
       const verdict = latestVerification(beat)?.data.verdict;
       return [
-        `${clock(first)} integrated ${shortId(fact.data.predecessor)}..${shortId(fact.data.snapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
+        `${clock(first)} integrated ${shortGitId(fact.data.predecessor)}..${shortGitId(fact.data.snapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
       ];
     }
     case "attestation":
