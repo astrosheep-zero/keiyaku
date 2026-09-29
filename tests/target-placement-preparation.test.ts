@@ -49,7 +49,7 @@ function document(title = "Target checkout placement"): string {
     "",
     "## Criteria",
     "### Preserve bytes",
-    "Refuse before publication when local content conflicts.",
+    "The journal admits and the checkout follows or stays behind.",
     "",
   ].join("\n");
 }
@@ -97,7 +97,7 @@ async function readyPlacementFixture() {
   return { ...value, git };
 }
 
-test("immutable placement preparation leaves the publication seat free and rechecks mutable state", async () => {
+test("placement preparation leaves the publication seat free and rechecks journal authority", async () => {
   for (const mutation of ["checkout", "authority"] as const) {
     const value = await readyPlacementFixture();
     const { repository, git, id, contract } = value;
@@ -143,21 +143,23 @@ test("immutable placement preparation leaves the publication seat free and reche
           await placing.catch(() => undefined);
         }
         const result = await placing;
-        assert.equal(result.kind, "refused");
-        if (result.kind !== "refused") assert.fail("stale preparation was accepted");
         if (mutation === "checkout") {
-          assert.equal(result.refusal.kind, "checkout-not-followable");
-          if (result.refusal.kind === "checkout-not-followable") assert.equal(result.refusal.reason, "dirty-tracked");
-          assert.equal((await contract.state()).terminal, null);
+          assert.equal(result.kind, "accepted", "a dirty checkout must not veto placement");
+          if (result.kind !== "accepted") return;
+          assert.equal((await contract.state()).terminal?.kind, "claimed");
+          assert.ok(result.physical?.lag.some((lag) => lag.kind === "target-checkout-retained"));
+          assert.notEqual(repository.run(["rev-parse", "refs/heads/main"]), before);
           assert.equal(
             readFileSync(resolve(repository.path, "delivered.txt"), "utf8"),
             "local edit during preparation\n",
           );
         } else {
+          assert.equal(result.kind, "refused");
+          if (result.kind !== "refused") assert.fail("stale preparation was accepted");
           assert.equal(result.refusal.kind, "terminal");
           assert.equal((await contract.state()).terminal?.kind, "abandoned");
+          assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
         }
-        assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
       },
     );
   }

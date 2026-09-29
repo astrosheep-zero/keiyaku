@@ -549,25 +549,20 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(readFileSync(join(repository.path, "artifact"), "utf8"), "candidate file\n");
   });
 
-  test("a displaced directory with untracked contents refuses at the directory", async () => {
+  test("a displaced directory with untracked contents leaves the checkout behind", async () => {
     const { contract, repository } = await directoryReplacementContract("");
-    // The directory guard refuses on the first `git ls-files --directory` result.
-    for (let index = 0; index < 1; index += 1) {
-      const name = `untracked-${String(index).padStart(4, "0")}-${"x".repeat(220)}.txt`;
-      writeFileSync(join(repository.path, "artifact", name), "untracked\n");
-    }
-    const target = repository.run(["rev-parse", "refs/heads/main"]).trim();
+    const name = `untracked-0000-${"x".repeat(220)}.txt`;
+    writeFileSync(join(repository.path, "artifact", name), "untracked\n");
 
     const delivered = acceptedDelivery(await contract.deliver());
 
-    const placement = delivered.value.placement;
-    assert.ok(placement);
-    if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable")
-      assert.fail("expected checkout-not-followable placement refusal");
-    assert.equal(placement.refusal.reason, "untracked");
-    assert.deepEqual(placement.refusal.paths, ["artifact"]);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), target);
+    const completion = delivered.value.completion;
+    assert.ok(completion, "expected a completed placement");
+    assert.equal(delivered.value.placement, undefined);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
+    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
     assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
+    assert.equal(readFileSync(join(repository.path, "artifact", name), "utf8"), "untracked\n");
   });
 
   test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {

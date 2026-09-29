@@ -1809,7 +1809,7 @@ test("an unsatisfied review attempts no placement and carries no target row", ()
   assert.doesNotMatch(text, /target/u);
 });
 
-test("completion stops project every checkout-followability refusal fact", () => {
+test("completion stops project an ignored-checkout refusal fact", () => {
   const contract = contractId("kei/checkout-followability");
   const envelope = {
     kind: "accepted" as const,
@@ -1818,65 +1818,33 @@ test("completion stops project every checkout-followability refusal fact", () =>
     facts: [],
     settlementLags: [],
   };
-  const cases = [
-    {
-      reason: "staged" as const,
-      paths: ["staged.ts", 'quote"path.ts'],
-      text: [
-        "! checkout-not-followable",
-        "  checkout  /repo/checkout",
-        "  target  refs/heads/main",
-        "  reason  staged",
-        "  paths",
-        "    staged.ts",
-        '    quote"path.ts',
-      ],
-    },
-    {
-      reason: "dirty-tracked" as const,
-      paths: ["conflict.ts"],
-      text: [
-        "! checkout-not-followable",
-        "  checkout  /repo/checkout",
-        "  target  refs/heads/main",
-        "  reason  dirty-tracked",
-        "  paths",
-        "    conflict.ts",
-      ],
-    },
-    {
-      reason: "untracked" as const,
-      paths: [],
-      text: [
-        "! checkout-not-followable",
-        "  checkout  /repo/checkout",
-        "  target  refs/heads/main",
-        "  reason  untracked",
-        "  paths  none",
-      ],
-    },
+  const text = [
+    "! checkout-not-followable",
+    "  checkout  /repo/checkout",
+    "  target  refs/heads/main",
+    "  reason  untracked",
+    "  paths",
+    "    ignored.tmp",
+    '    quote"path.tmp',
   ];
-
-  for (const { reason, paths, text } of cases) {
-    const rendered = renderText({
-      ...envelope,
-      verb: "deliver",
-      placement: {
-        refusal: {
-          kind: "checkout-not-followable",
-          contractId: contract,
-          target: "refs/heads/main",
-          path: "/repo/checkout",
-          reason,
-          paths,
-        },
+  const rendered = renderText({
+    ...envelope,
+    verb: "deliver",
+    placement: {
+      refusal: {
+        kind: "checkout-not-followable",
+        contractId: contract,
+        target: "refs/heads/main",
+        path: "/repo/checkout",
+        reason: "untracked",
+        paths: ["ignored.tmp", 'quote"path.tmp'],
       },
-    } as InvocationResult);
-    const renderedLines = rendered.split("\n");
-    const start = renderedLines.indexOf("! checkout-not-followable");
-    assert.notEqual(start, -1);
-    assert.deepEqual(renderedLines.slice(start, start + text.length), text);
-  }
+    },
+  } as InvocationResult);
+  const renderedLines = rendered.split("\n");
+  const start = renderedLines.indexOf("! checkout-not-followable");
+  assert.notEqual(start, -1);
+  assert.deepEqual(renderedLines.slice(start, start + text.length), text);
 });
 
 test("continuation checkout stop keeps its exact block after the dependent context", () => {
@@ -2134,6 +2102,49 @@ test("a terminal receipt names a retained worktree in place of the obituary", ()
     }),
   );
   assert.doesNotMatch(preexisting, /lag  worktree|\/tmp\//u, "pre-existing residue stays typed-only");
+});
+
+test("a terminal receipt names each checkout its own follow left behind", () => {
+  const contract = contractId("kei/retained-checkout");
+  const text = renderText(
+    receipt({
+      verb: "review",
+      contract,
+      verdict: "satisfied",
+      completion: {
+        integration: snapshotId("4".repeat(40)),
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+      },
+      retainedCheckouts: [
+        { path: "/repo", target: "refs/heads/main" },
+        { path: "/repo/.keiyaku/wt/fridge", target: "refs/heads/main" },
+      ],
+      retiredWorktree: "shed",
+    }),
+  );
+  assert.match(text, /^✓ accepted$/mu);
+  assert.match(text, /^! lag  checkout behind  \/repo  · refs\/heads\/main$/mu);
+  assert.match(text, /^! lag  checkout behind  \/repo\/\.keiyaku\/wt\/fridge  · refs\/heads\/main$/mu);
+  assert.match(text, /^  worktree  shed retired$/mu);
+  assert.doesNotMatch(text, /target-checkout-retained/u, "the raw kind never prints");
+  const preexisting = renderText(
+    receipt({
+      verb: "review",
+      contract: contractId("kei/preexisting-checkout-residue"),
+      verdict: "satisfied",
+      lag: [
+        {
+          kind: "target-checkout-retained",
+          path: "/repo",
+          target: "refs/heads/main",
+          diagnostic: "kept",
+          affects: "placement",
+        },
+      ],
+    }),
+  );
+  assert.doesNotMatch(preexisting, /checkout behind|\/repo/u, "pre-existing checkout residue stays typed-only");
 });
 
 test("a completed placement names the landed diff's shape through the shared diffstat rule", () => {

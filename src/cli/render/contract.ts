@@ -42,6 +42,22 @@ function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number)
   return renderOpaqueBlock(detail.kind, indent, columns);
 }
 
+/**
+ * The one word for a checkout git could not carry to the landed head: `behind` is git's own name for
+ * that state, and the raw result kind never prints on a receipt.
+ */
+function checkoutBehindRows(path: string, target: string, columns: number): readonly string[] {
+  const lines: string[] = [];
+  receiptRow(
+    lines,
+    "!",
+    "lag",
+    [{ text: "checkout behind" }, { text: path, opaque: true }, { text: `· ${target}`, opaque: true }],
+    columns,
+  );
+  return lines;
+}
+
 function lagRows(lag: Lag, columns: number): readonly string[] {
   const lines: string[] = [];
   if (lag.kind === "worktree-retained") {
@@ -63,13 +79,7 @@ function lagRows(lag: Lag, columns: number): readonly string[] {
   } else if (lag.kind === "unsealed-bytes") {
     receiptRow(lines, "!", "lag", [{ text: "unsealed bytes" }, { text: lag.path, opaque: true }], columns);
   } else if (lag.kind === "target-checkout-retained") {
-    receiptRow(
-      lines,
-      "!",
-      "lag",
-      [{ text: `target-checkout-retained ${lag.target} ${lag.path}`, opaque: true }],
-      columns,
-    );
+    pushBlock(lines, checkoutBehindRows(lag.path, lag.target, columns));
     receiptPayload(lines, "reason", lag.diagnostic);
   } else if (lag.kind === "worktree-hook-failed") {
     receiptRow(
@@ -208,6 +218,11 @@ function acceptedRecord(
 
 function acceptedLagRows(result: AcceptedEnvelope, columns: number): readonly string[] {
   const obligations: string[] = [];
+  // A checkout this invocation's own follow could not carry is loud; the same arm's reconciliation lag
+  // is pre-existing residue and stays in the typed result only.
+  for (const checkout of result.retainedCheckouts ?? []) {
+    pushBlock(obligations, checkoutBehindRows(checkout.path, checkout.target, columns));
+  }
   if (result.lag !== undefined) {
     for (const lag of result.lag) {
       if (

@@ -205,13 +205,7 @@ export function decodeIntegrationPreparationRefusal(value: unknown): Integration
 export function decodeCheckoutNotFollowableRefusal(value: unknown): CheckoutNotFollowableRefusal {
   const object = record(value, ["kind", "contractId", "target", "path", "reason", "paths"]);
   if (object.kind !== "checkout-not-followable") fail();
-  if (
-    object.reason !== "staged" &&
-    object.reason !== "dirty-tracked" &&
-    object.reason !== "unmerged" &&
-    object.reason !== "untracked"
-  )
-    fail();
+  if (object.reason !== "untracked") fail();
   return {
     kind: "checkout-not-followable",
     contractId: decodeContractId(object.contractId),

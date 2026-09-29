@@ -35,6 +35,7 @@ type MutationObservation = Pick<
   | "recoverySnapshot"
   | "retiredWorktree"
   | "retainedWorktree"
+  | "retainedCheckouts"
   | "cleanup"
   | "executionStops"
 >;
@@ -77,6 +78,7 @@ function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | 
     ...(result.recoverySnapshot === undefined ? {} : { recoverySnapshot: result.recoverySnapshot }),
     ...(result.retiredWorktree === undefined ? {} : { retiredWorktree: result.retiredWorktree }),
     ...(result.retainedWorktree === undefined ? {} : { retainedWorktree: result.retainedWorktree }),
+    ...(result.retainedCheckouts === undefined ? {} : { retainedCheckouts: result.retainedCheckouts }),
     ...(result.lags.length === 0 || firstLag === undefined ? {} : { lag: [firstLag, ...result.lags.slice(1)] }),
     ...(result.cleanup.length === 0 ? {} : { cleanup: result.cleanup }),
     ...(result.executionStops.length === 0 ? {} : { executionStops: result.executionStops }),

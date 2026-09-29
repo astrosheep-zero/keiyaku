@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
+import { invoke } from "../src/cli/invoke.js";
+import { parseArgv } from "../src/cli/parse.js";
+import type { InvocationResult } from "../src/cli/result.js";
+import { renderText } from "../src/cli/render/text.js";
 import { externalRequestCommandsFor } from "../src/akuma-body.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
@@ -265,5 +269,87 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const replacedValue = acceptedDeliveryValue(replaced.result);
     assert.notDeepEqual(replacedValue.integration, firstValue.integration, "overwrite=true captures the new bytes");
     assert.equal((await keiyaku.state()).terminal, null);
+  });
+});
+
+function executable(argv: readonly string[]) {
+  const parsed = parseArgv(argv);
+  if (!("command" in parsed)) throw new Error("expected command invocation");
+  return parsed;
+}
+
+async function cliResult(cwd: string, argv: readonly string[]): Promise<InvocationResult> {
+  return (await invoke(executable(["-C", cwd, ...argv]), {
+    environment: {},
+    readStdin: async () => "",
+  })) as InvocationResult;
+}
+
+/** A committed candidate that changes one path of a target checkout whose other tracked files stay clean. */
+async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, changedPath: string) {
+  const repository = repositoryWithMain({ files });
+  const bound = await Keiyaku.with().bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: document(),
+    workspace: "worktree",
+    gates: ["reviewed"],
+    target: "refs/heads/main",
+  });
+  const state = await bound.keiyaku.state();
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+  writeFileSync(join(worktree, changedPath), "candidate\n");
+  repository.run(["-C", worktree, "add", changedPath]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  await bound.keiyaku.deliver();
+  return { repository, state, worktree };
+}
+
+describe("dirty target checkout placement", { concurrency: 2 }, () => {
+  test("an overlapping uncommitted edit never vetoes acceptance, and reconcile carries the checkout forward", async () => {
+    const { repository, state } = await targetedCheckoutBinding({ "target.txt": "base\n" }, "target.txt");
+    writeFileSync(join(repository.path, "target.txt"), "local work in progress\n");
+
+    const reviewed = await cliResult(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"]);
+    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
+    const text = renderText(reviewed);
+    assert.match(text, /^✓ review satisfied  /mu);
+    assert.match(text, /^✓ accepted$/mu);
+    assert.match(text, /^  worktree  .+ retired$/mu);
+    assert.doesNotMatch(text, /target-checkout-retained/u);
+    const lines = text.split("\n");
+    const lagStart = lines.indexOf("! lag  checkout behind");
+    assert.notEqual(lagStart, -1, text);
+    assert.deepEqual(lines.slice(lagStart, lagStart + 3), [
+      "! lag  checkout behind",
+      `  ${repository.path}`,
+      "  · refs/heads/main",
+    ]);
+    const landed = repository.run(["rev-parse", "refs/heads/main"]).trim();
+    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "local work in progress\n");
+
+    repository.run(["-C", repository.path, "checkout", "--", "target.txt"]);
+    const reconciled = await cliResult(repository.path, ["reconcile"]);
+    assert.ok(reconciled.kind === "reconcile", JSON.stringify(reconciled));
+    const reconcileLines = renderText(reconciled).split("\n");
+    const recoveredStart = reconcileLines.indexOf("  effect  target-checkout  recovered");
+    assert.notEqual(recoveredStart, -1, renderText(reconciled));
+    assert.equal(reconcileLines[recoveredStart + 1], `  ${repository.path}`);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), landed);
+    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
+  });
+
+  test("an uncommitted edit outside the movement follows silently", async () => {
+    const { repository, state } = await targetedCheckoutBinding(
+      { "target.txt": "base\n", "other.txt": "base\n" },
+      "target.txt",
+    );
+    writeFileSync(join(repository.path, "other.txt"), "unrelated local work\n");
+
+    const reviewed = await cliResult(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"]);
+    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
+    assert.equal(reviewed.retainedCheckouts, undefined);
+    assert.doesNotMatch(renderText(reviewed), /checkout behind/u);
+    assert.equal(readFileSync(join(repository.path, "other.txt"), "utf8"), "unrelated local work\n");
+    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });
 });

@@ -62,6 +62,26 @@ export type MutationFinality =
 
 export type MutationLag = ReconcileCompletion["lag"][number] & Readonly<{ affects: ReconcileLagScope }>;
 
+/** A target checkout this invocation's own follow could not carry to the landed head. */
+export type RetainedCheckout = Readonly<{ path: string; target: string }>;
+
+export function decodeRetainedCheckout(value: unknown): RetainedCheckout {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed retained checkout");
+  const object = value as Record<string, unknown>;
+  if (Object.keys(object).some((key) => key !== "path" && key !== "target"))
+    throw new Error("malformed retained checkout");
+  return {
+    path: nonblankString(object.path, "retained checkout path"),
+    target: nonblankString(object.target, "retained checkout target"),
+  };
+}
+
+function decodeRetainedCheckouts(value: unknown): readonly RetainedCheckout[] {
+  if (!Array.isArray(value)) throw new Error("malformed retained checkout list");
+  return value.map((item) => decodeRetainedCheckout(item));
+}
+
 type AcceptedFinalityInput = Readonly<{
   kind: "accepted";
   operation: MutationOperation;
@@ -176,6 +196,7 @@ export const mutationResultSchema = <Value>(
       "recoverySnapshot",
       "retiredWorktree",
       "retainedWorktree",
+      "retainedCheckouts",
       "cleanup",
       "executionStops",
     ]);
@@ -200,6 +221,9 @@ export const mutationResultSchema = <Value>(
       ...(object.retainedWorktree === undefined
         ? {}
         : { retainedWorktree: nonblankString(object.retainedWorktree, "retained worktree path") }),
+      ...(object.retainedCheckouts === undefined
+        ? {}
+        : { retainedCheckouts: decodeRetainedCheckouts(object.retainedCheckouts) }),
     };
   }, "expected mutation result");
 
@@ -315,6 +339,8 @@ export type MutationResult<Value> = Readonly<{
   retiredWorktree?: string;
   /** The appointed worktree's path when this invocation's own removal of it was retained. */
   retainedWorktree?: string;
+  /** Target checkouts this invocation's own follow left behind, in arm order. */
+  retainedCheckouts?: readonly RetainedCheckout[];
   pending: readonly MutationPendingSurface[];
 }>;
 
@@ -385,6 +411,23 @@ async function reconcileExecution<Value, PublicValue>(
   };
 }
 
+/**
+ * This invocation's own follow that could not carry a target checkout is physical residue the receipt
+ * must name. Reconciliation lags for the same arm are pre-existing residue and stay in typed results only.
+ */
+function retainedCheckoutArms(lag: ReconcileReport["lag"]): readonly RetainedCheckout[] {
+  const seen = new Set<string>();
+  const checkouts: RetainedCheckout[] = [];
+  for (const entry of lag) {
+    if (entry.kind !== "target-checkout-retained") continue;
+    const key = `${entry.path}\u0000${entry.target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    checkouts.push({ path: entry.path, target: entry.target });
+  }
+  return checkouts;
+}
+
 export async function completeMutation<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
 ): Promise<MutationResult<PublicValue>> {
@@ -400,6 +443,7 @@ export async function completeMutation<Value, PublicValue>(
       ...lag,
       affects: reconcileLagScope(lag),
     }));
+    const retainedCheckouts = retainedCheckoutArms(snapshot.physical.lag);
     const settlementLags = reports.flatMap((report) => report.settlement.lags);
     const obligations = { lags, settlementLags, cleanup: snapshot.cleanup, executionStops: snapshot.stops };
     return {
@@ -413,6 +457,7 @@ export async function completeMutation<Value, PublicValue>(
       ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
       ...(retiredWorktree === undefined ? {} : { retiredWorktree }),
       ...(retainedWorktree === undefined ? {} : { retainedWorktree }),
+      ...(retainedCheckouts.length === 0 ? {} : { retainedCheckouts }),
     };
   } catch (error) {
     const receipt = receiptFromProgress(input.operation, input.contractId, progress);

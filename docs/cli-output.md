@@ -41,7 +41,11 @@ words the audit surface already uses; when that snapshot later lands, the
 landing row names the same identity, and a completed placement also names the
 landed diff's shape in the one shared diffstat vocabulary. A terminal receipt
 names its appointed worktree's short name when it retired the worktree, and
-names the retained worktree's path when its own removal failed.
+names the retained worktree's path when its own removal failed. A landed
+placement is never vetoed by uncommitted checkout state: the receipt names each
+target checkout this command's own follow could not carry as one `checkout
+behind` lag row with its path and target, one row per retained arm, and leaves
+retention that predates the command to the typed result.
 
 A completed placement reads like Git movement, identically for a review and a
 deliver: the title states the verdict or delivery and the Contract, one row

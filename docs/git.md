@@ -98,7 +98,7 @@ its carrier and field layout remain private Git mechanics. An unmatched record
 with no live operation is disposable custody, while a live operation without a
 matching receipt remains foreign.
 
-Targeted placement is serialized per target and claims only when its persisted predecessor still matches. Followability is a no-effects judgment: incompatible checkouts or operational failure leave claim and target untouched; recovery belongs to [git-reconciliation.md](git-reconciliation.md). Refusals preserve the first actual physical category: staged, dirty-tracked, unmerged, or untracked; `conflict` is integration-only. Target lag names the appointed worktree against the frozen target. ContractHead and journal blob custody identifiers remain private to ordinary text.
+Targeted placement is serialized per target and claims only when its persisted predecessor still matches. Uncommitted checkout state never vetoes a landed placement: the journal admits, the reference advances, and each registered target checkout follows when Git can carry the movement without touching uncommitted state. A checkout Git cannot carry stays behind, named on the terminal receipt and carried forward later by [git-reconciliation.md](git-reconciliation.md). Contact, not cleanliness, decides: uncommitted state the movement does not touch neither blocks nor lags, and automatic merging of uncommitted state never happens. The one collision Git reports by silently destroying an ignored worktree entry is refused before the journal admits rather than followed. `conflict` is integration-only. Target lag names the appointed worktree against the frozen target. ContractHead and journal blob custody identifiers remain private to ordinary text.
 
 ## Custody And Cleanup
 

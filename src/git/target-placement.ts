@@ -17,7 +17,7 @@ export type CheckoutNotFollowableRefusal = Readonly<{
   contractId: ContractId;
   target: string;
   path: string;
-  reason: "staged" | "dirty-tracked" | "unmerged" | "untracked";
+  reason: "untracked";
   paths: readonly string[];
 }>;
 
@@ -156,41 +156,6 @@ export async function prepareTargetPlacementChanges(
   return { predecessor: target.expectedOid, candidate: target.newOid, paths, writes };
 }
 
-async function dryRunRefusal(
-  input: CheckoutObservation,
-  scopes: readonly PhysicalScope[],
-): Promise<CheckoutNotFollowableRefusal | null> {
-  const { repository, contractId, target, path, predecessor, changes } = input;
-  const pathspecs = changes.paths.map(literalPath);
-  if (pathspecs.length === 0) return null;
-
-  const unmerged = await gitPaths(repository, path, [
-    "diff",
-    "--name-only",
-    "--diff-filter=U",
-    "-z",
-    "--",
-    ...pathspecs,
-  ]);
-  if (unmerged.length > 0) return checkoutRefusal(contractId, target, path, "unmerged", unmerged);
-
-  const staged = await gitPaths(repository, path, [
-    "diff",
-    "--cached",
-    "--name-only",
-    "-z",
-    predecessor,
-    "--",
-    ...pathspecs,
-  ]);
-  if (staged.length > 0) return checkoutRefusal(contractId, target, path, "staged", staged);
-
-  const dirty = await gitPaths(repository, path, ["diff-files", "--name-only", "-z", "--", ...pathspecs]);
-  if (dirty.length > 0) return checkoutRefusal(contractId, target, path, "dirty-tracked", dirty);
-
-  return await untrackedRefusalWithinScopes(input, scopes, false);
-}
-
 type PhysicalScope = Readonly<{
   path: string;
   kind: "leaf" | "directory";
@@ -236,25 +201,16 @@ async function destructionScopes(
   return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function untrackedArgs(ignored: boolean): readonly string[] {
-  return [
-    "ls-files",
-    "--others",
-    ...(ignored ? ["--ignored"] : []),
-    "--exclude-standard",
-    "--directory",
-    "--no-empty",
-    "-z",
-  ];
+function untrackedArgs(): readonly string[] {
+  return ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty", "-z"];
 }
 
 async function untrackedRefusalWithinScopes(
   input: CheckoutObservation,
   scopes: readonly PhysicalScope[],
-  ignored: boolean,
 ): Promise<CheckoutNotFollowableRefusal | null> {
   const { repository, contractId, target, path } = input;
-  const args = untrackedArgs(ignored);
+  const args = untrackedArgs();
   const leaves = scopes.filter((scope) => scope.kind === "leaf");
   if (leaves.length > 0) {
     const collisions = await gitPaths(repository, path, [
@@ -336,6 +292,11 @@ async function workspaceMatchesTreeOnPaths(
   );
 }
 
+/**
+ * A checkout that git cannot carry is judged by the physical follow, which records its own lag.
+ * The one collision read-tree cannot report is a candidate write over an ignored worktree entry:
+ * git carries that by silently destroying the entry, so it is refused here instead.
+ */
 async function ordinaryPrecheck(
   repository: GitRepository,
   contractId: ContractId,
@@ -346,20 +307,14 @@ async function ordinaryPrecheck(
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
   const observation = { repository, contractId, target, path, predecessor, candidate, changes };
-  let dryRunError: GitPlumbingError | undefined;
   try {
     await runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
-    dryRunError = error;
+    return null;
   }
   const scopes = await destructionScopes(path, changes.writes);
-  if (dryRunError !== undefined) {
-    const refusal = await dryRunRefusal(observation, scopes);
-    if (refusal !== null) return refusal;
-    throw dryRunError;
-  }
-  return await untrackedRefusalWithinScopes(observation, scopes, true);
+  return await untrackedRefusalWithinScopes(observation, scopes);
 }
 
 export async function acquireTargetPlacementFence(

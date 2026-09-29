@@ -38,7 +38,7 @@ function document(title = "Target checkout placement"): string {
     Objective: "Keep the checked-out target coherent with placement.",
     Design: "Fence publication and Git-native follow.",
     Region: "~~~\ndelivered.txt\n~~~",
-    Criteria: "### Preserve bytes\nRefuse before publication when local content conflicts.\n",
+    Criteria: "### Preserve bytes\nThe journal admits and the checkout follows or stays behind.\n",
   });
 }
 
@@ -211,50 +211,45 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.deepEqual(rewound.row.targetObservation, { head: delivery.integration.predecessor, drift: true });
   });
 
-  test("operational precheck failure preserves the unclaimed target and foreign index lock", async () => {
+  test("an operational precheck failure leaves the checkout behind without disturbing the target or a foreign index lock", async () => {
     const { repository, contract } = await ordinaryCandidateFixture();
-    const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
     const index = readFileSync(resolve(repository.path, ".git", "index"));
     const lock = resolve(repository.path, ".git", "index.lock");
     writeFileSync(lock, "foreign writer\n");
     try {
       const delivered = acceptedDelivery(await contract.deliver());
-      assert.equal(delivered.value.placement && "failure" in delivered.value.placement
-        ? delivered.value.placement.failure : undefined, "target-placement-failed");
-      assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
+      const completion = delivered.value.completion;
+      assert.ok(completion, "expected a completed placement");
+      assert.equal(delivered.value.placement, undefined);
+      assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
+      assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
       assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
       assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
       assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
       const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
-      assert.equal(observed.state?.terminal, null);
+      assert.equal(observed.state?.terminal?.kind, "claimed");
     } finally {
       rmSync(lock);
     }
   });
 
-  test("a staged candidate-changed path refuses placement with its exact path", async () => {
+  test("a staged candidate-changed path leaves the checkout behind instead of refusing placement", async () => {
     const { repository, contract } = await ordinaryCandidateFixture();
-    const predecessor = repository.run(["rev-parse", "refs/heads/main"]);
     writeFileSync(resolve(repository.path, "delivered.txt"), "staged conflict\n");
     repository.run(["add", "delivered.txt"]);
-    const stagedPatch = repository.run(["diff", "--cached", "--", "delivered.txt"]);
 
     const delivered = acceptedDelivery(await contract.deliver());
 
-    const placement = delivered.value.placement;
-    assert.ok(placement);
-    if (!("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable") {
-      assert.fail("expected checkout-not-followable");
-    }
-    assert.equal(placement.refusal.reason, "staged");
-    assert.deepEqual(placement.refusal.paths, ["delivered.txt"]);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]), predecessor);
-    assert.equal(repository.run(["diff", "--cached", "--", "delivered.txt"]), stagedPatch);
+    const completion = delivered.value.completion;
+    assert.ok(completion, "expected a completed placement");
+    assert.equal(delivered.value.placement, undefined);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
+    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+    assert.equal(repository.run(["show", ":delivered.txt"]), "staged conflict\n");
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
-    assert.deepEqual(delivered.lags, []);
   });
 
-  test("an unmerged candidate-changed path is classified before staged", async () => {
+  test("an unmerged candidate-changed path leaves the checkout behind instead of refusing placement", async () => {
     const { repository, contract } = await ordinaryCandidateFixture();
     const base = repository.run(["rev-parse", "HEAD:delivered.txt"]).trim();
     const ours = repository.run(["hash-object", "-w", "--stdin"], "ours\n").trim();
@@ -264,11 +259,14 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
 
     const delivered = acceptedDelivery(await contract.deliver());
-    const placement = delivered.value.placement;
-    assert.ok(placement && "refusal" in placement && placement.refusal.kind === "checkout-not-followable");
-    if (!placement || !("refusal" in placement) || placement.refusal.kind !== "checkout-not-followable") return;
-    assert.equal(placement.refusal.reason, "unmerged");
-    assert.deepEqual(placement.refusal.paths, ["delivered.txt"]);
+
+    const completion = delivered.value.completion;
+    assert.ok(completion, "expected a completed placement");
+    assert.equal(delivered.value.placement, undefined);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
+    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+    assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "unresolved\n");
   });
 
   test("reconcile completes an ordinary follow interrupted after atomic publication", async () => {

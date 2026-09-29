@@ -46,7 +46,14 @@ export type Lag = MutationResult<unknown>["lags"][number];
 
 type MutationEnvelope = Pick<
   MutationResult<unknown>,
-  "head" | "settlementLags" | "recoverySnapshot" | "retiredWorktree" | "retainedWorktree" | "cleanup" | "executionStops"
+  | "head"
+  | "settlementLags"
+  | "recoverySnapshot"
+  | "retiredWorktree"
+  | "retainedWorktree"
+  | "retainedCheckouts"
+  | "cleanup"
+  | "executionStops"
 >;
 
 export type AcceptedEnvelope = Readonly<{
@@ -60,6 +67,8 @@ export type AcceptedEnvelope = Readonly<{
   retiredWorktree?: MutationEnvelope["retiredWorktree"];
   /** The appointed worktree's path when this invocation's own removal of it was retained. */
   retainedWorktree?: MutationEnvelope["retainedWorktree"];
+  /** Target checkouts this invocation's own follow left behind, in arm order. */
+  retainedCheckouts?: MutationEnvelope["retainedCheckouts"];
   lag?: readonly [Lag, ...Lag[]];
   cleanup?: MutationEnvelope["cleanup"];
   executionStops?: MutationEnvelope["executionStops"];
