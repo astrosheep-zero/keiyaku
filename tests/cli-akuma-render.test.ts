@@ -508,15 +508,17 @@ test("an open turn settles old says on the rail and only its trailing say flushe
     at: AKUMA_ACTIVITY_AT,
     text: "old settled say",
   };
-  const tool = completedTool(3, "bash", { kind: "run", command: "after the old say" });
+  const tools = [3, 4, 5, 6].map((sequence) =>
+    completedTool(sequence, "bash", { kind: "run", command: `after-say-${sequence}` }),
+  );
   const trailingSay: ActivityRow = {
     kind: "said",
-    sequence: 4,
+    sequence: 7,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
     text: "still streaming",
   };
-  const rows = [oldSay, tool, trailingSay];
+  const rows = [oldSay, ...tools, trailingSay];
   const stream = activityStream({ columns: 80, color: false });
   const settled = stream({
     snapshot: openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
@@ -539,6 +541,8 @@ test("an open turn settles old says on the rail and only its trailing say flushe
     "only the trailing say flushes unresolved",
   );
   assert.ok(!flushed.some((line) => line.includes("old settled say")), "a settled say is never flushed");
+  assert.ok(!flushed.some((line) => line.includes("after-say-6")), "an in-flight final say omits prior tail tools");
+  assert.ok(flushed.some((line) => line.includes("⋮ 1 omitted")), "the earlier tool stays accounted for");
 });
 
 test("display-width padding measures cells, so a wide emoji alias cannot skew its column", () => {

@@ -3418,30 +3418,44 @@ test("a say omits earlier tail tools and only keeps the last two after the final
   const text = [observed, ...stream.flush()].filter(Boolean).join("\n");
 
   assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
-  assert.doesNotMatch(text, /src\/(middle|selected)\.ts/u, "all tools before the final say are omitted");
+  for (const sequence of [2, 3, 4, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.doesNotMatch(text, /src\/(middle|selected)\.ts/u, "only deferred pre-say tools are omitted");
   assert.match(text, /! edit   src\/last\.ts — \+4 -2 — error · refused/u);
-  assert.match(text, /\$ tool-13/u);
-  for (const sequence of [2, 3, 4, 6, 7, 8, 11, 12])
+  for (const sequence of [6, 7, 8, 11, 12])
     assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /⋮ 8 omitted[\s\S]*flush-now[\s\S]*⋮ 2 omitted/u);
+  assert.match(text, /⋮ 5 omitted[\s\S]*flush-now[\s\S]*⋮ 2 omitted/u);
   assert.equal(text.split("flush-now").length - 1, 1);
 });
 
-test("a say flushes the pending tail without renewing one wait's tool budget", () => {
+test("multiple says preserve three opening tools and only the final say's two newest tools", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
   const say = (sequence: number, text: string) =>
     snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
-  const rows = [tool(1), tool(2), tool(3), say(4, "checkpoint"), tool(5), tool(6), tool(7), tool(8)];
+  const rows = [
+    tool(1),
+    tool(2),
+    tool(3),
+    say(4, "first"),
+    tool(5),
+    tool(6),
+    tool(7),
+    tool(8),
+    say(9, "last"),
+    tool(10),
+    tool(11),
+    tool(12),
+    tool(13),
+  ];
   const stream = activityStream({ columns: 120, color: false });
-  const before = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 4))));
+  const before = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 9))));
   const after = stream(liveActivity(idleAkumaSnapshot(rows)));
   const text = [...before, ...after, ...stream.flush()].join("\n");
 
-  for (const sequence of [1, 2, 3, 7, 8]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  for (const sequence of [5, 6]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.match(text, /checkpoint/u);
-  assert.equal((text.match(/⋮ 2 omitted/gu) ?? []).length, 1);
+  for (const sequence of [1, 2, 3, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  for (const sequence of [5, 6, 7, 8, 10, 11])
+    assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.match(text, /first[\s\S]*⋮ 4 omitted[\s\S]*last[\s\S]*⋮ 2 omitted/u);
 });
 
 test("a plural wait gives each target its own whole-command tool budget", () => {

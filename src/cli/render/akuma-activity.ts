@@ -534,7 +534,6 @@ type ActivityStreamState = {
   renderedBoundaries: Set<number>;
   admittedTellSequences: Set<number>;
   openingTools: number;
-  hasSaid: boolean;
   deferred: DeferredActivityEntry[];
   liveRows: Map<number, RenderRow>;
 };
@@ -641,7 +640,6 @@ function omitOldestDeferredTool(state: ActivityStreamState): void {
 
 /** A say is a checkpoint: only tools after the last say may occupy the recent tail. */
 function omitPreSayTools(state: ActivityStreamState): void {
-  state.hasSaid = true;
   state.deferred = state.deferred.map((entry) =>
     entry.kind === "row" && isBoundedStreamTool(entry.row) ? { kind: "gap", count: 1 } : entry,
   );
@@ -742,7 +740,7 @@ function observeActivitySnapshot(
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
     }
-    if (isBoundedStreamTool(row) && !state.hasSaid && state.openingTools < OPENING_TOOL_BUDGET) {
+    if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
@@ -779,9 +777,9 @@ function flushActivityTail(
 
 /**
  * Append-only live view over one command's successive settled snapshots. The
- * first three tools stream immediately before any say; later tools wait in a
- * two-row tail. A say omits the earlier tail, so only the last two tools after
- * the final say can print at closing. Newer tools displace older tail candidates
+ * first three tools stream immediately; later tools wait in a two-row tail.
+ * A say omits the earlier tail, so only the last two extra tools after the
+ * final say can print at closing. Newer tools displace older tail candidates
  * in place. Other narrative rows wait behind undecided tail tools.
  */
 export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
@@ -793,7 +791,6 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     renderedBoundaries: new Set(),
     admittedTellSequences: new Set(),
     openingTools: 0,
-    hasSaid: false,
     deferred: [],
     liveRows: new Map(),
   };
