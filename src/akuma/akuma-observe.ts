@@ -143,14 +143,6 @@ export async function bornStatus(
   return status;
 }
 
-export async function readBudgetedStatus(
-  worldPath: WorldRoot,
-  id: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
-): Promise<BudgetedStatusObservation> {
-  return await bornStatus(pathsForAkuId(worldPath, id), id, input);
-}
-
 export async function readLiveStatus(
   worldPath: WorldRoot,
   id: AkuId,
@@ -222,28 +214,6 @@ export async function waitForObservation<T>(
       input.signal,
     );
   }
-}
-
-/**
- * Successive status observations of one already born Akuma until its
- * observation window closes. Every acquired observation is reported to
- * `observe` before completion or deadline judgment, including the first
- * already-complete observation; the last status is returned.
- */
-export async function observeAkumaStatus(
-  worldPath: WorldRoot,
-  expected: AkuId,
-  input: Readonly<{ timeoutMs: number; signal?: AbortSignal; observe: (status: LiveStatusObservation) => void }>,
-): Promise<Readonly<{ reason: WaitReason; status: AkumaStatus }>> {
-  const paths = pathsForAkuId(worldPath, expected);
-  const waited = await waitForObservation({
-    timeoutMs: input.timeoutMs,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    observe: async () => await bornLiveStatus(paths, expected, { aperture: "monitoring" }),
-    complete: (observation) => defaultWaitComplete(observation.status),
-    onObserve: input.observe,
-  });
-  return { reason: waited.reason, status: waited.value.status };
 }
 
 export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {

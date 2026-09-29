@@ -123,13 +123,7 @@ export function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export {
-  bornStatus,
-  rosterListRow,
-  readAkumaBirthCwd,
-  readBudgetedStatus,
-  type BudgetedStatusObservation,
-} from "./akuma-observe.js";
+export { bornStatus, rosterListRow, readAkumaBirthCwd, type BudgetedStatusObservation } from "./akuma-observe.js";
 
 export type AkumaConfiguration = Readonly<{ home?: string; settings?: Settings; execution?: ExecutionContext }>;
 
