@@ -2,8 +2,39 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import test from "node:test";
 import type { ExecutionEvent } from "../src/library/execution.js";
+import { contractId, documentKey, entryUlid, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
 import { ExecutionProgressRenderer, executionProgressLines } from "../src/cli/render/execution-progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
+
+const bindFact: JournalEntry = {
+  v: 1,
+  kind: "bind",
+  contract: contractId("kei/progress"),
+  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+  at: "2026-01-01T00:00:00.000Z",
+  data: {
+    coordinates: { start: snapshotId("start"), workspace: "worktree" },
+    terms: {
+      document: { bytes: "# Progress\n", key: documentKey("progress") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+  },
+};
+
+const claimedFact: JournalEntry = {
+  v: 1,
+  kind: "claimed",
+  contract: contractId("kei/progress"),
+  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+  at: "2026-01-01T00:00:01.000Z",
+  data: { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX") },
+};
+
+function admittedEvent(fact: JournalEntry): ExecutionEvent {
+  return { kind: "admitted", contractId: fact.contract, fact };
+}
 
 class CapturedStream extends Writable {
   readonly chunks: string[] = [];
@@ -95,7 +126,7 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
 });
 
 test("admitted and stage progress never render outside a live frame", () => {
-  const admitted = { kind: "admitted", contractId: "kei/progress", fact: { kind: "bind" } } as ExecutionEvent;
+  const admitted = admittedEvent(bindFact);
   assert.deepEqual(executionProgressLines(admitted, { columns: 80, color: false }), []);
   for (const stage of ["placement", "continuation", "reconciliation"] as const) {
     for (const state of ["started", "finished"] as const) {
@@ -108,7 +139,7 @@ test("admitted and stage progress never render outside a live frame", () => {
 test("stage and admitted events never render on a TTY either", async () => {
   const stream = new CapturedStream(true);
   const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
-  await renderer.consume({ kind: "admitted", contractId: "kei/progress", fact: { kind: "claim" } } as ExecutionEvent);
+  await renderer.consume(admittedEvent(claimedFact));
   await renderer.consume({
     kind: "stage",
     contractId: "kei/progress",

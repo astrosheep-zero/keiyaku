@@ -21,13 +21,18 @@ test("amend names the missing Verification declaration required by verified", as
       Criteria: "### Gate\nState the reason.",
     }),
   });
+  assert.ok("kind" in bound);
   assert.equal(bound.kind, "accepted");
+  assert.ok("verb" in bound);
   if (bound.kind !== "accepted") return;
   const result = await invoke(executable(["-C", raw.path, "amend", bound.contract, "--gates", "verified"]), {
     environment: {}, readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
   });
+  assert.ok("kind" in result);
   assert.equal(result.kind, "refused");
-  assert.match(renderText(result as never), /gate 'verified' requires a declared Verification; the Contract declares none/u);
+  assert.ok("verb" in result);
+  if (result.kind !== "refused") return;
+  assert.match(renderText(result), /gate 'verified' requires a declared Verification; the Contract declares none/u);
 });
 
 test("CLI binds mixed gate selections and amends or binds an explicit empty selection", async () => {
@@ -60,9 +65,10 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
           }),
       },
     );
+    assert.ok("kind" in result);
     assert.equal(result.kind, "accepted", JSON.stringify(result));
-    assert.ok("contract" in result);
-    return result.contract as ContractId;
+    assert.ok("verb" in result && result.kind === "accepted");
+    return result.contract;
   };
   const gates = async (id: ContractId) => (await observeContract(repository, id)).state?.terms.gates;
   const mixed = await bind("reviewed,strict,security-audited,reviewed");
@@ -74,7 +80,9 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
       throw new Error("gate-only amend must not read stdin");
     },
   });
+  assert.ok("kind" in amend);
   assert.equal(amend.kind, "accepted");
+  assert.ok("verb" in amend);
   if (amend.kind === "accepted" && amend.verb === "amend") {
     assert.deepEqual(amend.changes.gates, []);
     assert.match(renderText(amend), /✓ amended[\s\S]*gates  none/u);

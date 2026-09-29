@@ -4,7 +4,6 @@ import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
 import { defaultWaitComplete } from "../src/akuma/akuma.js";
-import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -16,11 +15,10 @@ import {
   recordTellReceipt,
   readStatusFacts,
 } from "../src/akuma/heart/index.js";
-import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/selection-execution.js";
-import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
+import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 
 async function fixture() {
@@ -31,9 +29,9 @@ test("shared observation returns one final deadline snapshot and propagates call
   let reads = 0;
   const deadline = await waitForObservation({
     timeoutMs: 0,
-    observe: async () => {
+    observe: async (): Promise<"running" | "settled"> => {
       reads += 1;
-      return "running" as const;
+      return "running";
     },
     complete: (status) => status === "settled",
   });

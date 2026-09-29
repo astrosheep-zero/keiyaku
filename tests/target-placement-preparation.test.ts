@@ -1,16 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import promises from "node:fs/promises";
-import { syncBuiltinESMExports } from "node:module";
-import { dirname, resolve } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { gate } from "../src/core/facts/types.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { mintSnapshotId } from "../src/git/identity.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { observeTargetPlacement } from "../src/git/target-placement.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
 import {

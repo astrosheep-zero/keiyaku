@@ -22,7 +22,7 @@ import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { waitAkuma } from "../src/library/selection.js";
-import { decodeAskObservation, type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
+import { type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";

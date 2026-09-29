@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractId } from "../src/core/facts/types.js";
+import { contractHead, contractId } from "../src/core/facts/types.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import type { AcceptedBindResult } from "../src/cli/result.js";
 
@@ -8,11 +8,12 @@ const result = {
   kind: "accepted",
   verb: "bind",
   contract: contractId("kei/overlap-render-owner-5062"),
+  head: contractHead("head"),
   facts: [],
   settlementLags: [],
   target: "refs/heads/main",
   overlaps: [],
-} as AcceptedBindResult;
+} satisfies AcceptedBindResult;
 
 function render(overlaps: NonNullable<AcceptedBindResult["overlaps"]>, columns = 100): string {
   return renderAccepted({ ...result, overlaps }, { columns, color: false });

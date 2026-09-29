@@ -47,7 +47,7 @@ async function bindAndCommit(options: { gates: readonly string[]; verification: 
 }
 
 function assertRuntimeStop(value: unknown): void {
-  assert.ok(value !== undefined && typeof value === "object" && "failure" in value);
+  assert.ok(value !== null && typeof value === "object" && "failure" in value);
   assert.equal((value as { failure: unknown }).failure, "environment-failure");
 }
 

@@ -1,15 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAkumaStatus, type ActivityRow, type AkumaStatus } from "../src/akuma/akuma.js";
+import {
+  parseAkumaStatus,
+  type ActivityRow,
+  type AkumaStatus,
+  type IdleSnapshotRow,
+  type OpenSnapshotRow,
+} from "../src/akuma/akuma.js";
 import {
   activityStream,
-  associatedIdentity,
   callObservationStream,
   DEFAULT_CONTEXT,
   frameRule,
   killResultText,
   snapshotActivityLines,
-  snapshotHeading,
   snapshotText,
   tellText,
   waitObservationStream,
@@ -36,7 +40,7 @@ import {
   reportedFileChange,
 } from "./support/kanshi-activity.js";
 
-function running(id: string, rows: readonly ActivityRow[]) {
+function running(id: string, rows: readonly OpenSnapshotRow[]) {
   return parseAkumaStatus({
     id,
     life: "running",
@@ -45,7 +49,7 @@ function running(id: string, rows: readonly ActivityRow[]) {
   });
 }
 
-function settled(id: string, rows: readonly Extract<ActivityRow, { kind: "said" }>[]) {
+function settled(id: string, rows: readonly IdleSnapshotRow[]) {
   return parseAkumaStatus({
     id,
     life: "asleep",
@@ -56,6 +60,11 @@ function settled(id: string, rows: readonly Extract<ActivityRow, { kind: "said" 
 
 function observed(status: AkumaStatus, rows: readonly ActivityRow[]) {
   return { status, rows, contract: { kind: "none" as const } };
+}
+
+/** A synthetic live observation; these render fixtures never exercise the observation budget. */
+function liveObservation(status: AkumaStatus, rows: readonly ActivityRow[]) {
+  return { status, rows, ordinarySelected: 0 };
 }
 
 test("status frame closes its timeline before references and ends at cwd", () => {
@@ -149,12 +158,13 @@ test("Akuma observation failures name the target and reason without carrier word
 });
 
 test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {
+  const id = parseAkuId("aku/worker/deadbeef").id;
   const result = {
     kind: "akuma" as const,
     action: "ask" as const,
     body: "continue",
     result: {
-      akuma: "aku/worker/deadbeef",
+      akuma: id,
       tell: {
         admission: { fact: "recorded" as const, tellId: "tell-id" },
         row: {
@@ -271,7 +281,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
 
   const progress = askProgressStream(undefined, undefined, context);
   const admission = progress.admitted(tell, id);
-  const tellFrame = progress.observe({ status, rows: [tell.row] });
+  const tellFrame = progress.observe(liveObservation(status, [tell.row]));
   const tellConclusion = progress.conclude({
     akuma: id,
     tell,
@@ -297,8 +307,8 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
 test("ask activity starts at admission and includes a later settlement of an older tool", () => {
   const id = parseAkuId("aku/worker/deadbeef").id;
   const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
-  const opening: ActivityRow = { kind: "call", sequence: 1, turnSequence: 1, at: at(0), text: "original input" };
-  const oldNote: ActivityRow = { kind: "note", sequence: 2, turnSequence: 1, at: at(1), text: "before ask" };
+  const opening: OpenSnapshotRow = { kind: "call", sequence: 1, turnSequence: 1, at: at(0), text: "original input" };
+  const oldNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: at(1), text: "before ask" };
   const oldActive = { ...activeTool(3, "bash", { kind: "run" as const, command: "old tool" }), at: at(2) };
   const tell = {
     admission: { fact: "recorded" as const, tellId: "tell-ask" },
@@ -313,10 +323,10 @@ test("ask activity starts at admission and includes a later settlement of an old
     },
     wake: { kind: "told" as const },
   };
-  const later: ActivityRow = { kind: "note", sequence: 5, turnSequence: 1, at: at(4), text: "after ask" };
-  const next: ActivityRow = { kind: "note", sequence: 6, turnSequence: 1, at: at(5), text: "new activity" };
+  const later: OpenSnapshotRow = { kind: "note", sequence: 5, turnSequence: 1, at: at(4), text: "after ask" };
+  const next: OpenSnapshotRow = { kind: "note", sequence: 6, turnSequence: 1, at: at(5), text: "new activity" };
   const oldSettled = { ...completedTool(7, "bash", { kind: "run" as const, command: "old tool" }), at: at(6) };
-  const status = (rows: readonly ActivityRow[]) =>
+  const status = (rows: readonly OpenSnapshotRow[]) =>
     parseAkumaStatus({
       id,
       life: "running",
@@ -327,13 +337,13 @@ test("ask activity starts at admission and includes a later settlement of an old
   const admission = stream.admitted(tell, id);
   assert.match(admission.join("\n"), /✓ told +"new question"/u, "the receipt is returned before observation");
   const firstRows = [opening, oldNote, oldActive, tell.row, later];
-  const first = stream.observe({ status: status(firstRows), rows: firstRows });
+  const first = stream.observe(liveObservation(status(firstRows), firstRows));
   assert.deepEqual(first, ["      ⋮ 1 omitted"], "only post-admission settled evidence counts as omitted");
   const secondRows = [opening, oldNote, tell.row, later, next, oldSettled];
-  const second = stream.observe({ status: status(secondRows), rows: secondRows });
+  const second = stream.observe(liveObservation(status(secondRows), secondRows));
   assert.match(second.join("\n"), /new activity/u);
   assert.match(second.join("\n"), /old tool/u);
-  assert.deepEqual(stream.observe({ status: status(secondRows), rows: secondRows }), [], "later activity streams once");
+  assert.deepEqual(stream.observe(liveObservation(status(secondRows), secondRows)), [], "later activity streams once");
   const conclusion = stream.conclude({ akuma: id, tell, observation: { reason: "answered", answer: "exact\nanswer" } });
   const transcript = [...admission, ...first, ...second, ...conclusion].join("\n");
   assert.equal((transcript.match(/new question/gu) ?? []).length, 1);
@@ -369,12 +379,12 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
     },
     wake: { kind: "told" as const },
   };
-  const earlier: ActivityRow = { kind: "note", sequence: 2, turnSequence: 1, at, text: "earlier" };
-  const beforeOpening: ActivityRow = { kind: "note", sequence: 5, turnSequence: 1, at, text: "eligible but skipped" };
-  const opening: ActivityRow = { kind: "call", sequence: 6, turnSequence: 2, at, text: "next turn" };
-  const afterOpening: ActivityRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
-  const live: ActivityRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
-  const status = (rows: readonly ActivityRow[]) =>
+  const earlier: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at, text: "earlier" };
+  const beforeOpening: OpenSnapshotRow = { kind: "note", sequence: 5, turnSequence: 1, at, text: "eligible but skipped" };
+  const opening: OpenSnapshotRow = { kind: "call", sequence: 6, turnSequence: 2, at, text: "next turn" };
+  const afterOpening: OpenSnapshotRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
+  const live: OpenSnapshotRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
+  const status = (rows: readonly OpenSnapshotRow[]) =>
     parseAkumaStatus({
       id,
       life: "running",
@@ -388,14 +398,14 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
   const rows = [earlier, tell.row, beforeOpening, opening, afterOpening];
   const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
   const receipt = stream.admitted(tell, id);
-  const baseline = stream.observe({ status: status(rows), rows });
+  const baseline = stream.observe(liveObservation(status(rows), rows));
   assert.equal(baseline.length, 3);
   assert.match(baseline[0]!, /⋮ 1 omitted/u);
   assert.match(baseline[1]!, /call +next turn/u);
   assert.match(baseline[2]!, /⋮ 1 omitted/u);
-  const later = stream.observe({ status: status([...rows, live]), rows: [...rows, live] });
+  const later = stream.observe(liveObservation(status([...rows, live]), [...rows, live]));
   assert.match(later.join("\n"), /live update/u);
-  assert.deepEqual(stream.observe({ status: status([...rows, live]), rows: [...rows, live] }), []);
+  assert.deepEqual(stream.observe(liveObservation(status([...rows, live]), [...rows, live])), []);
   const transcript = [...receipt, ...baseline, ...later].join("\n");
   assert.ok(transcript.indexOf("question") < transcript.indexOf("next turn"));
   assert.ok(transcript.indexOf("next turn") < transcript.indexOf("live update"));
@@ -440,14 +450,14 @@ test("plural wait tags selected identities and keeps rows compact at 80 columns"
   assert.deepEqual(opening.slice(0, 2), ["dead @first", "face @second"]);
   assert.equal(opening.at(-1), "─".repeat(Math.max(displayColumns("dead @first"), displayColumns("face @second"))));
 
-  const longSay: ActivityRow = {
+  const longSay: OpenSnapshotRow = {
     kind: "said",
     sequence: 2,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
     text: "a long streamed answer ".repeat(8),
   };
-  const sameMinuteNote: ActivityRow = {
+  const sameMinuteNote: OpenSnapshotRow = {
     kind: "note",
     sequence: 2,
     turnSequence: 1,
@@ -490,8 +500,8 @@ test("plural wait falls back to a distinguishing identity suffix for equal final
   ]);
   assert.deepEqual(opening.slice(0, 2), ["one/deadbeef @first", "two/deadbeef @second"]);
 
-  const firstNote: ActivityRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first" };
-  const secondNote: ActivityRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "second" };
+  const firstNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first" };
+  const secondNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "second" };
   const rows = stream.observe([
     observed(running(first, [firstBase, firstNote]), [firstBase, firstNote]),
     observed(running(second, [secondBase, secondNote]), [secondBase, secondNote]),
@@ -501,7 +511,7 @@ test("plural wait falls back to a distinguishing identity suffix for equal final
 });
 
 test("an open turn settles old says on the rail and only its trailing say flushes unresolved", () => {
-  const oldSay: ActivityRow = {
+  const oldSay: OpenSnapshotRow = {
     kind: "said",
     sequence: 2,
     turnSequence: 1,
@@ -511,7 +521,7 @@ test("an open turn settles old says on the rail and only its trailing say flushe
   const tools = [3, 4, 5, 6].map((sequence) =>
     completedTool(sequence, "bash", { kind: "run", command: `after-say-${sequence}` }),
   );
-  const trailingSay: ActivityRow = {
+  const trailingSay: OpenSnapshotRow = {
     kind: "said",
     sequence: 7,
     turnSequence: 1,
@@ -570,14 +580,14 @@ test("plural wait closes settled said rows but leaves in-flight said rows open",
     observed(running(second, [secondBase]), [secondBase]),
   ]);
 
-  const inFlight: Extract<ActivityRow, { kind: "said" }> = {
+  const inFlight: IdleSnapshotRow = {
     kind: "said",
     sequence: 2,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
     text: "in-flight ".repeat(30),
   };
-  const complete: Extract<ActivityRow, { kind: "said" }> = {
+  const complete: IdleSnapshotRow = {
     kind: "said",
     sequence: 2,
     turnSequence: 1,
