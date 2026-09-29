@@ -64,11 +64,15 @@ retained coordination residue without claiming a world-wide transaction.
 
 Each domain-state-to-mark mapping and refusal receipt assembly has one
 definition site; render surfaces consume that shared definition and never
-re-derive it. `●` asserts liveness and belongs only to a redrawable live frame;
-settled intermediate activity uses the plain `│` rail, including successful
-non-final tool and Tell settlements; a successful final row uses `✓` at most
-once per stream, failures use `!`, and unresolved activity closes as `?`. History
-and status never contain `●`.
+re-derive it. The checkbox trio `[ ]`, `[✓]`, and `[×]` belongs only to state
+surfaces: it names the current requirement fill-state, including delivery and
+gates against the current candidate. Event surfaces such as history, timelines,
+and receipts use bare marks instead; in a causal history skeleton the mark
+itself carries the verdict, without a satisfied/unsatisfied word. `✓` marks a
+successfully completed action row (a tool settlement or an answered outcome);
+`│` is the neutral rail for voice rows and told Tells; `●` asserts liveness and
+belongs only to a redrawable live frame; `!` is failure; `?` is unresolved
+activity. History and status never contain `●`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence

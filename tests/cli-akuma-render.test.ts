@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAkumaStatus, type ActivityRow, type AkumaStatus } from "../src/akuma/akuma.js";
 import {
+  activityStream,
   associatedIdentity,
   callObservationStream,
   DEFAULT_CONTEXT,
@@ -24,7 +25,7 @@ import {
 import { parseArgv } from "../src/cli/parse.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkuId } from "../src/akuma/identity.js";
-import { displayColumns } from "../src/cli/render/terminal.js";
+import { displayColumns, padToDisplay } from "../src/cli/render/terminal.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
   activeTool,
@@ -67,11 +68,9 @@ test("status frame closes its timeline before references and ends at cwd", () =>
     allowed: [],
     timeline: openAkumaSnapshot([{ kind: "row", row: note }], [reportedFileChange(1, "update", "/work/file")]),
   });
-  const lines = snapshotText(
-    { status, contract: { kind: "failed", diagnostic: "lookup refused" } },
-    DEFAULT_CONTEXT,
-    { showAllowed: true },
-  ).split("\n");
+  const lines = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, DEFAULT_CONTEXT, {
+    showAllowed: true,
+  }).split("\n");
   assert.equal(lines[0], id);
   assert.equal(lines[1], frameRule([id]));
   assert.match(lines[2]!, /note +edited$/u);
@@ -214,12 +213,21 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   );
   assert.match(
     tellText(
-      { ...ordinary, result: { ...ordinary.result, tell: { ...ordinary.result.tell, wake: { kind: "failed", diagnostic: "wake refused" } } } },
+      {
+        ...ordinary,
+        result: {
+          ...ordinary.result,
+          tell: { ...ordinary.result.tell, wake: { kind: "failed", diagnostic: "wake refused" } },
+        },
+      },
       context,
     ),
     /^\d{2}:\d{2} ! tell +"continue"\n! tell delivery failed · wake refused$/mu,
   );
-  assert.equal(killResultText(result.result.akuma, "killed"), `${result.result.akuma}\n${frameRule([result.result.akuma])}\n\n✓ killed`);
+  assert.equal(
+    killResultText(result.result.akuma, "killed"),
+    `${result.result.akuma}\n${frameRule([result.result.akuma])}\n\n✓ killed`,
+  );
   assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
   assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
 
@@ -252,11 +260,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
     wake: { kind: "told" as const },
   };
   const status = running(id, [tell.row]);
-  const call = callObservationStream(
-    context,
-    { id, contract: { kind: "none" }, facts: [] },
-    { now: () => startedAt },
-  );
+  const call = callObservationStream(context, { id, contract: { kind: "none" }, facts: [] }, { now: () => startedAt });
   const callFrame = call.observe({ status, rows: [tell.row] });
   const callConclusion = call.conclude({
     kind: "observed",
@@ -340,7 +344,9 @@ test("ask activity starts at admission and includes a later settlement of an old
   assert.match(transcript, /✓ answered\n\n$/u);
   assert.equal(
     akumaRawAnswer({
-      kind: "akuma", action: "ask", body: "new question",
+      kind: "akuma",
+      action: "ask",
+      body: "new question",
       result: { akuma: id, tell, observation: { reason: "answered", answer: "exact\nanswer" } },
     }),
     "exact\nanswer",
@@ -353,8 +359,13 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
   const tell = {
     admission: { fact: "recorded" as const, tellId: "tell-ask" },
     row: {
-      kind: "tell" as const, sequence: 4, at, tellId: "tell-ask", text: "question",
-      state: "told" as const, deliveries: [],
+      kind: "tell" as const,
+      sequence: 4,
+      at,
+      tellId: "tell-ask",
+      text: "question",
+      state: "told" as const,
+      deliveries: [],
     },
     wake: { kind: "told" as const },
   };
@@ -363,14 +374,17 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
   const opening: ActivityRow = { kind: "call", sequence: 6, turnSequence: 2, at, text: "next turn" };
   const afterOpening: ActivityRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
   const live: ActivityRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
-  const status = (rows: readonly ActivityRow[]) => parseAkumaStatus({
-    id, life: "running", allowed: [],
-    timeline: {
-      ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
-      turn: { kind: "turn" as const, sequence: 6, turnSequence: 2, bodySequence: 2, at },
-      openingSequence: 6,
-    },
-  });
+  const status = (rows: readonly ActivityRow[]) =>
+    parseAkumaStatus({
+      id,
+      life: "running",
+      allowed: [],
+      timeline: {
+        ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
+        turn: { kind: "turn" as const, sequence: 6, turnSequence: 2, bodySequence: 2, at },
+        openingSequence: 6,
+      },
+    });
   const rows = [earlier, tell.row, beforeOpening, opening, afterOpening];
   const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
   const receipt = stream.admitted(tell, id);
@@ -483,6 +497,60 @@ test("plural wait falls back to a distinguishing identity suffix for equal final
   assert.match(rows[1]!, /^      two\/deadbeef │ note   second$/u);
 });
 
+test("an open turn settles old says on the rail and only its trailing say flushes unresolved", () => {
+  const oldSay: ActivityRow = {
+    kind: "said",
+    sequence: 2,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "old settled say",
+  };
+  const tool = completedTool(3, "bash", { kind: "run", command: "after the old say" });
+  const trailingSay: ActivityRow = {
+    kind: "said",
+    sequence: 4,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    text: "still streaming",
+  };
+  const rows = [oldSay, tool, trailingSay];
+  const stream = activityStream({ columns: 80, color: false });
+  const settled = stream({
+    snapshot: openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
+    rows,
+  });
+  assert.ok(
+    settled.some((line) => line.includes("old settled say") && line.includes("│")),
+    "a say with a successor settles on the rail",
+  );
+  assert.ok(!settled.some((line) => line.includes("?")), "a settled say never prints as unresolved");
+  const live = stream.frame();
+  assert.ok(!live.some((line) => line.includes("old settled say")), "a settled say never enters the live frame");
+  const liveSay = live.find((line) => line.includes(" say    "))!;
+  assert.match(liveSay, /● say/u, "only the open turn's trailing say stays live");
+  assert.ok(liveSay.includes("still streaming"), "the trailing say's text is live");
+  assert.ok(!liveSay.includes("”"), "the trailing say's quote remains open");
+  const flushed = stream.flush();
+  assert.ok(
+    flushed.some((line) => line.includes("still streaming") && line.includes("?")),
+    "only the trailing say flushes unresolved",
+  );
+  assert.ok(!flushed.some((line) => line.includes("old settled say")), "a settled say is never flushed");
+});
+
+test("display-width padding measures cells, so a wide emoji alias cannot skew its column", () => {
+  assert.equal(displayColumns("🕷️"), 2);
+  assert.equal(padToDisplay("🕷️", 4), "🕷️  ");
+  assert.equal(displayColumns(padToDisplay("🕷️", 4)), 4);
+  assert.equal(padToDisplay("@ab", 4), "@ab ");
+  const column = (label: string): string => `${padToDisplay(label, 4)}|`;
+  assert.equal(
+    displayColumns(column("🕷️")),
+    displayColumns(column("ab")),
+    "a wide emoji and a two-cell name open the next column at the same place",
+  );
+});
+
 test("plural wait closes settled said rows but leaves in-flight said rows open", () => {
   const first = "aku/worker/deadbeef";
   const second = "aku/worker/facefeed";
@@ -565,21 +633,33 @@ test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
     id: "aku/worker/abcd1234",
     life: "running",
     allowed: [],
-    timeline: openAkumaSnapshot([], [
-      reportedFileChange(1, "update", "/work/unknown"),
-      { ...reportedFileChange(2, "update", "/work/known"), diffstat: { added: 3, removed: 1 } },
-    ]),
+    timeline: openAkumaSnapshot(
+      [],
+      [
+        reportedFileChange(1, "update", "/work/unknown"),
+        { ...reportedFileChange(2, "update", "/work/known"), diffstat: { added: 3, removed: 1 } },
+      ],
+    ),
   });
   const text = snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT);
-  assert.ok(text.split("\n").some((line) => /^  ~ +\/work\/unknown$/u.test(line)), text);
-  assert.ok(text.split("\n").some((line) => /^  \+3 -1 +\/work\/known$/u.test(line)), text);
+  assert.ok(
+    text.split("\n").some((line) => /^  ~ +\/work\/unknown$/u.test(line)),
+    text,
+  );
+  assert.ok(
+    text.split("\n").some((line) => /^  \+3 -1 +\/work\/known$/u.test(line)),
+    text,
+  );
   assert.doesNotMatch(text, /\+\? -\?/u);
 });
 
 test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
   const lines = snapshotActivityLines(
     openAkumaSnapshot([
-      { kind: "row", row: completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }) },
+      {
+        kind: "row",
+        row: completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }),
+      },
       {
         kind: "row",
         row: completedTool(2, "edit", {

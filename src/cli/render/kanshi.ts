@@ -2,11 +2,12 @@ import type { ContractKanshiRow, KanshiReport } from "../../kanshi/index.js";
 import {
   abbreviateGitIds,
   afterWording,
-  contractBall,
+  progressStrip,
   displayGitId,
   gateFact,
   gitIdsInRow,
   mergeSummary,
+  targetMovementFacts,
   verificationFact,
 } from "./contract-observation.js";
 import {
@@ -195,12 +196,19 @@ function renderSelectedContractRow(
         context,
       ),
     );
-    lines.push(...semanticBlock("ball", [contractBall(row, abbreviations)], context));
+    lines.push(...semanticBlock("ball", [progressStrip(row)], context));
     const akuma = linkedAkumaSummary(row, report);
     if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
     if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
   } else {
-    lines.push(...semanticBlock("ball", [contractBall(row, abbreviations)], context));
+    lines.push(...semanticBlock("ball", [progressStrip(row)], context));
+    lines.push(
+      ...semanticBlock(
+        "prerequisites",
+        row.after.filter((edge) => edge.endpoint.kind !== "claimed").map(afterWording),
+        context,
+      ),
+    );
     if (row.delivery !== null) {
       lines.push(
         ...semanticBlock(
@@ -208,6 +216,7 @@ function renderSelectedContractRow(
           [
             `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
             `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
+            ...(row.targetObservation?.drift === true ? targetMovementFacts(row, abbreviations) : []),
           ],
           context,
         ),
@@ -248,7 +257,7 @@ function renderWorldContractRow(
           .filter((fact) => !fact.startsWith("  "))
           .slice(0, 1)
       : [
-          contractBall(row, abbreviations),
+          progressStrip(row),
           ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
           ...liveAlarms(row, report),
         ];
@@ -256,7 +265,7 @@ function renderWorldContractRow(
   return entityLines({
     mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
     identity: row.id,
-    state: `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`,
+    state: formatAge(row.phaseAt, report.observedAt),
     title,
     facts: contractFacts,
     context,

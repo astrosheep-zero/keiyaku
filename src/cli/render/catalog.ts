@@ -1,5 +1,5 @@
 import type { Catalog } from "../catalog.js";
-import { abbreviateGitIds, contractBall, displayGitId, gitIdsInRow } from "./contract-observation.js";
+import { abbreviateGitIds, displayGitId, gitIdsInRow, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
@@ -59,8 +59,8 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
           ? row.abandonNote
           : undefined;
     const lines = [
-      `${contractMark(row)} ${safeText(row.id)} · ${row.phase} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
-      `  ${terminal ? outcome : contractBall(row, abbreviations)}`,
+      `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
+      `  ${terminal ? outcome : progressStrip(row)}`,
       ...(testimony === undefined
         ? []
         : renderBoundedPayload({

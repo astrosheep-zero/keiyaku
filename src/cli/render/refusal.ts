@@ -1,4 +1,5 @@
 import type { BindDraftReceipt, RefusedResult } from "../result.js";
+import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
 import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -170,10 +171,28 @@ export function renderRefusalFacts(
   ).map((line) => `${indent}${line}`);
 }
 
+function refusalTitle(verb: string): string {
+  return `× ${verb} refused`;
+}
+
+/**
+ * The one refusal receipt assembly: a denied-verdict title, a labeled reason, labeled facts, and the
+ * applicable acceptance grammar. Typed refusals and bare command refusals both render through here.
+ */
+export function renderStructuredRefusal(
+  verb: string,
+  reason: string,
+  facts: readonly string[] = [],
+  guide?: CliUsageGuide,
+): string {
+  const lines = [refusalTitle(verb), `  reason  ${safeText(reason)}`, ...facts.map((fact) => `  ${safeText(fact)}`)];
+  if (guide !== undefined) lines.push(...usageAcceptanceLines(guide));
+  return lines.join("\n");
+}
+
 export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const base = `× ${result.verb} refused`;
-  const lines = [base];
+  const lines = [refusalTitle(result.verb)];
   if (result.contract !== undefined) lines.push(`  contract  ${safeText(result.contract)}`);
   if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
     lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "  ", columns, result.contract));

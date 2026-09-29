@@ -264,7 +264,7 @@ export type RegionResult = Readonly<{ kind: "region"; region: Section<RegionRead
 
 export type CatalogResult = Readonly<{ kind: "catalog"; catalog: Catalog }>;
 
-export type ContractHistoryResult = Readonly<{ kind: "contract-history"; history: ContractHistory }>;
+export type ContractHistoryResult = Readonly<{ kind: "contract-history"; history: ContractHistory; full: boolean }>;
 export type NukeInvocationResult = Readonly<{ kind: "nuke"; result: NukeResult }>;
 
 export type InvocationResult =

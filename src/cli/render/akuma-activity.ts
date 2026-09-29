@@ -12,6 +12,7 @@ import {
   displayColumns,
   renderBoundedTextBlock,
   renderBoundedPayload,
+  padToDisplay,
   safeText,
   takeDisplayColumns,
   takeDisplayColumnsFromEnd,
@@ -107,7 +108,7 @@ function mark(row: RenderRow, live = false): "│" | "●" | "⧗" | "✓" | "!"
   if (row.kind === "tool") {
     if (row.state === "active") return live ? "●" : "?";
     if (row.state === "unsettled") return "?";
-    return row.state.status === "ok" ? "│" : "!";
+    return row.state.status === "ok" ? "✓" : "!";
   }
   return "│";
 }
@@ -171,12 +172,6 @@ function actionCell(head: string, verb: string, columns: number): string {
 
 function continuationPrefix(): string {
   return " ".repeat(TIME_WIDTH) + " │ " + " ".repeat(VERB_WIDTH) + " ";
-}
-
-/** Pad to a terminal-column width; raw string length is never the measuring stick. */
-function padToDisplay(text: string, width: number): string {
-  const remaining = width - displayColumns(text);
-  return remaining > 0 ? `${text}${" ".repeat(remaining)}` : text;
 }
 
 /**
@@ -606,8 +601,17 @@ function renderStreamRow(
   else state.previousClock = at;
 }
 
+/**
+ * A say is in-flight only while it is the newest row of the open turn: it may still be streaming, so it
+ * stays in the redrawable frame. A say with any successor row is settled evidence and renders on the rail.
+ */
 function inFlightSay(activity: RenderedActivity, row: RenderRow): boolean {
-  return activity.snapshot.kind === "open" && row.kind === "said";
+  if (activity.snapshot.kind !== "open" || row.kind !== "said") return false;
+  let newest: RenderRow | undefined;
+  for (const candidate of activity.rows) {
+    if (newest === undefined || candidate.sequence > newest.sequence) newest = candidate;
+  }
+  return newest !== undefined && newest.sequence === row.sequence;
 }
 
 function coalesceDeferredGaps(state: ActivityStreamState): void {
@@ -1423,11 +1427,11 @@ function snapshotCore(
 }
 
 function snapshotConclusion(status: AkumaObservation["status"]): string {
-  const entries = status.timeline.entries;
-  const last =
-    status.timeline.kind === "idle" && status.timeline.outcome !== undefined
-      ? status.timeline.outcome
-      : [...entries].reverse().find((entry) => entry.kind === "row")?.row;
+  const timeline = status.timeline;
+  // The outcome row (`✓ answer` / `! error`) is already the ending; a closer would be a second mark
+  // carrying no new information, so it is absent exactly then.
+  if (timeline.kind === "idle" && timeline.outcome !== undefined) return "";
+  const last = [...timeline.entries].reverse().find((entry) => entry.kind === "row")?.row;
   const { mark, verb } = conclusionMarkVerb(status, "life");
   return `${last === undefined ? "unknown" : clock(last.at)} ${mark} ${verb}`;
 }
@@ -1439,9 +1443,10 @@ export function snapshotText(
 ): string {
   const core = snapshotCore(view, context, options);
   const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
+  const conclusion = snapshotConclusion(view.status);
   return [
     ...core.lines,
-    snapshotConclusion(view.status),
+    ...(conclusion.length === 0 ? [] : [conclusion]),
     ...(taskContext.length > 0 ? ["", ...taskContext] : []),
     ...(view.status.timeline.reportedChanges.length > 0 || view.status.timeline.reportedChangesOmitted > 0 ? [""] : []),
     ...renderReportedChangeLines(view.status.timeline),

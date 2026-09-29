@@ -225,7 +225,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
     workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/history" },
     events: facts.map((fact) => ({ source: "journal", fact })),
   };
-  const output = renderText({ kind: "contract-history", history });
+  const output = renderText({ kind: "contract-history", history, full: true });
   assert.equal(
     output,
     [
@@ -298,10 +298,7 @@ test("terminal catalogue and Kanshi cards do not repeat unattached verification"
     tasks: { kind: "absent" },
     akuma: { kind: "absent" },
   };
-  assert.doesNotMatch(
-    renderKanshiText(report, { columns: 80, color: false }, "contract"),
-    /verification|candidate/u,
-  );
+  assert.doesNotMatch(renderKanshiText(report, { columns: 80, color: false }, "contract"), /verification|candidate/u);
 
   const bareRow = {
     ...row,
@@ -447,7 +444,7 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   );
   const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
   const text = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(text, /│ run    \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
+  assert.match(text, /✓ run    \$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
   assert.doesNotMatch(text, /activity "|\bdocument\b|please|next|then/u);
   assert.doesNotMatch(text, /──|tasks \d|changes \d|came back|STILL RUNNING|killed/u);
   for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))

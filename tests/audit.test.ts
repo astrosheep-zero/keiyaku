@@ -14,6 +14,8 @@ import { admitDeliveryOperation } from "../src/protocol/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
+import { renderAcceptedAudit } from "../src/cli/render/audit.js";
+import type { AcceptedAuditResult } from "../src/cli/result.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
@@ -135,10 +137,10 @@ test("audit without Verification still returns an accepted ready candidate", asy
       }),
     }),
   );
-  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
+  assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, observed.state!.head);
-  assert.ok(result.value.candidate.kind === "ready", "expected result.value.candidate.kind = \"ready\"");
+  assert.ok(result.value.candidate.kind === "ready", 'expected result.value.candidate.kind = "ready"');
   assert.equal(result.value.candidate.identity.method, "squash");
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "undeclared");
@@ -180,12 +182,51 @@ test("Verification reuse reads the durable current testimony, not a caller's sta
 // Test declaration admission at its owner, without binding two complete worktrees.
 test("verified terms require a declaration at both unbound and identified boundaries", () => {
   for (const id of [undefined, contractId("kei/verify-boundary")]) {
-    assert.deepEqual(prepareVerificationDeclaration({ gates: [gate("verified")], definition: null, ...(id === undefined ? {} : { contractId: id }) }), {
-      kind: "refused",
-      refusal: { kind: "verification-declaration-invalid", ...(id === undefined ? {} : { contractId: id }) },
-    });
-    assert.deepEqual(prepareVerificationDeclaration({ gates: [gate("reviewed")], definition: null, ...(id === undefined ? {} : { contractId: id }) }), {
-      kind: "prepared", data: null,
-    });
+    assert.deepEqual(
+      prepareVerificationDeclaration({
+        gates: [gate("verified")],
+        definition: null,
+        ...(id === undefined ? {} : { contractId: id }),
+      }),
+      {
+        kind: "refused",
+        refusal: { kind: "verification-declaration-invalid", ...(id === undefined ? {} : { contractId: id }) },
+      },
+    );
+    assert.deepEqual(
+      prepareVerificationDeclaration({
+        gates: [gate("reviewed")],
+        definition: null,
+        ...(id === undefined ? {} : { contractId: id }),
+      }),
+      {
+        kind: "prepared",
+        data: null,
+      },
+    );
   }
+});
+
+test("audit target lag is absent at zero and counted when the target moved", () => {
+  const report = (behind: number): AcceptedAuditResult =>
+    ({
+      kind: "accepted",
+      verb: "audit",
+      contract: contractId("kei/audit-lag"),
+      report: {
+        candidate: { kind: "blocked", refusal: { kind: "verification-declaration-invalid" } },
+        verification: { kind: "not-run" },
+        target: { kind: "placeable", ref: "refs/heads/main", head: "a".repeat(40) },
+        targetLag: { kind: "counted", behind },
+      },
+      cleanup: [],
+      executionStops: [],
+    }) as unknown as AcceptedAuditResult;
+
+  const unmoved = renderAcceptedAudit(report(0), { columns: 120, color: false });
+  assert.match(unmoved, /main @ aaaaaaa/u);
+  assert.doesNotMatch(unmoved, /behind 0/u, "zero lag is an absent fact, not a printed zero");
+
+  const moved = renderAcceptedAudit(report(5), { columns: 120, color: false });
+  assert.match(moved, /behind 5/u, "a moved target still names its lag");
 });

@@ -31,9 +31,17 @@ export type ParsedAkumaCommand = Output &
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
     | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
     | (Readonly<{ command: "ask"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
-    | (Readonly<{ command: "history"; last: boolean; id?: string; before?: number; since?: number; limit?: number }> &
+    | (Readonly<{
+        command: "history";
+        last: boolean;
+        id?: string;
+        before?: number;
+        since?: number;
+        limit?: number;
+        full?: never;
+      }> &
         Addressed)
-    | Readonly<{ command: "history"; contract: string }>
+    | Readonly<{ command: "history"; contract: string; full: boolean }>
     | (Readonly<{ command: "fork"; at: string }> & Addressed)
   );
 
@@ -131,9 +139,17 @@ const AKUMA_COMMAND_SPECS = {
   history: {
     arity: 1,
     stdin: false,
-    flags: { id: "value", before: "value", since: "value", limit: "value", last: "boolean", json: "boolean" },
+    flags: {
+      id: "value",
+      before: "value",
+      since: "value",
+      limit: "value",
+      last: "boolean",
+      full: "boolean",
+      json: "boolean",
+    },
     usage:
-      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]\nhistory <kei/...>",
+      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]\nhistory <kei/...> [--full]",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
       "--id reads the exact retained answered turn (turn/<number>).",
@@ -141,6 +157,7 @@ const AKUMA_COMMAND_SPECS = {
       "--limit bounds page size (default 12); without --since, the latest rows are shown.",
       "With --since, paging starts at the earliest newer rows.",
       "--last returns only the most recent answer, if one exists; it is not a history page.",
+      "Contract history defaults to a causal skeleton; --full prints every event with complete fields.",
     ].join("\n"),
   },
   fork: {
@@ -314,7 +331,7 @@ function parseHistory(
     if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
       fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
     }
-    return { command: "history", contract: selector, output };
+    return { command: "history", contract: selector, full: flags.full === true, output };
   }
   return parseAkumaHistory(selector, flags, output, fail);
 }
@@ -325,6 +342,7 @@ function parseAkumaHistory(
   output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "history"; akuma: string }> {
+  if (flags.full === true) fail("history --full is only valid for kei/...");
   const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
   if (flags.before !== undefined && flags.since !== undefined)
     fail("history --before and --since are mutually exclusive");

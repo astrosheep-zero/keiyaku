@@ -60,13 +60,18 @@ export function renderUsageMessage(
   if (guide.given !== undefined) {
     lines.push(`  given  ${guide.given}`);
   }
-  const accepts = guide.accepts.split("\n");
-  lines.push(`  accepts  ${accepts[0]!}`);
-  for (const part of accepts.slice(1)) {
-    lines.push(`           ${part}`);
-  }
-  lines.push(`  help  ${guide.help}`);
+  lines.push(...usageAcceptanceLines(guide));
   return lines.join("\n");
+}
+
+/** The acceptance grammar tail shared by usage and substantive refusals. */
+export function usageAcceptanceLines(guide: CliUsageGuide): readonly string[] {
+  const accepts = guide.accepts.split("\n");
+  return [
+    `  accepts  ${accepts[0]!}`,
+    ...accepts.slice(1).map((part) => `           ${part}`),
+    `  help  ${guide.help}`,
+  ];
 }
 
 export class CliUsageError extends Error {

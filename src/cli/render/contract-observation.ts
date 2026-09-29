@@ -12,6 +12,26 @@ function shortGitId(value: string): string {
   return GIT_OBJECT_ID.test(value) ? value.slice(0, 7) : value;
 }
 
+export function gateDisplayName(gate: string): string {
+  if (gate === "reviewed") return "review";
+  if (gate === "verified") return "verification";
+  return gate;
+}
+
+function progressChip(mark: " " | "✓" | "×", label: string): string {
+  return `[${mark}] ${label}`;
+}
+
+/** The one readable projection of delivery and current-candidate gate progress. */
+export function progressStrip(row: Pick<ContractRow, "delivery" | "gates">): string {
+  const delivery = progressChip(row.delivery === null ? " " : "✓", "delivery");
+  const gates = row.gates.reports.map((report) => {
+    const mark = report.current.kind !== "attested" ? " " : report.current.verdict === "satisfied" ? "✓" : "×";
+    return progressChip(mark, gateDisplayName(report.gate));
+  });
+  return [delivery, ...gates].join("  ");
+}
+
 export function gateGlyph(report: ContractGateReport): string {
   if (report.current.kind === "stale") return "!";
   if (report.current.kind === "missing") return "○";
@@ -19,7 +39,7 @@ export function gateGlyph(report: ContractGateReport): string {
 }
 
 export function gateFact(report: ContractGateReport): string {
-  return `${gateGlyph(report)} ${report.gate}${report.current.kind === "stale" ? " · stale" : ""}`;
+  return `${gateGlyph(report)} ${gateDisplayName(report.gate)}${report.current.kind === "stale" ? " · stale" : ""}`;
 }
 
 export function candidateFact(delivery: ContractRow["delivery"]): string {
@@ -73,23 +93,6 @@ export function mergeSummary(observation: ContractWorkspaceObservation): string 
   if (observation.merge === null) return undefined;
   const count = observation.merge.unmergedPaths.length;
   return count > 0 ? `merge conflict in worktree (${count} paths)` : "merge in progress (resolution staged)";
-}
-
-export function missingGates(row: ContractRow): readonly string[] {
-  return row.gates.reports
-    .filter((gate) => gate.current.kind !== "attested" || gate.current.verdict !== "satisfied")
-    .map(gateFact);
-}
-
-export function contractBall(row: ContractRow, abbreviations: ReadonlyMap<string, string>): string {
-  if (row.phase === "bound") return "awaiting delivery";
-  if (row.verification?.kind === "unrecorded") return "awaiting verification";
-  const missing = missingGates(row);
-  if (missing.length > 0) return `awaiting gates  ${missing.join("  ")}`;
-  const blockers = row.after.filter((edge) => edge.endpoint.kind !== "claimed");
-  if (blockers.length > 0) return `awaiting prerequisites  ${blockers.map(afterWording).join(" · ")}`;
-  if (row.targetObservation?.drift === true) return targetMovementFacts(row, abbreviations)[0] ?? "target moved";
-  return "awaiting placement";
 }
 
 export function abbreviateGitIds(ids: readonly string[]): ReadonlyMap<string, string> {

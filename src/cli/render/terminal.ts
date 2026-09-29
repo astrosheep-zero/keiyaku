@@ -121,6 +121,12 @@ export function truncateDisplayText(value: string, maximum: number): string {
   return `${takeDisplayColumns(clean, maximum - 1).text.replace(/…+$/u, "")}…`;
 }
 
+/** Pad text to a terminal-column width; raw string length is never the measuring stick. */
+export function padToDisplay(text: string, width: number): string {
+  const remaining = width - displayColumns(text);
+  return remaining > 0 ? `${text}${" ".repeat(remaining)}` : text;
+}
+
 export function truncateMiddleDisplayText(value: string, maximum: number): string {
   const clean = safeText(value);
   if (displayColumns(clean) <= maximum) return clean;
@@ -293,6 +299,7 @@ export function renderOpaqueBlock(value: string, indent: string, columns: number
           truncated = true;
           break;
         }
+        if (lines.at(-1) === indent.trimEnd()) continue;
         lines.push(indent.trimEnd());
         continue;
       }

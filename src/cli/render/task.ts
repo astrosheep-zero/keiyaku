@@ -25,14 +25,7 @@ import type { ParsedTaskCommand } from "../commands/task.js";
 import { outcomeLines, refusalLines, receiptPayload, receiptRow } from "./receipt.js";
 import { taskMark } from "./marks.js";
 export { taskMark } from "./marks.js";
-import {
-  DEFAULT_CLI_COLUMNS,
-  displayColumns,
-  emptyCatalogue,
-  renderTextBlock,
-  safeText,
-  type TextRenderContext,
-} from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, displayColumns, emptyCatalogue, safeText, type TextRenderContext } from "./terminal.js";
 
 type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
 type TaskFailure =
@@ -86,7 +79,27 @@ function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly
   const title = safeText(entity.title);
   const inline = `${scan} — ${title}`;
   if (displayColumns(inline) <= columns) return [inline];
-  return [`${scan} —`, ...renderTextBlock(title, `${indent}  `, columns)];
+  return [scan, ...dashTitleLines(title, `${indent}  `, columns)];
+}
+
+/** Wrap `— <title>` as one unit: the dash never dangles alone at a line end. */
+function dashTitleLines(title: string, indent: string, columns: number): readonly string[] {
+  const words = title
+    .trim()
+    .split(/\s+/u)
+    .filter((word) => word.length > 0);
+  const unit = words.length === 0 ? [`—`] : [`— ${words[0]!}`, ...words.slice(1)];
+  const lines: string[] = [];
+  let current = indent;
+  for (const word of unit) {
+    const candidate = current === indent ? `${indent}${word}` : `${current} ${word}`;
+    if (current !== indent && displayColumns(candidate) > columns) {
+      lines.push(current);
+      current = `${indent}${word}`;
+    } else current = candidate;
+  }
+  lines.push(current);
+  return lines;
 }
 
 function stateEntity(task: TaskView | (TaskRef & { priority?: number | null })): TaskEntity {

@@ -63,10 +63,7 @@ function builtCli(): string {
   // The compile seam links .test-build/src to the real build/src, so a compiled test
   // and a source test resolve the same built CLI through one relative path.
   return fileURLToPath(
-    new URL(
-      import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../build/src/cli/index.js",
-      import.meta.url,
-    ),
+    new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../build/src/cli/index.js", import.meta.url),
   );
 }
 
@@ -98,11 +95,10 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   const added = runCli(root, ["task", "add", "Title", "--body", "x".repeat(500_000), "--json"]);
   assert.equal(added.status, 0, added.stderr ?? added.error?.message);
   const id = JSON.parse(added.stdout).value.id as string;
-  const child = spawn(
-    process.execPath,
-    [builtCli(), "task", "show", id, "--json"],
-    { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
-  );
+  const child = spawn(process.execPath, [builtCli(), "task", "show", id, "--json"], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let stderr = "";
   child.stderr?.setEncoding("utf8").on("data", (chunk) => (stderr += chunk));
   // Register settlement before the blocked-write window: a child that exits early
@@ -243,38 +239,17 @@ test("audit show-diff preserves an actual candidate diff", () => {
     "### candidate",
     "test",
   ].join("\n");
-  const bound = spawnSync(
-    process.execPath,
-    [
-      builtCli(),
-      "-C",
-      repository.path,
-      "bind",
-      "--gates",
-      "",
-      "-",
-      "--json",
-    ],
-    {
-      input: markdown,
-      encoding: "utf8",
-    },
-  );
+  const bound = spawnSync(process.execPath, [builtCli(), "-C", repository.path, "bind", "--gates", "", "-", "--json"], {
+    input: markdown,
+    encoding: "utf8",
+  });
   assert.equal(bound.status, 0, bound.stderr);
   const contract = JSON.parse(bound.stdout).contract as string;
   const binding = JSON.parse(bound.stdout);
   writeFileSync(join(binding.workspace.path, "candidate.txt"), "candidate\n");
   const audited = spawnSync(
     process.execPath,
-    [
-      builtCli(),
-      "-C",
-      repository.path,
-      "audit",
-      contract,
-      "--include-dirty",
-      "--show-diff",
-    ],
+    [builtCli(), "-C", repository.path, "audit", contract, "--include-dirty", "--show-diff"],
     {
       encoding: "utf8",
     },
@@ -292,7 +267,17 @@ test("a local status on an absent complete id reports one caller-facing fact", (
   const result = runCli(root, ["status", id]);
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
-  assert.equal(result.stderr, `× Akuma not found  ${id}\n`);
+  assert.equal(
+    result.stderr,
+    [
+      "× status refused",
+      "  reason  Akuma not found",
+      `  id  ${id}`,
+      "  accepts  keiyaku status [<contract>|@name|<aku/...>]...",
+      "  help  keiyaku status --help",
+      "",
+    ].join("\n"),
+  );
 });
 
 test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
@@ -302,19 +287,40 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
   const refusals: readonly (readonly [unknown, string])[] = [
     [
       new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
-      `× Akuma alias not found  @missing`,
+      [
+        "× wait refused",
+        "  reason  Akuma alias not found",
+        "  alias  @missing",
+        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
+        "  help  keiyaku wait --help",
+      ].join("\n"),
     ],
     [
       new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }),
-      `× invalid Akuma address  aku/intern/nope`,
+      [
+        "× wait refused",
+        "  reason  invalid Akuma address",
+        "  selector  aku/intern/nope",
+        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
+        "  help  keiyaku wait --help",
+      ].join("\n"),
     ],
     [
       new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as never }),
-      `× Akuma not in this World  ${id}`,
+      [
+        "× wait refused",
+        "  reason  Akuma not in this World",
+        `  ids  ${id}`,
+        "  world  /private/world",
+        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
+        "  help  keiyaku wait --help",
+      ].join("\n"),
     ],
   ];
   for (const [error, body] of refusals) {
-    assert.deepEqual(await akumaFailureProjection(error, parsed.command), { body, exitCode: 1 });
+    const projected = await akumaFailureProjection(error, parsed.command);
+    assert.deepEqual(projected, { body, exitCode: 1 });
+    assert.match(projected!.body, /^× wait refused\n  reason  /u);
   }
 });
 
@@ -413,11 +419,17 @@ test("malformed arc document is a substantive refusal with the full grammar", ()
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const markdown = [
     "# Arc refusal",
-    "## Context", "Context.",
-    "## Objective", "Objective.",
-    "## Design", "Design.",
-    "## Region", "src/**",
-    "## Criteria", "### Works", "Works.",
+    "## Context",
+    "Context.",
+    "## Objective",
+    "Objective.",
+    "## Design",
+    "Design.",
+    "## Region",
+    "src/**",
+    "## Criteria",
+    "### Works",
+    "Works.",
   ].join("\n");
   const bound = runCli(repository.path, ["bind", "--gates", "", "--json", "-"], markdown);
   assert.equal(bound.status, 0, bound.stdout + bound.stderr);

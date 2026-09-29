@@ -439,12 +439,16 @@ async function invokeRegion(
   };
 }
 
-async function invokeContractHistory(repo: Repo | undefined, contract: string): Promise<InvocationResult> {
+async function invokeContractHistory(
+  repo: Repo | undefined,
+  contract: string,
+  full: boolean,
+): Promise<InvocationResult> {
   if (repo === undefined) throw new Error("history kei/... requires a resolved Repo");
   const { contractFromInput } = await import("./selectors.js");
   const selected = contractFromInput(repo, contract);
   try {
-    return { kind: "contract-history" as const, history: await selected.contract.history() };
+    return { kind: "contract-history" as const, history: await selected.contract.history(), full };
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
@@ -554,7 +558,8 @@ async function invokeParsed(
   if (parsed.command === "settings") return { kind: "settings", value: await settingsAt(world ?? undefined, home) };
   if (parsed.command === "nuke") return await (await import("./commands/nuke.js")).invokeNuke(parsed, world);
   if (parsed.command === "task") return await invokeTask(parsed, runtime, edge, execution, coordinates);
-  if (parsed.command === "history" && "contract" in parsed) return await invokeContractHistory(repo, parsed.contract);
+  if (parsed.command === "history" && "contract" in parsed)
+    return await invokeContractHistory(repo, parsed.contract, parsed.full);
   if (isParsedAkumaCommand(parsed))
     return await invokeParsedAkuma({
       parsed,

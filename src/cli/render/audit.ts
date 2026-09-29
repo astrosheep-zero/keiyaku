@@ -132,7 +132,7 @@ function targetLines(
       [
         { text: "placeable" },
         {
-          text: `${target.ref.replace(/^refs\/heads\//u, "")} @ ${displayGitId(target.head, abbreviations)}${report.targetLag?.kind === "counted" ? ` · behind ${report.targetLag.behind}` : report.targetLag?.kind === "unknown" ? " · behind unknown" : ""}`,
+          text: `${target.ref.replace(/^refs\/heads\//u, "")} @ ${displayGitId(target.head, abbreviations)}${report.targetLag?.kind === "counted" && report.targetLag.behind > 0 ? ` · behind ${report.targetLag.behind}` : report.targetLag?.kind === "unknown" ? " · behind unknown" : ""}`,
           opaque: true,
         },
       ],

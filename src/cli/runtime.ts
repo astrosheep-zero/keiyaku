@@ -4,8 +4,9 @@ import type { InstallInvocationResult } from "./commands/install.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import type { TaskInvocationResult } from "./commands/task-invoke.js";
 import type { ParsedCommand, ParsedExecution } from "./parse.js";
-import { CliUsageError } from "./parse.js";
+import { CliUsageError, usageGuideForCommand } from "./parse.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
+import { renderStructuredRefusal } from "./render/refusal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
 import type { ExecutionEvent } from "../library/execution.js";
@@ -182,15 +183,33 @@ export async function akumaFailureProjection(
   );
   if (error instanceof AkumaNotBornError) {
     return {
-      body: command.output === "json" ? error.message : `× Akuma not found  ${safeText(error.id)}`,
+      body:
+        command.output === "json"
+          ? error.message
+          : renderStructuredRefusal(
+              command.command,
+              "Akuma not found",
+              [`id  ${safeText(error.id)}`],
+              usageGuideForCommand(command),
+            ),
       exitCode: 1,
     };
   }
   if (error instanceof AkumaAddressError) {
     const body =
       error.refusal.kind === "akuma-alias-not-found"
-        ? `× Akuma alias not found  ${safeText(error.refusal.alias)}`
-        : `× invalid Akuma address  ${safeText(error.refusal.selector)}`;
+        ? renderStructuredRefusal(
+            command.command,
+            "Akuma alias not found",
+            [`alias  ${safeText(error.refusal.alias)}`],
+            usageGuideForCommand(command),
+          )
+        : renderStructuredRefusal(
+            command.command,
+            "invalid Akuma address",
+            [`selector  ${safeText(error.refusal.selector)}`],
+            usageGuideForCommand(command),
+          );
     return { body: command.output === "json" ? error.message : body, exitCode: 1 };
   }
   if (error instanceof AkumaWorldScopeError) {
@@ -198,7 +217,15 @@ export async function akumaFailureProjection(
       body:
         command.output === "json"
           ? JSON.stringify(error.refusal)
-          : error.refusal.ids.map((id) => `× Akuma not in this World  ${safeText(id)}`).join("\n"),
+          : renderStructuredRefusal(
+              command.command,
+              "Akuma not in this World",
+              [
+                `ids  ${error.refusal.ids.map((id) => safeText(id)).join(" · ")}`,
+                `world  ${safeText(error.refusal.world)}`,
+              ],
+              usageGuideForCommand(command),
+            ),
       exitCode: 1,
     };
   }
@@ -220,7 +247,12 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
   const { AkumaArchetypeError } = await import("../akuma/archetype.js");
   if (error instanceof AkumaArchetypeError) {
     if (command.command === "call") {
-      return `× call refused\n  reason  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`;
+      return renderStructuredRefusal(
+        "call",
+        `Akuma not found · ${safeText(error.archetype)}`,
+        ["available  keiyaku ls aku/"],
+        usageGuideForCommand(command),
+      );
     }
     return `× ${command.command} failed\n  reason  ${safeText(error.message)}`;
   }
@@ -299,7 +331,12 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
               archetype: error.archetype,
               available: "keiyaku ls aku/",
             })
-          : `× call refused\n  reason  Akuma not found · ${safeText(error.archetype)}\n  available  keiyaku ls aku/`,
+          : renderStructuredRefusal(
+              "call",
+              `Akuma not found · ${safeText(error.archetype)}`,
+              ["available  keiyaku ls aku/"],
+              usageGuideForCommand(command),
+            ),
       );
       return 1;
     }

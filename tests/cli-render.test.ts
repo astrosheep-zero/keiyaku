@@ -1,6 +1,8 @@
 import { receipt } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { changeId, contractHead, contractId, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
 import type { InvocationResult } from "../src/cli/result.js";
 import { renderCatalogText } from "../src/cli/render/catalog.js";
@@ -59,8 +61,11 @@ import { parseAkuId } from "../src/akuma/identity.js";
 import { renderTaskText } from "../src/cli/render/task.js";
 import { reuseLines } from "../src/cli/render/receipt.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
+import { progressStrip } from "../src/cli/render/contract-observation.js";
+import type { ContractHistoryEvent } from "../src/index.js";
 import { parseTaskCommand } from "../src/cli/commands/task.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
+import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -146,8 +151,167 @@ test("receipt and history rendering keeps journal ids and zero counts out of tex
   ]);
   assert.equal(
     renderContractHistory({ id: "kei/empty-history" as never, state: "snapshot" as never, events: [] }),
+    "history  kei/empty-history · bound\n",
+  );
+  assert.equal(
+    renderContractHistory({ id: "kei/empty-history" as never, state: "snapshot" as never, events: [] }, { full: true }),
     "history  kei/empty-history\n",
   );
+});
+
+test("the progress strip renders the road to claim from current-candidate chips", () => {
+  const strip = (delivery: unknown, reports: readonly unknown[]): string =>
+    progressStrip({ delivery, gates: { reports } } as never);
+  const review = (current: unknown): unknown => ({ gate: "reviewed", current });
+
+  assert.equal(strip(null, [review({ kind: "missing" })]), "[ ] delivery  [ ] review", "bound");
+  assert.equal(strip(null, []), "[ ] delivery", "a gate-less contract shows the delivery chip alone");
+  assert.equal(strip({}, [review({ kind: "missing" })]), "[✓] delivery  [ ] review", "a candidate without a review");
+  assert.equal(
+    strip({}, [review({ kind: "attested", verdict: "unsatisfied" })]),
+    "[✓] delivery  [×] review",
+    "a denied review",
+  );
+  assert.equal(
+    strip({}, [review({ kind: "attested", verdict: "satisfied" })]),
+    "[✓] delivery  [✓] review",
+    "a satisfied review",
+  );
+  assert.equal(
+    strip({}, [review({ kind: "stale", priorVerdict: "satisfied" })]),
+    "[✓] delivery  [ ] review",
+    "a satisfied review over a superseded candidate does not fill the box",
+  );
+  assert.equal(
+    strip({}, [{ gate: "verified", current: { kind: "attested", verdict: "satisfied" } }]),
+    "[✓] delivery  [✓] verification",
+    "gate display names are nouns",
+  );
+});
+
+test("skeleton history fuses beats and keeps evidence out of the row grammar", () => {
+  const watch = contractId("kei/history-test");
+  const start = snapshotId("a".repeat(40));
+  const candidateA = snapshotId("b".repeat(40));
+  const integrationA = snapshotId("c".repeat(40));
+  const candidateB = snapshotId("d".repeat(40));
+  const integrationB = snapshotId("e".repeat(40));
+  const later = snapshotId("f".repeat(40));
+  let suffix = 0;
+  const nextEntry = (): string => {
+    suffix += 1;
+    return entryUlid(`01ARZ3NDEKTSV4RRFFQ69G5F${String(suffix).padStart(2, "0")}`);
+  };
+  const journal = (kind: string, at: string, data: unknown): ContractHistoryEvent => ({
+    source: "journal",
+    fact: { v: 1, kind, contract: watch, entry: nextEntry(), at, data } as never,
+  });
+  const deliverData = (tender: string, predecessor: string, snapshot: string) => ({
+    tenderSnapshot: tender,
+    integration: { predecessor, snapshot, changeId: changeId(snapshot) },
+    method: "squash",
+    policy: { requireBranchesToBeUpToDate: false },
+  });
+  const verification = (snapshot: string, verdict: "satisfied" | "unsatisfied"): unknown => ({
+    gate: "verified",
+    subject: JSON.stringify([["snapshot", snapshot]]),
+    verdict,
+    summary: `verification ${verdict}\nsecond line`,
+  });
+  const events: ContractHistoryEvent[] = [
+    journal("bind", "2026-09-28T15:18:31.946Z", {
+      coordinates: { start, target: "refs/heads/main", workspace: "worktree" },
+      terms: { gates: ["reviewed", "verified"], after: [] },
+    }),
+    {
+      source: "dispatch",
+      dispatch: {
+        akuId: parseAkuId("aku/intern/33dd4670").id,
+        contractId: watch,
+        dispatchedAt: "2026-09-28T15:20:00.000Z",
+      },
+    },
+    journal("bound", "2026-09-28T15:21:00.000Z", {}),
+    journal("deliver", "2026-09-28T16:00:00.000Z", deliverData(candidateA, start, integrationA)),
+    journal("attestation", "2026-09-28T16:01:00.000Z", verification(integrationA, "unsatisfied")),
+    journal("amend", "2026-09-28T16:11:00.000Z", { gates: ["reviewed", "verified"], after: [] }),
+    journal("deliver", "2026-09-28T16:18:00.000Z", deliverData(candidateB, start, integrationB)),
+    journal("attestation", "2026-09-28T16:19:00.000Z", verification(integrationB, "satisfied")),
+    journal("attestation", "2026-09-28T16:38:00.000Z", {
+      gate: "reviewed",
+      subject: JSON.stringify([["snapshot", integrationB]]),
+      verdict: "satisfied",
+      summary: "review summary",
+    }),
+    journal("reintegrated", "2026-09-28T16:38:30.000Z", { predecessor: integrationB, snapshot: later }),
+    journal("attestation", "2026-09-28T16:39:00.000Z", verification(later, "satisfied")),
+    journal("arc", "2026-09-29T09:00:00.000Z", { seq: 1, title: "Chapter One", body: "freeform body\nline two" }),
+    journal("claimed", "2026-09-29T09:30:00.000Z", { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5F99") }),
+  ];
+  const journals = events.filter((event) => event.source === "journal").length;
+  const text = renderContractHistory({ id: watch, state: start, events });
+
+  assert.equal(
+    text.split("\n")[0],
+    `history  kei/history-test · claimed · ${journals} entries · 1 dispatch`,
+    "the header carries state, plural counts, and no journal word",
+  );
+  assert.doesNotMatch(text, /journal/u);
+  assert.equal((text.match(/^\d{4}-\d{2}-\d{2}$/gmu) ?? []).length, 2, "one bare day divider per day");
+  assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · @intern$/mu);
+  assert.match(text, /^16:00 delivered bbbbbbb · × verification · \d+ lines$/mu, "a denied fused deliver beat");
+  assert.match(text, /^16:11 amended · gates$/mu, "amend names its facets");
+  assert.match(text, /^16:18 delivered ddddddd · ✓ verification · \d+ lines$/mu, "a satisfied fused deliver beat");
+  assert.match(text, /^16:38 ✓ review · \d+ lines$/mu, "a mark-first review beat");
+  assert.match(
+    text,
+    /^16:38 integrated eeeeeee\.\.fffffff · ✓ verification · \d+ lines$/mu,
+    "a fused reintegration beat",
+  );
+  assert.match(text, /^09:00 arc Chapter One · 2 lines$/mu, "the chapter title is visible with its body folded");
+  assert.match(text, /^09:30 claimed$/mu);
+  assert.doesNotMatch(text, /freeform body|verification satisfied|verification unsatisfied/u, "evidence stays folded");
+  assert.doesNotMatch(text, /\[[ ✓×]\]/u, "history rows never carry state checkboxes");
+  assert.doesNotMatch(text, /T\d{2}:\d{2}:\d{2}|Z /u, "skeleton rows carry HH:MM only");
+  assert.doesNotMatch(text, /satisfied|unsatisfied/u, "the mark carries the verdict");
+
+  const full = renderContractHistory({ id: watch, state: start, events }, { full: true });
+  assert.match(full, /^history  kei\/history-test · \d+ journal entries · 1 dispatch$/mu);
+  assert.match(full, /2026-09-28T15:18:31\.946Z bind · 01ARZ3NDEKTSV4RRFFQ69G5F01/u, "full keeps ISO stamps");
+  assert.match(full, /candidate  bbbbbbb/u, "full keeps complete fields");
+
+  const help = renderAkumaHelp("history");
+  assert.match(help, /\[--full\]/u, "help advertises the full mode");
+  assert.match(help, /defaults to a causal skeleton/u, "help documents the default skeleton");
+  assert.match(help, /--full prints every event/u, "help documents the full mode");
+});
+
+test("a task title wraps its em-dash and title as one unit", () => {
+  const context = { columns: 60, color: false } as const;
+  const text = renderTaskText(
+    parseTaskCommand(["ls"]),
+    {
+      kind: "accepted",
+      value: {
+        rows: [
+          {
+            id: "task/usability/a-very-long-task-title-that-cannot-fit-here" as never,
+            title:
+              "a very long task title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
+            state: "open",
+            priority: 2,
+            disposition: "ready",
+            updatedAt: "2026-08-12T00:00:00.000Z",
+            bodyPresent: false,
+          },
+        ],
+        hasMore: false,
+      },
+    },
+    context,
+  );
+  for (const line of text.split("\n")) assert.ok(!line.trimEnd().endsWith("—"), line);
+  assert.match(text, /^  — a very long/mu, "the em-dash moves with its title to the continuation line");
 });
 
 test("compose plan renders positions and titles instead of provisional Task ids", () => {
@@ -167,13 +331,25 @@ test("compose plan renders positions and titles instead of provisional Task ids"
 
 test("task receipts report fields and admissions without projection diffs", () => {
   const task = {
-    id: "task/alpha" as never, namespace: [], title: "Alpha", state: "open" as const, priority: 2 as const,
-    needs: [], parent: null, supersedes: [], relates: [], note: "new note", body: "first line\nsecond line",
-    createdAt: "2026-08-12T00:00:00.123Z", updatedAt: "2026-08-12T00:01:00.456Z",
+    id: "task/alpha" as never,
+    namespace: [],
+    title: "Alpha",
+    state: "open" as const,
+    priority: 2 as const,
+    needs: [],
+    parent: null,
+    supersedes: [],
+    relates: [],
+    note: "new note",
+    body: "first line\nsecond line",
+    createdAt: "2026-08-12T00:00:00.123Z",
+    updatedAt: "2026-08-12T00:01:00.456Z",
   };
   const update = renderTaskText(parseTaskCommand(["update", "task/alpha", "--note", "new note"]), {
-    kind: "accepted", value: {
-      task, documentDiff: "--- task/alpha.md\n+++ task/alpha.md\n+updatedAt: noise",
+    kind: "accepted",
+    value: {
+      task,
+      documentDiff: "--- task/alpha.md\n+++ task/alpha.md\n+updatedAt: noise",
       changedFields: [{ field: "note", action: "replaced" }],
     },
   });
@@ -183,7 +359,9 @@ test("task receipts report fields and admissions without projection diffs", () =
   const added = renderTaskText(parseTaskCommand(["add", "Alpha"]), { kind: "accepted", value: task });
   assert.match(added, /^✓ added  task\/alpha/u);
   const composed = renderTaskText(parseTaskCommand(["compose", "-"]), {
-    kind: "accepted", aliases: [{ alias: "alpha", taskId: task.id }], admissionOrder: [task.id],
+    kind: "accepted",
+    aliases: [{ alias: "alpha", taskId: task.id }],
+    admissionOrder: [task.id],
     admissions: [{ position: 1, kind: "new", title: "Alpha", alias: "alpha" }],
     documentChanges: [{ taskId: task.id, kind: "created", documentDiff: "+updatedAt: noise" }],
   });
@@ -191,7 +369,15 @@ test("task receipts report fields and admissions without projection diffs", () =
   assert.match(composed, /^admit 1  \+ Alpha  as \^alpha$/mu);
   assert.doesNotMatch(composed, /diff|updatedAt/u);
   const shown = renderTaskText(parseTaskCommand(["show", "task/alpha"]), {
-    task, needs: [], blockers: [], blocks: [], parent: null, children: [], supersedes: [], supersededBy: [], related: [],
+    task,
+    needs: [],
+    blockers: [],
+    blocks: [],
+    parent: null,
+    children: [],
+    supersedes: [],
+    supersededBy: [],
+    related: [],
   });
   assert.match(shown, /^  created  2026-08-12T00:00:00Z$/mu);
   assert.match(shown, /^  updated  2026-08-12T00:01:00Z$/mu);
@@ -583,8 +769,9 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   };
   const text = renderCatalogText(catalog);
 
-  assert.match(text, /! kei\/selected-contract · bound · 0s · Selected Contract/u);
-  assert.match(text, /awaiting delivery/u);
+  assert.match(text, /! kei\/selected-contract · 0s · Selected Contract/u);
+  assert.match(text, /\[ \] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
+  assert.doesNotMatch(text, /bound|awaiting/u);
   assert.doesNotMatch(text, /candidate|predecessor|method|content identity|behind|workspace/u);
   assert.doesNotMatch(text, new RegExp(state, "u"));
   assert.doesNotMatch(text, /not shown|full|next:|--all/u);
@@ -607,7 +794,8 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(delivered, /awaiting verification/u);
+  assert.match(delivered, /\[✓\] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
+  assert.doesNotMatch(delivered, /awaiting/u);
   assert.doesNotMatch(delivered, /candidate|predecessor|content identity|method|behind/u);
 
   const expected = snapshotId("b".repeat(40));
@@ -630,7 +818,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(moved, /awaiting gates/u);
+  assert.match(moved, /\[✓\] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
   assert.doesNotMatch(moved, /candidate|predecessor|content identity|behind/u);
 
   const disappeared = renderCatalogText({
@@ -651,7 +839,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       },
     ],
   });
-  assert.match(disappeared, /awaiting gates/u);
+  assert.match(disappeared, /\[✓\] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
   assert.doesNotMatch(disappeared, /candidate|predecessor|content identity|behind/u);
 });
 
@@ -693,11 +881,13 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     );
   const bound = show(base);
   assert.match(bound, /⧗ bound · 5s/u);
-  assert.match(bound, /○ reviewed/u);
-  assert.match(bound, /awaiting delivery/u);
+  assert.match(bound, /○ review/u);
+  assert.match(bound, /\[ \] delivery  \[ \] review/u);
+  assert.doesNotMatch(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
   const delivered = show({ ...base, phase: "delivered", delivery });
-  assert.match(delivered, /awaiting gates  ○ reviewed/u);
+  assert.match(delivered, /\[✓\] delivery  \[ \] review/u);
+  assert.doesNotMatch(delivered, /awaiting gates/u);
   assert.match(delivered, /candidate  bbbbbbb/u);
   assert.match(delivered, /integration result  aaaaaaa/u);
   assert.doesNotMatch(delivered, /predecessor|method|content identity|behind/u);
@@ -705,11 +895,36 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     ...base,
     phase: "delivered",
     delivery,
-    gates: { satisfied: false, reports: [{ gate: "reviewed", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z", summary: "Fix missing coverage" } }] },
+    gates: {
+      satisfied: false,
+      reports: [
+        {
+          gate: "reviewed",
+          current: {
+            kind: "attested",
+            verdict: "unsatisfied",
+            at: "2026-08-12T00:00:00.000Z",
+            summary: "Fix missing coverage",
+          },
+        },
+      ],
+    },
   });
   assert.match(denied, /review  ×  “Fix missing coverage”/u);
-  assert.equal((denied.match(/× reviewed/gu) ?? []).length, 1);
+  assert.match(denied, /\[×\] review/u);
+  assert.doesNotMatch(denied, /× reviewed/u);
   assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
+  const stale = show({
+    ...base,
+    phase: "delivered",
+    delivery,
+    gates: {
+      satisfied: false,
+      reports: [{ gate: "reviewed", current: { kind: "stale", priorVerdict: "satisfied" } }],
+    },
+  });
+  assert.match(stale, /\[✓\] delivery  \[ \] review/u, "a superseded review does not fill the chip");
+  assert.match(stale, /! review · stale/u, "the card body keeps the stale review detail");
   const blocked = show({
     ...base,
     phase: "delivered",
@@ -717,7 +932,8 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     gates: { satisfied: true, reports: [] },
     after: [{ contractId: contractId("kei/other"), endpoint: { kind: "active", phase: "bound" } }],
   });
-  assert.match(blocked, /^  awaiting prerequisites  blocked by  kei\/other · bound$/mu);
+  assert.match(blocked, /\[✓\] delivery/u);
+  assert.match(blocked, /^  blocked by  kei\/other · bound$/mu);
   const moved = show({
     ...base,
     phase: "delivered",
@@ -728,7 +944,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   });
   assert.match(moved, /^  integration result  aaaaaaa · target moved since$/mu);
   assert.match(moved, /^  target moved  aaaaaaa -> bbbbbbb$/mu);
-  assert.doesNotMatch(moved, /awaiting gates|awaiting prerequisites/u);
+  assert.doesNotMatch(moved, /awaiting/u);
   const claimed = show({
     ...base,
     phase: "claimed",
@@ -766,7 +982,8 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.doesNotMatch(abandoned, /worktree|candidate|when  /u);
   assert.equal((abandoned.match(/× abandoned/gu) ?? []).length, 1);
   const world = show({ ...base, phase: "delivered", delivery }, "world");
-  assert.match(world, /awaiting gates  ○ reviewed/u);
+  assert.match(world, /\[✓\] delivery  \[ \] review/u);
+  assert.doesNotMatch(world, /awaiting gates/u);
   assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
 });
 
@@ -967,11 +1184,15 @@ test("amend receipt names gate and prerequisite changes even without document di
   const gates = renderText({ ...base, changes: { gates: ["reviewed", "holder-smelled"] } });
   assert.match(gates, /✓ amended[\s\S]*gates  reviewed · holder-smelled/u);
   assert.doesNotMatch(gates, /terms  unchanged/u);
-  assert.match(renderText({ ...base, changes: { after: [contractId("kei/prerequisite")] } }), /after  kei\/prerequisite/u);
+  assert.match(
+    renderText({ ...base, changes: { after: [contractId("kei/prerequisite")] } }),
+    /after  kei\/prerequisite/u,
+  );
 });
 
 test("amend terms diff keeps comparison headers without the banner or header whitespace", () => {
-  const diff = "===================================================================\n--- before\t\n+++ after\t\n@@ -1 +1 @@\n-old\n+new\n";
+  const diff =
+    "===================================================================\n--- before\t\n+++ after\t\n@@ -1 +1 @@\n-old\n+new\n";
   const text = renderText(receipt({ verb: "amend", contract: contractId("kei/diff"), diff, changes: {} }));
   assert.match(text, /^✓ amended  kei\/diff\n  terms diff\n  --- before\n  \+\+\+ after\n  @@/u);
   assert.doesNotMatch(text, /^  ===|before\t|after\t/mu);
@@ -982,7 +1203,9 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
   const tender = snapshotId("a".repeat(40));
   const integration = snapshotId("b".repeat(40));
   const result: InvocationResult = receipt({
-    verb: "deliver", contract, tenderSnapshot: tender,
+    verb: "deliver",
+    contract,
+    tenderSnapshot: tender,
     integration: { changeId: changeId("0".repeat(40)) },
     completion: { predecessor: tender, integration, target: "refs/heads/main" },
   });
@@ -999,20 +1222,32 @@ test("audit declares Verification once and names target lag from its typed repor
   const head = snapshotId("a".repeat(40));
   const integrated = snapshotId("b".repeat(40));
   const base = receipt({
-    verb: "audit" as const, contract,
+    verb: "audit" as const,
+    contract,
     report: {
       candidate: {
-        kind: "ready" as const, workspace: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" },
+        kind: "ready" as const,
+        workspace: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" },
         identity: {
-          tenderSnapshot: head, integration: { predecessor: head, snapshot: integrated, changeId: changeId("0".repeat(40)) },
-          method: "squash" as const, policy: { requireBranchesToBeUpToDate: false },
+          tenderSnapshot: head,
+          integration: { predecessor: head, snapshot: integrated, changeId: changeId("0".repeat(40)) },
+          method: "squash" as const,
+          policy: { requireBranchesToBeUpToDate: false },
         },
         scope: { filesChanged: 0, insertions: 0, deletions: 0 },
       },
-      delivery: { changeId: changeId("0".repeat(40)), relation: "identical" as const, verification: { kind: "undeclared" as const } },
+      delivery: {
+        changeId: changeId("0".repeat(40)),
+        relation: "identical" as const,
+        verification: { kind: "undeclared" as const },
+      },
       verification: { kind: "undeclared" as const },
       target: { kind: "placeable" as const, ref: "refs/heads/main", head },
-      targetLag: { kind: "counted" as const, behind: 3, subject: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" } },
+      targetLag: {
+        kind: "counted" as const,
+        behind: 3,
+        subject: { kind: "worktree" as const, path: "/repo/.keiyaku/wt/audit-lag" },
+      },
     },
   });
   const counted = renderText(base);
@@ -1027,31 +1262,50 @@ test("audit declares Verification once and names target lag from its typed repor
 test("receipt hashes extend their prefixes when IDs collide within one receipt", () => {
   const tender = snapshotId(`${"a".repeat(7)}0${"0".repeat(32)}`);
   const integration = snapshotId(`${"a".repeat(7)}1${"0".repeat(32)}`);
-  const text = renderText(receipt({
-    verb: "deliver", contract: contractId("kei/hash-collision"), tenderSnapshot: tender,
-    integration: { changeId: changeId("0".repeat(40)) },
-    completion: { predecessor: tender, integration, target: "refs/heads/main" },
-  }));
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract: contractId("kei/hash-collision"),
+      tenderSnapshot: tender,
+      integration: { changeId: changeId("0".repeat(40)) },
+      completion: { predecessor: tender, integration, target: "refs/heads/main" },
+    }),
+  );
   assert.match(text, /candidate  aaaaaaa0/u);
   assert.match(text, /target  aaaaaaa0\.\.aaaaaaa1/u);
 });
 
 test("reconcile lists changed effects once with path last and no null sentinels", () => {
-  const ref = { kind: "ref" as const, name: "refs/keiyaku/delivery/example", action: "removed" as const, before: "a".repeat(40) as never, after: null };
-  const text = renderText({ kind: "reconcile", report: {
-    effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }], lag: [],
-    settlement: { actions: [], lags: [] },
-  } });
+  const ref = {
+    kind: "ref" as const,
+    name: "refs/keiyaku/delivery/example",
+    action: "removed" as const,
+    before: "a".repeat(40) as never,
+    after: null,
+  };
+  const text = renderText({
+    kind: "reconcile",
+    report: {
+      effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }],
+      lag: [],
+      settlement: { actions: [], lags: [] },
+    },
+  });
   assert.equal(text, "✓ reconcile\n  effect  ref  removed · aaaaaaa  refs/keiyaku/delivery/example");
   assert.doesNotMatch(text, /null/u);
 });
 
-
 test("reconcile recovery snapshots use receipt-length Git identities", () => {
-  const text = renderText({ kind: "reconcile", report: {
-    effects: [{ kind: "recovery-snapshot", action: "created", snapshot: snapshotId("f".repeat(40)), retention: "ephemeral" }],
-    lag: [], settlement: { actions: [], lags: [] },
-  } });
+  const text = renderText({
+    kind: "reconcile",
+    report: {
+      effects: [
+        { kind: "recovery-snapshot", action: "created", snapshot: snapshotId("f".repeat(40)), retention: "ephemeral" },
+      ],
+      lag: [],
+      settlement: { actions: [], lags: [] },
+    },
+  });
   assert.match(text, /effect  recovery-snapshot  created  fffffff/u);
   assert.doesNotMatch(text, /f{40}/u);
 });
@@ -1835,7 +2089,7 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     roster.slice(-bounded.length),
     bounded.map((line) => `  ${line}`),
   );
-  assert.match(roster.at(-1)!, /│ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
+  assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
@@ -1843,7 +2097,10 @@ test("World answer previews keep the conclusion, while detail keeps its opening"
   const answer = `${"premise ".repeat(35)}conclusion: ship the fix`;
   const snapshot = idleAkumaSnapshot([], answeredOutcome(1, answer));
   const context = { columns: 70, color: false };
-  const board = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]), context).join("\n");
+  const board = renderAkuma(
+    akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
+    context,
+  ).join("\n");
   assert.match(board, /answer “\u2026/u);
   assert.match(board, /conclusion: ship the fix”/u);
   assert.doesNotMatch(board, /premise premise premise premise premise premise/u);
@@ -1925,7 +2182,48 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(roster, /│ custom-tool/u);
+  assert.match(roster, /✓ custom-tool/u);
+});
+
+test("the output law names the current mark vocabulary and retires the one-check sentence", () => {
+  const law = readFileSync(fileURLToPath(new URL("../docs/cli-output.md", import.meta.url)), "utf8");
+  assert.doesNotMatch(law, /at most once per stream/u, "the retired one-check law is gone");
+  assert.doesNotMatch(law, /settled intermediate activity uses the plain/u);
+  assert.match(law, /`✓` marks a\s+successfully completed action row/u, "the replacement law exists");
+  assert.match(law, /`│` is the neutral rail for voice rows and told Tells/u);
+});
+
+test("a settled successful tool wears ✓ again while voice rows and told Tells stay on the rail", () => {
+  const id = "aku/worker/abcd0040";
+  const status = parseAkumaStatus({
+    id,
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([
+      { kind: "row", row: completedTool(1, "read", { kind: "read", path: "src/a.ts", offset: 0, limit: 1 }) },
+      {
+        kind: "row",
+        row: { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "spoken" },
+      },
+      {
+        kind: "row",
+        row: {
+          kind: "tell",
+          sequence: 3,
+          at: AKUMA_ACTIVITY_AT,
+          tellId: "tell/mark-law",
+          text: "told direction",
+          state: "told",
+          deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
+        },
+      },
+    ]),
+  });
+  const text = snapshotText({ status, contract: { kind: "none" } }, { columns: 100, color: false });
+  assert.match(text, /✓ read/u, "a settled tool action affirms success");
+  assert.match(text, /│ say/u, "a voice row stays on the rail");
+  assert.match(text, /│ told/u, "a told Tell stays on the rail");
+  assert.ok((text.match(/✓/gu) ?? []).length >= 2, "multiple success marks are normal on one stream");
 });
 
 test("generic tool rows preserve semantic and common summaries", () => {
@@ -1960,7 +2258,7 @@ test("generic tool rows preserve semantic and common summaries", () => {
   assert.doesNotMatch(text, /newest first · 20 rows/u);
   for (const name of ["mystery", "silent", "get_context_remaining"])
     assert.ok(
-      lines.some((line) => new RegExp(`│ ${name}$`, "u").test(line)),
+      lines.some((line) => new RegExp(`✓ ${name}$`, "u").test(line)),
       `${name} with empty or absent arguments renders no summary`,
     );
 });
@@ -2181,7 +2479,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
 });
 
-test("a sleeping worker ends its status timeline with the shared completion judgment", () => {
+test("a sleeping worker's outcome row is its ending, not a repeated completion mark", () => {
   const sleeping = parseAkumaStatus({
     id: "aku/worker/abcd0001",
     life: "asleep",
@@ -2189,8 +2487,21 @@ test("a sleeping worker ends its status timeline with the shared completion judg
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
   });
   const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
-  assert.match(snapshot, /^\d{2}:\d{2} ✓ completed$/mu);
-  assert.match(snapshot, /✓ answer “the answer”\n\d{2}:\d{2} ✓ completed$/u);
+  assert.match(snapshot, /✓ answer “the answer”$/u, "the timeline ends at its outcome row");
+  assert.doesNotMatch(snapshot, /✓ completed/u, "the answered outcome is already the ending");
+  assert.equal((snapshot.match(/✓/gu) ?? []).length, 1, "one check on one stream");
+
+  const answerless = parseAkumaStatus({
+    id: "aku/worker/abcd0002",
+    life: "asleep",
+    allowed: [],
+    timeline: idleAkumaSnapshot([]),
+  });
+  const answerlessText = snapshotText(
+    { status: answerless, contract: { kind: "none" } },
+    { columns: 80, color: false },
+  );
+  assert.match(answerlessText, /✓ completed$/mu, "an answer-less sleeper keeps its closer");
 
   const returned = waitText(
     {
@@ -2740,7 +3051,7 @@ test("live activity keeps unsettled rows in the frame and accounts for them on c
   assert.match(stream.frame().join("\n"), /● run +\$ slow/u);
 
   const settled = stream(liveActivity(idleAkumaSnapshot([complete]))).join("\n");
-  assert.match(settled, /│ run +\$ slow/u);
+  assert.match(settled, /✓ run +\$ slow/u);
   assert.equal(stream.frame().length, 0);
   assert.deepEqual(stream.flush(), []);
 
@@ -3386,7 +3697,7 @@ test("a streamed observing call opens one framed head and never replays a settle
   const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
   const text = stream.observe(live(growing)).join("\n");
   assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
-  assert.match(text, /│ run +\$ first/u);
+  assert.match(text, /✓ run +\$ first/u);
   assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
