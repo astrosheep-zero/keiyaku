@@ -104,7 +104,7 @@ Targeted placement is serialized per target and claims only when its persisted p
 
 Journal facts retain candidate identities, but are not reachability edges. Git
 keeps the tender and integration reachable while a managed worktree or pending
-placement needs them, and a claimed target may become a custodian. Refs are
+placement needs them, and an accepted target may become a custodian. Refs are
 released only after an independent surviving custodian proves the required exact
 commit or tender bytes remain available. Equal content never substitutes for
 the integration identity. Cleanup never rewrites a target; a target rewrite or
@@ -124,7 +124,7 @@ Foreign Git state, generic Git-operation recovery, automatic commits, and
 index- or worktree-rewriting cleanup remain outside Keiyaku's authority.
 
 Terminal cleanup removes a managed worktree only when its bytes and head are
-sealed by the Contract's recorded custody. Unsealed claimed bytes are retained.
+sealed by the Contract's recorded custody. Unsealed accepted bytes are retained.
 For abandoned unsealed bytes, Git may produce ephemeral, ref-free recovery
 evidence before removal; it is not a journal fact, retention promise, or source
 of later lifecycle authority. Physical removal precedes Place release and ref

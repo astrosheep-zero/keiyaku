@@ -24,7 +24,7 @@ import {
   stopLines,
   titleLines,
 } from "./receipt.js";
-import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
+import { abbreviateGitIds, displayGitId, lifecycleWord } from "./contract-observation.js";
 import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
@@ -325,8 +325,8 @@ function completedPlacementLines(
     );
   }
   lines.push(...nonGatingVerificationLines(result, columns));
-  // Placement admission always admits the claim entry beside the movement, so a completed placement is claimed.
-  receiptRow(lines, "✓", "claimed", [], columns);
+  // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
+  receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
   return lines;
 }
 
@@ -352,7 +352,7 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
   if (report === undefined) return [];
   const lines: string[] = [];
   for (const contractId of report.claimed) {
-    receiptRow(lines, "✓", "continuation", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
+    receiptRow(lines, "✓", "dependent", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
   }
   for (const { contractId, stop } of report.stopped) {
     if ("kind" in stop && stop.kind === "already-terminal")
@@ -362,7 +362,7 @@ function continuationLines(result: AcceptedDeliverResult | AcceptedReviewResult,
       receiptRow(
         lines,
         "!",
-        "continuation",
+        "dependent",
         [{ text: contractId, opaque: true }, { text: "physical follow stopped" }],
         columns,
       );

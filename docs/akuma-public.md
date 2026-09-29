@@ -66,7 +66,7 @@ that current window, never an earlier Turn or unrelated Tell.
 
 Placement discharges reported changes at the observation composition. While the
 Akuma's dispatch-associated Contract is active, a composed status surfaces them
-as above; once that Contract is claimed, the same observation presents no
+as above; once that Contract is accepted, the same observation presents no
 reported changes — the candidate they described is placed and preserved in Git.
 The discharge is derived at read time from the existing Dispatch association
 and the Contract's phase; it writes no fact and never alters the Heart

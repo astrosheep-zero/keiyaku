@@ -253,7 +253,7 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
 
   assert.equal(
     text.split("\n")[0],
-    `history  kei/history-test · claimed · ${journals} entries · 1 dispatch`,
+    `history  kei/history-test · accepted · ${journals} entries · 1 dispatch`,
     "the header carries state, plural counts, and no journal word",
   );
   assert.doesNotMatch(text, /journal/u);
@@ -269,7 +269,7 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
     "a fused reintegration beat",
   );
   assert.match(text, /^09:00 arc Chapter One · 2 lines$/mu, "the chapter title is visible with its body folded");
-  assert.match(text, /^09:30 claimed$/mu);
+  assert.match(text, /^09:30 accepted$/mu);
   assert.doesNotMatch(text, /freeform body|verification satisfied|verification unsatisfied/u, "evidence stays folded");
   assert.doesNotMatch(text, /\[[ ✓×]\]/u, "history rows never carry state checkboxes");
   assert.doesNotMatch(text, /T\d{2}:\d{2}:\d{2}|Z /u, "skeleton rows carry HH:MM only");
@@ -1021,14 +1021,14 @@ test("recorded verification names the snapshot the verdict covers", () => {
     ],
     hasMore: false,
   };
-  assert.match(renderCatalogText(catalog), /✓ claimed/u);
+  assert.match(renderCatalogText(catalog), /✓ accepted/u);
   assert.doesNotMatch(renderCatalogText(catalog), /verification|snapshot 4444444/u);
 
   const bare = renderCatalogText({
     ...catalog,
     rows: [catalogRow({ kind: "recorded", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" })],
   });
-  assert.match(bare, /✓ claimed/u);
+  assert.match(bare, /✓ accepted/u);
   assert.doesNotMatch(bare, /verification|snapshot/u);
 });
 
@@ -1212,7 +1212,7 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
   const text = renderText(result);
   assert.match(text, /candidate  aaaaaaa/u);
   assert.match(text, /target  aaaaaaa\.\.bbbbbbb/u);
-  assert.match(text, /✓ claimed/u);
+  assert.match(text, /✓ accepted/u);
   assert.doesNotMatch(text, /a{40}|b{40}|0{40}|content identity/u);
   assert.equal(JSON.parse(JSON.stringify(result)).tenderSnapshot, tender);
 });
@@ -1654,6 +1654,33 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   );
 });
 
+test("a satisfied review whose placement fails names the satisfied fact once and refuses in outcome words", () => {
+  const contract = contractId("kei/review-refused-f911");
+  const review: InvocationResult = {
+    kind: "accepted",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "review", kind: "attestation" }],
+    settlementLags: [],
+    verb: "review",
+    verdict: "satisfied",
+    placement: { failure: "target-placement-failed", diagnostic: "fatal: could not read from remote repository" },
+  };
+  const text = renderText(review);
+  assert.equal(
+    text,
+    [
+      "✓ review satisfied  kei/review-refused-f911",
+      "× not accepted",
+      "  reason",
+      "  fatal: could not read from remote repository",
+      "",
+    ].join("\n"),
+  );
+  assert.equal((text.match(/✓ review satisfied/gu) ?? []).length, 1, "the satisfied fact prints once");
+  assert.doesNotMatch(text, /placement|continuation|reconciliation/u, "no internal phase name appears");
+});
+
 test("direct gate stops render the sole placement report without another read", () => {
   const contract = contractId("kei/waiting-on-gates");
   assert.equal(
@@ -1802,8 +1829,8 @@ test("continuation checkout stop keeps its exact block after the dependent conte
     [
       "✓ delivered  kei/prerequisite-checkout",
       "  target  1111111..2222222  refs/heads/main",
-      "✓ claimed",
-      "! continuation  kei/stopped-checkout-dependent",
+      "✓ accepted",
+      "! dependent  kei/stopped-checkout-dependent",
       "! checkout-not-followable",
       "  checkout  /repo/checkout",
       "  target  refs/heads/main",
@@ -1840,13 +1867,13 @@ test("deliver projects a ran Verification completion", () => {
       "✓ delivered  kei/completion",
       "  target  3333333..4444444  refs/heads/main",
       "  integration result  4444444 · verification satisfied",
-      "✓ claimed",
+      "✓ accepted",
     ].join("\n"),
   );
   assertModeWordingAbsent(text);
 });
 
-test("deliver renders claimed and stopped continuations from the accepted result", () => {
+test("deliver renders accepted and stopped continuations from the accepted result", () => {
   const contract = contractId("kei/prerequisite");
   const claimed = contractId("kei/claimed-dependent");
   const stopped = contractId("kei/stopped-dependent");
@@ -1880,8 +1907,8 @@ test("deliver renders claimed and stopped continuations from the accepted result
     [
       "✓ delivered  kei/prerequisite",
       "  target  5555555..6666666  refs/heads/main",
-      "✓ claimed",
-      "✓ continuation  complete  kei/claimed-dependent",
+      "✓ accepted",
+      "✓ dependent  complete  kei/claimed-dependent",
       "! kei/stopped-dependent  ·  gates unsatisfied",
       "  gate  reviewed  · missing",
     ].join("\n"),
@@ -1932,7 +1959,7 @@ test("review projects a reused unsatisfied Verification as non-gating completion
       "  summary",
       "  [reused bash exit 1]",
       "",
-      "✓ claimed",
+      "✓ accepted",
     ].join("\n"),
   );
 });
@@ -1972,7 +1999,7 @@ test("movement projects its deviation and reintegration coordinates", () => {
       facts,
       completion: { integration: secondIntegrated, predecessor: secondPredecessor, target: "refs/heads/main" },
     }),
-    ["✓ delivered  kei/reintegrated", "  target  target-3..integration-4  refs/heads/main", "✓ claimed"].join("\n"),
+    ["✓ delivered  kei/reintegrated", "  target  target-3..integration-4  refs/heads/main", "✓ accepted"].join("\n"),
   );
 
   assert.equal(

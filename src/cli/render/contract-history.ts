@@ -1,5 +1,6 @@
 import { parseAkuId } from "../../akuma/identity.js";
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
+import { lifecycleWord } from "./contract-observation.js";
 import { receiptPayload } from "./receipt.js";
 import { renderOpaqueBlock, DEFAULT_CLI_COLUMNS } from "./terminal.js";
 
@@ -221,7 +222,7 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
       return [`${clock(first)} arc ${fact.data.title}${payloadSuffix(folded)}`];
     }
     case "claimed":
-      return [`${clock(first)} claimed`];
+      return [`${clock(first)} ${lifecycleWord("claimed")}`];
     case "abandoned":
       return [
         `${clock(first)} abandoned${fact.data.note === undefined ? "" : payloadSuffix(renderOpaqueBlock(fact.data.note, "  ", DEFAULT_CLI_COLUMNS))}`,
@@ -242,7 +243,7 @@ function skeletonState(history: ContractHistory): string {
   const journal = history.events.filter(
     (event): event is Readonly<{ source: "journal"; fact: Fact }> => event.source === "journal",
   );
-  if (journal.some((event) => event.fact.kind === "claimed")) return "claimed";
+  if (journal.some((event) => event.fact.kind === "claimed")) return lifecycleWord("claimed");
   if (journal.some((event) => event.fact.kind === "abandoned")) return "abandoned";
   if (journal.some((event) => event.fact.kind === "deliver" || event.fact.kind === "reintegrated")) return "delivered";
   return "bound";

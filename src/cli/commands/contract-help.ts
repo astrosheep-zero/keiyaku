@@ -100,7 +100,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "Verification, integration, and cleanup progress appears on stderr; stdout contains one final result.",
       "By default, delivery uses HEAD. --include-dirty includes all non-ignored worktree changes, staged or not; it leaves your branch and index unchanged, so staging or committing is unnecessary.",
       "Repeating delivery with unchanged work resumes unfinished verification or integration. Changed work replaces the candidate.",
-      "Delivery requests integration. If prerequisites and gates pass, it integrates now and claims the Contract; otherwise the candidate remains waiting.",
+      "Delivery requests integration. If prerequisites and gates pass, it integrates now and accepts the Contract; otherwise the candidate remains waiting.",
       "Only changed candidate work invalidates earlier review. If Verification did not finish, repeating delivery resumes that candidate; --overwrite replaces it.",
       "Delivery never counts as an independent review verdict.",
       "",
@@ -117,7 +117,7 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",
-      "--satisfied means every acceptance criterion is met. It records the verdict and requests integration; if the candidate, prerequisites, and gates are ready, this invocation integrates and claims the Contract. Otherwise the Contract stays active.",
+      "--satisfied means every acceptance criterion is met. It records the verdict and requests integration; if the candidate, prerequisites, and gates are ready, this invocation integrates and accepts the Contract. Otherwise the Contract stays active.",
       "--unsatisfied records what is missing and does not request integration.",
       "--summary gives the conclusion and evidence for --satisfied, or the specific blocker for --unsatisfied.",
       "Progress appears on stderr; stdout contains one final result.",

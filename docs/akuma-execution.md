@@ -47,7 +47,7 @@ fails with ENOENT, wake diagnoses the missing piece honestly: it checks the
 executable and the frozen execution cwd separately and names the genuinely
 missing side. A missing frozen directory names its path with the remedy to
 kill this Akuma and call a fresh one (a missing directory likely means its
-Contract was claimed and the worktree cleaned up, with deliverables already in
+Contract was accepted and the worktree cleaned up, with deliverables already in
 Git). A missing executable names the waking process executable with the remedy
 to re-enter with a fresh CLI process and retry, or kill and call fresh. Both
 missing names both. Non-ENOENT spawn failures pass through unchanged. Wake

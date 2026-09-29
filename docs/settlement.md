@@ -27,7 +27,7 @@ other's concurrency authority.
 
 ## Settlement Rules And Replay
 
-When a claimed Contract remains a Task's matching held holder, Settlement moves
+When an accepted Contract remains a Task's matching held holder, Settlement moves
 that Task to its settled completion state and releases the holder as its final
 action. An already settled Task remains settled. A dropped Task, missing Task,
 Task refusal, concurrent Task movement, or failed holder publication is visible
@@ -65,7 +65,7 @@ second authority:
   reconciliation and Settlement. Once admitted, later lag cannot reject or
   erase that Contract fact.
 - **Durable replay token:** The current matching held TaskHolder is the sole
-  durable token that says this claimed Contract still owes Task settlement.
+  durable token that says this accepted Contract still owes Task settlement.
 - **Token consumption point:** Settlement consumes that token only when it
   publishes the holder as released, after Task completion and the namespace
   projection opportunity have been attempted.

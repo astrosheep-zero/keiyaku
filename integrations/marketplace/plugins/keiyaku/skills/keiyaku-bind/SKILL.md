@@ -193,7 +193,7 @@ The holder now owns the lifecycle:
    boundary.
 3. Prepare and deliver the candidate.
 4. Coordinate verification, review evidence, gates, and prerequisites.
-5. Continue until the `kei` is claimed, amend terms while keeping the same
+5. Continue until the `kei` is accepted, amend terms while keeping the same
    objective and acceptance boundary, or abandon it when either has changed.
 
 Continue with `keiyaku-workflow` for this lifecycle. For Akuma invocation,

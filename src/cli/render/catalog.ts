@@ -1,5 +1,5 @@
 import type { Catalog } from "../catalog.js";
-import { abbreviateGitIds, displayGitId, gitIdsInRow, progressStrip } from "./contract-observation.js";
+import { abbreviateGitIds, displayGitId, gitIdsInRow, lifecycleWord, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, taskFrameHead, taskMark } from "./task.js";
@@ -49,7 +49,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     const terminal = row.phase === "claimed" || row.phase === "abandoned";
     const outcome =
       row.phase === "claimed"
-        ? `✓ claimed${row.delivery === null ? "" : ` · landed ${displayGitId(row.delivery.integration.snapshot, abbreviations)}`}`
+        ? `✓ ${lifecycleWord("claimed")}${row.delivery === null ? "" : ` · landed ${displayGitId(row.delivery.integration.snapshot, abbreviations)}`}`
         : "× abandoned";
     const review = row.gates.reports.find((gate) => gate.gate === "reviewed");
     const testimony =

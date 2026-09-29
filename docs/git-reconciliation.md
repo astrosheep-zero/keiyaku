@@ -49,7 +49,7 @@ state is retained unchanged. The same proof permits explicit rematerialization
 to retire a prior handoff; neither conflict resolution completeness nor tree
 equality is an ownership test.
 
-Target-checkout recovery can complete only the current claimed
+Target-checkout recovery can complete only the current accepted
 predecessor-to-candidate movement while the checkout state proves it can carry
 that movement. It never adopts an older ancestor, retries a pre-publication
 refusal, recaptures a candidate, or overwrites incompatible concurrent state.

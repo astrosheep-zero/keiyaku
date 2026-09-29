@@ -39,7 +39,9 @@ candidate and shows recorded verification independently.
 A completed placement reads like Git movement, identically for a review and a
 deliver: the title states the verdict or delivery and the Contract, one row
 states the reference movement, satisfied Verification adds one fact row naming
-the integrated object, and the final lifecycle state is one explicit row. Receipt
+the integrated object, and the final lifecycle state is one explicit row. The
+completed lifecycle state reads `accepted`; its recorded fact kind is not
+user-facing vocabulary. Receipt
 Git identities are abbreviated in text by the shared collision-aware display
 rule and remain full in JSON; absent content identity has no row. Amend receipts
 use a verb-past title, name gate and prerequisite changes independently, and
@@ -127,7 +129,7 @@ has been established.
 
 Detached call receipts foreground the complete Akuma identity with any alias
 as a parenthetical supplement, name the associated Contract and the actual
-execution directory, and stop at facts: no claimed live state, no prescribed
+execution directory, and stop at facts: no asserted live state, no prescribed
 follow-up. Tell delivery has one text carrier: its timeline row, with one
 bounded preview of the submitted Tell; a failed delivery adds one prominent
 failure fact to that same carrier. Opaque configuration and observation values
@@ -161,7 +163,15 @@ names observed target lag as counted or unknown when the target is placeable.
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual
 boundary — never simulated progress, persisted facts, or a hidden alternative
-protocol. For delivery, review, and audit, witnessed progress lives on the
+protocol. Four laws govern them. A command's durable output is one receipt,
+plus refusals; progress is not durable output. Progress lives only in the
+redrawable live frame and vanishes at completion, except that verification's
+own stdout and stderr content is factual and may stream. Off a terminal only
+completed facts appear — phase-finish lines and bounded live output, never a
+phase start, a stage transition, or an admitted fact. Admitted facts are named
+exactly once, in the receipt: a failure receipt names the facts admitted before
+the failure and then names the failure in outcome vocabulary with its reason,
+and internal phase names never appear in receipt text. For delivery, review, and audit, witnessed progress lives on the
 progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation

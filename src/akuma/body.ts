@@ -254,7 +254,7 @@ async function frozenCwdMissing(path: string): Promise<boolean> {
  * Diagnose an ENOENT Body spawn failure by checking the attempted executable
  * and the frozen execution cwd separately. The message names the genuinely
  * missing piece(s) with the kill-and-call-fresh remedy; a missing cwd likely
- * means its Contract was claimed and the worktree cleaned up. When both
+ * means its Contract was accepted and the worktree cleaned up. When both
  * pieces still exist the original failure passes through unchanged, as does
  * any non-ENOENT spawn failure.
  */
@@ -275,7 +275,7 @@ async function diagnoseSpawnEnoent(
   const remedies: string[] = [];
   if (noCwd)
     remedies.push(
-      "a missing execution directory likely means its Contract was claimed and the worktree cleaned up, with deliverables already in Git",
+      "a missing execution directory likely means its Contract was accepted and the worktree cleaned up, with deliverables already in Git",
     );
   if (noExecutable)
     remedies.push(

@@ -94,17 +94,44 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
   assert.match(stream.text, /verify  ✓ 1\/1 · 42s\n$/u);
 });
 
-test("admission progress names admitted terms, not a second bind", () => {
-  const event = { kind: "admitted", contractId: "kei/progress", fact: { kind: "bind" } } as ExecutionEvent;
-  assert.deepEqual(executionProgressLines(event, { columns: 80, color: false }), ["✓ admitted terms · kei/progress"]);
+test("admitted and stage progress never render outside a live frame", () => {
+  const admitted = { kind: "admitted", contractId: "kei/progress", fact: { kind: "bind" } } as ExecutionEvent;
+  assert.deepEqual(executionProgressLines(admitted, { columns: 80, color: false }), []);
+  for (const stage of ["placement", "continuation", "reconciliation"] as const) {
+    for (const state of ["started", "finished"] as const) {
+      const event = { kind: "stage", contractId: "kei/progress", stage, state } as ExecutionEvent;
+      assert.deepEqual(executionProgressLines(event, { columns: 80, color: false }), []);
+    }
+  }
 });
 
-test("non-TTY progress does not repeat a phase coordinate", async () => {
+test("stage and admitted events never render on a TTY either", async () => {
+  const stream = new CapturedStream(true);
+  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+  await renderer.consume({ kind: "admitted", contractId: "kei/progress", fact: { kind: "claim" } } as ExecutionEvent);
+  await renderer.consume({
+    kind: "stage",
+    contractId: "kei/progress",
+    stage: "placement",
+    state: "started",
+  } as ExecutionEvent);
+  await renderer.consume({
+    kind: "stage",
+    contractId: "kei/progress",
+    stage: "placement",
+    state: "finished",
+  } as ExecutionEvent);
+  renderer.finish();
+  assert.equal(stream.text, "");
+});
+
+test("non-TTY progress does not repeat a phase coordinate and never prints a phase start", async () => {
   const stream = new CapturedStream(false);
   const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
   await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
   await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
-  assert.equal(stream.text, "● declaration 1/1 · /scratch\n✓ declaration 1/1\n");
+  assert.equal(stream.text, "✓ declaration 1/1\n");
+  assert.doesNotMatch(stream.text, /●/u);
 });
 
 test("non-TTY progress emits sparse boundaries, bounded output, and no key-value vocabulary", async () => {
@@ -118,11 +145,11 @@ test("non-TTY progress emits sparse boundaries, bounded output, and no key-value
 
   await writeExecutionProgress(events(), stream);
 
-  assert.match(stream.text, /^● setup · npm ci · \/scratch\n/u);
   assert.match(stream.text, /stdout\n  x/u);
   assert.match(stream.text, /\[live output truncated\]/u);
   assert.match(stream.text, /✓ setup · npm ci · 42s\n/u);
   assert.match(stream.text, /progress dropped 2 events\n$/u);
+  assert.doesNotMatch(stream.text, /●/u);
   assert.doesNotMatch(stream.text, /(?:cwd|hook|declaration|elapsed)=/u);
 });
 
@@ -156,7 +183,7 @@ test("live output consolidates adjacent chunks by stream and resets at the next 
   assert.equal((stream.text.match(/^stderr$/gmu) ?? []).length, 1);
   assert.match(stream.text, /stdout\n  stdout onestdout two\nstderr\n  stderr one\n/u);
   assert.match(stream.text, /stderr\n  stderr one\nstdout\n  stdout three\n/u);
-  assert.match(stream.text, /● declaration 1\/1\nstdout\n  stdout next\n/u);
+  assert.match(stream.text, /stdout\n  stdout next\n✓ declaration 1\/1\n/u);
 });
 
 test("live output applies one cumulative UTF-8-safe stream budget", async () => {

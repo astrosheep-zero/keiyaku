@@ -18,6 +18,14 @@ export function gateDisplayName(gate: string): string {
   return gate;
 }
 
+/**
+ * The one display vocabulary for a Contract's lifecycle phase. The journal fact kind stays `claimed`; every
+ * readable surface names the completed Contract `accepted`.
+ */
+export function lifecycleWord(phase: ContractRow["phase"]): string {
+  return phase === "claimed" ? "accepted" : phase;
+}
+
 function progressChip(mark: " " | "✓" | "×", label: string): string {
   return `[${mark}] ${label}`;
 }
@@ -79,13 +87,13 @@ export function candidateIntegrationFacts(
 }
 
 export function afterWording(edge: ContractAfterEdge): string {
-  if (edge.endpoint.kind === "claimed") return `after  ${edge.contractId} · claimed`;
+  if (edge.endpoint.kind === "claimed") return `after  ${edge.contractId} · ${lifecycleWord("claimed")}`;
   const condition = edge.endpoint.kind === "active" ? edge.endpoint.phase : edge.endpoint.kind;
   return `blocked by  ${edge.contractId} · ${condition}`;
 }
 
 export function dependentWording(dependent: ContractDependent): string {
-  return `${dependent.contractId} (${dependent.phase})`;
+  return `${dependent.contractId} (${lifecycleWord(dependent.phase)})`;
 }
 
 export function mergeSummary(observation: ContractWorkspaceObservation): string | undefined {

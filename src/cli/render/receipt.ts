@@ -206,8 +206,14 @@ export function stopLines(
     const checkout = renderRefusalFacts(stop.refusal, "", columns, addressed);
     if (dependent === undefined) return checkout;
     const lines: string[] = [];
-    receiptRow(lines, "!", "continuation", [{ text: dependent, opaque: true }], columns);
+    receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }], columns);
     return [...lines, ...checkout];
+  }
+  if ("failure" in stop && stop.failure === "target-placement-failed") {
+    const lines: string[] = [];
+    receiptRow(lines, "×", "not accepted", dependent === undefined ? [] : [{ text: dependent, opaque: true }], columns);
+    receiptPayload(lines, "reason", stop.diagnostic);
+    return lines;
   }
   const lines: string[] = [];
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: directStopName(stop) }];
@@ -273,7 +279,7 @@ export function seatCloseLines(
 export function executionStopLines(stops: readonly ExecutionStop[], columns: number): readonly string[] {
   const lines: string[] = [];
   for (const stop of stops) {
-    receiptRow(lines, "!", stop.stage, [{ text: stop.reason }, { text: stop.contractId, opaque: true }], columns);
+    receiptRow(lines, "!", "execution", [{ text: stop.reason }, { text: stop.contractId, opaque: true }], columns);
     receiptPayload(lines, "reason", stop.diagnostic);
   }
   return lines;

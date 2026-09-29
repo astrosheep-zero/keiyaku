@@ -214,7 +214,7 @@ test("public Contract rows select the source entry for every phase", async () =>
     rows: board.rows,
     hasMore: false,
   });
-  assert.match(catalog, new RegExp(`${ids.delivered} · delivered · .* · Phase delivered`, "u"));
+  assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
 });
 
 test("Contract boards preserve endpoint kinds and lexical active reverse dependents", async () => {

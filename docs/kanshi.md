@@ -53,7 +53,7 @@ from names or directories, or uses an attachment as permission to change any
 product.
 
 The same read-time association discharges an observed Akuma snapshot's
-reported changes when the associated Contract's observed phase is claimed:
+reported changes when the associated Contract's observed phase is accepted:
 placement has preserved the candidate in Git, so the composite report no
 longer presents placed work as pending. The discharge derives from the Contract
 owner's own phase read, writes nothing, and yields to any missing, failed, or

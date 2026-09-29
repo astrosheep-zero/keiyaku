@@ -94,7 +94,7 @@ export const CONTRACT_REVIEWER_SKILL = [
   "",
   "`keiyaku review` records a verdict on the whole Contract.",
   "",
-  "Record `--satisfied` when you have verified two things and hold the evidence: the current worktree meets every Criterion, and the result actually achieves what the Objective set out to do. Criteria are the written checks; the Objective is the intent behind them — work that passes every check but misses the intent is not satisfied. If a delivered candidate, prerequisites, and all declared gates are in place, the Contract is claimed immediately and cannot be reopened.",
+  "Record `--satisfied` when you have verified two things and hold the evidence: the current worktree meets every Criterion, and the result actually achieves what the Objective set out to do. Criteria are the written checks; the Objective is the intent behind them — work that passes every check but misses the intent is not satisfied. If a delivered candidate, prerequisites, and all declared gates are in place, the Contract is accepted immediately and cannot be reopened.",
   "",
   "Record `--unsatisfied` when any Criterion is unmet, the work is incomplete, or the result does not achieve the Objective's intent — and state what is missing.",
   "",

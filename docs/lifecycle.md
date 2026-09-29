@@ -6,7 +6,7 @@ owned by [model.md](model.md); Markdown is owned by [document.md](document.md).
 
 ## Contract Lifecycle
 
-A Contract moves from bound through delivered to either claimed or abandoned.
+A Contract moves from bound through delivered to either accepted or abandoned.
 Binding alone places the Contract in its bound phase; there is no pre-phase.
 Terminal state is a journal-derived read model, never a separate record.
 Binding fixes coordinates and initial terms. Amendment may replace
@@ -19,7 +19,7 @@ eagerly.
 Contract's settled outcome or needs deliberate sequencing. It is not a Region
 lock, queue, ownership claim, or general-overlap remedy. Its targets must exist;
 v4 does not admit an unfulfillable forward dependency. Placement judges only the
-current direct prerequisites: every one must be claimed. A prerequisite that
+current direct prerequisites: every one must be accepted. A prerequisite that
 later abandons remains visible as an unsatisfied dependency, not an unknown one.
 
 Delivery captures a candidate and frozen placement policy. After that leading

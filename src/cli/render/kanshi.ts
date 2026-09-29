@@ -6,6 +6,7 @@ import {
   displayGitId,
   gateFact,
   gitIdsInRow,
+  lifecycleWord,
   mergeSummary,
   targetMovementFacts,
   verificationFact,
@@ -176,7 +177,7 @@ function renderSelectedContractRow(
     ...entityLines({
       mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
       identity: row.id,
-      state: `${row.phase} · ${formatAge(row.phaseAt, report.observedAt)}`,
+      state: `${lifecycleWord(row.phase)} · ${formatAge(row.phaseAt, report.observedAt)}`,
       title,
       facts: [],
       context,

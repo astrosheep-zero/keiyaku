@@ -35,14 +35,14 @@ to create parallel work.
 - An Arc is a chapter of one `kei`; it is not separately accepted.
 - A Task stores decomposition or dependencies that outlive this conversation.
 
-Use `after` only when one `kei` requires another to be claimed first. Ordinary
+Use `after` only when one `kei` requires another to be accepted first. Ordinary
 overlap is not a dependency.
 
 ## 3. Hold the `kei`
 
 Every `kei` has exactly one holder. The holder coordinates the work and owns
-acceptance until claim or abandonment. Delegation does not transfer that
-responsibility. An Akuma holding the whole loop needs the `kei`, current Arc
+acceptance until the Contract is accepted or abandoned. Delegation does not
+transfer that responsibility. An Akuma holding the whole loop needs the `kei`, current Arc
 when one exists, appointed worktree, holder duties, and actions its commission
 will perform. Birth freezes permissions; Contract association grants none.
 
@@ -69,9 +69,9 @@ Each act changes a different part of the world:
   review across rebase or target movement.
 - **Review:** Records verdict evidence for the current document and worktree
   content, even before delivery. Satisfied review requests placement: with a
-  delivered candidate, current gates, and ready prerequisites, it claims in
+  delivered candidate, current gates, and ready prerequisites, it accepts in
   this invocation. Unsatisfied review records testimony without placement.
-- **Abandon:** Records the alternate terminal outcome without claiming. Claimed
+- **Abandon:** Records the alternate terminal outcome without accepting. Accepted
   and abandoned Contracts cannot be reopened.
 
 Placement judges declared gates, not the producer's identity. Review does not

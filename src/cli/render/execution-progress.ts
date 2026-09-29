@@ -29,16 +29,6 @@ function phaseDetail(observation: Extract<ExecutionEvent, { kind: "verification"
   return observation.name === undefined ? observation.phase : `${observation.phase} · ${safeText(observation.name)}`;
 }
 
-function phaseStartLine(
-  observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"],
-  omitCoordinate = false,
-): string {
-  return `● ${[
-    phaseDetail(observation),
-    ...(omitCoordinate || observation.cwd === undefined ? [] : [safeText(observation.cwd)]),
-  ].join(" · ")}`;
-}
-
 function phaseMark(outcome: string | undefined): "✓" | "×" | "?" {
   if (outcome === undefined) return "?";
   return outcome === "ok" || outcome === "exit 0" ? "✓" : "×";
@@ -152,21 +142,20 @@ class VerificationLiveOutput {
   }
 }
 
-/** Sparse rendering for consumers that do not own a live stream. */
+/**
+ * Sparse rendering for consumers that do not own a live stream. Admitted facts and phase stages are not durable
+ * output: the receipt names admitted facts once, and a stage start is a live-frame claim that must never freeze
+ * into scrollback. Only completed verification facts and bounded live output survive here.
+ */
 export function executionProgressLines(event: ExecutionEvent, context: TextRenderContext): readonly string[] {
   switch (event.kind) {
     case "admitted":
-      return [`✓ admitted ${event.fact.kind === "bind" ? "terms" : event.fact.kind} · ${event.contractId}`];
-    case "verification":
-      return event.observation.kind === "output"
-        ? outputLines(event.observation, context)
-        : [
-            event.observation.state === "started"
-              ? phaseStartLine(event.observation)
-              : phaseFinishLine(event.observation),
-          ];
     case "stage":
-      return [`${event.state === "started" ? "●" : "✓"} ${event.stage}`];
+      return [];
+    case "verification": {
+      if (event.observation.kind === "output") return outputLines(event.observation, context);
+      return event.observation.state === "started" ? [] : [phaseFinishLine(event.observation)];
+    }
     case "progress-dropped":
       return [`progress dropped ${event.count} event${event.count === 1 ? "" : "s"}`];
   }
@@ -187,7 +176,6 @@ export class ExecutionProgressRenderer {
   private phaseFailed = false;
   private phaseUnknown = false;
   private readonly liveOutput = new VerificationLiveOutput();
-  private lastCoordinate: string | undefined;
 
   constructor(private readonly input: ExecutionProgressOptions) {
     this.status = new StatusLine(input.stream, input);
@@ -225,11 +213,6 @@ export class ExecutionProgressRenderer {
       this.verificationStartedAt ??= (this.input.now ?? (() => performance.now()))();
       if (this.status.isTTY)
         this.status.show((duration) => `verify  ● ${phaseDetail(observation)} · ${elapsed(duration)}`);
-      else {
-        const omitCoordinate = observation.cwd !== undefined && observation.cwd === this.lastCoordinate;
-        await this.write([phaseStartLine(observation, omitCoordinate)]);
-        if (observation.cwd !== undefined) this.lastCoordinate = observation.cwd;
-      }
       return;
     }
     await this.write(this.liveOutput.finish(this.input.context));

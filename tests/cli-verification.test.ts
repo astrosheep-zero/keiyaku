@@ -81,7 +81,7 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   );
   const repository = await repositoryAt(raw.path);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
-  assert.match(progress, /● declaration 1\/1/u);
+  assert.doesNotMatch(progress, /●/u, "non-TTY progress never prints a phase start");
   assert.match(progress, /delivery-live-output/u);
   assert.match(progress, /✓ declaration 1\/1/u);
 });
