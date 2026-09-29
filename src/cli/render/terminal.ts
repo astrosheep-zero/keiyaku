@@ -6,8 +6,8 @@ export function emptyCatalogue(surface: string): string {
 
 export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
   return [
-    ...facts.filter((fact) => !fact.startsWith("diagnostic  ") && !fact.startsWith("detail  ")),
-    ...facts.filter((fact) => fact.startsWith("diagnostic  ") || fact.startsWith("detail  ")),
+    ...facts.filter((fact) => !fact.startsWith("detail  ")),
+    ...facts.filter((fact) => fact.startsWith("detail  ")),
   ];
 }
 

@@ -32,10 +32,12 @@ import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
   displayColumns,
+  orderRefusalFacts,
   renderOpaqueBlock,
   takeDisplayColumns,
   truncateDisplayText,
 } from "../src/cli/render/terminal.js";
+import { stopLines } from "../src/cli/render/receipt.js";
 import { renderText } from "../src/cli/render/text.js";
 import {
   activeTool,
@@ -1839,6 +1841,59 @@ test("continuation checkout stop keeps its exact block after the dependent conte
       '    quote"path.ts',
     ].join("\n"),
   );
+});
+
+test("retry stops name their retry class in outcome vocabulary", () => {
+  const addressed = contractId("kei/retry-stop");
+  const dependent = contractId("kei/retry-dependent");
+  assert.deepEqual(stopLines({ retry: { kind: "exhausted" } }, 100, addressed), ["? retry  exhausted"]);
+  assert.deepEqual(stopLines({ retry: { kind: "collision" } }, 100, addressed), ["? retry  collision"]);
+  assert.deepEqual(
+    stopLines({ retry: { kind: "publication-failed", diagnostic: "fatal: unable to create lock" } }, 100, addressed),
+    ["? retry  publication failed", "  reason", "  fatal: unable to create lock", ""],
+  );
+  assert.deepEqual(stopLines({ retry: { kind: "collision" } }, 100, addressed, dependent), [
+    `? retry  collision  ·  ${dependent}`,
+  ]);
+
+  for (const retry of [
+    { kind: "exhausted" as const },
+    { kind: "collision" as const },
+    { kind: "publication-failed" as const, diagnostic: "fatal: unable to create lock" },
+  ]) {
+    const text = stopLines({ retry }, 100, addressed, dependent).join("\n");
+    assert.match(text, /^\? retry  /u);
+    assert.doesNotMatch(text, /!/u);
+  }
+});
+
+test("a retry placement stop renders through the delivered receipt without the failure mark", () => {
+  const contract = contractId("kei/retry-stops-receipt");
+  assert.equal(
+    renderText(
+      receipt({
+        verb: "deliver",
+        contract,
+        placement: { retry: { kind: "publication-failed", diagnostic: "fatal: unable to create lock" } },
+      }),
+    ),
+    [
+      "✓ delivered  kei/retry-stops-receipt",
+      "? retry  publication failed",
+      "  reason",
+      "  fatal: unable to create lock",
+      "",
+      "  candidate  kept",
+    ].join("\n"),
+  );
+});
+
+test("detail facts sink behind ordered refusal facts", () => {
+  assert.deepEqual(
+    orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "task  t"]),
+    ["reason  first", "path  /repo", "task  t", "detail  alpha", "detail  beta"],
+  );
+  assert.deepEqual(orderRefusalFacts(["detail  only", "reason  kept"]), ["reason  kept", "detail  only"]);
 });
 
 test("deliver projects a ran Verification completion", () => {

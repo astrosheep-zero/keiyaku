@@ -215,6 +215,14 @@ export function stopLines(
     receiptPayload(lines, "reason", stop.diagnostic);
     return lines;
   }
+  if ("retry" in stop && stop.retry !== undefined) {
+    const lines: string[] = [];
+    const segments: ReceiptSegment[] = [{ text: stop.retry.kind.replaceAll("-", " ") }];
+    if (dependent !== undefined) segments.push({ text: "·" }, { text: dependent, opaque: true });
+    receiptRow(lines, "?", "retry", segments, columns);
+    if (stop.retry.kind === "publication-failed") receiptPayload(lines, "reason", stop.retry.diagnostic);
+    return lines;
+  }
   const lines: string[] = [];
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: directStopName(stop) }];
   if ("failure" in stop && stop.failure === "target-moved") segments.push(...targetMovedDetail(stop));
@@ -226,9 +234,7 @@ export function stopLines(
   if ("failure" in stop && stop.failure === "environment-failure" && "name" in stop) {
     appendHookPayload(lines, stop.detail);
   }
-  if ("retry" in stop && stop.retry?.kind === "publication-failed") {
-    receiptPayload(lines, "reason", stop.retry.diagnostic);
-  } else if ("failure" in stop && "diagnostic" in stop) {
+  if ("failure" in stop && "diagnostic" in stop) {
     receiptPayload(lines, "reason", stop.diagnostic);
   }
   return lines;

@@ -171,7 +171,9 @@ completed facts appear — phase-finish lines and bounded live output, never a
 phase start, a stage transition, or an admitted fact. Admitted facts are named
 exactly once, in the receipt: a failure receipt names the facts admitted before
 the failure and then names the failure in outcome vocabulary with its reason,
-and internal phase names never appear in receipt text. For delivery, review, and audit, witnessed progress lives on the
+and internal phase names never appear in receipt text. A stop on a retryable
+conflict names its retry class in that same outcome vocabulary, never a
+terminal or substantive mark for a stop that concluded nothing. For delivery, review, and audit, witnessed progress lives on the
 progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation
