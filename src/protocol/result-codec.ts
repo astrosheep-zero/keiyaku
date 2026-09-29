@@ -378,12 +378,7 @@ export function decodeCandidateCompletion(value: unknown): CandidateCompletion {
   };
 }
 
-export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
-  const object = record(
-    value,
-    [],
-    ["completion", "verification", "verificationReuse", "verificationSubject", "verificationSummary", "placement"],
-  );
+export function decodeCompletionEvidenceFields(object: Record<string, unknown>): CompletionEvidence {
   return {
     ...(object.completion === undefined ? {} : { completion: decodeCandidateCompletion(object.completion) }),
     ...(object.verification === undefined ? {} : { verification: decodeVerificationStop(object.verification) }),
@@ -585,16 +580,8 @@ export function decodeReviewValue(value: unknown): ReviewValue {
       "workspace",
     ],
   );
-  const evidence = decodeCompletionEvidence({
-    ...(object.completion === undefined ? {} : { completion: object.completion }),
-    ...(object.verification === undefined ? {} : { verification: object.verification }),
-    ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
-    ...(object.verificationSubject === undefined ? {} : { verificationSubject: object.verificationSubject }),
-    ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
-    ...(object.placement === undefined ? {} : { placement: object.placement }),
-  });
   return {
-    ...evidence,
+    ...decodeCompletionEvidenceFields(object),
     ...(object.workspace === undefined ? {} : { workspace: decodeReviewWorkspaceEvidence(object.workspace) }),
   };
 }

@@ -31,55 +31,54 @@ export type PlacementRefusal =
       contractId: ContractId;
       unmet: readonly UnmetPrerequisite[];
     }>;
+function exactRecord(value: unknown, allowed: readonly string[]): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed placement refusal");
+  const object = value as Record<string, unknown>;
+  for (const key of Object.keys(object)) if (!allowed.includes(key)) throw new Error("malformed placement refusal");
+  return object;
+}
+
 export function decodePlacementRefusal(value: unknown): PlacementRefusal {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     throw new Error("malformed placement refusal");
   const object = value as Record<string, unknown>;
   if (object.kind === "contract-missing" || object.kind === "delivery-missing" || object.kind === "terminal") {
-    if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId"))
-      throw new Error("malformed placement refusal");
+    const { contractId: id } = exactRecord(value, ["kind", "contractId"]);
     try {
-      return { kind: object.kind, contractId: contractId(String(object.contractId)) };
+      return { kind: object.kind, contractId: contractId(String(id)) };
     } catch {
       throw new Error("malformed placement refusal");
     }
   }
   if (object.kind === "gates-unsatisfied") {
-    if (
-      Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet" && key !== "target")
-    )
-      throw new Error("malformed placement refusal");
-    if (!Array.isArray(object.unmet)) throw new Error("malformed placement refusal");
-    if (object.target !== undefined && (typeof object.target !== "string" || object.target.length === 0))
+    const { contractId: id, unmet, target } = exactRecord(value, ["kind", "contractId", "unmet", "target"]);
+    if (!Array.isArray(unmet)) throw new Error("malformed placement refusal");
+    if (target !== undefined && (typeof target !== "string" || target.length === 0))
       throw new Error("malformed placement refusal");
     try {
       return {
         kind: "gates-unsatisfied",
-        contractId: contractId(String(object.contractId)),
-        unmet: object.unmet.map(decodeGateReport),
-        ...(object.target === undefined ? {} : { target: object.target }),
+        contractId: contractId(String(id)),
+        unmet: unmet.map(decodeGateReport),
+        ...(target === undefined ? {} : { target }),
       };
     } catch {
       throw new Error("malformed placement refusal");
     }
   }
   if (object.kind !== "prerequisites-unsatisfied") throw new Error("malformed placement refusal");
-  if (Object.keys(object).some((key) => key !== "kind" && key !== "contractId" && key !== "unmet"))
-    throw new Error("malformed placement refusal");
-  if (!Array.isArray(object.unmet)) throw new Error("malformed placement refusal");
+  const { contractId: id, unmet } = exactRecord(value, ["kind", "contractId", "unmet"]);
+  if (!Array.isArray(unmet)) throw new Error("malformed placement refusal");
   try {
     return {
       kind: "prerequisites-unsatisfied",
-      contractId: contractId(String(object.contractId)),
-      unmet: object.unmet.map((item) => {
-        if (item === null || typeof item !== "object" || Array.isArray(item))
+      contractId: contractId(String(id)),
+      unmet: unmet.map((item) => {
+        const entry = exactRecord(item, ["contractId", "state"]);
+        if (entry.state !== "missing" && entry.state !== "active" && entry.state !== "abandoned")
           throw new Error("malformed placement refusal");
-        const unmet = item as Record<string, unknown>;
-        if (Object.keys(unmet).some((key) => key !== "contractId" && key !== "state"))
-          throw new Error("malformed placement refusal");
-        if (unmet.state !== "missing" && unmet.state !== "active" && unmet.state !== "abandoned")
-          throw new Error("malformed placement refusal");
-        return { contractId: contractId(String(unmet.contractId)), state: unmet.state };
+        return { contractId: contractId(String(entry.contractId)), state: entry.state };
       }),
     };
   } catch {

@@ -1,7 +1,7 @@
 import { decodeDeliverData } from "../core/facts/codec.js";
 import type { SnapshotId } from "../core/facts/types.js";
 import type { DeliverValue as ProtocolDeliverValue } from "../protocol/deliver.js";
-import { decodeCompletionEvidence, decodeDeliverLeading } from "../protocol/result-codec.js";
+import { decodeCompletionEvidenceFields, decodeDeliverLeading } from "../protocol/result-codec.js";
 import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
 import { ownerSchema } from "./result-codec.js";
 import { z } from "zod";
@@ -32,18 +32,10 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     method: object.method,
     policy: object.policy,
   });
-  const evidence = decodeCompletionEvidence({
-    ...(object.completion === undefined ? {} : { completion: object.completion }),
-    ...(object.verification === undefined ? {} : { verification: object.verification }),
-    ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
-    ...(object.verificationSubject === undefined ? {} : { verificationSubject: object.verificationSubject }),
-    ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
-    ...(object.placement === undefined ? {} : { placement: object.placement }),
-  });
   return {
     ...identity,
     ...(object.leading === undefined ? {} : { leading: decodeDeliverLeading(object.leading) }),
-    ...evidence,
+    ...decodeCompletionEvidenceFields(object),
     ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
   };
 }
