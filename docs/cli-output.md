@@ -205,7 +205,9 @@ vocabulary and never replays a settled row; omissions between evidence spans
 are marked opaquely rather than rewritten. A spoken update remains visible but
 does not renew the observation's tool-detail budget. A plural observation attributes
 every semantic row to a stable compact source tag resolved from the
-observation seam, and closes with an attributed scoreboard in the same order;
+observation seam. Its say rows retain the bounded two-line payload budget
+while other attributed rows stay compact. The observation closes with an
+attributed scoreboard in the same order;
 a failure fact for an unobserved member keeps that member's complete identity.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a

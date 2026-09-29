@@ -3383,7 +3383,7 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
   assert.doesNotMatch(text, /hidden-[123]/u);
 });
 
-test("a newly eligible say flushes a crowded tail with edits under ordinary tool priority", () => {
+test("a say omits earlier tail tools and only keeps the last two after the final say", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
   const fileChange = (sequence: number, path: string, state: CompletedToolRow["state"] = { status: "ok" }) =>
@@ -3408,18 +3408,22 @@ test("a newly eligible say flushes a crowded tail with edits under ordinary tool
     tool(8),
     fileChange(9, "src/selected.ts", { status: "error", message: "refused" }),
     say(10, "flush-now"),
+    tool(11),
+    tool(12),
+    tool(13),
+    fileChange(14, "src/last.ts", { status: "error", message: "refused" }),
   ];
   const stream = activityStream({ columns: 120, color: false });
   const observed = stream(liveActivity(idleAkumaSnapshot(rows))).join("\n");
   const text = [observed, ...stream.flush()].filter(Boolean).join("\n");
 
   assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
-  assert.doesNotMatch(text, /src\/middle\.ts/u, "a middle edit can be omitted like any ordinary tool");
-  assert.match(text, /src\/selected\.ts — \+4 -2 — error · refused/u);
-  for (const sequence of [2, 3, 4, 8]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.match(text, /! edit   src\/selected\.ts — \+4 -2 — error · refused/u);
-  for (const sequence of [6, 7]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.equal((text.match(/⋮ 3 omitted/gu) ?? []).length, 1);
+  assert.doesNotMatch(text, /src\/(middle|selected)\.ts/u, "all tools before the final say are omitted");
+  assert.match(text, /! edit   src\/last\.ts — \+4 -2 — error · refused/u);
+  assert.match(text, /\$ tool-13/u);
+  for (const sequence of [2, 3, 4, 6, 7, 8, 11, 12])
+    assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.match(text, /⋮ 8 omitted[\s\S]*flush-now[\s\S]*⋮ 2 omitted/u);
   assert.equal(text.split("flush-now").length - 1, 1);
 });
 

@@ -459,10 +459,13 @@ test("plural wait tags selected identities and keeps rows compact at 80 columns"
     observed(running(second, [secondBase, sameMinuteNote]), [secondBase, sameMinuteNote]),
   ]);
   assert.equal(rows.length, 1, "live rows stay in the redrawable frame");
-  const liveSay = stream.frame().find((row) => row.includes(" say    "))!;
-  assert.match(liveSay, /^\s*dead ● say    "/u);
-  assert.equal(liveSay.endsWith("…"), true, "an in-flight say ends in one trailing ellipsis");
-  assert.equal((liveSay.match(/"/gu) ?? []).length, 1, "the in-flight quote remains open");
+  const frame = stream.frame();
+  const liveSayIndex = frame.findIndex((row) => row.includes(" say    "));
+  assert.match(frame[liveSayIndex]!, /^\s*dead ● say    “/u);
+  assert.equal(frame[liveSayIndex + 1]!.endsWith("…"), true, "an in-flight say uses two lines and stays open");
+  assert.match(frame[liveSayIndex + 1]!, /^\s+│\s+\S/u, "the continuation aligns under the speech body");
+  assert.equal((frame.join("\n").match(/“/gu) ?? []).length, 1);
+  assert.equal((frame.join("\n").match(/”/gu) ?? []).length, 0);
   assert.match(
     rows[0]!,
     /^\d{2}:\d{2} face │ note   same minute$/u,
@@ -568,24 +571,26 @@ test("plural wait closes settled said rows but leaves in-flight said rows open",
     sequence: 2,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
-    text: "in-flight ".repeat(12),
+    text: "in-flight ".repeat(30),
   };
   const complete: Extract<ActivityRow, { kind: "said" }> = {
     kind: "said",
     sequence: 2,
     turnSequence: 1,
     at: AKUMA_ACTIVITY_AT,
-    text: "settled ".repeat(12),
+    text: "settled ".repeat(30),
   };
   const rows = stream.observe([
     observed(running(first, [firstBase, inFlight]), [firstBase, inFlight]),
     observed(settled(second, [complete]), [complete]),
   ]);
-  const liveSay = stream.frame().find((row) => row.includes(" say    "))!;
-  assert.match(liveSay, /^\s*dead ● say    "/u);
-  assert.equal(liveSay.endsWith("…"), true, "an in-flight say has no closing quote");
-  assert.match(rows[0]!, /^\d{2}:\d{2} face │ say    "/u);
-  assert.equal(rows[0]!.endsWith('…"'), true, "a settled say closes its quote after truncation");
+  const frame = stream.frame();
+  const liveSayIndex = frame.findIndex((row) => row.includes(" say    "));
+  assert.match(frame[liveSayIndex]!, /^\s*dead ● say    “/u);
+  assert.equal(frame[liveSayIndex + 1]!.endsWith("…"), true, "an in-flight say uses two lines without closing");
+  assert.match(rows[0]!, /^\d{2}:\d{2} face │ say    “/u);
+  assert.equal(rows.length, 2, "a settled say uses its two-line budget");
+  assert.equal(rows[1]!.endsWith("…”"), true, "a settled say closes its quote after truncation");
   for (const row of rows) assert.ok(displayColumns(row) <= 80, row);
 });
 

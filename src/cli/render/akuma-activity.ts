@@ -185,7 +185,7 @@ type RowLayout = Readonly<{
   marker: (count: number) => string;
   history?: true;
   compactRun?: true;
-  /** Plural wait rows spend their full remaining width on one terminal line. */
+  /** Plural wait keeps ordinary rows on one line; speech can use its two-line budget. */
   singleLine?: true;
   /** World-board answer previews keep the conclusion at the tail. */
   tailAnswer?: true;
@@ -359,8 +359,13 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
     first,
     continuation,
     columns: context.columns,
-    maxLines: layout.singleLine === true ? 1 : layout.history === true ? Number.MAX_SAFE_INTEGER : value.lines,
-    quote: quotedBody(row) ? (layout.singleLine === true ? '"' : "“") : "",
+    maxLines:
+      layout.singleLine === true && row.kind !== "said"
+        ? 1
+        : layout.history === true
+          ? Number.MAX_SAFE_INTEGER
+          : value.lines,
+    quote: quotedBody(row) ? (layout.singleLine === true && row.kind !== "said" ? '"' : "“") : "",
     openQuote: row.kind === "said" && inFlightSay,
     truncated: "truncated" in row && row.truncated === true,
   });
@@ -529,6 +534,7 @@ type ActivityStreamState = {
   renderedBoundaries: Set<number>;
   admittedTellSequences: Set<number>;
   openingTools: number;
+  hasSaid: boolean;
   deferred: DeferredActivityEntry[];
   liveRows: Map<number, RenderRow>;
 };
@@ -633,6 +639,15 @@ function omitOldestDeferredTool(state: ActivityStreamState): void {
   coalesceDeferredGaps(state);
 }
 
+/** A say is a checkpoint: only tools after the last say may occupy the recent tail. */
+function omitPreSayTools(state: ActivityStreamState): void {
+  state.hasSaid = true;
+  state.deferred = state.deferred.map((entry) =>
+    entry.kind === "row" && isBoundedStreamTool(entry.row) ? { kind: "gap", count: 1 } : entry,
+  );
+  coalesceDeferredGaps(state);
+}
+
 /** Emit only a prefix whose omission runs can no longer join an unresolved tail tool. */
 function flushSafeActivityPrefix(
   state: ActivityStreamState,
@@ -722,11 +737,12 @@ function observeActivitySnapshot(
   const rows = observedRows.filter((row) => row.kind !== "thought");
   for (const row of rows) {
     if (row.kind === "said") {
+      omitPreSayTools(state);
       lines.push(...flushActivityTail(state, context, layout));
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
     }
-    if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
+    if (isBoundedStreamTool(row) && !state.hasSaid && state.openingTools < OPENING_TOOL_BUDGET) {
       state.openingTools += 1;
       renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
       continue;
@@ -763,10 +779,10 @@ function flushActivityTail(
 
 /**
  * Append-only live view over one command's successive settled snapshots. The
- * first three tools stream immediately; later tools wait in a two-row tail
- * until the command ends. As a newer tool displaces an older tail candidate,
- * its body becomes an in-place omission count. Narrative waits only while a
- * preceding tail tool still decides its position.
+ * first three tools stream immediately before any say; later tools wait in a
+ * two-row tail. A say omits the earlier tail, so only the last two tools after
+ * the final say can print at closing. Newer tools displace older tail candidates
+ * in place. Other narrative rows wait behind undecided tail tools.
  */
 export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
   const state: ActivityStreamState = {
@@ -777,6 +793,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     renderedBoundaries: new Set(),
     admittedTellSequences: new Set(),
     openingTools: 0,
+    hasSaid: false,
     deferred: [],
     liveRows: new Map(),
   };
@@ -824,6 +841,7 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       { live: true, inFlightSay: (row) => row.kind === "said" },
     );
   const flush = (): readonly string[] => {
+    if ([...state.liveRows.values()].some((row) => row.kind === "said")) omitPreSayTools(state);
     const lines = [...flushActivityTail(state, context, layout)];
     for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
       const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;

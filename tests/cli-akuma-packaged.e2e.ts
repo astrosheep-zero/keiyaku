@@ -159,7 +159,7 @@ function markColumn(line: string, mark: string): number {
 
 /** Ascending message numbers rendered in one attributed source's rows. */
 function attributedAttemptNumbers(stderr: string, tag: string): readonly number[] {
-  return [...stderr.matchAll(new RegExp(`^.*${tag} +\\S+ +say +"attempt (\\d+)`, "gmu"))].map((match) =>
+  return [...stderr.matchAll(new RegExp(`^.*${tag} +\\S+ +say +“attempt (\\d+)`, "gmu"))].map((match) =>
     Number(match[1]!),
   );
 }
@@ -173,7 +173,7 @@ function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: st
   );
   assert.match(
     stderr,
-    new RegExp(`^.*${tag} +● say +"attempt \\d+`, "mu"),
+    new RegExp(`^.*${tag} +● say +“attempt \\d+`, "mu"),
     `${mode} streamed in-flight say evidence for its source:\n${stderr}`,
   );
 
