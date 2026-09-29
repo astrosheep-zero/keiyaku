@@ -28,7 +28,15 @@ import type {
 
 type MutationObservation = Pick<
   MutationResult<unknown>,
-  "facts" | "head" | "lags" | "settlementLags" | "recoverySnapshot" | "cleanup" | "executionStops"
+  | "facts"
+  | "head"
+  | "lags"
+  | "settlementLags"
+  | "recoverySnapshot"
+  | "retiredWorktree"
+  | "retainedWorktree"
+  | "cleanup"
+  | "executionStops"
 >;
 
 type MutationCallOptions = Readonly<{
@@ -67,6 +75,8 @@ function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | 
     facts: acceptedFacts(result),
     settlementLags: result.settlementLags,
     ...(result.recoverySnapshot === undefined ? {} : { recoverySnapshot: result.recoverySnapshot }),
+    ...(result.retiredWorktree === undefined ? {} : { retiredWorktree: result.retiredWorktree }),
+    ...(result.retainedWorktree === undefined ? {} : { retainedWorktree: result.retainedWorktree }),
     ...(result.lags.length === 0 || firstLag === undefined ? {} : { lag: [firstLag, ...result.lags.slice(1)] }),
     ...(result.cleanup.length === 0 ? {} : { cleanup: result.cleanup }),
     ...(result.executionStops.length === 0 ? {} : { executionStops: result.executionStops }),
@@ -83,6 +93,7 @@ function acceptedCompletion(completion: Delivery["completion"]): Delivery["compl
     integration: completion.integration,
     ...(completion.predecessor === undefined ? {} : { predecessor: completion.predecessor }),
     ...(completion.target === undefined ? {} : { target: completion.target }),
+    ...(completion.scope === undefined ? {} : { scope: completion.scope }),
     ...(completion.verification === undefined ? {} : { verification: completion.verification }),
   };
 }
@@ -135,6 +146,7 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
     ...(verificationVerdict === undefined ? {} : { verificationVerdict }),
     ...(value.verification === undefined ? {} : { verification: value.verification }),
     ...(value.verificationReuse === undefined ? {} : { verificationReuse: value.verificationReuse }),
+    ...(value.verificationSubject === undefined ? {} : { verificationSubject: value.verificationSubject }),
     ...(value.verificationSummary === undefined ? {} : { verificationSummary: value.verificationSummary }),
     ...(value.placement === undefined ? {} : { placement: value.placement }),
     ...(value.continuation === undefined ? {} : { continuation: value.continuation }),

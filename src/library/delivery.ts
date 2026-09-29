@@ -20,6 +20,7 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     "completion",
     "verification",
     "verificationReuse",
+    "verificationSubject",
     "verificationSummary",
     "placement",
     "continuation",
@@ -35,6 +36,7 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
     ...(object.completion === undefined ? {} : { completion: object.completion }),
     ...(object.verification === undefined ? {} : { verification: object.verification }),
     ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
+    ...(object.verificationSubject === undefined ? {} : { verificationSubject: object.verificationSubject }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
     ...(object.placement === undefined ? {} : { placement: object.placement }),
   });
@@ -56,6 +58,7 @@ class DeliveryHandle {
   declare readonly completion?: DeliveryValue["completion"];
   declare readonly verification?: DeliveryValue["verification"];
   declare readonly verificationReuse?: DeliveryValue["verificationReuse"];
+  declare readonly verificationSubject?: DeliveryValue["verificationSubject"];
   declare readonly verificationSummary?: DeliveryValue["verificationSummary"];
   declare readonly placement?: DeliveryValue["placement"];
   declare readonly continuation?: DeliveryValue["continuation"];
@@ -74,6 +77,7 @@ class DeliveryHandle {
         | "completion"
         | "verification"
         | "verificationReuse"
+        | "verificationSubject"
         | "verificationSummary"
         | "placement"
         | "continuation"

@@ -25,6 +25,7 @@ import {
   titleLines,
 } from "./receipt.js";
 import { abbreviateGitIds, displayGitId, lifecycleWord } from "./contract-observation.js";
+import { renderDiffstat } from "./akuma-tool.js";
 import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
 
 const HANG = "  ";
@@ -272,7 +273,11 @@ function nonGatingVerificationLines(
     lines,
     "!",
     "verification",
-    [{ text: "unsatisfied" }, { text: `(${verification.mode})` }, { text: "· not required by Contract gates" }],
+    [
+      ...(verification.mode === "reused" ? [{ text: "reused" }] : []),
+      { text: "unsatisfied" },
+      { text: "· not required by Contract gates" },
+    ],
     columns,
   );
   if (result.verificationSummary !== undefined) {
@@ -281,13 +286,51 @@ function nonGatingVerificationLines(
   return lines;
 }
 
+/** A terminal command names the worktree it retired, or the retained worktree it failed to remove. */
+function worktreeRetirementLines(
+  result: { retiredWorktree?: string | undefined; retainedWorktree?: string | undefined },
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  if (result.retiredWorktree !== undefined)
+    receiptRow(lines, " ", "worktree", [{ text: `${result.retiredWorktree} retired` }], columns);
+  else if (result.retainedWorktree !== undefined)
+    receiptRow(
+      lines,
+      "!",
+      "lag",
+      [{ text: "worktree retained" }, { text: result.retainedWorktree, opaque: true }],
+      columns,
+    );
+  return lines;
+}
+
+/** The landed diff's shape, rendered by the one diffstat rule the akuma surfaces already own. */
+function landedChangesLines(
+  scope: Readonly<{ filesChanged: number; insertions: number; deletions: number }> | undefined,
+  columns: number,
+): readonly string[] {
+  if (scope === undefined) return [];
+  const files = `${scope.filesChanged} ${scope.filesChanged === 1 ? "file" : "files"}`;
+  const lines: string[] = [];
+  receiptRow(
+    lines,
+    " ",
+    "changes",
+    [{ text: `${files} · ${renderDiffstat({ added: scope.insertions, removed: scope.deletions })}` }],
+    columns,
+  );
+  return lines;
+}
+
 /**
  * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
  * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
  * state. Satisfied Verification adds one fact row naming the integrated result; placement made that commit the
- * reference's new head, so the movement and integrated-result rows share one sha. Verification mode words stay in
- * JSON and `history`, never in ordinary receipt text. A completion without an advanced reference states no movement.
- * Journal ULIDs stay in JSON and `history`, never in ordinary receipt text.
+ * reference's new head, so the movement and integrated-result rows share one sha. The verdict names reuse in the
+ * audit surface's vocabulary and carries no qualifier when this command executed declarations. A completion
+ * without an advanced reference states no movement. Journal ULIDs stay in JSON and `history`, never in ordinary
+ * receipt text.
  */
 function completedPlacementLines(
   result: AcceptedDeliverResult | AcceptedReviewResult,
@@ -320,10 +363,17 @@ function completedPlacementLines(
       lines,
       " ",
       "integration result",
-      [{ text: `${displayGitId(completion.integration, abbreviations)} · verification satisfied` }],
+      [
+        {
+          text: `${displayGitId(completion.integration, abbreviations)} · verification ${
+            completion.verification.mode === "reused" ? "reused " : ""
+          }satisfied`,
+        },
+      ],
       columns,
     );
   }
+  lines.push(...landedChangesLines(completion.scope, columns));
   lines.push(...nonGatingVerificationLines(result, columns));
   // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
   receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
@@ -406,6 +456,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   const abbreviations = abbreviateGitIds([
     result.tenderSnapshot ?? "",
     result.integration?.changeId ?? "",
+    result.verificationSubject?.snapshot ?? "",
     result.completion?.predecessor ?? "",
     result.completion?.integration ?? "",
   ]);
@@ -434,7 +485,25 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
       columns,
     );
   if (complete) lines.push(...completedPlacementLines(result, columns));
-  else lines.push(...movementLines(result, columns));
+  else {
+    const subject = result.verificationSubject;
+    if (subject !== undefined) {
+      receiptRow(
+        lines,
+        " ",
+        "integration result",
+        [
+          {
+            text: `${displayGitId(subject.snapshot, abbreviations)} · verification ${
+              subject.mode === "reused" ? "reused " : ""
+            }${subject.verdict}`,
+          },
+        ],
+        columns,
+      );
+    }
+    lines.push(...movementLines(result, columns));
+  }
   if (result.verification !== undefined) {
     lines.push(...stopLines(result.verification, columns, result.contract));
   }
@@ -444,6 +513,7 @@ function renderAcceptedDeliver(result: AcceptedDeliverResult, columns: number): 
   if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(...continuationLines(result, columns));
   lines.push(...(complete ? obligationLines(result, columns) : recordBlock(result, columns)));
+  lines.push(...worktreeRetirementLines(result, columns));
   return lines.join("\n");
 }
 
@@ -458,6 +528,7 @@ function renderAcceptedReview(result: AcceptedReviewResult, columns: number): st
   }
   lines.push(...continuationLines(result, columns));
   lines.push(...obligationLines(result, columns));
+  lines.push(...worktreeRetirementLines(result, columns));
   return lines.join("\n");
 }
 
@@ -476,6 +547,7 @@ function renderAcceptedAbandon(result: AcceptedAbandonResult, columns: number): 
   const lines = titleLines("✓", "abandoned", result.contract, columns);
   if (result.note !== undefined) receiptRow(lines, " ", "note", [{ text: result.note }], columns);
   lines.push(...recordBlock(result, columns));
+  lines.push(...worktreeRetirementLines(result, columns));
   return lines.join("\n");
 }
 

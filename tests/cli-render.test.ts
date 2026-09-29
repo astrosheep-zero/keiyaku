@@ -38,6 +38,7 @@ import {
   truncateDisplayText,
 } from "../src/cli/render/terminal.js";
 import { stopLines } from "../src/cli/render/receipt.js";
+import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
 import { renderText } from "../src/cli/render/text.js";
 import {
   activeTool,
@@ -1928,6 +1929,179 @@ test("deliver projects a ran Verification completion", () => {
   assertModeWordingAbsent(text);
 });
 
+test("placement receipts name reused provenance in the audit surface's vocabulary", () => {
+  const contract = contractId("kei/placement-reuse");
+  const text = renderText(
+    receipt({
+      verb: "review",
+      contract,
+      verdict: "satisfied",
+      completion: {
+        integration: snapshotId("4".repeat(40)),
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+        verification: { mode: "reused", verdict: "satisfied" },
+      },
+    }),
+  );
+  assert.equal(
+    text,
+    [
+      "✓ review satisfied  kei/placement-reuse",
+      "  target  3333333..4444444  refs/heads/main",
+      "  integration result  4444444 · verification reused satisfied",
+      "✓ accepted",
+    ].join("\n"),
+  );
+});
+
+test("a deliver receipt without placement names the verdict's exact snapshot and provenance", () => {
+  const contract = contractId("kei/standalone-subject");
+  const integration = snapshotId("a".repeat(40));
+  assert.equal(
+    renderText(
+      receipt({
+        verb: "deliver",
+        contract,
+        tenderSnapshot: snapshotId("b".repeat(40)),
+        integration: { changeId: changeId("c".repeat(40)) },
+        verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+      }),
+    ),
+    [
+      "✓ delivered  kei/standalone-subject",
+      "  candidate  bbbbbbb",
+      "  content identity (not commit)  ccccccc",
+      "  integration result  aaaaaaa · verification reused satisfied",
+      "  candidate  kept",
+    ].join("\n"),
+  );
+  const fresh = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      verificationSubject: { snapshot: integration, mode: "ran", verdict: "unsatisfied" },
+    }),
+  );
+  assert.match(fresh, /^  integration result  aaaaaaa · verification unsatisfied$/mu);
+  assert.equal((fresh.match(/integration result/gu) ?? []).length, 1);
+});
+
+test("a placed deliver keeps the verdict on the placement integration row only", () => {
+  const contract = contractId("kei/one-row");
+  const integration = snapshotId("4".repeat(40));
+  const text = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      completion: {
+        integration,
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+        verification: { mode: "reused", verdict: "satisfied" },
+      },
+      verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+    }),
+  );
+  assert.equal((text.match(/integration result/gu) ?? []).length, 1);
+  assert.match(text, /^  integration result  4444444 · verification reused satisfied$/mu);
+});
+
+test("terminal receipts name the retired worktree last", () => {
+  const review = renderText(
+    receipt({
+      verb: "review",
+      contract: contractId("kei/retired-review"),
+      verdict: "satisfied",
+      completion: {
+        integration: snapshotId("4".repeat(40)),
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+        verification: { mode: "ran", verdict: "satisfied" },
+      },
+      retiredWorktree: "fridge",
+    }),
+  );
+  assert.match(review, /^  worktree  fridge retired$/mu);
+  assert.match(review, /retired$/u);
+  const abandoned = renderText(
+    receipt({ verb: "abandon", contract: contractId("kei/retired-abandon"), retiredWorktree: "shed" }),
+  );
+  assert.match(abandoned, /^  worktree  shed retired$/mu);
+  const active = renderText(receipt({ verb: "review", contract: contractId("kei/active"), verdict: "satisfied" }));
+  assert.doesNotMatch(active, /retired/u);
+});
+
+test("a terminal receipt names a retained worktree in place of the obituary", () => {
+  const retained = renderText(
+    receipt({
+      verb: "abandon",
+      contract: contractId("kei/retained-abandon"),
+      retainedWorktree: "/repo/.keiyaku/wt/fridge",
+    }),
+  );
+  assert.match(retained, /^! lag  worktree retained  \/repo\/\.keiyaku\/wt\/fridge$/mu);
+  assert.doesNotMatch(retained, /retired/u);
+  const preexisting = renderText(
+    receipt({
+      verb: "review",
+      contract: contractId("kei/preexisting-residue"),
+      verdict: "satisfied",
+      lag: [{ kind: "worktree-retained", path: "/tmp/wt", affects: "none" }],
+    }),
+  );
+  assert.doesNotMatch(preexisting, /lag  worktree|\/tmp\//u, "pre-existing residue stays typed-only");
+});
+
+test("a completed placement names the landed diff's shape through the shared diffstat rule", () => {
+  const contract = contractId("kei/landed-shape");
+  const text = renderText(
+    receipt({
+      verb: "review",
+      contract,
+      verdict: "satisfied",
+      completion: {
+        integration: snapshotId("4".repeat(40)),
+        predecessor: snapshotId("3".repeat(40)),
+        target: "refs/heads/main",
+        scope: { filesChanged: 3, insertions: 4, deletions: 1 },
+        verification: { mode: "ran", verdict: "satisfied" },
+      },
+    }),
+  );
+  assert.equal(
+    text,
+    [
+      "✓ review satisfied  kei/landed-shape",
+      "  target  3333333..4444444  refs/heads/main",
+      "  integration result  4444444 · verification satisfied",
+      `  changes  3 files · ${renderDiffstat({ added: 4, removed: 1 })}`,
+      "✓ accepted",
+    ].join("\n"),
+  );
+  const single = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      completion: {
+        integration: snapshotId("6".repeat(40)),
+        predecessor: snapshotId("5".repeat(40)),
+        target: "refs/heads/main",
+        scope: { filesChanged: 1, insertions: 2, deletions: 0 },
+      },
+    }),
+  );
+  assert.ok(single.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 2, removed: 0 })}`));
+  const unplaced = renderText(
+    receipt({
+      verb: "deliver",
+      contract,
+      verificationSubject: { snapshot: snapshotId("a".repeat(40)), mode: "ran", verdict: "satisfied" },
+    }),
+  );
+  assert.doesNotMatch(unplaced, /changes/u, "a deliver without placement carries no changes row");
+});
+
 test("deliver renders accepted and stopped continuations from the accepted result", () => {
   const contract = contractId("kei/prerequisite");
   const claimed = contractId("kei/claimed-dependent");
@@ -2010,7 +2184,7 @@ test("review projects a reused unsatisfied Verification as non-gating completion
     [
       "✓ review satisfied  kei/review-completion-unsatisfied",
       "  target  7777777..8888888  refs/heads/main",
-      "! verification  unsatisfied  (reused)  · not required by Contract gates",
+      "! verification  reused  unsatisfied  · not required by Contract gates",
       "  summary",
       "  [reused bash exit 1]",
       "",

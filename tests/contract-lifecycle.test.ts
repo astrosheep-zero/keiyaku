@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { externalRequestCommandsFor } from "../src/akuma-body.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
-import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
+import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 /** A committed candidate whose configured scratch setup always fails, producing a Verification runtime stop. */
@@ -144,6 +144,61 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assertRuntimeStop(delivered.value.verification);
     assert.equal((await keiyaku.state()).terminal, null);
+  });
+
+  test("an unaffected deliver names the verified snapshot the later placement lands", async () => {
+    const { keiyaku } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const delivered = await keiyaku.deliver();
+    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+    assert.equal(delivered.value.completion, undefined);
+    assert.equal(delivered.retiredWorktree, undefined, "an active Contract retires nothing");
+    assert.equal((await keiyaku.state()).terminal, null);
+    const subject = delivered.value.verificationSubject;
+    assert.deepEqual(subject, {
+      snapshot: (await keiyaku.state()).currentIntegration?.snapshot,
+      mode: "ran",
+      verdict: "satisfied",
+    });
+
+    const reviewed = await keiyaku.review({ verdict: "satisfied" });
+    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
+    assert.equal(reviewed.value.completion?.integration, subject?.snapshot, "the placement names the same id");
+  });
+
+  test("a terminal acceptance reports the retired appointed worktree", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    const delivered = await keiyaku.deliver();
+    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+    assert.equal(delivered.retiredWorktree, undefined, "an active Contract retires nothing");
+    const reviewed = await keiyaku.review({ verdict: "satisfied" });
+    assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
+    assert.equal(reviewed.retiredWorktree, basename(worktree));
+    assert.equal((await keiyaku.state()).terminal?.kind, "claimed");
+  });
+
+  test("a terminal removal failure surfaces as retained residue instead of an obituary", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    const marker = join(repository.path, ".git", "remove-failed-once");
+    const shim = [
+      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ] && [ ! -e "$KEIYAKU_REMOVE_MARKER" ]; then',
+      '  : > "$KEIYAKU_REMOVE_MARKER"',
+      "  exit 1",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n");
+    await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
+      const delivered = await keiyaku.deliver();
+      assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
+      const abandoned = await Keiyaku.with()
+        .select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id })
+        .abandon();
+      assert.ok(abandoned.kind === "accepted", JSON.stringify(abandoned));
+      assert.equal(abandoned.retiredWorktree, undefined);
+      assert.equal(abandoned.retainedWorktree, worktree);
+      assert.ok(abandoned.lags.some((lag) => lag.kind === "worktree-retained"));
+    });
   });
 
   test("a reused unsatisfied Verification blocks only when verified is selected", async () => {

@@ -110,6 +110,11 @@ export const mutationPendingSurfaceSchema = ownerSchema(
   "expected pending surface",
 ) satisfies z.ZodType<MutationPendingSurface>;
 
+function nonblankString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`malformed ${label}`);
+  return value;
+}
+
 function decodeMutationLag(value: unknown): MutationLag {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed mutation lag");
   const { affects, ...withoutScope } = value as Record<string, unknown>;
@@ -169,6 +174,8 @@ export const mutationResultSchema = <Value>(
       "settlementLags",
       "pending",
       "recoverySnapshot",
+      "retiredWorktree",
+      "retainedWorktree",
       "cleanup",
       "executionStops",
     ]);
@@ -187,6 +194,12 @@ export const mutationResultSchema = <Value>(
       ...(object.recoverySnapshot === undefined
         ? {}
         : { recoverySnapshot: snapshotId(String(object.recoverySnapshot)) }),
+      ...(object.retiredWorktree === undefined
+        ? {}
+        : { retiredWorktree: nonblankString(object.retiredWorktree, "retired worktree name") }),
+      ...(object.retainedWorktree === undefined
+        ? {}
+        : { retainedWorktree: nonblankString(object.retainedWorktree, "retained worktree path") }),
     };
   }, "expected mutation result");
 
@@ -298,6 +311,10 @@ export type MutationResult<Value> = Readonly<{
   cleanup: readonly ExecutionCleanup[];
   executionStops: readonly ExecutionStop[];
   recoverySnapshot?: SnapshotId;
+  /** The appointed worktree's short name when this invocation retired it. */
+  retiredWorktree?: string;
+  /** The appointed worktree's path when this invocation's own removal of it was retained. */
+  retainedWorktree?: string;
   pending: readonly MutationPendingSurface[];
 }>;
 
@@ -329,9 +346,11 @@ function rememberLeading<Value, PublicValue>(input: Completion<Value, PublicValu
 async function reconcileExecution<Value, PublicValue>(
   input: Completion<Value, PublicValue>,
   progress: ExecutionProgress,
-): Promise<readonly ReconcileCompletion[]> {
+): Promise<Readonly<{ reports: readonly ReconcileCompletion[]; retiredWorktree?: string; retainedWorktree?: string }>> {
   const contracts = [...new Set([input.contractId, ...progress.snapshot().affected])];
   const reports: ReconcileCompletion[] = [];
+  let retiredWorktree: string | undefined;
+  let retainedWorktree: string | undefined;
   for (const contractId of contracts) {
     try {
       input.scope.signal?.throwIfAborted();
@@ -349,13 +368,21 @@ async function reconcileExecution<Value, PublicValue>(
           progress.observe({ kind: "stage", contractId, stage: "reconciliation", state: "finished" });
         }
       })();
+      if (contractId === input.contractId) {
+        if (retiredWorktree === undefined) retiredWorktree = report.retiredWorktree;
+        if (retainedWorktree === undefined) retainedWorktree = report.retainedWorktree;
+      }
       reports.push(report);
       progress.recordResidue(contractId, report.settlement);
     } catch (error) {
       progress.recordStop(executionStop(contractId, "reconciliation", error, input.scope.signal));
     }
   }
-  return reports;
+  return {
+    reports,
+    ...(retiredWorktree === undefined ? {} : { retiredWorktree }),
+    ...(retainedWorktree === undefined ? {} : { retainedWorktree }),
+  };
 }
 
 export async function completeMutation<Value, PublicValue>(
@@ -364,7 +391,7 @@ export async function completeMutation<Value, PublicValue>(
   const progress = input.progress ?? new ExecutionProgress();
   rememberLeading(input, progress);
   try {
-    const reports = await reconcileExecution(input, progress);
+    const { reports, retiredWorktree, retainedWorktree } = await reconcileExecution(input, progress);
     const snapshot = progress.snapshot();
     const effects = [...snapshot.physical.effects, ...reports.flatMap((report) => report.effects)];
     const recoverySnapshot = effects.findLast((effect) => effect.kind === "recovery-snapshot")?.snapshot;
@@ -384,6 +411,8 @@ export async function completeMutation<Value, PublicValue>(
       ...obligations,
       pending: collectAcceptedPending(phasePendingFromValue(input.operation, publicValue), obligations),
       ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
+      ...(retiredWorktree === undefined ? {} : { retiredWorktree }),
+      ...(retainedWorktree === undefined ? {} : { retainedWorktree }),
     };
   } catch (error) {
     const receipt = receiptFromProgress(input.operation, input.contractId, progress);

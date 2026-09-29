@@ -35,6 +35,10 @@ export type ReconcileCompletion = Readonly<{
   lag: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
   settlement: SettlementReport;
   hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
+  /** The appointed worktree's short name when this invocation physically removed it. */
+  retiredWorktree?: string;
+  /** The appointed worktree's path when this invocation's own removal of it was retained. */
+  retainedWorktree?: string;
 }>;
 
 /**
@@ -168,6 +172,27 @@ function isManagedTerminal(state: ContractState | null): boolean {
   return state !== null && isManagedWorktree(state) && state.terminal !== null;
 }
 
+/**
+ * Terminal cleanup retires the appointed worktree. Name its short name only when this
+ * invocation physically removed that exact worktree; name its path when this invocation's
+ * own removal was retained. A retained worktree keeps its own typed lag either way.
+ */
+function terminalWorktreeOutcome(
+  scope: RepositoryScope,
+  cleanup: ReconcileReport | undefined,
+  place: string | undefined,
+): Readonly<{ kind: "retired"; place: string } | { kind: "retained"; path: string }> | undefined {
+  if (cleanup === undefined || place === undefined) return undefined;
+  const path = worktreePath(scope, place);
+  if (
+    cleanup.effects.some((effect) => effect.kind === "worktree" && effect.path === path && effect.action === "removed")
+  )
+    return { kind: "retired", place };
+  if (cleanup.lag.some((lag) => lag.kind === "worktree-retained" && lag.path === path))
+    return { kind: "retained", path };
+  return undefined;
+}
+
 function appointableManagedContracts(states: readonly ContractState[]): readonly ContractId[] {
   return states.filter((state) => isManagedWorktree(state) && state.terminal === null).map((state) => state.id);
 }
@@ -274,6 +299,7 @@ export async function completeReconcile(
     effects: retained.report.effects,
   });
   const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
+  const worktree = terminalWorktreeOutcome(input.scope, cleanup?.report, appointment.place);
   const release = releaseEligible(retained.state, cleanup?.report, appointment.place !== undefined)
     ? await releaseAppointments(input.scope, [input.contractId])
     : undefined;
@@ -288,6 +314,8 @@ export async function completeReconcile(
     ],
     settlement,
     ...(hookRuns.length === 0 ? {} : { hookRuns }),
+    ...(worktree?.kind === "retired" ? { retiredWorktree: worktree.place } : {}),
+    ...(worktree?.kind === "retained" ? { retainedWorktree: worktree.path } : {}),
   };
 }
 

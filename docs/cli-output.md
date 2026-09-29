@@ -34,7 +34,14 @@ journal blobs, entry ids, and record-field enumeration out of ordinary text —
 evidence handles live in JSON and `history` alone. Recorded verification folds
 into a delivery row only when its snapshot matches; otherwise it remains an
 independent verdict fact. A row without a delivery association states no
-candidate and shows recorded verification independently.
+candidate and shows recorded verification independently. A receipt that reports
+a Verification verdict names the snapshot that verdict covers and says whether
+this command reused a standing attestation or executed declarations, in the
+words the audit surface already uses; when that snapshot later lands, the
+landing row names the same identity, and a completed placement also names the
+landed diff's shape in the one shared diffstat vocabulary. A terminal receipt
+names its appointed worktree's short name when it retired the worktree, and
+names the retained worktree's path when its own removal failed.
 
 A completed placement reads like Git movement, identically for a review and a
 deliver: the title states the verdict or delivery and the Contract, one row

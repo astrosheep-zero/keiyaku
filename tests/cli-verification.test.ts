@@ -1,11 +1,14 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { setImmediate } from "node:timers/promises";
 import test from "node:test";
 import { invoke as invokeRaw } from "../src/cli/invoke.js";
+import type { InvocationResult } from "../src/cli/result.js";
+import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
+import { renderText } from "../src/cli/render/text.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 import { startContractExecution, type ExecutionEvent } from "../src/library/execution.js";
@@ -45,13 +48,9 @@ function progressOutput() {
   };
 }
 
-async function bindAndDeliver(script: string, gates: readonly string[] = ["verified"]) {
+async function bindCandidate(script: string, gates: readonly string[] = ["verified"]) {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  raw.run(["checkout", "--quiet", "-b", "candidate"]);
-  writeFileSync(resolve(raw.path, "candidate.txt"), "candidate\n");
-  raw.run(["add", "candidate.txt"]);
-  raw.run(["commit", "--quiet", "-m", "candidate"]);
   mkdirSync(resolve(raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(
     resolve(raw.path, ".keiyaku", "settings.json"),
@@ -62,13 +61,24 @@ async function bindAndDeliver(script: string, gates: readonly string[] = ["verif
     readStdin: async () => markdown(script),
   })) as unknown as { kind: string; contract: string };
   assert.equal(bound.kind, "accepted");
+  const id = bound.contract as ContractId;
+  const repository = await repositoryAt(raw.path);
+  const worktree = await appointedWorktreePath(repository, id);
+  writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
+  raw.run(["-C", worktree, "add", "candidate.txt"]);
+  raw.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  return { raw, id };
+}
+
+async function bindAndDeliver(script: string, gates: readonly string[] = ["verified"]) {
+  const { raw, id } = await bindCandidate(script, gates);
   const output = progressOutput();
-  const result = await invokeRaw(executable(["-C", raw.path, "deliver", bound.contract]), {
+  const result = await invokeRaw(executable(["-C", raw.path, "deliver", id]), {
     environment: { KEIYAKU_ACTOR_ID: "cli-verification-test" },
     progress: output.progress,
   });
   output.stream.destroy();
-  return { raw, id: bound.contract as ContractId, result, progress: output.text() };
+  return { raw, id, result, progress: output.text() };
 }
 
 test("deliver adapts a successful Verification result through the CLI", async () => {
@@ -84,6 +94,40 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   assert.doesNotMatch(progress, /●/u, "non-TTY progress never prints a phase start");
   assert.match(progress, /delivery-live-output/u);
   assert.match(progress, /✓ declaration 1\/1/u);
+});
+
+test("a blocked deliver names the verified snapshot and the accepting review lands it", async () => {
+  const { raw, id } = await bindCandidate("printf 'verified-output\\n'", ["reviewed"]);
+  const repository = await repositoryAt(raw.path);
+  const worktree = await appointedWorktreePath(repository, id);
+
+  const blocked = await invokeRaw(executable(["-C", raw.path, "deliver", id]), { environment: {} });
+  const blockedText = renderText(blocked as unknown as InvocationResult, { columns: 200, color: false });
+  const standalone = /^  integration result  ([0-9a-f]+) · verification satisfied$/mu.exec(blockedText);
+  assert.ok(standalone, blockedText);
+  assert.doesNotMatch(blockedText, /verification reused/u, "a fresh run carries no qualifier");
+  assert.equal((blockedText.match(/integration result/gu) ?? []).length, 1, "no second row repeats the subject");
+
+  const reviewed = await invokeRaw(
+    executable(["-C", raw.path, "review", id, "--satisfied", "--summary", "accepted"]),
+    { environment: {} },
+  );
+  const reviewedText = renderText(reviewed as unknown as InvocationResult, { columns: 200, color: false });
+  const placed = /^  integration result  ([0-9a-f]+) · verification reused satisfied$/mu.exec(reviewedText);
+  assert.ok(placed, reviewedText);
+  assert.equal(placed[1], standalone[1], "the landing names the id the verdict covered");
+  assert.ok(
+    reviewedText.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 1, removed: 0 })}`),
+    "the acceptance names the landed diff's shape",
+  );
+  assert.ok(reviewedText.endsWith(`  worktree  ${basename(worktree)} retired`), reviewedText);
+});
+
+test("a deliver that accepts names the landed diff's shape", async () => {
+  const { result } = await bindAndDeliver("printf 'verified-output\\n'");
+  const text = renderText(result as unknown as InvocationResult, { columns: 200, color: false });
+  assert.ok(text.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 1, removed: 0 })}`));
+  assert.equal((text.match(/^  changes /gmu) ?? []).length, 1, "one bounded changes row");
 });
 
 test("audit reports reuse on a second unchanged verification", async () => {

@@ -23,7 +23,7 @@ import { decodeVerificationDeclarationRefusal } from "../verification/declaratio
 import type { VerificationDeclarationRefusal } from "../verification/declaration.js";
 import type { AuditReport } from "./audit.js";
 import { decodeForkSourceMovedRefusal, decodeTargetInputRefusal } from "./bind.js";
-import type { CandidateCompletion, CompletionEvidence } from "./completion.js";
+import type { CandidateCompletion, CompletionEvidence, VerificationSubject } from "./completion.js";
 import type { DeliverLeading, IntegrationConflictMaterialized } from "./deliver.js";
 import type { CurrentVerifiedAttestation, VerificationCleanupFailure, VerificationRuntimeStop } from "./intent.js";
 import type {
@@ -254,6 +254,13 @@ export function decodeVerificationReuse(value: unknown): CurrentVerifiedAttestat
   };
 }
 
+export function decodeVerificationSubject(value: unknown): VerificationSubject {
+  const object = record(value, ["snapshot", "mode", "verdict"]);
+  if (object.mode !== "ran" && object.mode !== "reused") fail();
+  if (object.verdict !== "satisfied" && object.verdict !== "unsatisfied") fail();
+  return { snapshot: decodeSnapshotId(object.snapshot), mode: object.mode, verdict: object.verdict };
+}
+
 function decodePlacementStepRefusal(value: unknown) {
   return first(value, [
     decodePlacementRefusal,
@@ -344,11 +351,23 @@ export function decodeVerificationCleanupFailure(value: unknown): VerificationCl
 }
 
 export function decodeCandidateCompletion(value: unknown): CandidateCompletion {
-  const object = record(value, ["integration"], ["predecessor", "target", "verification"]);
+  const object = record(value, ["integration"], ["predecessor", "target", "scope", "verification"]);
   const completion: CandidateCompletion = {
     integration: decodeSnapshotId(object.integration),
     ...(object.predecessor === undefined ? {} : { predecessor: decodeSnapshotId(object.predecessor) }),
     ...(object.target === undefined ? {} : { target: nonblank(object.target) }),
+    ...(object.scope === undefined
+      ? {}
+      : {
+          scope: (() => {
+            const scope = record(object.scope, ["filesChanged", "insertions", "deletions"]);
+            return {
+              filesChanged: integer(scope.filesChanged),
+              insertions: integer(scope.insertions),
+              deletions: integer(scope.deletions),
+            };
+          })(),
+        }),
     ...(object.verification === undefined
       ? {}
       : {
@@ -367,7 +386,7 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
   const object = record(
     value,
     [],
-    ["completion", "verification", "verificationReuse", "verificationSummary", "placement"],
+    ["completion", "verification", "verificationReuse", "verificationSubject", "verificationSummary", "placement"],
   );
   return {
     ...(object.completion === undefined ? {} : { completion: decodeCandidateCompletion(object.completion) }),
@@ -375,6 +394,9 @@ export function decodeCompletionEvidence(value: unknown): CompletionEvidence {
     ...(object.verificationReuse === undefined
       ? {}
       : { verificationReuse: decodeVerificationReuse(object.verificationReuse) }),
+    ...(object.verificationSubject === undefined
+      ? {}
+      : { verificationSubject: decodeVerificationSubject(object.verificationSubject) }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: nonblank(object.verificationSummary) }),
     ...(object.placement === undefined ? {} : { placement: decodePlacementStop(object.placement) }),
   };
@@ -557,12 +579,21 @@ export function decodeReviewValue(value: unknown): ReviewValue {
   const object = record(
     value,
     [],
-    ["completion", "verification", "verificationReuse", "verificationSummary", "placement", "workspace"],
+    [
+      "completion",
+      "verification",
+      "verificationReuse",
+      "verificationSubject",
+      "verificationSummary",
+      "placement",
+      "workspace",
+    ],
   );
   const evidence = decodeCompletionEvidence({
     ...(object.completion === undefined ? {} : { completion: object.completion }),
     ...(object.verification === undefined ? {} : { verification: object.verification }),
     ...(object.verificationReuse === undefined ? {} : { verificationReuse: object.verificationReuse }),
+    ...(object.verificationSubject === undefined ? {} : { verificationSubject: object.verificationSubject }),
     ...(object.verificationSummary === undefined ? {} : { verificationSummary: object.verificationSummary }),
     ...(object.placement === undefined ? {} : { placement: object.placement }),
   });

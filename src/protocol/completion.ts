@@ -1,4 +1,5 @@
 import type { ActorId, ContractId, EntryUlid, SnapshotId } from "../core/facts/types.js";
+import { readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { currentVerifiedAttestation, verifyDelivery, type CurrentVerifiedAttestation } from "./intent.js";
@@ -23,7 +24,16 @@ export type CandidateCompletion = Readonly<{
   /** The reference this placement advanced and the head it advanced from, both observed at completion time. */
   predecessor?: SnapshotId;
   target?: string;
+  /** The landed diff's shape, read from the recorded integration pair at completion time. */
+  scope?: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
   verification?: Readonly<{ mode: "ran" | "reused"; verdict: "satisfied" | "unsatisfied" }>;
+}>;
+
+/** The terminal Verification attempt's own subject: the captured integration snapshot and its provenance. */
+export type VerificationSubject = Readonly<{
+  snapshot: SnapshotId;
+  mode: "ran" | "reused";
+  verdict: "satisfied" | "unsatisfied";
 }>;
 
 /** Candidate conclusions only. Invocation-owned receipts and cleanup live in progress. */
@@ -31,6 +41,7 @@ export type CompletionEvidence = Readonly<{
   completion?: CandidateCompletion;
   verification?: VerificationStop;
   verificationReuse?: CurrentVerifiedAttestation;
+  verificationSubject?: VerificationSubject;
   verificationSummary?: string;
   placement?: PlacementStop;
 }>;
@@ -83,7 +94,10 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   cursor.ran = undefined;
   const current = currentVerifiedAttestation(state);
   if (current !== undefined) {
-    cursor.evidence = { verificationReuse: current };
+    cursor.evidence = {
+      verificationReuse: current,
+      verificationSubject: { snapshot, mode: "reused", verdict: current.verdict },
+    };
     return;
   }
   const declaration = input.deriveDocument(state).verification;
@@ -105,9 +119,6 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   });
   if (result === null) return;
   const verified = unpackVerificationOutcome(result);
-  if (verified.reuse !== undefined) {
-    cursor.evidence = { verificationReuse: verified.reuse };
-  }
   if (verified.admission !== undefined) {
     cursor.checkpoint = contractCheckpoint(verified.admission);
     input.progress.recordResidue(state.id, verified.admission);
@@ -115,7 +126,15 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
       (fact) => fact.kind === "attestation" && fact.data.gate === "verified",
     )?.entry;
   }
+  const subject: VerificationSubject | undefined =
+    verified.reuse !== undefined
+      ? { snapshot, mode: "reused", verdict: verified.reuse.verdict }
+      : verified.counts === undefined
+        ? undefined
+        : { snapshot, mode: "ran", verdict: verified.counts.verdict };
   cursor.evidence = {
+    ...(verified.reuse === undefined ? {} : { verificationReuse: verified.reuse }),
+    ...(subject === undefined ? {} : { verificationSubject: subject }),
     ...(verified.stop === undefined ? {} : { verification: verified.stop }),
     ...(verified.counts?.verdict !== "unsatisfied" || verified.counts.summary === undefined
       ? {}
@@ -144,12 +163,18 @@ async function observeCandidateTarget(
   }
 }
 
-function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { kind: "completed" }> {
+async function completedResult(
+  input: CompletionInput,
+  cursor: CompletionCursor,
+): Promise<Extract<CompletionResult, { kind: "completed" }>> {
   const state = cursor.checkpoint.state;
   const integration = state.currentIntegration?.snapshot;
   if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
   const target = state.coordinates.target;
   const predecessor = state.currentIntegration?.predecessor;
+  // The landed shape is a read of the recorded integration pair, captured here; the receipt renderer holds no repository.
+  const scope =
+    predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
   // Never attach a superseded run's verdict to the final integration.
   const current = currentVerifiedAttestation(state);
   const verification =
@@ -159,7 +184,12 @@ function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { 
           mode: cursor.ran === current.entry ? ("ran" as const) : ("reused" as const),
           verdict: current.verdict,
         };
-  const { verificationSummary: _oldSummary, verificationReuse: _oldReuse, ...evidence } = cursor.evidence;
+  const {
+    verificationSummary: _oldSummary,
+    verificationReuse: _oldReuse,
+    verificationSubject: _oldSubject,
+    ...evidence
+  } = cursor.evidence;
   return {
     kind: "completed",
     checkpoint: cursor.checkpoint,
@@ -168,6 +198,15 @@ function completedResult(cursor: CompletionCursor): Extract<CompletionResult, { 
       completion: {
         integration,
         ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+        ...(scope === undefined
+          ? {}
+          : {
+              scope: {
+                filesChanged: scope.filesChanged,
+                insertions: scope.insertions,
+                deletions: scope.deletions,
+              },
+            }),
         ...(verification === undefined ? {} : { verification }),
       },
       ...(current === undefined || verification?.mode !== "reused" ? {} : { verificationReuse: current }),
@@ -259,7 +298,7 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
   const target = cursor.checkpoint.state.coordinates.target;
   let placement = await placeCurrentCandidate(input, cursor);
   for (let cycles = 0; ; cycles += 1) {
-    if (placement.kind === "accepted") return completedResult(cursor);
+    if (placement.kind === "accepted") return await completedResult(input, cursor);
     if (placement.kind !== "target-moved" || target === undefined || placement.observedTreeEqualsCandidate) {
       const stop = placementStop(placement);
       if (stop === undefined) throw new Error("non-accepted placement requires a stop");
@@ -308,7 +347,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     if (admitted !== undefined) cursor.checkpoint = admitted;
     // Only this invocation's confirmed claim can complete the node after a trailing failure.
     if (admitted?.state.terminal?.kind === "claimed" && input.progress.hasFact(admitted.state.terminal)) {
-      return completedResult(cursor);
+      return await completedResult(input, cursor);
     }
     return stoppedResult(cursor, stop);
   }
