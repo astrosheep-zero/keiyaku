@@ -1,14 +1,13 @@
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { activityFact, claudeBodyLaunch, turnEndFact } from "./support/akuma-fixtures.js";
+import { activityFact, bornBody, claudeBodyLaunch, seedLegacySchema, turnEndFact } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { settlementProbe, waitForCondition, waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { AkumaNotBornError, killAkumaWithRecovery } from "../src/akuma/akuma.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
@@ -158,26 +157,7 @@ async function timeline(paths: Parameters<typeof activitySlice>[0]) {
 }
 
 async function bornHistoryHandle(root: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({
-    worldRoot: root,
-    archetype: "claude",
-    draw: () => suffix,
-  });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed: [],
-    createdAt: "2026-08-10T00:00:00.000Z",
-  });
-  const body = await holder.recordBody(allocated.paths, {
-    leashTakenAt: "2026-08-10T00:00:00.000Z",
-  });
+  const { allocated, holder, body } = await bornBody(root, suffix, "2026-08-10T00:00:00.000Z");
   const turn = await beginTurn(allocated.paths, {
     bodySequence: body.sequence,
     startedAt: "2026-08-10T00:00:01.000Z",
@@ -1395,20 +1375,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
 
 test("kill returns before its successor recovery settles", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-kill-recovery-fire-and-forget-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0010" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    origin: { kind: "direct" },
-    allowed: [],
-    cwd: root,
-    createdAt: "2026-08-10T00:00:00.000Z",
-  });
-  const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+  const { allocated, holder, body } = await bornBody(root, "1d1e0010", "2026-08-10T00:00:00.000Z");
   await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
   await recordTell(allocated.paths, {
     kind: "tell",
@@ -1434,20 +1401,7 @@ test("kill returns before its successor recovery settles", async (context) => {
 
 test("failed kill recovery leaves its pending Tell unchanged", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-kill-recovery-failure-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0011" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    origin: { kind: "direct" },
-    allowed: [],
-    cwd: root,
-    createdAt: "2026-08-10T00:00:00.000Z",
-  });
-  const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+  const { allocated, holder, body } = await bornBody(root, "1d1e0011", "2026-08-10T00:00:00.000Z");
   await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
   await recordTell(allocated.paths, {
     kind: "tell",
@@ -1470,20 +1424,7 @@ test("failed kill recovery leaves its pending Tell unchanged", async (context) =
 
 test("kill settles a stranded dead Body and later observation presents the killed life", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-kill-stranded-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0012" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    origin: { kind: "direct" },
-    allowed: [],
-    cwd: root,
-    createdAt: "2026-08-10T00:00:00.000Z",
-  });
-  const body = await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-10T00:00:00.000Z" });
+  const { allocated, holder, body } = await bornBody(root, "1d1e0012", "2026-08-10T00:00:00.000Z");
   await breakBody(allocated.paths, { sequence: body.sequence, end: "broke-off", at: "2026-08-10T00:00:01.000Z" });
   holder.release();
 
@@ -1626,20 +1567,7 @@ test("interrupt caller cancellation stops waiting without manufacturing control 
 
 test("interrupt reports untidy when a free leash has no clean Body settlement", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unstoppable-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0003" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    origin: { kind: "direct" },
-    allowed: [],
-    cwd: root,
-    createdAt: "2026-08-08T00:00:00.000Z",
-  });
-  await holder.recordBody(allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+  const { allocated, holder } = await bornBody(root, "1d1e0003", "2026-08-08T00:00:00.000Z");
   holder.release();
   assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
     kind: "unavailable",
@@ -1651,22 +1579,7 @@ test("interrupt reports untidy when a free leash has no clean Body settlement", 
 
 test("interrupt reports hung when the Body does not release its held leash", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-held-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0005" });
-  await initializeHeart(allocated.paths);
-  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
-  await holder.birth(allocated.paths, {
-    id: allocated.id,
-    archetype: "claude",
-    provider: CLAUDE_EXECUTION,
-    options: {},
-    origin: { kind: "direct" },
-    allowed: [],
-    cwd: root,
-    createdAt: "2026-08-08T00:00:00.000Z",
-  });
-  const body = await holder.recordBody(allocated.paths, {
-    leashTakenAt: "2026-08-08T00:00:00.000Z",
-  });
+  const { allocated, holder, body } = await bornBody(root, "1d1e0005", "2026-08-08T00:00:00.000Z");
   await holder.recordBodyHung(allocated.paths, {
     sequence: body.sequence,
     diagnostic: "provider custody remained live",
@@ -1819,14 +1732,7 @@ test("list silently skips identities whose compact row cannot be read", async (c
     archetype: "claude",
     draw: () => "c1000001",
   });
-  const heart = new DatabaseSync(heartCut.paths.heart);
-  heart.exec(
-    [
-      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
-      "INSERT INTO akuma_schema VALUES (1, 13)",
-    ].join(""),
-  );
-  heart.close();
+  seedLegacySchema(heartCut.paths.heart, "akuma_schema", 13);
   const noise = join(akumaRunRoot(root), "NOISE-notid");
   mkdirSync(noise);
   const visible = await allocateAkumaDirectory({
@@ -1847,14 +1753,7 @@ test("list silently skips identities whose compact row cannot be read", async (c
   });
   await initializeHeart(leashCut.paths);
   unlinkSync(leashCut.paths.leash);
-  const leash = new DatabaseSync(leashCut.paths.leash);
-  leash.exec(
-    [
-      "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL);",
-      "INSERT INTO leash_schema VALUES (1, 2)",
-    ].join(""),
-  );
-  leash.close();
+  seedLegacySchema(leashCut.paths.leash, "leash_schema", 2);
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
 });
 

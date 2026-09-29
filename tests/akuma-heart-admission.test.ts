@@ -1,19 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { initializeHeart, withReadOnlyHeart } from "../src/akuma/heart/storage.js";
-import { World } from "../src/world.js";
+import { heartFixture } from "./support/akuma-fixtures.js";
+import { withReadOnlyHeart } from "../src/akuma/heart/storage.js";
 
 async function fixture() {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-heart-admission-")));
-  const { paths } = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
-  await initializeHeart(paths);
-  return { paths, close: () => rmSync(root, { recursive: true, force: true }) };
+  const { allocated, close } = await heartFixture("keiyaku-heart-admission-");
+  return { paths: allocated.paths, close };
 }
 
 test("Heart read admission yields through an exclusive WAL reader lock and executes once", async () => {

@@ -1,7 +1,18 @@
-import type { BodyLaunch } from "../../src/akuma/body.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
-import type { TimelineFact } from "../../src/akuma/heart/index.js";
-import type { allocateAkumaDirectory } from "../../src/akuma/identity.js";
+import type { BodyLaunch } from "../../src/akuma/body.js";
+import {
+  HeldAkumaLeash,
+  initializeHeart,
+  recordTell as heartRecordTell,
+  type Soul,
+  type TimelineFact,
+} from "../../src/akuma/heart/index.js";
+import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
+import { World } from "../../src/world.js";
 
 type AllocatedAkuma = Awaited<ReturnType<typeof allocateAkumaDirectory>>;
 type ActivityFact = Extract<TimelineFact, { kind: "activity" }>;
@@ -24,6 +35,71 @@ export function turnEndFact(
   outcome: TurnEndFact["outcome"],
 ): TurnEndFact {
   return { kind: "turn-end", sequence, turnSequence, completedAt, outcome };
+}
+
+/** A fresh Heart-initialized World root with an allocated claude Akuma; the caller closes it. */
+export async function heartFixture(prefix: string) {
+  const root = await World.at(mkdtempSync(join(tmpdir(), prefix)));
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
+  await initializeHeart(allocated.paths);
+  return { root, allocated, close: () => rmSync(root, { recursive: true, force: true }) };
+}
+
+/** The shared direct-origin Soul basis for a Heart fixture; scenario time stays at the call site. */
+export async function soulFixture(prefix: string) {
+  const value = await heartFixture(prefix);
+  const soul: Soul = {
+    id: value.allocated.id,
+    archetype: "claude",
+    description: "Claude fixture",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
+    cwd: value.root,
+    origin: { kind: "direct" },
+    allowed: ALLOWED_ACTIONS,
+    createdAt: "2026-08-08T00:00:00.000Z",
+  };
+  return { ...value, soul };
+}
+
+/** One born claude Body under a fresh Heart: the invariant direct-origin, empty-permission,
+ * default-options life; createdAt is the scenario's exact time. */
+export async function bornBody(root: string, suffix: string, createdAt: string) {
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
+  await initializeHeart(allocated.paths);
+  const holder = (await HeldAkumaLeash.try(allocated.paths))!;
+  await holder.birth(allocated.paths, {
+    id: allocated.id,
+    archetype: "claude",
+    provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: {},
+    origin: { kind: "direct" },
+    allowed: [],
+    cwd: root,
+    createdAt,
+  });
+  const body = await holder.recordBody(allocated.paths, { leashTakenAt: createdAt });
+  return { allocated, holder, body };
+}
+
+/** Admit one scenario Tell through Heart; identity, body, and time stay explicit. */
+export async function recordTell(
+  paths: Parameters<typeof heartRecordTell>[0],
+  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
+) {
+  return await heartRecordTell(paths, { kind: "tell", ...tell });
+}
+
+/** Write one old-version schema row so an owner open can prove its hard refusal. */
+export function seedLegacySchema(path: string, table: "akuma_schema" | "leash_schema", version: number): void {
+  const database = new DatabaseSync(path);
+  try {
+    database.exec(
+      `CREATE TABLE ${table}(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO ${table} VALUES (1, ${version})`,
+    );
+  } finally {
+    database.close();
+  }
 }
 
 /** A fresh launch object per call; no shared Heart, adapter, options, or lifecycle. */

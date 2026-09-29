@@ -1,13 +1,8 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
+import { recordTell, seedLegacySchema, soulFixture } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync, rmSync,
-  unlinkSync
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
@@ -29,7 +24,7 @@ import {
   readOpenPendingTellDisposition,
   drainPendingTells,
   endTurn,
-  finishBodyIfIdle, initializeHeart,
+  finishBodyIfIdle,
   HeartAbsentError,
   life,
   probeLeash,
@@ -47,31 +42,9 @@ import {
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { World } from "../src/world.js";
 
 async function fixture() {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-heart-")));
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
-  await initializeHeart(allocated.paths);
-  const soul: Soul = {
-    id: allocated.id,
-    archetype: "claude",
-    description: "Claude fixture",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed: ALLOWED_ACTIONS,
-    createdAt: "2026-08-08T00:00:00.000Z",
-  };
-  return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
-}
-
-async function recordTell(
-  paths: Parameters<typeof heartRecordTell>[0],
-  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
-) {
-  return await heartRecordTell(paths, { kind: "tell", ...tell });
+  return await soulFixture("keiyaku-akuma-heart-");
 }
 
 async function tellFixture(
@@ -889,16 +862,8 @@ test("unknown Body Request state is authority corruption", async () => {
 test("heart schema version 29 and leash schema version 4 hard-refuse old authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
-  const heart = new DatabaseSync(allocated.paths.heart);
-  heart.exec(
-    "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)",
-  );
-  heart.close();
-  const leash = new DatabaseSync(allocated.paths.leash);
-  leash.exec(
-    "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
-  );
-  leash.close();
+  seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
+  seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
   await assert.rejects(readHeart(allocated.paths), /heart schema version must be 29/u);
   await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });

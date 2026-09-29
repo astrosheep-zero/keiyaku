@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
 import { defaultWaitComplete } from "../src/akuma/akuma.js";
 import { AkumaHandle } from "../src/akuma/akuma-handle.js";
 import {
@@ -15,45 +12,19 @@ import {
   beginTurn,
   breakBody,
   endTurn,
-  initializeHeart,
-  recordTell as heartRecordTell,
   recordTellDeliveries,
   recordTellReceipt,
   readStatusFacts,
-  type Soul,
 } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { World } from "../src/world.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/selection-execution.js";
 import { ordinarySnapshotBudget, projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 
 async function fixture() {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-observation-")));
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
-  await initializeHeart(allocated.paths);
-  const soul: Soul = {
-    id: allocated.id,
-    archetype: "claude",
-    description: "Claude fixture",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
-    cwd: root,
-    origin: { kind: "direct" },
-    allowed: ALLOWED_ACTIONS,
-    createdAt: "2026-08-08T00:00:00.000Z",
-  };
-  return { root, allocated, soul, close: () => rmSync(root, { recursive: true, force: true }) };
-}
-
-async function recordTell(
-  paths: Parameters<typeof heartRecordTell>[0],
-  tell: Readonly<{ id: string; body: string; recordedAt: string }>,
-) {
-  return await heartRecordTell(paths, { kind: "tell", ...tell });
+  return await soulFixture("keiyaku-akuma-observation-");
 }
 
 test("shared observation returns one final deadline snapshot and propagates caller abort", async () => {
