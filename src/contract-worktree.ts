@@ -1,16 +1,13 @@
-import { chmod, lstat, readFile, unlink } from "node:fs/promises";
+import { chmod, lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
 import { repairDerivedFile, type DerivedFileAction } from "./coordination/durable-file.js";
-import { contractId, type ContractId, type ContractState } from "./core/facts/types.js";
+import { type ContractState } from "./core/facts/types.js";
 import {
   CONTRACT_DELIVERER_SKILL,
   CONTRACT_REVIEWER_SKILL,
   CONTRACT_ONBOARDING_SKILL,
-  renderContractAppointment,
   renderContractGuidance,
 } from "./contract-guidance.js";
-import { worktreeGitDirectory, worktreeRoot } from "./git/repository.js";
 import { GitPlumbingError, runGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
@@ -25,10 +22,6 @@ const SEAT_SKILLS = [
   ["keiyaku-deliver", CONTRACT_DELIVERER_SKILL],
   ["keiyaku-review", CONTRACT_REVIEWER_SKILL],
 ] as const;
-export type ContractAppointment =
-  | Readonly<{ kind: "absent"; path: string }>
-  | Readonly<{ kind: "appointed"; path: string; contract: ContractId }>
-  | Readonly<{ kind: "invalid"; path: string }>;
 export type ContractFileEffect = Readonly<{
   kind: "contract-file";
   path: string;
@@ -74,54 +67,6 @@ async function isTracked(repository: GitRepository, relativePath: string): Promi
 
 function generatedPath(worktree: string, name: string): string {
   return join(worktree, ".keiyaku", name);
-}
-
-function appointedContract(bytes: string): ContractId | undefined {
-  const lines = bytes.split(/\r?\n/u),
-    close = lines.indexOf("---", 1);
-  if (lines[0] !== "---" || (close !== 2 && close !== 3) || !lines[1]?.startsWith("contract: ")) return undefined;
-  if (close === 3 && !lines[2]?.startsWith("description: ")) return undefined;
-  try {
-    return contractId(lines[1]!.slice("contract: ".length));
-  } catch {
-    return undefined;
-  }
-}
-export async function readContractAppointment(repository: GitRepository): Promise<ContractAppointment> {
-  const path = generatedPath(await worktreeRoot(repository), "KEIYAKU.md");
-  const stat = await lstat(path).catch((error: NodeJS.ErrnoException) =>
-    error.code === "ENOENT" ? undefined : Promise.reject(error),
-  );
-  if (stat === undefined) return { kind: "absent", path };
-  if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "invalid", path };
-  const contract = appointedContract(await readFile(path, "utf8"));
-  return contract === undefined ? { kind: "invalid", path } : { kind: "appointed", path, contract };
-}
-export async function withContractWorktreeAppointment<T>(
-  repository: GitRepository,
-  action: () => T | Promise<T>,
-): Promise<T> {
-  const root = await worktreeRoot(repository);
-  const lock = await acquireSqliteTransactionLock({
-    path: join(await worktreeGitDirectory(repository, root), "keiyaku", "contract-worktree.sqlite"),
-    mode: "immediate",
-  });
-  try {
-    return await action();
-  } finally {
-    lock.close();
-  }
-}
-
-export async function releaseContractWorktree(repository: GitRepository, contract: ContractId): Promise<void> {
-  const appointment = await readContractAppointment(repository);
-  if (appointment.kind !== "appointed" || appointment.contract !== contract) return;
-  if ((await readFile(appointment.path, "utf8")) !== renderContractAppointment(contract)) return;
-  try {
-    await unlink(appointment.path);
-  } catch {
-    /* reservation cleanup is best effort */
-  }
 }
 
 async function repair(
