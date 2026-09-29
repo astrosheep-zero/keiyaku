@@ -82,24 +82,3 @@ export async function observeRecentTaskStatus(
 ): Promise<BoundedList<RecentTaskStatusRow>> {
   return recentTaskStatus(world, input);
 }
-
-export async function observeTaskCatalog(
-  world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; limit?: number }> = {},
-): Promise<BoundedList<TaskRow>> {
-  const { namespace } = input;
-  if (namespace !== undefined && !namespace.every(isTaskSegment)) {
-    throw new TypeError("namespace must contain canonical segments");
-  }
-  const documents = await readRecentTaskDocuments(world, {
-    ...(namespace === undefined ? {} : { namespace }),
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-  });
-  const known = new Map(documents.rows.map((document) => [document.id, document]));
-  return {
-    rows: (await Promise.all(documents.rows.map((document) => catalogRow(world, document, known)))).map(
-      ({ blockers: _blockers, ...row }) => row,
-    ),
-    hasMore: documents.hasMore,
-  };
-}
