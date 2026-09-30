@@ -1,9 +1,8 @@
 import { join } from "node:path";
-import { createAkumaProduct, type AkumaBornCall } from "../../src/akuma/akuma-product.js";
+import { createAkumaProduct } from "../../src/akuma/akuma-product.js";
 import type { AkumaCallInput } from "../../src/akuma/akuma.js";
 import { Akumas } from "../../src/index.js";
 import type {
-  AkumaCallContext,
   AkumaConfiguration,
   AkumaCompleteList,
   AkumaList,
@@ -68,17 +67,6 @@ export class AkumaComposition {
     });
     if (result.observation.kind === "failed") throw new Error(result.observation.failure.diagnostic);
     return this.product.selectHandle({ id: result.akuma });
-  }
-
-  async beginCall(
-    input: Parameters<ReturnType<typeof createAkumaProduct>["admit"]>[0],
-    context: AkumaCallContext,
-  ): Promise<AkumaBornCall> {
-    return await this.product.admit(input, context);
-  }
-
-  async finishCall(born: AkumaBornCall, completion: Readonly<{ contractId?: string }> = {}): Promise<AkumaHandle> {
-    return await this.product.publish(born, completion);
   }
 
   async listArchetypes(): Promise<readonly string[]> {

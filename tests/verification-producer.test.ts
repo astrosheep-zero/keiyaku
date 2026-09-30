@@ -88,7 +88,9 @@ test("caller cancellation is nonterminal and stops later declarations", async ()
         { signal: controller.signal },
       ),
     );
-    const deadline = performance.now() + 2_000;
+    // Readiness only: a loaded machine can take longer than two seconds to spawn
+    // the declaration. Every cancellation assertion below is unchanged.
+    const deadline = performance.now() + 15_000;
     while (!existsSync(started)) {
       if (performance.now() >= deadline) throw new Error("Verification declaration did not start");
       await new Promise((resolve) => setTimeout(resolve, 20));

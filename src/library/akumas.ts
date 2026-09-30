@@ -18,11 +18,13 @@ import type {
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
 import {
   historyAkuma,
-  killAkuma,
+  killAkumaOn,
+  selectionSeam,
   statusAkuma,
-  tellAkuma,
-  askAkuma,
-  waitAkuma,
+  tellAkumaOn,
+  askAkumaOn,
+  waitAkumaOn,
+  type SelectionSeam,
   type AkumaHistoryInput as LibraryAkumaHistoryInput,
   type AkumaHistoryResult,
   type AkumaKillInput as LibraryAkumaKillInput,
@@ -79,10 +81,13 @@ export type Akumas = AkumasHandle;
 class AkumasHandle {
   #world: WorldRoot;
   #execution: ExecutionContext;
+  #selection: SelectionSeam;
 
   constructor(world: WorldRoot, execution: ExecutionContext) {
     this.#world = world;
     this.#execution = execution;
+    // One typed route seam captured at construction: no operation re-derives it.
+    this.#selection = selectionSeam(execution);
     Object.freeze(this);
   }
 
@@ -103,19 +108,19 @@ class AkumasHandle {
   }
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
-    return tellAkuma(this.withWorld(input, "Akumas.tell input") as LibraryAkumaTellInput, this.#execution);
+    return tellAkumaOn(this.#selection, this.withWorld(input, "Akumas.tell input") as LibraryAkumaTellInput);
   }
 
   ask<T = string>(input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
-    return askAkuma(this.withWorld(input, "Akumas.ask input") as LibraryAkumaAskInput<T>, this.#execution);
+    return askAkumaOn(this.#selection, this.withWorld(input, "Akumas.ask input") as LibraryAkumaAskInput<T>);
   }
 
   wait(input: AkumaWaitInput): Promise<AkumaWaitResult> {
-    return waitAkuma(this.withWorld(input, "Akumas.wait input") as LibraryAkumaWaitInput, this.#execution);
+    return waitAkumaOn(this.#selection, this.withWorld(input, "Akumas.wait input") as LibraryAkumaWaitInput);
   }
 
   kill(input: AkumaKillInput): Promise<AkumaKillResult> {
-    return killAkuma(this.withWorld(input, "Akumas.kill input") as LibraryAkumaKillInput, this.#execution);
+    return killAkumaOn(this.#selection, this.withWorld(input, "Akumas.kill input") as LibraryAkumaKillInput);
   }
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {

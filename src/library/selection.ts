@@ -9,6 +9,7 @@ import {
 import { AkumaObservationError } from "../akuma/akuma-errors.js";
 import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+
 import {
   requestForwardedSelectionKill,
   requestForwardedSelectionTell,
@@ -49,6 +50,120 @@ import {
 } from "../akuma/selection-observation.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 import { parsePublicHistoryId } from "../akuma/identity.js";
+
+type AddressedAkuma = Awaited<ReturnType<typeof addressAkuma>>;
+type AddressedAkumaSet = Awaited<ReturnType<typeof addressAkumaSet>>;
+type UncheckedSelectionAddress = Parameters<typeof addressAkuma>[0];
+
+type SelectionWaitMode = Readonly<{
+  completion: "any" | "all";
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  repo?: Repo;
+}>;
+
+/**
+ * The one typed selection seam captured per execution. Selector resolution is
+ * bound once: local execution addresses and proves birth in this process, while
+ * a forwarded operation resolves coordinates only because the serving parent
+ * owns the target and its admission probes. Each verb's local or forwarded
+ * ability is likewise chosen once here, so no operation repeats a route branch.
+ */
+export type SelectionSeam = Readonly<{
+  addressOne(input: UncheckedSelectionAddress): Promise<AddressedAkuma>;
+  addressSet(input: UncheckedSelectionAddress): Promise<AddressedAkumaSet>;
+  wait(addressed: AddressedAkumaSet, mode: SelectionWaitMode, observer?: WaitObserver): Promise<AkumaWaitResult>;
+  kill(addressed: AddressedAkumaSet, signal?: AbortSignal): Promise<AkumaKillResult>;
+  tell(addressed: AddressedAkuma, input: AkumaTellInput, signal?: AbortSignal): Promise<AkumaTellResult>;
+  ask<T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, signal?: AbortSignal): Promise<AkumaAskResult<T>>;
+}>;
+
+export function selectionSeam(execution: ExecutionContext): SelectionSeam {
+  const channel = executionChannel(execution);
+  return channel.kind === "body-request" ? forwardedSelection(channel.directory) : localSelection();
+}
+
+function forwardedSelection(directory: string): SelectionSeam {
+  return {
+    addressOne: resolveAkuma,
+    addressSet: resolveAkumaSet,
+    wait: async (addressed, mode) => await forwardedWait(addressed, { ...mode, directory }),
+    kill: async (addressed, abort) =>
+      await requestForwardedSelectionKill({
+        directory,
+        targets: addressed.orderedIds,
+        ...(abort === undefined ? {} : { signal: abort }),
+      }),
+    tell: async (addressed, input, abort) =>
+      await requestForwardedSelectionTell({
+        directory,
+        target: addressed.id,
+        body: input.body,
+        ...(input.interrupt === true ? { interrupt: true } : {}),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        ...(abort === undefined ? {} : { signal: abort }),
+      }),
+    ask: async <T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, abort: AbortSignal | undefined) => {
+      const result = await requestForwardedSelectionAsk({
+        directory,
+        target: addressed.id,
+        body: input.body,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        ...(input.schema === undefined ? {} : { schema: input.schema as Schema<unknown> }),
+        ...(input.interrupt === true ? { interrupt: true } : {}),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        ...(abort === undefined ? {} : { signal: abort }),
+      });
+      return (
+        input.schema === undefined
+          ? result
+          : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
+      ) as AkumaAskResult<T>;
+    },
+  };
+}
+
+function localSelection(): SelectionSeam {
+  return {
+    addressOne: addressAkuma,
+    addressSet: addressAkumaSet,
+    wait: async (addressed, mode, observer) =>
+      await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) }),
+    kill: async (addressed, abort) =>
+      await executeKillAkuma({
+        path: addressed.path,
+        ids: addressed.orderedIds,
+        ...(abort === undefined ? {} : { signal: abort }),
+      }),
+    tell: async (addressed, input, abort) =>
+      await executeTellAkuma({
+        path: addressed.path,
+        id: addressed.id,
+        body: input.body,
+        ...(input.interrupt === true ? { interrupt: true } : {}),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        ...(abort === undefined ? {} : { signal: abort }),
+      }),
+    ask: async <T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, abort: AbortSignal | undefined) => {
+      const result = await executeAskAkuma({
+        path: addressed.path,
+        id: addressed.id,
+        body: input.body,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
+        ...(input.interrupt === true ? { interrupt: true } : {}),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+        ...(input.observe === undefined ? {} : { onObserve: input.observe }),
+        ...(abort === undefined ? {} : { signal: abort }),
+      });
+      return (
+        input.schema === undefined
+          ? result
+          : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
+      ) as AkumaAskResult<T>;
+    },
+  };
+}
 
 export type AkumaWaitInput = AkumaSetAddressInput &
   Readonly<{
@@ -349,6 +464,14 @@ export async function waitAkuma(
   execution: ExecutionContext = localExecutionContext(),
   observer?: WaitObserver,
 ): Promise<AkumaWaitResult> {
+  return await waitAkumaOn(selectionSeam(execution), input, observer);
+}
+
+export async function waitAkumaOn(
+  seam: SelectionSeam,
+  input: AkumaWaitInput,
+  observer?: WaitObserver,
+): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
@@ -358,56 +481,45 @@ export async function waitAkuma(
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
-  const channel = executionChannel(execution);
   const repo = values.repo as Repo | undefined;
-  const mode = {
-    completion: selected,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-    ...(repo === undefined ? {} : { repo }),
-  };
-  if (channel.kind === "body-request") {
-    // A forwarded operation resolves coordinates without proving birth: the
-    // parent Selection owns the target, so this process never probes locally.
-    const addressed = await resolveAkumaSet(setAddress(values));
-    return await forwardedWait(addressed, { ...mode, directory: channel.directory });
-  }
-  const addressed = await addressAkumaSet(setAddress(values));
-  return await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) });
+  const addressed = await seam.addressSet(setAddress(values));
+  return await seam.wait(
+    addressed,
+    {
+      completion: selected,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+      ...(repo === undefined ? {} : { repo }),
+    },
+    observer,
+  );
 }
 
 export async function killAkuma(
   input: AkumaKillInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaKillResult> {
+  return await killAkumaOn(selectionSeam(execution), input);
+}
+
+export async function killAkumaOn(seam: SelectionSeam, input: AkumaKillInput): Promise<AkumaKillResult> {
   const values = requireInput(input, "Akumas.kill input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "signal"].includes(key)) {
       throw new TypeError(`Akumas.kill input has unknown field: ${key}`);
     }
   }
-  const callerSignal = signal(values.signal);
-  const channel = executionChannel(execution);
-  if (channel.kind === "body-request") {
-    const addressed = await resolveAkumaSet(setAddress(values));
-    return await requestForwardedSelectionKill({
-      directory: channel.directory,
-      targets: addressed.orderedIds,
-      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-    });
-  }
-  const addressed = await addressAkumaSet(setAddress(values));
-  return await executeKillAkuma({
-    path: addressed.path,
-    ids: addressed.orderedIds,
-    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-  });
+  return await seam.kill(await seam.addressSet(setAddress(values)), signal(values.signal));
 }
 
 export async function tellAkuma(
   input: AkumaTellInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaTellResult> {
+  return await tellAkumaOn(selectionSeam(execution), input);
+}
+
+export async function tellAkumaOn(seam: SelectionSeam, input: AkumaTellInput): Promise<AkumaTellResult> {
   const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
     if (key === "schema") throw new TypeError("Akumas.tell does not accept schema; use Akumas.ask");
@@ -418,28 +530,7 @@ export async function tellAkuma(
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
-  const callerSignal = signal(values.signal);
-  const channel = executionChannel(execution);
-  if (channel.kind === "body-request") {
-    const addressed = await resolveAkuma(directAddress(values));
-    return await requestForwardedSelectionTell({
-      directory: channel.directory,
-      target: addressed.id,
-      body: values.body,
-      ...(input.interrupt === true ? { interrupt: true } : {}),
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-    });
-  }
-  const addressed = await addressAkuma(directAddress(values));
-  return await executeTellAkuma({
-    path: addressed.path,
-    id: addressed.id,
-    body: values.body,
-    ...(input.interrupt === true ? { interrupt: true } : {}),
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-  });
+  return await seam.tell(await seam.addressOne(directAddress(values)), input, signal(values.signal));
 }
 
 function validateAskInput(
@@ -472,47 +563,13 @@ export async function askAkuma<T = string>(
   input: AkumaAskInput<T>,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaAskResult<T>> {
+  return await askAkumaOn(selectionSeam(execution), input);
+}
+
+export async function askAkumaOn<T = string>(seam: SelectionSeam, input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
   const values = requireInput(input, "Akumas.ask input");
   validateAskInput(values);
-  const callerSignal = signal(values.signal);
-  const channel = executionChannel(execution);
-  if (channel.kind === "body-request") {
-    // A forwarded Tell is resolved by its serving parent, so this process must
-    // not prove the target against its own Heart files.
-    const addressed = await resolveAkuma(directAddress(values));
-    const result = await requestForwardedSelectionAsk({
-      directory: channel.directory,
-      target: addressed.id,
-      body: values.body,
-      ...(values.timeoutMs === undefined ? {} : { timeoutMs: values.timeoutMs }),
-      ...(input.schema === undefined ? {} : { schema: input.schema as Schema<unknown> }),
-      ...(input.interrupt === true ? { interrupt: true } : {}),
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-    });
-    return (
-      input.schema === undefined
-        ? result
-        : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
-    ) as AkumaAskResult<T>;
-  }
-  const addressed = await addressAkuma(directAddress(values));
-  const result = await executeAskAkuma({
-    path: addressed.path,
-    id: addressed.id,
-    body: values.body,
-    ...(values.timeoutMs === undefined ? {} : { timeoutMs: values.timeoutMs }),
-    ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
-    ...(input.interrupt === true ? { interrupt: true } : {}),
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(input.observe === undefined ? {} : { onObserve: input.observe }),
-    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-  });
-  return (
-    input.schema === undefined
-      ? result
-      : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
-  ) as AkumaAskResult<T>;
+  return await seam.ask(await seam.addressOne(directAddress(values)), input, signal(values.signal));
 }
 
 function validateHistoryInput(values: Record<string, unknown>): void {

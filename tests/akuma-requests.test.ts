@@ -311,7 +311,10 @@ test("reserved child request is adjudicated from child Soul after publication fa
     });
     assert.equal((await readRequest(value.parent.paths, id))?.state, "served");
     const fact = await readRequest(value.parent.paths, id);
-    assert.equal(child, fact?.state === "served" && "child" in fact ? fact.child : null);
+    // The born child is returned live together with the stopped Tell stage.
+    assert.equal(child.kind, "live");
+    assert.equal(child.id, fact?.state === "served" && "child" in fact ? fact.child : null);
+    assert.match(child.kind === "live" ? (child.tellFailure ?? "") : "", /publication exit evidence unavailable/u);
   } finally {
     await pump.close();
     value.close();

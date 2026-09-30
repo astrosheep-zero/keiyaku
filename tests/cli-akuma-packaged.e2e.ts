@@ -581,7 +581,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
       1,
       "failure opens the known child identity once",
     );
-    assert.match(failed.stderr, /! error recorded Tell .* missing from Heart/u);
+    assert.match(failed.stderr, /! error .*fixture initial Tell admission failed/u);
     assert.doesNotMatch(failed.stderr, /● tell/u, "a birth reference does not claim Tell admission");
   } finally {
     await pump.close();

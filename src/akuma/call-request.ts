@@ -1,11 +1,10 @@
 import { isAbsolute, resolve } from "node:path";
-import { clipAllowedActions, allowedActionsSchema } from "./allowed.js";
+import { allowedActionsSchema } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { archetypeName, akumaIdSchema, type AkuId, type AkumaPaths } from "./identity.js";
-import { publishAkuma } from "./publication.js";
-import type { CallInitialTell, CallInitialTellAdmission } from "./call-initial-tell.js";
+import { callDiagnostic, executePreparedCall } from "./publication.js";
+import { tellResultSchema, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { providerOptionsSchema, providerRecipeSchema } from "./provider-recipe.js";
-import { resolveProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -16,7 +15,7 @@ import {
 } from "./request-wire.js";
 import type { OwnedProcess } from "../runtime/proc/run.js";
 import { z } from "zod";
-import { World, type WorldRoot } from "../world.js";
+import type { WorldRoot } from "../world.js";
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const archetypeSchema = z.string().transform((value, context) => {
@@ -77,6 +76,20 @@ type AkumaCallRequestCapabilities = Readonly<{
   admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
 }>;
 
+const liveResultSchema = z
+  .object({
+    kind: z.literal("live"),
+    id: akumaIdSchema,
+    tell: tellResultSchema.optional(),
+    tellFailure: z.string().optional(),
+  })
+  .strict();
+const referenceSchema = z.object({ kind: z.literal("reference"), id: akumaIdSchema }).strict();
+
+export type AkumaCallLive = z.infer<typeof liveResultSchema>;
+export type AkumaCallReference = z.infer<typeof referenceSchema>;
+export type AkumaCallOutput = AkumaCallLive | AkumaCallReference;
+
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
   const parsed = akumaCallPayloadSchema.safeParse(value);
   return parsed.success ? { ...parsed.data, action: "akuma.call" } : null;
@@ -91,62 +104,57 @@ async function executeAkumaCall(
   request: AkumaCallRequest,
   facts: ExecutionFacts,
   capabilities: AkumaCallRequestCapabilities,
-): Promise<Readonly<{ result: AkuId; child: string }>> {
-  const { world, paths, parent, spawn } = capabilities;
-  const requestWorld = await World.prove(request.world);
-  if (requestWorld !== world) {
-    await refuseRequest(paths, facts.id, `request world ${requestWorld} does not match ${world}`);
-    throw new Error(`request world ${requestWorld} does not match ${world}`);
-  }
-  const selected = await resolveProviderExecution(request.recipe.provider);
-  const admission = selected.adapter.admitOptions(request.recipe.options);
-  if (admission.kind === "refused") {
-    await refuseRequest(paths, facts.id, admission.diagnostic);
-    throw new Error(admission.diagnostic);
-  }
-  const recipe = {
-    ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
-    allowed: clipAllowedActions(request.recipe.allowed, parent.allowed),
-    provider: selected.execution,
-    options: admission.options,
-  };
-  const published = await publishAkuma({
-    worldPath: world,
+): Promise<Readonly<{ result: AkumaCallLive; child: string }>> {
+  const { world, paths, parent, spawn, admitInitialTell } = capabilities;
+  const outcome = await executePreparedCall({
     archetype: request.archetype,
+    cwd: request.cwd ?? parent.cwd,
+    ...(request.initialTell === undefined
+      ? {}
+      : {
+          initialTell: {
+            tellId: request.initialTell.tellId,
+            body: request.initialTell.body,
+            ...(request.initialTell.schemaJson === undefined ? {} : { schemaJson: request.initialTell.schemaJson }),
+            ...(request.initialTell.initiator === undefined ? {} : { initiator: request.initialTell.initiator }),
+          },
+        }),
     signal: facts.signal,
-    launch: async (allocated) => {
-      if (!facts.admissionOpen()) throw new Error("body closed request admission");
-      await reserveRequest(paths, facts.id, allocated.id);
-      return await spawn({
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          archetype: allocated.archetype,
-          ...recipe,
-          cwd: request.cwd ?? parent.cwd,
-          origin: { kind: "request", parent: parent.id, requestId: facts.id },
-        },
-      });
+    custody: {
+      kind: "request",
+      world,
+      coordinate: request.world,
+      recipe: {
+        ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
+        provider: request.recipe.provider,
+        options: request.recipe.options,
+        allowed: request.recipe.allowed,
+      },
+      parent,
+      requestId: facts.id,
+      admissionOpen: facts.admissionOpen,
+      reserve: async (child) => {
+        await reserveRequest(paths, facts.id, child);
+      },
+      refuse: async (diagnostic) => {
+        await refuseRequest(paths, facts.id, diagnostic);
+      },
+      spawn,
+      admitInitialTell,
     },
   });
-  if (request.initialTell === undefined) return { result: published.id, child: published.id };
-  const admitted = await capabilities.admitInitialTell({
-    id: published.id,
-    initialTell: {
-      tellId: request.initialTell.tellId,
-      body: request.initialTell.body,
-      ...(request.initialTell.schemaJson === undefined ? {} : { schemaJson: request.initialTell.schemaJson }),
-      ...(request.initialTell.initiator === undefined ? {} : { initiator: request.initialTell.initiator }),
+  return {
+    result: {
+      kind: "live",
+      id: outcome.child.id,
+      ...(outcome.tell === undefined ? {} : { tell: outcome.tell }),
+      ...(outcome.failure === undefined ? {} : { tellFailure: callDiagnostic(outcome.failure) }),
     },
-    signal: facts.signal,
-  });
-  if (admitted.kind === "birth-failed") throw new Error(admitted.diagnostic);
-  if (admitted.kind === "not-born") throw new Error(`Akuma ${published.id} was not born for its initial Tell`);
-  await admitted.wake;
-  return { result: published.id, child: published.id };
+    child: outcome.child.id,
+  };
 }
 
-export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, AkuId, AkuId> {
+export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, AkumaCallLive, AkumaCallReference> {
   return {
     action: "akuma.call",
     supportsCancellation: true,
@@ -154,14 +162,14 @@ export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, Ak
     decodeRequest: decodeAkumaCallRequest,
     encodeResult: (result) => result,
     decodeResult: (result) => {
-      const child = akumaIdSchema.safeParse(result);
-      if (!child.success) throw new Error("Akuma call returned an invalid child");
-      return child.data;
+      const parsed = liveResultSchema.safeParse(result);
+      if (!parsed.success) throw new Error("Akuma call returned an invalid live child result");
+      return parsed.data;
     },
     decodeReference: (reference) => {
-      const child = akumaIdSchema.safeParse(reference);
-      if (!child.success) throw new Error("Akuma call stored an invalid child reference");
-      return child.data;
+      const parsed = referenceSchema.safeParse(reference);
+      if (!parsed.success) throw new Error("Akuma call stored an invalid child reference");
+      return parsed.data;
     },
     isPermitted: (allowed) => allowed.includes("akuma.call"),
   };
@@ -169,14 +177,14 @@ export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, Ak
 
 export function akumaCallRequestCommand(
   capabilities: AkumaCallRequestCapabilities,
-): ChildRequestCommand<AkumaCallRequest, AkuId, AkuId> {
+): ChildRequestCommand<AkumaCallRequest, AkumaCallLive, AkumaCallReference> {
   return {
     completion: "child",
     protocol: akumaCallRequestProtocol(),
     projectChild: (child) => {
       const id = akumaIdSchema.safeParse(child);
       if (!id.success) throw new Error("Akuma call stored an invalid child reference");
-      return id.data;
+      return { kind: "reference", id: id.data };
     },
     execute: async (request, facts) => await executeAkumaCall(request, facts, capabilities),
   };
@@ -190,7 +198,7 @@ export function akumaCallRequestCommands(
 
 export async function requestForwardedAkumaCall(
   input: Omit<AkumaCallRequest, "action"> & Readonly<{ directory: string; id: string; signal?: AbortSignal }>,
-): Promise<AkuId> {
+): Promise<AkumaCallOutput> {
   const { directory, id, signal, ...request } = input;
   const response = await requestBodyCommand({
     directory,

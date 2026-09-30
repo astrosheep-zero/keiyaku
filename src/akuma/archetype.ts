@@ -49,6 +49,12 @@ type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> &
     provider: ProviderExecution;
   }>;
 
+/** One loaded archetype whose provider owner has decoded its execution but not yet admitted its options. */
+export type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
+  Readonly<{
+    provider: ProviderExecution;
+  }>;
+
 export class AkumaArchetypeError extends Error {
   readonly kind = "akuma-archetype";
   constructor(
@@ -449,10 +455,10 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-async function admitArchetype(archetype: DecodedArchetype, settings: Settings): Promise<AdmittedArchetype> {
+async function admitArchetype(archetype: PreparedArchetype): Promise<AdmittedArchetype> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
-    selected = await resolveProviderExecution(providerExecution(settings, archetype.provider));
+    selected = await resolveProviderExecution(archetype.provider);
   } catch (error) {
     if (error instanceof TypeError)
       throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
@@ -472,10 +478,25 @@ async function admitArchetype(archetype: DecodedArchetype, settings: Settings): 
   });
 }
 
+/** Resolve one archetype and decode its provider execution, leaving option admission to the caller. */
+export async function loadPreparedArchetype(
+  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
+): Promise<PreparedArchetype> {
+  const name = archetypeName(input.name);
+  const definition = await resolveArchetype(name, input, undefined);
+  let provider: ProviderExecution;
+  try {
+    provider = providerExecution(input.settings, definition.provider);
+  } catch (error) {
+    if (error instanceof TypeError)
+      throw new AkumaArchetypeError(definition.name, [definition.path], `uses ${error.message}`);
+    throw error;
+  }
+  return Object.freeze({ ...definition, provider });
+}
+
 export async function loadArchetype(
   input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
 ): Promise<AdmittedArchetype> {
-  const name = archetypeName(input.name);
-  const definition = await resolveArchetype(name, input, undefined);
-  return await admitArchetype(definition, input.settings);
+  return await admitArchetype(await loadPreparedArchetype(input));
 }

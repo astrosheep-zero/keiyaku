@@ -38,6 +38,7 @@ import {
 import { parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { spawnAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
 import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
@@ -160,6 +161,77 @@ function slowEmptyPublicationBody() {
       };
     },
     release,
+  };
+}
+
+/**
+ * Own the real `spawnAkumaBody` custody a forwarded admission starts for its wake.
+ * The wake loop is lent a borrowed port whose `release()` cannot release the
+ * fixture's own handle, so the fixture keeps genuine custody: it can await real
+ * closure, or terminate the launch it still owns when the wake loop only borrowed
+ * it. `settle` proves how many launches were started and how many are closed;
+ * settlement failures are reported, never swallowed, and the owning fixture
+ * retains its bytes unless every launch is closed.
+ */
+function trackedWakeLaunches() {
+  const launches: OwnedProcess[] = [];
+  const runtime: TellWakeRuntime = {
+    spawn: async (paths) => {
+      const owned = await spawnAkumaBody({ paths, refuseIfHeld: true });
+      launches.push(owned);
+      // Borrowed port: the wake loop reads the exit and may terminate through the
+      // fixture's retained custody, but releasing it must not release that handle.
+      return {
+        pid: owned.pid,
+        exited: owned.exited,
+        terminate: async (force) => await owned.terminate(force),
+        release: () => {},
+      };
+    },
+  };
+  return {
+    runtime,
+    async settle(timeoutMs = 15_000): Promise<Readonly<{ launched: number; closed: number }>> {
+      const tracked = launches.splice(0);
+      const failures: unknown[] = [];
+      let closed = 0;
+      for (const owned of tracked) {
+        let exitError: unknown;
+        let exited = false;
+        const exit = owned.exited.then(
+          () => {
+            exited = true;
+          },
+          (error: unknown) => {
+            exited = true;
+            exitError = error;
+          },
+        );
+        const raced = await Promise.race([
+          exit.then(() => "settled" as const),
+          new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs)),
+        ]);
+        if (raced === "timeout") {
+          // Retained custody still owns this launch: terminate it, then await the
+          // real closure it produces rather than trusting the request.
+          try {
+            await owned.terminate(true);
+          } catch (error) {
+            failures.push(error);
+          }
+          const closedAfterTerminate = await Promise.race([
+            exit.then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+          ]);
+          if (!closedAfterTerminate) failures.push(new Error(`wake launch pid ${owned.pid} survived termination`));
+        }
+        if (exitError !== undefined) failures.push(exitError);
+        if (exited) closed += 1;
+        owned.release();
+      }
+      if (failures.length > 0) throw new AggregateError(failures, "wake launch settlement failed");
+      return { launched: tracked.length, closed };
+    },
   };
 }
 
@@ -436,7 +508,10 @@ test("forwarded schema Akumas.call admits its initial Tell after held birth befo
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
-  const { pump, leash } = await requestPump(world, slow.spawn);
+  const wake = trackedWakeLaunches();
+  const { pump, leash } = await requestPump(world, slow.spawn, async ({ id, initialTell, signal }) =>
+    await new AkumaHandle(id, world).admitInitialTell(initialTell, { signal, runtime: wake.runtime }),
+  );
   const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   try {
@@ -461,14 +536,42 @@ test("forwarded schema Akumas.call admits its initial Tell after held birth befo
     const history = await PublicAkuma.select(world, result.akuma).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 1);
   } finally {
+    const failures: unknown[] = [];
+    let closure: Readonly<{ launched: number; closed: number }> | undefined;
     try {
       await slow.release();
-      rmSync(raw.path, { recursive: true, force: true });
-    } finally {
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
       await pump.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      closure = await wake.settle();
+    } catch (error) {
+      failures.push(error);
+    }
+    try {
+      if (closure === undefined) {
+        // The settlement failure is already recorded; keep the bytes for diagnosis.
+      } else if (closure.closed === closure.launched) {
+        rmSync(raw.path, { recursive: true, force: true });
+      } else {
+        failures.push(
+          new Error(`native wake launch closure unproven (${closure.closed}/${closure.launched}); retained fixture bytes`),
+        );
+      }
+    } finally {
       leash.release();
       restoreSquareLedger();
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "wake fixture settlement failed");
+    if (closure === undefined) throw new Error("native wake launch settlement did not complete");
+    assert.equal(closure.launched > 0, true, "expected a tracked native wake launch");
+    assert.equal(closure.closed, closure.launched, "every tracked native wake launch must be closed");
   }
 });
 
@@ -696,7 +799,7 @@ test("forwarded call preserves the born child when its exact initial Tell receip
     assert.equal(result.observation.kind, "failed");
     if (result.observation.kind === "failed") {
       assert.equal(result.observation.tellId.length > 0, true);
-      assert.match(result.observation.failure.diagnostic, /missing from Heart/u);
+      assert.match(result.observation.failure.diagnostic, /initial Tell admission failed after child birth/u);
       assert.equal(result.observation.tell, undefined);
     }
     assert.equal(
@@ -879,4 +982,24 @@ test("Archetype and call allowed inputs refuse malformed values before allocatio
     await assert.rejects(runtime.call({ archetype: "worker", body: "invalid", allowed: allowed as never }), expected);
   }
   assert.deepEqual((await runtime.list()).rows, []);
+});
+
+// The initiating local call must keep its Archetype-classified refusal even though
+// the shared prepared-call executor performs provider admission.
+test("a local call reports unsupported Archetype options as an Archetype failure before allocation", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-local-unsupported-option-");
+  const home = join(root, "home");
+  mkdirSync(join(home, "akuma"), { recursive: true });
+  const value = await settings({ root, home });
+  const archetypePath = join(home, "akuma", "greedy.md");
+  writeFileSync(archetypePath, "---\nprovider: claude\nnetwork: enabled\n---\nWork.\n");
+  await assert.rejects(
+    Akumas.of(await World.at(root)).call({ archetype: "greedy", body: "hello", home, settings: value }),
+    (error: unknown) =>
+      error instanceof AkumaArchetypeError &&
+      error.archetype === "greedy" &&
+      error.searched.join("\n") === archetypePath &&
+      error.reason === "is unsupported: Claude provider does not support the network option",
+  );
+  assert.equal(existsSync(join(root, ".keiyaku", "akuma", "run")), false);
 });

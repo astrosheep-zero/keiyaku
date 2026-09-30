@@ -26,7 +26,12 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability.
+provider fork capability. The submitting process writes its call wiring after
+call admission — including any exact first Tell — and before it observes the
+call outcome, and the same wiring serves a local call and a live forwarded call.
+Submitting-process plugin observation stays optional observation that never gates
+birth, Tell, or Dispatch; Dispatch and Alias remain independent cross-product
+authority, not child identity, and each keeps its own integration result.
 
 Caller-selected World, Contract, and execution directory are validated before
 birth. World proof happens once at the outer boundary. Cwd selection is explicit
@@ -41,7 +46,7 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics.
 
-A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
+A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake for both local and forwarded calls;
 Library composes surrounding Dispatch and Alias facts. A forwarded child receipt
 proves birth only. If its exact initial Tell receipt is absent, the call keeps

@@ -3,7 +3,7 @@ import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
-import { createAkumaProduct, type AkumaBornCall, type InitialCallTell } from "../akuma/akuma-product.js";
+import { createAkumaProduct, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma-product.js";
 import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -98,19 +98,6 @@ export type CallResult = Readonly<{
 }>;
 
 type CallExecution = CallResult["execution"];
-
-export type BornCall = Readonly<{
-  path: WorldRoot;
-  born: AkumaBornCall;
-  execution: CallExecution;
-  mode: "wait" | "detach";
-  timeoutMs: number;
-  signal?: AbortSignal;
-  dispatch: DispatchStage;
-  alias: AliasStage;
-  initialTell?: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
-  observe?: CallWaitObserver;
-}>;
 
 export type ForkInput = Readonly<{
   path: WorldRoot;
@@ -218,9 +205,8 @@ function callSeat(contract: unknown) {
   return seat;
 }
 
-async function callerAkuId(path: WorldRoot, born: AkumaBornCall): Promise<AkuId | undefined> {
-  if (born.kind !== "requested") return undefined;
-  const soul = await readSoul(pathsForAkuId(path, born.id));
+async function requestedParent(path: WorldRoot, id: AkuId): Promise<AkuId | undefined> {
+  const soul = await readSoul(pathsForAkuId(path, id));
   return soul?.origin.kind === "request" ? soul.origin.parent : undefined;
 }
 
@@ -237,19 +223,23 @@ async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promis
   }
 }
 
+/**
+ * The submitting process's optional called-plugin observation. It runs once,
+ * after the prepared executor returned its local value or the forwarded caller
+ * received its exact live output, and it never gates birth, initial Tell, or a
+ * later integration stage. A failed delivery stays a diagnostic.
+ */
 async function emitCalledSignal(
   input: Readonly<{
     path: WorldRoot;
     settings?: Settings;
-    born: AkumaBornCall;
-    akumaId: AkuId;
+    admitted: AdmittedAkumaCall;
     contractId?: ContractId;
   }>,
 ): Promise<void> {
   try {
-    const callerAkumaId = await callerAkuId(input.path, input.born);
-    const paths =
-      input.born.kind === "requested" ? pathsForAkuId(input.path, input.akumaId) : input.born.allocated.paths;
+    const paths = pathsForAkuId(input.path, input.admitted.id);
+    const callerAkumaId = input.admitted.requested ? await requestedParent(input.path, input.admitted.id) : undefined;
     const reportDiagnostic = (message: string): void => {
       void recordPluginDiagnostic(paths, message);
     };
@@ -258,7 +248,7 @@ async function emitCalledSignal(
         world: input.path,
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         reportDiagnostic,
-        akumaId: input.akumaId,
+        akumaId: input.admitted.id,
         ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
         ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
       });
@@ -268,28 +258,6 @@ async function emitCalledSignal(
   } catch {
     // Plugin delivery must not change an already admitted call.
   }
-}
-
-async function admitCall(
-  input: Readonly<{
-    path: WorldRoot;
-    world: ReturnType<typeof createAkumaProduct>;
-    call: Parameters<ReturnType<typeof createAkumaProduct>["admit"]>[0];
-    context: Readonly<{ cwdCanonical?: true }>;
-    settings?: Settings;
-    contractId?: ContractId;
-  }>,
-): Promise<Readonly<{ born: AkumaBornCall; akuma: AkuId }>> {
-  const born = await input.world.admit(input.call, input.context);
-  const akuma = born.kind === "requested" ? born.id : born.allocated.id;
-  await emitCalledSignal({
-    path: input.path,
-    ...(input.settings === undefined ? {} : { settings: input.settings }),
-    born,
-    akumaId: akuma,
-    ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-  });
-  return { born, akuma };
 }
 
 async function dispatchStage(
@@ -456,170 +424,167 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
   };
 }
 
-async function prepareCall(input: CallInput, context: ExecutionContext): Promise<BornCall> {
-  const parsed = await parseCallInput(input);
-  const execution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
-  const world = akumaWorld(parsed.path, parsed.home, parsed.settings, context);
-  const { born, akuma } = await admitCall({
-    path: parsed.path,
-    world,
-    call: callAdmissionInput(parsed, execution),
-    context: execution === undefined ? {} : { cwdCanonical: true },
-    ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-    ...(parsed.seat === undefined ? {} : { contractId: parsed.seat.id }),
-  });
-  const completedExecution = execution ?? born.execution;
-  const dispatch: DispatchStage =
-    parsed.seat === undefined
-      ? { kind: "none" }
-      : await dispatchStage({ repository: parsed.seat.scope, akuId: akuma, contractId: parsed.seat.id });
-  const aliasStage = await resolveAliasStage(parsed.path, parsed.alias, dispatch, akuma);
+function callResultOf(
+  akuma: AkuId,
+  execution: CallExecution,
+  dispatch: DispatchStage,
+  alias: AliasStage,
+  initialTell: ParsedCallInput["initialTell"],
+): Omit<CallResult, "observation"> {
   return {
-    path: parsed.path,
-    born,
-    execution: completedExecution,
-    mode: parsed.mode,
-    timeoutMs: parsed.timeoutMs,
-    ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
+    kind: "called",
+    akuma,
+    execution,
     dispatch,
-    alias: aliasStage,
-    ...(parsed.initialTell === undefined ? {} : { initialTell: parsed.initialTell }),
-    ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
+    alias,
+    ...(initialTell?.schema === undefined ? {} : { structured: true }),
   };
 }
 
-type PublishedCallHandle = Awaited<ReturnType<ReturnType<typeof createAkumaProduct>["publish"]>>;
-type PublishedCall = Readonly<{
-  born: BornCall;
-  handle: PublishedCallHandle;
-  result: Omit<CallResult, "observation">;
-}>;
-type PromptedCall = PublishedCall &
-  Readonly<{ born: BornCall & Readonly<{ initialTell: InitialCallTell & Readonly<{ schema?: Schema<unknown> }> }> }>;
-type AdmittedCallTell = Readonly<{ kind: "admitted"; wake?: Promise<TellResult> }>;
-type CallTellAdmission = AdmittedCallTell | Readonly<{ kind: "failed"; result: CallResult }>;
-
-async function publishCallTarget(born: BornCall): Promise<PublishedCall> {
-  const world = akumaWorld(born.path);
-  const contractId = born.dispatch.kind === "dispatched" ? born.dispatch.dispatch.contractId : undefined;
-  const handle = await world.publish(born.born, { ...(contractId === undefined ? {} : { contractId }) }, born.signal);
+function failedCall(
+  result: Omit<CallResult, "observation">,
+  tellId: string,
+  error: unknown,
+  tell?: TellResult,
+): CallResult {
   return {
-    born,
-    handle,
-    result: {
-      kind: "called",
-      akuma: handle.id,
-      execution: born.execution,
-      dispatch: born.dispatch,
-      alias: born.alias,
-      ...(born.initialTell?.schema === undefined ? {} : { structured: true }),
-    },
-  };
-}
-
-function failedCall(call: PromptedCall, error: unknown, tell?: TellResult): CallResult {
-  return {
-    ...call.result,
+    ...result,
     observation: {
       kind: "failed",
-      tellId: call.born.initialTell.tellId,
+      tellId,
       ...(tell === undefined ? {} : { tell }),
       failure: integrationFailure(error),
     },
   };
 }
 
-async function admitCallTell(call: PromptedCall): Promise<CallTellAdmission> {
-  const { born, handle } = call;
-  if (born.born.kind === "requested") return { kind: "admitted" };
-  let admitted: Awaited<ReturnType<typeof handle.admitInitialTell>>;
-  try {
-    admitted = await handle.admitInitialTell(born.initialTell, {
-      ...(born.signal === undefined ? {} : { signal: born.signal }),
-    });
-  } catch (error) {
-    if (born.signal?.aborted) throw error;
-    return { kind: "failed", result: failedCall(call, error) };
-  }
-  if (admitted.kind === "birth-failed")
-    return { kind: "failed", result: failedCall(call, new Error(admitted.diagnostic)) };
-  if (admitted.kind === "not-born")
-    return {
-      kind: "failed",
-      result: failedCall(call, new Error(`Akuma ${handle.id} was not born for its initial Tell`)),
-    };
-  const wake = admitted.wake;
-  void wake.catch(() => undefined);
-  return { kind: "admitted", wake };
-}
-
-async function detachCall(call: PromptedCall, admission: AdmittedCallTell): Promise<CallResult> {
-  let tell: TellResult | undefined;
-  try {
-    tell =
-      admission.wake === undefined
-        ? await call.handle.admittedReceipt(call.born.initialTell.tellId)
-        : await admission.wake;
-    return { ...call.result, observation: { kind: "detached", tell } };
-  } catch (error) {
-    if (admission.wake !== undefined)
-      tell = await call.handle.admittedReceipt(call.born.initialTell.tellId).catch(() => undefined);
-    return failedCall(call, error, tell);
-  }
-}
-
-async function observeCall(call: PromptedCall, admission: AdmittedCallTell): Promise<CallResult> {
-  const { born, handle } = call;
-  let tell: TellResult | undefined;
+async function observeCall(
+  input: Readonly<{
+    path: WorldRoot;
+    akuma: AkuId;
+    result: Omit<CallResult, "observation">;
+    initialTell: NonNullable<ParsedCallInput["initialTell"]>;
+    receipt: TellResult;
+    timeoutMs: number;
+    signal?: AbortSignal;
+    observe?: CallWaitObserver;
+  }>,
+): Promise<CallResult> {
   const onObserve: AskObserver = {
     admitted: async (receipt, id) => {
-      tell = receipt;
-      await born.observe?.admitted?.(receipt, id, {
-        dispatch: born.dispatch,
-        alias: born.alias,
+      await input.observe?.admitted?.(receipt, id, {
+        dispatch: input.result.dispatch,
+        alias: input.result.alias,
       });
     },
-    ...(born.observe?.observe === undefined ? {} : { observe: born.observe.observe }),
+    ...(input.observe?.observe === undefined ? {} : { observe: input.observe.observe }),
   };
   try {
     const observed = await observeAdmittedAskAkuma({
-      path: born.path,
-      id: handle.id,
-      tellId: born.initialTell.tellId,
-      timeoutMs: born.timeoutMs,
-      ...(admission.wake === undefined ? {} : { wake: admission.wake }),
-      ...(born.signal === undefined ? {} : { signal: born.signal }),
+      path: input.path,
+      id: input.akuma,
+      tellId: input.initialTell.tellId,
+      timeoutMs: input.timeoutMs,
+      receipt: input.receipt,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
       onObserve,
     });
     return {
-      ...call.result,
+      ...input.result,
       observation: {
         kind: "observed",
         tell: observed.tell,
         observation:
-          born.initialTell.schema === undefined
+          input.initialTell.schema === undefined
             ? observed.observation
-            : decodeAskObservation(observed.observation, born.initialTell.schema),
+            : decodeAskObservation(observed.observation, input.initialTell.schema),
         ...(observed.completedAt === undefined ? {} : { completedAt: observed.completedAt }),
       },
     };
   } catch (error) {
-    if (born.signal?.aborted) throw error;
-    return failedCall(call, error, tell);
+    if (input.signal?.aborted) throw error;
+    return failedCall(input.result, input.initialTell.tellId, error, input.receipt);
   }
+}
+
+/** One failure that still names the child the invocation durably admitted. */
+function knownChildFailure(reason: unknown, akuma: AkuId): Error {
+  const error = reason instanceof Error ? reason : new Error(reason === undefined ? "call aborted" : String(reason));
+  Object.defineProperty(error, "akuma", { value: akuma, enumerable: false });
+  return error;
+}
+
+/** Preserve a native failure identity; only an unknown shape becomes a fresh Error. */
+function asError(failure: unknown): Error {
+  return failure instanceof Error ? failure : new Error(failure === undefined ? "call failed" : String(failure));
 }
 
 export async function callAkumas(
   input: CallInput,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<CallResult> {
-  const born = await prepareCall(input, execution);
-  const call = await publishCallTarget(born);
-  if (born.initialTell === undefined) return { ...call.result, observation: { kind: "born" } };
-  const prompted: PromptedCall = { ...call, born: { ...born, initialTell: born.initialTell } };
-  const admission = await admitCallTell(prompted);
-  if (admission.kind === "failed") return admission.result;
-  return born.mode === "detach" ? await detachCall(prompted, admission) : await observeCall(prompted, admission);
+  const parsed = await parseCallInput(input);
+  const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
+  const seat = parsed.seat;
+  const world = akumaWorld(parsed.path, parsed.home, parsed.settings, execution);
+  const admitted = await world.admit(
+    {
+      ...callAdmissionInput(parsed, selectedExecution),
+      ...(seat === undefined ? {} : { contractId: seat.id }),
+    },
+    selectedExecution === undefined ? {} : { cwdCanonical: true },
+  );
+  // One caller-wiring sequence, after the prepared executor returned its local value
+  // or the forwarded caller received its exact live output, before outcome observation.
+  await emitCalledSignal({
+    path: parsed.path,
+    ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
+    admitted,
+    ...(seat === undefined ? {} : { contractId: seat.id }),
+  });
+  const dispatch: DispatchStage =
+    seat === undefined
+      ? { kind: "none" }
+      : await dispatchStage({ repository: seat.scope, akuId: admitted.id, contractId: seat.id });
+  const aliasStage = await resolveAliasStage(parsed.path, parsed.alias, dispatch, admitted.id);
+  const result = callResultOf(
+    admitted.id,
+    selectedExecution ?? admitted.execution,
+    dispatch,
+    aliasStage,
+    parsed.initialTell,
+  );
+  if (parsed.initialTell === undefined) {
+    // A prompt-free call must not report a clean birth when a launch stage failed
+    // after the child was durably born; keep the native failure and the child.
+    if (admitted.failure !== undefined) throw knownChildFailure(admitted.failure, admitted.id);
+    return { ...result, observation: { kind: "born" } };
+  }
+  const receipt = admitted.tell;
+  if (receipt === undefined) {
+    if (parsed.signal?.aborted === true && admitted.failure !== undefined) {
+      // Cancellation keeps its native meaning, and the already-born child stays
+      // attached as private invocation evidence rather than being discarded.
+      throw knownChildFailure(parsed.signal.reason, admitted.id);
+    }
+    const failure =
+      admitted.failure === undefined
+        ? new Error(`Akuma ${admitted.id} returned no exact initial Tell receipt`)
+        : asError(admitted.failure);
+    return failedCall(result, parsed.initialTell.tellId, failure);
+  }
+  return parsed.mode === "detach"
+    ? { ...result, observation: { kind: "detached", tell: receipt } }
+    : await observeCall({
+        path: parsed.path,
+        akuma: admitted.id,
+        result,
+        initialTell: parsed.initialTell,
+        receipt,
+        timeoutMs: parsed.timeoutMs,
+        ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
+        ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
+      });
 }
 
 export async function forkAkumas(input: ForkInput): Promise<ForkResult> {

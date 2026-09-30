@@ -24,9 +24,9 @@ import {
 } from "../src/task/index.js";
 import {
   decodeTaskMutationRequest,
-  executeTaskMutation,
   taskMutationRequestCommand,
   type TaskMutationBodyRequest,
+  type TaskMutationRequestPort,
 } from "../src/task/mutation.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
@@ -267,7 +267,8 @@ test("Task mutation mints raw World once while Tasks consumes its branded capabi
   const canonical = await World.at(root);
   await assert.rejects(
     taskMutationRequestCommand("task.add", {
-      task: async () => Promise.reject(new Error("raw World must not reach the Task executor")),
+      ...UNUSED_TASK_ABILITIES,
+      add: async () => Promise.reject(new Error("raw World must not reach the Task executor")),
     }).execute(
       {
         world: `${canonical}/.` as WorldRoot,
@@ -938,13 +939,47 @@ test("targeted reads ignore unrelated malformed and symlink authorities", async 
   assert.equal(shown?.task.id, id);
 });
 
-test("forced-local Task mutation execution preserves owner validation and authenticated creation actor", async () => {
+const UNUSED_TASK_ABILITIES: TaskMutationRequestPort = {
+  add: async () => {
+    throw new Error("unexpected Task ability");
+  },
+  addDocument: async () => {
+    throw new Error("unexpected Task ability");
+  },
+  compose: async () => {
+    throw new Error("unexpected Task ability");
+  },
+  update: async () => {
+    throw new Error("unexpected Task ability");
+  },
+  lifecycle: async () => {
+    throw new Error("unexpected Task ability");
+  },
+  batch: async () => {
+    throw new Error("unexpected Task ability");
+  },
+};
+
+test("forced-local Task descriptor preserves owner validation and authenticated creation actor", async () => {
   const { root, tasks } = await world();
-  const result = await executeTaskMutation({
-    world: tasks.root,
-    requester: "aku/parent/00000001",
-    request: { action: "task.add", input: { title: "Forwarded", body: "exact\nbody", namespace: [] } },
-  });
+  const served = await taskMutationRequestCommand("task.add", {
+    ...UNUSED_TASK_ABILITIES,
+    add: async ({ world: proven, options }) => await Tasks.of(proven).add(options),
+  }).execute(
+    {
+      world: tasks.root,
+      request: { action: "task.add", input: { title: "Forwarded", body: "exact\nbody", namespace: [] } },
+    },
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      admittedAt: "2026-08-18T00:00:00.000Z",
+      requester: "aku/parent/00000001",
+      signal: new AbortController().signal,
+      admissionOpen: () => true,
+    },
+  );
+  if (served.kind !== "served") assert.fail("expected a served Task mutation");
+  const result = served.result;
   assert.equal("kind" in result && result.kind, "accepted");
   if (!("kind" in result) || result.kind !== "accepted" || !("value" in result) || "task" in result.value)
     assert.fail("expected accepted task mutation result");

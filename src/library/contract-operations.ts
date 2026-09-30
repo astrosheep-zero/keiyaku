@@ -13,7 +13,6 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
-import type { AuditReport } from "../protocol/audit.js";
 import {
   auditReportSchema,
   outcomeSchema,
@@ -112,14 +111,14 @@ type ContractReference = ContractService | z.infer<typeof materializedHandoffRef
 export type ContractRequestPort = Readonly<{
   audit(
     input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
-  ): Promise<Readonly<{ result: AuditResult; auditReport?: AuditReport }>>;
+  ): Promise<AuditResult>;
   deliver(
     input: DeliverRequest &
       Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
-  ): Promise<Readonly<{ result: DeliveryResult; deliveryFactId?: string }>>;
+  ): Promise<DeliveryResult>;
   review(
     input: ReviewRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
-  ): Promise<Readonly<{ result: ReviewResult; reviewFactId?: string }>>;
+  ): Promise<ReviewResult>;
 }>;
 function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
   const schema =
@@ -164,11 +163,21 @@ function executionObservation(facts: ExecutionFacts): Readonly<{ observe?: Execu
   return { observe: (event) => facts.progress?.(event) };
 }
 
-function servedContractReference(
-  result: ContractResult,
-  service: Extract<ContractService, { kind: "accepted-reference" }>,
-): import("../akuma/request-wire.js").ServiceCompletion<ContractResult, ContractService> {
-  return { kind: "served", result, service };
+function acceptedDeliveryEvidence(result: Extract<DeliveryResult, { kind: "accepted" }>): string {
+  const leading = result.value.leading;
+  if (leading === undefined) throw new Error("accepted delivery is missing its leading admission evidence");
+  return leading.fact;
+}
+
+function acceptedReviewEvidence(
+  result: Extract<ReviewResult, { kind: "accepted" }>,
+  contractId: ContractRequest["contractId"],
+): string {
+  const review = result.facts.findLast(
+    (fact) => fact.contract === contractId && fact.kind === "attestation" && fact.data.gate === "reviewed",
+  );
+  if (review === undefined) throw new Error("accepted review is missing its addressed journal fact");
+  return review.entry;
 }
 
 async function executeContractRequest(
@@ -178,76 +187,77 @@ async function executeContractRequest(
 ): Promise<import("../akuma/request-wire.js").ServiceCompletion<ContractResult, ContractService>> {
   const observation = executionObservation(facts);
   if (request.action === "contract.audit") {
-    const served = await port.audit({
+    const result = await port.audit({
       ...request,
       ...observation,
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });
-    if (served.result.kind !== "accepted") return { kind: "voided", outcome: served.result };
-    if (served.auditReport === undefined)
-      throw new Error(`Contract ${request.action} completed without durable service evidence`);
+    if (result.kind !== "accepted") return { kind: "voided", outcome: result };
     return {
       kind: "served",
-      result: served.result,
+      result,
       service: {
         kind: "audit-report",
         repoRoot: request.repoRoot,
         contractId: request.contractId,
-        report: served.auditReport,
+        report: result.value,
       },
     };
   }
   if (request.action === "contract.deliver") {
-    const served = await port.deliver({
+    const result = await port.deliver({
       ...request,
       ...observation,
       overwrite: request.overwrite ?? false,
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });
-    if (served.result.kind === "refused" || served.result.kind === "retry")
-      return { kind: "voided", outcome: served.result };
-    if (served.result.kind === "handoff") {
+    if (result.kind === "refused" || result.kind === "retry") return { kind: "voided", outcome: result };
+    if (result.kind === "handoff") {
       return {
         kind: "served",
-        result: served.result,
+        result,
         service: {
           kind: "materialized-handoff",
           repoRoot: request.repoRoot,
           contractId: request.contractId,
-          targetHead: served.result.value.targetHead,
-          handoffBase: served.result.value.handoffBase,
-          recovery: served.result.value.recovery,
-          conflictPaths: served.result.value.conflictPaths,
-          workspace: served.result.value.workspace,
+          targetHead: result.value.targetHead,
+          handoffBase: result.value.handoffBase,
+          recovery: result.value.recovery,
+          conflictPaths: result.value.conflictPaths,
+          workspace: result.value.workspace,
         },
       };
     }
-    if (served.deliveryFactId === undefined)
-      throw new Error(`Contract ${request.action} completed without durable service evidence`);
-    return servedContractReference(served.result, {
-      kind: "accepted-reference",
-      repoRoot: request.repoRoot,
-      contractId: request.contractId,
-      deliveryFactId: served.deliveryFactId,
-    });
+    return {
+      kind: "served",
+      result,
+      service: {
+        kind: "accepted-reference",
+        repoRoot: request.repoRoot,
+        contractId: request.contractId,
+        deliveryFactId: acceptedDeliveryEvidence(result),
+      },
+    };
   }
-  const served = await port.review({
+  const result = await port.review({
     ...request,
     ...observation,
     requester: facts.requester as ContractRequester,
     signal: facts.signal,
   });
-  if (served.result.kind !== "accepted") return { kind: "voided", outcome: served.result };
-  if (served.reviewFactId === undefined)
-    throw new Error(`Contract ${request.action} completed without durable service evidence`);
-  return servedContractReference(served.result, {
-    kind: "accepted-reference",
-    repoRoot: request.repoRoot,
-    contractId: request.contractId,
-    reviewFactId: served.reviewFactId,
-  });
+  if (result.kind !== "accepted") return { kind: "voided", outcome: result };
+  return {
+    kind: "served",
+    result,
+    service: {
+      kind: "accepted-reference",
+      repoRoot: request.repoRoot,
+      contractId: request.contractId,
+      reviewFactId: acceptedReviewEvidence(result, request.contractId),
+    },
+  };
 }
 
 function decodedContractResult(action: ContractRequest["action"], value: unknown): ContractResult {

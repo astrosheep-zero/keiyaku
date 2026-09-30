@@ -13,13 +13,13 @@ import type {
   UnbornAkumaListRow,
 } from "./akuma.js";
 import { canonicalBirthCwd } from "./call-input.js";
-import type { CallInitialTell } from "./call-initial-tell.js";
+import type { CallInitialTell, TellResult } from "./call-initial-tell.js";
 import { rosterListRow, readAkumaBirthCwd } from "./akuma-observe.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, archetypeName, parseAkuId } from "./identity.js";
-import { loadArchetype, listArchetypes as readArchetypes } from "./archetype.js";
-import { birthAkuma, launchAkuma } from "./publication.js";
+import { AkumaArchetypeError, loadPreparedArchetype, listArchetypes as readArchetypes } from "./archetype.js";
+import { executePreparedCall, PreparedCallAdmissionError } from "./publication.js";
 import { spawnAkumaBody } from "./body.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
 import { executionChannel } from "./requests.js";
@@ -34,24 +34,20 @@ type BornExecution = Readonly<{ cwd: string; source: "input" | "caller" | "proce
 
 export type InitialCallTell = CallInitialTell;
 
-export type BornAkumaCall = Readonly<{
-  kind: "born";
-  allocated: AllocatedAkuma;
-  seed: AkumaCallRecipe &
-    Readonly<{ id: AllocatedAkuma["id"]; archetype: string; cwd: string; origin: { kind: "direct" } }>;
-  execution: BornExecution;
-}>;
-
-export type RequestedAkumaCall = Readonly<{
-  kind: "requested";
+/** One admitted call: the leading child identity plus the exact live initial Tell evidence when supplied. */
+export type AdmittedAkumaCall = Readonly<{
   id: AllocatedAkuma["id"];
   cwd: string;
   execution: BornExecution;
+  /** True when the serving process was reached through the one direct-parent request channel. */
+  requested: boolean;
+  tell?: TellResult;
+  /** The native local failure, or the request transport's diagnostic text, after a confirmed birth. */
+  failure?: unknown;
 }>;
 
-export type AkumaBornCall = BornAkumaCall | RequestedAkumaCall;
-
-type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> & Readonly<{ initialTell?: InitialCallTell }>;
+type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> &
+  Readonly<{ initialTell?: InitialCallTell; contractId?: string }>;
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 type KnownAkuma = Readonly<{
   id: ReturnType<typeof akuIdFromDirectoryName>["id"];
@@ -65,14 +61,14 @@ async function admitBodyRequest(input: {
   name: string;
   recipe: AkumaCallRecipe;
   execution: Extract<ReturnType<typeof executionChannel>, { kind: "body-request" }>;
-}): Promise<RequestedAkumaCall> {
+}): Promise<AdmittedAkumaCall> {
   const cwd =
     input.call.cwd === undefined
       ? undefined
       : input.context.cwdCanonical === true
         ? input.call.cwd
         : await canonicalBirthCwd(input.call.cwd);
-  const child = await requestForwardedAkumaCall({
+  const response = await requestForwardedAkumaCall({
     directory: input.execution.directory,
     id: randomUUID(),
     world: input.path,
@@ -82,12 +78,17 @@ async function admitBodyRequest(input: {
     recipe: input.recipe,
     ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
   });
-  const bornCwd = await readAkumaBirthCwd(input.path, child);
+  const bornCwd = await readAkumaBirthCwd(input.path, response.id);
   return {
-    kind: "requested",
-    id: child,
+    id: response.id,
     cwd: bornCwd,
+    requested: true,
     execution: { cwd: bornCwd, source: cwd === undefined ? "caller" : "input" },
+    ...(response.kind === "live" && response.tell !== undefined ? { tell: response.tell } : {}),
+    ...(response.kind === "live" && response.tellFailure !== undefined ? { failure: response.tellFailure } : {}),
+    ...(response.kind === "reference" && input.call.initialTell !== undefined
+      ? { failure: `Akuma ${response.id} was born without its exact initial Tell receipt` }
+      : {}),
   };
 }
 
@@ -95,34 +96,60 @@ async function admitDirect(input: {
   call: AkumaCallLaunchInput;
   context: AkumaCallContext;
   path: WorldRoot;
-  archetype: Awaited<ReturnType<typeof loadArchetype>>;
+  archetype: Awaited<ReturnType<typeof loadPreparedArchetype>>;
   recipe: AkumaCallRecipe;
-}): Promise<BornAkumaCall> {
+}): Promise<AdmittedAkumaCall> {
   const initiatorCwd = input.context.initiatorCwd;
   const selectedCwd = input.call.cwd ?? initiatorCwd ?? input.path;
   const cwd =
     input.call.cwd !== undefined && input.context.cwdCanonical === true
       ? input.call.cwd
       : await canonicalBirthCwd(selectedCwd);
-  const allocated = await birthAkuma({
-    worldPath: input.path,
-    archetype: input.archetype.name,
-    ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
-  });
-  return {
-    kind: "born",
-    allocated,
-    seed: {
-      id: allocated.id,
-      archetype: allocated.archetype,
-      ...input.recipe,
+  let result: Awaited<ReturnType<typeof executePreparedCall>>;
+  try {
+    result = await executePreparedCall({
+      archetype: input.archetype.name,
       cwd,
-      origin: { kind: "direct" },
-    },
+      ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
+      ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
+      custody: {
+        kind: "local",
+        world: input.path,
+        recipe: input.recipe,
+        spawn: async (launch) =>
+          await spawnAkumaBody({
+            paths: launch.paths,
+            seed: launch.seed,
+            ...(input.call.contractId === undefined ? {} : { completion: { contractId: input.call.contractId } }),
+          }),
+        admitInitialTell: async ({ id, initialTell, signal }) =>
+          await new AkumaHandle(id, input.path).admitInitialTell(initialTell, {
+            ...(signal === undefined ? {} : { signal }),
+          }),
+      },
+    });
+  } catch (error) {
+    // The executor owns provider admission; this local edge restores the
+    // Archetype-classified refusal the initiating caller has always seen.
+    if (error instanceof PreparedCallAdmissionError) {
+      throw new AkumaArchetypeError(
+        input.archetype.name,
+        [input.archetype.path],
+        error.stage === "options" ? `is unsupported: ${error.diagnostic}` : `uses ${error.diagnostic}`,
+      );
+    }
+    throw error;
+  }
+  return {
+    id: result.child.id,
+    cwd,
+    requested: false,
     execution: {
       cwd,
       source: input.call.cwd !== undefined ? "input" : initiatorCwd === undefined ? "world" : "process",
     },
+    ...(result.tell === undefined ? {} : { tell: result.tell }),
+    ...(result.failure === undefined ? {} : { failure: result.failure }),
   };
 }
 
@@ -254,11 +281,11 @@ class AkumaProduct {
       ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
     });
   }
-  async admit(input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AkumaBornCall> {
+  async admit(input: AkumaCallLaunchInput, context: AkumaCallContext): Promise<AdmittedAkumaCall> {
     const name = archetypeName(input.archetype);
     const home = this.configuration.home === undefined ? {} : { home: this.configuration.home };
     const settings = this.configuration.settings ?? (await readSettings({ root: this.path, ...home }));
-    const archetype = await loadArchetype({ name, project: this.path, ...home, settings });
+    const archetype = await loadPreparedArchetype({ name, project: this.path, ...home, settings });
     const allowed =
       input.allowed === undefined
         ? archetype.allowed
@@ -273,29 +300,6 @@ class AkumaProduct {
     if (execution.kind === "body-request")
       return await admitBodyRequest({ call: input, context, path: this.path, name, recipe: requestRecipe, execution });
     return await admitDirect({ call: input, context, path: this.path, archetype, recipe: requestRecipe });
-  }
-  async publish(
-    born: AkumaBornCall,
-    completion: Readonly<{ contractId?: string }> = {},
-    signal?: AbortSignal,
-  ): Promise<AkumaHandle> {
-    if (born.kind === "requested") {
-      return new AkumaHandle(born.id, this.path, { cwd: born.cwd, source: born.execution.source });
-    }
-    const published = await launchAkuma({
-      allocated: born.allocated,
-      ...(signal === undefined ? {} : { signal }),
-      launch: async (allocated) =>
-        await spawnAkumaBody({
-          paths: allocated.paths,
-          seed: born.seed,
-          ...(Object.keys(completion).length === 0 ? {} : { completion }),
-        }),
-    });
-    return new AkumaHandle(published.id, this.path, {
-      cwd: born.execution.cwd,
-      source: born.execution.source,
-    });
   }
   async listComplete(input: Readonly<{ archetype?: string }> = {}): Promise<AkumaCompleteList> {
     if (typeof input !== "object" || input === null || Array.isArray(input))

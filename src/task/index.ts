@@ -6,7 +6,12 @@ import {
   type ExecutionContext,
   type LibraryExecution,
 } from "../akuma/requests.js";
-import { requestForwardedTask, type TaskMutationRequest, type TaskMutationResultForRequest } from "./mutation.js";
+import {
+  requestForwardedTask,
+  type TaskLifecycleVerb,
+  type TaskMutationRequest,
+  type TaskMutationResultForRequest,
+} from "./mutation.js";
 export type { WorldRoot } from "../world.js";
 import {
   buildTree,
@@ -132,6 +137,19 @@ export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
 export { observeRecentTaskStatus, type RecentTaskStatusRow } from "./catalog.js";
 export { taskRowViewLimit } from "./input.js";
 
+/**
+ * The one captured execution route per Tasks handle. Local execution calls the
+ * Task operations directly; a forwarded handle sends the same operation through
+ * the one body-request channel. The channel is read once at construction, never
+ * re-derived per operation.
+ */
+type TaskRoute = Readonly<{ kind: "local" }> | Readonly<{ kind: "forwarded"; directory: string }>;
+
+function taskRoute(execution: ExecutionContext): TaskRoute {
+  const channel = executionChannel(execution);
+  return channel.kind === "body-request" ? { kind: "forwarded", directory: channel.directory } : { kind: "local" };
+}
+
 function forwardTask<Request extends TaskMutationRequest>(
   directory: string,
   world: WorldRoot,
@@ -146,11 +164,123 @@ function forwardTask<Request extends TaskMutationRequest>(
   });
 }
 
+type LifecycleAction = "task.start" | "task.stop" | "task.hold" | "task.resume" | "task.done" | "task.drop";
+type SingleLifecycleRequest = Extract<TaskMutationRequest, { action: LifecycleAction; id: TaskId }>;
+type BatchLifecycleRequest = Extract<TaskMutationRequest, { action: LifecycleAction; ids: readonly TaskId[] }>;
+
+/** The single lifecycle request shapes, keyed once by verb instead of switched per handle. */
+const SINGLE_LIFECYCLE: Readonly<
+  Record<TaskLifecycleVerb, (id: TaskId, note: string | undefined) => SingleLifecycleRequest>
+> = {
+  start: (id) => ({ action: "task.start", id }),
+  stop: (id) => ({ action: "task.stop", id }),
+  hold: (id) => ({ action: "task.hold", id }),
+  resume: (id) => ({ action: "task.resume", id }),
+  done: (id, note) => ({ action: "task.done", id, ...(note === undefined ? {} : { note }) }),
+  drop: (id, note) => ({ action: "task.drop", id, ...(note === undefined ? {} : { note }) }),
+};
+
+/** The batch lifecycle request shapes for the same verbs. */
+const BATCH_LIFECYCLE: Readonly<
+  Record<TaskLifecycleVerb, (ids: readonly TaskId[], note: string | undefined) => BatchLifecycleRequest>
+> = {
+  start: (ids) => ({ action: "task.start", ids }),
+  stop: (ids) => ({ action: "task.stop", ids }),
+  hold: (ids) => ({ action: "task.hold", ids }),
+  resume: (ids) => ({ action: "task.resume", ids }),
+  done: (ids, note) => ({ action: "task.done", ids, ...(note === undefined ? {} : { note }) }),
+  drop: (ids, note) => ({ action: "task.drop", ids, ...(note === undefined ? {} : { note }) }),
+};
+
+type ComposeValues = Readonly<{
+  markdown: string;
+  namespace?: readonly string[];
+  actor?: string;
+  signal?: AbortSignal;
+}>;
+
+/**
+ * The one bound operation table for a captured route. Each entry either calls the
+ * local Task operations directly or sends the same validated values as the one
+ * forwarded request shape. Validation stays in the handle methods.
+ */
+type TaskOperations = Readonly<{
+  add(values: AddTaskInput): Promise<TaskMutationResult>;
+  addDocument(values: AddTaskDocumentInput): Promise<TaskMutationResult>;
+  compose(values: ComposeValues): Promise<TaskCompositionResult>;
+  update(id: TaskId, values: UpdateTaskInput): Promise<TaskUpdateResult>;
+  lifecycle(
+    id: TaskId,
+    verb: TaskLifecycleVerb,
+    note: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<TaskMutationResult>;
+  batch(
+    verb: TaskLifecycleVerb,
+    ids: readonly TaskId[],
+    note: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<TaskBatchResult>;
+}>;
+
+function taskOperations(world: WorldRoot, route: TaskRoute): TaskOperations {
+  if (route.kind === "forwarded") {
+    const { directory } = route;
+    return {
+      add: (values) => {
+        const { actor: _actor, signal, namespace: selected, ...request } = values;
+        return forwardTask(
+          directory,
+          world,
+          { action: "task.add", input: { ...request, namespace: selected ?? [] } },
+          signal,
+        );
+      },
+      addDocument: (values) =>
+        forwardTask(
+          directory,
+          world,
+          { action: "task.addDocument", input: { markdown: values.markdown, namespace: values.namespace ?? [] } },
+          values.signal,
+        ),
+      compose: (values) =>
+        forwardTask(
+          directory,
+          world,
+          { action: "task.compose", markdown: values.markdown, namespace: values.namespace ?? [] },
+          values.signal,
+        ),
+      update: (id, values) => {
+        const { signal, ...request } = values;
+        return forwardTask(directory, world, { action: "task.update", id, input: request }, signal);
+      },
+      lifecycle: (id, verb, note, signal) => forwardTask(directory, world, SINGLE_LIFECYCLE[verb](id, note), signal),
+      batch: (verb, ids, note, signal) => forwardTask(directory, world, BATCH_LIFECYCLE[verb](ids, note), signal),
+    };
+  }
+  return {
+    add: (values) => addTask(world, values),
+    addDocument: (values) => addTaskDocument(world, values),
+    compose: (values) =>
+      composeTasks({
+        world,
+        markdown: values.markdown,
+        ...(values.signal === undefined ? {} : { signal: values.signal }),
+        ...(values.actor === undefined ? {} : { actor: values.actor }),
+        ...(values.namespace === undefined ? {} : { defaultNamespace: values.namespace }),
+        planOnly: false,
+      }),
+    update: (id, values) => updateTask(world, id, values),
+    lifecycle: (id, verb, note, signal) => lifecycleTask(world, id, verb, signal, note),
+    batch: (verb, ids, note, signal) => batchTasks(world, verb, ids, signal, note),
+  };
+}
+
 class TaskHandle {
   constructor(
     readonly id: TaskId,
     private readonly world: WorldRoot,
-    private readonly execution: ExecutionContext,
+    private readonly operations: TaskOperations,
   ) {}
   async read(): Promise<TaskDetail | null> {
     const facts = await readTaskDetail(this.world, this.id);
@@ -165,50 +295,13 @@ class TaskHandle {
       : { kind: "accepted", value: node };
   }
   update(input: UpdateTaskInput): Promise<TaskUpdateResult> {
-    const values = updateInput(input);
-    const { signal: abort, ...request } = values;
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request") {
-      return forwardTask(channel.directory, this.world, { action: "task.update", id: this.id, input: request }, abort);
-    }
-    return updateTask(this.world, this.id, values);
+    return this.operations.update(this.id, updateInput(input));
   }
-  private lifecycle(
-    verb: "start" | "stop" | "hold" | "resume" | "done" | "drop",
-    input: unknown,
-  ): Promise<TaskMutationResult> {
+  private lifecycle(verb: TaskLifecycleVerb, input: unknown): Promise<TaskMutationResult> {
     const value = record(input ?? {}, `${verb} input`);
     closed(value, verb === "drop" || verb === "done" ? ["note", "signal"] : ["signal"], `${verb} input`);
     const note = verb === "drop" || verb === "done" ? text(value.note, "note") : undefined;
-    const abort = signal(value.signal);
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request") {
-      switch (verb) {
-        case "start":
-          return forwardTask(channel.directory, this.world, { action: "task.start", id: this.id }, abort);
-        case "stop":
-          return forwardTask(channel.directory, this.world, { action: "task.stop", id: this.id }, abort);
-        case "hold":
-          return forwardTask(channel.directory, this.world, { action: "task.hold", id: this.id }, abort);
-        case "resume":
-          return forwardTask(channel.directory, this.world, { action: "task.resume", id: this.id }, abort);
-        case "done":
-          return forwardTask(
-            channel.directory,
-            this.world,
-            { action: "task.done", id: this.id, ...(note === undefined ? {} : { note }) },
-            abort,
-          );
-        case "drop":
-          return forwardTask(
-            channel.directory,
-            this.world,
-            { action: "task.drop", id: this.id, ...(note === undefined ? {} : { note }) },
-            abort,
-          );
-      }
-    }
-    return lifecycleTask(this.world, this.id, verb, abort, note);
+    return this.operations.lifecycle(this.id, verb, note, signal(value.signal));
   }
   start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
     return this.lifecycle("start", input);
@@ -233,30 +326,21 @@ export type Task = TaskHandle;
 
 class TasksHandle {
   readonly root: WorldRoot;
+  private readonly operations: TaskOperations;
   constructor(
     private readonly world: WorldRoot,
-    private readonly execution: ExecutionContext,
+    execution: ExecutionContext,
   ) {
     this.root = world;
+    this.operations = taskOperations(world, taskRoute(execution));
   }
   task(input: Readonly<{ id: string }>): Task {
     const v = record(input, "task input");
     closed(v, ["id"], "task input");
-    return new TaskHandle(id(v.id), this.world, this.execution);
+    return new TaskHandle(id(v.id), this.world, this.operations);
   }
   add(input: AddTaskInput): Promise<TaskMutationResult> {
-    const values = addInput(input);
-    const { actor: _actor, signal: abort, namespace: selected, ...request } = values;
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request") {
-      return forwardTask(
-        channel.directory,
-        this.world,
-        { action: "task.add", input: { ...request, namespace: selected ?? [] } },
-        abort,
-      );
-    }
-    return addTask(this.world, values);
+    return this.operations.add(addInput(input));
   }
   addDocument(input: AddTaskDocumentInput): Promise<TaskMutationResult> {
     const v = record(input, "addDocument input");
@@ -266,22 +350,12 @@ class TasksHandle {
     const ns = namespace(v.namespace),
       createdBy = actor(v.actor),
       abort = signal(v.signal);
-    const local = {
+    return this.operations.addDocument({
       markdown,
       ...(ns === undefined ? {} : { namespace: ns }),
       ...(createdBy === undefined ? {} : { actor: createdBy }),
       ...(abort === undefined ? {} : { signal: abort }),
-    };
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request") {
-      return forwardTask(
-        channel.directory,
-        this.world,
-        { action: "task.addDocument", input: { markdown, namespace: ns ?? [] } },
-        abort,
-      );
-    }
-    return addTaskDocument(this.world, local);
+    });
   }
   async list(
     input: Readonly<{
@@ -412,35 +486,7 @@ class TasksHandle {
     const note = text(v.note, "note");
     if (note !== undefined && verb !== "done" && verb !== "drop")
       throw new TypeError("batch note is valid only for done or drop");
-    const abort = signal(v.signal);
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request") {
-      switch (verb) {
-        case "start":
-          return forwardTask(channel.directory, this.world, { action: "task.start", ids }, abort);
-        case "stop":
-          return forwardTask(channel.directory, this.world, { action: "task.stop", ids }, abort);
-        case "resume":
-          return forwardTask(channel.directory, this.world, { action: "task.resume", ids }, abort);
-        case "hold":
-          return forwardTask(channel.directory, this.world, { action: "task.hold", ids }, abort);
-        case "done":
-          return forwardTask(
-            channel.directory,
-            this.world,
-            { action: "task.done", ids, ...(note === undefined ? {} : { note }) },
-            abort,
-          );
-        case "drop":
-          return forwardTask(
-            channel.directory,
-            this.world,
-            { action: "task.drop", ids, ...(note === undefined ? {} : { note }) },
-            abort,
-          );
-      }
-    }
-    return batchTasks(this.world, verb, ids, abort, note);
+    return this.operations.batch(verb, ids, note, signal(v.signal));
   }
   compose(
     input: Readonly<{
@@ -459,24 +505,23 @@ class TasksHandle {
     const selected = namespace(v.namespace);
     const selectedSignal = signal(v.signal);
     const selectedActor = actor(v.actor);
-    const local = {
-      world: this.world,
-      markdown,
-      ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
-      ...(selectedActor === undefined ? {} : { actor: selectedActor }),
-      ...(selected === undefined ? {} : { defaultNamespace: selected }),
-      planOnly: v.plan === true,
-    };
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request" && v.plan !== true) {
-      return forwardTask(
-        channel.directory,
-        this.world,
-        { action: "task.compose", markdown, namespace: selected ?? [] },
-        selectedSignal,
-      );
+    if (v.plan === true) {
+      // A dry-run plan never leaves the process: it composes locally on any route.
+      return composeTasks({
+        world: this.world,
+        markdown,
+        ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
+        ...(selectedActor === undefined ? {} : { actor: selectedActor }),
+        ...(selected === undefined ? {} : { defaultNamespace: selected }),
+        planOnly: true,
+      });
     }
-    return composeTasks(local);
+    return this.operations.compose({
+      markdown,
+      ...(selected === undefined ? {} : { namespace: selected }),
+      ...(selectedActor === undefined ? {} : { actor: selectedActor }),
+      ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
+    });
   }
 }
 export type Tasks = TasksHandle;

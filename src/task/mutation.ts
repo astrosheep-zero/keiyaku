@@ -6,19 +6,15 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
-import {
-  addTask,
-  addTaskDocument,
-  batchTasks,
-  lifecycleTask,
-  updateTask,
-  type AddTaskInput,
-  type TaskBatchResult,
-  type TaskMutationResult,
-  type TaskUpdateResult,
-  type UpdateTaskInput,
+import type {
+  AddTaskDocumentInput,
+  AddTaskInput,
+  TaskBatchResult,
+  TaskMutationResult,
+  TaskUpdateResult,
+  UpdateTaskInput,
 } from "./operations.js";
-import { composeTasks, type TaskCompositionResult } from "./compose.js";
+import type { TaskCompositionResult } from "./compose.js";
 import { taskIdsSchema, taskNamespaceSchema } from "./identity.js";
 import { taskNonblankTextSchema, taskStateSchema, taskPrioritySchema } from "./document.js";
 import {
@@ -165,10 +161,45 @@ export type TaskMutationResultForRequest<Request extends TaskMutationRequest> =
       : Request extends Readonly<{ ids: readonly string[] }>
         ? TaskBatchResult
         : TaskMutationResult;
+export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
+
+/**
+ * The forced-local Tasks SDK abilities one descriptor execution entry consumes.
+ * They are composed at the upper Body edge from the same `Tasks.of(world)`
+ * product an ordinary local caller uses; this module never imports that product
+ * because the product consumes this descriptor protocol.
+ */
 export type TaskMutationRequestPort = Readonly<{
-  task(
-    input: Readonly<{ world: WorldRoot; request: TaskMutationRequest; requester: string; signal: AbortSignal }>,
-  ): Promise<TaskMutationExecutionResult>;
+  add(input: Readonly<{ world: WorldRoot; options: AddTaskInput }>): Promise<TaskMutationResult>;
+  addDocument(input: Readonly<{ world: WorldRoot; document: AddTaskDocumentInput }>): Promise<TaskMutationResult>;
+  compose(
+    input: Readonly<{
+      world: WorldRoot;
+      markdown: string;
+      defaultNamespace: readonly string[];
+      actor: string;
+      signal?: AbortSignal;
+    }>,
+  ): Promise<TaskCompositionResult>;
+  update(input: Readonly<{ world: WorldRoot; id: string; options: UpdateTaskInput }>): Promise<TaskUpdateResult>;
+  lifecycle(
+    input: Readonly<{
+      world: WorldRoot;
+      verb: TaskLifecycleVerb;
+      id: string;
+      note?: string;
+      signal?: AbortSignal;
+    }>,
+  ): Promise<TaskMutationResult>;
+  batch(
+    input: Readonly<{
+      world: WorldRoot;
+      verb: TaskLifecycleVerb;
+      ids: readonly string[];
+      note?: string;
+      signal?: AbortSignal;
+    }>,
+  ): Promise<TaskBatchResult>;
 }>;
 function decodeTaskBodyRequest(action: TaskMutationAction, value: unknown): TaskMutationBodyRequest | null {
   const parsed = taskBodyRequestSchema.extend({ request: taskRequestSchemas[action] }).safeParse(value);
@@ -239,16 +270,65 @@ export function taskMutationRequestCommand(
     projectService: (service) => ({ kind: "served-reference", action: service.action }),
     execute: async (request, facts) => {
       const world = await World.prove(request.world);
-      return {
-        kind: "served",
-        result: await port.task({
-          world,
-          request: request.request,
-          requester: facts.requester,
-          signal: facts.signal,
-        }),
-        service: { action: request.request.action },
-      };
+      const action = request.request.action;
+      let result: TaskMutationExecutionResult;
+      switch (action) {
+        case "task.add":
+          result = await port.add({
+            world,
+            options: addTaskOptions(request.request.input, facts.requester, facts.signal),
+          });
+          break;
+        case "task.addDocument":
+          result = await port.addDocument({
+            world,
+            document: { ...request.request.input, actor: facts.requester, signal: facts.signal },
+          });
+          break;
+        case "task.compose":
+          result = await port.compose({
+            world,
+            markdown: request.request.markdown,
+            defaultNamespace: request.request.namespace,
+            actor: facts.requester,
+            signal: facts.signal,
+          });
+          break;
+        case "task.update":
+          result = await port.update({
+            world,
+            id: request.request.id,
+            options: updateTaskOptions(request.request.input, facts.signal),
+          });
+          break;
+        case "task.start":
+        case "task.stop":
+        case "task.hold":
+        case "task.resume":
+        case "task.done":
+        case "task.drop": {
+          const verb = action.slice("task.".length) as TaskLifecycleVerb;
+          const note = "note" in request.request ? request.request.note : undefined;
+          result =
+            "ids" in request.request
+              ? await port.batch({
+                  world,
+                  verb,
+                  ids: request.request.ids,
+                  ...(note === undefined ? {} : { note }),
+                  signal: facts.signal,
+                })
+              : await port.lifecycle({
+                  world,
+                  verb,
+                  id: request.request.id,
+                  ...(note === undefined ? {} : { note }),
+                  signal: facts.signal,
+                });
+          break;
+        }
+      }
+      return { kind: "served", result, service: { action } };
     },
   };
 }
@@ -358,53 +438,4 @@ function updateTaskOptions(input: z.output<typeof updateInputSchema>, signal?: A
     ...(dropRelates === undefined ? {} : { dropRelates }),
     ...(signal === undefined ? {} : { signal }),
   };
-}
-
-export async function executeTaskMutation(
-  input: Readonly<{
-    world: WorldRoot;
-    request: TaskMutationRequest;
-    requester: string;
-    signal?: AbortSignal;
-  }>,
-): Promise<TaskMutationExecutionResult> {
-  const { world, request, signal } = input;
-  const withSignal = signal === undefined ? {} : { signal };
-  switch (request.action) {
-    case "task.add":
-      return await addTask(world, addTaskOptions(request.input, input.requester, signal));
-    case "task.addDocument":
-      return await addTaskDocument(world, { ...request.input, actor: input.requester, ...withSignal });
-    case "task.compose":
-      return await composeTasks({
-        world,
-        markdown: request.markdown,
-        defaultNamespace: request.namespace,
-        actor: input.requester,
-        planOnly: false,
-        ...withSignal,
-      });
-    case "task.update":
-      return await updateTask(world, request.id, updateTaskOptions(request.input, signal));
-    case "task.start":
-      if ("ids" in request) return await batchTasks(world, "start", request.ids, signal);
-      return await lifecycleTask(world, request.id, "start", signal);
-    case "task.stop":
-      return "ids" in request
-        ? await batchTasks(world, "stop", request.ids, signal)
-        : await lifecycleTask(world, request.id, "stop", signal);
-    case "task.resume":
-      return "ids" in request
-        ? await batchTasks(world, "resume", request.ids, signal)
-        : await lifecycleTask(world, request.id, "resume", signal);
-    case "task.hold":
-      if ("ids" in request) return await batchTasks(world, "hold", request.ids, signal);
-      return await lifecycleTask(world, request.id, "hold", signal);
-    case "task.done":
-      if ("ids" in request) return await batchTasks(world, "done", request.ids, signal, request.note);
-      return await lifecycleTask(world, request.id, "done", signal, request.note);
-    case "task.drop":
-      if ("ids" in request) return await batchTasks(world, "drop", request.ids, signal, request.note);
-      return await lifecycleTask(world, request.id, "drop", signal, request.note);
-  }
 }

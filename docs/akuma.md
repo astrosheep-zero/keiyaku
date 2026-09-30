@@ -30,6 +30,17 @@ births.
 
 Publication ends process custody by writing a durable verdict — Soul proves birth, a Seal under the leash proves failure — or by leaving the unborn child to leash judgment when the leash is unavailable; proven exit is welcome evidence but never a custody precondition, and a termination or exit error by itself changes nothing durable.
 
+A direct call and a requested call served by its parent share one lower birth
+authority. The initiating caller's admitted provider recipe, execution directory,
+and first Tell are retained as caller intent: the serving parent admits provider
+input itself but never reloads Settings or an Archetype, and never reinterprets
+that intent. Provider input is admitted once before any child exists, so a refused
+recipe leaves no child; a requested child is reserved before it is published.
+Confirmed birth is never replaced by a later stage's failure: a spawn or
+first-Tell failure after Soul carries the born child together with its native
+failure, and caller cancellation never discards a confirmed child or an exact
+admitted Tell. Only a birth that never proved Soul is a failed birth.
+
 Life is derived solely from leash and latest Heart evidence. A live Body is
 running; an explicitly completed one is asleep; an unsuccessful one is stranded;
 a witnessed stop is killed only while that Body remains latest. Free leash with

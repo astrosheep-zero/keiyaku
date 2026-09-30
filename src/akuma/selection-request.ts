@@ -214,9 +214,9 @@ function decodedSelectionResult(action: SelectionRequest["action"], value: unkno
 }
 
 /** Akuma owns Body Request payload, live result, and durable service codecs for wait/tell/kill. */
-export function selectionRequestProtocol(
+export function selectionRequestProtocol<Result extends SelectionResult = SelectionResult>(
   action: SelectionRequest["action"],
-): RequestProtocol<SelectionRequest, SelectionResult, SelectionService> {
+): RequestProtocol<SelectionRequest, Result, SelectionService> {
   return {
     action,
     supportsCancellation: true,
@@ -226,7 +226,7 @@ export function selectionRequestProtocol(
     },
     decodeRequest: (payload) => decodeSelectionRequest(action, payload),
     encodeResult: (result) => result,
-    decodeResult: (result) => decodedSelectionResult(action, result),
+    decodeResult: (result) => decodedSelectionResult(action, result) as Result,
     encodeFailure: encodeSelectionLiveFailure,
     decodeFailure: decodeSelectionLiveFailure,
     decodeReference: (reference) => decodeSelectionService(action, reference),
@@ -311,26 +311,16 @@ export function selectionRequestCommands(
   };
 }
 
-function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
-  action: "akuma.wait",
-): AkumaWaitResult;
-function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
-  action: "akuma.tell",
-): AkumaTellResult;
-function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
-  action: "akuma.ask",
-): AkumaAskResult;
-function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
-  action: "akuma.kill",
-): AkumaKillResult;
-function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
-  _action: SelectionRequest["action"],
-): AkumaWaitResult | AkumaTellResult | AkumaAskResult | AkumaKillResult {
+type ForwardedSelectionResponse<Result, Service> =
+  | Readonly<{ kind: "returned"; result: Result }>
+  | Readonly<{ kind: "reference"; reference: Service }>;
+
+/**
+ * The one terminal guard for every forwarded Selection operation: a returned
+ * live result is the operation's own answer, and a durable reference can never
+ * reproduce an expired live result.
+ */
+function forwardedSelectionResult<Result, Service>(response: ForwardedSelectionResponse<Result, Service>): Result {
   if (response.kind === "returned") return response.result;
   throw new Error("Akuma body request terminal Selection reference cannot reproduce an expired live result");
 }
@@ -346,7 +336,7 @@ export async function requestForwardedSelectionWait(
 ): Promise<AkumaWaitResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: selectionRequestProtocol("akuma.wait"),
+    command: selectionRequestProtocol<AkumaWaitResult>("akuma.wait"),
     value: {
       action: "akuma.wait",
       targets: input.targets,
@@ -355,7 +345,7 @@ export async function requestForwardedSelectionWait(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedSelectionCommandResult(response, "akuma.wait");
+  return forwardedSelectionResult<AkumaWaitResult, SelectionService>(response);
 }
 
 export async function requestForwardedSelectionTell(
@@ -370,7 +360,7 @@ export async function requestForwardedSelectionTell(
 ): Promise<AkumaTellResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: selectionRequestProtocol("akuma.tell"),
+    command: selectionRequestProtocol<AkumaTellResult>("akuma.tell"),
     value: {
       action: "akuma.tell",
       target: input.target,
@@ -380,7 +370,7 @@ export async function requestForwardedSelectionTell(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedSelectionCommandResult(response, "akuma.tell");
+  return forwardedSelectionResult<AkumaTellResult, SelectionService>(response);
 }
 
 export async function requestForwardedSelectionAsk(
@@ -397,7 +387,7 @@ export async function requestForwardedSelectionAsk(
 ): Promise<AkumaAskResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: selectionRequestProtocol("akuma.ask"),
+    command: selectionRequestProtocol<AkumaAskResult>("akuma.ask"),
     value: {
       action: "akuma.ask",
       target: input.target,
@@ -409,7 +399,7 @@ export async function requestForwardedSelectionAsk(
     },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedSelectionCommandResult(response, "akuma.ask");
+  return forwardedSelectionResult<AkumaAskResult, SelectionService>(response);
 }
 
 export async function requestForwardedSelectionKill(
@@ -421,9 +411,9 @@ export async function requestForwardedSelectionKill(
 ): Promise<AkumaKillResult> {
   const response = await requestBodyCommand({
     directory: input.directory,
-    command: selectionRequestProtocol("akuma.kill"),
+    command: selectionRequestProtocol<AkumaKillResult>("akuma.kill"),
     value: { action: "akuma.kill", targets: input.targets },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  return forwardedSelectionCommandResult(response, "akuma.kill");
+  return forwardedSelectionResult<AkumaKillResult, SelectionService>(response);
 }

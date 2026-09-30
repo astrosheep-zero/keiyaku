@@ -7,14 +7,11 @@ import { selectionRequestPort } from "./akuma/selection-owner-port.js";
 import { selectionRequestCommands } from "./akuma/selection-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
 import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
-import {
-  executeForwardedAudit,
-  executeForwardedDeliver,
-  executeForwardedReview,
-} from "./library/contract-forwarding.js";
+import { Keiyaku } from "./library/keiyaku.js";
 import { Repo } from "./library/repo.js";
 import { requireBranchesToBeUpToDateFrom, settings } from "./settings.js";
-import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";
+import { taskMutationRequestCommands, type TaskLifecycleVerb, type TaskMutationRequestPort } from "./task/mutation.js";
+import { Tasks, type Task, type TaskMutationResult } from "./task/index.js";
 import { composeRequestCommands } from "./akuma/request-wire.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
@@ -34,62 +31,119 @@ async function contractDependencies(repoRoot: string, processConfiguration: Body
   return [repo, configuration] as const;
 }
 
+function contractChannel(
+  repo: Repo,
+  contractId: Parameters<ContractRequestPort["deliver"]>[0]["contractId"],
+  requester: Parameters<ContractRequestPort["deliver"]>[0]["requester"],
+  configuration: Awaited<ReturnType<typeof contractDependencies>>[1],
+  requireBranchesToBeUpToDate: boolean,
+) {
+  return Keiyaku.with({
+    actor: requester,
+    requireBranchesToBeUpToDate,
+    hooks: worktreeHooksFrom({ settings: configuration }),
+  }).select({ repo, id: contractId });
+}
+
 function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
   return {
     audit: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await executeForwardedAudit({
+      return await contractChannel(
         repo,
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-        contractId: input.contractId,
-        requester: input.requester,
-        includeDirty: input.includeDirty,
-        showDiff: input.showDiff,
-        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
-        hooks: worktreeHooksFrom({ settings: configuration }),
-        signal: input.signal,
-      });
+        input.contractId,
+        input.requester,
+        configuration,
+        requireBranchesToBeUpToDateFrom({ settings: configuration }),
+      ).audit(
+        {
+          includeDirty: input.includeDirty,
+          showDiff: input.showDiff,
+          signal: input.signal,
+        },
+        input.observe === undefined ? undefined : { observe: input.observe },
+      );
     },
     deliver: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await executeForwardedDeliver({
+      return await contractChannel(
         repo,
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-        contractId: input.contractId,
-        requester: input.requester,
-        ...(input.message === undefined ? {} : { message: input.message }),
-        includeDirty: input.includeDirty,
-        materializeConflict: input.materializeConflict,
-        ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
-        requireBranchesToBeUpToDate: requireBranchesToBeUpToDateFrom({ settings: configuration }),
-        hooks: worktreeHooksFrom({ settings: configuration }),
-        signal: input.signal,
-      });
+        input.contractId,
+        input.requester,
+        configuration,
+        requireBranchesToBeUpToDateFrom({ settings: configuration }),
+      ).deliver(
+        {
+          includeDirty: input.includeDirty,
+          materializeConflict: input.materializeConflict,
+          ...(input.message === undefined ? {} : { message: input.message }),
+          ...(input.overwrite === undefined ? {} : { overwrite: input.overwrite }),
+          signal: input.signal,
+        },
+        input.observe === undefined ? undefined : { observe: input.observe },
+      );
     },
     review: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await executeForwardedReview({
+      return await contractChannel(
         repo,
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-        contractId: input.contractId,
-        requester: input.requester,
-        verdict: input.verdict,
-        signal: input.signal,
-        ...(input.summary === undefined ? {} : { summary: input.summary }),
-        hooks: worktreeHooksFrom({ settings: configuration }),
-      });
+        input.contractId,
+        input.requester,
+        configuration,
+        requireBranchesToBeUpToDateFrom({ settings: configuration }),
+      ).review(
+        {
+          verdict: input.verdict,
+          ...(input.summary === undefined ? {} : { summary: input.summary }),
+          signal: input.signal,
+        },
+        input.observe === undefined ? undefined : { observe: input.observe },
+      );
     },
   };
 }
 
+type TaskLifecycleInput = Readonly<{ note?: string; signal?: AbortSignal }>;
+
+const TASK_LIFECYCLE: Readonly<
+  Record<TaskLifecycleVerb, (handle: Task, input: TaskLifecycleInput) => Promise<TaskMutationResult>>
+> = {
+  start: async (handle, input) => await handle.start(input),
+  stop: async (handle, input) => await handle.stop(input),
+  hold: async (handle, input) => await handle.hold(input),
+  resume: async (handle, input) => await handle.resume(input),
+  done: async (handle, input) => await handle.done(input),
+  drop: async (handle, input) => await handle.drop(input),
+};
+
+/**
+ * The upper Body edge composes the forced-local Tasks SDK the descriptor
+ * execution entries consume. Each ability is one ordinary local product
+ * operation; no generic task(request) dispatcher is introduced here.
+ */
 function taskMutationRequestPort(): TaskMutationRequestPort {
   return {
-    task: async (input) =>
-      await executeTaskMutation({
-        world: input.world,
-        request: input.request,
-        requester: input.requester,
-        signal: input.signal,
+    add: async ({ world, options }) => await Tasks.of(world).add(options),
+    addDocument: async ({ world, document }) => await Tasks.of(world).addDocument(document),
+    compose: async ({ world, markdown, defaultNamespace, actor, signal }) =>
+      await Tasks.of(world).compose({
+        markdown,
+        namespace: defaultNamespace,
+        actor,
+        ...(signal === undefined ? {} : { signal }),
+      }),
+    update: async ({ world, id, options }) => await Tasks.of(world).task({ id }).update(options),
+    lifecycle: async ({ world, verb, id, note, signal }) =>
+      await TASK_LIFECYCLE[verb](Tasks.of(world).task({ id }), {
+        ...(note === undefined ? {} : { note }),
+        ...(signal === undefined ? {} : { signal }),
+      }),
+    batch: async ({ world, verb, ids, note, signal }) =>
+      await Tasks.of(world).batch({
+        verb,
+        ids,
+        ...(note === undefined ? {} : { note }),
+        ...(signal === undefined ? {} : { signal }),
       }),
   };
 }

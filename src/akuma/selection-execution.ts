@@ -270,11 +270,18 @@ export async function observeAdmittedAskAkuma(
     signal?: AbortSignal;
     startedAt?: number;
     wake?: Promise<TellResult>;
+    /**
+     * The exact receipt of the admission this observation is bound to. The
+     * call-facing seam always supplies it so observation never substitutes a
+     * later Heart read for that invocation's admission evidence. Ordinary
+     * Tell-bound asks may omit it and keep reading the current admitted receipt.
+     */
+    receipt?: TellResult;
     onObserve?: AskObserver;
   }>,
 ): Promise<AkumaAskResult> {
   const handle = source(input.path).selectHandle({ id: input.id });
-  const tell = await handle.admittedReceipt(input.tellId);
+  const tell = input.receipt ?? (await handle.admittedReceipt(input.tellId));
   await input.onObserve?.admitted?.(tell, input.id);
   let settled: TellResult | undefined;
   void input.wake?.then(

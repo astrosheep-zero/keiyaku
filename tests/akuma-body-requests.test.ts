@@ -61,9 +61,14 @@ import {
   contractHead,
   contractId as makeContractId,
   entryUlid,
+  gate,
   snapshotId,
+  type DependencyKeySet,
 } from "../src/core/facts/types.js";
 import { World, type WorldRoot } from "../src/world.js";
+import { Keiyaku, Repo, bodyRequestExecution } from "../src/index.js";
+// File-scope: git fixture teardown binds to this file, and both repository tests share its template.
+import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 import { Tasks } from "../src/task/index.js";
 import {
   taskMutationRequestCommand,
@@ -137,7 +142,22 @@ const unusedContractPort: ContractRequestPort = {
 };
 
 const unusedTaskPort: TaskMutationRequestPort = {
-  task: async () => {
+  add: async () => {
+    throw new Error("unexpected Task request");
+  },
+  addDocument: async () => {
+    throw new Error("unexpected Task request");
+  },
+  compose: async () => {
+    throw new Error("unexpected Task request");
+  },
+  update: async () => {
+    throw new Error("unexpected Task request");
+  },
+  lifecycle: async () => {
+    throw new Error("unexpected Task request");
+  },
+  batch: async () => {
     throw new Error("unexpected Task request");
   },
 };
@@ -160,6 +180,27 @@ async function requestBodyDeliver(
     ...(id === undefined ? {} : { id }),
     command: contractRequestProtocol("contract.deliver"),
     value: { action: "contract.deliver", ...request, contractId: makeContractId(request.contractId) },
+    ...(signal === undefined ? {} : { signal }),
+  });
+  return response.kind === "reference" ? response.reference : response.result;
+}
+
+async function requestBodyReview(
+  input: Readonly<{
+    directory: string;
+    id?: string;
+    repoRoot: string;
+    contractId: string;
+    verdict: "satisfied" | "unsatisfied";
+    signal?: AbortSignal;
+  }>,
+) {
+  const { directory, id, signal, ...request } = input;
+  const response = await requestBodyCommand({
+    directory,
+    ...(id === undefined ? {} : { id }),
+    command: contractRequestProtocol("contract.review"),
+    value: { action: "contract.review", ...request, contractId: makeContractId(request.contractId) },
     ...(signal === undefined ? {} : { signal }),
   });
   return response.kind === "reference" ? response.reference : response.result;
@@ -330,8 +371,8 @@ async function readTransportClaim(directory: string, id: string): Promise<Readon
   throw new Error(`transport claim ${id} was not found`);
 }
 
-type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>["result"];
-type FixtureReviewResult = Awaited<ReturnType<ContractRequestPort["review"]>>["result"];
+type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>;
+type FixtureReviewResult = Awaited<ReturnType<ContractRequestPort["review"]>>;
 
 function acceptedContract(marker: string, action: "deliver", contract: string): FixtureDeliveryResult;
 function acceptedContract(marker: string, action: "review", contract: string): FixtureReviewResult;
@@ -1017,10 +1058,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
         },
         { contractId, message: "ship it", includeDirty: true, materializeConflict: false },
       );
-      return {
-        result: acceptedContract("delivery-result", "deliver", contractId),
-        deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA3",
-      };
+      return acceptedContract("delivery-result", "deliver", contractId);
     },
   });
   try {
@@ -1090,6 +1128,80 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
   }
 });
 
+function reviewedAttestation(contract: string, entry: string, gateWord: "reviewed" | "verified") {
+  return {
+    v: 1 as const,
+    kind: "attestation" as const,
+    contract: makeContractId(contract),
+    entry: entryUlid(entry),
+    at: "2026-08-18T00:00:00.000Z",
+    data: { gate: gate(gateWord), subject: "[]" as DependencyKeySet, verdict: "satisfied" as const },
+  };
+}
+
+test("review derives its service reference from the invocation's addressed reviewed attestation", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-reference-")));
+  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const contractId = "kei/forwarded-review";
+  const reviewed = reviewedAttestation(contractId, "01ARZ3NDEKTSV4RRFFQ69G5FAX", "reviewed");
+  const incidental = [
+    reviewedAttestation(contractId, "01ARZ3NDEKTSV4RRFFQ69G5FAY", "verified"),
+    reviewedAttestation("kei/other-contract", "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "reviewed"),
+  ];
+  const native = { ...acceptedContract("review-result", "review", contractId), facts: [...incidental, reviewed] };
+  let calls = 0;
+  const pump = await openContractPump(parent, {
+    review: async (input) => {
+      calls += 1;
+      assert.equal(input.requester, parent.id);
+      assert.equal(input.contractId, contractId);
+      return native;
+    },
+  });
+  try {
+    const id = randomUUID();
+    assert.deepEqual(
+      await requestBodyReview({ directory: pump.directory, id, repoRoot: root, contractId, verdict: "satisfied" }),
+      native,
+    );
+    assert.equal(calls, 1);
+    const fact = await readRequest(parent.paths, id);
+    assert.deepEqual(fact?.state === "served" && "serviceJson" in fact ? JSON.parse(fact.serviceJson) : null, {
+      kind: "accepted-reference",
+      repoRoot: root,
+      contractId,
+      reviewFactId: reviewed.entry,
+    });
+    assert.doesNotMatch(JSON.stringify(fact), /review-result/u);
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("review with no addressed reviewed attestation settles unproven rather than serving a reference", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-missing-")));
+  const parent = await born(root, "parent", "22222222", ["contract.review"]);
+  const contractId = "kei/forwarded-review-missing";
+  const native = {
+    ...acceptedContract("review-result", "review", contractId),
+    facts: [reviewedAttestation("kei/other-contract", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "reviewed")],
+  };
+  const pump = await openContractPump(parent, { review: async () => native });
+  try {
+    const id = randomUUID();
+    await assert.rejects(
+      requestBodyReview({ directory: pump.directory, id, repoRoot: root, contractId, verdict: "satisfied" }),
+    );
+    const fact = await readRequest(parent.paths, id);
+    assert.equal(fact?.state, "unproven");
+    assert.equal(fact !== null && "serviceJson" in fact ? fact.serviceJson : null, null);
+  } finally {
+    await pump.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("Task request recovery voids an unserved claim without replaying Task authority", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-task-recovery-"));
   const parent = await born(root, "parent", "44444444", ["task.add"]);
@@ -1120,15 +1232,13 @@ test("deliver returns without a durable reference and settles Heart voided", asy
     deliver: async () => {
       calls += 1;
       return {
-        result: {
-          operation: "deliver",
-          kind: "refused",
-          facts: [],
-          effects: [],
-          pending: [],
-          refusal: { kind: "contract-missing", contractId: makeContractId("kei/not-accepted") },
-        } as FixtureDeliveryResult,
-      };
+        operation: "deliver",
+        kind: "refused",
+        facts: [],
+        effects: [],
+        pending: [],
+        refusal: { kind: "contract-missing", contractId: makeContractId("kei/not-accepted") },
+      } as FixtureDeliveryResult;
     },
   });
   try {
@@ -1263,15 +1373,13 @@ test("completion fences admission but drains a returned delivery reference", asy
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-drain-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   let started!: () => void;
-  let release!: (value: Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>) => void;
+  let release!: (value: FixtureDeliveryResult) => void;
   const executorStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  const executorReleased = new Promise<Readonly<{ result: FixtureDeliveryResult; deliveryFactId: string }>>(
-    (resolve) => {
-      release = resolve;
-    },
-  );
+  const executorReleased = new Promise<FixtureDeliveryResult>((resolve) => {
+    release = resolve;
+  });
   const id = randomUUID();
   const pump = await openContractPump(parent, {
     deliver: async (input) => {
@@ -1293,10 +1401,7 @@ test("completion fences admission but drains a returned delivery reference", asy
     await executorStarted;
     pump.stopAdmission();
     const closing = pump.close();
-    release({
-      result: acceptedContract("drained", "deliver", "kei/drained"),
-      deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FB0",
-    });
+    release(acceptedContract("drained", "deliver", "kei/drained"));
     await closing;
     // The receipt may reach the caller before transport disposal; only the durable
     // served reference is guaranteed after close drains the in-flight operation.
@@ -1308,7 +1413,8 @@ test("completion fences admission but drains a returned delivery reference", asy
       kind: "accepted-reference",
       repoRoot: root,
       contractId: "kei/drained",
-      deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FB0",
+      // The durable reference now comes from the returned invocation's own leading fact.
+      deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA3",
     });
   } finally {
     await pump.close();
@@ -1332,10 +1438,7 @@ test("a vanished live receipt does not fail durable request settlement", async (
     deliver: async () => {
       started();
       await executorReleased;
-      return {
-        result: acceptedContract("missing-receipt", "deliver", "kei/missing-receipt"),
-        deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FB1",
-      };
+      return acceptedContract("missing-receipt", "deliver", "kei/missing-receipt");
     },
   });
   try {
@@ -1910,15 +2013,13 @@ test("forwarded materialization retains and replays its handoff evidence", async
       calls += 1;
       assert.equal(input.materializeConflict, true);
       return {
-        result: {
-          operation: "deliver",
-          kind: "handoff",
-          contract: makeContractId("kei/conflicted"),
-          facts: [],
-          effects: [],
-          pending: [],
-          value: materializedValue,
-        },
+        operation: "deliver",
+        kind: "handoff",
+        contract: makeContractId("kei/conflicted"),
+        facts: [],
+        effects: [],
+        pending: [],
+        value: materializedValue,
       };
     },
   });
@@ -2071,9 +2172,6 @@ function openPump(
 }
 
 test("forwarded native delivery preserves full JSON result and revives the diff ability", async () => {
-  const { Keiyaku, Repo, bodyRequestExecution } = await import("../src/index.js");
-  const { executeForwardedDeliver } = await import("../src/library/contract-forwarding.js");
-  const { repositoryWithMain, document, accepted, commitCandidate } = await import("./support/library-verbs.js");
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const root = await World.at(repository.path);
@@ -2086,19 +2184,20 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
   const pump = await openContractPump(parent, {
     deliver: async (input) => {
       calls += 1;
-      const served = await executeForwardedDeliver({
-        repo,
-        contractId: input.contractId,
-        requester: input.requester,
-        includeDirty: input.includeDirty,
-        materializeConflict: input.materializeConflict,
-        signal: input.signal,
-        hooks: undefined,
-        requireBranchesToBeUpToDate: false,
-        ...(input.message === undefined ? {} : { message: input.message }),
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-      });
-      owner = served.result;
+      // The serving parent composes the native owner operation directly; no
+      // forwarding wrapper reconstructs its result.
+      const served = await Keiyaku.with({ actor: input.requester })
+        .select({ repo, id: input.contractId })
+        .deliver(
+          {
+            includeDirty: input.includeDirty,
+            materializeConflict: input.materializeConflict,
+            ...(input.message === undefined ? {} : { message: input.message }),
+            signal: input.signal,
+          },
+          input.observe === undefined ? undefined : { observe: input.observe },
+        );
+      owner = served;
       return served;
     },
   });
@@ -2127,6 +2226,70 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
     assert.equal(claims.length, 1);
     const claim = JSON.parse(await readFile(join(pump.directory, claims[0]!), "utf8")) as { id: string };
     assert.equal((await readRequest(parent.paths, claim.id))?.state, "served");
+  } finally {
+    await pump.close();
+  }
+});
+
+test("forwarded native review preserves the owner outcome and stores the addressed reviewed attestation", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const root = await World.at(repository.path);
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), gates: ["reviewed"] }));
+  assert.ok(bound.value.workspace?.kind === "worktree");
+  commitCandidate(repository, bound.value.workspace.path);
+  accepted(await Keiyaku.with().select({ repo, id: bound.contract }).deliver());
+  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  let owner: FixtureReviewResult | undefined;
+  let calls = 0;
+  const pump = await openContractPump(parent, {
+    review: async (input) => {
+      calls += 1;
+      // The serving parent composes the native owner operation directly; no
+      // forwarding wrapper reconstructs its result.
+      const served = await Keiyaku.with({ actor: input.requester })
+        .select({ repo, id: input.contractId })
+        .review(
+          { verdict: input.verdict, signal: input.signal },
+          input.observe === undefined ? undefined : { observe: input.observe },
+        );
+      owner = served;
+      return served;
+    },
+  });
+  try {
+    const observations: string[] = [];
+    const forwarded = Keiyaku.with({ execution: bodyRequestExecution({ directory: pump.directory }) }).select({
+      repo,
+      id: bound.contract,
+    });
+    const result = accepted(
+      await forwarded.review(
+        { verdict: "satisfied" },
+        {
+          observe: (event) => {
+            observations.push(event.kind);
+          },
+        },
+      ),
+    );
+    assert.equal(calls, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), JSON.parse(JSON.stringify(owner)));
+    assert.ok(observations.includes("admitted"));
+    const reviewed = result.facts.filter(
+      (fact) => fact.contract === bound.contract && fact.kind === "attestation" && fact.data.gate === "reviewed",
+    );
+    assert.equal(reviewed.length, 1);
+    const claims = (await readdir(pump.directory)).filter((name) => name.endsWith(".request.json"));
+    assert.equal(claims.length, 1);
+    const claim = JSON.parse(await readFile(join(pump.directory, claims[0]!), "utf8")) as { id: string };
+    const stored = await readRequest(parent.paths, claim.id);
+    assert.deepEqual(stored?.state === "served" && "serviceJson" in stored ? JSON.parse(stored.serviceJson) : null, {
+      kind: "accepted-reference",
+      repoRoot: repository.path,
+      contractId: bound.contract,
+      reviewFactId: reviewed[0]!.entry,
+    });
   } finally {
     await pump.close();
   }
