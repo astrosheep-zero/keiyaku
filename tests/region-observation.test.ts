@@ -3,9 +3,7 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
-import { renderText } from "../src/cli/render/text.js";
+import { runCli } from "./support/cli-fixtures.js";
 import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
@@ -89,12 +87,10 @@ test("region names a terminal Contract instead of reporting it missing", async (
   const bound = await bind(repository, "Terminal region", ["src/**"]);
   const id = (present(await bound.value.keiyaku.state())).id;
   await bound.value.keiyaku.abandon();
-  const parsed = parseArgv(["-C", repository.path, "region", id]);
-  if (!("command" in parsed)) throw new Error("region did not parse");
-  const result = await invoke(parsed, { cwd: repository.path });
-  assert.equal("kind" in result ? result.kind : undefined, "refused");
-  assert.match(renderText(result as never), /reason  terminal/u);
-  assert.doesNotMatch(renderText(result as never), /contract missing/u);
+  const result = await runCli(["-C", repository.path, "region", id], { cwd: repository.path });
+  assert.equal(result.exit, 1);
+  assert.match(result.stdout, /reason  terminal/u);
+  assert.doesNotMatch(result.stdout, /contract missing/u);
 });
 
 

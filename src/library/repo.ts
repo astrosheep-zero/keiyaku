@@ -3,15 +3,11 @@ import { resolve } from "node:path";
 import { currentBranchOperation, scopeOperation, type RepositoryScope } from "../protocol/operations.js";
 import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
-import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
-import { withGitDecodeChannel } from "../git/read-observation.js";
-import { completeRepoReconcile, type RepoContractReconcileReport, type RepoReconcileReport } from "./reconcile.js";
 
 export { NoGitWorldError };
-export type { RepoContractReconcileReport, RepoReconcileReport };
+export type { RepoContractReconcileReport, RepoReconcileReport } from "./reconcile.js";
 
 export type RepoAtInput = Readonly<{ path?: string; gitPath?: string }>;
-export type ReconcileInput = Readonly<{ hooks?: WorktreeHooks; retryHooks?: boolean }>;
 
 const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
@@ -22,20 +18,7 @@ async function resolvePinnedScope(path?: string, gitPath?: string): Promise<Repo
   });
 }
 
-export function reconcileInput(input: ReconcileInput | undefined): Readonly<{
-  hooks: WorktreeHooks;
-  retryHooks: boolean;
-}> {
-  const values = input === undefined ? undefined : requireInput(input, "reconcile input");
-  if (values?.retryHooks !== undefined && typeof values.retryHooks !== "boolean") {
-    throw new TypeError("retryHooks must be a boolean");
-  }
-  return {
-    hooks: worktreeHooksOption(values?.hooks),
-    retryHooks: values?.retryHooks ?? false,
-  };
-}
-
+/** One Git world shared by its worktrees; it is coordinate proof and branch observation only. */
 export class Repo {
   readonly root: string;
   readonly cwd: string;
@@ -58,18 +41,6 @@ export class Repo {
 
   async currentBranch(): Promise<string | null> {
     return await currentBranchOperation({ scope: scopeForRepo(this) });
-  }
-
-  async reconcile(input?: ReconcileInput): Promise<RepoReconcileReport> {
-    const scope = scopeForRepo(this);
-    const options = reconcileInput(input);
-    return await withGitDecodeChannel(scope, (channel) =>
-      completeRepoReconcile({
-        scope,
-        channel,
-        ...options,
-      }),
-    );
   }
 }
 

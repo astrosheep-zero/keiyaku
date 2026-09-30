@@ -41,6 +41,16 @@ function fakeAgentSource(): string {
     '        await chunk("agent_message_chunk", "attempt " + index);',
     "      }",
     "    }",
+    '    if (mode === "holding") {',
+    "      // A tool opened and never completed is a live (active) row forever, so it can only ever",
+    "      // appear through the close flush; the repeated said marker keeps the waiter observing.",
+    '      await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "hold", title: "hold", kind: "execute", rawInput: { command: "hold" }, status: "in_progress" } });',
+    "      for (let index = 1; ; index += 1) {",
+    '        await new Promise((resolve) => setTimeout(resolve, 300));',
+    '        await chunk("agent_message_chunk", "attempt " + index);',
+    '        await chunk("agent_thought_chunk", "retry note " + index);',
+    "      }",
+    "    }",
     '    if (mode === "slow") {',
     "      for (let index = 1; index <= 10; index += 1) {",
     '        await new Promise((resolve) => setTimeout(resolve, 250));',
@@ -68,7 +78,7 @@ function fakeAgentSource(): string {
 }
 
 /** One fake ACP provider recipe whose agent runs the given mode. */
-function acpRecipe(agent: string, mode: "notes" | "slow" | "tools" | "answer" | "empty"): Readonly<Record<string, unknown>> {
+function acpRecipe(agent: string, mode: "notes" | "holding" | "slow" | "tools" | "answer" | "empty"): Readonly<Record<string, unknown>> {
   return {
     kind: "acp",
     executable: process.execPath,
@@ -95,6 +105,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
   writeFileSync(agent, fakeAgentSource());
   for (const [archetype, provider] of [
     ["worker", "fake-notes"],
+    ["holder", "fake-holding"],
     ["slowcoach", "fake-slow"],
     ["toolbox", "fake-tools"],
     ["finisher", "fake-answer"],
@@ -108,6 +119,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
       {
         providers: {
           "fake-notes": acpRecipe(agent, "notes"),
+          "fake-holding": acpRecipe(agent, "holding"),
           "fake-slow": acpRecipe(agent, "slow"),
           "fake-tools": acpRecipe(agent, "tools"),
           "fake-answer": acpRecipe(agent, "answer"),
@@ -431,6 +443,123 @@ test("packaged plural waits attribute activity and close every target", { timeou
     if (cleanupFailure !== undefined) throw cleanupFailure;
   }
 });
+
+/**
+ * One real cancellation witness: a waiter interrupted while its target is genuinely live must close
+ * its frame with the unresolved live row and exit on the truthful owner rejection, fabricating no
+ * answer and no conclusion. The `holder` provider opens one tool and never completes it, so that row
+ * stays active (live) forever while repeated said/retry updates keep the waiter observing. The active
+ * tool never streams during observation, so its unresolved `? run $ hold` row can only appear through
+ * the close flush.
+ */
+test("packaged wait interrupted mid-observation closes unresolved and fabricates nothing", { timeout: 120_000 }, async () => {
+  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
+  const { root, world, env } = observingWorld();
+  try {
+    const born = await runPackagedCli(["-C", world, "call", "holder", "--alias", "@held", "prompt"], { cwd: world, env });
+    assert.equal(born.code, 0, born.stderr);
+    const interrupted = await runPackagedCliInterrupted(
+      ["-C", world, "wait", "@held", "--timeout", "60s"],
+      { cwd: world, env },
+      (stderr) => /attempt \d+/u.test(stderr),
+      "SIGINT",
+    );
+    assert.equal(
+      interrupted.signalCode,
+      null,
+      `the waiter handled the signal rather than dying to it:\n${interrupted.stderr}`,
+    );
+    assert.equal(interrupted.code, 3, `an interrupted wait reports the owner rejection:\n${interrupted.stderr}`);
+    assert.equal(interrupted.stdout, "", "an interrupted wait writes no fabricated answer");
+    assert.match(interrupted.stderr, /\? +run +\$ +hold/u, `the retained live tool closes unresolved:\n${interrupted.stderr}`);
+    assert.match(
+      interrupted.stderr,
+      /× wait failed\n  reason  CLI cancellation requested/u,
+      "the close reports the real cancellation cause",
+    );
+    assert.doesNotMatch(interrupted.stderr, /— waited |✓ answered/u, "a cancelled wait prints no conclusion");
+  } finally {
+    try {
+      await killAndAwaitPluralTarget(await World.at(world), "@held");
+    } finally {
+      await removeTempDirectory(root);
+    }
+  }
+});
+
+/**
+ * Run one packaged CLI observation and interrupt it as soon as a real settled row proves the waiter
+ * is observing. The bounded readiness await refuses a command that never observes; it never waits for
+ * a row that only the close flush can produce.
+ */
+function runPackagedCliInterrupted(
+  args: readonly string[],
+  input: Readonly<{ cwd: string; env?: NodeJS.ProcessEnv; stdin?: string }>,
+  ready: (stderr: string) => boolean,
+  interrupt: NodeJS.Signals,
+): Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null; stdout: string; stderr: string }>> {
+  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", packagedCli, ...args], {
+    cwd: input.cwd,
+    env: input.env ?? process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer | string) => {
+    stdout += String(chunk);
+  });
+  child.stderr.on("data", (chunk: Buffer | string) => {
+    stderr += String(chunk);
+  });
+  let exitState: Readonly<{ code: number; signalCode: NodeJS.Signals | null }> | undefined;
+  let spawnFailure: unknown;
+  const closed = new Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null }>>((resolve, reject) => {
+    child.on("error", (error) => {
+      spawnFailure = error;
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      exitState = { code: code ?? 1, signalCode: signal };
+      resolve(exitState);
+    });
+  });
+  void closed.catch(() => undefined);
+  child.stdin.end(input.stdin ?? "");
+  const closeWithin = async (
+    timeoutMs: number,
+  ): Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null }>> => {
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), timeoutMs);
+    });
+    const outcome = await Promise.race([closed.then((state) => ({ state })), timedOut]);
+    if (outcome === true) {
+      child.kill("SIGKILL");
+      return await closed;
+    }
+    clearTimeout(timer);
+    return outcome.state;
+  };
+  const readinessDeadline = Date.now() + 30_000;
+  return (async () => {
+    while (!ready(stderr)) {
+      if (spawnFailure !== undefined) throw spawnFailure;
+      if (exitState !== undefined)
+        throw new Error(
+          `the observing waiter closed (code ${exitState.code}, signal ${exitState.signalCode}) before streaming a settled row; stderr:\n${stderr}`,
+        );
+      if (Date.now() > readinessDeadline) {
+        child.kill("SIGKILL");
+        await closeWithin(30_000);
+        throw new Error(`the observing waiter never streamed a settled row; stderr:\n${stderr}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    child.kill(interrupt);
+    const { code, signalCode } = await closeWithin(30_000);
+    return { code, signalCode, stdout, stderr };
+  })();
+}
 
 function runPackagedCli(
   args: readonly string[],

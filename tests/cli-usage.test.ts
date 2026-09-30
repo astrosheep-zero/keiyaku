@@ -3,19 +3,21 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
-import { captureOutput } from "./support/cli-fixtures.js";
+import { captureOutput, runCli as runCliInProcess } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { invoke } from "../src/cli/invoke.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { akumaFailureProjection, invocationExitCode } from "../src/cli/runtime.js";
+import { akumaFailureProjection } from "../src/cli/runtime.js";
+import { reconcileHasFailure } from "../src/cli/render/reconcile.js";
+import type { ReconcileReport } from "../src/library/contract-types.js";
 import { contractId } from "../src/core/facts/types.js";
+import type { WorldRoot } from "../src/world.js";
 
 function runCli(cwd: string, argv: readonly string[], input?: string) {
   // A caller inside an Akuma Body carries AKUMA_REQUESTS and would forward the
@@ -57,7 +59,7 @@ test("task query defaults to active rows and opts into terminal rows", () => {
     const query = (flags: readonly string[]) => {
       const result = runCli(root, ["task", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
       assert.equal(result.status, 0, result.stderr);
-      return (JSON.parse(result.stdout).value.value.rows as readonly { id: string }[]).map((row) => row.id);
+      return (JSON.parse(result.stdout).value.rows as readonly { id: string }[]).map((row) => row.id);
     };
     assert.equal(query([]).length, 1);
     assert.deepEqual(query(["--closed"]), [id]);
@@ -107,81 +109,69 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
 });
 
 test("worktree hook failure reports exit 1 at the CLI boundary", async () => {
-  const result: import("../src/cli/result.js").InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        {
-          kind: "worktree-hook-failed",
+  const report: ReconcileReport = {
+    effects: [],
+    lag: [
+      {
+        kind: "worktree-hook-failed",
           phase: "create",
           path: "/tmp/wt",
           command: 0,
           name: "prepare",
-          failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
-        },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
+        failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
+      },
+    ],
+    settlement: { actions: [], lags: [] },
   };
-  assert.equal(await invocationExitCode(result), 1);
+  assert.equal(reconcileHasFailure(report), true);
 });
 
 test("target checkout retention reports exit 1 at the CLI boundary", async () => {
-  const result: import("../src/cli/result.js").InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [
-        {
-          kind: "target-checkout-retained",
-          target: "refs/heads/main",
-          path: "/repo/file",
-          diagnostic: "checkout failed",
-        },
-      ],
-      settlement: { actions: [], lags: [] },
-    },
+  const report: ReconcileReport = {
+    effects: [],
+    lag: [
+      {
+        kind: "target-checkout-retained",
+        target: "refs/heads/main",
+        path: "/repo/file",
+        diagnostic: "checkout failed",
+      },
+    ],
+    settlement: { actions: [], lags: [] },
   };
-  assert.equal(await invocationExitCode(result), 1);
+  assert.equal(reconcileHasFailure(report), true);
 });
 
 test("private-state seat-close failure reports exit 1 at the CLI boundary", async () => {
-  const result: import("../src/cli/result.js").InvocationResult = {
-    kind: "reconcile",
-    report: {
-      effects: [],
-      lag: [],
-      settlement: {
-        actions: [],
-        lags: [],
-        seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
-      },
+  const report: ReconcileReport = {
+    effects: [],
+    lag: [],
+    settlement: {
+      actions: [],
+      lags: [],
+      seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
     },
   };
-  assert.equal(await invocationExitCode(result), 1);
+  assert.equal(reconcileHasFailure(report), true);
 });
 
 test("reconcile failure reports exit 1 at the CLI boundary", async () => {
-  const result: import("../src/cli/result.js").InvocationResult = {
-    kind: "reconcile" as const,
-    report: {
-      effects: [],
-      lag: [{ kind: "contract-file-failed", worktree: "/tmp/wt", path: "KEIYAKU.md", diagnostic: "write failed" }],
-      settlement: {
-        actions: [],
-        lags: [
-          {
-            kind: "settlement-failed",
-            surface: "task" as const,
-            contractId: contractId("kei/example"),
-            diagnostic: "task failed",
-          },
-        ],
-      },
+  const report: ReconcileReport = {
+    effects: [],
+    lag: [{ kind: "contract-file-failed", worktree: "/tmp/wt", path: "KEIYAKU.md", diagnostic: "write failed" }],
+    settlement: {
+      actions: [],
+      lags: [
+        {
+          kind: "settlement-failed",
+          surface: "task" as const,
+          contractId: contractId("kei/example"),
+          diagnostic: "task failed",
+        },
+      ],
     },
   };
-  assert.equal(await invocationExitCode(result), 1);
+  assert.equal(reconcileHasFailure(report), true);
 });
 
 test("task show preserves a multi-line body end to end", () => {
@@ -223,8 +213,8 @@ test("audit show-diff preserves an actual candidate diff", () => {
   });
   assert.equal(bound.status, 0, bound.stderr);
   const contract = JSON.parse(bound.stdout).contract as string;
-  const binding = JSON.parse(bound.stdout);
-  writeFileSync(join(binding.workspace.path, "candidate.txt"), "candidate\n");
+  const binding = JSON.parse(bound.stdout) as { readonly value: { readonly workspace: { readonly path: string } } };
+  writeFileSync(join(binding.value.workspace.path, "candidate.txt"), "candidate\n");
   const audited = spawnSync(
     process.execPath,
     [builtCli(), "-C", repository.path, "audit", contract, "--include-dirty", "--show-diff"],
@@ -252,6 +242,7 @@ test("a local status on an absent complete id reports one caller-facing fact", (
       "  reason  Akuma not found",
       `  id  ${id}`,
       "  accepts  keiyaku status [<contract>|@name|<aku/...>]...",
+      "           keiyaku status --guidance [<contract>|@<contract>]",
       "  help  keiyaku status --help",
       "",
     ].join("\n"),
@@ -284,7 +275,7 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
       ].join("\n"),
     ],
     [
-      new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as never }),
+      new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as WorldRoot }),
       [
         "× wait refused",
         "  reason  Akuma not in this World",
@@ -345,7 +336,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
   );
 });
 
-test("unmatched Contract selectors preserve exit and JSON behavior while exposing text evidence", () => {
+test("unmatched Contract selectors keep the text refusal and preserve the native missing-guidance null in JSON", () => {
   const repo = makeGitRepository();
   const run = (args: string[]) =>
     spawnSync(
@@ -357,7 +348,8 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
         ),
         "-C",
         repo.path,
-        "show",
+        "status",
+        "--guidance",
         "kei/missing",
         ...args,
       ],
@@ -369,12 +361,12 @@ test("unmatched Contract selectors preserve exit and JSON behavior while exposin
     assert.equal(text.stderr, "");
     assert.equal(
       text.stdout,
-      ["× show refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
+      ["× status refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
     );
     const json = run(["--json"]);
     assert.equal(json.status, 1);
     assert.equal(json.stderr, "");
-    assert.match(json.stdout, /contract-missing/u);
+    assert.equal(json.stdout.trim(), "null");
   } finally {
     rmSync(repo.path, { recursive: true, force: true });
   }
@@ -455,23 +447,25 @@ test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
 });
 
 test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {
-  const missing = "/absent/keiyaku-usage-blank-stdin";
-  const parsed = parseArgv(["bind", "-"]);
-  if (!("command" in parsed)) throw new Error("bind did not parse as executable");
-  await assert.rejects(
-    () =>
-      invoke(parsed, {
-        cwd: missing,
-        environment: {},
-        readStdin: async () => " \n\t",
-      }),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "bind requires a nonblank stdin document" &&
-      error.message.includes("  reason  bind requires a nonblank stdin document") &&
-      error.message.includes("  accepts  keiyaku bind ") &&
-      error.message.includes("  help  keiyaku bind --help"),
-  );
+  const repository = makeGitRepository();
+  try {
+    await assert.rejects(
+      () =>
+        runCliInProcess(["-C", repository.path, "bind", "-"], {
+          cwd: repository.path,
+          environment: {},
+          readStdin: async () => " \n\t",
+        }),
+      (error: unknown) =>
+        error instanceof CliUsageError &&
+        error.diagnostic === "bind requires a nonblank stdin document" &&
+        error.message.includes("  reason  bind requires a nonblank stdin document") &&
+        error.message.includes("  accepts  keiyaku bind ") &&
+        error.message.includes("  help  keiyaku bind --help"),
+    );
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
 });
 
 test("settings and duplicate-flag diagnostics stay visible", () => {

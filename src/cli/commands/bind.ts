@@ -7,7 +7,7 @@ import {
   type Repo,
   type WorktreeHooks,
 } from "../../index.js";
-import type { ParsedBind } from "./contract.js";
+import type { ParsedBind } from "./contract-grammar.js";
 import { contractFromInput } from "../selectors.js";
 
 type BindCommandInput = Readonly<{

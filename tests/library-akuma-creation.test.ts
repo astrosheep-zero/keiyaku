@@ -43,8 +43,8 @@ import { selectionRequestCommands, type SelectionRequestPort } from "../src/akum
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
+import { cliJson } from "./support/cli-fixtures.js";
+import type { CallResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { Akumas, bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
@@ -59,12 +59,6 @@ import { AkumaComposition as Akuma, AkumaHandle, isolateSquareFixtureLedger } fr
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-
-function executable(argv: readonly string[]): ParsedExecution {
-  const parsed = parseArgv(argv);
-  if (!("command" in parsed)) throw new Error("expected executable command");
-  return parsed;
-}
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
@@ -847,34 +841,32 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     if (appointment.kind !== "appointed") return;
 
     const invocationCwd = realpathSync(raw.path);
-    const implicit = await invoke(executable(["-C", ".", "call", "worker", "--contract", managedId, "-"]), {
+    const implicit = await cliJson<CallResult>(["-C", ".", "call", "worker", "--contract", managedId, "-"], {
       cwd: raw.path,
       environment: { ...environment, KEIYAKU_HOME: configured.home },
       readStdin: async () => "implicit placement",
     });
-    assert.ok("kind" in implicit && implicit.kind === "akuma" && implicit.action === "call");
-    if (!("kind" in implicit) || implicit.kind !== "akuma" || implicit.action !== "call") return;
-    assert.deepEqual(implicit.result.execution, { cwd: invocationCwd, source: "input" });
-    assert.notEqual(implicit.result.execution.cwd, appointment.path);
-    assert.equal(implicit.result.dispatch.kind, "dispatched");
-    if (implicit.result.dispatch.kind === "dispatched")
-      assert.equal(implicit.result.dispatch.dispatch.contractId, managedId);
-    assert.equal((await readSoul(pathsForAkuId(world, implicit.result.akuma)))?.cwd, invocationCwd);
+    assert.equal(implicit.value.kind, "called");
+    assert.deepEqual(implicit.value.execution, { cwd: invocationCwd, source: "input" });
+    assert.notEqual(implicit.value.execution.cwd, appointment.path);
+    assert.equal(implicit.value.dispatch.kind, "dispatched");
+    if (implicit.value.dispatch.kind === "dispatched")
+      assert.equal(implicit.value.dispatch.dispatch.contractId, managedId);
+    assert.equal((await readSoul(pathsForAkuId(world, implicit.value.akuma)))?.cwd, invocationCwd);
 
     const explicitDir = join(raw.path, "explicit-workdir");
     mkdirSync(explicitDir);
-    const explicit = await invoke(
-      executable(["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir", "-"]),
+    const explicit = await cliJson<CallResult>(
+      ["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir", "-"],
       {
         cwd: raw.path,
         environment: { ...environment, KEIYAKU_HOME: configured.home },
         readStdin: async () => "explicit placement",
       },
     );
-    assert.ok("kind" in explicit && explicit.kind === "akuma" && explicit.action === "call");
-    if (!("kind" in explicit) || explicit.kind !== "akuma" || explicit.action !== "call") return;
-    assert.deepEqual(explicit.result.execution, { cwd: realpathSync(explicitDir), source: "input" });
-    assert.equal(explicit.result.dispatch.kind, "dispatched");
+    assert.equal(explicit.value.kind, "called");
+    assert.deepEqual(explicit.value.execution, { cwd: realpathSync(explicitDir), source: "input" });
+    assert.equal(explicit.value.dispatch.kind, "dispatched");
     operationFailed = false;
   } finally {
     try {

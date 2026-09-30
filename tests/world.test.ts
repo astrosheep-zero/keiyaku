@@ -5,10 +5,11 @@ import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test from "node:test";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
-import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
+import { parseArgv as parseInvocation } from "../src/cli/parse.js";
+import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { World, WorldError } from "../src/world.js";
 
-function parseArgv(argv: readonly string[]): ParsedExecution {
+function parseArgv(argv: readonly string[]): ParsedCommandInvocation {
   const parsed = parseInvocation(argv);
   if (!("command" in parsed)) throw new Error("expected executable command");
   return parsed;

@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
-import type { AcceptedResult } from "../src/cli/result.js";
+import { cliJson } from "./support/cli-fixtures.js";
 import { GIT_REF } from "../src/git/repository.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
@@ -54,20 +53,16 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
     gates: [],
   }));
   const sourceId = (present(await source.value.keiyaku.state())).id;
-  const parsed = parseArgv(["bind", "--fork-of", sourceId]);
-  if (!("command" in parsed)) throw new Error("fork bind did not parse as executable");
-  const result = await invoke(parsed, {
+  const result = await cliJson<Readonly<{ kind: string; operation: string }>>(["bind", "--fork-of", sourceId], {
     cwd: repository.path,
     environment: {},
     readStdin: () => {
       throw new Error("fork bind must not read stdin");
     },
   });
-  assert.equal("kind" in result ? result.kind : undefined, "accepted");
-  if (!("kind" in result) || result.kind !== "accepted" || !("verb" in result) || result.verb !== "bind") {
-    throw new Error("fork bind did not return an accepted result");
-  }
-  assert.equal((result as Extract<AcceptedResult, { verb: "bind" }>).verb, "bind");
+  assert.equal(result.exit, 0);
+  assert.equal(result.value.kind, "accepted");
+  assert.equal(result.value.operation, "bind");
   assert.throws(() => parseArgv(["bind", "--fork-of", sourceId, "-"]), /fork bind reads no stdin/u);
   assert.throws(
     () => parseArgv(["bind", "--fork-of", sourceId, "--gates", "default"]),

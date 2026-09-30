@@ -5,6 +5,11 @@ their transparent effects and lags. It repairs desired physical custody from
 accepted facts and fresh external observation. Reconciliation is idempotent
 across retries and process restarts, writes no journal fact, and cannot reverse
 admission. It is the sole repair primitive for accepted-but-lagged Git effects.
+Its one public entry is the collection composition's reconcile: the caller
+supplies the Git-world coordinate under repair, the addressed Contract when one
+Contract is meant, and the existing hook-retry choice, while the composition's
+captured hooks feed the operation. A Contract handle repairs nothing and the
+Git-world coordinate observes only.
 
 ## Replay And Concurrency
 

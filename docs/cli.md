@@ -35,6 +35,12 @@ and its literal usage, never guesses missing input or prompts for
 authority-bearing facts. User-facing text is a projection of public results; it
 never becomes a second decision layer.
 
+An operation may retire the very worktree the running CLI executes from. The
+process acquires every ability its receipt needs before mutable product work can
+remove that tree, and reports its native result and process classification
+afterward without importing a retired path, restoring or copying the tree, or
+suppressing the cleanup that removed it.
+
 ## Public command adaptation
 
 Each root verb has one public purpose. The CLI adapts it without recreating its
@@ -44,7 +50,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | --- | --- | --- |
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, abandon, audit, reconcile | Request the named lifecycle, evidence, inspection, or repair judgment; refuse an absent or ambiguous Contract selector. | Return the owning lifecycle, audit, or reconciliation result unchanged. |
-| show, status, ls | Read one requested Contract, Akuma, archetype, Task, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
+| status, ls | Read one requested Contract, Akuma, archetype, Task, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
@@ -65,6 +71,13 @@ retry, and unavailable observation rather than recasting any of them as an
 empty success. Task command intent and Task presentation are owned by
 [cli-task.md](cli-task.md). Literal help rows, flags, positional forms, stdin
 rules, and parser recovery are executable interface detail, not CLI law.
+
+`status` reads a Contract's guidance only when the caller explicitly opts in
+for one selected Contract; an ordinary world, Contract, Akuma, or plural status
+incurs no guidance read and adds no guidance output, and an Akuma, plural, or
+world selection is refused before that read. The returned guidance bytes are the
+owner's own value, rendered directly in text and serialized directly in JSON.
+There is no separate guidance-reading verb.
 
 `ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and

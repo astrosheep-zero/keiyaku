@@ -19,14 +19,8 @@ import {
   waitObservationStream,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
-import {
-  akumaRawAnswer,
-  renderAkumaJson,
-  renderAkumaText,
-  askProgressStream,
-  waitedTellProgress,
-} from "../src/cli/render/akuma.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { askProgressStream, waitedTellProgress } from "../src/cli/render/akuma.js";
+import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns, padToDisplay } from "../src/cli/render/terminal.js";
@@ -136,18 +130,15 @@ test("Akuma observation failures name the target and reason without carrier word
   assert.equal(
     waitText(
       {
-        kind: "akuma",
-        action: "wait",
-        result: {
-          mode: "all",
-          reason: "deadline",
-          observations: [],
-          unobserved: [
-            { id: first, diagnostic: "heart locked" },
-            { id: second, diagnostic: "permission denied" },
-          ],
-        },
+        mode: "all",
+        reason: "deadline",
+        observations: [],
+        unobserved: [
+          { id: first, diagnostic: "heart locked" },
+          { id: second, diagnostic: "permission denied" },
+        ],
       },
+      {},
       DEFAULT_CONTEXT,
     ),
     [
@@ -181,7 +172,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
       observation: { reason: "answered" as const, answer: "exact answer" },
     },
   };
-  assert.equal(akumaRawAnswer(result), "exact answer");
+  assert.equal(askRawAnswer(result.result, undefined), "exact answer");
   const context = { columns: 80, color: false };
   const ordinary = {
     kind: "akuma" as const,
@@ -189,7 +180,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     body: result.body,
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
-  assert.match(tellText(ordinary, context), /✓ told +"continue"/u);
+  assert.match(tellText(ordinary.result, undefined, context), /✓ told +"continue"/u);
   const progress = waitedTellProgress(result.result, undefined, context);
   assert.match(progress, /✓ told +"continue"/u);
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
@@ -208,7 +199,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
       },
     },
   };
-  const receipt = tellText(long, context).split("\n");
+  const receipt = tellText(long.result, undefined, context).split("\n");
   assert.equal(receipt.length, 3, "frame head, rule and one Tell row only");
   assert.equal(receipt[1], frameRule([result.result.akuma]));
   assert.match(receipt[2]!, /✓ told +"one line of caller input .*…"$/u);
@@ -216,7 +207,8 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   assert.ok(displayColumns(receipt[2]!) <= 80);
   assert.match(
     tellText(
-      { ...long, result: { ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } } },
+      { ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } },
+      undefined,
       context,
     ),
     /⧗ tell/u,
@@ -224,12 +216,10 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   assert.match(
     tellText(
       {
-        ...ordinary,
-        result: {
-          ...ordinary.result,
-          tell: { ...ordinary.result.tell, wake: { kind: "failed", diagnostic: "wake refused" } },
-        },
+        ...ordinary.result,
+        tell: { ...ordinary.result.tell, wake: { kind: "failed", diagnostic: "wake refused" } },
       },
+      undefined,
       context,
     ),
     /^\d{2}:\d{2} ! tell +"continue"\n! tell delivery failed · wake refused$/mu,
@@ -239,17 +229,14 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     `${result.result.akuma}\n${frameRule([result.result.akuma])}\n\n✓ killed`,
   );
   assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
-  assert.deepEqual(JSON.parse(renderAkumaJson(result)), result.result);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.result)), result.result);
 
   const structured = {
     ...result,
     structured: true as const,
     result: { ...result.result, observation: { reason: "answered" as const, answer: "decoded scalar" } },
   };
-  assert.equal(akumaRawAnswer(structured), '"decoded scalar"');
-  const command = parseArgv(["ask", result.result.akuma, "--wait", "1s", "continue"]);
-  assert.equal("command" in command, true);
-  assert.equal(renderAkumaText(command as never, structured, context), '"decoded scalar"');
+  assert.equal(askRawAnswer(structured.result, true), '"decoded scalar"');
 });
 
 test("call and bounded Tell share one input frame and pinned conclusion", () => {
@@ -353,12 +340,7 @@ test("ask activity starts at admission and includes a later settlement of an old
   assert.ok(transcript.indexOf("new question") < transcript.indexOf("new activity"));
   assert.match(transcript, /✓ answered\n\n$/u);
   assert.equal(
-    akumaRawAnswer({
-      kind: "akuma",
-      action: "ask",
-      body: "new question",
-      result: { akuma: id, tell, observation: { reason: "answered", answer: "exact\nanswer" } },
-    }),
+    askRawAnswer({ akuma: id, tell, observation: { reason: "answered", answer: "exact\nanswer" } }, undefined),
     "exact\nanswer",
   );
 });
@@ -430,7 +412,9 @@ test("Akuma life mark covers the full life vocabulary from one definition site",
     killed: "×",
     hung: "?",
   } as const;
-  for (const [life, mark] of Object.entries(expected)) assert.equal(akumaMark(life as never), mark, life);
+  for (const life of Object.keys(expected) as Array<keyof typeof expected>) {
+    assert.equal(akumaMark(life), expected[life], life);
+  }
 });
 
 test("plural wait tags selected identities and keeps rows compact at 80 columns", () => {

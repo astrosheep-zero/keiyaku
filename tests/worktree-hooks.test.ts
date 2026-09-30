@@ -18,6 +18,7 @@ import { Keiyaku, Repo } from "../src/index.js";
 import { abandonOperation } from "../src/protocol/abandon.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
+import { runCli } from "./support/cli-fixtures.js";
 
 const EMPTY_HOOKS: WorktreeHooks = { create: [], destroy: [] };
 
@@ -77,15 +78,19 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     create: [appendCommand(log, "create\n", 100)],
     destroy: [appendCommand(log, "destroy\n")],
   };
+  const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo,
     markdown: contractBody("Concurrent hooks"),
     hooks,
   }));
   const id = (present(await bound.value.keiyaku.state())).id;
   const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
-  const reports = await Promise.all([bound.value.keiyaku.reconcile({ hooks }), bound.value.keiyaku.reconcile({ hooks })]);
+  const reports = await Promise.all([
+    Keiyaku.with({ hooks }).reconcile({ repo, contract: id }),
+    Keiyaku.with({ hooks }).reconcile({ repo, contract: id }),
+  ]);
 
   assert.deepEqual(
     reports.map((report) => report.lag),
@@ -155,18 +160,75 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   assert.equal(repository.run(["rev-parse", `${recovery}^^`]).trim(), originalHead);
 });
 
+/** One configured worktree hook command that records its phase in a marker file outside the worktree. */
+function markerCommand(marker: string, phase: string): HookCommand {
+  return {
+    name: phase,
+    argv: [
+      process.execPath,
+      "-e",
+      `require("node:fs").appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(`${phase}\n`)})`,
+    ],
+    timeoutMs: 5_000,
+  };
+}
+
+function settingsHooks(root: string, hooks: Readonly<Record<string, readonly HookCommand[]>>): void {
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "settings.json"), `${JSON.stringify({ worktree: hooks })}\n`);
+}
+
+test("CLI abandon carries the configured destroy hook to the native operation", async (context) => {
+  const repository = repositoryWithMain();
+  const markers = mkdtempSync(join(tmpdir(), "keiyaku-cli-hook-abandon-"));
+  context.after(() => rmSync(markers, { recursive: true, force: true }));
+  const marker = join(markers, "destroy.txt");
+  settingsHooks(repository.path, { destroy: [markerCommand(marker, "destroy")] });
+  const bound = accepted(await Keiyaku.with().bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("CLI abandon hooks"),
+  }));
+  const id = present(await bound.value.keiyaku.state()).id;
+
+  const abandoned = await runCli(["-C", repository.path, "abandon", id], { environment: {} });
+  assert.equal(abandoned.exit, 0, abandoned.stderr);
+  assert.equal(readFileSync(marker, "utf8"), "destroy\n");
+});
+
+test("CLI arc carries the configured create hook into its reconciliation", async (context) => {
+  const repository = repositoryWithMain();
+  const markers = mkdtempSync(join(tmpdir(), "keiyaku-cli-hook-arc-"));
+  context.after(() => rmSync(markers, { recursive: true, force: true }));
+  const marker = join(markers, "create.txt");
+  settingsHooks(repository.path, { create: [markerCommand(marker, "create")] });
+  const bound = accepted(await Keiyaku.with().bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: contractBody("CLI arc hooks"),
+  }));
+  const id = present(await bound.value.keiyaku.state()).id;
+  rmSync(await appointedWorktreePath(await repositoryAt(repository.path), id), { recursive: true, force: true });
+
+  const arced = await runCli(["-C", repository.path, "arc", id, "-"], {
+    environment: {},
+    readStdin: async () => contractBody("CLI arc hooks v2"),
+  });
+  assert.equal(arced.exit, 0, arced.stderr);
+  assert.equal(readFileSync(marker, "utf8"), "create\n");
+});
+
 test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);
+  const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo,
     markdown: contractBody("Terminal wins"),
     hooks: EMPTY_HOOKS,
   }));
   const id = (present(await bound.value.keiyaku.state())).id;
   const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
-  const pending = bound.value.keiyaku.reconcile();
+  const pending = Keiyaku.with().reconcile({ repo, contract: id });
 
   const scope = await scopeOperation({ coordinate: repository.path });
   const terminal = await withGitDecodeChannel(scope, (channel) =>
@@ -267,8 +329,9 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   );
   repository.run(["add", ".keiyaku/settings.json"]);
   repository.run(["commit", "--quiet", "-m", "scratch settings"]);
+  const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+    repo,
     markdown: contractBody("Scratch cleanup"),
     hooks: EMPTY_HOOKS,
   }));
@@ -304,7 +367,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
 
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot));
   try {
-    const report = await bound.value.keiyaku.reconcile();
+    const report = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
     assert.equal(
       report.effects.some(
         (effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed",

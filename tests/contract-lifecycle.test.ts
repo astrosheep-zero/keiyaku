@@ -4,10 +4,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
-import type { InvocationResult } from "../src/cli/result.js";
-import { renderText } from "../src/cli/render/text.js";
+import type { ReviewOutcome } from "../src/index.js";
+import { renderAccepted } from "../src/cli/render/contract.js";
+import { renderReconcile } from "../src/cli/render/reconcile.js";
+import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
+import { cliJson } from "./support/cli-fixtures.js";
 import { externalRequestCommandsFor } from "../src/akuma-body.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
@@ -327,17 +328,8 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
   });
 });
 
-function executable(argv: readonly string[]) {
-  const parsed = parseArgv(argv);
-  if (!("command" in parsed)) throw new Error("expected command invocation");
-  return parsed;
-}
-
-async function cliResult(cwd: string, argv: readonly string[]): Promise<InvocationResult> {
-  return (await invoke(executable(["-C", cwd, ...argv]), {
-    environment: {},
-    readStdin: async () => "",
-  })) as InvocationResult;
+function cliJsonAt<Value>(cwd: string, argv: readonly string[]) {
+  return cliJson<Value>(["-C", cwd, ...argv], { environment: {}, readStdin: async () => "" });
 }
 
 /** A committed candidate that changes one path of a target checkout whose other tracked files stay clean. */
@@ -359,14 +351,15 @@ async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, 
   return { repository, state, worktree };
 }
 
-describe("dirty target checkout placement", { concurrency: 2 }, () => {
+describe("dirty target checkout placement", () => {
   test("an overlapping uncommitted edit never vetoes acceptance, and reconcile carries the checkout forward", async () => {
     const { repository, state } = await targetedCheckoutBinding({ "target.txt": "base\n" }, "target.txt");
     writeFileSync(join(repository.path, "target.txt"), "local work in progress\n");
 
-    const reviewed = await cliResult(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"]);
+    const reviewed = (await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])).value;
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    const text = renderText(reviewed);
+    if (reviewed.kind !== "accepted") throw new Error("review was refused");
+    const text = renderAccepted(reviewed, { columns: 100, color: false });
     assert.match(text, /^✓ review satisfied  /mu);
     assert.match(text, /^✓ accepted$/mu);
     assert.match(text, /^  worktree  .+ retired$/mu);
@@ -383,11 +376,10 @@ describe("dirty target checkout placement", { concurrency: 2 }, () => {
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "local work in progress\n");
 
     repository.run(["-C", repository.path, "checkout", "--", "target.txt"]);
-    const reconciled = await cliResult(repository.path, ["reconcile"]);
-    assert.ok(reconciled.kind === "reconcile", JSON.stringify(reconciled));
-    const reconcileLines = renderText(reconciled).split("\n");
+    const reconciled = (await cliJsonAt<ReconcileCompletion | RepoReconcileReport>(repository.path, ["reconcile"])).value;
+    const reconcileLines = renderReconcile(reconciled).split("\n");
     const recoveredStart = reconcileLines.indexOf("  effect  target-checkout  recovered");
-    assert.notEqual(recoveredStart, -1, renderText(reconciled));
+    assert.notEqual(recoveredStart, -1, renderReconcile(reconciled));
     assert.equal(reconcileLines[recoveredStart + 1], `  ${repository.path}`);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), landed);
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
@@ -400,10 +392,11 @@ describe("dirty target checkout placement", { concurrency: 2 }, () => {
     );
     writeFileSync(join(repository.path, "other.txt"), "unrelated local work\n");
 
-    const reviewed = await cliResult(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"]);
+    const reviewed = (await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])).value;
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    assert.equal(reviewed.effects.some((effect) => effect.kind === "checkout-retained"), false);
-    assert.doesNotMatch(renderText(reviewed), /checkout behind/u);
+    if (reviewed.kind !== "accepted") throw new Error("review was refused");
+    assert.equal((reviewed.effects as readonly { kind: string }[]).some((effect) => effect.kind === "checkout-retained"), false);
+    assert.doesNotMatch(renderAccepted(reviewed, { columns: 100, color: false }), /checkout behind/u);
     assert.equal(readFileSync(join(repository.path, "other.txt"), "utf8"), "unrelated local work\n");
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });

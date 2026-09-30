@@ -1,520 +1,483 @@
-import { CliUsageError, commandGuide, isBlankInput, usageLine, type CliUsageGuide } from "../usage.js";
-import { parseDuration as decodeDuration } from "../../duration.js";
-import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
+import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma-grammar.js";
+import { CliUsageError, isBlankInput } from "../usage.js";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { squareAssignedParticipantName } from "@astrosheep/square";
+import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
+import { canonicalBirthCwd } from "../../akuma/call-input.js";
+import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
+import type { ExecutionContext } from "../../akuma/requests.js";
+import { executionChannel } from "../../akuma/requests.js";
+import { settings, type Settings } from "../../settings.js";
 import {
-  ALLOWED_ACTIONS,
-  DEFAULT_ALLOWED_ACTIONS,
-  decodeAllowedActions,
-  type AllowedActions,
-} from "../../akuma/allowed.js";
-import { parsePublicHistoryId } from "../../akuma/identity.js";
+  Akumas,
+  AkumaWorldScopeError,
+  type CallInput,
+  type Keiyaku as KeiyakuContract,
+  type Repo,
+} from "../../index.js";
+import type { WorldRoot } from "../../world.js";
+import type { CliCoordinates } from "../coordinates.js";
+import { contractFromInput } from "../selectors.js";
+import { ActivityDriver } from "../activity.js";
+import { displayContext, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import type { CliRuntime } from "../runtime.js";
+import {
+  callObservationStream,
+  inputWaitStream,
+  waitObservationStream,
+  type WaitSelectedIdentity,
+} from "../render/akuma-activity.js";
+import { askRawAnswer, callRawAnswer, historyRawAnswer, waitRawAnswer } from "../render/akuma-activity.js";
+import {
+  askExitCode,
+  askProgressStream,
+  callExitCode,
+  callObservationHead,
+  forkExitCode,
+  historyExitCode,
+  killExitCode,
+  renderCallText,
+  renderForkText,
+  renderHistoryText,
+  renderKillText,
+  renderTellText,
+  renderWaitText,
+  tellExitCode,
+  waitedTellProgress,
+} from "../render/akuma.js";
+export {
+  akumaUsageGuide,
+  isAkumaAction,
+  isParsedAkumaCommand,
+  parseAkumaCommand,
+  renderAkumaHelp,
+  renderAkumaRootRows,
+} from "./akuma-grammar.js";
 
-type Output = Readonly<{ output: "text" | "json" }>;
-type Addressed = Readonly<{ akuma: string }>;
-export type AkumaPromptSource = Readonly<{ kind: "argument"; value: string }> | Readonly<{ kind: "stdin" }>;
-type Prompted = Readonly<{ prompt: AkumaPromptSource }>;
+// ---------------------------------------------------------------------------
+// Leaf dispatch: acquisition, one public SDK invocation, direct rendering
+// ---------------------------------------------------------------------------
 
-export type ParsedAkumaCommand = Output &
-  (
-    | (Readonly<{
-        command: "call";
-        archetype: string;
-        contract?: string;
-        alias?: AkumaAlias;
-        mode: "wait" | "detach";
-        timeoutMs?: number;
-        allowed?: AllowedActions;
-        schema?: string;
-      }> &
-        Readonly<{ prompt?: AkumaPromptSource }>)
-    | Readonly<{ command: "kill"; akuma: readonly string[] }>
-    | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-    | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
-    | (Readonly<{ command: "ask"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
-    | (Readonly<{
-        command: "history";
-        last: boolean;
-        id?: string;
-        before?: number;
-        since?: number;
-        limit?: number;
-        full?: never;
-      }> &
-        Addressed)
-    | Readonly<{ command: "history"; contract: string; full: boolean }>
-    | (Readonly<{ command: "fork"; at: string }> & Addressed)
-  );
+async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
+  return settings({
+    ...(root === undefined ? {} : { root }),
+    ...(home === undefined ? {} : { home }),
+  });
+}
 
-export type InvokedAkumaCommand = Exclude<ParsedAkumaCommand, { command: "history"; contract: string }>;
-
-export type AkumaAction = ParsedAkumaCommand["command"];
-type FlagValue = string | true | readonly string[];
-type AkumaCommandSpec = Readonly<{
-  arity: number | "one-or-more";
-  stdin: boolean;
-  flags: Readonly<Record<string, "boolean" | "value" | "repeatable">>;
-  usage: string;
-  purpose: string;
-  details?: string;
+type InvokeInput = Readonly<{
+  path: WorldRoot;
+  executionCwd?: string;
+  home?: string;
+  settings?: Settings;
+  contract?: KeiyakuContract;
+  repo?: Repo;
+  environment: NodeJS.ProcessEnv;
+  readStdin: () => Promise<string>;
+  execution: ExecutionContext;
+  signal?: AbortSignal;
 }>;
 
-const EXTRA_ALLOWED_ACTIONS = ALLOWED_ACTIONS.filter((action) => !DEFAULT_ALLOWED_ACTIONS.includes(action));
+type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
 
-const AKUMA_COMMAND_SPECS = {
-  call: {
-    arity: 1,
-    stdin: true,
-    flags: {
-      contract: "value",
-      alias: "value",
-      wait: "value",
-      allowed: "repeatable",
-      json: "boolean",
-      schema: "value",
-    },
-    usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
-    purpose: "Call an Akuma into the world.",
-    details: [
-      "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
-      "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
-      "--schema and --wait require a prompt.",
-      "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
-      "--contract assigns the Akuma work from that Contract; it does not choose where the Akuma works.",
-      "--workdir selects where the Akuma works; relative paths start from your current directory. Without it, the current directory is used.",
-      "--alias <name> gives the new Akuma the selector @name; use it instead of aku/<id>.",
-      `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
-      ...(EXTRA_ALLOWED_ACTIONS.length === 0
-        ? []
-        : [`Also available with --allowed: ${EXTRA_ALLOWED_ACTIONS.join(", ")}.`]),
-      "Repeated --allowed adds actions to the selected Akuma's allowed actions; it cannot remove inherited permissions.",
-      "If no actions are configured, defaults apply; an explicitly empty list allows none.",
-      "An Akuma started by another Akuma can use only actions its parent can use. status <aku/...|@alias> shows that Akuma's allowed actions.",
-      "--schema checks the Akuma's answer against a JSON Schema file; stdin is still the prompt source.",
-      "On success, the Akuma is assigned to the Contract; if @name is already in use, --alias reassigns it to this Akuma.",
-      "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
-    ].join("\n"),
-  },
-  wait: {
-    arity: "one-or-more",
-    stdin: false,
-    flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
-    purpose: "Wait for one or more Akumas to finish work.",
-    details: [
-      "The default mode is any; --all waits until every selected Akuma completes.",
-      "An already completed member counts immediately, so repeating a selection can return at once.",
-      "Akuma names, completed activity, and the final result stream on stderr.",
-      "A streamed plural wait leaves stdout empty, and so does a single wait with no answer.",
-      "Only a single selected Akuma that answered writes to stdout, exactly its answer.",
-      "With --json nothing streams and stdout carries the result document.",
-    ].join("\n"),
-  },
-  tell: {
-    arity: 1,
-    stdin: true,
-    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
-    purpose: "Tell an Akuma something without waiting for its answer.",
-    details: [
-      "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
-      "Use ask to block for the answer or supply a schema.",
-    ].join("\n"),
-  },
-  ask: {
-    arity: 1,
-    stdin: true,
-    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "ask <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
-    purpose: "Ask an Akuma and block until it answers.",
-    details: [
-      "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
-      "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
-      "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
-      "Completed activity streams on stderr and the final answer is written to stdout once.",
-    ].join("\n"),
-  },
-  history: {
-    arity: 1,
-    stdin: false,
-    flags: {
-      id: "value",
-      before: "value",
-      since: "value",
-      limit: "value",
-      last: "boolean",
-      full: "boolean",
-      json: "boolean",
-    },
-    usage:
-      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]\nhistory <kei/...> [--full]",
-    purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
-    details: [
-      "--id reads the exact retained answered turn (turn/<number>).",
-      "--before <index> pages older rows before that sequence; --since <index> pages newer rows after it.",
-      "--limit bounds page size (default 12); without --since, the latest rows are shown.",
-      "With --since, paging starts at the earliest newer rows.",
-      "--last returns only the most recent answer, if one exists; it is not a history page.",
-      "Contract history defaults to a causal skeleton; --full prints every event with complete fields.",
-    ].join("\n"),
-  },
-  fork: {
-    arity: 1,
-    stdin: false,
-    flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...|@alias> --at <historyId>",
-    purpose: "Create a new Akuma from an answered turn.",
-    details: "--at takes a retained answered turn id (turn/<n>); find one with history.",
-  },
-  kill: {
-    arity: "one-or-more",
-    stdin: false,
-    flags: { json: "boolean" },
-    usage: "kill <aku/...|@alias>...",
-    purpose: "Stop the selected Akuma's current work; it can be woken again with tell.",
-  },
-} as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
-
-export function isAkumaAction(value: string | undefined): value is AkumaAction {
-  return value !== undefined && Object.hasOwn(AKUMA_COMMAND_SPECS, value);
+function akumas(input: InvokeInput) {
+  return Akumas.of(input.path, { execution: input.execution });
 }
 
-export function isParsedAkumaCommand(command: Readonly<{ command: string }>): command is InvokedAkumaCommand {
-  return isAkumaAction(command.command) && !("contract" in command && command.command === "history");
-}
-
-export function renderAkumaRootRows(): readonly string[] {
-  return Object.entries(AKUMA_COMMAND_SPECS).map(([action, spec]) => `  ${action.padEnd(10)} ${spec.purpose}`);
-}
-
-export function renderAkumaHelp(action: AkumaAction): string {
-  const spec: AkumaCommandSpec = AKUMA_COMMAND_SPECS[action];
-  return `${spec.purpose}\n\n${usageLine(spec.usage)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
-}
-
-export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
-  return commandGuide(action, AKUMA_COMMAND_SPECS[action].usage);
-}
-
-type Scanned = Readonly<{ flags: Readonly<Record<string, FlagValue>>; positionals: readonly string[]; stdin: boolean }>;
-
-function stringFlag(value: FlagValue | undefined, diagnostic: string, fail: (message: string) => never): string {
-  if (typeof value !== "string") fail(diagnostic);
-  return value as string;
-}
-
-function parseDuration(raw: FlagValue, option: string, fail: (message: string) => never): number {
-  if (typeof raw !== "string") fail(`${option} requires an integer duration with unit ms, s, m, or h`);
-  const duration = decodeDuration(raw);
-  if (duration.kind === "invalid") fail(`${option} requires an integer duration with unit ms, s, m, or h`);
-  if (duration.kind === "overflow") fail(`${option} duration exceeds the safe millisecond range`);
-  return duration.milliseconds;
-}
-
-function scanNamedOption(
-  input: Readonly<{
-    action: AkumaAction;
-    spec: AkumaCommandSpec;
-    argv: readonly string[];
-    index: number;
-  }>,
-  flags: Record<string, FlagValue>,
-  fail: (message: string) => never,
-): number {
-  const token = input.argv[input.index]!;
-  const name = token.slice(2);
-  const kind = input.spec.flags[name];
-  if (kind === undefined) fail(`option ${token} is not valid for ${input.action}`);
-  if (kind !== "repeatable" && flags[name] !== undefined) fail(`duplicate option: ${token}`);
-  if (kind === "boolean") {
-    flags[name] = true;
-    return input.index;
-  }
-  const value = input.argv[input.index + 1];
-  if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
-    fail(`${token} requires a value`);
-  }
-  if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
-  flags[name] = kind === "repeatable" ? [...(Array.isArray(flags[name]) ? flags[name] : []), value] : value;
-  return input.index + 1;
-}
-
-function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message: string) => never): Scanned {
-  const spec = AKUMA_COMMAND_SPECS[action];
-  const flags: Record<string, FlagValue> = {};
-  const positionals: string[] = [];
-  let stdin = false;
-  let positionalOnly = false;
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!positionalOnly && token === "--") {
-      positionalOnly = true;
-      continue;
-    }
-    if (positionalOnly) {
-      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
-      positionals.push(token);
-    } else if (token === "-") {
-      if (!spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
-      if (stdin) fail("stdin marker '-' may appear only once");
-      stdin = true;
-    } else if (token === "-d") {
-      fail(`option ${token} is not valid for ${action}`);
-    } else if (!token.startsWith("--")) {
-      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
-      positionals.push(token);
-    } else {
-      if (action === "tell" && (token === "--wait" || token === "--schema"))
-        fail(`tell ${token} is not supported; use ask ${token}`);
-      index = scanNamedOption({ action, spec, argv, index }, flags, fail);
-    }
-  }
-  return { flags, positionals, stdin };
-}
-
-function positiveIndex(raw: FlagValue, option: string, fail: (message: string) => never): number {
-  if (typeof raw !== "string" || !/^[1-9][0-9]*$/u.test(raw)) fail(`${option} requires a positive integer`);
-  const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) fail(`${option} exceeds the safe integer range`);
-  return value;
-}
-
-function validateDirect(value: string, _fail: (message: string) => never): string {
-  // Address validation belongs to the operation boundary so callers receive
-  // the compact Akuma refusal instead of a generic usage page.
-  return value;
-}
-
-function validateSet(value: string, fail: (message: string) => never): string {
-  if (value.startsWith("kei/")) return value;
-  if (value.includes("*")) {
-    try {
-      parseAkumaGlob(value);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : `invalid Akuma glob: ${value}`);
-    }
-    return value;
-  }
-  return validateDirect(value, fail);
-}
-
-function parseWait(
-  rawSelectors: readonly string[],
-  flags: Readonly<Record<string, FlagValue>>,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): ParsedAkumaCommand {
-  if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
-  const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
-  return {
-    command: "wait",
-    akuma: rawSelectors.map((value) => validateSet(value, fail)),
-    ...(completion === undefined ? {} : { completion }),
-    ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, "--timeout", fail) }),
-    output,
-  };
-}
-
-function parseHistory(
-  selector: string,
-  flags: Readonly<Record<string, FlagValue>>,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "history" }> {
-  if (selector.startsWith("kei/")) {
-    if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
-      fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
-    }
-    return { command: "history", contract: selector, full: flags.full === true, output };
-  }
-  return parseAkumaHistory(selector, flags, output, fail);
-}
-
-function refuseHistoryIdConflict(
-  flags: Readonly<Record<string, FlagValue>>,
-  bounded: boolean,
-  fail: (message: string) => never,
-): void {
-  if (flags.id !== undefined && (flags.last === true || bounded))
-    fail("history --id cannot be combined with --last, --before, --since, or --limit");
-}
-
-function parseAkumaHistory(
-  selector: string,
-  flags: Readonly<Record<string, FlagValue>>,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "history"; akuma: string }> {
-  if (flags.full === true) fail("history --full is only valid for kei/...");
-  const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
-  if (flags.before !== undefined && flags.since !== undefined)
-    fail("history --before and --since are mutually exclusive");
-  refuseHistoryIdConflict(flags, bounded, fail);
-  if (flags.last === true && bounded) fail("history --last cannot be combined with --before, --since, or --limit");
-  const limit = flags.limit === undefined ? undefined : positiveIndex(flags.limit, "--limit", fail);
-  if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
-  const id =
-    flags.id === undefined ? undefined : stringFlag(flags.id, "history --id requires a nonblank historyId", fail);
-  if (id !== undefined && parsePublicHistoryId(id) === null) fail("history --id requires turn/<positive safe integer>");
-  return {
-    command: "history",
-    akuma: validateDirect(selector, fail),
-    ...(id === undefined ? {} : { id }),
-    last: flags.last === true,
-    ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
-    ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
-    ...(limit === undefined ? {} : { limit }),
-    output,
-  };
-}
-
-function parseAddressed(
-  action: Exclude<AkumaAction, "call" | "tell" | "ask">,
-  rawSelectors: readonly string[],
-  flags: Readonly<Record<string, FlagValue>>,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): ParsedAkumaCommand {
-  if (action === "kill")
-    return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
-  if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
-  if (action === "history") {
-    const selector = rawSelectors[0]!;
-    if (selector.includes("*")) fail("history accepts one complete aku/..., @alias, or kei/... selector");
-    return parseHistory(selector, flags, output, fail);
-  }
-  const akuma = validateDirect(rawSelectors[0]!, fail);
-  const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
-  return { command: action, akuma, at, output };
-}
-
-function parsePrompted(
-  action: "call" | "tell" | "ask",
-  positionals: readonly string[],
-  stdin: boolean,
-  fail: (message: string) => never,
-): Readonly<{ subject: string; prompt?: AkumaPromptSource }> {
-  if (positionals.length < 1 || positionals.length > 2) fail(`${action} has invalid positional arguments`);
-  const argument = positionals[1];
-  if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
-  if (action !== "call" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
-  return {
-    subject: positionals[0]!,
-    ...(stdin
-      ? { prompt: { kind: "stdin" as const } }
-      : argument === undefined
-        ? {}
-        : { prompt: { kind: "argument" as const, value: argument } }),
-  };
-}
-
-function parseTell(
-  flags: Readonly<Record<string, FlagValue>>,
-  subject: string,
-  prompt: AkumaPromptSource,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "tell" }> {
-  return {
-    command: "tell",
-    akuma: validateDirect(subject, fail),
-    interrupt: flags.interrupt === true,
-    prompt,
-    output,
-  };
-}
-
-function parseAsk(
-  flags: Readonly<Record<string, FlagValue>>,
-  subject: string,
-  prompt: AkumaPromptSource,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "ask" }> {
-  const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "ask --schema requires a file", fail);
-  return {
-    command: "ask",
-    akuma: validateDirect(subject, fail),
-    interrupt: flags.interrupt === true,
-    ...(schema === undefined ? {} : { schema }),
-    ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
-    prompt,
-    output,
-  };
-}
-
-function parseAllowedFlag(raw: FlagValue | undefined, fail: (message: string) => never): AllowedActions | undefined {
-  if (raw === undefined) return undefined;
-  if (!Array.isArray(raw)) fail("--allowed requires a value");
-  const selected = raw as readonly string[];
+async function schemaFromFile(path: string): Promise<Schema<unknown>> {
   try {
-    return decodeAllowedActions(selected, "--allowed");
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    return Schema.json(parsed as JsonSchemaDocument, (value) => value);
   } catch (error) {
-    fail(error instanceof Error ? error.message : "invalid --allowed action");
+    throw new Error(`cannot read JSON Schema file ${path}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-function parseCall(
-  flags: Readonly<Record<string, FlagValue>>,
-  archetype: string,
-  prompt: AkumaPromptSource | undefined,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "call" }> {
-  let alias: AkumaAlias | undefined;
-  if (flags.alias !== undefined) {
-    try {
-      const name = stringFlag(flags.alias, "--alias requires a name", fail);
-      alias = parseAkumaAlias(name.startsWith("@") ? name : `@${name}`);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : "invalid Akuma alias");
-    }
-  }
-  const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
-  const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
-  const allowed = parseAllowedFlag(flags.allowed, fail);
-  const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "call --schema requires a file", fail);
-  if (prompt === undefined && schema !== undefined) fail("call --schema requires a prompt");
-  if (prompt === undefined && flags.wait !== undefined) fail("call --wait requires a prompt");
+function inputAlias(selector: string): string | undefined {
+  return selector.startsWith("@") ? selector : undefined;
+}
+
+async function promptBody(
+  action: "call" | "tell" | "ask",
+  command: Readonly<{ prompt: AkumaPromptSource }>,
+  input: InvokeInput,
+): Promise<string> {
+  if (command.prompt.kind !== "stdin") return command.prompt.value;
+  const bytes = await input.readStdin();
+  if (isBlankInput(bytes)) throw new CliUsageError(`${action} requires a nonblank prompt`);
+  return bytes;
+}
+
+function waitObserver(
+  stream: ReturnType<typeof waitObservationStream>,
+  driver: ActivityDriver,
+  onSelected?: (selected: readonly WaitSelectedIdentity[]) => void,
+): import("../../library/akumas.js").WaitObserver {
   return {
-    command: "call",
-    archetype,
-    ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
-    ...(alias === undefined ? {} : { alias }),
-    mode,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(allowed === undefined ? {} : { allowed }),
-    ...(schema === undefined ? {} : { schema }),
-    ...(prompt === undefined ? {} : { prompt }),
-    output,
+    selected: (selected) => {
+      onSelected?.(selected);
+      stream.select(selected);
+    },
+    observe: (observed) => {
+      driver.settle(stream.observe(observed), stream.frame());
+    },
   };
 }
 
-export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
-  const candidate = argv[0];
-  if (!isAkumaAction(candidate)) throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
-  const action = candidate;
-  const spec = AKUMA_COMMAND_SPECS[action];
-  const fail = (message: string): never => {
-    throw new CliUsageError(message, akumaUsageGuide(action));
+async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
+  let initiator: string | undefined;
+  try {
+    initiator = squareAssignedParticipantName(input.environment);
+  } catch {}
+  if (initiator === undefined) return {};
+  try {
+    await emitInitiatingPluginSignal({
+      world: input.path,
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+      initiator,
+      reportDiagnostic: (message) => writeStderr(message),
+    });
+  } catch (error) {
+    writeStderr(`! plugin initiation: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { initiator };
+}
+
+function emitResult(body: string, exact: boolean): void {
+  if (exact) process.stdout.write(body);
+  else writeStdout(body);
+}
+
+// eslint-disable-next-line complexity -- one call owns prompt/schema/placement plus live observation.
+async function runCall(
+  command: Extract<InvokedAkumaCommand, { command: "call" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
+  const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const caller = akumas(input);
+  const request: CallRequest = {
+    ...(await inputInitiator(input)),
+    archetype: command.archetype,
+    ...(body === undefined ? {} : { body }),
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
+    ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
+    ...(input.contract === undefined ? {} : { contract: input.contract }),
+    ...(command.alias === undefined ? {} : { alias: command.alias }),
+    ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+    ...(schema === undefined ? {} : { schema }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   };
-  const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
-  const output = flags.json === true ? ("json" as const) : ("text" as const);
-  if (action === "call" || action === "tell" || action === "ask") {
-    const parsed = parsePrompted(action, positionals, stdin, fail);
-    return action === "call"
-      ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
-      : action === "tell"
-        ? parseTell(flags, parsed.subject, parsed.prompt!, output, fail)
-        : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);
+  let stream: ReturnType<typeof callObservationStream> | undefined;
+  const driver = new ActivityDriver(process.stderr);
+  const observing = command.mode === "wait" && command.output === "text";
+  const observe: CallRequest["observe"] = observing
+    ? {
+        admitted: (tell, id, head) => {
+          stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
+            admittedAt: tell.row.at,
+          });
+          driver.redraw(stream.frame());
+        },
+        observe: (observation) => {
+          driver.settle(stream?.observe(observation) ?? [], stream?.frame() ?? []);
+        },
+      }
+    : undefined;
+  try {
+    const result = await caller.call({
+      ...request,
+      mode: command.mode,
+      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      ...(observe === undefined ? {} : { observe }),
+    });
+    let streamed = stream !== undefined;
+    if (stream !== undefined) {
+      driver.conclude(stream.conclude(result.observation));
+    } else if (observing && result.observation.kind === "failed") {
+      const fallback = inputWaitStream(
+        resultContext(),
+        () =>
+          callObservationHead({
+            akuma: result.akuma,
+            dispatch: result.dispatch,
+            alias: result.alias,
+          }),
+        { cursor: "empty", answerSeparator: true },
+      );
+      writeStderr(fallback.conclude({ kind: "failed", diagnostic: result.observation.failure.diagnostic }));
+      streamed = true;
+    }
+    if (command.output === "json") {
+      writeJson(result);
+      return callExitCode(result);
+    }
+    const raw = callRawAnswer(result, streamed);
+    if (raw === undefined) emitResult(renderCallText(result, streamed, displayContext()), false);
+    else emitResult(raw, true);
+    return callExitCode(result);
+  } finally {
+    driver.close(stream?.flush() ?? []);
   }
-  if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
-    fail(`${action} has invalid positional arguments`);
+}
+
+async function runWait(
+  command: Extract<InvokedAkumaCommand, { command: "wait" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
+  const stream = command.output === "text" ? waitObservationStream(resultContext()) : undefined;
+  const driver = new ActivityDriver(process.stderr);
+  const startedAt = Date.now();
+  let selection: readonly WaitSelectedIdentity[] | undefined;
+  const observer =
+    stream === undefined
+      ? undefined
+      : waitObserver(stream, driver, (selected) => {
+          selection = selected;
+        });
+  try {
+    const result = await akumas(input).wait({
+      akuma: command.akuma,
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(command.completion === undefined ? {} : { completion: command.completion }),
+      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(observer === undefined ? {} : { observe: observer }),
+    });
+    const streamed = stream !== undefined && stream.streamed();
+    if (stream !== undefined && streamed) driver.conclude(stream.conclude(result));
+    const presentation = {
+      ...(alias === undefined ? {} : { alias }),
+      ...(selection === undefined ? {} : { selection }),
+      startedAt,
+    };
+    if (command.output === "json") {
+      writeJson(result);
+      return 0;
+    }
+    const raw = waitRawAnswer(result, streamed);
+    if (raw === undefined) emitResult(renderWaitText(result, presentation, displayContext()), false);
+    else emitResult(raw, true);
+    return 0;
+  } finally {
+    driver.close(stream?.flush() ?? []);
   }
-  if (stdin) fail(`${action} reads no stdin`);
-  return parseAddressed(action, positionals, flags, output, fail);
+}
+
+async function runTell(
+  command: Extract<InvokedAkumaCommand, { command: "tell" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const body = await promptBody("tell", command, input);
+  const result = await akumas(input).tell({
+    ...(await inputInitiator(input)),
+    akuma: command.akuma,
+    body,
+    ...(command.interrupt ? { interrupt: true } : {}),
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (command.output === "json") {
+    writeJson(result);
+    return tellExitCode(result);
+  }
+  emitResult(renderTellText(result, inputAlias(command.akuma), displayContext()), false);
+  return tellExitCode(result);
+}
+
+async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>, input: InvokeInput): Promise<number> {
+  const body = await promptBody("ask", command, input);
+  const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const alias = inputAlias(command.akuma);
+  const channel = executionChannel(input.execution);
+  const progress =
+    command.output === "text" && channel.kind === "local"
+      ? askProgressStream(undefined, alias, resultContext())
+      : undefined;
+  const driver = new ActivityDriver(process.stderr);
+  try {
+    const result = await akumas(input).ask({
+      ...(await inputInitiator(input)),
+      akuma: command.akuma,
+      body,
+      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+      ...(schema === undefined ? {} : { schema }),
+      ...(command.interrupt ? { interrupt: true } : {}),
+      ...(input.repo === undefined ? {} : { repo: input.repo }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(progress === undefined
+        ? {}
+        : {
+            observe: {
+              admitted: (tell, id) => {
+                driver.settle(progress.admitted(tell, id), progress.frame());
+              },
+              observe: (observation) => {
+                driver.settle(progress.observe(observation), progress.frame());
+              },
+            },
+          }),
+    });
+    if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
+    else if (command.output === "text" && channel.kind === "body-request")
+      writeStderr(waitedTellProgress(result, alias, resultContext()));
+    if (command.output === "json") {
+      writeJson(result);
+      return askExitCode(result);
+    }
+    emitResult(askRawAnswer(result, schema !== undefined) ?? "", true);
+    return askExitCode(result);
+  } finally {
+    driver.close(progress?.flush() ?? []);
+  }
+}
+
+async function runHistory(
+  command: Extract<InvokedAkumaCommand, { command: "history" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const result = await akumas(input).history({
+    akuma: command.akuma,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(command.before === undefined ? {} : { before: command.before }),
+    ...(command.since === undefined ? {} : { since: command.since }),
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
+    ...(command.id === undefined ? {} : { id: command.id }),
+    last: command.last,
+  });
+  if (command.output === "json") {
+    writeJson(result);
+    return historyExitCode(result, command.id);
+  }
+  const raw = historyRawAnswer(result, command.id);
+  const presentation = {
+    ...(inputAlias(command.akuma) === undefined ? {} : { alias: command.akuma }),
+    ...(command.id === undefined ? {} : { id: command.id }),
+    last: command.last,
+  };
+  if (raw !== undefined) emitResult(raw, true);
+  else if (command.last && result.kind === "last") emitResult(result.answer, true);
+  else emitResult(renderHistoryText(result, presentation, displayContext()), false);
+  return historyExitCode(result, command.id);
+}
+
+async function runFork(
+  command: Extract<InvokedAkumaCommand, { command: "fork" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const receipt = await akumas(input).fork({
+    akuma: command.akuma,
+    at: command.at,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+  });
+  if (command.output === "json") {
+    writeJson(receipt);
+    return forkExitCode(receipt);
+  }
+  emitResult(renderForkText(receipt), false);
+  return forkExitCode(receipt);
+}
+
+async function runKill(
+  command: Extract<InvokedAkumaCommand, { command: "kill" }>,
+  input: InvokeInput,
+): Promise<number> {
+  const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
+  const result = await akumas(input).kill({
+    akuma: command.akuma,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (command.output === "json") {
+    writeJson(result);
+    return killExitCode(result);
+  }
+  emitResult(renderKillText(result, alias, displayContext()), false);
+  return killExitCode(result);
+}
+
+async function akumaWorld(command: InvokedAkumaCommand, coordinates: CliCoordinates): Promise<WorldRoot> {
+  const world =
+    command.command === "call"
+      ? (coordinates.candidateWorld ?? (await coordinates.establishWorld()))
+      : coordinates.world;
+  if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
+  return world;
+}
+
+async function callExecutionCwd(
+  command: InvokedAkumaCommand,
+  cwd: string,
+  workdir: string | undefined,
+): Promise<string | undefined> {
+  if (command.command !== "call") return undefined;
+  if (workdir !== undefined)
+    return await canonicalBirthCwd(resolve(cwd, workdir), `workdir is not an existing directory: ${workdir}`);
+  return cwd;
+}
+
+async function akumaInput(
+  command: InvokedAkumaCommand,
+  coordinates: CliCoordinates,
+  workdir: string | undefined,
+  runtime: CliRuntime,
+): Promise<InvokeInput> {
+  const path = await akumaWorld(command, coordinates);
+  const executionCwd = await callExecutionCwd(command, coordinates.cwd, workdir);
+  const execution = runtime.execution;
+  const home = command.command === "call" ? runtime.home : undefined;
+  const configuration = command.command === "call" ? await settingsAt(path, home) : undefined;
+  if (command.command === "call" && command.contract !== undefined && coordinates.repo === undefined)
+    throw new Error("call with Contract requires a resolved Repo");
+  const contract =
+    command.command === "call" && command.contract !== undefined
+      ? contractFromInput(coordinates.repo!, command.contract, execution).contract
+      : undefined;
+  return {
+    path,
+    ...(executionCwd === undefined ? {} : { executionCwd }),
+    ...(home === undefined ? {} : { home }),
+    ...(configuration === undefined ? {} : { settings: configuration }),
+    ...(contract === undefined ? {} : { contract }),
+    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
+    environment: runtime.environment,
+    readStdin: runtime.readStdin,
+    execution,
+    ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
+  };
+}
+
+export async function runAkumaCommand(
+  command: InvokedAkumaCommand,
+  coordinates: CliCoordinates,
+  workdir: string | undefined,
+  runtime: CliRuntime,
+): Promise<number> {
+  try {
+    const input = await akumaInput(command, coordinates, workdir, runtime);
+    switch (command.command) {
+      case "call":
+        return await runCall(command, input);
+      case "wait":
+        return await runWait(command, input);
+      case "tell":
+        return await runTell(command, input);
+      case "ask":
+        return await runAsk(command, input);
+      case "history":
+        return await runHistory(command, input);
+      case "fork":
+        return await runFork(command, input);
+      case "kill":
+        return await runKill(command, input);
+    }
+  } catch (error) {
+    if (error instanceof Error && "executionReceipt" in error) throw error;
+    if (error instanceof AkumaWorldScopeError) throw error;
+    if (error instanceof TypeError) throw new CliUsageError(error.message);
+    throw error;
+  }
 }

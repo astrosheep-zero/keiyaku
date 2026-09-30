@@ -146,18 +146,16 @@ export const CONTRACT_COMMAND_SPECS = {
   status: {
     positional: "optional",
     stdin: "none",
-    flags: { json: "boolean" },
-    usage: "status [<contract>|@name|<aku/...>]...",
+    flags: { guidance: "boolean", json: "boolean" },
+    usage: "status [<contract>|@name|<aku/...>]...\nstatus --guidance [<contract>|@<contract>]",
     purpose: "Show the world overview or selected Contract and Akuma status.",
-    details: "Akuma entries show the directory each Akuma was started in.",
-  },
-  show: {
-    positional: "optional",
-    stdin: "none",
-    flags: { json: "boolean" },
-    usage: "show [<contract>|@<contract>]",
-    purpose: "Show one Contract's requirements and work guidance.",
-    details: "Without a selector, shows the current worktree's Contract.",
+    details: [
+      "Akuma entries show the directory each Akuma was started in.",
+      "",
+      "--guidance reads one Contract's guidance instead of status. It accepts one Contract",
+      "selector or the installed Contract selection context, and refuses an Akuma, plural,",
+      "or world selection before the read.",
+    ].join("\n"),
   },
   ls: {
     positional: "optional",

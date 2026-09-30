@@ -1,6 +1,5 @@
 import type { ReconcileReport } from "../../library/contract-types.js";
 import { reconcileLagIsFailure, type RepoReconcileReport } from "../../library/reconcile.js";
-import type { ReconcileResult } from "../result.js";
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { receiptPayload, receiptRow } from "./receipt.js";
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./terminal.js";
@@ -201,11 +200,10 @@ export function reconcileHasFailure(report: ReconcileReport | RepoReconcileRepor
   );
 }
 
-export function renderReconcile(result: ReconcileResult, context?: TextRenderContext): string {
+export function renderReconcile(report: ReconcileReport | RepoReconcileReport, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const lines: string[] = ["✓ reconcile"];
   const seen = new Set<string>();
-  const report = result.report;
   if (isRepoReport(report)) {
     if (report.kind === "world-observation-failed") {
       receiptRow(lines, "!", "reconcile", [{ text: report.diagnostic, opaque: true }], columns);

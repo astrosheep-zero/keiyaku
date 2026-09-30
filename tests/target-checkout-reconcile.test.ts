@@ -247,7 +247,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       ].join("\n"),
       {},
       async (gitPath) =>
-        Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id }).reconcile(),
+        Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path, gitPath }), contract: candidate.id }),
     );
 
     assert.deepEqual(reconciled.lag, []);
@@ -269,7 +269,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.equal(repository.run(["diff", "--cached", "--name-only", delivery.integration.predecessor]), "local.txt\n");
     assert.equal(repository.run(["diff-files", "--name-only"]), "delivered.txt\n");
 
-    const reconciled = await candidate.contract.reconcile();
+    const reconciled = await Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path }), contract: candidate.id });
 
     assert.deepEqual(reconciled.lag, []);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]), `${delivery.integration.snapshot}\n`);
@@ -307,9 +307,10 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
         KEIYAKU_STAGED_BYTES: stagedBytes,
       },
       async (gitPath) =>
-        (
-          await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: candidate.id })
-        ).reconcile(),
+        Keiyaku.with().reconcile({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          contract: candidate.id,
+        }),
     );
 
     const stage = repository.run(["ls-files", "--stage", "--", "delivered.txt"]).trim().split(/\s+/u);
@@ -328,7 +329,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const { repository } = candidate;
     writeFileSync(resolve(repository.path, "delivered.txt"), "changed after publication\n");
 
-    const reconciled = await candidate.contract.reconcile();
+    const reconciled = await Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path }), contract: candidate.id });
 
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
     assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));

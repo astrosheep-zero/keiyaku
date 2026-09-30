@@ -157,14 +157,18 @@ test("audit maps only --show-diff to the existing display choice", () => {
   );
 });
 
-test("show parses one optional Contract selector and JSON output", () => {
-  assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { command: "show", contract: "kei/example", output: "json" },
+test("status --guidance parses exactly one Contract selector and JSON output", () => {
+  assert.deepEqual(parseArgv(["status", "--guidance", "kei/example", "--json"]), {
+    command: { command: "status", contract: "kei/example", guidance: true, output: "json" },
   });
-  assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { command: "show", contract: "@example", output: "text" },
+  assert.deepEqual(parseArgv(["status", "--guidance", "@example"]), {
+    command: { command: "status", contract: "@example", guidance: true, output: "text" },
   });
-  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one contract/);
+  assert.deepEqual(parseArgv(["status", "--guidance"]), {
+    command: { command: "status", guidance: true, output: "text" },
+  });
+  assert.throws(() => parseArgv(["status", "--guidance", "kei/one", "kei/two"]), /at most one Contract selector/u);
+  assert.throws(() => parseArgv(["status", "--guidance", "aku/x/*"]), /cannot select an Akuma/u);
 });
 
 test("bare ls requires a selector rather than opening help", () => {

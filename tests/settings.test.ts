@@ -8,9 +8,8 @@ import { ALLOWED_ACTIONS, DEFAULT_ALLOWED_ACTIONS } from "../src/akuma/allowed.j
 import { loadArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
-import { invoke, type SettingsInvocationResult } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
-import { renderSettingsText, settingsJsonValue } from "../src/cli/render/settings.js";
+import { cliJson, runCli } from "./support/cli-fixtures.js";
+import { renderSettingsText } from "../src/cli/render/settings.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { settings } from "../src/settings.js";
 
@@ -465,16 +464,22 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
         },
       }),
     );
-    const parsed = parseArgv(["-C", value.project, "settings"]);
-    if (!("command" in parsed)) throw new Error("unexpected non-executable invocation");
-    const result = await invoke(parsed, { cwd: value.project, environment: { KEIYAKU_HOME: value.home } });
-    const observed = result as SettingsInvocationResult;
-    assert.equal(observed.kind, "settings");
-    assert.match(renderSettingsText(observed.value), /^settings\n  user  read(?:\n    )?/u);
-    assert.match(renderSettingsText(observed.value), /    entry  default · user\n      "value\.kind"  bundle\n      "value\.gates\.0"  reviewed/u);
-    assert.deepEqual((settingsJsonValue(observed.value) as { namespaces: readonly unknown[] }).namespaces, [
-      observed.value.namespace("gates"),
-    ]);
+    const observed = await settings({ root: value.project, home: value.home });
+    const text = await runCli(["-C", value.project, "settings"], {
+      cwd: value.project,
+      environment: { KEIYAKU_HOME: value.home },
+    });
+    assert.equal(text.exit, 0);
+    assert.match(text.stdout, /^settings\n  user  read(?:\n    )?/u);
+    assert.match(
+      text.stdout,
+      /    entry  default · user\n      "value\.kind"  bundle\n      "value\.gates\.0"  reviewed/u,
+    );
+    const json = await cliJson<{ namespaces: readonly unknown[] }>(["-C", value.project, "settings"], {
+      cwd: value.project,
+      environment: { KEIYAKU_HOME: value.home },
+    });
+    assert.deepEqual(json.value.namespaces, [observed.namespace("gates")]);
   } finally {
     value.close();
   }

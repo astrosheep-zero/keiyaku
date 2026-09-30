@@ -5,7 +5,7 @@ import {
   taskUsageGuide,
   type ParsedTaskCommand,
   type TaskAction,
-} from "./commands/task.js";
+} from "./commands/task-grammar.js";
 import {
   akumaUsageGuide,
   isAkumaAction,
@@ -14,7 +14,7 @@ import {
   renderAkumaRootRows,
   type AkumaAction,
   type ParsedAkumaCommand,
-} from "./commands/akuma.js";
+} from "./commands/akuma-grammar.js";
 import {
   INSTALL_ROOT_PURPOSE,
   INSTALL_USAGE,
@@ -23,11 +23,7 @@ import {
   type ParsedInstallCommand,
 } from "./commands/install.js";
 import {
-  CONTRACT_COMMAND_SPECS,
   parseContractCommand,
-  renderContractHelp as renderContractHelpForOwner,
-  type ContractCommand as Command,
-  type ContractCommandSpec as CommandSpec,
   type ParsedContractParts,
   type ParsedAbandon,
   type ParsedAmend,
@@ -41,9 +37,14 @@ import {
   type ParsedRegion,
   type ParsedReview,
   type ParsedSettings,
-  type ParsedShow,
   type ParsedStatus,
-} from "./commands/contract.js";
+} from "./commands/contract-grammar.js";
+import {
+  CONTRACT_COMMAND_SPECS,
+  renderContractHelp as renderContractHelpForOwner,
+  type ContractCommand as Command,
+  type ContractCommandSpec as CommandSpec,
+} from "./commands/contract-help.js";
 import { renderOpaqueBlock, renderTextBlock } from "./render/terminal.js";
 import {
   CliUsageError,
@@ -55,7 +56,7 @@ import {
 } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 export type { CliUsageGuide } from "./usage.js";
-export { renderContractHelp } from "./commands/contract.js";
+export { renderContractHelp } from "./commands/contract-help.js";
 
 export type { Command };
 
@@ -151,7 +152,6 @@ export type ParsedCommand =
   | ParsedArc
   | ParsedAbandon
   | ParsedStatus
-  | ParsedShow
   | ParsedLs
   | ParsedAudit
   | ParsedReconcile
@@ -169,8 +169,10 @@ export type CliHelpCoordinate =
   | Readonly<{ kind: "install" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
-export type ParsedExecution = Readonly<{ cwd?: string; repo?: string; workdir?: string; command: ParsedCommand }>;
-export type ParsedInvocation = ParsedExecution | Readonly<{ help: CliHelpCoordinate }> | Readonly<{ version: true }>;
+export type ParsedInvocation =
+  | Readonly<{ cwd?: string; repo?: string; workdir?: string; command: ParsedCommand }>
+  | Readonly<{ help: CliHelpCoordinate }>
+  | Readonly<{ version: true }>;
 
 type RepoUse = "none" | "optional" | "required";
 export type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
@@ -185,7 +187,6 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
     case "abandon":
     case "audit":
     case "reconcile":
-    case "show":
     case "region":
       return { use: "required", acceptsExplicit: true };
     case "ls":

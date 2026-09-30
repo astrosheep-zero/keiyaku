@@ -1,22 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractHead, contractId } from "../src/core/facts/types.js";
+import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
-import type { AcceptedBindResult } from "../src/cli/result.js";
+import { acceptedReceipt } from "./support/cli-fixtures.js";
+import type { BindOutcome, Fact, RegionOverlap } from "../src/index.js";
 
-const result = {
-  kind: "accepted",
-  verb: "bind",
-  contract: contractId("kei/overlap-render-owner-5062"),
-  head: contractHead("head"),
-  facts: [],
-  settlementLags: [], effects: [], pending: [],
-  target: "refs/heads/main",
-  overlaps: [],
-} satisfies AcceptedBindResult;
+const contract = contractId("kei/overlap-render-owner-5062");
+type AcceptedBind = Extract<BindOutcome, { kind: "accepted" }>;
 
-function render(overlaps: NonNullable<AcceptedBindResult["overlaps"]>, columns = 100): string {
-  return renderAccepted({ ...result, overlaps }, { columns, color: false });
+/** The bind fact names the target the receipt prints; the region observation is the value under test. */
+const bindFact: Extract<Fact, { kind: "bind" }> = {
+  v: 1,
+  at: "2026-01-01T00:00:00Z",
+  contract,
+  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+  kind: "bind",
+  data: {
+    coordinates: { start: snapshotId("start"), target: "refs/heads/main", workspace: "worktree" },
+    terms: {
+      document: { bytes: "", key: documentKey("overlap-render") },
+      segments: [],
+      gates: [],
+      after: [],
+    },
+  },
+};
+
+/**
+ * One native accepted bind outcome. The bind value also carries the SDK's `Keiyaku` handle, which this
+ * renderer never reads; the region observation is stated natively and the handle is not simulated.
+ */
+function bindAccepted(overlaps: readonly RegionOverlap[]): AcceptedBind {
+  return acceptedReceipt({
+    operation: "bind",
+    contract,
+    facts: [bindFact],
+    value: { overlaps } as AcceptedBind["value"],
+  });
+}
+
+function render(overlaps: readonly RegionOverlap[], columns = 100): string {
+  return renderAccepted(bindAccepted(overlaps), { columns, color: false });
 }
 
 const related = contractId("kei/overlap-render-peer-31ce");

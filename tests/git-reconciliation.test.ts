@@ -76,7 +76,7 @@ async function deliveredReviewGatedTargetFixture() {
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
   const contract = Keiyaku.with().select({ repo, id: template.id });
-  return { contract, repository, worktree };
+  return { contract, repository, repo, worktree };
 }
 
 async function restoreOwnedRefs(
@@ -93,8 +93,9 @@ async function restoreOwnedRefs(
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
     const repository = repositoryWithMain();
+    const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+      repo,
       markdown: document(),
       workspace: "worktree",
     }));
@@ -110,7 +111,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "user seat skill"]);
     writeFileSync(reviewSkill, "stale generated skill\n");
 
-    const report = await contract.reconcile();
+    const report = await Keiyaku.with().reconcile({ repo, contract: contractId });
 
     assert.deepEqual(report.lag, []);
     assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
@@ -121,7 +122,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   });
 
   test("rewritten target history retains owned refs with unchanged effects", async () => {
-    const { contract, repository } = await deliveredReviewGatedTargetFixture();
+    const { contract, repository, repo } = await deliveredReviewGatedTargetFixture();
     writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "target only"]);
@@ -138,7 +139,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
     repository.run(["update-ref", "refs/heads/main", rewritten]);
 
-    const report = await contract.reconcile();
+    const report = await Keiyaku.with().reconcile({ repo, contract: state.id });
     const git = await repositoryAt(repository.path);
 
     assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
@@ -150,7 +151,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   });
 
   test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
-    const { contract, repository } = await deliveredReviewGatedTargetFixture();
+    const { contract, repository, repo } = await deliveredReviewGatedTargetFixture();
     await contract.review({ verdict: "satisfied" });
     const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
@@ -177,12 +178,10 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       ].join("\n"),
       { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
       async (gitPath) =>
-        (
-          await Keiyaku.with().select({
-            repo: await Repo.at({ path: repository.path, gitPath }),
-            id: state.id,
-          })
-        ).reconcile(),
+        Keiyaku.with().reconcile({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          contract: state.id,
+        }),
     );
     const git = await repositoryAt(repository.path);
     const moved = repository.run(["rev-parse", "refs/heads/main"]).trim();
@@ -194,7 +193,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
     assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
 
-    const retried = await contract.reconcile();
+    const retried = await Keiyaku.with().reconcile({ repo, contract: state.id });
     assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), moved);

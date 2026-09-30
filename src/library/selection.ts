@@ -23,7 +23,13 @@ import {
   decodeAskObservation,
   executeWaitAkuma,
 } from "../akuma/selection-execution.js";
-import type { AskObserver, WaitIdentityFacts, WaitObserver } from "../akuma/selection-execution.js";
+import type {
+  AskObserver,
+  WaitIdentityFacts,
+  WaitObservedAkuma,
+  WaitObserver,
+  WaitSelectedAkuma,
+} from "../akuma/selection-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -170,6 +176,8 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     completion?: "any" | "all";
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** The existing optional live-observation seam, validated here like Ask's. */
+    observe?: WaitObserver;
   }>;
 
 export type AkumaTellInput = AkumaAddressInput &
@@ -462,22 +470,38 @@ async function localWait(
 export async function waitAkuma(
   input: AkumaWaitInput,
   execution: ExecutionContext = localExecutionContext(),
-  observer?: WaitObserver,
 ): Promise<AkumaWaitResult> {
-  return await waitAkumaOn(selectionSeam(execution), input, observer);
+  return await waitAkumaOn(selectionSeam(execution), input);
 }
 
-export async function waitAkumaOn(
-  seam: SelectionSeam,
-  input: AkumaWaitInput,
-  observer?: WaitObserver,
-): Promise<AkumaWaitResult> {
+function waitObserver(value: unknown): WaitObserver | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new TypeError("observe must be a WaitObserver");
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "selected" && key !== "observe") throw new TypeError(`observe has unknown field: ${key}`);
+    if (record[key] !== undefined && typeof record[key] !== "function")
+      throw new TypeError(`observe.${key} must be a function`);
+  }
+  return {
+    ...(record.selected === undefined
+      ? {}
+      : { selected: record.selected as (selected: readonly WaitSelectedAkuma[]) => void }),
+    ...(record.observe === undefined
+      ? {}
+      : { observe: record.observe as (observed: readonly WaitObservedAkuma[]) => void }),
+  };
+}
+
+export async function waitAkumaOn(seam: SelectionSeam, input: AkumaWaitInput): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
+    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal", "observe"].includes(key)) {
       throw new TypeError(`Akumas.wait input has unknown field: ${key}`);
     }
   }
+  const observer = waitObserver(values.observe);
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);

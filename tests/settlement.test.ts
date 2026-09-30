@@ -124,7 +124,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   ]);
   replaceTaskState(world.path, taskId, "drop", "open");
 
-  const first = await bound.value.keiyaku.reconcile();
+  const first = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
   assert.deepEqual(first.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.deepEqual(first.settlement.lags, []);
   assert.equal(await taskState(world.path, taskId), "done");
@@ -132,7 +132,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
     { version: 1, taskId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "released" },
   ]);
 
-  const second = await bound.value.keiyaku.reconcile();
+  const second = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
   assert.deepEqual(second.settlement.actions, []);
   assert.deepEqual(second.settlement.lags, []);
   assert.equal(await taskState(world.path, taskId), "done");
@@ -179,7 +179,7 @@ test(
       }
     };
     try {
-      const replayed = await bound.value.keiyaku.reconcile();
+      const replayed = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
       const state = present(await bound.value.keiyaku.state());
       assert.deepEqual(replayed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
       assert.deepEqual(replayed.settlement.lags, [

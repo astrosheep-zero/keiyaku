@@ -1,12 +1,18 @@
-import type { CallWaitHead, DispatchStage } from "../../index.js";
-import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
-import type { ParsedCommand } from "../parse.js";
+import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
+import type { CallResult } from "../../library/akuma-creation.js";
+import type {
+  AkumaAskResult,
+  AkumaKillResult,
+  AkumaObservation,
+  AkumaTellResult,
+  AkumaWaitResult,
+} from "../../akuma/selection-observation.js";
+import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
   DEFAULT_CONTEXT,
-  akumaRawAnswer as akumaActivityRawAnswer,
   associatedIdentity,
-  historyText,
   inputWaitStream,
+  historyText,
   killResultText,
   snapshotHeading,
   snapshotText,
@@ -14,16 +20,16 @@ import {
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
-import type { AkumaAskResult } from "../../akuma/selection-observation.js";
-import type { AkuId } from "../../akuma/identity.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/akuma.js";
+import type { AkuId } from "../../akuma/identity.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
 export type AskProgress = Readonly<{
   admitted: (tell: TellResult, id: AkuId) => readonly string[];
   observe: (observation: LiveStatusObservation) => readonly string[];
   frame: () => readonly string[];
+  flush: () => readonly string[];
   conclude: (result: AkumaAskResult) => readonly string[];
 }>;
 
@@ -47,23 +53,12 @@ export function askProgressStream(
       return stream.admitted({
         at: tell.row.at,
         sequence: tell.row.sequence,
-        rows: [
-          tellText(
-            {
-              kind: "akuma",
-              action: "tell",
-              result: { akuma: target, tell },
-              body: "",
-              ...(alias === undefined ? {} : { alias }),
-            },
-            context,
-            { identity: false },
-          ),
-        ],
+        rows: [tellText({ akuma: target, tell }, alias, context, { identity: false })],
       });
     },
     observe: (observation) => stream.observe(observation),
     frame: () => stream.frame(),
+    flush: () => stream.flush(),
     conclude: (result) => [
       stream.conclude({
         kind: "observed",
@@ -81,10 +76,6 @@ export function waitedTellProgress(
 ): string {
   const stream = askProgressStream(result.akuma, alias, context);
   return [...stream.admitted(result.tell, result.akuma), ...stream.conclude(result)].join("\n");
-}
-
-export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
-  return akumaActivityRawAnswer(result);
 }
 
 function dispatchLines(stage: DispatchStage): readonly string[] {
@@ -114,32 +105,32 @@ export function callObservationHead(input: Readonly<{ akuma: string }> & CallWai
   };
 }
 
-function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, context: TextRenderContext): string {
-  if (result.streamed === true) return "";
+export function renderCallText(result: CallResult, streamed: boolean, context: TextRenderContext): string {
+  if (streamed) return "";
   const head = callObservationHead({
-    akuma: result.result.akuma,
-    dispatch: result.result.dispatch,
-    alias: result.result.alias,
+    akuma: result.akuma,
+    dispatch: result.dispatch,
+    alias: result.alias,
   });
-  if (result.result.observation.kind === "detached" || result.result.observation.kind === "born") {
+  if (result.observation.kind === "detached" || result.observation.kind === "born") {
     const branches = [
       ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
-      safeText(result.result.execution.cwd),
+      safeText(result.execution.cwd),
     ];
     return [
-      associatedIdentity(result.result.akuma, head.alias),
+      associatedIdentity(result.akuma, head.alias),
       ...branches.map((fact, index) => `${index === branches.length - 1 ? "└─" : "├─"} ${fact}`),
       ...head.facts,
     ].join("\n");
   }
-  if (result.result.observation.kind === "failed") {
+  if (result.observation.kind === "failed") {
     return [
       ...snapshotHeading(head.id, head.alias, head.contract),
       ...head.facts,
-      `! error ${safeText(result.result.observation.failure.diagnostic)}`,
+      `! error ${safeText(result.observation.failure.diagnostic)}`,
     ].join("\n");
   }
-  const inputObservation = result.result.observation;
+  const inputObservation = result.observation;
   const stream = inputWaitStream(context, () => head, { cursor: "empty" });
   stream.admitted({ at: inputObservation.tell.row.at, rows: [] });
   return stream.conclude({
@@ -149,110 +140,93 @@ function callText(result: Extract<AkumaInvocationResult, { action: "call" }>, co
   });
 }
 
-export function renderAkumaText(
-  command: ParsedCommand,
-  result: AkumaInvocationResult,
+export function renderWaitText(
+  result: AkumaWaitResult,
+  presentation: Readonly<{
+    alias?: string;
+    startedAt?: number;
+    selection?: readonly import("./akuma-activity.js").WaitSelectedIdentity[];
+  }>,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
-  const answer = akumaRawAnswer(result);
-  if (answer !== undefined) return answer;
-  if (result.action === "tell") return tellText(result, context);
-  switch (result.action) {
-    case "call":
-      return callText(result, context);
-    case "status":
-      return snapshotText(result.status, context, {
-        ...(result.alias === undefined ? {} : { alias: result.alias }),
-      });
-    case "wait":
-      return waitText(result, context);
-    case "ask":
-      return "";
-    case "history":
-      return historyText(command as Extract<ParsedCommand, { command: "history"; last: boolean }>, result, context);
-    case "fork": {
-      if (result.receipt.kind !== "forked")
-        return result.receipt.kind === "unknown-history"
-          ? `${result.receipt.at} has no matching retained answered turn`
-          : result.receipt.kind === "provider-cannot-fork"
-            ? `${result.receipt.provider} cannot fork`
-            : result.receipt.diagnostic;
-      const contractId =
-        result.receipt.dispatch.kind === "dispatched" ? result.receipt.dispatch.dispatch.contractId : undefined;
-      return associatedIdentity(
-        result.receipt.child,
-        undefined,
-        contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
-      );
-    }
-    case "kill":
-      return result.result.results
-        .map((member) => killResultText(member.id, member.evidence, result.alias))
-        .join("\n\n");
-  }
+  return waitText(result, presentation, context);
 }
 
-function callExitCode(result: Extract<AkumaInvocationResult, { action: "call" }>): number {
-  if (
-    result.result.dispatch.kind === "failed" ||
-    result.result.alias.kind === "failed" ||
-    result.result.observation.kind === "failed"
-  )
+export function renderStatusText(
+  status: AkumaObservation,
+  alias: string | undefined,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  return snapshotText(status, context, ...(alias === undefined ? [{}] : [{ alias }]));
+}
+
+export function renderTellText(
+  result: AkumaTellResult,
+  alias: string | undefined,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+  options: Readonly<{ identity?: boolean }> = {},
+): string {
+  return tellText(result, alias, context, options);
+}
+
+export function renderHistoryText(
+  result: AkumaHistoryResult,
+  presentation: Readonly<{ alias?: string; id?: string; last?: boolean }>,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  return historyText(result, presentation, context);
+}
+
+export function renderForkText(receipt: ForkResult): string {
+  if (receipt.kind !== "forked") {
+    if (receipt.kind === "unknown-history") return `${receipt.at} has no matching retained answered turn`;
+    if (receipt.kind === "provider-cannot-fork") return `${receipt.provider} cannot fork`;
+    return receipt.diagnostic;
+  }
+  const contractId = receipt.dispatch.kind === "dispatched" ? receipt.dispatch.dispatch.contractId : undefined;
+  return associatedIdentity(
+    receipt.child,
+    undefined,
+    contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
+  );
+}
+
+export function renderKillText(result: AkumaKillResult, alias: string | undefined, context: TextRenderContext): string {
+  void context;
+  return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n\n");
+}
+
+export function callExitCode(result: CallResult): number {
+  if (result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.observation.kind === "failed")
     return 2;
-  if (result.result.observation.kind !== "observed") return 0;
-  return result.result.observation.observation.reason === "failed" ||
-    result.result.observation.observation.reason === "invalid-output"
+  if (result.observation.kind !== "observed") return 0;
+  return result.observation.observation.reason === "failed" ||
+    result.observation.observation.reason === "invalid-output"
     ? 2
     : 0;
 }
-function killExitCode(result: Extract<AkumaInvocationResult, { action: "kill" }>): number {
-  return result.result.results.some(
+
+export function killExitCode(result: AkumaKillResult): number {
+  return result.results.some(
     (member) => member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy",
   )
     ? 1
     : 0;
 }
-function tellExitCode(result: Extract<AkumaInvocationResult, { action: "tell" }>): number {
-  return result.result.tell.wake.kind === "failed" ? 2 : 0;
-}
-function askExitCode(result: Extract<AkumaInvocationResult, { action: "ask" }>): number {
-  return result.result.observation.reason === "failed" || result.result.observation.reason === "invalid-output" ? 2 : 0;
-}
-function forkExitCode(result: Extract<AkumaInvocationResult, { action: "fork" }>): number {
-  return result.receipt.kind === "forked" ? 0 : result.receipt.kind === "upstream-forked" ? 2 : 1;
-}
-function historyExitCode(result: Extract<AkumaInvocationResult, { action: "history" }>): number {
-  if (result.mode !== "exact") return 0;
-  return result.historyResult.kind === "exact" ? 0 : 1;
+
+export function tellExitCode(result: AkumaTellResult): number {
+  return result.tell.wake.kind === "failed" ? 2 : 0;
 }
 
-export function akumaExitCode(result: AkumaInvocationResult): number {
-  switch (result.action) {
-    case "call":
-      return callExitCode(result);
-    case "kill":
-      return killExitCode(result);
-    case "tell":
-      return tellExitCode(result);
-    case "ask":
-      return askExitCode(result);
-    case "fork":
-      return forkExitCode(result);
-    case "history":
-      return historyExitCode(result);
-    default:
-      return 0;
-  }
+export function askExitCode(result: AkumaAskResult): number {
+  return result.observation.reason === "failed" || result.observation.reason === "invalid-output" ? 2 : 0;
 }
-export function akumaJsonValue(result: AkumaInvocationResult): unknown {
-  if (result.action === "call") return result.result;
-  if (result.action === "fork") return result.receipt;
-  if (result.action === "status") return result.status;
-  if (result.action === "wait") return result.result;
-  if (result.action === "tell" || result.action === "ask") return result.result;
-  if (result.action === "kill") return result.result;
-  return result.historyResult;
+
+export function forkExitCode(receipt: ForkResult): number {
+  return receipt.kind === "forked" ? 0 : receipt.kind === "upstream-forked" ? 2 : 1;
 }
-export function renderAkumaJson(result: AkumaInvocationResult): string {
-  return JSON.stringify(akumaJsonValue(result));
+
+export function historyExitCode(result: AkumaHistoryResult, id: string | undefined): number {
+  if (id === undefined) return 0;
+  return result.kind === "exact" ? 0 : 1;
 }

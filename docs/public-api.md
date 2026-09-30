@@ -44,12 +44,15 @@ error shapes belong to generated declarations, leaf help, and executable specifi
 native branded Contract handle created by binding or by selecting a complete
 Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
-amendment, delivery, review, abandonment, arc, audit, and reconciliation.
-`Keiyaku.with()` captures one immutable execution channel and Contract-local
-composition, then exposes only Contract collection operations: bind, select,
-list, and observe. Its actor, worktree hooks, and branch-freshness policy stay
-within Contract operations and never configure Akumas. There is no Contract
-`of` alias or package-root Akuma operation on Keiyaku.
+amendment, delivery, review, abandonment, arc, and audit. `Keiyaku.with()`
+captures one immutable execution channel and Contract-local composition, then
+exposes the Contract collection operations bind, select, list, and observe, and
+the one public repair entry that reconciles either a world or one addressed
+Contract from an explicit Git-world coordinate. Neither the Git-world coordinate
+nor a Contract handle exposes a second repair door. The composition's actor,
+worktree hooks, and branch-freshness policy stay within Contract operations and
+never configure Akumas. There is no Contract `of` alias or package-root Akuma
+operation on Keiyaku.
 
 Binding accepts either caller Markdown or a fork of existing terms. It may
 associate a Task through the post-admission association owned by

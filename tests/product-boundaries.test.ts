@@ -20,7 +20,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
     requireBranchesToBeUpToDate: true,
     execution: bodyRequestExecution({ directory: join(root, "contract-requests") }),
   });
-  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "select"]);
+  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "select"]);
   assert.equal("call" in contracts, false);
   assert.equal("nuke" in contracts, false);
   assert.equal("tasks" in contracts, false);

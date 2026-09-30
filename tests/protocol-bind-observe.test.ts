@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { AuthorityCorruptionError, KeiyakuError, Keiyaku } from "../src/index.js";
+import { AuthorityCorruptionError, KeiyakuError, Keiyaku, Repo } from "../src/index.js";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
@@ -532,7 +532,8 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
 
   test("public reconcile and admission observation retain canonical journal validation", async () => {
     const repository = repositoryWithHead();
-    const { bound, id, git } = await boundObservedContract(repository);
+    const repo = await Repo.at({ path: repository.path });
+    const { id, git } = await boundObservedContract(repository);
     const snapshot = await readGit(git);
     const path = contractJournalPath(id);
     const journal = snapshot.paths.get(path);
@@ -562,7 +563,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         error instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );
     await assert.rejects(
-      () => bound.value.keiyaku.reconcile(),
+      () => Keiyaku.with().reconcile({ repo, contract: id }),
       (error: unknown) =>
         error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );

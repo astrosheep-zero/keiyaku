@@ -1,6 +1,5 @@
-import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope } from "../../index.js";
+import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
-import type { Lag } from "../result.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -13,7 +12,7 @@ import {
 
 export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
 
-type HookFailure = Extract<Lag, { kind: "worktree-hook-failed" }>["failure"];
+type HookFailure = Extract<ReconciliationLag, { kind: "worktree-hook-failed" }>["failure"];
 
 export function receiptRow(
   lines: string[],

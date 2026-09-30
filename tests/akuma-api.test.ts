@@ -24,9 +24,8 @@ import {
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeAskAkuma } from "../src/akuma/selection-execution.js";
 import { deferred, settlementProbe, waitForCondition } from "./support/process.js";
-import { type InvokedAkumaCommand } from "../src/cli/commands/akuma.js";
-import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
-import { akumaExitCode } from "../src/cli/render/akuma.js";
+import { cliJson } from "./support/cli-fixtures.js";
+import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 
@@ -257,31 +256,21 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
       additionalProperties: false,
     }));
     const answered = await born("a1000013", answering('{"ok":true}'));
-    const command: InvokedAkumaCommand = {
-      command: "ask",
-      akuma: answered.allocated.id,
-      interrupt: false,
-      schema: schemaPath,
-      timeoutMs: 5_000,
-      prompt: { kind: "argument", value: "structured" },
-      output: "json",
-    };
-    const result = await invokeAkuma(command, { path: answered.world, environment: {}, readStdin: async () => "" });
-    assert.equal(result.kind, "akuma");
-    if (result.kind !== "akuma" || result.action !== "ask")
-      throw new Error("expected a waited Tell invocation result");
-    assert.deepEqual(result.result.observation, { reason: "answered", answer: { ok: true } });
+    const argv = (akuma: string) =>
+      ["-C", answered.world, "ask", akuma, "--schema", schemaPath, "--wait", "5s", "structured"] as const;
+    const result = await cliJson<AkumaAskResult>(argv(answered.allocated.id), {
+      environment: {},
+      readStdin: async () => "",
+    });
+    assert.deepEqual(result.value.observation, { reason: "answered", answer: { ok: true } });
 
     const invalid = await born("a1000014", answering("not-json"));
-    const invalidResult = await invokeAkuma(
-      { ...command, akuma: invalid.allocated.id },
-      { path: invalid.world, environment: {}, readStdin: async () => "" },
+    const invalidResult = await cliJson<AkumaAskResult>(
+      ["-C", invalid.world, "ask", invalid.allocated.id, "--schema", schemaPath, "--wait", "5s", "structured"],
+      { environment: {}, readStdin: async () => "" },
     );
-    assert.equal(invalidResult.kind, "akuma");
-    if (invalidResult.kind !== "akuma" || invalidResult.action !== "ask")
-      throw new Error("expected a waited Tell invocation result");
-    assert.equal(invalidResult.result.observation.reason, "invalid-output");
-    assert.equal(akumaExitCode(invalidResult), 2, "invalid schema output fails like an invalid call answer");
+    assert.equal(invalidResult.value.observation.reason, "invalid-output");
+    assert.equal(invalidResult.exit, 2, "invalid schema output fails like an invalid call answer");
 
     const interrupt = await born("a1000012", answering("unused"));
     context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));

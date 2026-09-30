@@ -54,9 +54,11 @@ Keiyaku.with({ execution }).select({ repo, id }).review(cancellable);
 
 const observed: ContractObservation = await Keiyaku.with().observe({ repo, id });
 if (observed.kind === "present") observed.row.gates.reports;
-const reconciled = await selected.reconcile();
+const reconciled = await Keiyaku.with().reconcile({ repo, contract: id });
 reconciled.effects;
 reconciled.settlement;
+const worldReconciled = await Keiyaku.with().reconcile({ repo, retryHooks: true });
+worldReconciled.kind;
 
 // Handles cannot be independently constructed outside their repository authority.
 // @ts-expect-error constructor is private

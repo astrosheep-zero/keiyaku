@@ -4,21 +4,22 @@ import type { AkuId } from "../src/akuma/identity.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import type { CallObservation, CallResult } from "../src/library/akuma-creation.js";
 import type { WorldRoot } from "../src/world.js";
-import { parseArgv, type ParsedExecution } from "../src/cli/parse.js";
-import type { AkumaInvocationResult } from "../src/cli/commands/akuma-invoke.js";
-import { renderAkumaJson, renderAkumaText } from "../src/cli/render/akuma.js";
+import { parseArgv } from "../src/cli/parse.js";
+import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
+import { renderCallText, renderForkText } from "../src/cli/render/akuma.js";
+import { callRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { AKUMA_ACTIVITY_AT } from "./support/kanshi-activity.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkuId;
-function parseExecution(argv: readonly string[]): ParsedExecution {
+const context = { columns: 100, color: false } as const;
+function parseExecution(argv: readonly string[]): ParsedCommandInvocation {
   const parsed = parseArgv(argv);
   if (!("command" in parsed)) throw new Error("expected command invocation");
   return parsed;
 }
 
 const command = parseExecution(["call", "worker", "prompt"]).command;
-const waitingCommand = parseExecution(["call", "worker", "--wait", "30s", "prompt"]).command;
 
 function tellResult() {
   return {
@@ -36,20 +37,13 @@ function tellResult() {
   };
 }
 
-function detachedCall(
-  result: Pick<CallResult, "dispatch" | "alias">,
-): Extract<AkumaInvocationResult, { action: "call" }> {
+function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): CallResult {
   return {
-    kind: "akuma",
-    action: "call",
-    world,
-    result: {
-      kind: "called",
-      akuma,
-      execution: { cwd: world, source: "process" },
-      observation: { kind: "detached", tell: tellResult() },
-      ...result,
-    },
+    kind: "called",
+    akuma,
+    execution: { cwd: world, source: "process" },
+    observation: { kind: "detached", tell: tellResult() },
+    ...result,
   };
 }
 
@@ -63,34 +57,31 @@ test("call defaults to detached birth and rejects removed detach flags", () => {
   });
   assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
   assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
-  const text = renderAkumaText(command, detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }));
+  const text = renderCallText(detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }), false, context);
   assert.equal(text, [`${akuma}`, `└─ ${world}`].join("\n"));
   assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached call has no timeline or observation conclusion");
   assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁/u);
 });
 
 test("a contract-bound call receipt hangs contract and cwd as tree branches", () => {
-  const text = renderAkumaText(
-    command,
+  const text = renderCallText(
     detachedCall({
       dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
       alias: { kind: "aliased", alias: { alias: "@sapling" as AkumaAlias, akuId: akuma }, previous: null },
     }),
+    false,
+    context,
   );
   assert.equal(text, [`${akuma} (@sapling)`, `├─ kei/tree-receipt`, `└─ ${world}`].join("\n"));
 });
 
 test("a dispatched fork receipt hangs its contract beneath the child identity", () => {
   const child = "aku/worker/5678abcd" as AkuId;
-  const text = renderAkumaText(parseExecution(["fork", akuma, "--at", "turn/1"]).command, {
-    kind: "akuma",
-    action: "fork",
-    receipt: {
-      kind: "forked",
-      parent: akuma,
-      child,
-      dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
-    },
+  const text = renderForkText({
+    kind: "forked",
+    parent: akuma,
+    child,
+    dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
   });
   assert.equal(text, `${child}\n└─ kei/tree-receipt`);
 });
@@ -98,45 +89,42 @@ test("a dispatched fork receipt hangs its contract beneath the child identity", 
 function observingCall(
   observation: CallObservation,
   result: Pick<CallResult, "dispatch" | "alias"> = { dispatch: { kind: "none" }, alias: { kind: "none" } },
-): Extract<AkumaInvocationResult, { action: "call" }> {
+): CallResult {
   return {
-    kind: "akuma",
-    action: "call",
-    world,
-    result: {
-      kind: "called",
-      akuma,
-      execution: { cwd: world, source: "process" },
-      observation,
-      ...result,
-    },
+    kind: "called",
+    akuma,
+    execution: { cwd: world, source: "process" },
+    observation,
+    ...result,
   };
 }
 
 test("prompt-free call renders its born identity without a Tell receipt", () => {
   const result = observingCall({ kind: "born" });
-  const text = renderAkumaText(command, result);
+  const text = renderCallText(result, false, context);
   assert.equal(text, [`${akuma}`, `└─ ${world}`].join("\n"));
   assert.doesNotMatch(text, /tell|answer|cwd|->/u);
-  assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
 });
 test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
-  const text = renderAkumaText(
-    waitingCommand,
-    observingCall({ kind: "observed", tell: tellResult(), observation: { reason: "answered", answer: "final answer" } }),
-  );
-  assert.equal(text, "final answer");
-  assert.doesNotMatch(text, /cwd/u);
+  const result = observingCall({
+    kind: "observed",
+    tell: tellResult(),
+    observation: { reason: "answered", answer: "final answer" },
+  });
+  const raw = callRawAnswer(result, true);
+  assert.equal(raw, "final answer");
+  assert.doesNotMatch(raw ?? "", /cwd/u);
 });
 
 test("an observing call keeps a failed observation diagnostic on stdout without cwd", () => {
-  const text = renderAkumaText(
-    waitingCommand,
+  const text = renderCallText(
     observingCall({
       kind: "failed",
       tellId: "tell/msys",
       failure: { kind: "infrastructure", diagnostic: "window lost" },
     }),
+    false,
+    context,
   );
   assert.match(text, /! error window lost/u);
   assert.doesNotMatch(text, /cwd/u);
@@ -147,7 +135,7 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
     dispatch: { kind: "none" },
     alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akuId: akuma }, previous: null },
   });
-  assert.match(renderAkumaText(command, aliased), /aku\/worker\/1234abcd \(@ship\)/u);
+  assert.match(renderCallText(aliased, false, context), /aku\/worker\/1234abcd \(@ship\)/u);
 
   const failures = [
     {
@@ -166,12 +154,11 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
     },
   ];
   for (const { result, diagnostic } of failures) {
-    const text = renderAkumaText(command, result);
+    const text = renderCallText(result, false, context);
     assert.ok(text.split("\n").includes(diagnostic));
     assert.doesNotMatch(text, /keiyaku wait|to wait|-----/u);
-    assert.equal(renderAkumaJson(result), JSON.stringify(result.result));
-  }
+    }
 
   const successful = detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } });
-  assert.equal(renderAkumaJson(successful), JSON.stringify(successful.result));
+  assert.match(successful.akuma, /aku\/worker\/1234abcd/u);
 });

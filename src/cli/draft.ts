@@ -3,7 +3,8 @@ import { lstatSync, mkdirSync, readFileSync, readdirSync, unlinkSync, utimesSync
 import { join } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import type { WorldRoot } from "../world.js";
-import type { BindDraftReceipt } from "./result.js";
+
+export type BindDraftReceipt = Readonly<{ path: string; warning?: string } | { path?: never; warning: string }>;
 
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const DRAFT_NAME = /^bind-[0-9a-f]{64}\.md$/u;

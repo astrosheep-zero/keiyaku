@@ -46,8 +46,8 @@ test("namespace and leaf help identify an executable command", () => {
     renderAkumaHelp("call"),
     /keiyaku ls aku\/ to find visible Akuma names; hidden definitions can still be called by name/u,
   );
-  assert.match(renderContractHelp("show"), /requirements and work guidance/u);
-  assert.doesNotMatch(renderContractHelp("show"), /current state/u);
+  assert.match(renderContractHelp("status"), /--guidance reads one Contract's guidance/u);
+  assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
 });
 

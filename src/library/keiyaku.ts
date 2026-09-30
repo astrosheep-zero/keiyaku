@@ -81,10 +81,14 @@ import {
   type Review,
 } from "./outcome.js";
 import type { OperationRefusals } from "./refusal.js";
-import { completeReconcile } from "./reconcile.js";
+import {
+  completeReconcile,
+  completeRepoReconcile,
+  type ReconcileCompletion,
+  type RepoReconcileReport,
+} from "./reconcile.js";
 import { observeChangedRegion, observeRegion, type AmendRegionObservation, type RegionObservation } from "./region.js";
-import { reconcileInput, scopeForRepo, type ReconcileInput } from "./repo.js";
-import type { ReconcileReport } from "./contract-types.js";
+import { scopeForRepo, type Repo } from "./repo.js";
 import type {
   AbandonInput,
   AmendInput,
@@ -147,7 +151,11 @@ export type {
   HookCommand,
   RequireBranchesToBeUpToDateFromInput,
 } from "./configuration.js";
-export type { RepoAtInput, ReconcileInput, RepoReconcileReport, RepoContractReconcileReport } from "./repo.js";
+export type { RepoAtInput } from "./repo.js";
+export type { ReconcileCompletion, RepoContractReconcileReport, RepoReconcileReport } from "./reconcile.js";
+
+/** One repair entry: an explicit Repo plus an optional addressed Contract and retry choice. */
+export type ReconcileInput = Readonly<{ repo: Repo; contract?: string; retryHooks?: boolean }>;
 export type {
   AbandonInput,
   AmendInput,
@@ -239,11 +247,18 @@ export type LocalContractCompositionCapture = Readonly<{
 
 export type KeiyakuWithInput = LocalContractComposition & Readonly<{ execution?: LibraryExecution }>;
 
+export interface KeiyakuLibraryReconcile {
+  (input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
+  (input: ReconcileInput & Readonly<{ contract?: undefined }>): Promise<RepoReconcileReport>;
+  (input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport>;
+}
+
 export type KeiyakuLibrary = Readonly<{
   bind(input: BindInput): Promise<BindOutcome>;
   select(input: KeiyakuSelectInput): Keiyaku;
   list(input: ContractListInput): Promise<ContractList>;
   observe(input: ContractObservationInput): Promise<ContractObservation>;
+  reconcile: KeiyakuLibraryReconcile;
 }>;
 
 export function captureLocalContractComposition(input?: LocalContractComposition): LocalContractCompositionCapture {
@@ -281,6 +296,7 @@ export function composeContractLibrary(
     select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, execution, composition),
     list: (operation: ContractListInput) => listKeiyaku(operation),
     observe: (operation: ContractObservationInput) => observeKeiyaku(operation),
+    reconcile: reconcileOperation(composition),
   });
 }
 
@@ -294,6 +310,41 @@ export function selectKeiyaku(
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
   return createHandle(contractId(values.id), scope, execution, composition);
+}
+
+/**
+ * The one public repair entry: an explicit Repo proves the Git world, the captured composition
+ * supplies hooks, and the same operation-local retryHooks choice stays available. Omitted contract
+ * reconciles the complete world; a supplied one reconciles that addressed Contract.
+ */
+function reconcileOperation(composition: LocalContractCompositionCapture): KeiyakuLibraryReconcile {
+  function run(input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
+  function run(input: ReconcileInput & Readonly<{ contract?: undefined }>): Promise<RepoReconcileReport>;
+  function run(input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport>;
+  function run(input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport> {
+    return reconcileKeiyaku(input, composition);
+  }
+  return run;
+}
+
+async function reconcileKeiyaku(
+  input: ReconcileInput,
+  composition: LocalContractCompositionCapture = captureLocalContractComposition(),
+): Promise<ReconcileCompletion | RepoReconcileReport> {
+  const values = requireInput(input, "Keiyaku.with().reconcile input", ["repo", "contract", "retryHooks"]);
+  const scope = scopeForRepo(values.repo);
+  const contract = values.contract;
+  if (contract !== undefined && typeof contract !== "string") throw new TypeError("contract must be a string");
+  if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
+    throw new TypeError("retryHooks must be a boolean");
+  const options = { scope, hooks: composition.hooks, retryHooks: values.retryHooks ?? false };
+  if (contract === undefined) {
+    return await withGitDecodeChannel(scope, (channel) => completeRepoReconcile({ ...options, channel }));
+  }
+  const id = contractId(contract);
+  return await readContractValue(() =>
+    withGitDecodeChannel(scope, (channel) => completeReconcile({ ...options, channel, contractId: id })),
+  );
 }
 
 export async function listKeiyaku(input: ContractListInput): Promise<ContractList> {
@@ -829,20 +880,6 @@ export class Keiyaku {
       },
       signal,
       observer,
-    );
-  }
-
-  async reconcile(input?: ReconcileInput): Promise<ReconcileReport> {
-    const options = reconcileInput(input);
-    return await this.read(() =>
-      withGitDecodeChannel(this.scope, (channel) =>
-        completeReconcile({
-          scope: this.scope,
-          channel,
-          contractId: this.id,
-          ...options,
-        }),
-      ),
     );
   }
 

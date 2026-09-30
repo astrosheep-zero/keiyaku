@@ -12,9 +12,8 @@ import { contractId, entryUlid, snapshotId, type ContractId, type JournalEntry }
 import type { ContractBody } from "../src/body/types.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decideArc } from "../src/core/verbs/arc.js";
-import { invoke } from "../src/cli/invoke.js";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import type { AcceptedResult } from "../src/cli/result.js";
+import { cliJson } from "./support/cli-fixtures.js";
 import { observeContract } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
@@ -164,35 +163,41 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
     cwd: repository.path,
     environment: { KEIYAKU_HOME: `${repository.path}/empty-home` },
   };
-  const command = (argv: readonly string[], source = "") => {
-    const parsed = parseArgv(argv);
-    if (!("command" in parsed)) throw new Error("arc test command did not parse as executable");
-    return invoke(parsed, {
-      ...runtime,
-      readStdin: async () => source,
-    });
-  };
+type CliValue = Readonly<{
+    kind?: string;
+    operation?: string;
+    contract?: ContractId;
+    facts?: readonly Readonly<{ kind: string }>[];
+    refusal?: Readonly<{ kind: string; diagnostic?: string }>;
+    diagnostic?: string;
+    contracts?: Readonly<{
+      kind: string;
+      value: Readonly<{ rows: readonly Readonly<{ id: ContractId }>[] }>;
+    }>;
+  }>;
+
+  const command = (argv: readonly string[], source = "") =>
+    cliJson<CliValue>(argv, { ...runtime, readStdin: async () => source });
 
   const bound = await command(["bind", "-"], contractDocument("Arc CLI"));
-  assert.equal("kind" in bound ? bound.kind : undefined, "accepted");
-  if (!("kind" in bound) || bound.kind !== "accepted" || !("verb" in bound) || bound.verb !== "bind") {
+  assert.equal(bound.value.kind, "accepted");
+  if (bound.value.kind !== "accepted" || bound.value.operation !== "bind" || bound.value.contract === undefined) {
     throw new Error("bind did not return an accepted contract");
   }
-  const contract = (bound as Extract<AcceptedResult, { verb: "bind" }>).contract;
+  const contract = bound.value.contract;
   const before = await command(["status", contract]);
-  assert.doesNotMatch(JSON.stringify(before), /currentArc/);
+  assert.doesNotMatch(JSON.stringify(before.value), /currentArc/);
 
   const admitted = await command(
     ["arc", contract, "-"],
     "# CLI Chapter\nAny text before a section.\n\n## Delivery\nDone.\n",
   );
-  assert.equal("kind" in admitted ? admitted.kind : undefined, "accepted");
-  if (!("kind" in admitted) || admitted.kind !== "accepted" || !("verb" in admitted) || admitted.verb !== "arc") {
+  assert.equal(admitted.value.kind, "accepted");
+  if (admitted.value.kind !== "accepted" || admitted.value.operation !== "arc") {
     throw new Error("arc did not return an accepted result");
   }
-  const admittedArc = admitted as Extract<AcceptedResult, { verb: "arc" }>;
   assert.deepEqual(
-    admittedArc.facts.map((fact) => fact.kind),
+    (admitted.value.facts ?? []).map((fact) => fact.kind),
     ["arc"],
   );
   const state = (await observeContract(await repositoryAt(repository.path), contract)).state;
@@ -205,18 +210,16 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   });
   for (const malformed of ["#  \n", ""]) {
     const invalid = await command(["arc", contract, "-"], malformed);
-    assert.equal("kind" in invalid ? invalid.kind : undefined, "refused");
-    if ("kind" in invalid && invalid.kind === "refused") {
-      assert.deepEqual(invalid.refusal, {
-        kind: "invalid-document",
-        diagnostic:
-          "arc document requires exactly one nonblank H1 chapter name (# <name>) followed by a freeform Markdown body (which may be empty)",
-      });
-    }
+    assert.equal(invalid.value.kind, "refused");
+    assert.deepEqual(invalid.value.refusal, {
+      kind: "invalid-document",
+      diagnostic:
+        "arc document requires exactly one nonblank H1 chapter name (# <name>) followed by a freeform Markdown body (which may be empty)",
+    });
   }
   const second = await command(["arc", contract, "-"], "# CLI Chapter Two");
-  assert.equal("kind" in second ? second.kind : undefined, "accepted");
-  if (!("kind" in second) || second.kind !== "accepted" || !("verb" in second) || second.verb !== "arc") {
+  assert.equal(second.value.kind, "accepted");
+  if (second.value.kind !== "accepted" || second.value.operation !== "arc") {
     throw new Error("second arc did not return an accepted result");
   }
   const secondState = (await observeContract(await repositoryAt(repository.path), contract)).state;
@@ -225,14 +228,13 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
   assert.deepEqual(secondState?.currentArc?.data, { seq: 2, title: "CLI Chapter Two", body: "" });
 
   const after = await command(["status", contract]);
-  assert.equal("kind" in after ? after.kind : undefined, "status");
-  if ("kind" in after && after.kind === "status" && after.report.contracts.kind === "present") {
+  if (after.value.contracts?.kind === "present") {
     assert.deepEqual(
-      after.report.contracts.value.rows.map((row) => row.id),
+      after.value.contracts.value.rows.map((row) => row.id),
       [contract],
     );
   }
-  assert.match(JSON.stringify(after), new RegExp(contract));
+  assert.match(JSON.stringify(after.value), new RegExp(contract));
   assert.doesNotMatch(renderContractBody(body), /\n## Arc\n/);
   assert.match(renderContractBody(body, secondState?.currentArc?.data), /## Arc\n\n### Sequence\n\n2/);
   assert.match(renderContractBody(body, secondState?.currentArc?.data), /### Body$/m);

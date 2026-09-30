@@ -3,9 +3,10 @@ import type { CallObservation } from "../../library/akuma-creation.js";
 import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
 import type { AkumaAskObservation } from "../../akuma/selection-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
-import type { AkumaInvocationResult } from "../commands/akuma-invoke.js";
-import type { WaitObservedAkuma } from "../../akuma/selection-execution.js";
-import type { ParsedCommand } from "../parse.js";
+import type { WaitObservedAkuma } from "../../library/akumas.js";
+import type { AkumaAskResult, AkumaTellResult, AkumaWaitResult } from "../../akuma/selection-observation.js";
+import type { AkumaHistoryResult } from "../../library/selection.js";
+import type { CallResult } from "../../library/akuma-creation.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -875,6 +876,8 @@ export type WaitObservationStream = Readonly<{
   observe: (observed: readonly WaitObservedAkuma[]) => readonly string[];
   /** Current live rows from all selected streams; never part of append-only output. */
   frame: () => readonly string[];
+  /** In-flight rows with their unresolved marks, emitted by a close that never concluded. */
+  flush: () => readonly string[];
   /** The wait's closing scoreboard, or the empty string when there is nothing to print. */
   conclude: (result: WaitConclusionResult) => string;
   streamed: () => boolean;
@@ -1216,8 +1219,9 @@ export function waitObservationStream(
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
     observeWaitRound(state, round, context, now);
   const frame = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.frame());
+  const flush = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.flush());
   const conclude = (result: WaitConclusionResult): string => concludeWaitStream(state, result, startedAt, now);
-  return { select, observe, frame, conclude, streamed: () => state.observed };
+  return { select, observe, frame, flush, conclude, streamed: () => state.observed };
 }
 
 /** The identity a streamed observing call's head frame renders from its resolved birth. */
@@ -1241,16 +1245,19 @@ export type InputWaitStream = Readonly<{
   observe: (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>) => readonly string[];
   /** Current live rows for the redrawable frame; never part of append-only output. */
   frame: () => readonly string[];
+  /** In-flight rows with their unresolved marks, emitted by a close that never concluded. */
+  flush: () => readonly string[];
   conclude: (result: InputWaitConclusion) => string;
   opened: () => boolean;
 }>;
 
-export type CallObservationStream = Readonly<{
-  observe: InputWaitStream["observe"];
-  frame: InputWaitStream["frame"];
-  conclude: (observation: CallObservation) => string;
-  opened: InputWaitStream["opened"];
-}>;
+/**
+ * The call-observation projection of one input wait: the same admitted/observe/frame/flush/opened
+ * lifetime with the closing judgment translated from the native CallObservation.
+ */
+export type CallObservationStream = Readonly<
+  Omit<InputWaitStream, "conclude"> & { conclude: (observation: CallObservation) => string }
+>;
 
 function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
   const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
@@ -1305,6 +1312,7 @@ export function inputWaitStream(
     return lines;
   };
   const frame: InputWaitStream["frame"] = () => activity.frame();
+  const flush: InputWaitStream["flush"] = () => activity.flush();
   const conclude: InputWaitStream["conclude"] = (result) => {
     const lines: string[] = [];
     open(lines, result.kind === "failed");
@@ -1322,7 +1330,7 @@ export function inputWaitStream(
     lines.push(...head().facts);
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };
-  return { admitted: admit, observe, frame, conclude, opened: () => opened };
+  return { admitted: admit, observe, frame, flush, conclude, opened: () => opened };
 }
 
 export function callObservationStream(
@@ -1337,8 +1345,7 @@ export function callObservationStream(
   });
   stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
   return {
-    observe: stream.observe,
-    frame: stream.frame,
+    ...stream,
     conclude: (observation) => {
       if (observation.kind === "failed")
         return stream.conclude({ kind: "failed", diagnostic: observation.failure.diagnostic });
@@ -1349,7 +1356,6 @@ export function callObservationStream(
         ...(observation.completedAt === undefined ? {} : { completedAt: observation.completedAt }),
       });
     },
-    opened: stream.opened,
   };
 }
 
@@ -1492,58 +1498,49 @@ function answerBytes(answer: unknown, structured: boolean): string | undefined {
   return !structured && typeof answer === "string" ? answer : JSON.stringify(answer);
 }
 
-function askAnswer(result: Extract<AkumaInvocationResult, { action: "ask" }>): string | undefined {
-  if (result.result.observation.reason !== "answered") return "";
-  return answerBytes(result.result.observation.answer, result.structured === true);
+/** Presentation-only state for one akuma invocation; it never reaches JSON. */
+export type AkumaPresentation = Readonly<{
+  alias?: string;
+  streamed?: boolean;
+  structured?: boolean;
+  startedAt?: number;
+  selection?: readonly WaitSelectedIdentity[];
+}>;
+
+export function askRawAnswer(result: AkumaAskResult, structured: boolean | undefined): string | undefined {
+  if (result.observation.reason !== "answered") return "";
+  return answerBytes(result.observation.answer, structured === true);
 }
 
-function callAnswer(result: Extract<AkumaInvocationResult, { action: "call" }>): string | undefined {
-  const observation = result.result.observation;
+export function callRawAnswer(result: CallResult, streamed: boolean): string | undefined {
+  const observation = result.observation;
   if (observation.kind !== "observed" || observation.observation.reason !== "answered")
-    return result.streamed === true ? "" : undefined;
-  return answerBytes(observation.observation.answer, result.result.structured === true);
+    return streamed ? "" : undefined;
+  return answerBytes(observation.observation.answer, result.structured === true);
 }
 
-function waitAnswer(result: Extract<AkumaInvocationResult, { action: "wait" }>): string | undefined {
-  const total = result.result.observations.length + result.result.unobserved.length;
-  if (result.streamed === true) {
+export function waitRawAnswer(result: AkumaWaitResult, streamed: boolean): string | undefined {
+  const total = result.observations.length + result.unobserved.length;
+  if (streamed) {
     // Plural waits leave stdout empty so one answer can never be mistaken for the whole result.
     if (total !== 1) return "";
-    const single = result.result.observations[0];
+    const single = result.observations[0];
     return single === undefined ? "" : (statusAnswer(single) ?? "");
   }
   if (total !== 1) return undefined;
-  return statusAnswer(result.result.observations[0]!);
+  return statusAnswer(result.observations[0]!);
 }
 
-function historyAnswer(result: Extract<AkumaInvocationResult, { action: "history" }>): string | undefined {
-  if (result.mode !== "exact" || result.historyResult.kind !== "exact") return undefined;
-  const outcome = result.historyResult.outcome.outcome;
+export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
+  if (historyId === undefined || result.kind !== "exact") return undefined;
+  const outcome = result.outcome.outcome;
   return outcome.kind === "answered" ? outcome.answer : outcome.diagnostic;
 }
 
-export function akumaRawAnswer(result: AkumaInvocationResult): string | undefined {
-  switch (result.action) {
-    case "ask":
-      return askAnswer(result);
-    case "call":
-      return callAnswer(result);
-    case "wait":
-      return waitAnswer(result);
-    case "history":
-      return historyAnswer(result);
-    default:
-      return undefined;
-  }
-}
-
-export function waitText(
-  result: Extract<AkumaInvocationResult, { action: "wait" }>,
-  context: TextRenderContext,
-): string {
-  const alias = result.alias;
-  const observations = result.result.observations;
-  const unobserved = result.result.unobserved;
+export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation, context: TextRenderContext): string {
+  const alias = presentation.alias;
+  const observations = result.observations;
+  const unobserved = result.unobserved;
   const total = observations.length + unobserved.length;
   if (total <= 1) {
     const single = [
@@ -1557,12 +1554,12 @@ export function waitText(
     return single.join("\n\n");
   }
   const end = Date.now();
-  const startedAt = result.startedAt ?? end;
+  const startedAt = presentation.startedAt ?? end;
   const order: string[] = [];
   const remember = (id: string): void => {
     if (!order.includes(id)) order.push(id);
   };
-  for (const member of result.selection ?? []) remember(member.id);
+  for (const member of presentation.selection ?? []) remember(member.id);
   for (const observation of observations) remember(observation.status.id);
   for (const member of unobserved) remember(member.id);
   const observationById = new Map<string, AkumaObservation>(
@@ -1604,18 +1601,19 @@ export function waitText(
 }
 
 export function historyText(
-  command: Extract<ParsedCommand, { command: "history"; last: boolean }>,
-  result: Extract<AkumaInvocationResult, { action: "history" }>,
+  result: AkumaHistoryResult,
+  presentation: AkumaPresentation & Readonly<{ id?: string; last?: boolean }>,
   context: TextRenderContext,
 ): string {
-  if (result.mode === "exact") {
-    const exact = result.historyResult;
-    if (exact.kind !== "exact")
-      return `${exact.kind === "unknown-history" ? exact.historyId : "unknown"} has no matching retained outcome`;
-    return exact.outcome.outcome.kind === "answered" ? exact.outcome.outcome.answer : exact.outcome.outcome.diagnostic;
+  if (presentation.id !== undefined) {
+    if (result.kind !== "exact")
+      return `${result.kind === "unknown-history" ? result.historyId : "unknown"} has no matching retained outcome`;
+    return result.outcome.outcome.kind === "answered"
+      ? result.outcome.outcome.answer
+      : result.outcome.outcome.diagnostic;
   }
-  if (command.last) return result.mode === "last" ? result.answer : "no answer retained";
-  if (result.mode !== "page") throw new Error("history result lacks page");
+  if (presentation.last === true) return result.kind === "last" ? result.answer : "no answer retained";
+  if (result.kind !== "history") throw new Error("history result lacks page");
   const rows = groupedRows(result.history.rows, context, historyLayout());
   const paging =
     result.history.omitted > 0
@@ -1627,19 +1625,20 @@ export function historyText(
           ),
         ]
       : [];
-  return [...snapshotHeading(result.akuma, result.alias, result.historyResult.contract), ...paging, ...rows].join("\n");
+  return [...snapshotHeading(result.id, presentation.alias, result.contract), ...paging, ...rows].join("\n");
 }
 
 export function tellText(
-  result: Extract<AkumaInvocationResult, { action: "tell" }>,
+  result: AkumaTellResult,
+  alias: string | undefined,
   context: TextRenderContext,
   options: Readonly<{ identity?: boolean }> = {},
 ): string {
-  const wake = result.result.tell.wake;
-  const target = identity(result.result.akuma, result.alias);
+  const wake = result.tell.wake;
+  const target = identity(result.akuma, alias);
   const glyph = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
   const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
-  const row = groupedRows([result.result.tell.row], context, {
+  const row = groupedRows([result.tell.row], context, {
     ...plainLayout(),
     head: (time, _glyph, _verb, columns) => eventPrefix(glyph, verb, time, columns),
     singleLine: true,

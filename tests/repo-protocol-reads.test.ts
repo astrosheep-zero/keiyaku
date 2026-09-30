@@ -29,7 +29,7 @@ import {
   type ContractId,
   type JournalEntry,
 } from "../src/core/facts/types.js";
-import { renderCatalogText } from "../src/cli/render/catalog.js";
+import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { protocolContractId } from "./support/git.js";
 
 function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
@@ -206,14 +206,7 @@ test("public Contract rows select the source entry for every phase", async () =>
   const delivered = board.rows.find((row) => row.id === ids.delivered);
   assert.equal(delivered?.phase, "delivered");
   assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "delivered");
-  const catalog = renderCatalogText({
-    kind: "contracts",
-    root: board.root,
-    state: board.state,
-    observedAt: board.observedAt,
-    rows: board.rows,
-    hasMore: false,
-  });
+  const catalog = renderContractCatalogue({ ...board, hasMore: false });
   assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
 });
 

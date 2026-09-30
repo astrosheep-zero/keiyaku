@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { executable } from "./support/cli-fixtures.js";
-import { invoke } from "../src/cli/invoke.js";
-import { renderText } from "../src/cli/render/text.js";
+import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
@@ -13,26 +11,29 @@ import { contractMarkdown } from "./support/markdown.js";
 test("amend names the missing Verification declaration required by verified", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await invoke(executable(["-C", raw.path, "bind", "--gates", "", "-"]), {
+  const bound = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+    ["-C", raw.path, "bind", "--gates", "", "-"],
+    {
+      environment: {},
+      readStdin: async () => contractMarkdown("Without verification", {
+        Context: "Test gate requirement.", Objective: "Name absent Verification.",
+        Design: "Keep the declaration absent.", Region: "src/**",
+        Criteria: "### Gate\nState the reason.",
+      }),
+    },
+  );
+  assert.equal(bound.value.kind, "accepted");
+  if (bound.value.kind !== "accepted" || bound.value.contract === undefined) return;
+  const result = await cliJson<Readonly<{ kind: string; refusal?: unknown }>>(
+    ["-C", raw.path, "amend", bound.value.contract, "--gates", "verified"],
+    { environment: {}, readStdin: async () => { throw new Error("gate-only amend must not read stdin"); } },
+  );
+  assert.equal(result.value.kind, "refused");
+  const rendered = await runCli(["-C", raw.path, "amend", bound.value.contract, "--gates", "verified"], {
     environment: {},
-    readStdin: async () => contractMarkdown("Without verification", {
-      Context: "Test gate requirement.", Objective: "Name absent Verification.",
-      Design: "Keep the declaration absent.", Region: "src/**",
-      Criteria: "### Gate\nState the reason.",
-    }),
+    readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
   });
-  assert.ok("kind" in bound);
-  assert.equal(bound.kind, "accepted");
-  assert.ok("verb" in bound);
-  if (bound.kind !== "accepted") return;
-  const result = await invoke(executable(["-C", raw.path, "amend", bound.contract, "--gates", "verified"]), {
-    environment: {}, readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
-  });
-  assert.ok("kind" in result);
-  assert.equal(result.kind, "refused");
-  assert.ok("verb" in result);
-  if (result.kind !== "refused") return;
-  assert.match(renderText(result), /gate 'verified' requires a declared Verification; the Contract declares none/u);
+  assert.match(rendered.stdout, /gate 'verified' requires a declared Verification; the Contract declares none/u);
 });
 
 test("CLI binds mixed gate selections and amends or binds an explicit empty selection", async () => {
@@ -50,8 +51,8 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
   );
   const repository = await repositoryAt(raw.path);
   const bind = async (selection: string | undefined) => {
-    const result = await invoke(
-      executable(["-C", raw.path, "bind", ...(selection === undefined ? [] : ["--gates", selection]), "-"]),
+    const result = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+      ["-C", raw.path, "bind", ...(selection === undefined ? [] : ["--gates", selection]), "-"],
       {
         environment: {},
         readStdin: async () =>
@@ -65,29 +66,20 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
           }),
       },
     );
-    assert.ok("kind" in result);
-    assert.equal(result.kind, "accepted", JSON.stringify(result));
-    assert.ok("verb" in result && result.kind === "accepted");
-    return result.contract;
+    assert.equal(result.value.kind, "accepted", JSON.stringify(result.value));
+    assert.notEqual(result.value.contract, undefined);
+    return result.value.contract as ContractId;
   };
   const gates = async (id: ContractId) => (await observeContract(repository, id)).state?.terms.gates;
   const mixed = await bind("reviewed,strict,security-audited,reviewed");
   assert.deepEqual(await gates(mixed), ["reviewed", "verified", "security-audited"]);
 
-  const amend = await invoke(executable(["-C", raw.path, "amend", mixed, "--gates", ""]), {
+  const amendText = await runCli(["-C", raw.path, "amend", mixed, "--gates", ""], {
     environment: {},
-    readStdin: async () => {
-      throw new Error("gate-only amend must not read stdin");
-    },
+    readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
   });
-  assert.ok("kind" in amend);
-  assert.equal(amend.kind, "accepted");
-  assert.ok("verb" in amend);
-  if (amend.kind === "accepted" && amend.verb === "amend") {
-    assert.deepEqual(amend.changes.gates, []);
-    assert.match(renderText(amend), /✓ amended[\s\S]*gates  none/u);
-    assert.doesNotMatch(renderText(amend), /terms unchanged/u);
-  }
+  assert.match(amendText.stdout, /✓ amended[\s\S]*gates  none/u);
+  assert.doesNotMatch(amendText.stdout, /terms unchanged/u);
   assert.deepEqual(await gates(mixed), []);
   assert.deepEqual(await gates(await bind("")), []);
   assert.deepEqual(await gates(await bind(undefined)), ["verified"]);

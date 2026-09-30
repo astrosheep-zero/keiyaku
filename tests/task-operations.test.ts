@@ -39,6 +39,7 @@ import {
   withTaskLocks
 } from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
+import { runCli } from "./support/cli-fixtures.js";
 
 type Assert<Condition extends true> = Condition;
 
@@ -1001,4 +1002,30 @@ test("forced-local Task descriptor preserves owner validation and authenticated 
     ids: ["task/one", "task/two"],
   });
   assert.throws(() => decodeTaskMutationRequest("task.start", { ids: [] }), /invalid task\.start request/u);
+});
+
+test("task show keeps the native addressed read and null with or without an established World", async (context) => {
+  const established = mkdtempSync(join(tmpdir(), "keiyaku-task-show-world-"));
+  const absent = mkdtempSync(join(tmpdir(), "keiyaku-task-show-absent-"));
+  context.after(() => {
+    rmSync(established, { recursive: true, force: true });
+    rmSync(absent, { recursive: true, force: true });
+  });
+  mkdirSync(join(established, ".keiyaku"));
+
+  for (const root of [established, absent]) {
+    const single = await runCli(["-C", root, "task", "show", "task/missing", "--json"], { environment: {} });
+    assert.equal(single.exit, 1, single.stderr);
+    assert.equal(single.stdout.trim(), "null");
+
+    const plural = await runCli(["-C", root, "task", "show", "task/a", "task/b", "--json"], { environment: {} });
+    assert.equal(plural.exit, 1, plural.stderr);
+    assert.equal(plural.stdout.trim(), "[null,null]");
+
+    const text = await runCli(["-C", root, "task", "show", "task/missing"], { environment: {} });
+    assert.equal(text.exit, 1, text.stderr);
+    assert.match(text.stdout, /^× show refused$/mu);
+    assert.match(text.stdout, /^  task  task\/missing$/mu);
+    assert.doesNotMatch(text.stdout, /null/u);
+  }
 });

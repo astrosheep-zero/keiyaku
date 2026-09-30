@@ -1,5 +1,5 @@
-import type { AuditReport } from "../../index.js";
-import type { AcceptedAuditResult } from "../result.js";
+import type { AuditOutcome, AuditReport } from "../../index.js";
+import { effectCleanup, effectExecutionStops } from "./effects.js";
 import {
   executionCleanupLines,
   executionStopLines,
@@ -167,19 +167,21 @@ function targetLines(
   return lines;
 }
 
-function obligationLines(result: AcceptedAuditResult, columns: number): readonly string[] {
+function obligationLines(result: AcceptedAudit, columns: number): readonly string[] {
   return [
     ...executionCleanupLines(
-      (result.cleanup ?? []).filter((issue) => issue.kind !== "worktree-leak"),
+      effectCleanup(result.effects).filter((issue) => issue.kind !== "worktree-leak"),
       columns,
       result.contract,
     ),
-    ...executionStopLines(result.executionStops ?? [], columns),
+    ...executionStopLines(effectExecutionStops(result.effects), columns),
   ];
 }
 
-export function renderAcceptedAudit(result: AcceptedAuditResult, context?: TextRenderContext): string {
-  const report = result.report;
+type AcceptedAudit = Extract<AuditOutcome, { kind: "accepted" }>;
+
+export function renderAcceptedAudit(result: AcceptedAudit, context?: TextRenderContext): string {
+  const report = result.value;
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const ids: string[] =
     report.candidate.kind === "ready"

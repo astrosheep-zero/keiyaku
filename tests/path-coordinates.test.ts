@@ -6,21 +6,18 @@ import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
+import { cliJson } from "./support/cli-fixtures.js";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
-import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
-import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
+import { parseArgv as parseInvocation } from "../src/cli/parse.js";
+import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { World } from "../src/world.js";
 import { registeredWorktrees, repositoryAt } from "../src/git/repository.js";
 
-function parseArgv(argv: readonly string[]): ParsedExecution {
+function parseArgv(argv: readonly string[]): ParsedCommandInvocation {
   const parsed = parseInvocation(argv);
   if (!("command" in parsed)) throw new Error("expected executable command");
   return parsed;
-}
-
-async function invoke(invocation: Parameters<typeof invokeRaw>[0], runtime?: Parameters<typeof invokeRaw>[1]): Promise<InvocationResult> {
-  return (await invokeRaw(invocation, runtime)) as InvocationResult;
 }
 
 function repositoryWithSpaces(): string {
@@ -89,15 +86,19 @@ test("CLI accepts native repository coordinate spellings through managed worktre
   const coordinates = process.platform === "win32" ? [path, path.replaceAll("\\", "/")] : [path];
 
   for (const [index, coordinate] of coordinates.entries()) {
-    const result = await invoke(parseArgv(["-C", coordinate, "--repo", ".", "bind", "-"]), {
-      cwd: process.cwd(),
-      environment: {},
-      readStdin: async () => contractDocument(`Native coordinate ${index}`),
-    });
-    assert.equal(result.kind, "accepted");
-    if (result.kind !== "accepted") continue;
+    const result = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+      ["-C", coordinate, "--repo", ".", "bind", "-"],
+      {
+        cwd: process.cwd(),
+        environment: {},
+        readStdin: async () => contractDocument(`Native coordinate ${index}`),
+      },
+    );
+    assert.equal(result.exit, 0);
+    assert.equal(result.value.kind, "accepted");
+    if (result.value.kind !== "accepted") continue;
     const row = (await Keiyaku.with().list({ repo: await Repo.at({ path }) })).rows.find(
-      (candidate) => candidate.id === result.contract,
+      (candidate) => candidate.id === result.value.contract,
     );
     assert.notEqual(row?.worktreePath, null);
     if (row?.worktreePath !== null && row?.worktreePath !== undefined) assert.equal(existsSync(row.worktreePath), true);

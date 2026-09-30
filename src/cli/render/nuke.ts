@@ -17,7 +17,7 @@ export function renderNukeText(result: NukeResult): string {
     ].join("\n");
   }
   if (result.kind === "refused") {
-    return renderRefusal({ kind: "refused", verb: "nuke", refusal: result.refusal });
+    return renderRefusal({ operation: "nuke", refusal: result.refusal });
   }
   return "";
 }

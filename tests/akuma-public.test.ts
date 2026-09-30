@@ -47,8 +47,7 @@ import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { Akumas } from "../src/index.js";
-import { invoke } from "../src/cli/invoke.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { cliJson } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
 import type { AkumaHandle } from "../src/akuma/akuma-handle.js";
 
@@ -1650,12 +1649,10 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
       hasMore: false,
     });
 
-    const parsed = parseArgv(["-C", root, "ls", "aku/"]);
-    if (!("command" in parsed)) throw new Error("expected parsed ls command");
-    const cli = await invoke(parsed, {
+    const cli = await cliJson<Readonly<{ rows: readonly unknown[]; hasMore: boolean }>>(["-C", root, "ls", "aku/"], {
       environment: { KEIYAKU_HOME: home },
     });
-    assert.deepEqual(cli, { kind: "catalog", catalog: { kind: "archetypes", rows: catalog.rows, hasMore: false } });
+    assert.deepEqual(cli.value, { rows: catalog.rows, hasMore: false });
 
     const shared = await loadArchetype({ name: "shared", project: root, home, settings: settingsValue });
     assert.equal(shared.path, join(root, ".keiyaku", "akuma", "shared.md"));

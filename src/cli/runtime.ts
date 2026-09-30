@@ -1,25 +1,86 @@
-import { isParsedAkumaCommand } from "./commands/akuma.js";
-import type { InvokedAkumaCommand } from "./commands/akuma.js";
-import type { InstallInvocationResult } from "./commands/install.js";
-import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
-import type { TaskInvocationResult } from "./commands/task-invoke.js";
-import type { ParsedCommand, ParsedExecution } from "./parse.js";
-import { CliUsageError, usageGuideForCommand } from "./parse.js";
+import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
+import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
+import {
+  installExitCode,
+  installHarnesses,
+  renderInstallText,
+  type InstallInvocationResult,
+} from "./commands/install.js";
+import { runTaskCommand } from "./commands/task.js";
+import { resolveInvocationCoordinates } from "./coordinates.js";
+import {
+  assertExplicitRepoUse,
+  CliUsageError,
+  usageGuideForCommand,
+  type ParsedCommand,
+  type ParsedInvocation,
+} from "./parse.js";
+import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
+import { createExecutionProgressRenderer } from "./render/execution-progress.js";
+import { executionFailureLines } from "./render/receipt.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
-import { renderStructuredRefusal } from "./render/refusal.js";
-import type { InvocationResult } from "./result.js";
-import type { Settings } from "../settings.js";
+import { displayContext, writeJson, writeStderr, writeStdout } from "./streams.js";
+import { BindDraftError } from "./draft.js";
+import { AkumaArchetypeError } from "../akuma/archetype.js";
+import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
+import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
+import { KeiyakuError, encodeFailureWire } from "../library/outcome.js";
+import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
+import { bodyRequestExecution, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 import type { ExecutionObserver } from "../library/keiyaku.js";
+import type { ActorId } from "../index.js";
 
-function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
-  stream.write(body.endsWith("\n") ? body : `${body}\n`);
+export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
+
+export type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>;
+
+/** Everything one invocation's leaves need at the process edge; Product JSON never sees this. */
+export type CliRuntime = Readonly<{
+  environment: NodeJS.ProcessEnv;
+  execution: LibraryExecution;
+  home?: string;
+  readStdin: () => Promise<string>;
+  signal: AbortSignal;
+  progress: () => Promise<ExecutionProgressDriver>;
+  actor?: ActorId;
+}>;
+
+export type CliRuntimeInput = Readonly<{
+  cwd?: string;
+  environment?: NodeJS.ProcessEnv;
+  readStdin?: () => Promise<string>;
+  actor?: ActorId;
+  signal?: AbortSignal;
+}>;
+
+function processStdin(): Promise<string> {
+  return (async () => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return Buffer.concat(chunks).toString("utf8");
+  })();
 }
 
-/** Builds the one live progress observer for an invocation; the caller owns when it finishes. */
+function memoized(reader: () => Promise<string>): () => Promise<string> {
+  let value: Promise<string> | undefined;
+  return () => (value ??= reader());
+}
+
+function executionForEnvironment(environment: NodeJS.ProcessEnv): LibraryExecution {
+  return environment[AKUMA_REQUESTS_ENV] === undefined
+    ? localExecutionContext()
+    : bodyRequestExecution({ directory: environment[AKUMA_REQUESTS_ENV] });
+}
+
+function homeFromEnvironment(environment: NodeJS.ProcessEnv): string | undefined {
+  const mapped = environment.KEIYAKU_HOME?.trim();
+  return mapped === undefined || mapped.length === 0 ? undefined : mapped;
+}
+
+/** Builds the one live progress observer for an invocation; the leaf owns when it finishes. */
 export async function writeExecutionProgress(
   stream: NodeJS.WritableStream = process.stderr,
-): Promise<Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>> {
-  const { createExecutionProgressRenderer } = await import("./render/execution-progress.js");
+): Promise<ExecutionProgressDriver> {
   const terminal = stream as NodeJS.WritableStream & Readonly<{ isTTY?: boolean; columns?: number }>;
   const renderer = createExecutionProgressRenderer({
     stream: terminal,
@@ -34,7 +95,8 @@ export async function writeExecutionProgress(
   return { observe: (event) => renderer.observe(event), finish: () => renderer.finish() };
 }
 
-function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {
+function cliCancellation(signal: AbortSignal | undefined): Readonly<{ signal: AbortSignal; close(): void }> {
+  if (signal !== undefined) return { signal, close: () => undefined };
   const controller = new AbortController();
   const cancel = (): void => controller.abort(new Error("CLI cancellation requested"));
   process.once("SIGINT", cancel);
@@ -48,140 +110,38 @@ function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {
   };
 }
 
-export async function writeTask(
-  command: Extract<ParsedCommand, { command: "task" }>,
-  result: TaskInvocationResult,
-): Promise<number> {
-  const { renderTaskIncompleteDiagnostic, renderTaskText, taskExitCode } = await import("./render/task.js");
-  const context = {
-    columns:
-      process.stdout.isTTY === true && Number.isInteger(process.stdout.columns)
-        ? process.stdout.columns
-        : DEFAULT_CLI_COLUMNS,
-    color: false,
-  };
-  if (command.output === "json") writeCliStream(process.stdout, JSON.stringify(result));
-  else if (
-    command.action === "compose" &&
-    typeof result === "object" &&
-    result !== null &&
-    "kind" in result &&
-    result.kind === "incomplete"
-  ) {
-    const diagnostic = renderTaskIncompleteDiagnostic(result);
-    if (diagnostic.length > 0) writeCliStream(process.stderr, diagnostic);
-    process.stdout.write(result.draft);
-  } else writeCliStream(process.stdout, renderTaskText(command, result, context));
-  return taskExitCode(result);
-}
-
-function displayContext() {
-  return {
-    columns:
-      process.stdout.isTTY === true && Number.isInteger(process.stdout.columns)
-        ? process.stdout.columns
-        : DEFAULT_CLI_COLUMNS,
-    color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
-  };
-}
-
-async function writeAkuma(
-  command: InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }>,
-  result: AkumaInvocationResult,
-): Promise<number> {
-  const { renderAkumaJson, akumaExitCode, akumaRawAnswer, renderAkumaText } = await import("./render/akuma.js");
-  const output =
-    command.output === "json" ? renderAkumaJson(result) : renderAkumaText(command, result, displayContext());
-  const exact =
-    command.output === "text" &&
-    (akumaRawAnswer(result) !== undefined ||
-      (command.command === "history" && command.last && result.action === "history" && result.mode === "last"));
-  if (exact) process.stdout.write(output);
-  else writeCliStream(process.stdout, output);
-  return akumaExitCode(result);
-}
-
-function isAkumaOutput(
+/** Bind's document admission runs before coordinate resolution so a malformed document refuses first. */
+async function admitBindInput(
   command: ParsedCommand,
-  result: unknown,
-): command is InvokedAkumaCommand | Extract<ParsedCommand, { command: "status" }> {
-  if (isParsedAkumaCommand(command)) return true;
-  return (
-    command.command === "status" &&
-    typeof result === "object" &&
-    result !== null &&
-    "kind" in result &&
-    result.kind === "akuma"
-  );
+  invocation: ParsedCommandInvocation,
+  runtime: CliRuntime,
+  processCwd: string,
+): Promise<void> {
+  if (command.command !== "bind" || command.forkOf !== undefined) return;
+  await admitBindMarkdown({
+    markdown: await runtime.readStdin(),
+    processCwd,
+    ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+  });
 }
 
-function invocationJson(result: InvocationResult): unknown {
-  switch (result.kind) {
-    case "guidance":
-      return { contract: result.contract, guidance: result.guidance };
-    case "catalog":
-      return result.catalog;
-    case "nuke":
-      return result.result;
-    case "region":
-      return result.region;
-    case "contract-history":
-      return result.history;
-    case "status":
-      return result.report;
-    case "status-set":
-      return result.entries;
-    default:
-      return result;
-  }
+async function runInstall(
+  command: Extract<ParsedCommand, { command: "install" }>,
+  environment: NodeJS.ProcessEnv,
+): Promise<number> {
+  const result: InstallInvocationResult = await installHarnesses(command.harnesses, environment);
+  if (command.output === "json") writeJson(result);
+  else writeStdout(renderInstallText(result));
+  return installExitCode(result);
 }
 
-export async function invocationExitCode(result: InvocationResult): Promise<number> {
-  if (result.kind === "nuke") return (await import("./render/nuke.js")).nukeExitCode(result.result);
-  if (result.kind === "reconcile") {
-    const { reconcileHasFailure } = await import("./render/reconcile.js");
-    return reconcileHasFailure(result.report) ? 1 : 0;
-  }
-  return result.kind === "refused" ? 1 : result.kind === "retry" ? 2 : 0;
-}
+export type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
 
-async function writeResult(command: ParsedCommand, result: unknown): Promise<number> {
-  if (command.command === "install") {
-    const { installExitCode, renderInstallText } = await import("./commands/install.js");
-    const value = result as InstallInvocationResult;
-    writeCliStream(process.stdout, command.output === "json" ? JSON.stringify(value) : renderInstallText(value));
-    return installExitCode(value);
-  }
-  if (command.command === "task") return await writeTask(command, result as TaskInvocationResult);
-  if (command.command === "settings") {
-    const { renderSettingsText, settingsJsonValue } = await import("./render/settings.js");
-    const value = (result as { value: Settings }).value;
-    writeCliStream(
-      process.stdout,
-      command.output === "json"
-        ? JSON.stringify(settingsJsonValue(value))
-        : renderSettingsText(value, displayContext().columns),
-    );
-    return 0;
-  }
-  if (isAkumaOutput(command, result)) return await writeAkuma(command, result as AkumaInvocationResult);
-  const contractResult = result as InvocationResult;
-  const { renderText } = await import("./render/text.js");
-  const json = command.output === "json";
-  const body = json ? JSON.stringify(invocationJson(contractResult)) : renderText(contractResult, displayContext());
-  writeCliStream(process.stdout, body);
-  return invocationExitCode(contractResult);
-}
-
-type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
-
+/** Projection of one native Akuma addressing/observation failure into its stated refusal body. */
 export async function akumaFailureProjection(
   error: unknown,
   command: ParsedCommand,
 ): Promise<AkumaFailureProjection | undefined> {
-  const [{ AkumaNotBornError, AkumaObservationError }, { AkumaAddressError, AkumaWorldScopeError }] = await Promise.all(
-    [import("../akuma/akuma-errors.js"), import("../library/address.js")],
-  );
   if (error instanceof AkumaNotBornError) {
     return {
       body:
@@ -245,7 +205,6 @@ export async function akumaFailureProjection(
 async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
   const diagnostic = error instanceof Error ? error.message : String(error);
   if (command.output === "json" || error instanceof CliUsageError) return diagnostic;
-  const { AkumaArchetypeError } = await import("../akuma/archetype.js");
   if (error instanceof AkumaArchetypeError) {
     if (command.command === "call") {
       return renderStructuredRefusal(
@@ -260,72 +219,96 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
   return `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`;
 }
 
-export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
+function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): number {
+  const refusal = {
+    kind: "invalid-document" as const,
+    diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
+  };
+  if (command.output === "json") writeJson({ kind: "refused", operation: "bind", refusal, draft: error.draft });
+  else writeStdout(renderRefusal({ operation: "bind", refusal }, error.draft, displayContext()));
+  return error.original instanceof CliUsageError ? 64 : 1;
+}
+
+async function writeFailure(error: unknown, command: ParsedCommand): Promise<number> {
+  if (error instanceof BindDraftError) return writeBindDraftFailure(error, command);
+  if (error instanceof KeiyakuError) {
+    const diagnostic = error.message;
+    if (command.output === "json") writeJson(encodeFailureWire(error));
+    else if (error.outcome !== undefined) {
+      writeStdout(
+        executionFailureLines(error.outcome, error.category, diagnostic, displayContext().columns).join("\n"),
+      );
+    } else writeStderr(`× ${command.command} failed\n  reason  ${safeText(diagnostic)}`);
+    return 3;
+  }
+  const akumaFailure = await akumaFailureProjection(error, command);
+  if (akumaFailure !== undefined) {
+    writeStderr(akumaFailure.body);
+    return akumaFailure.exitCode;
+  }
+  if (error instanceof AkumaArchetypeError && command.command === "call") {
+    if (command.output === "json")
+      writeJson({
+        kind: "refused",
+        diagnostic: "Akuma not found",
+        archetype: error.archetype,
+        available: "keiyaku ls aku/",
+      });
+    else
+      writeStdout(
+        renderStructuredRefusal(
+          "call",
+          `Akuma not found · ${safeText(error.archetype)}`,
+          ["available  keiyaku ls aku/"],
+          usageGuideForCommand(command),
+        ),
+      );
+    return 1;
+  }
+  if (command.output === "json") writeJson(encodeFailureWire(error));
+  else writeStderr(await commandFailureText(error, command));
+  return error instanceof CliUsageError ? 64 : 3;
+}
+
+export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
   const command = invocation.command;
-  const cancellation = cliCancellation();
+  assertExplicitRepoUse(command, invocation.repo);
+  const environment = input.environment ?? process.env;
+  const home = homeFromEnvironment(environment);
+  const cancellation = cliCancellation(input.signal);
+  let progress: Promise<ExecutionProgressDriver> | undefined;
+  const runtime: CliRuntime = {
+    environment,
+    execution: executionForEnvironment(environment),
+    ...(home === undefined ? {} : { home }),
+    readStdin: memoized(input.readStdin ?? processStdin),
+    signal: cancellation.signal,
+    progress: () => (progress ??= writeExecutionProgress()),
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+  };
   try {
-    const { invoke } = await import("./invoke.js");
-    const result = await invoke(invocation, {
-      cwd: process.cwd(),
-      signal: cancellation.signal,
-      progress: writeExecutionProgress,
-    });
-    return await writeResult(command, result);
+    if (command.command === "install") return await runInstall(command, environment);
+    await admitBindInput(command, invocation, runtime, input.cwd ?? process.cwd());
+    const coordinates = await resolveInvocationCoordinates(
+      {
+        processCwd: input.cwd ?? process.cwd(),
+        ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+        ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+        ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
+        command,
+      },
+      environment,
+    );
+    if (command.command === "task") return await runTaskCommand(command, coordinates, runtime);
+    if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);
+    if (command.command === "history" && "contract" in command)
+      return await runContractHistoryCommand(command, coordinates);
+    return await runContractCommand(command, coordinates, runtime);
   } catch (error) {
-    const { KeiyakuError } = await import("../library/keiyaku.js");
-    const receipt = error instanceof KeiyakuError ? error.outcome : undefined;
-    if (receipt !== undefined) {
-      const diagnostic = error instanceof Error ? error.message : String(error);
-      const category = error instanceof KeiyakuError ? error.category : "internal";
-      const { executionFailureLines } = await import("./render/receipt.js");
-      writeCliStream(
-        process.stdout,
-        command.output === "json"
-          ? JSON.stringify({ kind: "execution-failed", category, diagnostic, receipt })
-          : executionFailureLines(receipt, category, diagnostic, displayContext().columns).join("\n"),
-      );
-      return 3;
+    if (error instanceof CliUsageError && error.guide === undefined) {
+      throw new CliUsageError(error.diagnostic, usageGuideForCommand(command));
     }
-    const akumaFailure = await akumaFailureProjection(error, command);
-    if (akumaFailure !== undefined) {
-      writeCliStream(process.stderr, akumaFailure.body);
-      return akumaFailure.exitCode;
-    }
-    if (command.command === "bind") {
-      const { BindDraftError } = await import("./draft.js");
-      if (error instanceof BindDraftError) {
-        const { renderRefusal } = await import("./render/refusal.js");
-        const refusal = {
-          kind: "invalid-document",
-          diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
-        };
-        const result = { kind: "refused" as const, verb: "bind", refusal, draft: error.draft };
-        writeCliStream(process.stdout, command.output === "json" ? JSON.stringify(result) : renderRefusal(result));
-        return error.original instanceof CliUsageError ? 64 : 1;
-      }
-    }
-    const { AkumaArchetypeError } = await import("../akuma/archetype.js");
-    if (error instanceof AkumaArchetypeError && command.command === "call") {
-      writeCliStream(
-        process.stdout,
-        command.output === "json"
-          ? JSON.stringify({
-              kind: "refused",
-              diagnostic: "Akuma not found",
-              archetype: error.archetype,
-              available: "keiyaku ls aku/",
-            })
-          : renderStructuredRefusal(
-              "call",
-              `Akuma not found · ${safeText(error.archetype)}`,
-              ["available  keiyaku ls aku/"],
-              usageGuideForCommand(command),
-            ),
-      );
-      return 1;
-    }
-    writeCliStream(process.stderr, await commandFailureText(error, command));
-    return error instanceof CliUsageError ? 64 : 3;
+    return await writeFailure(error, command);
   } finally {
     cancellation.close();
   }

@@ -76,6 +76,9 @@ export type {
 export type { AkumaWorldScopeRefusal };
 export type { AkumaList, AkumaListInput };
 
+/** The existing native wait-observation seam, exposed type-only for CLI composition. */
+export type { WaitObserver, WaitObservedAkuma, WaitSelectedAkuma } from "../akuma/selection-execution.js";
+
 export type Akumas = AkumasHandle;
 
 class AkumasHandle {

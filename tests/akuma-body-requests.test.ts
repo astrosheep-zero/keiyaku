@@ -35,12 +35,12 @@ import {
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/selection-execution.js";
-import { type ProviderAdapter } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 import { waitAkuma, tellAkuma } from "../src/library/selection.js";
-import { invokeAkuma } from "../src/cli/commands/akuma-invoke.js";
-import { akumaRawAnswer } from "../src/cli/render/akuma.js";
-import { parseArgv } from "../src/cli/parse.js";
+import { cliJson } from "./support/cli-fixtures.js";
+import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
+import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import {
   selectionRequestCommand,
   selectionRequestProtocol,
@@ -1854,21 +1854,16 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot));
   try {
-    const parsed = parseArgv(["ask", target.id, "--wait", "10s", "facade delayed"]);
-    if (!("command" in parsed) || parsed.command.command !== "ask") throw new Error("expected an Ask command");
-    const pending = invokeAkuma(parsed.command, {
-      path: callerRoot,
-      environment: {},
+    const pending = cliJson<AkumaAskResult>(["-C", callerRoot, "ask", target.id, "--wait", "10s", "facade delayed"], {
+      environment: { [AKUMA_REQUESTS_ENV]: pump.directory },
       readStdin: async () => "",
-      execution: bodyRequestExecutionContext(pump.directory),
     });
     await started.promise;
     finish.resolve({ kind: "answered", answer: "facade delayed answer", historyId: "facade-direct-history" });
-    const result = await pending;
-    if (result.action !== "ask") throw new Error("expected an Ask result");
-    assert.deepEqual(result.result.observation, { reason: "answered", answer: "facade delayed answer" });
-    assert.equal(result.result.tell.row.text, "facade delayed");
-    assert.equal(akumaRawAnswer(result), "facade delayed answer", "forwarded CLI preserves exact stdout bytes");
+    const answered = await pending;
+    assert.deepEqual(answered.value.observation, { reason: "answered", answer: "facade delayed answer" });
+    assert.equal(answered.value.tell.row.text, "facade delayed");
+    assert.equal(askRawAnswer(answered.value, undefined), "facade delayed answer", "forwarded CLI preserves exact stdout bytes");
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
     restoreTellRuntime();

@@ -1,6 +1,6 @@
-import type { BindDraftReceipt, RefusedResult } from "../result.js";
+import type { BindDraftReceipt } from "../draft.js";
 import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
-import type { IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
+import type { ContractId, IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
 import { shortGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -15,11 +15,9 @@ import {
 type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
   option?: Readonly<{ flag: string; available: boolean }>;
 };
-export type RenderableRefusal = KeiyakuRefusal | DirtyWithOption;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+/** Edge acquisition refusals the CLI owns; they never come from the SDK. */
+export type CliEdgeRefusal = Readonly<{ kind: "invalid-document"; diagnostic: string }>;
+export type RenderableRefusal = KeiyakuRefusal | DirtyWithOption | CliEdgeRefusal;
 
 function wrap(lines: string[], text: string, indent: string, columns: number): void {
   lines.push(...renderOpaqueBlock(text, indent, columns));
@@ -41,11 +39,6 @@ function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string
 
 const REFUSAL_WORDS: Readonly<Record<string, string>> = {
   "contract-missing": "contract missing",
-  "task-missing": "task missing",
-  "invalid-lifecycle-transition": "invalid lifecycle transition",
-  "invalid-namespace-context": "invalid namespace context",
-  "relation-owned-by-other": "relation owned by other",
-  "invalid-composition": "invalid composition",
 };
 
 function refusalWords(kind: string): string {
@@ -141,17 +134,6 @@ function refusalFacts(
   }
   const lines = [`${indent}reason  ${refusalWords(refusal.kind)}`];
   if (identity !== undefined) lines.push(`${indent}contract  ${safeText(identity)}`);
-  if ("taskId" in refusal && typeof refusal.taskId === "string")
-    lines.push(`${indent}task  ${safeText(refusal.taskId)}`);
-  const fields = refusal as unknown as Record<string, unknown>;
-  const kind = String(fields.kind);
-  if (kind === "invalid-lifecycle-transition")
-    lines.push(`${indent}state  ${safeText(String(fields.state))} · verb  ${safeText(String(fields.verb))}`);
-  if (kind === "invalid-namespace-context") lines.push(`${indent}path  ${safeText(String(fields.path))}`);
-  if (kind === "relation-owned-by-other") {
-    lines.push(`${indent}related task  ${safeText(String(fields.related))}`);
-    lines.push(`${indent}declaring task  ${safeText(String(fields.declaringTask))}`);
-  }
   if ("diagnostic" in refusal && typeof refusal.diagnostic === "string")
     lines.push(`${indent}detail  ${safeText(refusal.diagnostic)}`);
   return lines;
@@ -187,15 +169,24 @@ export function renderStructuredRefusal(
   return lines.join("\n");
 }
 
-export function renderRefusal(result: RefusedResult, context?: TextRenderContext): string {
+/** One native refusal plus the CLI's own presentation identity; the draft belongs only to edge bind. */
+export type RefusedInvocation = Readonly<{
+  operation: string;
+  contract?: ContractId;
+  refusal: RenderableRefusal;
+}>;
+
+export function renderRefusal(
+  refused: RefusedInvocation,
+  draft?: BindDraftReceipt,
+  context?: TextRenderContext,
+): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const lines = [refusalTitle(result.verb)];
-  if (result.contract !== undefined) lines.push(`  contract  ${safeText(result.contract)}`);
-  if (isRecord(result.refusal) && typeof result.refusal.kind === "string") {
-    lines.push(...renderRefusalFacts(result.refusal as RenderableRefusal, "  ", columns, result.contract));
-  }
+  const lines = [refusalTitle(refused.operation)];
+  if (refused.contract !== undefined) lines.push(`  contract  ${safeText(refused.contract)}`);
+  lines.push(...renderRefusalFacts(refused.refusal, "  ", columns, refused.contract));
   const output = lines.join("\n");
-  return result.draft === undefined ? output : `${output}\n${renderBindDraftReceipt(result.draft)}`;
+  return draft === undefined ? output : `${output}\n${renderBindDraftReceipt(draft)}`;
 }
 
 export function renderConflictMaterialized(

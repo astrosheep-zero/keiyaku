@@ -16,7 +16,8 @@ import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { renderAcceptedAudit } from "../src/cli/render/audit.js";
-import type { AcceptedAuditResult } from "../src/cli/result.js";
+import { contractHead } from "../src/core/facts/types.js";
+import type { AuditOutcome } from "../src/index.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
@@ -209,20 +210,22 @@ test("verified terms require a declaration at both unbound and identified bounda
 });
 
 test("audit target lag is absent at zero and counted when the target moved", () => {
-  const report = (behind: number): AcceptedAuditResult =>
+  const report = (behind: number): Extract<AuditOutcome, { kind: "accepted" }> =>
     ({
       kind: "accepted",
-      verb: "audit",
+      operation: "audit",
       contract: contractId("kei/audit-lag"),
-      report: {
+      head: contractHead("head"),
+      facts: [],
+      effects: [],
+      pending: [],
+      value: {
         candidate: { kind: "blocked", refusal: { kind: "verification-declaration-invalid" } },
         verification: { kind: "not-run" },
         target: { kind: "placeable", ref: "refs/heads/main", head: "a".repeat(40) },
         targetLag: { kind: "counted", behind },
       },
-      cleanup: [],
-      executionStops: [],
-    }) as unknown as AcceptedAuditResult;
+    }) as unknown as Extract<AuditOutcome, { kind: "accepted" }>;
 
   const unmoved = renderAcceptedAudit(report(0), { columns: 120, color: false });
   assert.match(unmoved, /main @ aaaaaaa/u);

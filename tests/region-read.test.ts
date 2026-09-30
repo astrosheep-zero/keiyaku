@@ -2,9 +2,7 @@ import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
-import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
-import { parseArgv as parseInvocation, type ParsedExecution } from "../src/cli/parse.js";
-import { renderText } from "../src/cli/render/text.js";
+import { runCli } from "./support/cli-fixtures.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
@@ -21,19 +19,6 @@ import {
   writeCommit,
   GIT_REF,
 } from "../src/git/repository.js";
-
-function parseArgv(argv: readonly string[]): ParsedExecution {
-  const parsed = parseInvocation(argv);
-  if (!("command" in parsed)) throw new Error("expected executable command");
-  return parsed;
-}
-
-async function invoke(
-  invocation: Parameters<typeof invokeRaw>[0],
-  runtime?: Parameters<typeof invokeRaw>[1],
-): Promise<InvocationResult> {
-  return (await invokeRaw(invocation, runtime)) as InvocationResult;
-}
 
 function document(title: string, patterns: readonly string[]): string {
   return contractMarkdown(title, {
@@ -222,8 +207,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(row?.title, null);
     assert.equal(row?.verification, undefined);
     assert.equal(report.region?.kind, "failed");
-    const failed = await invoke(parseArgv(["region"]), { cwd: repository.path, environment: {} });
-    assert.equal(failed.kind, "region");
-    if (failed.kind === "region") assert.match(renderText(failed), /^× region\n  reason  /);
+    const failed = await runCli(["region"], { cwd: repository.path, environment: {} });
+    assert.match(failed.stdout, /^× region\n  reason  /u);
   });
 });

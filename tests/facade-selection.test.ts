@@ -22,8 +22,7 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { waitAkuma } from "../src/library/selection.js";
-import { type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/akuma/selection-execution.js";
+import { type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/library/akumas.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
@@ -225,20 +224,16 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
   const rounds: (readonly WaitObservedAkuma[])[] = [];
   const selected: (readonly WaitSelectedAkuma[])[] = [];
-  const result = await waitAkuma(
-    {
-      path: world,
-      akuma: [worker.id],
-      repo: await Repo.at({ path: world }),
-      completion: "all",
-      timeoutMs: 0,
-    },
-    undefined,
-    {
+  const result = await Akumas.of(world).wait({
+    akuma: [worker.id],
+    repo: await Repo.at({ path: world }),
+    completion: "all",
+    timeoutMs: 0,
+    observe: {
       selected: (members) => selected.push(members),
       observe: (observed) => rounds.push(observed),
     },
-  );
+  });
   assert.equal(selected.length, 1);
   assert.deepEqual(selected[0], [
     { id: worker.id, alias: "@observed", contract: { kind: "associated", contractId: owner } },

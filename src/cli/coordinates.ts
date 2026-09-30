@@ -125,3 +125,34 @@ async function resolveWorld(cwd: string, repo: Repo | undefined) {
 export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<CliCoordinates> {
   return cliCoordinateDiscovery.resolve(input);
 }
+
+/** One explicit Git executable override from the process edge; a blank value is usage, not absence. */
+export function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
+  const value = environment.KEIYAKU_GIT_PATH;
+  if (value === undefined) return undefined;
+  if (value.trim().length === 0) throw new CliUsageError("KEIYAKU_GIT_PATH requires a nonblank value");
+  return value;
+}
+
+export type InvocationCoordinatesInput = Readonly<{
+  processCwd?: string;
+  cwd?: string;
+  repo?: string;
+  workdir?: string;
+  command: ParsedCommand;
+}>;
+
+/** The one process-edge coordinate resolution: explicit filesystem inputs plus the command's Repo policy. */
+export async function resolveInvocationCoordinates(
+  invocation: InvocationCoordinatesInput,
+  environment: NodeJS.ProcessEnv,
+): Promise<CliCoordinates> {
+  const gitPath = gitPathFromEdge(environment);
+  return resolveCliCoordinates({
+    ...(invocation.processCwd === undefined ? {} : { processCwd: invocation.processCwd }),
+    ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+    ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+    ...(gitPath === undefined ? {} : { gitPath }),
+    command: invocation.command,
+  });
+}

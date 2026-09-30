@@ -20,14 +20,29 @@ import type {
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
-import type { TaskInvocationResult, TaskShowResult, TaskWorldObservation } from "../commands/task-invoke.js";
-import type { ParsedTaskCommand } from "../commands/task.js";
 import { outcomeLines, refusalLines, receiptPayload, receiptRow } from "./receipt.js";
 import { taskMark } from "./marks.js";
 export { taskMark } from "./marks.js";
 import { DEFAULT_CLI_COLUMNS, displayColumns, emptyCatalogue, safeText, type TextRenderContext } from "./terminal.js";
 
-type TaskReadOutcome = TaskList | BlockedTaskList | TaskQueryResult | TaskDecompositionTree | TaskContextResult;
+type TaskListOutcome = TaskList | BlockedTaskList | TaskQueryResult;
+/** One addressed show selection: native details, or a refusal naming a missing addressed read. */
+export type TaskShowResult = TaskDetail | TaskDetail[] | Extract<TaskMutationResult, { kind: "refused" }>;
+/** Presentation-only list scope the leaf acquired; never part of a product value. */
+export type TaskListScope = "world" | "current" | Readonly<{ namespace: string }>;
+/** The union of native Task SDK answers one leaf renders directly; the CLI adds no result envelope. */
+export type TaskNativeResult =
+  | TaskMutationResult
+  | TaskUpdateResult
+  | TaskBatchResult
+  | TaskCompositionResult
+  | TaskShowResult
+  | TaskList
+  | BlockedTaskList
+  | TaskQueryResult
+  | TaskDecompositionTree
+  | TaskDoctorReport
+  | TaskContextResult;
 type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
   | Extract<TaskContextResult, { kind: "refused" | "retry" }>
@@ -48,15 +63,6 @@ type RefusalProjection = Readonly<{
 type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
-
-function isWorldObservation(result: TaskInvocationResult): result is TaskWorldObservation {
-  return (
-    typeof result === "object" &&
-    result !== null &&
-    "kind" in result &&
-    (result.kind === "present" || result.kind === "absent" || result.kind === "failed")
-  );
-}
 
 /** Task dispositions and relation states are snake_case facts; people read them as words. */
 export function dispositionText(word: string): string {
@@ -203,24 +209,25 @@ function renderListRow(
 }
 
 function renderRows(
-  command: ParsedTaskCommand,
-  result: TaskList | BlockedTaskList | TaskQueryResult,
+  action: "ls" | "ready" | "blocked" | "query",
+  scope: TaskListScope,
+  result: TaskListOutcome,
   columns: number,
 ): string {
-  if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
-  const view = command.action === "ls" ? "tasks" : command.action;
+  if (result.kind !== "accepted") return renderFailure(action, result, columns);
+  const view = action === "ls" ? "tasks" : action;
   const footer = result.value.hasMore ? ["…"] : [];
-  const scope =
-    command.flags.world === true
+  const scopeText =
+    scope === "world"
       ? "world"
-      : command.action === "ls" && command.positionals.length > 0
-        ? `namespace ${command.positionals[0]!.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`
-        : "current namespace";
-  const heading = taskFrameHead(view, scope);
+      : scope === "current"
+        ? "current namespace"
+        : `namespace ${scope.namespace.replace(/^task\//u, "").replace(/\/$/u, "") || "root"}`;
+  const heading = taskFrameHead(view, scopeText);
   if (result.value.rows.length === 0) return emptyCatalogue(view);
   return [
     heading,
-    ...result.value.rows.flatMap((item) => renderListRow(item, columns, command.action === "ready")),
+    ...result.value.rows.flatMap((item) => renderListRow(item, columns, action === "ready")),
     ...footer,
   ].join("\n");
 }
@@ -253,7 +260,7 @@ function renderShowDetail(result: TaskDetail, columns: number): string {
 function renderShow(result: TaskShowResult, columns: number): string {
   if (Array.isArray(result)) return result.map((detail) => renderShowDetail(detail, columns)).join("\n\n");
   if ("kind" in result) return renderFailure("show", result, columns);
-  return renderShowDetail(result as TaskDetail, columns);
+  return renderShowDetail(result, columns);
 }
 
 function treeLines(node: TaskTreeNode, columns: number, depth = 0): readonly string[] {
@@ -301,36 +308,27 @@ function renderAcceptedMutation(
   return lines.join("\n");
 }
 
-function renderMutation(
-  command: ParsedTaskCommand,
-  result: TaskMutationResult | TaskUpdateResult,
-  columns: number,
-): string {
-  if (result.kind !== "accepted") return renderFailure(command.action, result, columns);
-  if (command.action !== "update") {
-    return renderAcceptedMutation(
-      command.action,
-      (result as Extract<TaskMutationResult, { kind: "accepted" }>).value,
-      columns,
-    );
-  }
-  const value = (result as Extract<TaskUpdateResult, { kind: "accepted" }>).value;
-  return renderAcceptedMutation(command.action, value.task, columns, value.changedFields);
+function renderMutation(action: string, result: TaskMutationResult, columns: number): string {
+  if (result.kind !== "accepted") return renderFailure(action, result, columns);
+  return renderAcceptedMutation(action, result.value, columns);
 }
 
-function renderBatchItem(verb: string, item: TaskBatchResult["items"][number]): string {
+function renderUpdate(result: TaskUpdateResult, columns: number): string {
+  if (result.kind !== "accepted") return renderFailure("update", result, columns);
+  return renderAcceptedMutation("update", result.value.task, columns, result.value.changedFields);
+}
+
+function renderBatchItem(verb: string, item: TaskBatchResult["items"][number], columns: number): string {
   if (item.outcome.kind === "accepted") return `✓ ${PAST_VERBS[verb] ?? verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  return refusalLines(
-    verb,
-    [`task  ${item.id}`, `reason  ${facts.diagnostic}`, ...(facts.facts ?? [])],
-    DEFAULT_CLI_COLUMNS,
-  ).join("\n");
+  return refusalLines(verb, [`task  ${item.id}`, `reason  ${facts.diagnostic}`, ...(facts.facts ?? [])], columns).join(
+    "\n",
+  );
 }
 
-function renderBatch(verb: string, batch: TaskBatchResult): string {
-  return batch.items.map((item) => renderBatchItem(verb, item)).join("\n");
+function renderBatch(verb: string, batch: TaskBatchResult, columns: number): string {
+  return batch.items.map((item) => renderBatchItem(verb, item, columns)).join("\n");
 }
 
 function admissionLines(
@@ -381,61 +379,70 @@ function renderCompose(result: TaskCompositionResult, columns: number): string {
   ].join("\n");
 }
 
-export function renderTaskText(
-  command: ParsedTaskCommand,
-  result: TaskInvocationResult,
+/** One addressed show selection rendered directly from its native answer. */
+export function renderTaskShow(result: TaskShowResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  return renderShow(result, context.columns);
+}
+
+/** One list read rendered from its native answer and the leaf's presentation-only scope. */
+export function renderTaskList(
+  action: "ls" | "ready" | "blocked" | "query",
+  scope: TaskListScope,
+  result: TaskListOutcome,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
-  if (isWorldObservation(result)) {
-    if (result.kind === "absent") return "task world absent";
-    if (result.kind === "failed") {
-      const lines: string[] = ["task world failed"];
-      receiptPayload(lines, "reason", result.failure.message);
-      return lines.join("\n");
-    }
-    result = result.value;
-  }
-  return renderTaskValue(command, result, context.columns);
+  return renderRows(action, scope, result, context.columns);
 }
 
-function isBatchAction(action: ParsedTaskCommand["action"]): boolean {
-  return ["start", "stop", "hold", "resume", "done", "drop"].includes(action);
+export function renderTaskTree(result: TaskDecompositionTree, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  return result.kind === "accepted"
+    ? treeLines(result.value, context.columns).join("\n")
+    : renderFailure("tree", result, context.columns);
 }
 
-function renderTaskValue(
-  command: ParsedTaskCommand,
-  result: Exclude<TaskInvocationResult, TaskWorldObservation>,
-  columns: number,
+export function renderTaskDoctor(result: TaskDoctorReport): string {
+  return renderDoctor(result);
+}
+
+export function renderTaskContext(result: TaskContextResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  if (result.kind !== "accepted") return renderFailure("context", result, context.columns);
+  const value = result.value.namespace.length === 0 ? "root" : result.value.namespace.join("/");
+  return `context ${value} · ${result.value.source}`;
+}
+
+export function renderTaskCompose(result: TaskCompositionResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  return renderCompose(result, context.columns);
+}
+
+/** One single-Task mutation answer; `verb` is the literal action the leaf invoked. */
+export function renderTaskMutation(
+  verb: string,
+  result: TaskMutationResult,
+  context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
-  if (command.action === "show") return renderShow(result as TaskShowResult, columns);
-  if (
-    command.action === "ls" ||
-    command.action === "ready" ||
-    command.action === "blocked" ||
-    command.action === "query"
-  ) {
-    return renderRows(command, result as TaskList | BlockedTaskList | TaskQueryResult, columns);
-  }
-  if (command.action === "tree") {
-    const tree = result as TaskDecompositionTree;
-    return tree.kind === "accepted"
-      ? treeLines(tree.value, columns).join("\n")
-      : renderFailure(command.action, tree, columns);
-  }
-  if (command.action === "doctor") return renderDoctor(result as TaskDoctorReport);
-  if (command.action === "context") {
-    const context = result as TaskContextResult;
-    if (context.kind !== "accepted") return renderFailure(command.action, context, columns);
-    const value = context.value.namespace.length === 0 ? "root" : context.value.namespace.join("/");
-    return `context ${value} · ${context.value.source}`;
-  }
-  if (command.action === "compose") return renderCompose(result as TaskCompositionResult, columns);
-  if (isBatchAction(command.action)) {
-    if (!(typeof result === "object" && result !== null && "items" in result))
-      return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);
-    return renderBatch(command.action, result as TaskBatchResult);
-  }
-  return renderMutation(command, result as TaskMutationResult | TaskUpdateResult, columns);
+  return renderMutation(verb, result, context.columns);
+}
+
+export function renderTaskUpdate(result: TaskUpdateResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  return renderUpdate(result, context.columns);
+}
+
+/** One lifecycle answer: a single mutation or a plural batch, both native shapes. */
+export function renderTaskLifecycle(
+  verb: string,
+  result: TaskMutationResult | TaskBatchResult,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  return "items" in result ? renderBatch(verb, result, context.columns) : renderMutation(verb, result, context.columns);
+}
+
+/** A native refusal the CLI edge raised for one action, through the shared refusal grammar. */
+export function renderTaskFailure(
+  verb: string,
+  result: TaskFailure,
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  return renderFailure(verb, result, context.columns);
 }
 
 export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
@@ -447,22 +454,15 @@ export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): s
   ].join("\n");
 }
 
-export function taskExitCode(result: TaskInvocationResult): number {
-  if (isWorldObservation(result)) {
-    if (result.kind === "absent") return 1;
-    if (result.kind === "failed") return 3;
-    result = result.value;
-  }
-  if (typeof result === "object" && result !== null && "issues" in result)
-    return (result as TaskDoctorReport).issues.length === 0 ? 0 : 1;
-  if (typeof result === "object" && result !== null && "items" in result) {
-    const kinds = (result as TaskBatchResult).items.map((item) => item.outcome.kind);
+export function taskExitCode(result: TaskNativeResult): number {
+  if ("issues" in result) return result.issues.length === 0 ? 0 : 1;
+  if ("items" in result) {
+    const kinds = result.items.map((item) => item.outcome.kind);
     return kinds.includes("retry") ? 2 : kinds.includes("refused") ? 1 : 0;
   }
-  if (typeof result === "object" && result !== null && "kind" in result) {
-    const outcome = result as TaskReadOutcome | TaskMutationResult | TaskUpdateResult | TaskCompositionResult;
-    if (outcome.kind === "retry") return 2;
-    if (outcome.kind === "refused" || outcome.kind === "incomplete") return 1;
+  if ("kind" in result) {
+    if (result.kind === "retry") return 2;
+    if (result.kind === "refused" || result.kind === "incomplete") return 1;
   }
   return 0;
 }

@@ -5,11 +5,39 @@ import type { ContractKanshiBoard } from "../src/kanshi/index.js";
 import type { WorldRoot } from "../src/world.js";
 import type { KanshiReport } from "../src/kanshi/index.js";
 import { resolveContextualContract, resolveKanshiContract } from "../src/cli/selectors.js";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { invoke } from "../src/cli/invoke.js";
+import { CliUsageError } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractRow, kanshiReport as sharedKanshiReport } from "./support/cli-fixtures.js";
 import { rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+
+/**
+ * Run the real CLI boundary for one invocation. The refusal this suite pins is process output,
+ * so it is observed across a real process instead of by swapping the in-process stdout that the
+ * test runner also owns.
+ */
+function runCliJson(cwd: string, argv: readonly string[]) {
+  const environment = { ...process.env };
+  delete environment[AKUMA_REQUESTS_ENV];
+  const result = spawnSync(
+    process.execPath,
+    [
+      ...(import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"]),
+      fileURLToPath(
+        new URL(import.meta.url.endsWith(".js") ? "../src/cli/index.js" : "../src/cli/index.ts", import.meta.url),
+      ),
+      "-C",
+      cwd,
+      ...argv,
+      "--json",
+    ],
+    { encoding: "utf8", env: environment },
+  );
+  assert.equal(result.error, undefined, result.error?.message);
+  return result;
+}
 
 const active = "kei/active-contract" as ContractId;
 
@@ -61,17 +89,20 @@ test("selectors use disposition rather than reinterpreting terminal phases", () 
 const kanshiReport = (contracts: KanshiReport["contracts"]): KanshiReport =>
   sharedKanshiReport(contracts, { root: "/repo" as WorldRoot });
 
-test("missing Contract selectors refuse uniformly across read and reconcile verbs", async () => {
+test("missing Contract selectors refuse uniformly across read and reconcile verbs", () => {
   const repo = makeGitRepository();
   try {
-    for (const verb of ["show", "deliver", "status", "region", "reconcile"] as const) {
-      const parsed = parseArgv([verb, "kei/missing"]);
-      if (!("command" in parsed)) throw new Error(`expected ${verb} command`);
-      const result = await invoke(parsed, { cwd: repo.path, environment: {} });
-      assert.ok("kind" in result && result.kind === "refused");
-      if ("kind" in result && result.kind === "refused") {
-        assert.equal((result.refusal as { kind: string }).kind, "contract-missing");
-      }
+    const refusalKind = (value: Readonly<{ kind: string; refusal?: Readonly<{ kind: string }> }>): string =>
+      value.kind === "refused" ? (value.refusal?.kind ?? "missing-envelope") : value.kind;
+    for (const argv of [
+      ["deliver", "kei/missing"],
+      ["status", "kei/missing"],
+      ["region", "kei/missing"],
+      ["reconcile", "kei/missing"],
+    ] as const) {
+      const result = runCliJson(repo.path, argv);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(refusalKind(JSON.parse(result.stdout)), "contract-missing");
     }
   } finally {
     rmSync(repo.path, { recursive: true, force: true });

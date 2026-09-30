@@ -1,4 +1,7 @@
-import type { Catalog } from "../catalog.js";
+import type { AkumaList } from "../../akuma/akuma.js";
+import type { ArchetypeCatalogRow } from "../../akuma/archetype.js";
+import type { ContractList } from "../../library/contract-types.js";
+import type { TaskPage, TaskRow } from "../../task/index.js";
 import { abbreviateGitIds, displayGitId, gitIdsInRow, lifecycleWord, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
@@ -9,17 +12,17 @@ function relativeAge(source: string | null, observedAt: string): string | null {
   return ageText(source, observedAt);
 }
 
-function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): string {
-  const rows = catalog.rows;
+export function renderAkumaCatalogue(list: AkumaList, archetype: string | null): string {
+  const rows = list.rows;
   if (rows.length === 0) {
     return emptyCatalogue("akuma");
   }
-  const lines = [catalog.archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(catalog.archetype)}`, ""];
+  const lines = [archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(archetype)}`, ""];
   for (const row of rows) {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
-    const lifeAge = relativeAge(lifeAt, catalog.observedAt);
-    const activityAge = relativeAge(activityAt, catalog.observedAt);
+    const lifeAge = relativeAge(lifeAt, list.observedAt);
+    const activityAge = relativeAge(activityAt, list.observedAt);
     const ages = [
       ...(lifeAge === null ? [] : [lifeAge]),
       ...(activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
@@ -29,7 +32,7 @@ function renderAkumaCatalog(catalog: Extract<Catalog, { kind: "akuma" }>): strin
       `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
     );
   }
-  if (catalog.hasMore) lines.push("…");
+  if (list.hasMore) lines.push("…");
   return lines.join("\n");
 }
 
@@ -37,12 +40,12 @@ function formatAge(source: string, observedAt: string): string {
   return ageText(source, observedAt, "future");
 }
 
-function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>): string {
+export function renderContractCatalogue(list: ContractList): string {
   const abbreviations = abbreviateGitIds([
-    ...(catalog.state === null ? [] : [catalog.state]),
-    ...catalog.rows.flatMap(gitIdsInRow),
+    ...(list.state === null ? [] : [list.state]),
+    ...list.rows.flatMap(gitIdsInRow),
   ]);
-  const rows = catalog.rows;
+  const rows = list.rows;
   if (rows.length === 0) return emptyCatalogue("contracts");
   const header = "CONTRACTS // recent";
   const blocks = rows.map((row) => {
@@ -59,7 +62,7 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
           ? row.abandonNote
           : undefined;
     const lines = [
-      `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, catalog.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
+      `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, list.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
       `  ${terminal ? outcome : progressStrip(row)}`,
       ...(testimony === undefined
         ? []
@@ -76,40 +79,38 @@ function renderContractCatalog(catalog: Extract<Catalog, { kind: "contracts" }>)
     ];
     return lines.join("\n");
   });
-  return [header, ...(blocks.length === 0 ? [] : ["", ...blocks]), ...(catalog.hasMore ? ["…"] : [])].join("\n");
+  return [header, ...(blocks.length === 0 ? [] : ["", ...blocks]), ...(list.hasMore ? ["…"] : [])].join("\n");
 }
-export function renderCatalogText(catalog: Catalog): string {
-  if (catalog.kind === "tasks") {
-    const namespace = catalog.namespace ?? [];
-    const scope = namespace.length === 0 ? "root" : `namespace ${namespace.join("/")}`;
-    const head = taskFrameHead("tasks", scope);
-    if (catalog.rows.length === 0) return emptyCatalogue("tasks");
-    return [
-      head,
-      ...catalog.rows.map(
-        (row) =>
-          `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
-      ),
-      ...(catalog.hasMore ? ["…"] : []),
-    ].join("\n");
-  }
-  if (catalog.kind === "contracts") return renderContractCatalog(catalog);
-  if (catalog.kind === "archetypes") {
-    const head = "AKUMA NAMES // available";
-    if (catalog.rows.length === 0) return emptyCatalogue("akuma names");
-    return [
-      head,
-      ...(catalog.rows.length === 0
-        ? []
-        : [
-            "",
-            ...catalog.rows.flatMap((row) => [
-              `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
-              ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
-            ]),
-            ...(catalog.hasMore ? ["…"] : []),
+
+export function renderArchetypeCatalogue(
+  list: Readonly<{ rows: readonly ArchetypeCatalogRow[]; hasMore: boolean }>,
+): string {
+  if (list.rows.length === 0) return emptyCatalogue("akuma names");
+  return [
+    "AKUMA NAMES // available",
+    ...(list.rows.length === 0
+      ? []
+      : [
+          "",
+          ...list.rows.flatMap((row) => [
+            `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
+            ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
           ]),
-    ].join("\n");
-  }
-  return renderAkumaCatalog(catalog);
+          ...(list.hasMore ? ["…"] : []),
+        ]),
+  ].join("\n");
+}
+
+export function renderTaskCatalogue(list: TaskPage<TaskRow>, namespace: readonly string[]): string {
+  const scope = namespace.length === 0 ? "root" : `namespace ${namespace.join("/")}`;
+  const head = taskFrameHead("tasks", scope);
+  if (list.rows.length === 0) return emptyCatalogue("tasks");
+  return [
+    head,
+    ...list.rows.map(
+      (row) =>
+        `${taskMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
+    ),
+    ...(list.hasMore ? ["…"] : []),
+  ].join("\n");
 }

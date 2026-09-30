@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { nuke, World } from "../src/index.js";
+import { nuke, World, type NukeResult } from "../src/index.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
@@ -13,9 +13,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
-import { parseArgv } from "../src/cli/parse.js";
 import { nukeExitCode, renderNukeText } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
@@ -27,7 +25,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { Tasks } from "../src/task/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
-import { captureOutput } from "./support/cli-fixtures.js";
+import { captureOutput, cliJson } from "./support/cli-fixtures.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
@@ -645,20 +643,14 @@ test("Git nuke removes proven unregistered appointed residue", async () => {
 test("CLI nuke returns native refusal outcomes for missing and mismatched confirmation", async () => {
   const world = await testWorld();
   try {
-    const bare = parseArgv(["-C", world, "nuke"]);
-    const mismatch = parseArgv(["-C", world, "nuke", "--confirm", "wrong"]);
-    if (!("command" in bare) || !("command" in mismatch))
-      throw new Error("nuke invocation did not parse as executable");
-    const required = await invoke(bare, { cwd: world });
-    const rejected = await invoke(mismatch, { cwd: world });
-    assert.ok("kind" in required && required.kind === "nuke");
-    assert.ok("kind" in rejected && rejected.kind === "nuke");
-    assert.equal(required.result.kind, "refused");
-    assert.equal(rejected.result.kind, "refused");
-    if (required.result.kind !== "refused" || rejected.result.kind !== "refused")
+    const required = await cliJson<NukeResult>(["-C", world, "nuke"], { cwd: world });
+    const rejected = await cliJson<NukeResult>(["-C", world, "nuke", "--confirm", "wrong"], { cwd: world });
+    assert.equal(required.value.kind, "refused");
+    assert.equal(rejected.value.kind, "refused");
+    if (required.value.kind !== "refused" || rejected.value.kind !== "refused")
       throw new Error("missing nuke refusal");
     assert.equal(
-      renderNukeText(required.result),
+      renderNukeText(required.value),
       [
         "× nuke refused",
         "  reason  nuke confirmation required",
@@ -667,7 +659,7 @@ test("CLI nuke returns native refusal outcomes for missing and mismatched confir
       ].join("\n"),
     );
     assert.equal(
-      renderNukeText(rejected.result),
+      renderNukeText(rejected.value),
       [
         "× nuke refused",
         "  reason  nuke confirmation mismatch",
@@ -676,8 +668,8 @@ test("CLI nuke returns native refusal outcomes for missing and mismatched confir
         `  option  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
     );
-    assert.deepEqual(required.result.refusal, { kind: "nuke-confirmation-required", world });
-    assert.deepEqual(rejected.result.refusal, { kind: "nuke-confirmation-mismatch", world, confirmation: "wrong" });
+    assert.deepEqual(required.value.refusal, { kind: "nuke-confirmation-required", world });
+    assert.deepEqual(rejected.value.refusal, { kind: "nuke-confirmation-mismatch", world, confirmation: "wrong" });
   } finally {
     rmSync(world, { recursive: true, force: true });
   }

@@ -83,7 +83,12 @@ changes the frozen subject set, observation retries, or the honest
 distinguishing of observed and unobserved subjects. Plural wait retries
 transient unreadable members during observation, but final output never
 fabricates completion. A wait reports its requested mode separately from its
-completed-or-deadline return reason. Tell and kill return their primary evidence; ask returns its input-bound observation.
+completed-or-deadline return reason. A wait input may also carry the same optional
+typed live-observation seam Ask already accepts: it reports the frozen selected
+set and each observation round to a caller-supplied viewer, changes no admission,
+completion, subject set, or final result, and is left honestly unavailable where
+the transport does not carry it. Tell and kill return their primary evidence; ask
+returns its input-bound observation.
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count

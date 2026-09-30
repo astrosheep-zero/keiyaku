@@ -1,9 +1,11 @@
-import { contractCatalog, contractRow, kanshiReport, receipt } from "./support/cli-fixtures.js";
+import { acceptedReceipt, contractCatalog, contractRow, kanshiReport } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { renderCatalogText } from "../src/cli/render/catalog.js";
+import { renderContractCatalogue } from "../src/cli/render/catalog.js";
+import { renderAccepted } from "../src/cli/render/contract.js";
+import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { renderBindDraftReceipt, renderRefusalFacts } from "../src/cli/render/refusal.js";
 import { entityLines, displayColumns, plumbFacts } from "../src/cli/render/terminal.js";
@@ -21,7 +23,6 @@ import {
 import { dependencyKeySet } from "../src/core/subject.js";
 import type { ContractHistory, Fact } from "../src/library/contract-types.js";
 import type { ContractKanshiRow } from "../src/kanshi/index.js";
-import { renderText } from "../src/cli/render/text.js";
 import type { Settings } from "../src/settings.js";
 import {
   activityAkumaRow,
@@ -224,7 +225,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
     workspace: { kind: "worktree", path: "/repo/.keiyaku/wt/history" },
     events: facts.map((fact) => ({ source: "journal", fact })),
   };
-  const output = renderText({ kind: "contract-history", history, full: true });
+  const output = renderContractHistory(history, { full: true });
   assert.equal(
     output,
     [
@@ -263,7 +264,7 @@ const verifiedRow = (): ContractKanshiRow =>
 test("terminal catalogue and Kanshi cards do not repeat unattached verification", () => {
   const row = verifiedRow();
   const catalog = contractCatalog([row]);
-  assert.doesNotMatch(renderCatalogText(catalog), /verification/u);
+  assert.doesNotMatch(renderContractCatalogue(catalog), /verification/u);
 
   const report = kanshiReport({
     kind: "present",
@@ -304,7 +305,7 @@ test("selected delivered Kanshi folds matching verification into the integration
     kind: "present",
     value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
   });
-  const catalogText = renderCatalogText(catalog);
+  const catalogText = renderContractCatalogue(catalog);
   assert.doesNotMatch(catalogText, /integration result|predecessor|verification/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
   assert.equal((selected.match(/^  integration result  4444444 · verification satisfied$/gmu) ?? []).length, 1);
@@ -340,7 +341,7 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
     kind: "present",
     value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
   });
-  const catalogText = renderCatalogText(catalog);
+  const catalogText = renderContractCatalogue(catalog);
   assert.doesNotMatch(catalogText, /integration result|verification/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
   assert.match(selected, /(?:^|\n)  integration result  4444444$/mu);
@@ -352,33 +353,34 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
 
 test("audit separates its observation outcome from complete candidate coordinates", () => {
   const path = `src/${"long-directory/".repeat(8)}file.ts`;
-  const output = renderText(
-    receipt({
-      verb: "audit",
-      contract: contractId("kei/audit"),
-      head: contractHead("private-head"),
-      report: {
-        candidate: {
-          kind: "ready",
-          workspace: { kind: "worktree", path: "/worktree" },
-          identity: {
-            tenderSnapshot: snapshotId("a".repeat(40)),
-            integration: {
-              predecessor: snapshotId("b".repeat(40)),
-              snapshot: snapshotId("c".repeat(40)),
-              changeId: changeId("d".repeat(40)),
-            },
-            method: "squash",
-            policy: { requireBranchesToBeUpToDate: false },
+  const auditOutcome = acceptedReceipt({
+    operation: "audit",
+    contract: contractId("kei/audit"),
+    head: contractHead("private-head"),
+    facts: [],
+    effects: [],
+    pending: [],
+    value: {
+      candidate: {
+        kind: "ready",
+        workspace: { kind: "worktree", path: "/worktree" },
+        identity: {
+          tenderSnapshot: snapshotId("a".repeat(40)),
+          integration: {
+            predecessor: snapshotId("b".repeat(40)),
+            snapshot: snapshotId("c".repeat(40)),
+            changeId: changeId("d".repeat(40)),
           },
-          scope: { filesChanged: 1, insertions: 2, deletions: 3, paths: [path] },
+          method: "squash",
+          policy: { requireBranchesToBeUpToDate: false },
         },
-        verification: { kind: "not-run" },
-        target: { kind: "not-observed" },
+        scope: { filesChanged: 1, insertions: 2, deletions: 3, paths: [path] },
       },
-    }),
-    { columns: 80, color: false },
-  );
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
+    },
+  });
+  const output = renderAccepted(auditOutcome, { columns: 80, color: false });
   assert.equal(
     output,
     [

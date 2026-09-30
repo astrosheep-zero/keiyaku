@@ -1,497 +1,633 @@
-import {
-  CliUsageError,
-  isBlankInput,
-  TASK_FAMILY_USAGE_GUIDE,
-  unknownCommandGuide,
-  type CliUsageGuide,
-} from "../usage.js";
+import { CliUsageError, isBlankInput } from "../usage.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
+import type { ParsedTaskCommand } from "./task-grammar.js";
 import {
-  parseTaskQueryExpression,
-  validateTaskLimit,
-  validateTaskParent,
-  type TaskQueryExpression,
-} from "./task-query.js";
+  Tasks,
+  taskRowViewLimit,
+  type TaskBatchResult,
+  type TaskDetail,
+  type TaskId,
+  type TaskMutationResult,
+  type TaskPriority,
+  type TaskQuerySort,
+  type TaskState,
+  type TaskCompositionResult,
+  type TaskUpdateResult,
+} from "../../task/index.js";
+import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
+import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
+import { displayContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import type { CliRuntime } from "../runtime.js";
+import type { CliCoordinates } from "../coordinates.js";
+import {
+  renderTaskCompose,
+  renderTaskContext,
+  renderTaskDoctor,
+  renderTaskFailure,
+  renderTaskIncompleteDiagnostic,
+  renderTaskLifecycle,
+  renderTaskList,
+  renderTaskMutation,
+  renderTaskShow,
+  renderTaskTree,
+  renderTaskUpdate,
+  taskExitCode,
+  type TaskListScope,
+  type TaskShowResult,
+} from "../render/task.js";
+import { actorFromEdge } from "../actor.js";
+import type { TaskQueryExpression } from "./task-query.js";
+export { isTaskAction, parseTaskCommand, renderTaskHelp, taskUsageGuide } from "./task-grammar.js";
 
-export type TaskAction =
-  | "add"
-  | "show"
-  | "ls"
-  | "ready"
-  | "blocked"
-  | "tree"
-  | "doctor"
-  | "update"
-  | "query"
-  | "start"
-  | "stop"
-  | "hold"
-  | "resume"
-  | "done"
-  | "drop"
-  | "context"
-  | "compose";
-type TaskFlagValue = string | true | readonly string[];
-type TaskStdin = "document" | "body" | "append" | "note" | "compose";
+// ---------------------------------------------------------------------------
+// Leaf dispatch: acquisition, one public SDK invocation, direct rendering
+// ---------------------------------------------------------------------------
 
-export type ParsedTaskCommand = Readonly<{
-  command: "task";
-  action: TaskAction;
-  output: "text" | "json";
-  positionals: readonly string[];
-  flags: Readonly<Record<string, TaskFlagValue>>;
-  stdin?: TaskStdin;
-  where?: TaskQueryExpression;
+type TaskProduct = ReturnType<typeof Tasks.of>;
+type TaskContext = Readonly<{ directory: string; boundary: string; writeRoot?: string; managed?: boolean }>;
+
+type TaskInput = Readonly<{
+  tasks: TaskProduct;
+  command: ParsedTaskCommand;
+  runtime: CliRuntime;
+  context: TaskContext;
+  actor?: string;
+  current?: readonly string[];
+  stdin?: string;
+  composeMarkdown?: string;
+  composeNamespace?: readonly string[];
 }>;
 
-type TaskCommandSpec = Readonly<{
-  arity: readonly [minimum: number, maximum: number];
-  flags: Readonly<Record<string, "boolean" | "value" | "repeat">>;
-  stdin?: "document" | "compose";
-  usage: string;
-  purpose: string;
-  details?: string;
-}>;
-
-const COMMON = { json: "boolean" } as const;
-const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
-  add: {
-    arity: [0, 1],
-    stdin: "document",
-    flags: {
-      ...COMMON,
-      namespace: "value",
-      state: "value",
-      priority: "value",
-      needs: "repeat",
-      parent: "value",
-      supersedes: "repeat",
-      relates: "repeat",
-      body: "value",
-      note: "value",
-      actor: "value",
-    },
-    usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
-  [--state open|in_progress|on_hold|done|drop]
-  [--note <text>] [--actor <actor>]
-  [--needs <TaskId>]... [--parent <TaskId>]
-  [--supersedes <TaskId>]... [--relates <TaskId>]...
-  [--body <text>]
-task add [--namespace <ns>] [--actor <actor>] -`,
-    purpose: "Create a Task from flags or a Task document on stdin.",
-    details:
-      "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
-  },
-  show: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task show <TaskId>...",
-    purpose: "Read one or more Tasks and their relationships.",
-  },
-  ls: {
-    arity: [0, 1],
-    flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
-    usage: "task ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>]",
-    purpose: "List Tasks in the selected namespace.",
-    details: [
-      "With no selector, lists the current directory Task context.",
-      "task/ selects the root namespace; --world lists every namespace in the current Task world.",
-    ].join("\n"),
-  },
-  ready: {
-    arity: [0, 0],
-    flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "task ready [--world] [--parent <TaskId>] [--limit <n>]",
-    purpose: "List open Tasks whose every dependency is complete or dropped.",
-    details: "--world lists every namespace in the current Task world.",
-  },
-  blocked: {
-    arity: [0, 0],
-    flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "task blocked [--world] [--parent <TaskId>] [--limit <n>]",
-    purpose: "List Tasks with unmet dependencies.",
-    details: "--world lists every namespace in the current Task world.",
-  },
-  query: {
-    arity: [0, 0],
-    flags: {
-      ...COMMON,
-      where: "value",
-      world: "boolean",
-      closed: "boolean",
-      all: "boolean",
-      sort: "value",
-      limit: "value",
-    },
-    usage: `task query [--where <expression>] [--closed | --all] [--world]
-  [--sort priority|created|updated|id] [--limit <n>]`,
-    purpose: "Filter and sort Tasks with a boolean expression.",
-    details: [
-      "fields: state priority title id parent under needs blocks ready blocked created updated",
-      "operators: = != < > <= >= ~ and or not ( )",
-      "sort: priority and created ascend; updated descends; id is lexical. Default: priority.",
-      "--world lists every namespace in the current Task world.",
-      "By default only active Tasks match; --closed selects terminal Tasks, --all includes both.",
-      "examples:",
-      "  keiyaku task query --where 'priority <= 1 and ready' --world",
-      "  keiyaku task query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
-    ].join("\n"),
-  },
-  tree: {
-    arity: [1, 1],
-    flags: COMMON,
-    usage: "task tree <TaskId>",
-    purpose: "Show a Task and its parent/child breakdown.",
-  },
-  doctor: {
-    arity: [0, 0],
-    flags: COMMON,
-    usage: "task doctor",
-    purpose: "Check Tasks for inconsistencies without changing them.",
-  },
-  update: {
-    arity: [1, 1],
-    flags: {
-      ...COMMON,
-      title: "value",
-      body: "value",
-      append: "value",
-      note: "value",
-      priority: "value",
-      needs: "repeat",
-      "drop-needs": "repeat",
-      parent: "value",
-      "no-parent": "boolean",
-      supersedes: "repeat",
-      "drop-supersedes": "repeat",
-      relates: "repeat",
-      "drop-relates": "repeat",
-    },
-    usage: `task update <TaskId> [--title <text>] [--body <text>|- | --append <text>]
-  [--note <text>]
-  [--priority 0..3] [--needs <TaskId>]... [--drop-needs <TaskId>]...
-  [--parent <TaskId> | --no-parent]
-  [--supersedes <TaskId>]... [--drop-supersedes <TaskId>]...
-  [--relates <TaskId>]... [--drop-relates <TaskId>]...`,
-    purpose: "Change a Task's fields and relationships.",
-    details: [
-      "--body replaces the body; --append adds text after it, separated by a newline when needed.",
-      "--body - reads replacement body text from stdin.",
-    ].join("\n"),
-  },
-  start: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task start <TaskId>...",
-    purpose: "Move one or more open Tasks into progress.",
-  },
-  stop: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task stop <TaskId>...",
-    purpose: "Return one or more in-progress Tasks to open.",
-  },
-  hold: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task hold <TaskId>...",
-    purpose: "Put one or more Tasks on hold.",
-  },
-  resume: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task resume <TaskId>...",
-    purpose: "Return one or more held Tasks to open.",
-  },
-  done: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: { ...COMMON, note: "value" },
-    usage: "task done <TaskId>... [--note <text>]",
-    purpose: "Mark one or more Tasks done.",
-  },
-  drop: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: { ...COMMON, note: "value" },
-    usage: "task drop <TaskId>... [--note <text>]",
-    purpose: "Mark one or more Tasks as no longer needed.",
-  },
-  context: {
-    arity: [0, 1],
-    flags: COMMON,
-    usage: "task context [<namespace>]",
-    purpose: "Set or read the default Task namespace for this directory.",
-    details: "Omit <namespace> to read the current context; use / to reset it to the root namespace.",
-  },
-  compose: {
-    arity: [0, 0],
-    stdin: "compose",
-    flags: { ...COMMON, actor: "value", plan: "boolean" },
-    usage: "task compose [--actor <actor>] [--plan] -",
-    purpose: "Create or update several Tasks from one document, with an optional preview.",
-    details: [
-      "nodes: + <Title> creates; @task/<id> modifies a pre-existing Task",
-      "properties: as = <alias>; state = open|in_progress|on_hold|done|drop; pri = 0..3; parent = <ref>|empty",
-      "relations: needs|supersedes|relates with =, +=, or -=",
-      "references: @task/... is pre-existing; ^alias is new in this document",
-      "body: body = clears; body <<TOKEN reads exact content to TOKEN",
-      "TOKEN: [A-Z][A-Z0-9_]* with length 3..32",
-      "example:",
-      "  ns=feature",
-      "  + Parent",
-      "  as = parent",
-      "  pri = 1",
-      "  body <<BODY",
-      "  Exact body bytes.",
-      "  BODY",
-      "  + Child",
-      "  parent = ^parent",
-    ].join("\n"),
-  },
-};
-
-export function isTaskAction(value: string | undefined): value is TaskAction {
-  return value !== undefined && Object.hasOwn(TASK_COMMAND_SPECS, value);
+function value(command: ParsedTaskCommand, name: string): string | undefined {
+  const item = command.flags[name];
+  return typeof item === "string" ? item : undefined;
+}
+function values(command: ParsedTaskCommand, name: string): readonly string[] | undefined {
+  const item = command.flags[name];
+  return Array.isArray(item) ? item : undefined;
+}
+function namespace(raw: string | undefined): readonly string[] | undefined {
+  return raw === undefined ? undefined : raw === "/" ? [] : raw.split("/");
+}
+function priority(raw: string | undefined): TaskPriority | undefined {
+  if (raw === undefined) return undefined;
+  return Number(raw) as TaskPriority;
+}
+function ids(items: readonly string[] | undefined): readonly TaskId[] | undefined {
+  return items as readonly TaskId[] | undefined;
+}
+function limit(command: ParsedTaskCommand): number | undefined {
+  const raw = value(command, "limit");
+  return raw === undefined ? undefined : Number(raw);
 }
 
-export function renderTaskHelp(action?: TaskAction): string {
-  if (action !== undefined) {
-    const spec = TASK_COMMAND_SPECS[action];
-    return `${spec.purpose}\n\n${renderTaskUsage(action)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
-  }
-  return [
-    "usage  keiyaku task <command> ...",
-    "",
-    "commands:",
-    ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) =>
-      spec.usage
-        .split("\n")
-        .map((line) => `  ${line}`)
-        .concat(`    ${spec.purpose}`),
-    ),
-  ].join("\n");
-}
-
-export function renderTaskUsage(action: TaskAction): string {
-  return TASK_COMMAND_SPECS[action].usage
-    .split("\n")
-    .map((line, index) => {
-      if (index === 0 || line.trimStart().startsWith("task ")) {
-        const command = line.trimStart().startsWith("task ") ? `keiyaku ${line.trim()}` : `keiyaku ${line}`;
-        return `${index === 0 ? "usage  " : "      "}${command}`;
-      }
-      return `      ${line.trim()}`;
-    })
-    .join("\n");
-}
-
-function taskUsage(action: TaskAction): string {
-  const lines = TASK_COMMAND_SPECS[action].usage.split("\n");
-  return lines
-    .map((line, index) => {
-      if (index === 0 || line.trimStart().startsWith("task ")) return `keiyaku ${line.trim()}`;
-      return `           ${line.trim()}`;
-    })
-    .join("\n");
-}
-
-export function taskUsageGuide(action: TaskAction): CliUsageGuide {
-  return {
-    scope: `keiyaku task ${action}`,
-    accepts: taskUsage(action),
-    help: `keiyaku task ${action} --help`,
-  };
-}
-
-function setFlag(
-  flags: Record<string, TaskFlagValue>,
-  name: string,
-  kind: "boolean" | "value" | "repeat",
-  value: string | undefined,
-  fail: (message: string) => never,
-): void {
-  if (flags[name] !== undefined && kind !== "repeat") fail(`duplicate option: --${name}`);
-  if (kind === "boolean") {
-    flags[name] = true;
-    return;
-  }
-  if (value === undefined) fail(`--${name} requires a value`);
-  if (isBlankInput(value)) fail(`--${name} requires a nonblank value`);
-  if (kind === "repeat") {
-    const current = flags[name];
-    flags[name] = [...(Array.isArray(current) ? current : []), value];
-  } else flags[name] = value;
-}
-
-type ScannedTask = Readonly<{
-  positionals: readonly string[];
-  flags: Readonly<Record<string, TaskFlagValue>>;
-  stdin?: TaskStdin;
-}>;
-
-function scanTaskOption(
-  input: Readonly<{
-    action: TaskAction;
-    spec: TaskCommandSpec;
-    argv: readonly string[];
-    index: number;
-    flags: Record<string, TaskFlagValue>;
-    stdin?: TaskStdin;
-  }>,
-  fail: (message: string) => never,
-): Readonly<{ index: number; stdin?: TaskStdin }> {
-  const token = input.argv[input.index]!,
-    name = token.slice(2),
-    kind = input.spec.flags[name];
-  if (kind === undefined) fail(`option ${token} is not valid for task ${input.action}`);
-  const next = kind === "boolean" ? undefined : input.argv[input.index + 1];
-  if (next === "-" && input.action === "update" && name === "body") {
-    if (input.stdin !== undefined) fail("stdin marker '-' may appear only once");
-    input.flags[name] = "";
-    return { index: input.index + 1, stdin: name };
-  }
-  if (kind !== "boolean" && (next === undefined || next.startsWith("--") || next === "-"))
-    fail(`--${name} requires a value`);
-  setFlag(input.flags, name, kind, next, fail);
-  return {
-    index: input.index + (kind === "boolean" ? 0 : 1),
-    ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
-  };
-}
-
-function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (message: string) => never): ScannedTask {
-  const spec = TASK_COMMAND_SPECS[action],
-    positionals: string[] = [],
-    flags: Record<string, TaskFlagValue> = {};
-  let stdin: TaskStdin | undefined;
-  let positionalOnly = false;
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!positionalOnly && token === "--") {
-      positionalOnly = true;
-      continue;
-    }
-    if (!positionalOnly && token === "-") {
-      if (spec.stdin === undefined) fail("stdin marker '-' is not valid here");
-      if (stdin !== undefined) fail("stdin marker '-' may appear only once");
-      stdin = spec.stdin;
-      continue;
-    }
-    if (positionalOnly || !token.startsWith("--")) {
-      if (isBlankInput(token)) fail(`task ${action} requires a nonblank value`);
-      positionals.push(token);
-      continue;
-    }
-    const scanned = scanTaskOption(
-      { action, spec, argv, index, flags, ...(stdin === undefined ? {} : { stdin }) },
-      fail,
-    );
-    index = scanned.index;
-    stdin = scanned.stdin;
-  }
-  return { positionals, flags, ...(stdin === undefined ? {} : { stdin }) };
-}
-
-function validateUpdate(scanned: ScannedTask, fail: (message: string) => never): void {
-  const flags = scanned.flags;
-  if (flags.body !== undefined && flags.append !== undefined) fail("--body and --append are mutually exclusive");
-  if (flags.parent !== undefined && flags["no-parent"] === true)
-    fail("--parent and --no-parent are mutually exclusive");
-  if (Object.keys(flags).every((name) => name === "json")) fail("task update requires at least one patch option");
-}
-
-function validateTaskReadFlags(
-  action: TaskAction,
-  flags: Readonly<Record<string, TaskFlagValue>>,
-  fail: (message: string) => never,
-): void {
-  if ((action === "ls" || action === "query") && flags.closed === true && flags.all === true)
-    fail("--closed and --all are mutually exclusive");
-  if (action === "ls" && flags.world === true) {
-    // An explicit selector is checked below, after positional shape is known.
-  }
-  if (typeof flags.limit === "string") {
-    try {
-      validateTaskLimit(flags.limit);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-  }
+function validateTaskRowView(command: ParsedTaskCommand): void {
   if (
-    typeof flags.sort === "string" &&
-    flags.sort !== "priority" &&
-    flags.sort !== "created" &&
-    flags.sort !== "updated" &&
-    flags.sort !== "id"
-  ) {
-    fail("--sort must be priority, created, updated, or id");
-  }
-  if ((action === "ready" || action === "blocked") && typeof flags.parent === "string") {
-    try {
-      validateTaskParent(flags.parent);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-  }
-}
-
-function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (message: string) => never): void {
-  const spec = TASK_COMMAND_SPECS[action],
-    { positionals, flags, stdin } = scanned;
-  if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1])
-    fail(`task ${action} has invalid positional arguments`);
-  if (action === "add" && (stdin === "document") === (positionals.length === 1))
-    fail("task add requires either TITLE or '-' input");
-  if (
-    action === "add" &&
-    stdin === "document" &&
-    Object.keys(flags).some((name) => name !== "json" && name !== "namespace" && name !== "actor")
+    command.action === "ls" ||
+    command.action === "ready" ||
+    command.action === "blocked" ||
+    command.action === "query"
   )
-    fail("task add document input owns its creation fields");
-  if (action === "compose" && stdin !== "compose") fail("task compose requires '-' input");
-  if (action === "ls" && positionals.length === 1) {
-    const selector = positionals[0]!;
-    if (selector !== "task/" && (!selector.startsWith("task/") || !selector.endsWith("/")))
-      fail(`invalid Task namespace selector: ${selector}`);
-    if (selector !== "task/") {
-      try {
-        parseTaskNamespaceSelector(selector);
-      } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-      }
-    }
-    if (flags.world === true) fail("--world cannot be combined with an explicit Task namespace selector");
-  }
-  validateTaskReadFlags(action, flags, fail);
-  if (action === "update") validateUpdate(scanned, fail);
+    taskRowViewLimit(limit(command));
 }
 
-export function parseTaskCommand(argv: readonly string[]): ParsedTaskCommand {
-  const candidate = argv[0];
-  if (!isTaskAction(candidate)) {
-    throw new CliUsageError(
-      `unknown task command: ${candidate ?? ""}`,
-      unknownCommandGuide(TASK_FAMILY_USAGE_GUIDE, candidate ?? ""),
+function explicitListNamespace(command: ParsedTaskCommand): readonly string[] | undefined {
+  return command.action === "ls" && command.positionals.length === 1
+    ? parseTaskNamespaceSelector(command.positionals[0]!)
+    : undefined;
+}
+
+function taskStdinDiagnostic(command: ParsedTaskCommand): string | undefined {
+  switch (command.stdin) {
+    case "document":
+      return "task add requires a nonblank stdin document";
+    case "compose":
+      return "task compose requires a nonblank stdin document";
+    case "body":
+      return "task update --body requires a nonblank value";
+    case "append":
+      return "task update --append requires a nonblank value";
+    case "note":
+      return "task update --note requires a nonblank value";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The shared output primitive: one native answer, its matching rendered text, and the native exit
+ * classifier's verdict. JSON writes the untouched native value; text writes the rendered lines.
+ */
+function emitTask<Result>(output: "text" | "json", result: Result, project: () => string, code: number): number {
+  if (output === "json") writeJson(result);
+  else writeStdout(project());
+  return code;
+}
+
+async function invokeAdd(input: TaskInput): Promise<TaskMutationResult> {
+  const { tasks, command, current = [] } = input;
+  const selectedNamespace = namespace(value(command, "namespace")) ?? current;
+  const actor = input.actor;
+  if (command.stdin === "document") {
+    return tasks.addDocument({
+      markdown: input.stdin!,
+      ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
+      ...(actor === undefined ? {} : { actor }),
+    });
+  }
+  const body = value(command, "body"),
+    note = value(command, "note"),
+    initialState = value(command, "state") as TaskState | undefined,
+    selectedPriority = priority(value(command, "priority"));
+  const needs = ids(values(command, "needs")),
+    parent = value(command, "parent");
+  const supersedes = ids(values(command, "supersedes")),
+    relates = ids(values(command, "relates"));
+  return tasks.add({
+    title: command.positionals[0]!,
+    ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
+    ...(body === undefined ? {} : { body }),
+    ...(note === undefined ? {} : { note }),
+    ...(initialState === undefined ? {} : { state: initialState }),
+    ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
+    ...(needs === undefined ? {} : { needs }),
+    ...(parent === undefined ? {} : { parent: parent as TaskId }),
+    ...(supersedes === undefined ? {} : { supersedes }),
+    ...(relates === undefined ? {} : { relates }),
+    ...(actor === undefined ? {} : { actor }),
+  });
+}
+
+function invokeUpdate(input: TaskInput): Promise<TaskUpdateResult> {
+  const { tasks, command, stdin } = input;
+  const body = command.stdin === "body" ? stdin : value(command, "body"),
+    appendBody = command.stdin === "append" ? stdin : value(command, "append");
+  const note = command.stdin === "note" ? stdin : value(command, "note");
+  const title = value(command, "title"),
+    selectedPriority = priority(value(command, "priority"));
+  const addNeeds = ids(values(command, "needs")),
+    dropNeeds = ids(values(command, "drop-needs"));
+  const parent = value(command, "parent"),
+    addSupersedes = ids(values(command, "supersedes"));
+  const dropSupersedes = ids(values(command, "drop-supersedes")),
+    addRelates = ids(values(command, "relates"));
+  const dropRelates = ids(values(command, "drop-relates"));
+  return tasks.task({ id: command.positionals[0]! }).update({
+    ...(title === undefined ? {} : { title }),
+    ...(body === undefined ? {} : { body }),
+    ...(appendBody === undefined ? {} : { appendBody }),
+    ...(note === undefined ? {} : { note }),
+    ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
+    ...(addNeeds === undefined ? {} : { addNeeds }),
+    ...(dropNeeds === undefined ? {} : { dropNeeds }),
+    ...(command.flags["no-parent"] === true
+      ? { parent: null }
+      : parent === undefined
+        ? {}
+        : { parent: parent as TaskId }),
+    ...(addSupersedes === undefined ? {} : { addSupersedes }),
+    ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
+    ...(addRelates === undefined ? {} : { addRelates }),
+    ...(dropRelates === undefined ? {} : { dropRelates }),
+  });
+}
+
+function readScope(
+  command: ParsedTaskCommand,
+  current?: readonly string[],
+): Readonly<{ scope: "world" }> | Readonly<{ namespace: readonly string[] }> {
+  return command.flags.world === true ? { scope: "world" } : { namespace: current ?? [] };
+}
+
+function querySelection(command: ParsedTaskCommand): TaskQueryExpression | undefined {
+  const state = (value: "done" | "drop", operator: "=" | "!="): TaskQueryExpression => ({
+    kind: "predicate",
+    predicate: { field: "state", operator, value },
+  });
+  const selection: TaskQueryExpression =
+    command.flags.all === true
+      ? { kind: "predicate", predicate: { field: "priority", operator: ">=", value: 0 } }
+      : command.flags.closed === true
+        ? { kind: "or", terms: [state("done", "="), state("drop", "=")] }
+        : { kind: "and", terms: [state("done", "!="), state("drop", "!=")] };
+  return command.where === undefined ? selection : { kind: "and", terms: [selection, command.where] };
+}
+
+/** One addressed read per caller-supplied id, in caller order; the native null survives to JSON. */
+async function runShow(command: ParsedTaskCommand, tasks: TaskProduct): Promise<number> {
+  const handles = command.positionals.map((taskId) => tasks.task({ id: taskId }).id);
+  const details: (TaskDetail | null)[] = [];
+  for (const id of handles) details.push(await tasks.task({ id }).read());
+  const missing = details.findIndex((detail) => detail === null);
+  const code = missing >= 0 ? 1 : 0;
+  if (command.output === "json") {
+    writeJson(handles.length === 1 ? details[0] : details);
+    return code;
+  }
+  if (missing >= 0) {
+    const refusal: TaskShowResult = { kind: "refused", refusal: { kind: "task-missing", taskId: handles[missing]! } };
+    return emitTask(command.output, refusal, () => renderTaskShow(refusal, displayContext()), code);
+  }
+  const found = details.filter((detail): detail is TaskDetail => detail !== null);
+  const result: TaskShowResult = found.length === 1 ? found[0]! : found;
+  return emitTask(command.output, result, () => renderTaskShow(result, displayContext()), code);
+}
+
+/** Presentation-only list scope the leaf acquired, never part of the native answer. */
+function listPresentation(command: ParsedTaskCommand): TaskListScope {
+  if (command.flags.world === true) return "world";
+  const first = command.positionals[0];
+  return command.action === "ls" && first !== undefined ? { namespace: first } : "current";
+}
+
+async function runRead(input: TaskInput): Promise<number> {
+  const { tasks, command, current } = input;
+  const id = command.positionals[0]!;
+  const scope = listPresentation(command);
+  switch (command.action) {
+    case "ls": {
+      const result = await tasks.list({
+        selection: command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active",
+        ...(explicitListNamespace(command) === undefined
+          ? readScope(command, current)
+          : { namespace: explicitListNamespace(command)! }),
+        ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
+      });
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskList("ls", scope, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "ready": {
+      const result = await tasks.ready({
+        ...readScope(command, current),
+        ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }),
+        ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
+      });
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskList("ready", scope, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "blocked": {
+      const result = await tasks.blocked({
+        ...readScope(command, current),
+        ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }),
+        ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
+      });
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskList("blocked", scope, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "query": {
+      const result = await tasks.query({
+        ...(querySelection(command) === undefined ? {} : { where: querySelection(command)! }),
+        ...readScope(command, current),
+        ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }),
+        ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
+      });
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskList("query", scope, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "tree": {
+      const result = await tasks.task({ id }).tree();
+      return emitTask(command.output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
+    }
+    case "doctor": {
+      const result = await tasks.doctor();
+      return emitTask(command.output, result, () => renderTaskDoctor(result), taskExitCode(result));
+    }
+    default:
+      throw new Error(`task action is not a read: ${command.action}`);
+  }
+}
+
+function isWorldObservationAction(command: ParsedTaskCommand): boolean {
+  return (
+    command.action === "ls" ||
+    command.action === "ready" ||
+    command.action === "blocked" ||
+    command.action === "query" ||
+    command.action === "doctor"
+  );
+}
+
+function missingTask(id: string): Extract<TaskMutationResult, { kind: "refused" }> {
+  return { kind: "refused", refusal: { kind: "task-missing", taskId: id as TaskId } };
+}
+
+/**
+ * The one CLI edge mapping a Task action with no World to its native refusal answer, then through
+ * the matching action renderer and the native exit classifier.
+ */
+function missingWorld(command: ParsedTaskCommand): number {
+  const output = command.output;
+  if (command.action === "show") {
+    // An addressed missing read keeps its native null in JSON; text refuses without partial output.
+    if (output === "json") {
+      writeJson(command.positionals.length === 1 ? null : command.positionals.map(() => null));
+      return 1;
+    }
+    const refusal: TaskShowResult = missingTask(command.positionals[0]!);
+    return emitTask(output, refusal, () => renderTaskShow(refusal, displayContext()), 1);
+  }
+  if (isWorldObservationAction(command) || (command.action === "compose" && command.flags.plan === true)) {
+    if (output === "json") writeJson({ kind: "absent" });
+    else writeStdout("task world absent");
+    return 1;
+  }
+  if (command.action === "context") {
+    const result = { kind: "accepted" as const, value: { namespace: [], source: "default-root" as const } };
+    return emitTask(output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+  }
+  if (command.action === "tree") {
+    const result = missingTask(command.positionals[0]!);
+    return emitTask(output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
+  }
+  if (command.action === "update") {
+    const result = missingTask(command.positionals[0]!);
+    return emitTask(output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
+  }
+  if (
+    command.action === "start" ||
+    command.action === "stop" ||
+    command.action === "hold" ||
+    command.action === "resume"
+  ) {
+    if (command.positionals.length === 1) {
+      const result = missingTask(command.positionals[0]!);
+      return emitTask(
+        output,
+        result,
+        () => renderTaskMutation(command.action, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    const result = {
+      items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missingTask(id) })),
+    };
+    return emitTask(
+      output,
+      result,
+      () => renderTaskLifecycle(command.action, result, displayContext()),
+      taskExitCode(result),
     );
   }
-  const action = candidate;
-  const fail = (message: string): never => {
-    throw new CliUsageError(message, taskUsageGuide(action));
-  };
-  const scanned = scanTaskArgv(action, argv, fail);
-  validateTaskScan(action, scanned, fail);
-  let where: TaskQueryExpression | undefined;
-  if (action === "query" && typeof scanned.flags.where === "string") {
-    try {
-      where = parseTaskQueryExpression(scanned.flags.where);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
+  if (command.action === "done" || command.action === "drop") {
+    const result = {
+      items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missingTask(id) })),
+    };
+    return emitTask(
+      output,
+      result,
+      () => renderTaskLifecycle(command.action, result, displayContext()),
+      taskExitCode(result),
+    );
+  }
+  throw new Error(`task action has no missing-world answer: ${command.action}`);
+}
+
+/**
+ * One compose execution outcome: JSON keeps the untouched native value, while an incomplete text
+ * answer recovers its draft and puts the diagnostic on stderr.
+ */
+function emitCompose(output: "text" | "json", result: TaskCompositionResult): number {
+  if (output === "json") {
+    writeJson(result);
+    return taskExitCode(result);
+  }
+  if (result.kind === "incomplete") {
+    const diagnostic = renderTaskIncompleteDiagnostic(result);
+    if (diagnostic.length > 0) writeStderr(diagnostic);
+    process.stdout.write(result.draft);
+    return taskExitCode(result);
+  }
+  writeStdout(renderTaskCompose(result, displayContext()));
+  return taskExitCode(result);
+}
+
+/** One plural Task lifecycle answer: every verb shares the same batch shape and renderer. */
+async function runBatchLifecycle(
+  tasks: TaskProduct,
+  command: ParsedTaskCommand,
+  verb: "hold" | "done" | "drop",
+): Promise<number> {
+  const note = value(command, "note");
+  const result = await tasks.batch({
+    verb,
+    ids: command.positionals,
+    ...(note === undefined ? {} : { note }),
+  });
+  return emitTask(
+    command.output,
+    result,
+    () => renderTaskLifecycle(verb, result, displayContext()),
+    taskExitCode(result),
+  );
+}
+
+async function runMutation(input: TaskInput): Promise<number> {
+  const { tasks, command, current, stdin, composeMarkdown, composeNamespace } = input;
+  if (isWorldObservationAction(command) || command.action === "tree") return await runRead(input);
+  switch (command.action) {
+    case "add": {
+      const result = await invokeAdd(input);
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskMutation("add", result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "update": {
+      const result = await invokeUpdate(input);
+      return emitTask(command.output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
+    }
+    case "start":
+    case "stop":
+    case "resume": {
+      const result = await invokeLifecycle(tasks, command.positionals, command.positionals[0]!, command.action);
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskLifecycle(command.action, result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "hold":
+    case "done":
+    case "drop":
+      return await runBatchLifecycle(tasks, command, command.action);
+    case "context": {
+      const selected = namespace(command.positionals[0]);
+      if (selected !== undefined) {
+        await writeTaskNamespaceContext(input.context.writeRoot ?? input.context.directory, selected);
+        const resolved = await resolveTaskNamespaceContext(input.context);
+        if (typeof resolved === "object" && "kind" in resolved) {
+          const result = { kind: "refused" as const, refusal: resolved };
+          return emitTask(
+            command.output,
+            result,
+            () => renderTaskContext(result, displayContext()),
+            taskExitCode(result),
+          );
+        }
+        const result = { kind: "accepted" as const, value: resolved };
+        return emitTask(
+          command.output,
+          result,
+          () => renderTaskContext(result, displayContext()),
+          taskExitCode(result),
+        );
+      }
+      const result = {
+        kind: "accepted" as const,
+        value: { namespace: current ?? [], source: "default-root" as const },
+      };
+      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+    }
+    case "compose": {
+      const result = await tasks.compose({
+        markdown: composeMarkdown ?? stdin ?? "",
+        namespace: composeNamespace ?? current ?? [],
+        ...(input.actor === undefined ? {} : { actor: input.actor }),
+        ...(command.flags.plan === true ? { plan: true } : {}),
+      });
+      return emitCompose(command.output, result);
+    }
+    default:
+      throw new Error(`task action has no invocation: ${command.action}`);
+  }
+}
+
+function invokeLifecycle(
+  tasks: TaskProduct,
+  taskIds: readonly string[],
+  firstId: string,
+  verb: "start" | "stop" | "hold" | "resume",
+): Promise<TaskMutationResult | TaskBatchResult> {
+  return taskIds.length === 1 ? tasks.task({ id: firstId })[verb]() : tasks.batch({ verb, ids: taskIds });
+}
+
+function establishesWorld(command: ParsedTaskCommand): boolean {
+  return (
+    command.action === "add" ||
+    (command.action === "compose" && command.flags.plan !== true) ||
+    (command.action === "context" && command.positionals.length > 0)
+  );
+}
+
+/**
+ * One CLI edge turning a namespace-context refusal into the addressed action's native refusal
+ * answer, rendered through the matching action renderer and classified natively.
+ */
+function refuseNamespace(
+  command: ParsedTaskCommand,
+  refusal: Readonly<{ kind: "invalid-namespace-context"; path: string }>,
+): number {
+  const result = { kind: "refused" as const, refusal };
+  switch (command.action) {
+    case "ls":
+    case "ready":
+    case "blocked":
+    case "query": {
+      const action = command.action;
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskList(action, listPresentation(command), result, displayContext()),
+        taskExitCode(result),
+      );
+    }
+    case "add":
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskMutation("add", result, displayContext()),
+        taskExitCode(result),
+      );
+    case "context":
+      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+    case "compose":
+      return emitTask(
+        command.output,
+        result,
+        () => renderTaskFailure("compose", result, displayContext()),
+        taskExitCode(result),
+      );
+    default:
+      throw new Error(`task action has no namespace refusal: ${command.action}`);
+  }
+}
+
+// eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
+export async function runTaskCommand(
+  command: ParsedTaskCommand,
+  coordinates: CliCoordinates,
+  runtime: CliRuntime,
+): Promise<number> {
+  validateTaskRowView(command);
+  const stdinDiagnostic = taskStdinDiagnostic(command);
+  const stdin = stdinDiagnostic === undefined ? undefined : await runtime.readStdin();
+  if (stdinDiagnostic !== undefined && isBlankInput(stdin ?? "")) throw new CliUsageError(stdinDiagnostic);
+  const planOnly = command.action === "compose" && command.flags.plan === true;
+  const composeMarkdown = command.action === "compose" ? stdin : undefined;
+  const composition = composeMarkdown === undefined ? undefined : taskCompositionNamespaceHeader(composeMarkdown);
+  const explicitNamespace =
+    command.action === "add"
+      ? namespace(value(command, "namespace"))
+      : command.action === "compose" && composition?.specified
+        ? composition.namespace
+        : undefined;
+  const actor = actorFromEdge(
+    typeof command.flags.actor === "string" ? command.flags.actor : undefined,
+    runtime.environment,
+  );
+  const world =
+    coordinates.world ??
+    (planOnly ? coordinates.candidateWorld : establishesWorld(command) ? await coordinates.establishWorld() : null);
+  if (world === null) return missingWorld(command);
+  const tasks = Tasks.of(world, { execution: runtime.execution });
+  const contextSensitive =
+    command.action === "context" ||
+    (command.action === "add" && explicitNamespace === undefined) ||
+    (command.action === "compose" && composition?.specified !== true) ||
+    (((command.action === "ls" && explicitListNamespace(command) === undefined) ||
+      command.action === "ready" ||
+      command.action === "blocked" ||
+      command.action === "query") &&
+      command.flags.world !== true);
+  let current: readonly string[] | undefined;
+  if (contextSensitive) {
+    const resolved = await resolveTaskNamespaceContext(coordinates.taskContext);
+    if (typeof resolved === "object" && "kind" in resolved) return refuseNamespace(command, resolved);
+    current = resolved.namespace;
+    if (command.action === "context" && command.positionals.length === 0) {
+      const result = { kind: "accepted" as const, value: resolved };
+      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
     }
   }
-  return {
-    command: "task",
-    action,
-    output: scanned.flags.json === true ? "json" : "text",
-    ...scanned,
-    ...(where === undefined ? {} : { where }),
-  };
+  if (command.action === "show") return await runShow(command, tasks);
+  return await runMutation({
+    tasks,
+    command,
+    runtime,
+    context: coordinates.taskContext,
+    ...(actor === undefined ? {} : { actor }),
+    ...(current === undefined ? {} : { current }),
+    ...(stdin === undefined ? {} : { stdin }),
+    ...(composeMarkdown === undefined ? {} : { composeMarkdown }),
+    ...(explicitNamespace === undefined ? {} : { composeNamespace: explicitNamespace }),
+  });
 }
