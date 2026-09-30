@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -76,15 +77,15 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
     create: [appendCommand(log, "create\n", 100)],
     destroy: [appendCommand(log, "destroy\n")],
   };
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Concurrent hooks"),
     hooks,
-  });
-  const id = (await bound.keiyaku.state()).id;
+  }));
+  const id = (present(await bound.value.keiyaku.state())).id;
   const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
-  const reports = await Promise.all([bound.keiyaku.reconcile({ hooks }), bound.keiyaku.reconcile({ hooks })]);
+  const reports = await Promise.all([bound.value.keiyaku.reconcile({ hooks }), bound.value.keiyaku.reconcile({ hooks })]);
 
   assert.deepEqual(
     reports.map((report) => report.lag),
@@ -94,8 +95,8 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(existsSync(join(administration, "keiyaku", "hooks.json")), false);
 
-  const abandoned = await bound.keiyaku.abandon({ hooks });
-  assert.deepEqual(abandoned.lags, []);
+  const abandoned = await bound.value.keiyaku.abandon({ hooks });
+  assert.deepEqual(abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag), []);
   assert.deepEqual(lines(log), ["create", "destroy"]);
   assert.equal(existsSync(worktree), false);
   assert.equal(existsSync(administration), false);
@@ -130,18 +131,21 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
       },
     ],
   };
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Recovery around destroy hooks"),
     hooks,
-  });
-  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), (await bound.keiyaku.state()).id);
+  }));
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), (present(await bound.value.keiyaku.state())).id);
   const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
-  const abandoned = await bound.keiyaku.abandon({ hooks });
-  assert.notEqual(abandoned.recoverySnapshot, undefined);
-  const recovery = abandoned.recoverySnapshot!;
+  const abandoned = await bound.value.keiyaku.abandon({ hooks });
+  const recoveries = abandoned.effects.filter((effect) => effect.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot");
+  assert.equal(recoveries.length, 2);
+  const effect = recoveries.at(-1);
+  assert.ok(effect?.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot");
+  const recovery = effect.effect.snapshot;
   assert.equal(existsSync(worktree), false);
   assert.equal(repository.run(["show", `${recovery}:before-destroy-hook.txt`]), "initial bytes\n");
   assert.equal(repository.run(["show", `${recovery}:from-destroy-hook.txt`]), "hook bytes\n");
@@ -154,15 +158,15 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
 test("a reconcile queued on the effect lock reobserves terminal state before applying topology", async () => {
   const repository = repositoryWithMain();
   const git = await repositoryAt(repository.path);
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Terminal wins"),
     hooks: EMPTY_HOOKS,
-  });
-  const id = (await bound.keiyaku.state()).id;
+  }));
+  const id = (present(await bound.value.keiyaku.state())).id;
   const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
-  const pending = bound.keiyaku.reconcile();
+  const pending = bound.value.keiyaku.reconcile();
 
   const scope = await scopeOperation({ coordinate: repository.path });
   const terminal = await withGitDecodeChannel(scope, (channel) =>
@@ -183,7 +187,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
     false,
   );
   assert.equal(existsSync(worktree), false);
-  assert.equal((await bound.keiyaku.state()).terminal?.kind, "abandoned");
+  assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "abandoned");
 });
 
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
@@ -263,11 +267,11 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   );
   repository.run(["add", ".keiyaku/settings.json"]);
   repository.run(["commit", "--quiet", "-m", "scratch settings"]);
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody("Scratch cleanup"),
     hooks: EMPTY_HOOKS,
-  });
+  }));
   const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
   const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
   const module = new URL("../src/git/scratch.js", import.meta.url).href;
@@ -300,7 +304,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
 
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot));
   try {
-    const report = await bound.keiyaku.reconcile();
+    const report = await bound.value.keiyaku.reconcile();
     assert.equal(
       report.effects.some(
         (effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed",

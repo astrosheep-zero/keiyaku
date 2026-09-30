@@ -1,4 +1,4 @@
-import type { ExecutionEvent } from "../../library/execution.js";
+import type { ExecutionObservation } from "../../library/keiyaku.js";
 import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
 
@@ -24,7 +24,7 @@ function elapsed(ms: number): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${seconds % 60}s`;
 }
 
-function phaseDetail(observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"]): string {
+function phaseDetail(observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"]): string {
   if (observation.phase === "declaration") return `declaration ${observation.index ?? "?"}/${observation.total ?? "?"}`;
   return observation.name === undefined ? observation.phase : `${observation.phase} · ${safeText(observation.name)}`;
 }
@@ -35,7 +35,7 @@ function phaseMark(outcome: string | undefined): "✓" | "×" | "?" {
 }
 
 function phaseFinishLine(
-  observation: Extract<Extract<ExecutionEvent, { kind: "verification" }>["observation"], { kind: "phase" }>,
+  observation: Extract<Extract<ExecutionObservation, { kind: "verification" }>["observation"], { kind: "phase" }>,
 ): string {
   const facts = [
     phaseDetail(observation),
@@ -47,7 +47,7 @@ function phaseFinishLine(
 }
 
 function outputLines(
-  observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"] & Readonly<{ kind: "output" }>,
+  observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"] & Readonly<{ kind: "output" }>,
   context: TextRenderContext,
 ): readonly string[] {
   const output = boundedUtf8Prefix(observation.text);
@@ -77,7 +77,7 @@ class VerificationLiveOutput {
   }
 
   lines(
-    observation: Extract<ExecutionEvent, { kind: "verification" }>["observation"] & Readonly<{ kind: "output" }>,
+    observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"] & Readonly<{ kind: "output" }>,
     context: TextRenderContext,
   ): readonly string[] {
     const stream = observation.stream;
@@ -147,7 +147,7 @@ class VerificationLiveOutput {
  * output: the receipt names admitted facts once, and a stage start is a live-frame claim that must never freeze
  * into scrollback. Only completed verification facts and bounded live output survive here.
  */
-export function executionProgressLines(event: ExecutionEvent, context: TextRenderContext): readonly string[] {
+export function executionProgressLines(event: ExecutionObservation, context: TextRenderContext): readonly string[] {
   switch (event.kind) {
     case "admitted":
     case "stage":
@@ -181,7 +181,7 @@ export class ExecutionProgressRenderer {
     this.status = new StatusLine(input.stream, input);
   }
 
-  async consume(event: ExecutionEvent): Promise<void> {
+  async consume(event: ExecutionObservation): Promise<void> {
     if (event.kind === "verification") {
       await this.consumeVerification(event);
       return;
@@ -201,7 +201,7 @@ export class ExecutionProgressRenderer {
     this.status.finish(`verify  ${this.finalMark()} · ${duration}`);
   }
 
-  private async consumeVerification(event: Extract<ExecutionEvent, { kind: "verification" }>): Promise<void> {
+  private async consumeVerification(event: Extract<ExecutionObservation, { kind: "verification" }>): Promise<void> {
     const observation = event.observation;
     if (observation.kind === "output") {
       await this.write(this.liveOutput.lines(observation, this.input.context));
@@ -244,23 +244,31 @@ export class ExecutionProgressRenderer {
   }
 }
 
-export async function renderExecutionProgress(
-  events: AsyncIterable<ExecutionEvent>,
+/**
+ * One renderer fed directly by the invocation's observer; events keep transport order through a
+ * serialization chain, and a dead destination still aborts the live frame. There is no subscription
+ * queue and no second state machine.
+ */
+export function createExecutionProgressRenderer(
   input: ExecutionProgressOptions,
-): Promise<void> {
+): Readonly<{ observe(event: ExecutionObservation): void; finish(): Promise<void> }> {
   const renderer = new ExecutionProgressRenderer(input);
   const destination = watchDestination(input.stream);
-  const iterator = events[Symbol.asyncIterator]();
-  try {
-    for (;;) {
-      const next = await Promise.race([iterator.next(), destination.promise]);
-      if (next.done === true) break;
-      await renderer.consume(next.value);
-    }
-    renderer.finish();
-  } finally {
-    destination.detach();
-  }
+  let chain: Promise<void> = Promise.resolve();
+  return {
+    observe: (event: ExecutionObservation) => {
+      chain = chain.then(() => renderer.consume(event));
+      chain.catch(() => undefined);
+    },
+    finish: async () => {
+      try {
+        await Promise.race([destination.promise, chain]);
+        renderer.finish();
+      } finally {
+        destination.detach();
+      }
+    },
+  };
 }
 
 /** Reject when the destination dies while the producer is still owned. */

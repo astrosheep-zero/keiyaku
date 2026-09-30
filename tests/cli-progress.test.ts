@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import test from "node:test";
-import type { ExecutionEvent } from "../src/library/execution.js";
+import type { ExecutionObservation } from "../src/index.js";
 import { contractId, documentKey, entryUlid, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
 import { ExecutionProgressRenderer, executionProgressLines } from "../src/cli/render/execution-progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
@@ -32,7 +32,7 @@ const claimedFact: JournalEntry = {
   data: { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX") },
 };
 
-function admittedEvent(fact: JournalEntry): ExecutionEvent {
+function admittedEvent(fact: JournalEntry): ExecutionObservation {
   return { kind: "admitted", contractId: fact.contract, fact };
 }
 
@@ -63,26 +63,26 @@ function phase(
     elapsedMs?: number;
     outcome?: string;
   }>,
-): ExecutionEvent {
+): ExecutionObservation {
   return {
     kind: "verification",
     contractId: "kei/progress" as never,
     snapshot: "snapshot" as never,
     observation: { kind: "phase", cwd: "/scratch", state, ...values },
-  } as ExecutionEvent;
+  } as ExecutionObservation;
 }
 
-function output(text: string): ExecutionEvent {
+function output(text: string): ExecutionObservation {
   return outputFor("stdout", text);
 }
 
-function outputFor(stream: "stdout" | "stderr", text: string): ExecutionEvent {
+function outputFor(stream: "stdout" | "stderr", text: string): ExecutionObservation {
   return {
     kind: "verification",
     contractId: "kei/progress" as never,
     snapshot: "snapshot" as never,
     observation: { kind: "output", phase: "declaration", cwd: "/scratch", index: 1, total: 1, stream, text },
-  } as ExecutionEvent;
+  } as ExecutionObservation;
 }
 
 async function renderDeclarationOutput(chunks: readonly string[]): Promise<string> {
@@ -130,7 +130,7 @@ test("admitted and stage progress never render outside a live frame", () => {
   assert.deepEqual(executionProgressLines(admitted, { columns: 80, color: false }), []);
   for (const stage of ["placement", "continuation", "reconciliation"] as const) {
     for (const state of ["started", "finished"] as const) {
-      const event = { kind: "stage", contractId: "kei/progress", stage, state } as ExecutionEvent;
+      const event = { kind: "stage", contractId: "kei/progress", stage, state } as ExecutionObservation;
       assert.deepEqual(executionProgressLines(event, { columns: 80, color: false }), []);
     }
   }
@@ -145,13 +145,13 @@ test("stage and admitted events never render on a TTY either", async () => {
     contractId: "kei/progress",
     stage: "placement",
     state: "started",
-  } as ExecutionEvent);
+  } as ExecutionObservation);
   await renderer.consume({
     kind: "stage",
     contractId: "kei/progress",
     stage: "placement",
     state: "finished",
-  } as ExecutionEvent);
+  } as ExecutionObservation);
   renderer.finish();
   assert.equal(stream.text, "");
 });
@@ -167,14 +167,16 @@ test("non-TTY progress does not repeat a phase coordinate and never prints a pha
 
 test("non-TTY progress emits sparse boundaries, bounded output, and no key-value vocabulary", async () => {
   const stream = new CapturedStream(false);
-  async function* events(): AsyncGenerator<ExecutionEvent> {
+  async function* events(): AsyncGenerator<ExecutionObservation> {
     yield phase("started", { phase: "setup", name: "npm ci" });
     yield output("x".repeat(5_000));
     yield phase("finished", { phase: "setup", name: "npm ci", outcome: "ok", elapsedMs: 42_000 });
     yield { kind: "progress-dropped", count: 2 };
   }
 
-  await writeExecutionProgress(events(), stream);
+  const progress = await writeExecutionProgress(stream);
+  for await (const event of events()) progress.observe(event);
+  await progress.finish();
 
   assert.match(stream.text, /stdout\n  x/u);
   assert.match(stream.text, /\[live output truncated\]/u);
@@ -203,7 +205,7 @@ test("live output consolidates adjacent chunks by stream and resets at the next 
       stream: "stderr",
       text: "stderr one",
     },
-  } as ExecutionEvent);
+  } as ExecutionObservation);
   await renderer.consume(output("stdout three"));
   await renderer.consume(phase("finished", { phase: "setup", name: "npm ci", outcome: "ok" }));
   await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));

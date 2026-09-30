@@ -1,4 +1,4 @@
-import type { ExecutionCleanup, ExecutionStop, ExecutionReceipt } from "../../index.js";
+import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope } from "../../index.js";
 import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
 import type { Lag } from "../result.js";
 import { renderRefusalFacts } from "./refusal.js";
@@ -359,29 +359,41 @@ export function executionCleanupLines(
       receiptRow(lines, " ", "cleanup snapshot", [{ text: issue.snapshot, opaque: true }], columns);
     if (issue.kind === "verification-cleanup") lines.push(...cleanupLines(issue.failure, columns));
     else if (issue.kind === "worktree-leak") lines.push(...leakLines(issue.leak, columns));
+    else if (issue.kind === "decode-channel-retirement") receiptPayload(lines, "cleanup", issue.diagnostic);
     else lines.push(...seatCloseLines([issue.failure], columns));
   }
   return lines;
 }
 
 export function executionFailureLines(
-  receipt: ExecutionReceipt,
+  receipt: PartialOutcomeEnvelope,
   category: string,
   diagnostic: string,
   columns: number,
 ): readonly string[] {
+  const contract = "contract" in receipt ? receipt.contract : undefined;
+  const stops: ExecutionStop[] = [];
+  const cleanup: ExecutionCleanup[] = [];
+  for (const effect of receipt.effects) {
+    if (effect.kind === "execution-stopped")
+      stops.push({
+        kind: "execution-stopped",
+        contractId: effect.contract,
+        stage: effect.stage,
+        reason: effect.reason,
+        diagnostic: effect.diagnostic,
+      });
+    else if (effect.kind === "cleanup") cleanup.push(effect.issue);
+  }
   const lines: string[] = [];
   receiptRow(
     lines,
     "!",
     "execution failed after admission",
-    [{ text: category }, { text: receipt.contractId, opaque: true }],
+    [{ text: category }, ...(contract === undefined ? [] : [{ text: contract, opaque: true }])],
     columns,
   );
   receiptPayload(lines, "reason", diagnostic);
-  lines.push(
-    ...executionStopLines(receipt.executionStops, columns),
-    ...executionCleanupLines(receipt.cleanup, columns, receipt.contractId),
-  );
+  lines.push(...executionStopLines(stops, columns), ...executionCleanupLines(cleanup, columns, contract));
   return lines;
 }

@@ -1,3 +1,4 @@
+import { present } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -108,7 +109,7 @@ async function admitClaimWithoutFollow(
   await contract.deliver({ includeDirty: true });
   await contract.review({ verdict: "unsatisfied" });
   const git = await cachedRepositoryAt(repository.path);
-  const contractId = (await contract.state()).id;
+  const contractId = (present(await contract.state())).id;
   const state = (await observeContract(git, contractId)).state;
   const subject = state?.attestations.at(-1)?.data.subject;
   assert.ok(subject);
@@ -160,10 +161,10 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
   test("claimed target observation is current at integration and drifts after rewind", async () => {
     const { repository, contract } = await ordinaryCandidateFixture();
     await contract.deliver();
-    const delivery = (await contract.state()).delivery?.data;
+    const delivery = (present(await contract.state())).delivery?.data;
     if (delivery === undefined) throw new Error("delivery was not recorded");
     const repo = await cachedRepoAt(repository.path);
-    const contractId = (await contract.state()).id;
+    const contractId = (present(await contract.state())).id;
     const placed = await Keiyaku.with().observe({ repo, id: contractId });
     assert.ok(placed.kind === "present", "expected placed.kind = \"present\"");
     assert.deepEqual(placed.row.targetObservation, { head: delivery.integration.snapshot, drift: false });
@@ -185,11 +186,11 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       assert.ok(completion, "expected a completed placement");
       assert.equal(delivered.value.placement, undefined);
       assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-      assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+      assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "checkout-retained").map(({ path, target }) => ({ path, target })), [{ path: repository.path, target: "refs/heads/main" }]);
       assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
       assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
       assert.equal(readFileSync(lock, "utf8"), "foreign writer\n");
-      const observed = await observeContract(await cachedRepositoryAt(repository.path), (await contract.state()).id);
+      const observed = await observeContract(await cachedRepositoryAt(repository.path), (present(await contract.state())).id);
       assert.equal(observed.state?.terminal?.kind, "claimed");
     } finally {
       rmSync(lock);
@@ -207,7 +208,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(completion, "expected a completed placement");
     assert.equal(delivered.value.placement, undefined);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+    assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "checkout-retained").map(({ path, target }) => ({ path, target })), [{ path: repository.path, target: "refs/heads/main" }]);
     assert.equal(repository.run(["show", ":delivered.txt"]), "staged conflict\n");
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
   });
@@ -227,7 +228,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(completion, "expected a completed placement");
     assert.equal(delivered.value.placement, undefined);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+    assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "checkout-retained").map(({ path, target }) => ({ path, target })), [{ path: repository.path, target: "refs/heads/main" }]);
     assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "unresolved\n");
   });

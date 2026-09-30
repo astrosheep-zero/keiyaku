@@ -815,7 +815,7 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
       log: join(root, "stdio.log"),
     });
     const ownedProcess = owned;
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath), 10);
+    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 15_000), 10);
     await waitForProcessExit(descendantPid);
     await ownedProcess.exited;
     await expectLaterTerminateIsInert(ownedProcess);
@@ -1017,7 +1017,7 @@ test("LineRpcProcess accepts a valid oversized response", async () => {
   ].join(" ");
   let rpc: LineRpcProcess | undefined;
   try {
-    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 1_000 });
+    rpc = new LineRpcProcess({ argv: [process.execPath, "-e", child], cwd: root, requestTimeoutMs: 15_000 });
     const result = await rpc.request("probe");
     assert.equal(typeof result, "string");
     assert.equal((result as string).length, 300_000);

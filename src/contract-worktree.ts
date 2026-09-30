@@ -216,3 +216,16 @@ export async function projectContractWorktree(
     contractNamespace(state.id),
   );
 }
+
+export function decodeContractFileEffect(value: unknown): ContractFileEffect {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new Error("malformed contract-file effect");
+  const object = value as Record<string, unknown>;
+  if (object.kind !== "contract-file") throw new Error("malformed contract-file effect");
+  if (Object.keys(object).some((key) => key !== "kind" && key !== "path" && key !== "action"))
+    throw new Error("malformed contract-file effect");
+  if (typeof object.path !== "string" || object.path.trim() === "") throw new Error("malformed contract-file effect");
+  if (typeof object.action !== "string" || object.action.trim() === "")
+    throw new Error("malformed contract-file effect");
+  return { kind: "contract-file", path: object.path, action: object.action as ContractFileEffect["action"] };
+}

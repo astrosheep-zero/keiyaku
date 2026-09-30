@@ -37,7 +37,7 @@ type ReviewPreparationRefusal =
       contractId: import("../core/facts/types.js").ContractId;
     }>
   | import("../git/tender.js").DirtyWorkspaceRefusal;
-type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
+export type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
 type ReviewOperationInput = MutationOperationInput &
   Readonly<{
     verdict: AttestationData["verdict"];

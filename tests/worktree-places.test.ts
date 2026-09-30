@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import {
@@ -31,7 +32,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { invoke as invokeRaw, type InvocationResult } from "../src/cli/invoke.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
 import { Tasks } from "../src/task/index.js";
 import { World } from "../src/world.js";
 import { cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
@@ -260,41 +261,41 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       timeoutMs: 5_000,
     };
     const hooks = { create: [], destroy: [destroy] };
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Release order"),
       workspace: "worktree",
       hooks,
-    });
+    }));
     const git = await repositoryAt(repository.path);
-    const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
+    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
-    const failed = await bound.keiyaku.abandon({ hooks });
-    assert.ok(failed.lags.length > 0);
+    const failed = await bound.value.keiyaku.abandon({ hooks });
+    assert.ok(failed.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).length > 0);
     assert.equal(existsSync(appointment.path), true);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), appointment);
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), appointment);
     const other = await appointManagedWorktrees(git, [OTHER]);
     assert.equal(
       other.byContract.get(OTHER)?.place,
       expectedForwardAllocation(OTHER_START_INDEX, new Set([appointment.place])),
     );
     writeFileSync(ready, "ready\n");
-    const released = await bound.keiyaku.reconcile({ hooks, retryHooks: true });
+    const released = await bound.value.keiyaku.reconcile({ hooks, retryHooks: true });
     assert.deepEqual(released.lag, []);
     assert.equal(existsSync(appointment.path), false);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), { kind: "unappointed" });
   });
 
   test("Git removal failure retains custody and a fresh reconcile retries successfully", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Retry removal"),
       workspace: "worktree",
       hooks: { create: [], destroy: [] },
-    });
+    }));
     const git = await repositoryAt(repository.path);
-    const state = await bound.keiyaku.state();
+    const state = present(await bound.value.keiyaku.state());
     const appointment = await readManagedWorktreeAppointment(git, state.id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
@@ -312,7 +313,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
     await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
       const first = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
-      assert.ok(first.lags.some((lag) => lag.kind === "worktree-retained"));
+      assert.ok(first.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "worktree-retained"));
       assert.equal(repository.run(custody), beforeRefs);
       assert.equal(existsSync(appointment.path), true);
       assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
@@ -326,14 +327,14 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("a dangling symlink recreated after Git removal is retained as physical residue", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Dangling path"),
       workspace: "worktree",
       hooks: { create: [], destroy: [] },
-    });
+    }));
     const git = await repositoryAt(repository.path);
-    const state = await bound.keiyaku.state();
+    const state = present(await bound.value.keiyaku.state());
     const appointment = await readManagedWorktreeAppointment(git, state.id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
@@ -357,11 +358,11 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       },
       async (gitPath) => {
         const retained = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
-        assert.ok(retained.lags.some((lag) => lag.kind === "worktree-retained"));
+        assert.ok(retained.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "worktree-retained"));
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
         assert.equal(repository.run(custody), beforeRefs);
         assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
-        const replay = await bound.keiyaku.reconcile();
+        const replay = await bound.value.keiyaku.reconcile();
         assert.ok(replay.lag.some((lag) => lag.kind === "worktree-retained"));
         assert.equal(replay.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), false);
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
@@ -376,18 +377,18 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const tasks = Tasks.of(await World.at(repository.path));
     const added = await tasks.add({ title: "Independent task", priority: 0 });
     assert.equal(added.kind, "accepted");
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Corrupt register"),
       workspace: "worktree",
       hooks: { create: [], destroy: [] },
-    });
+    }));
     const git = await repositoryAt(repository.path);
     const path = placeRegisterPath(git);
     writeFileSync(path, '{"version":1}\n');
-    await assert.rejects(() => bound.keiyaku.deliver(), AuthorityCorruptionError);
-    await assert.rejects(() => bound.keiyaku.review({ verdict: "satisfied" }), AuthorityCorruptionError);
-    await assert.rejects(() => bound.keiyaku.reconcile(), AuthorityCorruptionError);
+    await assert.rejects(() => bound.value.keiyaku.deliver(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(() => bound.value.keiyaku.review({ verdict: "satisfied" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(() => bound.value.keiyaku.reconcile(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     const status = await invoke(parseArgv(["-C", repository.path, "status"]));
     assert.ok(status.kind === "status", "expected status.kind = \"status\"");
     assert.ok(status.report.contracts.kind === "failed", "expected status.report.contracts.kind = \"failed\"");
@@ -411,18 +412,18 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     mkdirSync(target);
     const worktrees = repository.run(["worktree", "list", "--porcelain"]);
     try {
-      const bound = await Keiyaku.with().bind({
+      const bound = accepted(await Keiyaku.with().bind({
         repo: await Repo.at({ path: repository.path }),
         markdown: contractBody("Unrealized"),
         workspace: "worktree",
         hooks: { create: [], destroy: [] },
-      });
-      assert.ok(bound.lags.some((lag) => lag.kind === "contract-file-failed"));
+      }));
+      assert.ok(bound.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "contract-file-failed"));
       assert.equal(existsSync(worktreePath(git, "atlantis")), false);
       assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
       assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
       rmSync(target, { recursive: true });
-      assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
+      assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), { kind: "unappointed" });
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
@@ -430,33 +431,33 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("release write failure keeps the appointment after physical removal", async () => {
     const repository = repositoryWithCommit();
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody("Release write"),
       workspace: "worktree",
       hooks: { create: [], destroy: [] },
-    });
+    }));
     const git = await repositoryAt(repository.path);
-    const appointment = await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id);
+    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const bytes = readFileSync(placeRegisterPath(git), "utf8");
     const directory = join(git.commonDirectory, "keiyaku");
     chmodSync(directory, 0o555);
     let abandoned;
     try {
-      abandoned = await bound.keiyaku.abandon();
+      abandoned = await bound.value.keiyaku.abandon();
     } finally {
       chmodSync(directory, 0o755);
     }
     assert.equal(existsSync(appointment.path), false);
-    assert.ok(abandoned.lags.some((lag) => lag.kind === "contract-file-failed"));
+    assert.ok(abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "contract-file-failed"));
     assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), appointment);
-    const repaired = await bound.keiyaku.reconcile();
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), appointment);
+    const repaired = await bound.value.keiyaku.reconcile();
     assert.deepEqual(repaired.lag, []);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
-    const again = await bound.keiyaku.reconcile();
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), { kind: "unappointed" });
+    const again = await bound.value.keiyaku.reconcile();
     assert.deepEqual(again.lag, []);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (await bound.keiyaku.state()).id), { kind: "unappointed" });
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.keiyaku.state())).id), { kind: "unappointed" });
   });
 });

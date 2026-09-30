@@ -1,3 +1,4 @@
+import { present, accepted } from "./support/library-verbs.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -146,19 +147,19 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
   test("same-Contract cross-process amends decide from the queued fresh state", async () => {
     const repository = repositoryWithMain();
     const contract = await bind(repository);
-    const source = (await contract.state()).terms;
+    const source = (present(await contract.state())).terms;
     const capability = await cachedRepositoryAt(repository.path);
     const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(capability), mode: "immediate" });
     const workers = [
       crossProcessAmend({
         repository: repository.path,
-        contractId: (await contract.state()).id,
+        contractId: (present(await contract.state())).id,
         markdown: "## Replace: Context\nfirst source terms\n",
         source,
       }),
       crossProcessAmend({
         repository: repository.path,
-        contractId: (await contract.state()).id,
+        contractId: (present(await contract.state())).id,
         markdown: "## Replace: Objective\nsecond source terms\n",
         source,
       }),
@@ -177,7 +178,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
     const outcomes = await Promise.all(workers.map(({ completed }) => completed));
     assert.equal(outcomes.filter((outcome) => outcome.includes("accepted")).length, 1);
     assert.equal(outcomes.filter((outcome) => outcome.includes("failed:terms-moved")).length, 1);
-    const body = decodeContractDocument((await contract.state()).terms.document.bytes);
+    const body = decodeContractDocument((present(await contract.state())).terms.document.bytes);
     assert.ok(body.context.trim() === "first source terms" || body.objective.trim() === "second source terms");
 
 
@@ -186,18 +187,18 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
   test("reintegration observes and publishes only after the shared private-state seat", async () => {
     const repository = repositoryWithMain();
     repository.run(["branch", "release"]);
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: document(),
       target: "refs/heads/release",
       workspace: "worktree",
       gates: ["reviewed"],
-    });
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
+    }));
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.keiyaku.state())).id);
     writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-    await bound.keiyaku.deliver();
+    await bound.value.keiyaku.deliver();
     writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
     repository.run(["add", "target.txt"]);
     repository.run(["commit", "--quiet", "-m", "move target"]);
@@ -210,7 +211,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
       path: privateStatePublicationSeatPath(capability),
       mode: "immediate",
     });
-    const writerIds = await Promise.all(writers.map(async (contract) => (await contract.state()).id));
+    const writerIds = await Promise.all(writers.map(async (contract) => (present(await contract.state())).id));
     const racingWriters = writers.map((_, index) =>
       crossProcessAmend({
         repository: repository.path,
@@ -222,7 +223,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
       reintegrateOperation({
         channel,
         repository: capability,
-        contractId: (await bound.keiyaku.state()).id,
+        contractId: (present(await bound.value.keiyaku.state())).id,
         target: "refs/heads/release",
       }),
     );

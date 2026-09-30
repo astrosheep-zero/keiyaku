@@ -3,20 +3,19 @@ import {
   Delivery,
   Repo,
   bodyRequestExecution,
-  executionReceipt,
-  projectMutationFinality,
+  KeiyakuError,
   type ContractId,
   type BindInput,
   type BindResult,
-  type Review,
+  type ReviewOutcome,
+  type DeliverOutcome,
+  type InvocationEffect,
+  type PendingSurface,
   type ReviewInput,
-  type MutationResult,
-  type ExecutionCleanup,
-  type ExecutionStop,
-  type ExecutionReceipt,
+  type PartialOutcomeEnvelope,
   type LocalContractComposition,
   type ContractObservation,
-  type RepoReconcileReport,
+
 } from "@astrosheep/keiyaku";
 
 declare const repo: Repo;
@@ -27,11 +26,22 @@ const input: BindInput = { repo, markdown, after: [id], gates: ["reviewed"] };
 const bound: Promise<BindResult> = Keiyaku.with().bind(input);
 const selected = Keiyaku.with().select({ repo, id });
 const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
-const reviewed: MutationResult<Review> = await selected.review(cancellable);
-const cleanup: readonly ExecutionCleanup[] = reviewed.cleanup;
-const stops: readonly ExecutionStop[] = reviewed.executionStops;
-const receipt: ExecutionReceipt | undefined = executionReceipt(new TypeError("failed"));
-projectMutationFinality(reviewed);
+const reviewed: ReviewOutcome = await selected.review(cancellable, { observe: async (event) => { void event.kind; } });
+const effects: readonly InvocationEffect[] = reviewed.effects;
+const pending: readonly PendingSurface[] = reviewed.pending;
+const failure = new KeiyakuError("internal", "failed", { cause: new TypeError("failed") });
+const receipt: PartialOutcomeEnvelope | undefined = failure.outcome;
+if (reviewed.kind === "accepted") {
+  reviewed.value.verification;
+  // @ts-expect-error cleanup belongs to the invocation, not the review value
+  reviewed.value.cleanup;
+}
+if (reviewed.kind === "refused") reviewed.refusal.kind;
+// @ts-expect-error only delivery can return handoff
+const reviewHandoff: ReviewOutcome = { ...reviewed, kind: "handoff" };
+declare const delivered: DeliverOutcome;
+if (delivered.kind === "accepted") { delivered.value.leading.fact; delivered.value.diff(); }
+if (delivered.kind === "handoff") delivered.value.handoffBase;
 
 const local: LocalContractComposition = {
   actor: "consumer",
@@ -44,9 +54,9 @@ Keiyaku.with({ execution }).select({ repo, id }).review(cancellable);
 
 const observed: ContractObservation = await Keiyaku.with().observe({ repo, id });
 if (observed.kind === "present") observed.row.gates.reports;
-declare const reconciled: RepoReconcileReport;
-if (reconciled.kind === "completed") reconciled.contracts;
-else reconciled.diagnostic;
+const reconciled = await selected.reconcile();
+reconciled.effects;
+reconciled.settlement;
 
 // Handles cannot be independently constructed outside their repository authority.
 // @ts-expect-error constructor is private
@@ -57,21 +67,14 @@ new Delivery();
 Repo.at(".");
 // @ts-expect-error a selected handle cannot switch repositories during an operation
 selected.review({ ...cancellable, repo });
-// @ts-expect-error cleanup belongs to the invocation, not the review value
-reviewed.value.cleanup;
-// @ts-expect-error a failed reconciliation cannot omit its reason
-const unreported: RepoReconcileReport = { kind: "world-observation-failed" };
-// @ts-expect-error a successful reconciliation must describe its contracts
-const incomplete: RepoReconcileReport = { kind: "completed" };
 // @ts-expect-error binding must contain Markdown or a fork source
 Keiyaku.with().bind({ repo });
 
 void bound;
-void cleanup;
-void stops;
+void effects;
+void pending;
 void receipt;
-void unreported;
-void incomplete;
+void reviewHandoff;
 
 // @ts-expect-error selectors require branded Contract identities
 Keiyaku.with().select({ repo, id: "kei/unbranded" });
@@ -85,3 +88,11 @@ repo.bind(input);
 (null as unknown as Delivery).review("satisfied");
 // @ts-expect-error abandonment takes an options object
 selected.abandon("manual");
+
+// @ts-expect-error removed subscription methods are not public
+selected.startDelivery();
+// @ts-expect-error retired result sidecars are not public
+reviewed.cleanup;
+// @ts-expect-error forwarding-specific retries do not belong to local bind
+const bindRetry: BindResult = { kind: "retry", operation: "bind", reason: { kind: "owner-reason-unavailable", diagnostic: "gone" }, facts: [], effects: [], pending: [] };
+void bindRetry;

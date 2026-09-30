@@ -23,8 +23,8 @@ import { localExecutionContext, type ExecutionContext } from "../akuma/requests.
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
-import type { Keiyaku } from "./contract-handle.js";
-import { seatForKeiyaku } from "./contract-handle.js";
+import type { Keiyaku } from "./keiyaku.js";
+import { seatForKeiyaku } from "./keiyaku.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type { AkumaStatus } from "../akuma/akuma.js";

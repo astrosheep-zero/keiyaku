@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
@@ -79,59 +80,59 @@ test("placement keeps post-bind Task edits and changes only state to done", asyn
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Edited completion");
   commitTasks(world);
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Edited completion"),
     workspace: "worktree",
     gates: [],
-  });
+  }));
   const authority = join(world.path, taskPath(taskId));
   const before = readFileSync(authority, "utf8");
   writeFileSync(authority, `${before}Manual edit after bind.\n`);
   writeFileSync(`${world.path}/edited.txt`, "edited\n");
 
-  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
 
   const after = readFileSync(authority, "utf8");
   assert.match(after, /Manual edit after bind\./u);
   assert.match(after, /^state: done$/mu);
   assert.match(after, new RegExp(`^createdAt: ${before.match(/createdAt: (.+)$/mu)![1]}$`, "mu"));
   assert.equal(await taskState(world.path, taskId), "done");
-  assert.deepEqual(delivered.settlementLags, []);
+  assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag), []);
 });
 
 test("reconcile replay of an owed completion is an idempotent no-op the second time", async () => {
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Replay completion", "drop");
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Replay completion"),
     workspace: "worktree",
     gates: [],
-  });
+  }));
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
-  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
 
-  assert.equal(delivered.settlementLags[0]?.surface, "task");
-  assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+  assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "task");
+  assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "claimed");
   assert.equal(await taskState(world.path, taskId), "drop");
   assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+    { version: 1, taskId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
   ]);
   replaceTaskState(world.path, taskId, "drop", "open");
 
-  const first = await bound.keiyaku.reconcile();
+  const first = await bound.value.keiyaku.reconcile();
   assert.deepEqual(first.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
   assert.deepEqual(first.settlement.lags, []);
   assert.equal(await taskState(world.path, taskId), "done");
   assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "released" },
+    { version: 1, taskId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "released" },
   ]);
 
-  const second = await bound.keiyaku.reconcile();
+  const second = await bound.value.keiyaku.reconcile();
   assert.deepEqual(second.settlement.actions, []);
   assert.deepEqual(second.settlement.lags, []);
   assert.equal(await taskState(world.path, taskId), "done");
@@ -144,18 +145,18 @@ test(
     const world = repository(),
       repo = await cachedRepoAt(world.path);
     const taskId = await task(world.path, "Settlement cleanup", "drop");
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo,
       task: taskId,
       markdown: document("Settlement cleanup"),
       workspace: "worktree",
       gates: [],
-    });
+    }));
     writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
-    const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
-    assert.equal(delivered.settlementLags[0]?.surface, "task");
+    const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+    assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "task");
     assert.deepEqual(await holders(world), [
-      { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+      { version: 1, taskId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
     ]);
     replaceTaskState(world.path, taskId, "drop", "open");
     assert.equal(await taskState(world.path, taskId), "open");
@@ -178,8 +179,8 @@ test(
       }
     };
     try {
-      const replayed = await bound.keiyaku.reconcile();
-      const state = await bound.keiyaku.state();
+      const replayed = await bound.value.keiyaku.reconcile();
+      const state = present(await bound.value.keiyaku.state());
       assert.deepEqual(replayed.settlement.actions, [{ kind: "task", taskId, action: "done" }]);
       assert.deepEqual(replayed.settlement.lags, [
         {
@@ -202,22 +203,22 @@ test("Settlement exact-read-backs an unknown TaskHolder release after external s
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const taskId = await task(world.path, "Unknown holder release", "drop");
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo,
     task: taskId,
     markdown: document("Unknown holder release"),
     workspace: "worktree",
     gates: [],
-  });
+  }));
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");
-  const delivered = acceptedDelivery(await bound.keiyaku.deliver({ includeDirty: true }));
-  assert.equal(delivered.settlementLags[0]?.surface, "task");
+  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+  assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "task");
   assert.deepEqual(await holders(world), [
-    { version: 1, taskId, contractId: (await bound.keiyaku.state()).id, disposition: "held" },
+    { version: 1, taskId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
   ]);
   replaceTaskState(world.path, taskId, "drop", "open");
   assert.equal(await taskState(world.path, taskId), "open");
-  const state = await bound.keiyaku.state();
+  const state = present(await bound.value.keiyaku.state());
 
   const git = await cachedRepositoryAt(world.path);
   const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(git), mode: "immediate" });

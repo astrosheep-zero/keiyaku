@@ -1,7 +1,8 @@
+import { present, accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { Keiyaku, KeiyakuRetry, Repo } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { applyAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { entryUlid, type ContractTerms } from "../src/core/facts/types.js";
@@ -30,15 +31,15 @@ test("two concurrent private-state binds both publish distinct accepted contract
   );
   assert.equal(results.length, writers);
   assert.ok(results.every((result) => result.kind === "accepted"));
-  const states = await Promise.all(results.map((result) => result.keiyaku.state()));
-  assert.equal(new Set(states.map((state) => state.id)).size, writers);
-  assert.ok(states.every((state) => state.head !== null));
+  const states = await Promise.all(results.map((result) => result.value.keiyaku.state()));
+  assert.equal(new Set(states.map((state) => present(state).id)).size, writers);
+  assert.ok(states.every((state) => present(state).head !== null));
 });
 
 test("a preparation spent by a concurrent publication restarts with a fresh attempt identity", async () => {
   const repository = repositoryWithMain();
   const bound = await bind(repository);
-  const id = (await bound.state()).id;
+  const id = (present(await bound.state())).id;
   const capability = await cachedRepositoryAt(repository.path);
   const headOf = async (channel: GitDecodeChannel) =>
     (await observeContractsForAdmissionAt(capability, channel, [id])).decision.get(id)?.head ?? null;
@@ -125,12 +126,12 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   }
   assert.ok(existsSync(stalling), "the bind must stall in its seat-external preparation");
   // Another independent bind must publish while the first still waits outside the seat.
-  const concurrent = await Keiyaku.with().bind({
+  const concurrent = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
-  });
+  }));
   assert.equal(concurrent.kind, "accepted");
   assert.equal(stalledBindSettled, false, "the stalled bind was still outside the seat");
   writeFileSync(release, "release\n");
@@ -142,8 +143,7 @@ test("an injected Git publication error still returns publication-failed", async
   const repository = repositoryWithMain();
   const contract = await bind(repository);
   const attempts = `${repository.path}/publication-attempts`;
-  await assert.rejects(
-    withGitShim(
+  const outcome = await withGitShim(
       [
         'if [ "$1" = "update-ref" ]; then',
         "  cat >/dev/null",
@@ -158,25 +158,20 @@ test("an injected Git publication error still returns publication-failed", async
         (
           await Keiyaku.with().select({
             repo: await Repo.at({ path: repository.path, gitPath }),
-            id: (await contract.state()).id,
+            id: (present(await contract.state())).id,
           })
         ).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
-    ),
-    (error: unknown) => {
-      assert.ok(error instanceof KeiyakuRetry, `expected KeiyakuRetry, got ${String(error)}`);
-      assert.equal(error.code, "publication-failed");
-      if (error.reason.kind === "publication-failed")
-        assert.match(error.reason.diagnostic, /forced hard publication failure/u);
-      return true;
-    },
-  );
+    );
+  assert.equal(outcome.kind, "retry");
+  assert.ok(outcome.kind === "retry" && outcome.reason.kind === "publication-failed");
+  assert.match(outcome.reason.diagnostic, /forced hard publication failure/u);
   assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
 });
 
 test("conflicting concurrent amends keep their typed business refusals", async () => {
   const repository = repositoryWithMain();
   const contract = await bind(repository);
-  const state = await contract.state();
+  const state = present(await contract.state());
   const id = state.id;
   const source: ContractTerms = state.terms;
   const capability = await cachedRepositoryAt(repository.path);

@@ -1,3 +1,4 @@
+import { present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -22,7 +23,7 @@ async function readyPlacementFixture() {
   await value.contract.deliver();
   await value.contract.review({ verdict: "unsatisfied" });
   const git = await cachedRepositoryAt(value.repository.path);
-  const subject = (await value.contract.state()).attestations.at(-1)!.data.subject;
+  const subject = (present(await value.contract.state())).attestations.at(-1)!.data.subject;
   await withGitDecodeChannel(git, async (channel) => {
     const result = await admitIntent(
       channel,
@@ -91,7 +92,7 @@ test("placement preparation leaves the publication seat free and rechecks journa
         if (mutation === "checkout") {
           assert.equal(result.kind, "accepted", "a dirty checkout must not veto placement");
           if (result.kind !== "accepted") return;
-          assert.equal((await contract.state()).terminal?.kind, "claimed");
+          assert.equal((present(await contract.state())).terminal?.kind, "claimed");
           assert.ok(result.physical?.lag.some((lag) => lag.kind === "target-checkout-retained"));
           assert.notEqual(repository.run(["rev-parse", "refs/heads/main"]), before);
           assert.equal(
@@ -102,7 +103,7 @@ test("placement preparation leaves the publication seat free and rechecks journa
           assert.equal(result.kind, "refused");
           if (result.kind !== "refused") assert.fail("stale preparation was accepted");
           assert.equal(result.refusal.kind, "terminal");
-          assert.equal((await contract.state()).terminal?.kind, "abandoned");
+          assert.equal((present(await contract.state())).terminal?.kind, "abandoned");
           assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
         }
       },

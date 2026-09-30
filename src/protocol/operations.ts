@@ -1,4 +1,4 @@
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import { readDeliveryDiff } from "../git/integration.js";
 import type { DirtyWorkspaceRefusal } from "../git/tender.js";
 import { currentBranch, observeContractAt } from "../git/observe.js";
@@ -102,7 +102,7 @@ type OperationInput = Readonly<{
   actor?: import("../core/facts/types.js").ActorId;
 }>;
 export type MutationOperationInput = OperationInput &
-  Readonly<{ channel: GitDecodeChannel; progress?: ExecutionProgress }>;
+  Readonly<{ channel: GitDecodeChannel; progress?: ProtocolProgress }>;
 
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
@@ -272,10 +272,9 @@ export async function documentsOperationAt(
   return withGitReadObservation(scope, channel, readDocuments);
 }
 
-export async function stateOperation(input: MutationOperationInput): Promise<ContractState> {
-  const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
-  if (state === null) throw new Error(`contract does not exist: ${input.contractId}`);
-  return state;
+/** A legitimately absent Contract is `null`; the caller maps absence to its own domain answer. */
+export async function stateOperation(input: MutationOperationInput): Promise<ContractState | null> {
+  return (await observeContractAt(input.scope, input.channel, input.contractId)).state;
 }
 
 export async function deliveryOperation(input: MutationOperationInput): Promise<DeliverData | null> {

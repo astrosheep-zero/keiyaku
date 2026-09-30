@@ -1,38 +1,21 @@
 /** @architectureCompositionRoot */
 import { rmdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { stopAkuma } from "../akuma/nuke.js";
-import { nukeGit } from "../git/nuke.js";
-import { appendPrivateStateSeatClose, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
+import { stopAkuma, AkumaResetStopError } from "../akuma/nuke.js";
+import { nukeGit, GitResetStopError } from "../git/nuke.js";
 import type { GitRepository } from "../git/process.js";
 import { nukeTask } from "../task/operations.js";
 import { World, type WorldRoot } from "../world.js";
-import { KeiyakuRefused } from "./refusal.js";
+import { isOperationalFailure } from "../protocol/progress.js";
 import { requireInput, requireMarkdown } from "./input.js";
+import { InvocationAccumulator, project, validated, type ResetOutcome, type ResetOwner } from "./outcome.js";
 
-export type NukeInput = Readonly<{
-  world: WorldRoot;
-  confirm?: string;
-}>;
-
-export type NukeResult =
-  | Readonly<{
-      kind: "success";
-      world: WorldRoot;
-      removed: Readonly<{ refs: number; worktrees: number; tasks: number }>;
-      seatClose?: readonly PrivateStateSeatCloseLag[];
-    }>
-  | Readonly<{
-      kind: "failed";
-      world: WorldRoot;
-      diagnostic: string;
-      seatClose?: readonly PrivateStateSeatCloseLag[];
-    }>;
-
+export type NukeInput = Readonly<{ world: WorldRoot; confirm?: string }>;
+export type NukeResult = ResetOutcome;
 type NukeGitOptions = Readonly<Pick<GitRepository, "onPrivateStateSeatContention" | "onPrivateStateSeatClose">>;
 
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function operational(error: unknown): error is Error {
+  return error instanceof AkumaResetStopError || error instanceof GitResetStopError || isOperationalFailure(error);
 }
 
 async function removeEmptyWorldMarker(world: WorldRoot): Promise<void> {
@@ -44,63 +27,71 @@ async function removeEmptyWorldMarker(world: WorldRoot): Promise<void> {
   }
 }
 
-async function nukeInput(input: NukeInput): Promise<NukeInput> {
-  const value = requireInput(input, "nuke input");
-  const world = await World.prove(requireMarkdown(value.world, "world"));
-  const confirm = value.confirm === undefined ? undefined : requireMarkdown(value.confirm, "confirm");
-  return { world, ...(confirm === undefined ? {} : { confirm }) };
-}
-
-function withSeatClose<T extends { kind: "success" | "failed" }>(
-  result: T,
-  seatClose: readonly PrivateStateSeatCloseLag[] | undefined,
-): T & Pick<NukeResult, "seatClose"> {
-  return seatClose === undefined || seatClose.length === 0 ? result : { ...result, seatClose };
-}
-
 export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions): Promise<NukeResult> {
-  const value = await nukeInput(input);
-  if (value.confirm === undefined) {
-    throw new KeiyakuRefused({ kind: "nuke-confirmation-required", world: value.world });
-  }
-  if (value.confirm !== value.world) {
-    throw new KeiyakuRefused({
-      kind: "nuke-confirmation-mismatch",
-      world: value.world,
-      confirmation: value.confirm,
-    });
-  }
-  let seatClose: readonly PrivateStateSeatCloseLag[] | undefined;
-  try {
-    const deleteAkuma = await stopAkuma(value.world);
-    const removed = { refs: 0, worktrees: 0, tasks: 0 };
-    let failed = false;
-    let firstDiagnostic: unknown;
-    const attempt = async <T>(owner: Promise<T>, count: (value: T) => void): Promise<void> => {
-      try {
-        count(await owner);
-      } catch (error) {
-        if (!failed) {
-          failed = true;
-          firstDiagnostic = error;
-        }
-      }
+  const value = validated(() => {
+    const values = requireInput(input, "nuke input", ["world", "confirm"]);
+    return {
+      world: requireMarkdown(values.world, "world"),
+      confirm: values.confirm === undefined ? undefined : requireMarkdown(values.confirm, "confirm"),
     };
-    await Promise.all([
-      attempt(deleteAkuma(), () => undefined),
-      attempt(nukeGit(value.world, "git", gitOptions), (outcome) => {
-        removed.refs = outcome.value.refs;
-        removed.worktrees = outcome.value.worktrees;
-        if (outcome.closeLag !== undefined) seatClose = appendPrivateStateSeatClose(seatClose, outcome.closeLag);
-      }),
-      attempt(nukeTask(value.world), (count) => {
-        removed.tasks = count;
-      }),
-    ]);
-    if (failed) throw firstDiagnostic;
-    await removeEmptyWorldMarker(value.world);
-    return withSeatClose({ kind: "success", world: value.world, removed }, seatClose);
-  } catch (error) {
-    return withSeatClose({ kind: "failed", world: value.world, diagnostic: diagnostic(error) }, seatClose);
+  });
+  const world = await World.prove(value.world);
+  const accumulator = new InvocationAccumulator();
+  accumulator.beginReset(world);
+  let failure: { error: unknown } | undefined;
+  const stop = (owner: ResetOwner, error: unknown): void => {
+    if (!operational(error)) {
+      failure ??= { error };
+      return;
+    }
+    accumulator.recordReset({ kind: "reset-owner-stopped", world, owner, diagnostic: error.message });
+  };
+  const runOwner = async (owner: ResetOwner, run: () => Promise<void>): Promise<void> => {
+    try {
+      await run();
+    } catch (error) {
+      stop(owner, error);
+    }
+  };
+  let refusal: import("./outcome.js").ResetRefusal | undefined;
+  if (value.confirm === undefined) refusal = { kind: "nuke-confirmation-required", world };
+  else if (value.confirm !== world)
+    refusal = { kind: "nuke-confirmation-mismatch", world, confirmation: value.confirm };
+  else {
+    let deleteAkuma: (() => Promise<void>) | undefined;
+    await runOwner("akuma", async () => {
+      deleteAkuma = await stopAkuma(world);
+    });
+    // No deletion owner starts without proof that live writers have stopped.
+    if (deleteAkuma !== undefined) {
+      await Promise.all([
+        runOwner("akuma", deleteAkuma),
+        runOwner("git", async () => {
+          const result = await nukeGit(world, "git", gitOptions, (counts) => accumulator.recordResetRemoved(counts));
+          if (result.closeLag !== undefined)
+            accumulator.recordReset({
+              kind: "reset-residue",
+              world,
+              owner: "git",
+              diagnostic: result.closeLag.diagnostic,
+            });
+        }),
+        runOwner("task", async () => {
+          await nukeTask(world, { onRemoved: (tasks) => accumulator.recordResetRemoved({ tasks }) });
+        }),
+      ]);
+      await runOwner("world", () => removeEmptyWorldMarker(world));
+    }
   }
+  const projected = project(
+    "nuke",
+    accumulator.snapshot(),
+    failure !== undefined
+      ? { kind: "failed", world, error: failure.error }
+      : refusal !== undefined
+        ? { kind: "refused", world, refusal }
+        : { kind: "accepted", world },
+  );
+  if (projected.kind === "failed") throw projected.error;
+  return projected.outcome;
 }

@@ -1,4 +1,4 @@
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
@@ -70,7 +70,7 @@ export type ProtocolPreparation<Input, Refusal, Seed, Prepared> = Readonly<{
 type ProtocolAdmission<Input extends Readonly<{ contractId: ContractId }>, Refusal> = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
-  progress?: ExecutionProgress;
+  progress?: ProtocolProgress;
   contracts: readonly ContractId[];
   attempts: readonly AttemptContext[];
   decide: (input: DecideInput<Input>) => OfferDecision<Refusal>;

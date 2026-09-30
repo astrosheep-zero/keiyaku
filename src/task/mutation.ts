@@ -249,6 +249,7 @@ export function taskMutationRequestCommand(
     execute: async (request, facts) => {
       const world = await World.prove(request.world);
       return {
+        kind: "served",
         result: await port.task({
           world,
           request: request.request,

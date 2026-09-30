@@ -1,7 +1,7 @@
 import type { AkumaList } from "../akuma/akuma.js";
 import type { ArchetypeCatalogRow } from "../akuma/archetype.js";
 import type { TaskRow } from "../task/index.js";
-import type { ContractRow } from "../library/contract.js";
+import type { ContractRow } from "../library/keiyaku.js";
 import type { WorldRoot } from "../world.js";
 
 export type CatalogQuery =

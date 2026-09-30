@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { auditResultSchema, deliveryResultSchema, reviewResultSchema } from "../src/library/mutation.js";
 import {
-  decodeContractLiveFailure,
-  encodeContractLiveFailure,
-  KeiyakuRefused,
-  KeiyakuRetry,
-} from "../src/library/refusal.js";
+  outcomeSchema,
+  auditReportSchema,
+  reviewSchema,
+  KeiyakuError,
+  encodeFailureWire,
+  decodeFailureWire,
+  withOutcomeReceipt,
+} from "../src/library/outcome.js";
+import { deliveryValueSchema } from "../src/library/delivery.js";
+import { ownerSchema } from "../src/library/result-codec.js";
+import { decodeMaterializedConflict } from "../src/protocol/result-codec.js";
+const deliveryResultSchema = outcomeSchema(
+  "deliver",
+  deliveryValueSchema,
+  ownerSchema(decodeMaterializedConflict, "expected handoff"),
+);
+const reviewResultSchema = outcomeSchema("review", reviewSchema);
+const auditResultSchema = outcomeSchema("audit", auditReportSchema);
 import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { decodeDeliverConflictRefusal, decodeVerificationRuntimeStop } from "../src/protocol/result-codec.js";
 import { decodeSettlementLag } from "../src/settlement/settle.js";
@@ -37,8 +49,8 @@ function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<st
   return {
     kind: "accepted",
     operation: "deliver",
-    cleanup: [],
-    executionStops: [],
+    contract,
+    effects: [],
     facts: [fact],
     head,
     value: {
@@ -49,8 +61,6 @@ function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<st
       leading: { kind: "admitted-now", fact: fact.entry },
       ...value,
     },
-    lags: [],
-    settlementLags: [],
     pending: [],
     ...extras,
   };
@@ -63,7 +73,12 @@ function refusesDelivery(value: Record<string, unknown> = {}, extras: Record<str
 test("accepted delivery round-trips owner settlement, verification, placement, cleanup, and continuation fields", () => {
   const result = acceptedDelivery(
     {
-      completion: { integration: snapshot, verification: { mode: "ran", verdict: "satisfied" } },
+      completion: {
+        integration: snapshot,
+        target: "refs/heads/main",
+        predecessor,
+        verification: { mode: "ran", verdict: "satisfied" },
+      },
       verification: {
         failure: "cancelled",
         stdout: "forwarded delivery tail",
@@ -78,35 +93,52 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
       },
     },
     {
-      lags: [{ kind: "worktree-retained", path: "/tmp/worktree", affects: "none" }],
-      settlementLags: [
-        decodeSettlementLag({
-          kind: "settlement-failed",
-          surface: "task",
-          contractId: contract,
-          taskId: "task/forwarding",
-          diagnostic: "task settlement refused",
-        }),
-      ],
-      cleanup: [
+      effects: [
         {
-          kind: "verification-cleanup",
-          contractId: contract,
-          snapshot,
-          failure: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } },
+          kind: "reconciliation-lag",
+          contract,
+          affects: "none",
+          lag: { kind: "worktree-retained", path: "/tmp/worktree" },
         },
-        { kind: "worktree-leak", contractId: contract, snapshot, leak: { path: "/tmp/leak", diagnostic: "retained" } },
-      ],
-      executionStops: [
+        {
+          kind: "settlement-lag",
+          contract,
+          lag: decodeSettlementLag({
+            kind: "settlement-failed",
+            surface: "task",
+            contractId: contract,
+            taskId: "task/forwarding",
+            diagnostic: "task settlement refused",
+          }),
+        },
+        {
+          kind: "cleanup",
+          contract,
+          issue: {
+            kind: "verification-cleanup",
+            contractId: contract,
+            snapshot,
+            failure: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } },
+          },
+        },
+        {
+          kind: "cleanup",
+          contract,
+          issue: {
+            kind: "worktree-leak",
+            contractId: contract,
+            snapshot,
+            leak: { path: "/tmp/leak", diagnostic: "retained" },
+          },
+        },
         {
           kind: "execution-stopped",
-          contractId: contract,
+          contract,
           stage: "continuation",
           reason: "failed",
           diagnostic: "discovery failed",
         },
       ],
-      recoverySnapshot: snapshot,
       pending: [
         { surface: "verification", required: true },
         { surface: "placement", required: true },
@@ -125,23 +157,31 @@ test("forwarded reconciliation lags preserve their repair scope", () => {
   const result = acceptedDelivery(
     {},
     {
-      lags: [
+      effects: [
         {
-          kind: "worktree-follow-retained",
-          path: "/tmp/dependent",
-          tender: gitTender,
-          head: gitHead,
-          reason: "head-moved",
+          kind: "reconciliation-lag",
+          contract,
           affects: "continuation",
+          lag: {
+            kind: "worktree-follow-retained",
+            path: "/tmp/dependent",
+            tender: gitTender,
+            head: gitHead,
+            reason: "head-moved",
+          },
         },
         {
-          kind: "target-checkout-retained",
-          path: "/tmp/main",
-          target: "refs/heads/main",
-          diagnostic: "dirty",
+          kind: "reconciliation-lag",
+          contract,
           affects: "placement",
+          lag: { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
         },
-        { kind: "reconcile-failed", stage: "effect", diagnostic: "busy", affects: "reconciliation" },
+        {
+          kind: "reconciliation-lag",
+          contract,
+          affects: "reconciliation",
+          lag: { kind: "reconcile-failed", stage: "effect", diagnostic: "busy" },
+        },
       ],
     },
   );
@@ -163,18 +203,29 @@ test("delivery leading preserves both witnessed arms and refuses a missing prove
 });
 
 test("malformed settlement lag and extra envelope fields are transport-integrity refusals", () => {
-  refusesDelivery({}, { settlementLags: [{}] });
-  refusesDelivery({}, { settlementLags: [{ kind: "settlement-failed", surface: "task", diagnostic: "lag" }] });
+  refusesDelivery({}, { effects: [{ kind: "settlement-lag", contract, lag: {} }] });
   refusesDelivery(
     {},
     {
-      settlementLags: [
+      effects: [
+        { kind: "settlement-lag", contract, lag: { kind: "settlement-failed", surface: "task", diagnostic: "lag" } },
+      ],
+    },
+  );
+  refusesDelivery(
+    {},
+    {
+      effects: [
         {
-          kind: "settlement-failed",
-          surface: "task",
-          contractId: contract,
-          taskId: "task/Forwarding",
-          diagnostic: "lag",
+          kind: "settlement-lag",
+          contract,
+          lag: {
+            kind: "settlement-failed",
+            surface: "task",
+            contractId: contract,
+            taskId: "task/Forwarding",
+            diagnostic: "lag",
+          },
         },
       ],
     },
@@ -184,13 +235,17 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
   refusesDelivery(
     {},
     {
-      lags: [
+      effects: [
         {
-          kind: "target-checkout-retained",
-          path: "/tmp/main",
-          target: "refs/heads/main",
-          diagnostic: "dirty",
+          kind: "reconciliation-lag",
+          contract,
           affects: "none",
+          lag: {
+            kind: "target-checkout-retained",
+            path: "/tmp/main",
+            target: "refs/heads/main",
+            diagnostic: "dirty",
+          },
         },
       ],
     },
@@ -199,19 +254,34 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
 });
 
 test("refusal, retry, review, audit, and materialized conflict variants round-trip", () => {
-  const refused = new KeiyakuRefused({ kind: "contract-missing", contractId: contract });
-  const retry = new KeiyakuRetry({ kind: "publication-failed", diagnostic: "busy" });
-  const retryEmpty = new KeiyakuRetry({ kind: "publication-failed", diagnostic: "" });
-  assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(refused)), refused);
-  assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(retry)), retry);
-  assert.deepEqual(decodeContractLiveFailure(encodeContractLiveFailure(retryEmpty)), retryEmpty);
-  assert.equal(decodeContractLiveFailure({ kind: "refused", refusal: { kind: "contract-missing" } }), null);
+  const refused = {
+    operation: "deliver",
+    kind: "refused",
+    contract,
+    facts: [],
+    effects: [],
+    pending: [],
+    refusal: { kind: "contract-missing", contractId: contract },
+  };
+  const retry = {
+    operation: "deliver",
+    kind: "retry",
+    contract,
+    facts: [],
+    effects: [],
+    pending: [],
+    reason: { kind: "publication-failed", diagnostic: "busy" },
+  };
+  const retryEmpty = { ...retry, reason: { kind: "publication-failed", diagnostic: "" } };
+  for (const result of [refused, retry, retryEmpty])
+    assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(result))), result);
+  assert.equal(deliveryResultSchema.safeParse({ ...refused, refusal: { kind: "contract-missing" } }).success, false);
 
   const review = {
     kind: "accepted",
     operation: "review",
-    cleanup: [],
-    executionStops: [],
+    contract,
+    effects: [],
     facts: [],
     head,
     value: {
@@ -228,8 +298,6 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
       },
     },
-    lags: [],
-    settlementLags: [],
     pending: [],
   };
   assert.deepEqual(reviewResultSchema.parse(JSON.parse(JSON.stringify(review))), review);
@@ -237,8 +305,8 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
   const audit = {
     kind: "accepted",
     operation: "audit",
-    cleanup: [],
-    executionStops: [],
+    contract,
+    effects: [],
     facts: [],
     head,
     value: {
@@ -249,25 +317,34 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
       },
       target: { kind: "not-observed" },
     },
-    lags: [],
-    settlementLags: [],
     pending: [],
   };
   assert.deepEqual(auditResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
 
   const conflict = {
-    kind: "integration-conflict-materialized",
-    targetHead: snapshot,
-    handoffBase: snapshot,
-    recovery: {
-      materialize: "deliver --materialize-conflict --include-dirty",
-      deliver: "deliver --include-dirty",
-      staging: "not-required",
+    operation: "deliver",
+    kind: "handoff",
+    contract,
+    facts: [],
+    effects: [],
+    pending: [],
+    value: {
+      kind: "integration-conflict-materialized",
+      targetHead: snapshot,
+      handoffBase: snapshot,
+      recovery: {
+        materialize: "deliver --materialize-conflict --include-dirty",
+        deliver: "deliver --include-dirty",
+        staging: "not-required",
+      },
+      conflictPaths: ["src/a.ts"],
+      workspace: { kind: "worktree", path: "/tmp/worktree" },
     },
-    conflictPaths: ["src/a.ts"],
-    workspace: { kind: "worktree", path: "/tmp/worktree" },
   };
-  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(conflict))), conflict);
+  assert.deepEqual(
+    deliveryResultSchema.parse(JSON.parse(JSON.stringify({ ...conflict, value: conflict.value }))),
+    conflict,
+  );
 });
 
 test("conflict recovery codecs reject the legacy continue field", () => {
@@ -277,18 +354,33 @@ test("conflict recovery codecs reject the legacy continue field", () => {
     staging: "not-required",
   };
   const materialized = {
-    kind: "integration-conflict-materialized",
-    targetHead: snapshot,
-    handoffBase: snapshot,
-    recovery,
-    conflictPaths: ["src/a.ts"],
-    workspace: { kind: "worktree", path: "/tmp/worktree" },
+    operation: "deliver",
+    kind: "handoff",
+    contract,
+    facts: [],
+    effects: [],
+    pending: [],
+    value: {
+      kind: "integration-conflict-materialized",
+      targetHead: snapshot,
+      handoffBase: snapshot,
+      recovery,
+      conflictPaths: ["src/a.ts"],
+      workspace: { kind: "worktree", path: "/tmp/worktree" },
+    },
   };
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(materialized))), materialized);
   const legacyRecovery = { materialize: recovery.materialize, continue: recovery.deliver, staging: recovery.staging };
-  assert.equal(deliveryResultSchema.safeParse({ ...materialized, recovery: legacyRecovery }).success, false);
   assert.equal(
-    deliveryResultSchema.safeParse({ ...materialized, recovery: { ...recovery, continue: recovery.deliver } }).success,
+    deliveryResultSchema.safeParse({ ...materialized, value: { ...materialized.value, recovery: legacyRecovery } })
+      .success,
+    false,
+  );
+  assert.equal(
+    deliveryResultSchema.safeParse({
+      ...materialized,
+      value: { ...materialized.value, recovery: { ...recovery, continue: recovery.deliver } },
+    }).success,
     false,
   );
 
@@ -353,25 +445,34 @@ test("accepted mutation refuses a missing head", () => {
 
 test("union branches refuse keys that belong to a different arm", () => {
   assert.equal(
-    decodeContractLiveFailure({
+    outcomeSchema("bind", reviewSchema).safeParse({
+      operation: "bind",
       kind: "refused",
+      contract,
+      facts: [],
+      effects: [],
+      pending: [],
       refusal: { kind: "fork-source-missing", contractId: contract, extra: true },
-    }),
-    null,
+    }).success,
+    false,
   );
   assert.equal(
-    decodeContractLiveFailure({
+    deliveryResultSchema.safeParse({
+      operation: "deliver",
       kind: "refused",
+      facts: [],
+      effects: [],
+      pending: [],
       refusal: { kind: "nuke-confirmation-required", world: "world", extra: true },
-    }),
-    null,
+    }).success,
+    false,
   );
   assert.equal(
     auditResultSchema.safeParse({
       kind: "accepted",
       operation: "deliver",
-      cleanup: [],
-      executionStops: [],
+      contract,
+      effects: [],
       facts: [],
       head,
       value: {
@@ -379,8 +480,7 @@ test("union branches refuse keys that belong to a different arm", () => {
         verification: { kind: "not-run", extra: true },
         target: { kind: "not-observed" },
       },
-      lags: [],
-      settlementLags: [],
+
       pending: [],
     }).success,
     false,
@@ -432,8 +532,8 @@ function acceptedAudit(target: Record<string, unknown>) {
   return {
     kind: "accepted",
     operation: "audit",
-    cleanup: [],
-    executionStops: [],
+    contract,
+    effects: [],
     facts: [],
     head,
     value: {
@@ -441,8 +541,6 @@ function acceptedAudit(target: Record<string, unknown>) {
       verification: { kind: "not-run" },
       target,
     },
-    lags: [],
-    settlementLags: [],
     pending: [],
   };
 }
@@ -474,28 +572,33 @@ test("audit target and git lag arms refuse keys that belong to a different arm",
     },
     diagnostic: "no",
   });
-  refusesDelivery({}, { lags: [{ kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" }] });
+  refusesDelivery(
+    {},
+    {
+      effects: [
+        {
+          kind: "reconciliation-lag",
+          contract,
+          affects: "placement",
+          lag: { kind: "worktree-retained", path: "/tmp/worktree", diagnostic: "no" },
+        },
+      ],
+    },
+  );
 });
 
-import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 
 test("post-admission failures round-trip their category and receipt without becoming no-effect refusals", () => {
   for (const original of [new Error("unexpected"), new TypeError("bug"), new AuthorityCorruptionError("corrupt")]) {
-    const receipt = {
-      operation: "deliver" as const,
-      contractId: contract,
-      head,
-      facts: [fact],
-      cleanup: [],
-      executionStops: [],
-    };
-    const encoded = encodeContractLiveFailure(withExecutionReceipt(original, receipt));
-    assert.equal((encoded as { kind: string }).kind, "post-admission-failure");
-    const decoded = decodeContractLiveFailure(encoded);
-    assert.ok(decoded instanceof original.constructor);
-    assert.equal(decoded instanceof KeiyakuRefused, false);
-    assert.deepEqual(executionReceipt(decoded), receipt);
+    const receipt = { operation: "deliver" as const, contract, head, facts: [fact], effects: [], pending: [] };
+    const encoded = encodeFailureWire(withOutcomeReceipt(original, receipt));
+    assert.equal(encoded.kind, "failed");
+    const decoded = decodeFailureWire(encoded);
+    assert.ok(decoded instanceof KeiyakuError);
+    assert.equal(decoded.category, original instanceof AuthorityCorruptionError ? "authority-corruption" : "internal");
+    assert.ok(decoded.cause instanceof original.constructor);
+    assert.deepEqual(decoded.outcome, receipt);
   }
 });
 

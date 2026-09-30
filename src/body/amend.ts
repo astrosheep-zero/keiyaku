@@ -287,10 +287,11 @@ function operationKey(operation: Operation): string {
   return `${operation.kind}:${operation.target}`;
 }
 
-function apply(source: string, current: ContractBody): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
-  const document = parseToAST(source);
-  const operations = operationSections(document);
-  if (operations.length === 0) refusal("amend requires at least one H2 operation");
+function apply(
+  document: DocumentNode,
+  operations: readonly Operation[],
+  current: ContractBody,
+): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
   const seen = new Set<string>();
   const changed = new Set<string>();
   const body = cloneBody(current);
@@ -308,9 +309,28 @@ export function applyAmendDocument(
   source: string,
   current: DecodedContractDocument,
 ): Readonly<{ document: string; changedSections: ReadonlySet<string> }> {
-  const result = apply(source, current);
-  return {
-    document: renderAmendedContractBody(current.document.bytes, result.body, result.changed),
-    changedSections: result.changed,
+  return prepareAmendDocument(source)(current);
+}
+
+/** Caller syntax is decoded before any repository observation; current-dependent application stays pure. */
+export function prepareAmendDocument(source: string): (current: DecodedContractDocument) => Readonly<{
+  document: string;
+  changedSections: ReadonlySet<string>;
+}> {
+  const document = parseToAST(source);
+  const operations = operationSections(document);
+  if (operations.length === 0) refusal("amend requires at least one H2 operation");
+  const seen = new Set<string>();
+  for (const operation of operations) {
+    const key = operationKey(operation);
+    if (seen.has(key)) refusal(`duplicate amend operation '${key}'`);
+    seen.add(key);
+  }
+  return (current) => {
+    const result = apply(document, operations, current);
+    return {
+      document: renderAmendedContractBody(current.document.bytes, result.body, result.changed),
+      changedSections: result.changed,
+    };
   };
 }

@@ -1,3 +1,5 @@
+import { accepted } from "./support/library-verbs.js";
+import { present } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -736,7 +738,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       workspace: "worktree",
       hooks: { create: [], destroy: [] },
     });
-    const managedId = (await bound.keiyaku.state()).id;
+    const managedId = (present(await accepted(bound).value.keiyaku.state())).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = 'appointed'");
     if (appointment.kind !== "appointed") return;
@@ -773,7 +775,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     operationFailed = false;
   } finally {
     try {
-      await bound?.keiyaku.abandon({ hooks: { create: [], destroy: [] } }).catch(() => undefined);
+      if (bound !== undefined) await accepted(bound).value.keiyaku.abandon({ hooks: { create: [], destroy: [] } }).catch(() => undefined);
       await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();

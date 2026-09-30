@@ -33,6 +33,7 @@ const receiptEnvelopeSchema = z.union([
       state: z.literal("voided"),
       evidence: z.string(),
       failure: z.unknown().optional(),
+      outcome: z.unknown().optional(),
     })
     .strict(),
   z
@@ -82,13 +83,17 @@ export type ChildRequestCommand<Input, Output, Reference> = Readonly<{
   execute(input: Input, facts: ExecutionFacts): Promise<Readonly<{ result: Output; child: string }>>;
 }>;
 
+export type ServiceCompletion<Output, Service> =
+  | Readonly<{ kind: "served"; result: Output; service: Service }>
+  | Readonly<{ kind: "voided"; outcome: Output }>;
+
 export type ServiceRequestCommand<Input, Output, Service, Reference> = Readonly<{
   completion: "service";
   protocol: RequestProtocol<Input, Output, Reference>;
   encodeService(service: Service): unknown;
   decodeService(service: unknown): Service;
   projectService(service: Service): Reference;
-  execute(input: Input, facts: ExecutionFacts): Promise<Readonly<{ result: Output; service: Service }>>;
+  execute(input: Input, facts: ExecutionFacts): Promise<ServiceCompletion<Output, Service>>;
 }>;
 
 type ErasedRequest = Readonly<{
@@ -105,7 +110,12 @@ type ErasedChildRequest = ErasedRequest &
 
 type ErasedServiceRequest = ErasedRequest &
   Readonly<{
-    execute(facts: ExecutionFacts): Promise<Readonly<{ result: unknown; serviceJson: string }>>;
+    execute(
+      facts: ExecutionFacts,
+    ): Promise<
+      | Readonly<{ kind: "served"; result: unknown; serviceJson: string }>
+      | Readonly<{ kind: "voided"; outcome: unknown }>
+    >;
   }>;
 
 export type ErasedRequestCommand =
@@ -168,7 +178,10 @@ export function eraseRequestCommand<Input, Output, Service, Reference>(
             isPermitted: (allowed) => protocol.isPermitted(allowed),
             execute: async (facts) => {
               const served = await command.execute(input, facts);
+              if (served.kind === "voided")
+                return { kind: "voided" as const, outcome: protocol.encodeResult(served.outcome) };
               return {
+                kind: "served" as const,
                 result: protocol.encodeResult(served.result),
                 serviceJson: JSON.stringify(command.encodeService(served.service)),
               };

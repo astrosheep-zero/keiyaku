@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -68,14 +69,14 @@ async function populatedWorld(t: TestContext) {
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
   assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     task: added.value.id,
     markdown: document(),
     workspace: "worktree",
     target: "main",
-  });
-  const contract = await bound.keiyaku.state();
+  }));
+  const contract = present(await bound.value.keiyaku.state());
   const renamed = await tasks.task({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
   await tasks.task({ id: added.value.id }).start();
@@ -91,7 +92,7 @@ async function populatedWorld(t: TestContext) {
     "dispatched",
   );
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
-  return { repository, contract, keiyaku: bound.keiyaku, taskId: added.value.id, akumaId };
+  return { repository, contract, keiyaku: bound.value.keiyaku, taskId: added.value.id, akumaId };
 }
 
 

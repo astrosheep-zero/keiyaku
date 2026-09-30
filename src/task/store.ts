@@ -270,7 +270,7 @@ function preserveCommittedResult<T>(result: T, errors: readonly unknown[]): T {
 
 export async function nukeTaskAuthority(
   world: WorldRoot,
-  options?: Readonly<{ timeoutMs?: number }>,
+  options?: Readonly<{ timeoutMs?: number; onRemoved?(count: number): void }>,
 ): Promise<number | "busy"> {
   const directory = tasksDirectory(world);
   const lockOptions = options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
@@ -287,6 +287,7 @@ export async function nukeTaskAuthority(
           if (resolved.exists) {
             await unlink(resolved.path);
             removed += 1;
+            options?.onRemoved?.(1);
           }
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

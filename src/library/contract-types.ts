@@ -1,25 +1,14 @@
-import type { ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import type { ContractFileEffect, ContractFileLag } from "../contract-worktree.js";
 import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
 import type { Dispatch } from "../dispatch/index.js";
 import type { Gate, WorktreeHooks } from "./configuration.js";
-import type { AmendRegionObservation, RegionObservation } from "./region.js";
 import type { Repo } from "./repo.js";
-import type { MutationResult } from "./mutation.js";
 import type { SettlementReport } from "../settlement/settle.js";
-import type { AttestationVerdict } from "./contract.js";
-import type { Keiyaku } from "./contract-handle.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
 import type { TaskId } from "../task/identity.js";
-import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
-export type BindResult = Readonly<
-  Omit<MutationResult<Keiyaku>, "value"> & {
-    keiyaku: Keiyaku;
-    workspace?: ContractWorkspaceLocation;
-    warnings?: readonly string[];
-  } & RegionObservation
->;
+export type AttestationVerdict = AttestationData["verdict"];
 export type Fact = JournalEntry;
 export type ContractHistoryEvent =
   | Readonly<{ source: "journal"; fact: Fact }>
@@ -32,13 +21,6 @@ export type ContractHistory = Readonly<{
 }>;
 export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
 export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
-export type AmendResult = Readonly<
-  MutationResult<void> & {
-    documentDiff: string;
-    changes: Readonly<{ gates?: readonly Gate[]; after?: readonly ContractId[] }>;
-  }
-> &
-  AmendRegionObservation;
 export type ReconcileReport = Readonly<{
   effects: readonly (ProtocolReconcileReport["effects"][number] | ContractFileEffect)[];
   lag: readonly (ProtocolReconcileReport["lag"][number] | ContractFileLag)[];

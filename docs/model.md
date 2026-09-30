@@ -23,8 +23,8 @@ A journal fold is a current read model, not stored authority. It exposes one
 coherent Contract state or explicit absence; a missing observation entry is a
 broken observation, not another representation of absence. A Contract has at
 most one terminal outcome. An impossible fold, malformed durable authority, or
-partial admission is corruption, surfaced at the package boundary as
-`AuthorityCorruptionError`, rather than a normal refusal or retry.
+partial admission is corruption, surfaced exceptionally at the package boundary
+with its native corruption cause, rather than a normal refusal or retry.
 
 A captured execution checkpoint is an interpretation, not testimony that the
 current invocation admitted anything. Completion may advance an existing

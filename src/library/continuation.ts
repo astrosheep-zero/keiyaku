@@ -5,12 +5,17 @@ import { reconcileDependentWorktree } from "../git/reconcile.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { completeCandidate, type CompletionResult } from "../protocol/completion.js";
-import { contractCheckpoint, executionStop, type ExecutionProgress, type ExecutionStop } from "../protocol/progress.js";
+import {
+  contractCheckpoint,
+  isOperationalStop,
+  executionStop,
+  type ExecutionStop,
+  type ProtocolProgress,
+} from "../protocol/progress.js";
 import { observeContractAt } from "../git/observe.js";
 import { decodeGitReconcileLag } from "../git/result-codec.js";
-import { executionStopSchema } from "./execution-result.js";
 import type { DocumentDerivation, PlacementStop, RepositoryScope, VerificationStop } from "../protocol/operations.js";
-import { decodePlacementStop, decodeVerificationStop } from "../protocol/result-codec.js";
+import { decodeExecutionStop, decodePlacementStop, decodeVerificationStop } from "../protocol/result-codec.js";
 import { ownerSchema } from "./result-codec.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
@@ -68,7 +73,7 @@ export const continuationReportSchema = ownerSchema(
 
 function decodeContinuationStop(value: unknown): ContinuationStop {
   if (value !== null && typeof value === "object" && "kind" in value) {
-    if (value.kind === "execution-stopped") return executionStopSchema.parse(value);
+    if (value.kind === "execution-stopped") return decodeExecutionStop(value);
     if (
       value.kind === "physical-lag" &&
       "lags" in value &&
@@ -102,11 +107,21 @@ function reverseDependents(world: Awaited<ReturnType<typeof observeActiveContrac
   return index;
 }
 
+/**
+ * The narrow Library-side sink a continuation offers. It reuses the accumulator's own progress
+ * methods, so each attempt is retained before the next sibling is awaited.
+ */
+export type ContinuationProgress = Readonly<{
+  recordPhysical(contractId: ContractId, physical: ReconcileResult): void;
+  recordStop(stop: ExecutionStop): void;
+  recordContinuation(contractId: ContractId, report: ContinuationReport): void;
+}>;
+
 type ContinuationInput = Readonly<{
   scope: RepositoryScope;
   channel: GitDecodeChannel;
   completed: Extract<CompletionResult, { kind: "completed" }>;
-  progress: ExecutionProgress;
+  progress: ProtocolProgress & ContinuationProgress;
   deriveDocument(state: ContractState): DocumentDerivation;
   actor?: import("../core/facts/types.js").ActorId;
   signal?: AbortSignal;
@@ -155,6 +170,7 @@ async function attemptDependent(
   try {
     return await continueCandidate(input, id, predecessor);
   } catch (error) {
+    if (!isOperationalStop(error, input.signal)) throw error;
     const stop = executionStop(id, "continuation", error, input.signal);
     input.progress.recordStop(stop);
     return { kind: "stopped-before-node", stop };
@@ -166,6 +182,11 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
   const primary = input.completed.checkpoint.state.id;
   const claimed: ContractId[] = [];
   const stopped: ContinuationReport["stopped"][number][] = [];
+  const retain = (): void =>
+    input.progress.recordContinuation(primary, { claimed: [...claimed], stopped: [...stopped] });
+  // The primary candidate's own conclusions are retained by completion before this walk discovers
+  // anything; every sibling attempt is retained here before the next one is awaited.
+  retain();
   try {
     input.signal?.throwIfAborted();
     const world = await withGitReadObservation(input.scope, input.channel, observeActiveContractWorld);
@@ -192,6 +213,7 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
         if (result.kind === "completed") {
           claimed.push(id);
           newlyClaimed.add(id);
+          retain();
           queue.push({ contractId: id, target: result.evidence.completion.integration });
         } else {
           const stop = result.stop;
@@ -199,14 +221,17 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
             contractId: id,
             stop: "refusal" in stop && stop.refusal.kind === "terminal" ? { kind: "already-terminal" } : stop,
           });
+          retain();
         }
       }
     }
     return attempted.size === 0 ? undefined : { claimed, stopped };
   } catch (error) {
+    if (!isOperationalStop(error, input.signal)) throw error;
     const stop = executionStop(primary, "continuation", error, input.signal);
     input.progress.recordStop(stop);
     stopped.push({ contractId: primary, stop });
+    retain();
     return { claimed, stopped };
   }
 }

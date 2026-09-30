@@ -52,7 +52,7 @@ each product owner deletes only its own custody.
 
 Missing confirmation and a confirmation that differs from the resolved World
 are typed refusals before every owner effect. Confirmed reset stops live writers
-then independently invokes owner-local deletion. A failed owner remains
+then independently invokes owner-local deletion. An operationally stopped owner remains
 retryable under the same literal confirmation, but reset creates no preview,
 token, snapshot hash, prompt, world-wide transaction, ledger, backup, trash,
 undo, or lifecycle simulation.
@@ -67,3 +67,13 @@ preserved; reset never adopts arbitrary files merely because they lie nearby.
 World composition has no fixed cross-owner deletion order, storage inventory, or
 residue-specific knowledge. Git alone applies its state-first local reset rule;
 that rule does not create a World-wide lock or transaction.
+
+A confirmed reset reports owner-confirmed removals and trailing owner stops in
+one accepted World answer. It does not invent Contract identity, head, journal
+facts, or another reset authority. Owner completion and retirement are
+independently awaited even when another owner fails; each confirmed removal
+remains visible before later cleanup or coordination fails. Required deletion
+stops and optional coordination residue retain their different meanings.
+Unexpected failures and authority corruption remain exceptional with the first
+native cause and all known reset evidence. No answer permits deletion while
+live writer custody remains unproven.

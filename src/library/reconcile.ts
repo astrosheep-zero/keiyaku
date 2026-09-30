@@ -1,6 +1,5 @@
 /** @architectureCompositionRoot */
 import type { ContractId, ContractState } from "../core/facts/types.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import {
   reconcileAllOperation,
@@ -13,6 +12,7 @@ import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import type { WorktreeHooks } from "./configuration.js";
+import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
 import {
   decodeContractFileLag,
   projectContractWorktree,
@@ -99,11 +99,26 @@ export type RepoReconcileReport =
   | Readonly<{ kind: "completed"; contracts: RepoReconcileContracts }>
   | Readonly<{ kind: "world-observation-failed"; diagnostic: string }>;
 
+type ReconcileProgress = ProtocolProgress &
+  Readonly<{
+    recordSettlement(contractId: ContractId, report: SettlementReport): void;
+    recordReconciliation(
+      contractId: ContractId,
+      report: Readonly<{
+        effects?: readonly (ReconcileReport["effects"][number] | ContractFileEffect)[];
+        lag?: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
+        retiredWorktree?: string;
+        retainedWorktree?: string;
+      }>,
+    ): void;
+  }>;
+
 type ReconcileOptions = Readonly<{
   scope: RepositoryScope;
   channel: GitDecodeChannel;
   hooks: WorktreeHooks;
   retryHooks: boolean;
+  progress?: ReconcileProgress;
 }>;
 
 function registerLag(scope: RepositoryScope, error: unknown): ContractFileLag {
@@ -187,7 +202,7 @@ async function releaseAppointments(
     await releaseManagedWorktrees(scope, contracts);
     return undefined;
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    if (!isOperationalFailure(error)) throw error;
     return registerLag(scope, error);
   }
 }
@@ -196,11 +211,11 @@ async function observeState(
   scope: RepositoryScope,
   channel: GitDecodeChannel,
   contractId: ContractId,
-): Promise<Readonly<{ state: ContractState } | { failed: ReconcileReport }>> {
+): Promise<Readonly<{ state: ContractState | null } | { failed: ReconcileReport }>> {
   try {
     return { state: await stateOperation({ scope, channel, contractId }) };
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    if (!isOperationalFailure(error)) throw error;
     return { failed: reconcileObservationFailure(error) };
   }
 }
@@ -219,7 +234,7 @@ async function appointForContract(
     }
     return { place, register };
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    if (!isOperationalFailure(error)) throw error;
     return { lag: registerLag(scope, error) };
   }
 }
@@ -230,16 +245,37 @@ type TerminalReconcilePhase = Readonly<{
   release: ContractFileLag | undefined;
 }>;
 
+function recordTerminalWorktree(
+  input: ReconcileOptions & Readonly<{ contractId: ContractId }>,
+  cleanup: ReconcileReport | undefined,
+  place: string | undefined,
+): ReturnType<typeof terminalWorktreeOutcome> {
+  const worktree = terminalWorktreeOutcome(input.scope, cleanup, place);
+  input.progress?.recordReconciliation(input.contractId, {
+    ...(worktree?.kind === "retired" ? { retiredWorktree: worktree.place } : {}),
+    ...(worktree?.kind === "retained" ? { retainedWorktree: worktree.path } : {}),
+  });
+  return worktree;
+}
+
 async function finishTerminalReconcile(
   input: ReconcileOptions & Readonly<{ contractId: ContractId }>,
   retained: Awaited<ReturnType<typeof reconcileOperation>>,
   appointed: Readonly<{ place?: string }>,
 ): Promise<TerminalReconcilePhase> {
-  const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
-  const worktree = terminalWorktreeOutcome(input.scope, cleanup?.report, appointed.place);
+  const cleanup = isManagedTerminal(retained.state)
+    ? await reconcileOperation({
+        ...input,
+        ...appointed,
+        onPhysical: (report) => recordTerminalWorktree(input, report, appointed.place),
+      })
+    : null;
+  if (cleanup !== null) input.progress?.recordPhysical(input.contractId, cleanup.report);
+  const worktree = recordTerminalWorktree(input, cleanup?.report, appointed.place);
   const release = releaseEligible(retained.state, cleanup?.report, appointed.place !== undefined)
     ? await releaseAppointments(input.scope, [input.contractId])
     : undefined;
+  if (release !== undefined) input.progress?.recordReconciliation(input.contractId, { lag: [release] });
   return { cleanup: cleanup?.report ?? null, worktree, release };
 }
 
@@ -269,10 +305,14 @@ export async function completeReconcile(
 ): Promise<ReconcileCompletion> {
   const observed = await observeState(input.scope, input.channel, input.contractId);
   if ("failed" in observed) {
+    input.progress?.recordPhysical(input.contractId, observed.failed);
     return { effects: observed.failed.effects, lag: observed.failed.lag, settlement: emptySettlement() };
   }
+  // A legitimately absent Contract has nothing to reconcile.
+  if (observed.state === null) return { effects: [], lag: [], settlement: emptySettlement() };
   const appointment = await appointForContract(input.scope, observed.state);
   if ("lag" in appointment) {
+    input.progress?.recordReconciliation(input.contractId, { lag: [appointment.lag] });
     return { effects: [], lag: [appointment.lag], settlement: emptySettlement() };
   }
   const appointed = appointment.place === undefined ? {} : { place: appointment.place };
@@ -281,14 +321,17 @@ export async function completeReconcile(
     retainTerminalWorktree: true,
     ...appointed,
   });
+  input.progress?.recordPhysical(input.contractId, retained.report);
   const projection = realizedOrRetainedManagedWorktree(input.scope, retained.report, appointment.place)
     ? await projectContractWorktree(input.scope, retained.state, appointment.register)
     : { effects: [], lag: [] };
+  input.progress?.recordReconciliation(input.contractId, projection);
   const settlement = await settle({
     repository: input.scope,
     channel: input.channel,
     state: retained.state,
     effects: retained.report.effects,
+    ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   const terminal = await finishTerminalReconcile(input, retained, appointed);
   return assembleReconcile(retained.report, projection, settlement, terminal);
@@ -319,14 +362,14 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
   try {
     states = await worldContractStates(input);
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    if (!isOperationalFailure(error)) throw error;
     return { kind: "world-observation-failed", diagnostic: worldObservationDiagnostic(error) };
   }
   let appointed: PlaceRegister;
   try {
     appointed = await appointPlaces(input.scope, states);
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+    if (!isOperationalFailure(error)) throw error;
     const lag = registerLag(input.scope, error);
     const contracts: RepoReconcileContracts[number][] = [];
     for (const state of states) {

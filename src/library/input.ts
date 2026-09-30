@@ -1,3 +1,6 @@
+import { decodeArcDocument } from "../body/arc.js";
+import { decodeContractDocument } from "../body/decode.js";
+import { validated } from "./outcome.js";
 import { verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
 import {
@@ -130,4 +133,12 @@ export function documentDerivation(
       ...(contractId === undefined ? {} : { contractId }),
     }),
   };
+}
+
+/** Early CLI acquisition uses the same Library caller boundary, never document-owner capabilities. */
+export function validateContractMarkdown(markdown: string): void {
+  validated(() => decodeContractDocument(requireMarkdown(markdown), { requireTimeout: true }));
+}
+export function validateArcMarkdown(markdown: string): void {
+  validated(() => decodeArcDocument(requireMarkdown(markdown)));
 }

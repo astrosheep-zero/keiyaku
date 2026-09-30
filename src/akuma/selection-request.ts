@@ -250,12 +250,14 @@ export function selectionRequestCommand(
     execute: async (request, facts) => {
       if (request.action === "akuma.wait") {
         return {
+          kind: "served",
           result: await port.wait({ ...request, signal: facts.signal }),
           service: { action: request.action },
         };
       }
       if (request.action === "akuma.tell") {
         return {
+          kind: "served",
           result: await port.tell({
             target: request.target,
             body: request.body,
@@ -271,6 +273,7 @@ export function selectionRequestCommand(
       if (request.action === "akuma.ask") {
         if (port.ask === undefined) throw new Error("bounded Tell Selection port is unavailable");
         return {
+          kind: "served",
           result: await port.ask({
             target: request.target,
             body: request.body,
@@ -287,8 +290,9 @@ export function selectionRequestCommand(
       }
       const result = await port.kill({ targets: request.targets, signal: facts.signal });
       if ("result" in result)
-        return { result: result.result, service: { action: request.action, results: result.service } };
+        return { kind: "served", result: result.result, service: { action: request.action, results: result.service } };
       return {
+        kind: "served",
         result,
         service: { action: request.action, results: result.results.map(({ id, evidence }) => ({ id, evidence })) },
       };

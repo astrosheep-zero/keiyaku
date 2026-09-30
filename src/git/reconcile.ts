@@ -2,6 +2,7 @@ import { access, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   acquireSqliteTransactionLock,
+  SqliteTransactionLockError,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -12,7 +13,7 @@ import {
   registeredWorktreePaths,
   type GitOid,
 } from "./repository.js";
-import { runGit, type GitRepository } from "./process.js";
+import { runGit, GitPlumbingError, type GitRepository } from "./process.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContractAt } from "./observe.js";
@@ -28,6 +29,8 @@ import { followDependentManagedWorktree, retireConflictHandoff, worktreePath } f
 import { removeCollectableScratchWorktrees } from "./scratch.js";
 import { reconcileTerminalManagedWorktree, removeRef, updateRef } from "./terminal-reconcile.js";
 import type { UnsealedBytes } from "./terminal-seal.js";
+
+class WorktreeCustodyError extends Error {}
 
 const pathExists = (path: string) =>
   access(path).then(
@@ -60,6 +63,7 @@ type ReconcileInput = Readonly<{
   retryHooks: boolean;
   retainTerminalWorktree?: boolean;
   place?: string;
+  onPhysical?: (report: ReconcileResult) => void;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
 type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string; diagnostic?: string }>;
@@ -102,6 +106,8 @@ export type ReconcileAccumulation = Readonly<{
   effects: Effect[];
   lag: ReconcileLag[];
   hookRuns: { phase: "create" | "destroy"; name: string }[];
+  recordEffect(...effects: readonly Effect[]): void;
+  recordLag(...lag: readonly ReconcileLag[]): void;
 }>;
 
 function deliveryRefFor(contract: ContractId): string {
@@ -133,13 +139,45 @@ function complete(
 ): ReconcileResult {
   return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
 }
+/** Append owner observations and publish those same objects before the next await. */
+function reconcileAccumulation(onPhysical: ReconcileInput["onPhysical"]): ReconcileAccumulation {
+  const effects: Effect[] = [];
+  const lag: ReconcileLag[] = [];
+  return {
+    effects,
+    lag,
+    hookRuns: [],
+    recordEffect(...observed) {
+      effects.push(...observed);
+      if (observed.length > 0) onPhysical?.({ effects: observed, lag: [] });
+    },
+    recordLag(...observed) {
+      lag.push(...observed);
+      if (observed.length > 0) onPhysical?.({ effects: [], lag: observed });
+    },
+  };
+}
+
 function failed(
   stage: ReconcileFailure["stage"],
   error: unknown,
   effects: readonly Effect[] = [],
   lag: readonly ReconcileLag[] = [],
 ): ReconcileResult {
-  if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
+  if (
+    !(
+      error instanceof WorktreeCustodyError ||
+      error instanceof GitPlumbingError ||
+      error instanceof SqliteTransactionLockError ||
+      (error instanceof Error &&
+        !(error instanceof AuthorityCorruptionError) &&
+        !(error instanceof TypeError) &&
+        "code" in error &&
+        typeof error.code === "string" &&
+        /^E[A-Z0-9]+$/u.test(error.code))
+    )
+  )
+    throw error;
   return { effects, lag: [...lag, { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) }] };
 }
 
@@ -167,7 +205,7 @@ async function worktree(
     await runGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
   }
-  if (await pathExists(path)) throw new Error(`delivery worktree path is occupied: ${path}`);
+  if (await pathExists(path)) throw new WorktreeCustodyError(`delivery worktree path is occupied: ${path}`);
   await mkdir(dirname(path), { recursive: true });
   await runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
@@ -176,13 +214,12 @@ async function worktree(
 async function removeCollectableScratch(
   repository: GitRepository,
   topology: WorktreeTopology,
-  effects: Effect[],
-  lag: ReconcileLag[],
+  acc: ReconcileAccumulation,
 ): Promise<void> {
   for (const removal of await removeCollectableScratchWorktrees(repository, topology.paths)) {
-    effects.push({ kind: "worktree", path: removal.path, action: removal.action });
+    acc.recordEffect({ kind: "worktree", path: removal.path, action: removal.action });
     if (removal.retained)
-      lag.push({
+      acc.recordLag({
         kind: "worktree-retained",
         path: removal.path,
         ...(removal.diagnostic === undefined ? {} : { diagnostic: removal.diagnostic }),
@@ -190,7 +227,11 @@ async function removeCollectableScratch(
   }
 }
 
-async function reconcileTargetCheckouts(repository: GitRepository, state: ContractState): Promise<ReconcileResult> {
+async function reconcileTargetCheckouts(
+  repository: GitRepository,
+  state: ContractState,
+  onPhysical?: (report: ReconcileResult) => void,
+): Promise<ReconcileResult> {
   if (state.terminal?.kind !== "claimed" || state.coordinates.target === undefined || state.delivery === null) {
     return complete();
   }
@@ -201,13 +242,16 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
     return failed("effect", error);
   }
   let result: ReconcileResult | undefined;
-  let exceptional: unknown;
+  let exceptional: { error: unknown } | undefined;
   try {
-    const recovered = await recoverTargetPlacement(repository, state);
+    const recovered = await recoverTargetPlacement(repository, state, onPhysical);
     result = complete(recovered.effects, recovered.lag);
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
-    else result = failed("effect", error);
+    try {
+      result = failed("effect", error);
+    } catch (unexpected) {
+      exceptional = { error: unexpected };
+    }
   }
   let releaseFailure: unknown;
   try {
@@ -215,7 +259,7 @@ async function reconcileTargetCheckouts(repository: GitRepository, state: Contra
   } catch (error) {
     releaseFailure = error;
   }
-  if (exceptional !== undefined) throw exceptional;
+  if (exceptional !== undefined) throw exceptional.error;
   if (result === undefined) throw new Error("target checkout reconcile produced no result");
   if (releaseFailure !== undefined) result = failed("effect", releaseFailure, result.effects, result.lag);
   return result;
@@ -225,14 +269,18 @@ async function reconcileActiveManagedWorktree(
   { repository, hooks, retryHooks, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
-  { effects, lag, hookRuns }: ReconcileAccumulation,
+  acc: ReconcileAccumulation,
 ): Promise<ReconcileResult> {
-  if (place === undefined) return complete(effects, [...lag, missingPlaceLag(repository)]);
+  const { effects, lag, hookRuns } = acc;
+  if (place === undefined) {
+    acc.recordLag(missingPlaceLag(repository));
+    return complete(effects, lag);
+  }
   const path = worktreePath(repository, place);
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
-  effects.push(await updateRef(repository, deliveryRefFor(state.id), desired));
+  acc.recordEffect(await updateRef(repository, deliveryRefFor(state.id), desired));
   const projection = await worktree(repository, topology, path, desired);
-  effects.push(projection);
+  acc.recordEffect(projection);
   const handoff = await retireConflictHandoff(repository, {
     contractId: state.id,
     place,
@@ -240,7 +288,7 @@ async function reconcileActiveManagedWorktree(
     consume: state.delivery !== null,
   });
   if (state.delivery !== null && handoff.kind === "retained") {
-    lag.push({
+    acc.recordLag({
       kind: "reconcile-failed",
       stage: "effect",
       diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
@@ -249,9 +297,9 @@ async function reconcileActiveManagedWorktree(
   if (projection.action === "created" || retryHooks) {
     const hookRun = await runCreateHooks(path, hooks);
     hookRuns.push(...hookRun.runs.map((name) => ({ phase: "create" as const, name })));
-    if (hookRun.lag !== null) lag.push(hookRun.lag);
+    if (hookRun.lag !== null) acc.recordLag(hookRun.lag);
   }
-  effects.push(
+  acc.recordEffect(
     await (state.delivery
       ? await updateRef(
           repository,
@@ -267,7 +315,7 @@ async function terminalHandoffRetained(
   input: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
-  lag: ReconcileLag[],
+  acc: ReconcileAccumulation,
 ): Promise<boolean> {
   if (input.place === undefined) return false;
   const path = worktreePath(input.repository, input.place);
@@ -279,7 +327,7 @@ async function terminalHandoffRetained(
     consume: state.delivery !== null,
   });
   if (handoff.kind === "active") {
-    lag.push({
+    acc.recordLag({
       kind: "reconcile-failed",
       stage: "effect",
       diagnostic: "conflict handoff retirement retained: active",
@@ -287,7 +335,7 @@ async function terminalHandoffRetained(
     return true;
   }
   if (handoff.kind !== "retained") return false;
-  lag.push({
+  acc.recordLag({
     kind: "reconcile-failed",
     stage: "effect",
     diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
@@ -301,26 +349,22 @@ async function reconcileWithTopology(
   topology: WorktreeTopology,
 ): Promise<ReconcileResult> {
   const { repository } = input;
-  const effects: Effect[] = [];
-  const lag: ReconcileLag[] = [];
-  const hookRuns: { phase: "create" | "destroy"; name: string }[] = [];
+  const acc = reconcileAccumulation(input.onPhysical);
+  const { effects, lag, hookRuns } = acc;
   try {
-    await removeCollectableScratch(repository, topology, effects, lag);
+    await removeCollectableScratch(repository, topology, acc);
     if (!state) return complete(effects, lag);
-    const targetCheckouts = await reconcileTargetCheckouts(repository, state);
-    effects.push(...targetCheckouts.effects);
-    lag.push(...targetCheckouts.lag);
+    const targetCheckouts = await reconcileTargetCheckouts(repository, state, input.onPhysical);
+    acc.recordEffect(...targetCheckouts.effects);
+    acc.recordLag(...targetCheckouts.lag);
     if (state.terminal) {
-      if (await terminalHandoffRetained(input, state, topology, lag)) return complete(effects, lag, hookRuns);
-      return await reconcileTerminalManagedWorktree(
-        input,
-        state,
-        topology,
-        { effects, lag, hookRuns },
-        { ref: deliveryRefFor(state.id), pin: candidatePinRefFor(state.id) },
-      );
+      if (await terminalHandoffRetained(input, state, topology, acc)) return complete(effects, lag, hookRuns);
+      return await reconcileTerminalManagedWorktree(input, state, topology, acc, {
+        ref: deliveryRefFor(state.id),
+        pin: candidatePinRefFor(state.id),
+      });
     }
-    const result = await reconcileActiveManagedWorktree(input, state, topology, { effects, lag, hookRuns });
+    const result = await reconcileActiveManagedWorktree(input, state, topology, acc);
     return hookRuns.length === 0 ? result : { ...result, hookRuns };
   } catch (error) {
     return failed("effect", error, effects, lag);
@@ -355,7 +399,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
   }
 
   let observation: GitReconcileObservation | undefined;
-  let exceptional: unknown;
+  let exceptional: { error: unknown } | undefined;
   try {
     const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
     const topology = await acquireWorktreeTopology(input.repository);
@@ -363,13 +407,21 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
       state,
       result: await reconcileWithTopology(input, state, topology),
     };
+    input.onPhysical?.(observation.result);
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof TypeError) exceptional = error;
-    else observation = { state: null, result: failed("observation", error) };
+    try {
+      observation = { state: null, result: failed("observation", error) };
+    } catch (unexpected) {
+      exceptional = { error: unexpected };
+    }
   }
 
-  observation = releaseFailure(held, observation);
-  if (exceptional !== undefined) throw exceptional;
+  try {
+    observation = releaseFailure(held, observation);
+  } catch (error) {
+    exceptional ??= { error };
+  }
+  if (exceptional !== undefined) throw exceptional.error;
   if (observation === undefined) throw new Error("reconcile produced no observation");
   return observation;
 }

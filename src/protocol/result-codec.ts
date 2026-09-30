@@ -36,6 +36,7 @@ import type {
 } from "./operations.js";
 import type { ReviewValue, ReviewWorkspaceEvidence } from "./review.js";
 import type { ProtocolTerminal } from "./run.js";
+import type { ExecutionStage, ExecutionStop } from "./progress.js";
 
 function fail(): never {
   throw new Error("malformed protocol result");
@@ -115,6 +116,29 @@ function first<const Decoders extends readonly ((value: unknown) => unknown)[]>(
     }
   }
   fail();
+}
+
+const EXECUTION_STAGES: readonly ExecutionStage[] = [
+  "admission",
+  "verification",
+  "placement",
+  "reintegration",
+  "continuation",
+  "reconciliation",
+];
+
+export function decodeExecutionStop(value: unknown): ExecutionStop {
+  const object = record(value, ["kind", "contractId", "stage", "reason", "diagnostic"]);
+  if (object.kind !== "execution-stopped") fail();
+  if (!EXECUTION_STAGES.includes(object.stage as ExecutionStage)) fail();
+  if (object.reason !== "cancelled" && object.reason !== "failed") fail();
+  return {
+    kind: "execution-stopped",
+    contractId: decodeContractId(object.contractId),
+    stage: object.stage as ExecutionStage,
+    reason: object.reason,
+    diagnostic: nonblank(object.diagnostic),
+  };
 }
 
 export function decodeProtocolTerminal(value: unknown): ProtocolTerminal {
@@ -544,15 +568,23 @@ function decodeAuditTargetLag(value: unknown): NonNullable<AuditReport["targetLa
   return { kind: "counted", behind, ...location };
 }
 
-export function decodeAuditReport(value: unknown): AuditReport {
-  const object = record(value, ["candidate", "verification", "target"], ["delivery", "targetLag"]);
+export function decodePartialAuditReport(value: unknown): Partial<AuditReport> {
+  const object = record(value, [], ["candidate", "verification", "target", "targetLag", "delivery"]);
   return {
-    candidate: first(object.candidate, [decodeAuditBlockedCandidate, decodeAuditReadyCandidate]),
-    verification: decodeAuditVerification(object.verification),
-    target: decodeAuditTarget(object.target),
+    ...(object.candidate === undefined
+      ? {}
+      : { candidate: first(object.candidate, [decodeAuditBlockedCandidate, decodeAuditReadyCandidate]) }),
+    ...(object.verification === undefined ? {} : { verification: decodeAuditVerification(object.verification) }),
+    ...(object.target === undefined ? {} : { target: decodeAuditTarget(object.target) }),
     ...(object.targetLag === undefined ? {} : { targetLag: decodeAuditTargetLag(object.targetLag) }),
     ...(object.delivery === undefined ? {} : { delivery: decodeAuditDelivery(object.delivery) }),
   };
+}
+
+export function decodeAuditReport(value: unknown): AuditReport {
+  const partial = decodePartialAuditReport(value);
+  if (partial.candidate === undefined || partial.verification === undefined || partial.target === undefined) fail();
+  return { ...partial, candidate: partial.candidate, verification: partial.verification, target: partial.target };
 }
 
 function decodeReviewWorkspaceEvidence(value: unknown): ReviewWorkspaceEvidence {

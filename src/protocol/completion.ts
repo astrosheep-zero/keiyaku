@@ -8,8 +8,10 @@ import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js
 import {
   contractCheckpoint,
   executionStop,
+  isOperationalFailure,
+  isOperationalStop,
   type ContractCheckpoint,
-  type ExecutionProgress,
+  type ProtocolProgress,
   type ExecutionStage,
   type ExecutionStop,
 } from "./progress.js";
@@ -50,7 +52,7 @@ export type CompletionInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   checkpoint: ContractCheckpoint;
-  progress: ExecutionProgress;
+  progress: ProtocolProgress;
   start: "verification" | "placement";
   deriveDocument(state: ContractCheckpoint["state"]): DocumentDerivation;
   actor?: ActorId;
@@ -75,6 +77,7 @@ type CompletionCursor = {
   checkpoint: ContractCheckpoint;
   evidence: CompletionEvidence;
   ran: EntryUlid | undefined;
+  completion?: CandidateCompletion;
   stage: ExecutionStage;
 };
 
@@ -92,17 +95,20 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   if (snapshot === undefined) throw new Error("delivery completion requires an integration snapshot");
   cursor.evidence = {};
   cursor.ran = undefined;
+  input.progress.recordCandidate(state.id, cursor.evidence);
   const current = currentVerifiedAttestation(state);
   if (current !== undefined) {
     cursor.evidence = {
       verificationReuse: current,
       verificationSubject: { snapshot, mode: "reused", verdict: current.verdict },
     };
+    input.progress.recordCandidate(state.id, cursor.evidence);
     return;
   }
   const declaration = input.deriveDocument(state).verification;
   if (declaration.kind === "refused") {
     cursor.evidence = { verification: { refusal: declaration.refusal } };
+    input.progress.recordCandidate(state.id, cursor.evidence);
     return;
   }
   const result = await verifyDelivery({
@@ -140,6 +146,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
       ? {}
       : { verificationSummary: verified.counts.summary }),
   };
+  input.progress.recordCandidate(state.id, cursor.evidence);
 }
 
 async function observeCandidateTarget(
@@ -159,7 +166,8 @@ async function observeCandidateTarget(
     });
     return observed.kind === "refused" ? { refusal: observed.refusal } : undefined;
   } catch (error) {
-    return { failure: "target-placement-failed", diagnostic: error instanceof Error ? error.message : String(error) };
+    if (!isOperationalFailure(error)) throw error;
+    return { failure: "target-placement-failed", diagnostic: error.message };
   }
 }
 
@@ -172,8 +180,13 @@ async function completedResult(
   if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
   const target = state.coordinates.target;
   const predecessor = state.currentIntegration?.predecessor;
-  const scope =
-    predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
+  // Movement and the completion base are known before this optional observation; a failed scope
+  // read must never erase an already-claimed candidate.
+  cursor.completion = {
+    integration,
+    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+  };
+  input.progress.recordCompletion(state.id, cursor.completion);
   // Never attach a superseded run's verdict to the final integration.
   const current = currentVerifiedAttestation(state);
   const verification =
@@ -183,25 +196,32 @@ async function completedResult(
           mode: cursor.ran === current.entry ? ("ran" as const) : ("reused" as const),
           verdict: current.verdict,
         };
+  cursor.completion = { ...cursor.completion, ...(verification === undefined ? {} : { verification }) };
+  input.progress.recordCompletion(state.id, cursor.completion);
+  const scope =
+    predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
   const {
     verificationSummary: _oldSummary,
     verificationReuse: _oldReuse,
     verificationSubject: _oldSubject,
     ...evidence
   } = cursor.evidence;
+  const completion: CandidateCompletion = {
+    integration,
+    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+    ...(scope === undefined
+      ? {}
+      : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
+    ...(verification === undefined ? {} : { verification }),
+  };
+  cursor.completion = completion;
+  input.progress.recordCompletion(state.id, completion);
   return {
     kind: "completed",
     checkpoint: cursor.checkpoint,
     evidence: {
       ...evidence,
-      completion: {
-        integration,
-        ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
-        ...(scope === undefined
-          ? {}
-          : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
-        ...(verification === undefined ? {} : { verification }),
-      },
+      completion,
       ...(current === undefined || verification?.mode !== "reused" ? {} : { verificationReuse: current }),
       ...(current?.verdict !== "unsatisfied" || current.summary === undefined
         ? {}
@@ -255,6 +275,14 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
   if (result.kind === "accepted") {
     cursor.checkpoint = contractCheckpoint(result);
     input.progress.recordResidue(result.state.id, result);
+    const acceptedIntegration = result.state.currentIntegration?.snapshot;
+    if (acceptedIntegration !== undefined) {
+      const acceptedPredecessor = result.state.currentIntegration?.predecessor;
+      input.progress.recordCompletion(result.state.id, {
+        integration: acceptedIntegration,
+        ...(acceptedPredecessor === undefined ? {} : { predecessor: acceptedPredecessor }),
+      });
+    }
   }
   return result;
 }
@@ -333,6 +361,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
   try {
     return await advanceCandidate(input, cursor);
   } catch (error) {
+    if (!isOperationalStop(error, input.signal)) throw error;
     const contractId: ContractId = input.checkpoint.state.id;
     const stop = executionStop(contractId, cursor.stage, error, input.signal);
     input.progress.recordStop(stop);
@@ -340,7 +369,21 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     if (admitted !== undefined) cursor.checkpoint = admitted;
     // Only this invocation's confirmed claim can complete the node after a trailing failure.
     if (admitted?.state.terminal?.kind === "claimed" && input.progress.hasFact(admitted.state.terminal)) {
-      return await completedResult(input, cursor);
+      if (cursor.completion === undefined) {
+        const integration = admitted.state.currentIntegration;
+        if (integration === null) throw error;
+        const target = admitted.state.coordinates.target;
+        cursor.completion = {
+          integration: integration.snapshot,
+          ...(target === undefined ? {} : { target, predecessor: integration.predecessor }),
+        };
+        input.progress.recordCompletion(contractId, cursor.completion);
+      }
+      return {
+        kind: "completed",
+        checkpoint: cursor.checkpoint,
+        evidence: { ...cursor.evidence, completion: cursor.completion },
+      };
     }
     return stoppedResult(cursor, stop);
   }

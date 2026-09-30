@@ -4,7 +4,7 @@ import type { HookFailure, WorktreeHookLag } from "./hooks.js";
 import { mintSnapshotId } from "./identity.js";
 import type { IntegrationPreparationRefusal } from "./integration.js";
 import type { PrivateStateSeatCloseLag } from "./private-state-seat.js";
-import type { ReconcileFailure, ReconcileLag } from "./reconcile.js";
+import type { Effect, ReconcileFailure, ReconcileLag } from "./reconcile.js";
 import type { WorktreeLeak } from "./scratch.js";
 import type { AuditTargetAnswer, CheckoutNotFollowableRefusal, TargetCheckoutLag } from "./target-placement.js";
 import type { UnsealedBytes } from "./terminal-seal.js";
@@ -318,4 +318,60 @@ export function decodeGitReconcileLag(value: unknown): ReconcileLag {
   if (kind === "reconcile-failed") return decodeReconcileFailureLag(value);
   if (kind !== "worktree-hook-failed") fail();
   return decodeWorktreeHookLag(value);
+}
+
+export function decodeReconcileEffect(value: unknown): Effect {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) fail();
+  const kind = (value as Record<string, unknown>).kind;
+  if (kind === "worktree") {
+    const object = record(value, ["kind", "path", "action"], ["before", "after"]);
+    if (object.action === "created" || object.action === "removed" || object.action === "unchanged")
+      return { kind: "worktree", path: nonblank(object.path), action: object.action };
+    if (object.action !== "followed") fail();
+    return {
+      kind: "worktree",
+      path: nonblank(object.path),
+      action: "followed",
+      before: decodeSnapshotId(object.before),
+      after: decodeSnapshotId(object.after),
+    };
+  }
+  if (kind === "recovery-snapshot") {
+    const object = record(value, ["kind", "action", "snapshot", "retention"]);
+    if (object.action !== "created" || object.retention !== "ephemeral") fail();
+    return {
+      kind: "recovery-snapshot",
+      action: "created",
+      snapshot: decodeSnapshotId(object.snapshot),
+      retention: "ephemeral",
+    };
+  }
+  if (kind === "target-checkout") {
+    const object = record(value, ["kind", "path", "target", "action"]);
+    if (object.action !== "followed" && object.action !== "recovered") fail();
+    return {
+      kind: "target-checkout",
+      path: nonblank(object.path),
+      target: nonblank(object.target),
+      action: object.action,
+    };
+  }
+  if (kind !== "ref") fail();
+  const object = record(value, ["kind", "name", "before", "after", "action"]);
+  if (
+    object.action !== "created" &&
+    object.action !== "updated" &&
+    object.action !== "removed" &&
+    object.action !== "unchanged"
+  )
+    fail();
+  const oid = (input: unknown): string | null =>
+    input === null ? null : typeof input === "string" && input !== "" ? input : fail();
+  return {
+    kind: "ref",
+    name: nonblank(object.name),
+    before: oid(object.before),
+    after: oid(object.after),
+    action: object.action,
+  };
 }

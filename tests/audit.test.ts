@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
@@ -38,36 +39,36 @@ async function failedStoredVerification(): Promise<
   Readonly<{
     repository: TestGitRepository;
     contract: Keiyaku;
-    state: Awaited<ReturnType<Keiyaku["state"]>>;
+    state: NonNullable<Awaited<ReturnType<Keiyaku["state"]>>>;
   }>
 > {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(),
     workspace: "worktree",
     gates: ["verified"],
-  });
-  const boundState = await bound.keiyaku.state();
+  }));
+  const boundState = present(await bound.value.keiyaku.state());
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), boundState.id);
   writeFileSync(`${worktree}/candidate.txt`, "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  await bound.keiyaku.deliver();
-  const state = await bound.keiyaku.state();
+  await bound.value.keiyaku.deliver();
+  const state = present(await bound.value.keiyaku.state());
   assert.equal(state.attestations.at(-1)?.data.verdict, "unsatisfied");
   assert.equal(state.attestations.at(-1)?.data.summary, "[1 bash exit 1]");
-  return { repository, contract: bound.keiyaku, state };
+  return { repository, contract: bound.value.keiyaku, state };
 }
 
 test("a stale document derivation is refused inside its E-decision", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",
-  });
-  const state = await bound.keiyaku.state();
+  }));
+  const state = present(await bound.value.keiyaku.state());
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
     document: decoded.document.key,
@@ -79,7 +80,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
       contractId: state.id,
     }),
   };
-  await bound.keiyaku.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
+  await bound.value.keiyaku.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
   const scope = await scopeOperation({ coordinate: repository.path });
   const refusal = { kind: "document-moved", contractId: state.id };
 
@@ -110,14 +111,14 @@ test("a stale document derivation is refused inside its E-decision", async () =>
 
 test("audit without Verification still returns an accepted ready candidate", async () => {
   const repository = repositoryWithMain();
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",
-  });
+  }));
 
   const scope = await scopeOperation({ coordinate: repository.path });
-  const contractId = (await bound.keiyaku.state()).id;
+  const contractId = (present(await bound.value.keiyaku.state())).id;
   const observed = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, contractId));
   const decoded = decodeContractDocument(observed.state!.terms.document.bytes);
   const result = await withGitDecodeChannel(scope, (channel) =>

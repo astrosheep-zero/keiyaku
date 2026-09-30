@@ -26,11 +26,12 @@ complete. Pure value work and construction over resolved coordinates remain
 synchronous. Callers pass ordinary JavaScript values; the owning boundary
 validates them once rather than requiring callers to forge brands.
 
-Malformed caller input and Markdown fail before repository observation.
-Uninterpretable persisted authority raises `AuthorityCorruptionError`. A domain
-decision that admits no fact raises a typed refusal or retry; unexpected
-infrastructure failures remain ordinary exceptions. Exact input and error shapes
-belong to generated declarations, leaf help, and executable specifications.
+Malformed caller input and Markdown fail before repository observation. Domain
+non-admission is a returned refusal or retry, never an expected exception.
+Exceptional failures distinguish caller mistakes, corrupt authority, uncertain
+publication, cancellation before admission, and unexpected internal failures.
+They retain the native cause and any known invocation evidence. Exact input and
+error shapes belong to generated declarations, leaf help, and executable specifications.
 
 ## Contract Surface
 
@@ -77,15 +78,23 @@ The diff may be unavailable when Git can no longer supply the recorded bytes;
 that absence is not a lifecycle error and the diff is never persisted, gated, or
 cached as authority.
 
-Delivery, review, and audit also offer eager observation forms alongside their
-existing promise operations. Each form returns one invocation-local final
-result and one optional bounded progress subscription. Starting does not depend
-on subscribing; leaving that subscription only stops observation, while the
-caller's explicit cancellation signal is the only cancellation request. The
-stream reports confirmed admission and witnessed trailing verification,
-placement, continuation, or reconciliation transitions, including explicit
-observation gaps. It is not a scheduler, journal verb, durable timeline, or
-second result model, and its consumer cannot change the final outcome.
+Native Contract and delivery abilities keep process custody private while their
+JSON projection retains public result data. Forwarded delivery revives its local
+diff ability from owner evidence, never from serialized callbacks or transport
+state.
+
+Delivery, review, and audit each expose one promised answer and an optional
+observation callback. Execution never depends on observation; a callback cannot
+hold custody, cancel execution, or change finality, even when it throws or
+rejects asynchronously. Caller cancellation alone requests a stop. Observations
+name confirmed admission and witnessed trailing work, including transport gaps,
+without becoming a scheduler, durable timeline, or second result model.
+
+Legitimately absent Contract reads return absence. A missing requested entry in
+a supposedly complete observation remains a broken observation, and corrupt
+persisted authority remains exceptional. Forking distinguishes legally unavailable
+source terms from corrupt source authority rather than disguising corruption as
+an ordinary refusal.
 
 ## Product Boundaries
 

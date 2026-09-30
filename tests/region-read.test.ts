@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
@@ -45,13 +46,13 @@ function document(title: string, patterns: readonly string[]): string {
 }
 
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {
-  const result = await Keiyaku.with().bind({
+  const result = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(title, patterns),
     workspace: "worktree",
     gates: [],
-  });
-  return { id: (await result.keiyaku.state()).id, contract: result.keiyaku };
+  }));
+  return { id: (present(await result.value.keiyaku.state())).id, contract: result.value.keiyaku };
 }
 
 async function read(repository: ReturnType<typeof repositoryWithMain>, region: Parameters<typeof kanshi>[0]["region"]) {

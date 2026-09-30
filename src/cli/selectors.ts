@@ -70,8 +70,8 @@ export function resolveContextualContract(
 /** Resolve one explicit, short, or worktree-contextual selector to its Contract id. */
 export async function resolveContractId(repo: Repo, selector: string | undefined, scope: string): Promise<ContractId> {
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector).id;
-  const { listCompleteContractBoard } = await import("../library/contract.js");
-  return resolveContextualContract(await listCompleteContractBoard(repo), selector, scope);
+  const { listKeiyaku } = await import("../library/keiyaku.js");
+  return resolveContextualContract(await listKeiyaku({ repo }), selector, scope);
 }
 
 export function canonicalContractSelector(selector: string): ContractId {

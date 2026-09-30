@@ -28,6 +28,7 @@ export async function abandonOperation(
       {
         ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),
         ...(input.observationSelection === undefined ? {} : { observationSelection: input.observationSelection }),
+        ...(input.progress === undefined ? {} : { progress: input.progress }),
       },
     ),
     undefined,

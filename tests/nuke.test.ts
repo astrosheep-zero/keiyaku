@@ -16,8 +16,6 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { invoke } from "../src/cli/invoke.js";
 import { main } from "../src/cli/main.js";
 import { parseArgv } from "../src/cli/parse.js";
-import type { RefusedResult } from "../src/cli/result.js";
-import { renderRefusal } from "../src/cli/render/refusal.js";
 import { nukeExitCode, renderNukeText } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
@@ -169,7 +167,14 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     writeFileSync(join(orphanRun, "leash.db"), "orphan leash\n");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 3, worktrees: 1, tasks: 1 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 3, worktrees: 1, tasks: 1 } },
+    });
     await running.body;
     assert.equal(existsSync(running.allocated.paths.heart), false);
     assert.equal(existsSync(running.allocated.paths.leash), false);
@@ -191,7 +196,14 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(readFileSync(join(unknownRun, "bytes.bin"), "utf8"), "foreign runtime\n");
     assert.equal(readFileSync(join(orphanRun, "leash.db"), "utf8"), "orphan leash\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -209,7 +221,14 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -218,7 +237,14 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.equal(existsSync(allocated.paths.requests), false);
     assert.equal(existsSync(allocated.paths.directory), false);
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
@@ -259,7 +285,14 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     const foreignByte = join(foreign, "foreign.txt");
     writeFileSync(foreignByte, "retain\n");
 
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 3, worktrees: 1, tasks: 1 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 3, worktrees: 1, tasks: 1 } },
+    });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(allocated.paths.log), false);
@@ -277,7 +310,14 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal(readFileSync(namespace, "utf8"), "retained\n");
     assert.equal(readFileSync(unknown, "utf8"), "unknown\n");
     assert.equal(readFileSync(foreignByte, "utf8"), "retain\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
     rmSync(fixture.foreign, { recursive: true, force: true });
@@ -307,7 +347,14 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
     writeFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "sibling\n");
     mkdirSync(join(allocated.paths.requests, "other-dir"));
     writeFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "inside\n");
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json")), false);
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json")), false);
     assert.equal(readFileSync(unknownFile, "utf8"), "keep-request-unknown\n");
@@ -326,7 +373,14 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
       mkdirSync(noncanonical);
       writeFileSync(join(noncanonical, "43333333-3333-4333-8333-333333333333.request.json"), "keep-noncanonical\n");
     }
-    assert.deepEqual(await nuke({ world, confirm: world }), { kind: "success", world, removed: { refs: 0, worktrees: 0, tasks: 0 } });
+    assert.deepEqual(await nuke({ world, confirm: world }), {
+      operation: "nuke",
+      kind: "accepted",
+      world,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    });
     for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
       assert.equal(
         readFileSync(join(allocated.paths.requests, name, "43333333-3333-4333-8333-333333333333.request.json"), "utf8"),
@@ -339,8 +393,11 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
 });
 
 test("confirmed nuke preserves recognized entries when stop cannot take custody", async () => {
-  const world = await testWorld();
+  const fixture = await gitNukeFixture();
+  const { world, raw } = fixture;
   try {
+    const task = await Tasks.of(world).add({ title: "Keep task while writer lives" });
+    assert.ok(task.kind === "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
     const soul: Soul = {
@@ -361,8 +418,23 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       mkdirSync(allocated.paths.requests, { recursive: true });
       writeFileSync(join(allocated.paths.requests, "pending.json"), "claim\n");
       const result = await nuke({ world, confirm: world });
-      assert.equal(result.kind, "failed");
-      assert.match(result.diagnostic, /could not be stopped: unavailable/u);
+      assert.equal(result.kind, "accepted");
+      assert.equal(result.value.removed.refs, 0);
+      assert.equal(result.value.removed.worktrees, 0);
+      assert.equal(result.value.removed.tasks, 0);
+      assert.deepEqual(result.effects, [
+        {
+          kind: "reset-owner-stopped",
+          world,
+          owner: "akuma",
+          diagnostic: `Akuma ${allocated.id} could not be stopped: unavailable`,
+        },
+      ]);
+      assert.deepEqual(result.pending, [{ surface: "reset", required: true }]);
+      assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), true);
+      assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
+      assert.equal(existsSync(fixture.managedPath), true);
+      assert.ok(await Tasks.of(world).task({ id: task.value.id }).read());
       assert.equal(existsSync(allocated.paths.heart), true);
       assert.equal(existsSync(allocated.paths.leash), true);
       assert.equal(existsSync(allocated.paths.log), true);
@@ -371,6 +443,7 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       leash.release();
     }
   } finally {
+    raw.run(["worktree", "remove", "--force", fixture.foreign]);
     rmSync(world, { recursive: true, force: true });
   }
 });
@@ -569,7 +642,7 @@ test("Git nuke removes proven unregistered appointed residue", async () => {
   }
 });
 
-test("CLI renders confirmation-required and confirmation-mismatch refusals", async () => {
+test("CLI nuke returns native refusal outcomes for missing and mismatched confirmation", async () => {
   const world = await testWorld();
   try {
     const bare = parseArgv(["-C", world, "nuke"]);
@@ -578,12 +651,14 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       throw new Error("nuke invocation did not parse as executable");
     const required = await invoke(bare, { cwd: world });
     const rejected = await invoke(mismatch, { cwd: world });
-    if (!("kind" in required) || required.kind !== "refused") throw new Error("nuke did not return a refusal");
-    if (!("kind" in rejected) || rejected.kind !== "refused") throw new Error("nuke did not return a refusal");
-    const requiredRefusal = required as RefusedResult;
-    const rejectedRefusal = rejected as RefusedResult;
+    assert.ok("kind" in required && required.kind === "nuke");
+    assert.ok("kind" in rejected && rejected.kind === "nuke");
+    assert.equal(required.result.kind, "refused");
+    assert.equal(rejected.result.kind, "refused");
+    if (required.result.kind !== "refused" || rejected.result.kind !== "refused")
+      throw new Error("missing nuke refusal");
     assert.equal(
-      renderRefusal(requiredRefusal, { columns: 1000, color: false }),
+      renderNukeText(required.result),
       [
         "× nuke refused",
         "  reason  nuke confirmation required",
@@ -592,7 +667,7 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
       ].join("\n"),
     );
     assert.equal(
-      renderRefusal(rejectedRefusal, { columns: 1000, color: false }),
+      renderNukeText(rejected.result),
       [
         "× nuke refused",
         "  reason  nuke confirmation mismatch",
@@ -601,6 +676,8 @@ test("CLI renders confirmation-required and confirmation-mismatch refusals", asy
         `  option  keiyaku nuke --confirm '${world}'`,
       ].join("\n"),
     );
+    assert.deepEqual(required.result.refusal, { kind: "nuke-confirmation-required", world });
+    assert.deepEqual(rejected.result.refusal, { kind: "nuke-confirmation-mismatch", world, confirmation: "wrong" });
   } finally {
     rmSync(world, { recursive: true, force: true });
   }
@@ -624,7 +701,14 @@ test("CLI nuke confirmation refusal is stdout exit 1 with labeled recovery facts
 });
 
 test("nuke receipt names confirmed removals and retained coordination locks", () => {
-  const text = renderNukeText({ kind: "success", world: "/world" as never, removed: { refs: 3, worktrees: 1, tasks: 2 } });
+  const text = renderNukeText({
+    operation: "nuke",
+    kind: "accepted",
+    world: "/world" as never,
+    effects: [],
+    pending: [],
+    value: { removed: { refs: 3, worktrees: 1, tasks: 2 } },
+  });
   assert.match(text, /refs removed  3/u);
   assert.match(text, /worktrees removed  1/u);
   assert.match(text, /task stores removed  2/u);
@@ -632,6 +716,106 @@ test("nuke receipt names confirmed removals and retained coordination locks", ()
 });
 
 test("CLI nuke exit code reports owner failure", () => {
-  assert.equal(nukeExitCode({ kind: "success", world: "/world" as never, removed: { refs: 0, worktrees: 0, tasks: 0 } }), 0);
-  assert.equal(nukeExitCode({ kind: "failed", world: "/world" as never, diagnostic: "broken" }), 2);
+  assert.equal(
+    nukeExitCode({
+      operation: "nuke",
+      kind: "accepted",
+      world: "/world" as never,
+      effects: [{ kind: "reset-owner-stopped", world: "/world", owner: "git", diagnostic: "busy" }],
+      pending: [{ surface: "reset", required: true }],
+      value: { removed: { refs: 1, worktrees: 0, tasks: 0 } },
+    }),
+    2,
+  );
+  assert.equal(
+    nukeExitCode({
+      operation: "nuke",
+      kind: "accepted",
+      world: "/world" as never,
+      effects: [],
+      pending: [],
+      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+    }),
+    0,
+  );
+  assert.equal(
+    nukeExitCode({
+      operation: "nuke",
+      kind: "refused",
+      world: "/world" as never,
+      effects: [],
+      pending: [],
+      refusal: { kind: "nuke-confirmation-required", world: "/world" as never },
+    }),
+    1,
+  );
+});
+
+test("native reset awaits independent removals and keeps their counts on an exceptional owner retirement", async () => {
+  const { nukeKeiyaku } = await import("../src/library/nuke.js");
+  const { KeiyakuError } = await import("../src/index.js");
+  const fixture = await gitNukeFixture();
+  const { raw, world } = fixture;
+  const original = new TypeError("reset owner retirement bug");
+  try {
+    raw.run(["update-ref", "-d", "refs/heads/keiyaku-state"]);
+    const task = await Tasks.of(world).add({ title: "Independent reset owner" });
+    assert.ok(task.kind === "accepted");
+    await assert.rejects(
+      nukeKeiyaku(
+        { world, confirm: world },
+        {
+          onPrivateStateSeatClose: () => {
+            throw original;
+          },
+        },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "internal");
+        assert.equal(error.cause, original);
+        assert.ok(error.outcome?.operation === "nuke");
+        assert.deepEqual(error.outcome.value?.removed, { refs: 2, worktrees: 1, tasks: 1 });
+        return true;
+      },
+    );
+    assert.equal(await Tasks.of(world).task({ id: task.value.id }).read(), null);
+    assert.equal(existsSync(fixture.managedPath), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), false);
+    assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
+  } finally {
+    raw.run(["worktree", "remove", "--force", fixture.foreign]);
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
+test("native reset returns a required partial stop after confirmed deletion and awaits independent owners", async () => {
+  const fixture = await gitNukeFixture();
+  const { raw, world, managedPath } = fixture;
+  try {
+    const task = await Tasks.of(world).add({ title: "Independent owner despite Git stop" });
+    assert.ok(task.kind === "accepted");
+    raw.run(["worktree", "remove", "--force", managedPath]);
+    mkdirSync(managedPath, { recursive: true });
+    writeFileSync(join(managedPath, "foreign.txt"), "not owned by Git cleanup\n");
+    const result = await nuke({ world, confirm: world });
+    assert.ok(result.kind === "accepted");
+    assert.deepEqual(result.value.removed, { refs: 1, worktrees: 0, tasks: 1 });
+    assert.deepEqual(result.pending, [{ surface: "reset", required: true }]);
+    assert.deepEqual(result.effects, [
+      {
+        kind: "reset-owner-stopped",
+        world,
+        owner: "git",
+        diagnostic: `managed Place path has foreign custody: ${managedPath}`,
+      },
+    ]);
+    assert.equal(await Tasks.of(world).task({ id: task.value.id }).read(), null);
+    assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
+    assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
+    assert.equal(readFileSync(join(managedPath, "foreign.txt"), "utf8"), "not owned by Git cleanup\n");
+  } finally {
+    raw.run(["worktree", "remove", "--force", fixture.foreign]);
+    rmSync(world, { recursive: true, force: true });
+  }
 });

@@ -1,4 +1,4 @@
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, ReintegratedData } from "../core/facts/types.js";
 import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
@@ -43,7 +43,7 @@ type ReintegrationInput = Readonly<{
   contractId: ContractId;
   target: string;
   actor?: ActorId;
-  progress?: ExecutionProgress;
+  progress?: ProtocolProgress;
 }>;
 
 type ReintegrationAttempt =

@@ -86,6 +86,7 @@ async function projectCommandReceipt(
             state: "voided" as const,
             evidence: fact.evidence,
             ...(failure === undefined ? {} : { failure }),
+            ...(outcome === undefined ? {} : { outcome: outcome.result }),
           }
         : fact.state === "unproven"
           ? {
@@ -213,6 +214,12 @@ async function serveServiceCommand(
   return await serveResolvedCommand(input, command, request, async (fact, facts) => {
     await beginRequest(input.paths, fact.id);
     const served = await request.execute(facts);
+    if (served.kind === "voided") {
+      return {
+        fact: await voidRequest(input.paths, fact.id, "returned owner outcome was voided"),
+        outcome: { kind: "returned", result: served.outcome },
+      };
+    }
     return {
       fact: await serveUpstreamRequest(input.paths, fact.id, served.serviceJson),
       outcome: { kind: "returned", result: served.result },

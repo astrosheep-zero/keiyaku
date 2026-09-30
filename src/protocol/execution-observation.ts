@@ -32,18 +32,18 @@ const observationSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("progress-dropped"), count: z.number().int().positive() }).strict(),
 ]);
 
-export type ExecutionEvent = z.infer<typeof observationSchema>;
-export type ExecutionObserver = (event: ExecutionEvent) => void;
+export type ExecutionObservation = z.infer<typeof observationSchema>;
+export type ExecutionObserver = (event: ExecutionObservation) => void | PromiseLike<void>;
 
 /** One owner decoder for local and transported ephemeral observations. */
-export function decodeExecutionEvent(value: unknown): ExecutionEvent {
+export function decodeExecutionObservation(value: unknown): ExecutionObservation {
   return observationSchema.parse(value);
 }
 
 /** Observation failure cannot change execution, admission, or process custody. */
-export function observeExecution(observer: ExecutionObserver | undefined, event: ExecutionEvent): void {
+export function observeExecution(observer: ExecutionObserver | undefined, event: ExecutionObservation): void {
   try {
-    observer?.(event);
+    void Promise.resolve(observer?.(event)).catch(() => undefined);
   } catch {
     // A consumer controls observation only, not the operation being observed.
   }

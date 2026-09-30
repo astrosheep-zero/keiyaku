@@ -1,15 +1,12 @@
-import type { LeadingOutcome } from "../protocol/outcome.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { executionReceipt, executionReceiptSchema, withExecutionReceipt } from "./execution-result.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import type { IntentOutcome, IntentRefusal, IntentRetry } from "../protocol/operations.js";
+import type { IntentRefusal, IntentRetry } from "../protocol/operations.js";
 import { decodeIntentRefusal, decodeProtocolTerminal } from "../protocol/result-codec.js";
-import type { AcceptedIntent } from "./mutation.js";
+import { decodeTargetInputRefusal } from "../protocol/bind.js";
 import { ownerSchema } from "./result-codec.js";
 import { z } from "zod";
 
 export type ForkSourceRefusal = Readonly<{
-  kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-invalid" | "fork-source-moved";
+  kind: "fork-source-missing" | "fork-source-unavailable" | "fork-source-moved";
   contractId: ContractId;
 }>;
 
@@ -28,7 +25,125 @@ export type KeiyakuRefusal =
   | ForkSourceRefusal
   | NukeConfirmationRefusal
   | NukeConfirmationRequiredRefusal;
-export type KeiyakuRetryReason = IntentRetry;
+export type ForwardingRetry = Readonly<{
+  kind: "owner-reason-unavailable";
+  diagnostic: string;
+}>;
+export type KeiyakuRetryReason = IntentRetry | ForwardingRetry;
+export type OperationRetries = Readonly<{
+  bind: IntentRetry;
+  amend: IntentRetry;
+  deliver: IntentRetry | ForwardingRetry;
+  review: IntentRetry | ForwardingRetry;
+  audit: IntentRetry | ForwardingRetry;
+  arc: IntentRetry;
+  abandon: IntentRetry;
+}>;
+
+export type OperationRefusals = Readonly<{
+  bind:
+    | import("../protocol/bind.js").BindRefusal
+    | import("../protocol/bind.js").TargetInputRefusal
+    | ForkSourceRefusal
+    | import("../verification/declaration.js").VerificationDeclarationRefusal;
+  amend:
+    | import("../core/verbs/amend.js").AmendRefusal
+    | import("../verification/declaration.js").VerificationDeclarationRefusal;
+  deliver:
+    | import("../core/verbs/deliver.js").DeliverRefusal
+    | import("../protocol/operations.js").DeliveryPreparationRefusal
+    | import("../protocol/operations.js").DeliverConflictRefusal
+    | import("../verification/declaration.js").VerificationDeclarationRefusal;
+  review: import("../protocol/review.js").ReviewRefusal;
+  audit: import("../protocol/audit.js").AuditRefusal;
+  arc: import("../core/verbs/arc.js").ArcRefusal;
+  abandon: import("../core/verbs/abandon.js").AbandonRefusal;
+}>;
+
+const REFUSAL_KINDS = {
+  bind: [
+    "contract-exists",
+    "invalid-after",
+    "unknown-prerequisite",
+    "invalid-target",
+    "target-missing",
+    "unborn-head",
+    "fork-source-missing",
+    "fork-source-unavailable",
+    "fork-source-moved",
+    "verification-declaration-invalid",
+  ],
+  amend: [
+    "contract-missing",
+    "terminal",
+    "terms-moved",
+    "unknown-prerequisite",
+    "cyclic-prerequisite",
+    "verification-declaration-invalid",
+  ],
+  deliver: [
+    "contract-missing",
+    "terminal",
+    "document-moved",
+    "target-missing",
+    "worktree-missing",
+    "dirty-workspace",
+    "unmerged-paths",
+    "integration-failed",
+    "integration-unsupported",
+    "merge-state-present",
+    "checkout-not-followable",
+    "verification-declaration-invalid",
+  ],
+  review: ["contract-missing", "terminal", "worktree-missing", "dirty-workspace"],
+  audit: ["contract-missing", "terminal", "document-moved", "verification-declaration-invalid"],
+  arc: ["contract-missing", "terminal"],
+  abandon: ["contract-missing", "terminal"],
+} as const;
+
+/** Operation narrowing is enforced at the real live boundary, not just in caller declarations. */
+export function decodeOperationRefusal<Operation extends keyof OperationRefusals>(
+  operation: Operation,
+  value: unknown,
+): OperationRefusals[Operation] {
+  const refusal =
+    operation === "bind" &&
+    value !== null &&
+    typeof value === "object" &&
+    "kind" in value &&
+    ["invalid-target", "target-missing", "unborn-head"].includes(String(value.kind))
+      ? decodeTargetInputRefusal(value)
+      : decodeKeiyakuRefusal(value);
+  if (operation !== "bind" && refusal.kind === "target-missing" && !("contractId" in refusal))
+    throw new Error("refusal does not belong to operation");
+  if (!(REFUSAL_KINDS[operation] as readonly string[]).includes(refusal.kind))
+    throw new Error("refusal does not belong to operation");
+  // All decoding belongs to the existing reason owners; this selection cannot admit another operation's reason.
+  return refusal as OperationRefusals[Operation];
+}
+
+export function decodeOperationRetry<Operation extends keyof OperationRetries>(
+  operation: Operation,
+  value: unknown,
+): OperationRetries[Operation] {
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    value.kind === "owner-reason-unavailable"
+  ) {
+    if (
+      !["deliver", "review", "audit"].includes(operation) ||
+      Object.keys(value).length !== 2 ||
+      !("diagnostic" in value) ||
+      typeof value.diagnostic !== "string"
+    )
+      throw new Error("malformed forwarding retry");
+    return { kind: "owner-reason-unavailable", diagnostic: value.diagnostic } as OperationRetries[Operation];
+  }
+  return decodeProtocolTerminal(value);
+}
 
 function decodeForkSourceRefusal(value: unknown): ForkSourceRefusal {
   if (value === null || typeof value !== "object" || Array.isArray(value))
@@ -39,7 +154,6 @@ function decodeForkSourceRefusal(value: unknown): ForkSourceRefusal {
   if (
     object.kind !== "fork-source-missing" &&
     object.kind !== "fork-source-unavailable" &&
-    object.kind !== "fork-source-invalid" &&
     object.kind !== "fork-source-moved"
   )
     throw new Error("malformed fork-source refusal");
@@ -63,6 +177,7 @@ function decodeNukeRefusal(value: unknown): NukeConfirmationRefusal | NukeConfir
   return { kind: "nuke-confirmation-mismatch", world: object.world, confirmation: object.confirmation };
 }
 
+/** One owner decoder for every expected non-admission reason, Contract or World. */
 export function decodeKeiyakuRefusal(value: unknown): KeiyakuRefusal {
   try {
     return decodeIntentRefusal(value);
@@ -83,103 +198,3 @@ export const keiyakuRetryReasonSchema = ownerSchema(
   decodeProtocolTerminal,
   "expected keiyaku retry",
 ) satisfies z.ZodType<KeiyakuRetryReason>;
-
-export class KeiyakuRefused extends Error {
-  readonly kind = "refused" as const;
-
-  constructor(readonly refusal: KeiyakuRefusal) {
-    super(`Keiyaku refused: ${refusal.kind}`);
-    this.name = "KeiyakuRefused";
-  }
-
-  get code(): KeiyakuRefusal["kind"] {
-    return this.refusal.kind;
-  }
-}
-
-export class KeiyakuRetry extends Error {
-  readonly kind = "retry" as const;
-
-  constructor(readonly reason: KeiyakuRetryReason) {
-    super(reason.kind === "publication-failed" ? reason.diagnostic : `Keiyaku retry required: ${reason.kind}`);
-    this.name = "KeiyakuRetry";
-  }
-
-  get code(): KeiyakuRetryReason["kind"] {
-    return this.reason.kind;
-  }
-}
-
-export type PostAdmissionFailureCategory = "authority-corruption" | "type-error" | "error";
-
-export function postAdmissionFailureCategory(error: unknown): PostAdmissionFailureCategory {
-  return error instanceof AuthorityCorruptionError
-    ? "authority-corruption"
-    : error instanceof TypeError
-      ? "type-error"
-      : "error";
-}
-
-const contractLiveFailureSchema = z.union([
-  z
-    .object({
-      kind: z.literal("post-admission-failure"),
-      category: z.enum(["authority-corruption", "type-error", "error"]),
-      diagnostic: z.string(),
-      receipt: executionReceiptSchema,
-    })
-    .strict(),
-  z.object({ kind: z.literal("refused"), refusal: keiyakuRefusalSchema }).strict(),
-  z.object({ kind: z.literal("retry"), reason: keiyakuRetryReasonSchema }).strict(),
-]);
-
-export function encodeContractLiveFailure(error: unknown): unknown | null {
-  const receipt = executionReceipt(error);
-  if (receipt !== undefined)
-    return {
-      kind: "post-admission-failure",
-      category: postAdmissionFailureCategory(error),
-      diagnostic: error instanceof Error ? error.message : String(error),
-      receipt,
-    };
-  if (error instanceof KeiyakuRefused) {
-    return { kind: "refused", refusal: error.refusal };
-  }
-  if (error instanceof KeiyakuRetry) {
-    return { kind: "retry", reason: error.reason };
-  }
-  return null;
-}
-
-export function decodeContractLiveFailure(value: unknown): Error | null {
-  const parsed = contractLiveFailureSchema.safeParse(value);
-  if (!parsed.success) return null;
-  if (parsed.data.kind === "post-admission-failure") {
-    const failure =
-      parsed.data.category === "authority-corruption"
-        ? new AuthorityCorruptionError(parsed.data.diagnostic)
-        : parsed.data.category === "type-error"
-          ? new TypeError(parsed.data.diagnostic)
-          : new Error(parsed.data.diagnostic);
-    return withExecutionReceipt(failure, parsed.data.receipt);
-  }
-  return parsed.data.kind === "refused"
-    ? new KeiyakuRefused(decodeKeiyakuRefusal(parsed.data.refusal))
-    : new KeiyakuRetry(parsed.data.reason);
-}
-
-export function requireAccepted<Value, Refusal extends KeiyakuRefusal>(
-  result: IntentOutcome<Value, Refusal>,
-): AcceptedIntent<Value> {
-  if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
-  if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
-  return result;
-}
-
-export function requireLeadingAdmission<Value, Refusal extends KeiyakuRefusal>(
-  result: LeadingOutcome<Value, Refusal>,
-): Extract<LeadingOutcome<Value, Refusal>, { kind: "accepted" }> {
-  if (result.kind === "refused") throw new KeiyakuRefused(result.refusal);
-  if (result.kind === "retry") throw new KeiyakuRetry(result.reason);
-  return result;
-}

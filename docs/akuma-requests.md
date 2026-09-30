@@ -39,7 +39,7 @@ child's own leash and Soul remain the sole birth judge.
 Service is serial in Heart admission order. The descriptor checks authenticated
 frozen permission before generic admission; refusal runs no operation owner.
 An admitted service call durably marks begun before owner execution; voided
-proves no product effect, while unproven records an effect whose absence or
+proves no committed product effect, while unproven records an effect whose absence or
 success is not proven. An admitted call reserves its child before spawn and settles served only after birth. A failed reservation or publication settles voided without claiming
 cross-database atomicity. Selection requests cross only canonical resolved Akuma
 targets; Contract and Task requests invoke their same direct-parent local
@@ -98,7 +98,7 @@ transport boundary terms:
   voids it before reservation or service begins. A child token is consumed when
   reserved becomes served or is voided from child Soul, Seal, or current-leash
   evidence. A service token is consumed when begun becomes served, voided with
-  proof of no product effect, or unproven when the effect cannot be proved
+  proof of no committed product effect, or unproven when the effect cannot be proved
   absent.
 - **Crash windows:** Review covers transport loss before admission, admission
   before reservation or begun, reservation before child birth, begun during
@@ -112,3 +112,22 @@ transport boundary terms:
   disappear after a terminal Heart fact is stored. The durable fact and
   owner-minted reference remain the recovery boundary; no receipt failure may
   re-run the owner effect or turn a terminal request back into pending work.
+
+## Returned owner outcomes
+
+Returned Contract refusal or retry and an owner throw are distinct. A returned
+outcome testifies to no committed product effect, settles the existing voided
+disposition, and sends the full owner answer only through live ephemeral
+transport. Heart retains diagnostic text, never a replayable result. A successful
+owner supplies its existing exact service reference; a missing required reference
+is an owner failure, not proof of no committed product effect. Generic rendezvous
+transports owner values opaquely and never interprets Contract reasons or invents
+references. Task action markers and child reservation evidence retain their own
+meaning.
+
+An owner throw after service begins cannot prove no committed product effect and remains unproven.
+Live decoded exceptional evidence keeps its own category and cause independently
+of that disposition. Expired or generic voided evidence exposes unavailable owner
+reason and unknown physical observations, not an invented original refusal or a
+claim that no residue exists. Recovery never parses diagnostics, rereads product
+authority to rebuild an invocation, or re-executes its old identity.

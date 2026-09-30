@@ -1,3 +1,4 @@
+import { present, accepted, assertRefused } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
@@ -17,14 +18,13 @@ import {
 } from "./support/git.js";
 import {
   document,
-  refused,
   repositoryWithMain,
 } from "./support/library-verbs.js";
 
 type ContractHandle = Pick<Keiyaku, "state">;
 
 async function publicContractId(handle: ContractHandle): Promise<ContractId> {
-  return (await handle.state()).id;
+  return (present(await handle.state())).id;
 }
 
 
@@ -60,14 +60,14 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   writeFileSync(join(repository.path, "z.txt"), "base\n");
   repository.run(["add", "a.txt", "z.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await cachedRepoAt(repository.path),
     markdown: document(),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["reviewed"],
-  });
-  const boundId = await publicContractId(bound.keiyaku);
+  }));
+  const boundId = await publicContractId(bound.value.keiyaku);
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "a.txt"), "target\n");
   writeFileSync(join(repository.path, "z.txt"), "target\n");
@@ -124,18 +124,15 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
     const journal = await readRef(git, GIT_REF);
-    await assert.rejects(
-      () => contract.deliver(),
-      refused({
+    await assertRefused(() => contract.deliver(), {
         kind: "integration-failed",
         contractId: await publicContractId(contract),
         reason: "conflict",
         targetHead,
         conflictPaths: ["a.txt", "z.txt"],
         recovery: DELIVER_CONFLICT_RECOVERY,
-      }),
-    );
-    const state = await contract.state();
+      });
+    const state = present(await contract.state());
     assert.equal(state.delivery, null);
     assert.equal(state.terminal, null);
     assert.equal(await readRef(git, GIT_REF), journal);
@@ -150,12 +147,12 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const pending = contract.review({ verdict: "satisfied" });
     // A full parallel suite can delay Git observation without changing the fence ordering.
     const deadline = Date.now() + 15000;
-    let state = await contract.state();
+    let state = present(await contract.state());
     while (state.attestations.at(-1)?.data.verdict !== "satisfied" && Date.now() < deadline) {
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
       });
-      state = await contract.state();
+      state = present(await contract.state());
     }
     assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
     assert.equal(state.delivery, null);
@@ -220,30 +217,30 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       reviewed.facts.map((fact) => fact.kind),
       ["attestation", "reintegrated", "claimed"],
     );
-    assert.equal(reviewed.value.placement, undefined);
-    const finalState = await contract.state();
+    assert.equal(accepted(reviewed).value.placement, undefined);
+    const finalState = present(await contract.state());
     assert.equal(finalState.terminal?.kind, "claimed");
     assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
   });
 
   test("declared failing Verification with no gate does not block a library delivery claim", async () => {
     const repository = repositoryWithMain();
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await cachedRepoAt(repository.path),
       markdown: document("exit 1"),
       workspace: "worktree",
       gates: [],
-    });
-    const state = await bound.keiyaku.state();
+    }));
+    const state = present(await bound.value.keiyaku.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
 
-    const delivered = await bound.keiyaku.deliver();
+    const delivered = await bound.value.keiyaku.deliver();
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.deepEqual(delivered.value.completion?.verification, { mode: "ran", verdict: "unsatisfied" });
     assert.equal(delivered.value.placement, undefined);
-    assert.equal((await bound.keiyaku.state()).terminal?.kind, "claimed");
+    assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "claimed");
   });
 });

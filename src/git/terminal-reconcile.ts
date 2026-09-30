@@ -66,7 +66,8 @@ async function removeTerminalWorktree(
   const present = await pathExists(path);
   try {
     await runGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
     return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
   }
   topology.paths.delete(path);
@@ -170,14 +171,10 @@ function complete(
   return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
 }
 
-function retainTerminalWorktree(
-  path: string,
-  retainedLag: ReconcileLag,
-  { effects, lag, hookRuns }: ReconcileAccumulation,
-): ReconcileResult {
-  effects.push({ kind: "worktree", path, action: "unchanged" });
-  lag.push(retainedLag);
-  return complete(effects, lag, hookRuns);
+function retainTerminalWorktree(path: string, retainedLag: ReconcileLag, acc: ReconcileAccumulation): ReconcileResult {
+  acc.recordEffect({ kind: "worktree", path, action: "unchanged" });
+  acc.recordLag(retainedLag);
+  return complete(acc.effects, acc.lag, acc.hookRuns);
 }
 
 async function terminalSealExpectations(
@@ -221,9 +218,7 @@ async function removeSealedTerminalWorktree({
         snapshot,
         retention: "ephemeral" as const,
       };
-      const existing = acc.effects.findIndex((item) => item.kind === "recovery-snapshot");
-      if (existing < 0) acc.effects.push(effect);
-      else acc.effects[existing] = effect;
+      acc.recordEffect(effect);
       return { snapshot, workspace };
     };
 
@@ -261,7 +256,7 @@ async function removeSealedTerminalWorktree({
   }
   const removal = await removeTerminalWorktree(repository, topology, path);
   if (removal.retained) return retainTerminalWorktree(path, { kind: "worktree-retained", path }, acc);
-  if (removal.effect !== undefined) acc.effects.push(removal.effect);
+  if (removal.effect !== undefined) acc.recordEffect(removal.effect);
   return null;
 }
 
@@ -289,20 +284,20 @@ async function releaseTerminalCustody({
   resolveSeal,
   ref,
   pin,
-  acc: { effects },
+  acc,
 }: TerminalCustody): Promise<void> {
   const [deliveryRef, candidatePin] = await Promise.all([readRef(repository, ref), readRef(repository, pin)]);
   if (deliveryRef === null && candidatePin === null) return;
   if (state.delivery === null) {
     const custodian = await snapshotCustodian(repository, state.coordinates.start);
     if (deliveryRef !== null) {
-      effects.push(
+      acc.recordEffect(
         custodian === null
           ? retainedRefEffect(ref, deliveryRef)
           : await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid),
       );
     }
-    if (candidatePin !== null) effects.push(await removeRef(repository, pin));
+    if (candidatePin !== null) acc.recordEffect(await removeRef(repository, pin));
     return;
   }
   const tender = state.delivery.data.tenderSnapshot;
@@ -310,27 +305,27 @@ async function releaseTerminalCustody({
   const target = await targetCustodyForClaimedIntegration(repository, state, integration);
   if (deliveryRef !== null && target !== null) {
     if (tender === integration) {
-      effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+      acc.recordEffect(await removeRefWithCustody(repository, ref, target.ref, target.oid));
     } else {
       const expected = await resolveSeal();
       if (sealedTree(expected, tender) === sealedTree(expected, integration)) {
-        effects.push(await removeRefWithCustody(repository, ref, target.ref, target.oid));
+        acc.recordEffect(await removeRefWithCustody(repository, ref, target.ref, target.oid));
       } else {
-        effects.push(retainedRefEffect(ref, deliveryRef));
+        acc.recordEffect(retainedRefEffect(ref, deliveryRef));
       }
     }
   } else if (deliveryRef !== null) {
-    effects.push(retainedRefEffect(ref, deliveryRef));
+    acc.recordEffect(retainedRefEffect(ref, deliveryRef));
   }
   if (candidatePin !== null) {
     if (target !== null || (tender === integration && deliveryRef !== null)) {
-      effects.push(
+      acc.recordEffect(
         target !== null
           ? await removeRefWithCustody(repository, pin, target.ref, target.oid)
           : await removeRefWithCustody(repository, pin, ref, tender),
       );
     } else {
-      effects.push(retainedRefEffect(pin, candidatePin));
+      acc.recordEffect(retainedRefEffect(pin, candidatePin));
     }
   }
 }
@@ -351,15 +346,15 @@ export async function reconcileTerminalManagedWorktree(
     return complete(acc.effects, acc.lag, acc.hookRuns);
   }
   const expected = await resolveSeal();
-  acc.effects.push(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
+  acc.recordEffect(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
   if (state.delivery !== null) {
-    acc.effects.push(
+    acc.recordEffect(
       await updateRef(primary, pin, state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot),
     );
   }
   if (retainTerminalWorktree === true) {
     if (topology.paths.has(path) && (await pathExists(path))) {
-      acc.effects.push({ kind: "worktree", path, action: "unchanged" });
+      acc.recordEffect({ kind: "worktree", path, action: "unchanged" });
     }
     return complete(acc.effects, acc.lag);
   }

@@ -1,15 +1,20 @@
 import {
-  executionReceipt,
-  KeiyakuRefused,
-  KeiyakuRetry,
-  type AmendResult,
+  type AmendValue,
   type AuditReport,
-  type BindResult,
+  type BindValue,
+  type ContractHead,
   type ContractId,
   type Delivery,
+  type ExecutionCleanup,
+  type ExecutionStop,
   type Fact,
-  type MutationResult,
+  type IntegrationConflictMaterialized,
+  type InvocationEffect,
+  type PendingSurface,
+  type ReconciliationLag,
   type Review,
+  type SettlementLag,
+  type SnapshotId,
 } from "../index.js";
 import type { AmendRegionObservation, RegionObservation } from "../library/region.js";
 import type {
@@ -20,38 +25,113 @@ import type {
   AcceptedBindResult,
   AcceptedDeliverResult,
   AcceptedEnvelope,
-  AcceptedFact,
   AcceptedResult,
   AcceptedReviewResult,
   InvocationResult,
 } from "./result.js";
 
-type MutationObservation = Pick<
-  MutationResult<unknown>,
-  | "facts"
-  | "head"
-  | "lags"
-  | "settlementLags"
-  | "recoverySnapshot"
-  | "retiredWorktree"
-  | "retainedWorktree"
-  | "retainedCheckouts"
-  | "cleanup"
-  | "executionStops"
->;
+/** The accepted arm every operation projects through: one envelope, one effect carrier. */
+type AcceptedObservation<Value> = Readonly<{
+  contract?: ContractId;
+  head: ContractHead;
+  facts: readonly Fact[];
+  effects: readonly InvocationEffect[];
+  pending: readonly PendingSurface[];
+  value: Value;
+}>;
+
+type CallOutcome<Value> =
+  | (AcceptedObservation<Value> & Readonly<{ kind: "accepted" }>)
+  | Readonly<{ kind: "refused"; contract?: ContractId; refusal: unknown }>
+  | Readonly<{ kind: "retry"; contract?: ContractId; reason: unknown }>
+  | Readonly<{ kind: "handoff"; value: IntegrationConflictMaterialized }>;
 
 type MutationCallOptions = Readonly<{
   coordinate?: ContractId;
   projectRefusal?: (refusal: unknown) => unknown;
 }>;
 
-function acceptedFacts(result: MutationObservation): readonly AcceptedFact[] {
-  return result.facts.map(
-    (fact): AcceptedFact =>
-      fact.kind === "reintegrated"
-        ? { contract: fact.contract, entry: fact.entry, kind: fact.kind, data: fact.data }
-        : { contract: fact.contract, entry: fact.entry, kind: fact.kind },
-  );
+/**
+ * The interim CLI presentation of one projection. The eight retired sidecar names are derived here
+ * from the single effect carrier; nothing is accumulated twice.
+ */
+function acceptedEnvelope(
+  result: Omit<AcceptedObservation<unknown>, "value">,
+  coordinate: ContractId | undefined,
+): AcceptedEnvelope {
+  const contract = coordinate ?? result.contract ?? result.facts[0]?.contract;
+  if (contract === undefined) throw new Error("accepted mutation is missing its contract identity");
+  const lags: ReconciliationLag[] = [];
+  const settlementLags: SettlementLag[] = [];
+  const cleanup: ExecutionCleanup[] = [];
+  const executionStops: ExecutionStop[] = [];
+  const retainedCheckouts: { path: string; target: string; diagnostic: string }[] = [];
+  let recoverySnapshot: SnapshotId | undefined;
+  let retiredWorktree: string | undefined;
+  let retainedWorktree: string | undefined;
+  for (const effect of result.effects) {
+    switch (effect.kind) {
+      case "reconciliation-lag":
+        lags.push(effect.lag);
+        break;
+      case "settlement-lag":
+        settlementLags.push(effect.lag);
+        break;
+      case "cleanup":
+        cleanup.push(effect.issue);
+        break;
+      case "execution-stopped":
+        executionStops.push({
+          kind: "execution-stopped",
+          contractId: contract,
+          stage: effect.stage,
+          reason: effect.reason,
+          diagnostic: effect.diagnostic,
+        });
+        break;
+      case "checkout-retained":
+        retainedCheckouts.push({ path: effect.path, target: effect.target, diagnostic: effect.diagnostic });
+        break;
+      case "worktree-retired":
+        retiredWorktree = effect.name;
+        break;
+      case "worktree-retained":
+        retainedWorktree = effect.path;
+        break;
+      case "reconciliation-effect":
+        if (effect.effect.kind === "recovery-snapshot") recoverySnapshot = effect.effect.snapshot;
+        break;
+      default:
+        break;
+    }
+  }
+  const firstLag = lags[0];
+  return {
+    kind: "accepted",
+    contract,
+    head: result.head,
+    facts: result.facts,
+    effects: result.effects,
+    pending: result.pending,
+    settlementLags,
+    ...(recoverySnapshot === undefined ? {} : { recoverySnapshot }),
+    ...(retiredWorktree === undefined ? {} : { retiredWorktree }),
+    ...(retainedWorktree === undefined ? {} : { retainedWorktree }),
+    ...(retainedCheckouts.length === 0 ? {} : { retainedCheckouts }),
+    ...(firstLag === undefined ? {} : { lag: [firstLag, ...lags.slice(1)] }),
+    ...(cleanup.length === 0 ? {} : { cleanup }),
+    ...(executionStops.length === 0 ? {} : { executionStops }),
+  };
+}
+
+function acceptedRegion(value: RegionObservation): RegionObservation {
+  return value.overlapFailure !== undefined ? { overlapFailure: value.overlapFailure } : { overlaps: value.overlaps };
+}
+
+function acceptedAmendRegion(value: AmendRegionObservation): AmendRegionObservation {
+  if (value.overlapFailure !== undefined) return { overlapFailure: value.overlapFailure };
+  if (value.overlaps !== undefined) return { overlaps: value.overlaps };
+  return {};
 }
 
 function attestationFor(
@@ -65,59 +145,31 @@ function attestationFor(
   );
 }
 
-function acceptedEnvelope(result: MutationObservation, coordinate: ContractId | undefined): AcceptedEnvelope {
-  const contract = coordinate ?? result.facts[0]?.contract;
-  if (contract === undefined) throw new Error("accepted mutation is missing its contract identity");
-  const firstLag = result.lags[0];
-  return {
-    kind: "accepted",
-    contract,
-    head: result.head,
-    facts: acceptedFacts(result),
-    settlementLags: result.settlementLags,
-    ...(result.recoverySnapshot === undefined ? {} : { recoverySnapshot: result.recoverySnapshot }),
-    ...(result.retiredWorktree === undefined ? {} : { retiredWorktree: result.retiredWorktree }),
-    ...(result.retainedWorktree === undefined ? {} : { retainedWorktree: result.retainedWorktree }),
-    ...(result.retainedCheckouts === undefined ? {} : { retainedCheckouts: result.retainedCheckouts }),
-    ...(result.lags.length === 0 || firstLag === undefined ? {} : { lag: [firstLag, ...result.lags.slice(1)] }),
-    ...(result.cleanup.length === 0 ? {} : { cleanup: result.cleanup }),
-    ...(result.executionStops.length === 0 ? {} : { executionStops: result.executionStops }),
-  };
-}
-
-function acceptedRegion(result: BindResult): RegionObservation {
-  if (result.overlapFailure !== undefined) return { overlapFailure: result.overlapFailure };
-  return { overlaps: result.overlaps };
-}
-
-function acceptedAmendRegion(result: AmendResult): AmendRegionObservation {
-  if (result.overlapFailure !== undefined) return { overlapFailure: result.overlapFailure };
-  if (result.overlaps !== undefined) return { overlaps: result.overlaps };
-  return {};
-}
-
-export function acceptedBind(result: BindResult, coordinates: Readonly<{ target?: string }>): AcceptedBindResult {
+export function acceptedBind(
+  result: AcceptedObservation<BindValue>,
+  coordinates: Readonly<{ target?: string }>,
+): AcceptedBindResult {
   return {
     ...acceptedEnvelope(result, undefined),
     verb: "bind",
-    ...(result.workspace === undefined ? {} : { workspace: result.workspace }),
+    ...(result.value.workspace === undefined ? {} : { workspace: result.value.workspace }),
     target: coordinates.target ?? null,
-    ...(result.warnings === undefined ? {} : { warnings: result.warnings }),
-    ...acceptedRegion(result),
+    ...(result.value.warnings === undefined ? {} : { warnings: result.value.warnings }),
+    ...acceptedRegion(result.value),
   };
 }
 
-export function acceptedAmend(result: AmendResult, coordinate: ContractId): AcceptedAmendResult {
+export function acceptedAmend(result: AcceptedObservation<AmendValue>, coordinate: ContractId): AcceptedAmendResult {
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "amend",
-    diff: result.documentDiff,
-    changes: result.changes,
-    ...acceptedAmendRegion(result),
+    diff: result.value.documentDiff,
+    changes: result.value.changes,
+    ...acceptedAmendRegion(result.value),
   };
 }
 
-export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: ContractId): AcceptedDeliverResult {
+export function acceptedDeliver(result: AcceptedObservation<Delivery>, coordinate: ContractId): AcceptedDeliverResult {
   const value = result.value;
   const attestation = attestationFor(result.facts, "verified", coordinate);
   const verificationVerdict =
@@ -139,7 +191,7 @@ export function acceptedDeliver(result: MutationResult<Delivery>, coordinate: Co
   };
 }
 
-export function acceptedReview(result: MutationResult<Review>, coordinate: ContractId): AcceptedReviewResult {
+export function acceptedReview(result: AcceptedObservation<Review>, coordinate: ContractId): AcceptedReviewResult {
   const value = result.value;
   const reviewAttestation = attestationFor(result.facts, "reviewed", coordinate);
   if (reviewAttestation === undefined) throw new Error("accepted review is missing its attestation fact");
@@ -163,7 +215,7 @@ export function acceptedReview(result: MutationResult<Review>, coordinate: Contr
   };
 }
 
-export function acceptedArc(result: MutationResult<void>, coordinate: ContractId): AcceptedArcResult {
+export function acceptedArc(result: AcceptedObservation<void>, coordinate: ContractId): AcceptedArcResult {
   const arc = result.facts.find((fact) => fact.kind === "arc");
   if (arc === undefined) throw new Error("accepted arc is missing its arc fact");
   return {
@@ -173,7 +225,7 @@ export function acceptedArc(result: MutationResult<void>, coordinate: ContractId
   };
 }
 
-export function acceptedAbandon(result: MutationResult<void>, coordinate: ContractId): AcceptedAbandonResult {
+export function acceptedAbandon(result: AcceptedObservation<void>, coordinate: ContractId): AcceptedAbandonResult {
   const abandoned = result.facts.find((fact) => fact.kind === "abandoned");
   if (abandoned === undefined) throw new Error("accepted abandon is missing its abandoned fact");
   return {
@@ -183,7 +235,7 @@ export function acceptedAbandon(result: MutationResult<void>, coordinate: Contra
   };
 }
 
-export function acceptedAudit(result: MutationResult<AuditReport>, coordinate: ContractId): AcceptedAuditResult {
+export function acceptedAudit(result: AcceptedObservation<AuditReport>, coordinate: ContractId): AcceptedAuditResult {
   return {
     ...acceptedEnvelope(result, coordinate),
     verb: "audit",
@@ -191,35 +243,28 @@ export function acceptedAudit(result: MutationResult<AuditReport>, coordinate: C
   };
 }
 
-export async function resultFromMutationCall<
-  const Verb extends AcceptedResult["verb"],
-  Result extends MutationObservation,
->(
+/** One promised operation is already the answer: expected refusals and retries are returned data. */
+export async function resultFromMutationCall<const Verb extends AcceptedResult["verb"], Value>(
   verb: Verb,
-  call: () => Promise<Result>,
-  project: (result: Result) => Extract<AcceptedResult, { verb: NoInfer<Verb> }>,
+  call: () => Promise<CallOutcome<Value>>,
+  project: (accepted: Extract<CallOutcome<Value>, { kind: "accepted" }>) => Extract<AcceptedResult, { verb: Verb }>,
   options: MutationCallOptions = {},
-): Promise<Extract<AcceptedResult, { verb: Verb }> | Extract<InvocationResult, { kind: "refused" | "retry" }>> {
-  try {
-    return project(await call());
-  } catch (error) {
-    if (executionReceipt(error) !== undefined) throw error;
-    if (error instanceof KeiyakuRefused) {
-      return {
-        kind: "refused",
-        verb,
-        ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
-        refusal: options.projectRefusal === undefined ? error.refusal : options.projectRefusal(error.refusal),
-      };
-    }
-    if (error instanceof KeiyakuRetry) {
-      return {
-        kind: "retry",
-        verb,
-        ...(options.coordinate === undefined ? {} : { contract: options.coordinate }),
-        detail: error.reason,
-      };
-    }
-    throw error;
+): Promise<
+  | Extract<AcceptedResult, { verb: Verb }>
+  | Extract<InvocationResult, { kind: "refused" | "retry" }>
+  | IntegrationConflictMaterialized
+> {
+  const outcome = await call();
+  if (outcome.kind === "accepted") return project(outcome);
+  if (outcome.kind === "handoff") return outcome.value;
+  const contract = options.coordinate ?? outcome.contract;
+  if (outcome.kind === "refused") {
+    return {
+      kind: "refused",
+      verb,
+      ...(contract === undefined ? {} : { contract }),
+      refusal: options.projectRefusal === undefined ? outcome.refusal : options.projectRefusal(outcome.refusal),
+    };
   }
+  return { kind: "retry", verb, ...(contract === undefined ? {} : { contract }), detail: outcome.reason };
 }

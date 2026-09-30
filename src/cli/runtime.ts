@@ -9,19 +9,19 @@ import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
 import { renderStructuredRefusal } from "./render/refusal.js";
 import type { InvocationResult } from "./result.js";
 import type { Settings } from "../settings.js";
-import type { ExecutionEvent } from "../library/execution.js";
+import type { ExecutionObserver } from "../library/keiyaku.js";
 
 function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
   stream.write(body.endsWith("\n") ? body : `${body}\n`);
 }
 
+/** Builds the one live progress observer for an invocation; the caller owns when it finishes. */
 export async function writeExecutionProgress(
-  events: AsyncIterable<ExecutionEvent>,
   stream: NodeJS.WritableStream = process.stderr,
-): Promise<void> {
-  const { renderExecutionProgress } = await import("./render/execution-progress.js");
+): Promise<Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>> {
+  const { createExecutionProgressRenderer } = await import("./render/execution-progress.js");
   const terminal = stream as NodeJS.WritableStream & Readonly<{ isTTY?: boolean; columns?: number }>;
-  await renderExecutionProgress(events, {
+  const renderer = createExecutionProgressRenderer({
     stream: terminal,
     context: {
       columns:
@@ -31,6 +31,7 @@ export async function writeExecutionProgress(
       color: false,
     },
   });
+  return { observe: (event) => renderer.observe(event), finish: () => renderer.finish() };
 }
 
 function cliCancellation(): Readonly<{ signal: AbortSignal; close(): void }> {
@@ -256,22 +257,9 @@ async function commandFailureText(error: unknown, command: ParsedCommand): Promi
     }
     return `× ${command.command} failed\n  reason  ${safeText(error.message)}`;
   }
-  const { KeiyakuRefused } = await import("../library/refusal.js");
-  if (error instanceof KeiyakuRefused) {
-    const { renderRefusalFacts } = await import("./render/refusal.js");
-    const contract =
-      "contractId" in error.refusal && typeof error.refusal.contractId === "string"
-        ? error.refusal.contractId
-        : undefined;
-    return [
-      `× ${command.command} refused`,
-      ...renderRefusalFacts(error.refusal, "  ", displayContext().columns, contract),
-    ].join("\n");
-  }
   return `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`;
 }
 
-// eslint-disable-next-line complexity, max-lines-per-function -- the process edge keeps one truthful cleanup boundary.
 export async function runCliCommand(invocation: ParsedExecution): Promise<number> {
   const command = invocation.command;
   const cancellation = cliCancellation();
@@ -284,12 +272,11 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
     });
     return await writeResult(command, result);
   } catch (error) {
-    const { executionReceipt } = await import("../library/execution-result.js");
-    const receipt = executionReceipt(error);
+    const { KeiyakuError } = await import("../library/keiyaku.js");
+    const receipt = error instanceof KeiyakuError ? error.outcome : undefined;
     if (receipt !== undefined) {
       const diagnostic = error instanceof Error ? error.message : String(error);
-      const { postAdmissionFailureCategory } = await import("../library/refusal.js");
-      const category = postAdmissionFailureCategory(error);
+      const category = error instanceof KeiyakuError ? error.category : "internal";
       const { executionFailureLines } = await import("./render/receipt.js");
       writeCliStream(
         process.stdout,
@@ -308,13 +295,10 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
       const { BindDraftError } = await import("./draft.js");
       if (error instanceof BindDraftError) {
         const { renderRefusal } = await import("./render/refusal.js");
-        const refusal =
-          error.original instanceof (await import("../library/refusal.js")).KeiyakuRefused
-            ? error.original.refusal
-            : {
-                kind: "invalid-document",
-                diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
-              };
+        const refusal = {
+          kind: "invalid-document",
+          diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
+        };
         const result = { kind: "refused" as const, verb: "bind", refusal, draft: error.draft };
         writeCliStream(process.stdout, command.output === "json" ? JSON.stringify(result) : renderRefusal(result));
         return error.original instanceof CliUsageError ? 64 : 1;
@@ -337,26 +321,6 @@ export async function runCliCommand(invocation: ParsedExecution): Promise<number
               ["available  keiyaku ls aku/"],
               usageGuideForCommand(command),
             ),
-      );
-      return 1;
-    }
-    const { KeiyakuRefused } = await import("../library/refusal.js");
-    if (error instanceof KeiyakuRefused) {
-      const contract =
-        "contractId" in error.refusal && typeof error.refusal.contractId === "string"
-          ? error.refusal.contractId
-          : undefined;
-      const refusal = {
-        kind: "refused" as const,
-        verb: command.command,
-        ...(contract === undefined ? {} : { contract: contract as never }),
-        refusal: error.refusal,
-      };
-      writeCliStream(
-        process.stdout,
-        command.output === "json"
-          ? JSON.stringify(refusal)
-          : (await import("./render/refusal.js")).renderRefusal(refusal),
       );
       return 1;
     }

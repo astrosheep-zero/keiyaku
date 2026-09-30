@@ -7,6 +7,7 @@ import {
   changeId,
   contractHead,
   contractId,
+  type JournalEntry,
   entryUlid,
   gate,
   snapshotId,
@@ -81,6 +82,18 @@ import type { ContractHistoryEvent } from "../src/index.js";
 import { parseTaskCommand } from "../src/cli/commands/task.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
+
+const fixtureEntry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+function boundFact(contract: ContractId): Extract<JournalEntry, { kind: "bound" }> {
+  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "bound", data: {} };
+}
+function claimedFact(contract: ContractId): Extract<JournalEntry, { kind: "claimed" }> {
+  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "claimed", data: { delivery: fixtureEntry } };
+}
+function deliverFact(contract: ContractId): Extract<JournalEntry, { kind: "deliver" }> {
+  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V"), kind: "deliver",
+    data: { tenderSnapshot: snapshotId("tender-commit"), integration: { predecessor: snapshotId("base"), snapshot: snapshotId("integration"), changeId: changeId("content-id") }, method: "squash", policy: { requireBranchesToBeUpToDate: false } } };
+}
 
 const worldRoot = "/world" as WorldRoot;
 
@@ -980,8 +993,8 @@ test("every verb receipt states facts without journal rows or entry ids", () => 
     kind: "accepted" as const,
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry, kind: "bound" as const }],
-    settlementLags: [],
+    facts: [boundFact(contract)],
+    settlementLags: [], effects: [], pending: [],
   };
   const receipts: readonly InvocationResult[] = [
     { ...envelope, verb: "bind", target: null, overlaps: [] },
@@ -1142,7 +1155,7 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
   const contract = contractId("kei/identity");
   const tender = snapshotId("a".repeat(40));
   const integration = snapshotId("b".repeat(40));
-  const result: InvocationResult = receipt({
+  const result = receipt({
     verb: "deliver",
     contract,
     tenderSnapshot: tender,
@@ -1357,7 +1370,7 @@ test("world reconcile failure renders its diagnostic", () => {
 
 test("Verification create action names are safe in text receipts", () => {
   const name = "prepare\nINJECT\u001b[31m";
-  const result: InvocationResult = receipt({
+  const result = receipt({
     verb: "deliver",
     contract: contractId("kei/hostile-create-name"),
     verification: {
@@ -1377,7 +1390,7 @@ test("Verification create action names are safe in text receipts", () => {
 
 test("Verification cleanup action names are safe in text receipts", () => {
   const name = "destroy\rINJECT\u001b[2J";
-  const result: InvocationResult = receipt({
+  const result = receipt({
     verb: "deliver",
     contract: contractId("kei/hostile-cleanup-name"),
     cleanup: [
@@ -1416,7 +1429,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
         affects: "continuation",
       },
     ] as const,
-    settlementLags: [],
+    settlementLags: [], effects: [], pending: [],
   };
   assert.equal(
     renderText({ ...envelope, verb: "deliver" }),
@@ -1434,10 +1447,10 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
 
 test("accepted bind receipts expose confirmed private-state seat close lag", () => {
   const contract = contractId("kei/bound");
-  const result: InvocationResult = receipt({
+  const result = receipt({
     verb: "bind",
     contract,
-    facts: [{ contract, entry: "bind", kind: "bound" }],
+    facts: [boundFact(contract)],
     workspace: { kind: "worktree", path: "/tmp/wt" },
     target: null,
     overlaps: [],
@@ -1465,10 +1478,10 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
 
 test("accepted bind receipts surface Region lint warnings", () => {
   const contract = contractId("kei/warned");
-  const result: InvocationResult = receipt({
+  const result = receipt({
     verb: "bind",
     contract,
-    facts: [{ contract, entry: "bind", kind: "bound" }],
+    facts: [boundFact(contract)],
     target: null,
     overlaps: [],
     warnings: ["Region pattern 'src/a b' contains whitespace and will never match a path"],
@@ -1484,9 +1497,9 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
     verb: "deliver",
     contract,
     head,
-    facts: [{ contract, entry: "claim", kind: "claimed" }],
-    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [], affects: "none" }],
-    settlementLags: [],
+    facts: [claimedFact(contract)],
+    lag: [{ kind: "unsealed-bytes", path: "/repo/.keiyaku/wt/contract", paths: [] }],
+    settlementLags: [], effects: [], pending: [],
     recoverySnapshot: snapshotId("recovery"),
     leading: { kind: "already-admitted", fact: "01K4AJ8F6K7JH8Y6Q5NEPRT41V" as never },
     tenderSnapshot: snapshotId("tender-commit"),
@@ -1513,8 +1526,8 @@ test("fresh admitted-now leading stays in JSON while receipt text stays quiet", 
     verb: "deliver",
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry: "01K4AJ8F6K7JH8Y6Q5NEPRT41V", kind: "deliver" }],
-    settlementLags: [],
+    facts: [deliverFact(contract)],
+    settlementLags: [], effects: [], pending: [],
     leading: { kind: "admitted-now", fact: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V") },
     tenderSnapshot: snapshotId("tender-commit"),
     integration: { changeId: changeId("content-id") },
@@ -1543,7 +1556,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
     contract,
     head: contractHead("head"),
     facts: [],
-    settlementLags: [],
+    settlementLags: [], effects: [], pending: [],
   };
 
   const deliver: InvocationResult = { ...envelope, verb: "deliver", placement };
@@ -1578,8 +1591,8 @@ test("a satisfied review whose placement fails names the satisfied fact once and
     kind: "accepted",
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry: "review", kind: "attestation" }],
-    settlementLags: [],
+    facts: [{ v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "attestation", data: { gate: gate("reviewed"), subject: "[]" as import("../src/core/facts/types.js").DependencyKeySet, verdict: "satisfied" } }],
+    settlementLags: [], effects: [], pending: [],
     verb: "review",
     verdict: "satisfied",
     placement: { failure: "target-placement-failed", diagnostic: "fatal: could not read from remote repository" },
@@ -1841,8 +1854,8 @@ test("deliver projects a ran Verification completion", () => {
     kind: "accepted" as const,
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    settlementLags: [],
+    facts: [claimedFact(contract)],
+    settlementLags: [], effects: [], pending: [],
   };
   const text = renderText({
     ...envelope,
@@ -2056,8 +2069,8 @@ test("review projects a reused unsatisfied Verification as non-gating completion
     kind: "accepted" as const,
     contract,
     head: contractHead("head"),
-    facts: [{ contract, entry: "claim", kind: "claimed" as const }],
-    settlementLags: [],
+    facts: [claimedFact(contract)],
+    settlementLags: [], effects: [], pending: [],
   };
   assert.equal(
     renderText({
@@ -2095,22 +2108,22 @@ test("movement projects its deviation and reintegration coordinates", () => {
     kind: "accepted" as const,
     contract,
     head: contractHead("head"),
-    settlementLags: [],
+    settlementLags: [], effects: [], pending: [],
   };
   const facts: readonly import("../src/cli/result.js").AcceptedFact[] = [
     {
       contract,
-      entry: "reintegration",
+      v: 1, at: "2026-01-01T00:00:00Z", entry: fixtureEntry,
       kind: "reintegrated" as const,
       data: { predecessor, snapshot: integrated },
     },
     {
       contract,
-      entry: "reintegration-2",
+      v: 1, at: "2026-01-01T00:00:01Z", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
       kind: "reintegrated" as const,
       data: { predecessor: secondPredecessor, snapshot: secondIntegrated },
     },
-    { contract, entry: "claim", kind: "claimed" as const },
+    claimedFact(contract),
   ];
 
   assert.equal(

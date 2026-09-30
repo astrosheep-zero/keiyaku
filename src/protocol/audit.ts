@@ -182,7 +182,7 @@ function completedAudit(
   state: ContractState,
   verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
   value: AuditReport,
-): IntentOutcome<AuditReport> {
+): IntentOutcome<AuditReport, never> {
   const obligations = {
     ...(verified?.cleanup === undefined ? {} : { cleanup: verified.cleanup }),
     ...(verified?.leak === undefined ? {} : { leak: verified.leak }),
@@ -192,7 +192,12 @@ function completedAudit(
     : { ...admitted(verified.admission, value), ...obligations };
 }
 
-export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport>> {
+export type AuditRefusal =
+  | import("../core/verbs/deliver.js").DeliverRefusal
+  | import("../verification/declaration.js").VerificationDeclarationRefusal;
+
+// eslint-disable-next-line complexity -- one adjudicated audit retains partial observations before each later owner boundary.
+export async function auditOperation(input: AuditOperationInput): Promise<IntentOutcome<AuditReport, AuditRefusal>> {
   const observed = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = activeContract(observed.decision, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
@@ -222,6 +227,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
   );
   if (prepared.kind === "refused") return accepted(state, [], blockedAudit(prepared.refusal));
   const candidate = await readyAuditCandidate(input.scope, prepared.data, workspace.answer, input.showDiff === true);
+  input.progress?.recordAudit(state.id, { candidate });
   const verified =
     derivation.verification.data === null
       ? undefined
@@ -237,7 +243,9 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     prepared.data,
     derivation.verification.data !== null,
   );
+  input.progress?.recordAudit(state.id, { verification, ...(delivery === undefined ? {} : { delivery }) });
   const target = await auditTargetAnswer(input.scope, state, prepared.data);
+  input.progress?.recordAudit(state.id, { target });
   const targetLag =
     target.kind === "placeable" ? await observeTargetLag(input.scope, workspace.answer.path, target.head) : undefined;
   const value: AuditReport = {

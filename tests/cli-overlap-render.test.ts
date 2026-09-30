@@ -10,7 +10,7 @@ const result = {
   contract: contractId("kei/overlap-render-owner-5062"),
   head: contractHead("head"),
   facts: [],
-  settlementLags: [],
+  settlementLags: [], effects: [], pending: [],
   target: "refs/heads/main",
   overlaps: [],
 } satisfies AcceptedBindResult;

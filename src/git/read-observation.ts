@@ -8,6 +8,7 @@ import { GitPlumbingError, type GitRepository } from "./process.js";
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");
+const BATCH_RETIREMENT_GRACE_MS = 1_000;
 
 export type GitBlobResult = Readonly<{ kind: "present"; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 
@@ -73,6 +74,8 @@ function streamCursor(stream: NodeJS.ReadableStream): StreamCursor {
   return { line, exact };
 }
 
+type BatchStatus = { spawnError: Error | null; failure: GitPlumbingError | null };
+
 type BatchObjectReader = Readonly<{
   objects(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>>;
   close(): Promise<void>;
@@ -102,21 +105,49 @@ function batchError(
 
 async function closeBatchProcess(
   process: ReturnType<typeof spawnCancellableProcess>,
-  child: ChildProcessWithoutNullStreams,
-  closed: Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>>,
-  spawnError: Error | null,
-  stderr: readonly Buffer[],
+  reader: Readonly<{
+    child: ChildProcessWithoutNullStreams;
+    closed: Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>>;
+    tail: Promise<void>;
+    status: BatchStatus;
+    stderr: readonly Buffer[];
+  }>,
 ): Promise<void> {
-  if (!child.stdin.destroyed) child.stdin.end();
-  const outcome = await Promise.race([closed, process.terminationFailure]);
-  await process.waitTermination();
-  if (spawnError !== null || outcome.code !== 0) {
-    throw batchError(
-      child,
-      stderr,
-      process.cancelled() ? "git process cancelled" : "git cat-file --batch did not close cleanly",
-      outcome.code,
-    );
+  const { child, closed, stderr } = reader;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), BATCH_RETIREMENT_GRACE_MS);
+  });
+  try {
+    const drained = await Promise.race([reader.tail, process.terminationFailure, deadline]);
+    if (drained !== null && reader.status.failure !== null) {
+      await process.waitTermination();
+      return;
+    }
+    if (drained !== null && !child.stdin.destroyed) child.stdin.end();
+    const outcome = drained === null ? null : await Promise.race([closed, process.terminationFailure, deadline]);
+    if (outcome === null) {
+      try {
+        await process.terminate(true);
+      } finally {
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        await process.waitTermination();
+      }
+      throw batchError(child, stderr, "decode-channel retirement exceeded its EOF close bound", child.exitCode);
+    }
+    await process.waitTermination();
+    if (reader.status.spawnError !== null || outcome.code !== 0) {
+      throw batchError(
+        child,
+        stderr,
+        process.cancelled() ? "git process cancelled" : "git cat-file --batch did not close cleanly",
+        outcome.code,
+      );
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -154,18 +185,17 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
   let tail: Promise<void> = Promise.resolve();
-  let spawnError: Error | null = null;
-  let failure: GitPlumbingError | null = null;
+  const status: BatchStatus = { spawnError: null, failure: null };
   child.stderr.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
   child.on("error", (error) => {
-    spawnError = error;
+    status.spawnError = error;
   });
   child.stdin.on("error", (error) => {
-    spawnError ??= error;
+    status.spawnError ??= error;
   });
 
   const batch = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
-    if (failure !== null) throw failure;
+    if (status.failure !== null) throw status.failure;
     // Feed bounded request chunks while the single parser drains responses.
     const sending = writeBatchRequests(child, oids);
     const receiving = (async () => {
@@ -180,17 +210,17 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
       child.stdin.destroy();
       child.stdout.destroy();
       await Promise.allSettled([sending, receiving]);
-      failure = batchError(child, stderr, process.cancelled() ? "git process cancelled" : String(error), null);
+      status.failure = batchError(child, stderr, process.cancelled() ? "git process cancelled" : String(error), null);
       await process.terminate(true);
       await closed;
       await process.waitTermination();
-      failure = batchError(
+      status.failure = batchError(
         child,
         stderr,
         process.cancelled() ? "git process cancelled" : error instanceof Error ? error.message : String(error),
         process.cancelled() ? null : child.exitCode,
       );
-      throw failure;
+      throw status.failure;
     }
   };
   const objects = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
@@ -212,12 +242,13 @@ function batchObjectReader(repository: GitRepository): BatchObjectReader {
     return new Map(await Promise.all(unique.map(async (oid) => [oid, await cache.get(oid)!] as const)));
   };
   const close = async (): Promise<void> => {
-    await tail.catch(() => undefined);
-    if (failure !== null) {
-      await process.waitTermination();
-      return;
-    }
-    await closeBatchProcess(process, child, closed, spawnError, stderr);
+    await closeBatchProcess(process, {
+      child,
+      closed,
+      tail,
+      status,
+      stderr,
+    });
   };
   return { objects, close };
 }
@@ -365,6 +396,7 @@ async function readFormat(observation: GitReadObservation): Promise<void> {
 export async function withGitDecodeChannel<Value>(
   repository: GitRepository,
   consume: (channel: GitDecodeChannel) => Value | PromiseLike<Value>,
+  onRetirementFailure?: (error: unknown) => void,
 ): Promise<Value> {
   const transport: { reader: BatchObjectReader | null } = { reader: null };
   let active = true;
@@ -378,19 +410,20 @@ export async function withGitDecodeChannel<Value>(
   } satisfies GitDecodeChannel;
 
   let result: Value | undefined;
-  let failure: unknown;
+  let failure: { error: unknown } | undefined;
   try {
     result = await consume(channel);
   } catch (error) {
-    failure = error;
+    failure = { error };
   }
   active = false;
   try {
     if (transport.reader !== null) await transport.reader.close();
   } catch (error) {
-    failure ??= error;
+    onRetirementFailure?.(error);
+    failure ??= { error };
   }
-  if (failure !== undefined) throw failure;
+  if (failure !== undefined) throw failure.error;
   return result as Value;
 }
 
@@ -438,7 +471,7 @@ async function observeEpoch<Value>(
   };
 
   let result: Value | undefined;
-  let failure: unknown;
+  let failure: { error: unknown } | undefined;
   try {
     let snapshot: GitSnapshot;
     let treeDirectories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
@@ -468,10 +501,10 @@ async function observeEpoch<Value>(
     if (commit !== null) await readFormat(observation);
     result = await consume(observation);
   } catch (error) {
-    failure = error;
+    failure = { error };
   }
   active = false;
-  if (failure !== undefined) throw failure;
+  if (failure !== undefined) throw failure.error;
   return result as Value;
 }
 

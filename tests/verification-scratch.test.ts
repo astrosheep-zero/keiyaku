@@ -10,7 +10,7 @@ import { projectSettings } from "../src/settings.js";
 import { executeVerification } from "../src/verification/execution.js";
 import type { VerificationObservation } from "../src/verification/observation.js";
 import { appointedWorktreePath } from "./support/git.js";
-import { document, repositoryWithMain } from "./support/library-verbs.js";
+import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 
 test("delivery prepares clean candidate scratch without importing worktree symlinks", async (t) => {
   for (const layout of ["external-dependencies", "workspace-self-link"]) {
@@ -23,13 +23,13 @@ test("delivery prepares clean candidate scratch without importing worktree symli
         'test "$(readlink node_modules/@fixture/self)" = ../..',
         'printf "declaration-output\\n"',
       ].join(" && ");
-      const bound = await Keiyaku.with().bind({
+      const bound = accepted(await Keiyaku.with().bind({
         repo: await Repo.at({ path: raw.path }),
         markdown: document(declaration),
         workspace: "worktree",
         gates: ["verified", "reviewed"],
-      });
-      const source = await appointedWorktreePath(await repositoryAt(raw.path), (await bound.keiyaku.state()).id);
+      }));
+      const source = await appointedWorktreePath(await repositoryAt(raw.path), (present(await bound.value.keiyaku.state())).id);
       const cleanupLog = join(raw.path, "cleanup.log");
       const setup = [
         'const fs = require("node:fs");',
@@ -77,13 +77,13 @@ test("delivery prepares clean candidate scratch without importing worktree symli
       symlinkSync(linkTarget, sourceLink, "dir");
 
       const observations: VerificationObservation[] = [];
-      const execution = bound.keiyaku.startDelivery();
-      for await (const event of execution.progress) {
-        if (event.kind === "verification") observations.push(event.observation);
-      }
-      const result = await execution.result;
+      const result = accepted(await bound.value.keiyaku.deliver(undefined, {
+        observe: (event) => {
+          if (event.kind === "verification") observations.push(event.observation);
+        },
+      }));
 
-      const attestation = (await bound.keiyaku.state()).attestations.at(-1);
+      const attestation = (present(await bound.value.keiyaku.state()))?.attestations.at(-1);
       assert.equal(attestation?.data.verdict, "satisfied", JSON.stringify(result));
       const scratch = observations.find((event) => event.phase === "materialize" && event.cwd)?.cwd;
       assert.ok(scratch);

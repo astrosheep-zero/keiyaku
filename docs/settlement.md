@@ -90,3 +90,9 @@ Settlement is not a hook. Hooks are external commands attached to physical
 effects and remain owned by those effects. Adding another settlement behavior
 requires an explicit rule in this chapter rather than a plugin point or
 configurable Contract, Task, or Akuma event.
+
+Invocation reporting retains each completed settlement action and lag before
+later holder publication or cleanup can fail. Programming failures and corrupt
+authority stay exceptional rather than becoming operational settlement lags.
+This reporting grants no new replay token: only the current held association
+can authorize a later settlement attempt.

@@ -13,7 +13,7 @@ export function executable(argv: readonly string[]) {
 
 /** Fresh receipt carriers only; expected renderings stay independent at the call site. */
 export function receipt<const T extends { verb: string }>(values: T) {
-  return { kind: "accepted" as const, head: contractHead("head"), facts: [], settlementLags: [], ...values };
+  return { kind: "accepted" as const, head: contractHead("head"), facts: [], effects: [], pending: [], settlementLags: [], ...values };
 }
 
 /** Capture the process outcome of one in-process CLI invocation. */

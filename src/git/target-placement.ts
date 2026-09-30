@@ -424,16 +424,20 @@ export async function prepareTargetPlacement(
 export async function followTargetPlacement(
   repository: GitRepository,
   prepared: PreparedTargetPlacement,
+  onPhysical?: (report: TargetPlacementPhysicalResult) => void,
 ): Promise<TargetPlacementPhysicalResult> {
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   const predecessor = gitObjectIdForSnapshot(prepared.target.expectedOid);
   const candidate = gitObjectIdForSnapshot(prepared.target.newOid);
   for (const arm of prepared.arms) {
+    const beforeEffects = effects.length,
+      beforeLag = lag.length;
     try {
       await runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
       effects.push({ kind: "target-checkout", path: arm.path, target: prepared.target.target, action: "followed" });
     } catch (error) {
+      if (!(error instanceof GitPlumbingError)) throw error;
       lag.push({
         kind: "target-checkout-retained",
         path: arm.path,
@@ -441,6 +445,7 @@ export async function followTargetPlacement(
         diagnostic: diagnostic(error),
       });
     }
+    onPhysical?.({ effects: effects.slice(beforeEffects), lag: lag.slice(beforeLag) });
   }
   return { effects, lag };
 }
@@ -528,6 +533,7 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
 export async function recoverTargetPlacement(
   repository: GitRepository,
   state: ContractState,
+  onPhysical?: (report: TargetPlacementPhysicalResult) => void,
 ): Promise<TargetPlacementPhysicalResult> {
   const target = state.coordinates.target;
   const delivery = state.delivery;
@@ -544,6 +550,8 @@ export async function recoverTargetPlacement(
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   for (const worktree of worktrees) {
+    const beforeEffects = effects.length,
+      beforeLag = lag.length;
     try {
       const recovery = await recoverCheckout({
         repository,
@@ -555,14 +563,17 @@ export async function recoverTargetPlacement(
       });
       if (recovery === "retained") {
         lag.push(recoveryLag(worktree.path, target, "target checkout entries are neither predecessor nor candidate"));
+        onPhysical?.({ effects: [], lag: lag.slice(beforeLag) });
         continue;
       }
       if (recovery === "recovered") {
         effects.push({ kind: "target-checkout", path: worktree.path, target, action: "recovered" });
       }
     } catch (error) {
+      if (!(error instanceof GitPlumbingError)) throw error;
       lag.push(recoveryLag(worktree.path, target, diagnostic(error)));
     }
+    onPhysical?.({ effects: effects.slice(beforeEffects), lag: lag.slice(beforeLag) });
   }
   return { effects, lag };
 }

@@ -1,4 +1,4 @@
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
@@ -32,7 +32,7 @@ import { runProtocol, type CompanionDecorator, type ProtocolPreparation, type Pr
 import { mintAttempts } from "./attempt.js";
 
 type CommonIntentAdmissionOptions<Refusal> = Readonly<{
-  progress?: ExecutionProgress;
+  progress?: ProtocolProgress;
   observedContracts?: readonly ContractId[];
   observe?: (
     repository: GitRepository,
@@ -121,7 +121,7 @@ type VerifyDeliveryInput = Readonly<{
   snapshot?: SnapshotId;
   signal?: AbortSignal;
   verification?: VerificationDefinition;
-  progress?: ExecutionProgress;
+  progress?: ProtocolProgress;
 }>;
 
 export type VerificationRuntimeStop = CapturedOutput &

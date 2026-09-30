@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
 import { listArchetypeDefinitions } from "../src/akuma/archetype.js";
 import { deferred as promiseBarrier } from "./support/process.js";
@@ -508,7 +509,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const repo = await Repo.at({ path: repository.path });
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo,
     markdown: [
       "# Review",
@@ -532,8 +533,8 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
       "Ambiguity is explicit.",
       "",
     ].join("\n"),
-  });
-  const boundId = (await bound.keiyaku.state()).id;
+  }));
+  const boundId = (present(await bound.value.keiyaku.state())).id;
   assert.match(boundId, /^kei\/review-[0-9a-f]{4}$/u);
   const alias = parseAkumaAlias(`@${contractSegment(boundId)}`);
   const source = await answered(repository.path, "worker", "00000001");

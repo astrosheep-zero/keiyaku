@@ -97,6 +97,7 @@ export async function amendOperation(
           attempt: attempts[index]!,
           offer: decision.offer,
           primaryContract: input.contractId,
+          ...(input.progress === undefined ? {} : { progress: input.progress }),
         });
         if (admission.kind === "accepted") {
           if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");

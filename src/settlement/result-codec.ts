@@ -1,6 +1,6 @@
 import { contractId } from "../core/facts/types.js";
 import { canonicalTaskId } from "../task/identity.js";
-import type { SettlementLag } from "./settle.js";
+import type { SettlementAction, SettlementLag } from "./settle.js";
 
 function fail(): never {
   throw new Error("malformed settlement lag");
@@ -52,4 +52,14 @@ export function decodeSettlementLag(value: unknown): SettlementLag {
     }
   }
   return record.path === undefined ? lag : { ...lag, path: nonblank(record.path) };
+}
+
+export function decodeSettlementAction(value: unknown): SettlementAction {
+  const action = object(value, ["kind", "taskId", "action"]);
+  if (action.kind !== "task" || action.action !== "done") fail();
+  try {
+    return { kind: "task", taskId: canonicalTaskId(nonblank(action.taskId)), action: "done" };
+  } catch {
+    return fail();
+  }
 }

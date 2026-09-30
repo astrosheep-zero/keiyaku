@@ -1,4 +1,4 @@
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
@@ -168,7 +168,7 @@ export async function admitDecidedOffer<Refusal = never>(
     primaryContract: ContractId;
     assertions?: readonly GitRefAssertion[];
     validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
-    progress?: ExecutionProgress;
+    progress?: ProtocolProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
   const { repository, decisionObservation, attempt, offer, primaryContract } = input;

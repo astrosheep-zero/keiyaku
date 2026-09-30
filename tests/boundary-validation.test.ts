@@ -1,7 +1,16 @@
+import { accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
+import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
+
+function invalidInput(error: unknown, message?: string): boolean {
+  assert.ok(error instanceof KeiyakuError);
+  assert.equal(error.category, "invalid-input");
+  assert.ok(error.cause instanceof TypeError);
+  if (message !== undefined) assert.equal(error.cause.message, message);
+  return true;
+}
 
 test("package boundary rejects malformed runtime inputs before journal mutation", async () => {
   const repository = makeGitRepository();
@@ -24,7 +33,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   await assert.rejects(
     () =>
       withGitShim("exit 99", {}, () => Keiyaku.with().bind({ repo, markdown: null, workspace: "worktree" } as never)),
-    TypeError,
+    invalidInput,
   );
 
   assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
@@ -44,7 +53,7 @@ test("amend validates programmer input before observing a missing contract", asy
       withGitShim("exit 99", {}, () =>
         Reflect.apply(contract.amend, contract, [{ markdown: "## Append: Context\ntext\n", gates: ["Invalid"] }]),
       ),
-    (error: unknown) => error instanceof TypeError && error.message === "gates[0] must match ^[a-z][a-z0-9-]{0,63}$",
+    (error: unknown) => invalidInput(error, "gates[0] must match ^[a-z][a-z0-9-]{0,63}$"),
   );
   assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
 });
@@ -55,8 +64,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  await assert.rejects(
-    Keiyaku.with().bind({
+  const refused = await Keiyaku.with().bind({
       repo,
       markdown: [
         "# T",
@@ -82,11 +90,11 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
       ].join("\n"),
       target: "bad\0target",
       workspace: "worktree",
-    }),
-    (error: unknown) => error instanceof KeiyakuRefused && error.code === "invalid-target",
-  );
+    });
+  assert.ok(refused.kind === "refused");
+  assert.deepEqual(refused.refusal, { kind: "invalid-target" });
 
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo,
     markdown: [
       "# T",
@@ -112,18 +120,18 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     ].join("\n"),
     workspace: "worktree",
     gates: ["security-audited"],
-  });
-  assert.ok(bound.keiyaku instanceof Keiyaku);
+  }));
+  assert.ok(bound.value.keiyaku instanceof Keiyaku);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => bound.keiyaku.deliver({ actor: " " } as never)),
-    (error: unknown) => error instanceof TypeError && error.message === "deliver input has unknown field: actor",
+    () => withGitShim("exit 99", {}, () => bound.value.keiyaku.deliver({ actor: " " } as never)),
+    (error: unknown) => invalidInput(error, "deliver input has unknown field: actor"),
   );
   await assert.rejects(
-    () => bound.keiyaku.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
-    (error: unknown) => error instanceof TypeError && error.message === "review input has unknown field: hooks",
+    () => bound.value.keiyaku.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
+    (error: unknown) => invalidInput(error, "review input has unknown field: hooks"),
   );
   await assert.rejects(
-    () => bound.keiyaku.audit({ requireBranchesToBeUpToDate: true } as never),
-    (error: unknown) => error instanceof TypeError && error.message === "audit input has unknown field: requireBranchesToBeUpToDate",
+    () => bound.value.keiyaku.audit({ requireBranchesToBeUpToDate: true } as never),
+    (error: unknown) => invalidInput(error, "audit input has unknown field: requireBranchesToBeUpToDate"),
   );
 });

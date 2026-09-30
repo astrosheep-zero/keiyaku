@@ -1,9 +1,10 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { AuthorityCorruptionError, Keiyaku } from "../src/index.js";
+import { AuthorityCorruptionError, KeiyakuError, Keiyaku } from "../src/index.js";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
@@ -139,12 +140,12 @@ function terms(after: readonly ContractId[]) {
 }
 
 async function boundObservedContract(repository: TestGitRepository) {
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await cachedRepoAt(repository.path),
     markdown: contractBody(),
     workspace: "worktree",
-  });
-  const id = (await bound.keiyaku.state()).id;
+  }));
+  const id = (present(await bound.value.keiyaku.state())).id;
   const git = await repositoryAt(repository.path);
   return { bound, id, git };
 }
@@ -561,9 +562,9 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         error instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );
     await assert.rejects(
-      () => bound.keiyaku.reconcile(),
+      () => bound.value.keiyaku.reconcile(),
       (error: unknown) =>
-        error instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
+        error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );
   });
 

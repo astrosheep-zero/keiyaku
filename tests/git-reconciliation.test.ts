@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,15 +41,15 @@ let deliveredReviewGatedTargetTemplate: Promise<DeliveredReviewGatedTargetTempla
 
 async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["reviewed"],
-  });
-  const contract = bound.keiyaku;
-  const contractId = (await contract.state()).id;
+  }));
+  const contract = bound.value.keiyaku;
+  const contractId = (present(await contract.state())).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
@@ -92,13 +93,13 @@ async function restoreOwnedRefs(
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
     const repository = repositoryWithMain();
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: document(),
       workspace: "worktree",
-    });
-    const contract = bound.keiyaku;
-    const contractId = (await contract.state()).id;
+    }));
+    const contract = bound.value.keiyaku;
+    const contractId = (present(await contract.state())).id;
     const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
     const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
     const deliverSkill = join(deliverLeaf, "SKILL.md");
@@ -125,7 +126,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "target only"]);
     await contract.review({ verdict: "satisfied" });
-    const state = await contract.state();
+    const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
     const tender = state.delivery?.data.tenderSnapshot;
     const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
@@ -151,7 +152,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
   test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
     const { contract, repository } = await deliveredReviewGatedTargetFixture();
     await contract.review({ verdict: "satisfied" });
-    const state = await contract.state();
+    const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
     const tender = state.delivery?.data.tenderSnapshot;
     const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;

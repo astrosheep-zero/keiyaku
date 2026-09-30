@@ -309,7 +309,8 @@ export async function observeWorkspace(
     const head = await workspaceMergeHead(repository, workspace);
     const merge = head === undefined ? null : { head, unmergedPaths: status.unmergedPaths };
     return { kind: dirty ? "dirty" : "clean", location, counts, merge };
-  } catch {
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
     return { kind: "unavailable", location };
   }
 }
@@ -328,7 +329,8 @@ export async function observeTargetLag(
       .trim();
     if (!/^[0-9]+$/u.test(text)) return { kind: "unknown", subject };
     return { kind: "counted", behind: Number(text), subject };
-  } catch {
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
     return { kind: "unknown", subject };
   }
 }

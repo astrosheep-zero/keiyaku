@@ -52,7 +52,6 @@ import type {
   DeliverConflictRefusal,
   DeliveryPreparationRefusal,
   DocumentDerivation,
-  IntentRefusal,
   MutationOperationInput,
 } from "./operations.js";
 import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
@@ -92,7 +91,13 @@ type DeliverOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
-type IntegrationConflictRefusal = Extract<IntentRefusal, { kind: "integration-failed"; reason: "conflict" }>;
+export type DeliverOperationRefusal =
+  | import("../core/verbs/deliver.js").DeliverRefusal
+  | DeliveryPreparationRefusal
+  | import("./operations.js").DeliverConflictRefusal
+  | import("../verification/declaration.js").VerificationDeclarationRefusal;
+
+type IntegrationConflictRefusal = Extract<DeliverOperationRefusal, { kind: "integration-failed"; reason: "conflict" }>;
 
 type DeliveryFailure =
   | DeliveryPreparationRefusal
@@ -497,7 +502,7 @@ function currentCandidateDeliveryDecision(
   input: DeliverOperationInput,
   observation: GitDecisionObservation,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): AttemptDecision<DeliverValue> | undefined {
+): AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined {
   const state = assembled.state;
   if (state === null || assembled.derivation === undefined) return undefined;
   if (!reusesCurrentCandidate(input, state, assembled.derivation)) return undefined;
@@ -522,7 +527,7 @@ function continuationDeliveryDecision(
   input: DeliverOperationInput,
   observation: GitDecisionObservation,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): AttemptDecision<DeliverValue> {
+): AttemptDecision<DeliverValue, DeliverOperationRefusal> {
   const record = observation.journals.get(input.contractId);
   const state = record?.state ?? null;
   if (record === undefined || state === null || state.delivery === null || assembled.derivation === undefined) {
@@ -549,7 +554,7 @@ async function decideAndAdmitDelivery(
   seat: PrivateStatePublicationSeat,
   observation: GitDecisionObservation,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): Promise<AttemptDecision<DeliverValue>> {
+): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
   const current = currentCandidateDeliveryDecision(input, observation, assembled);
   if (current !== undefined) return current;
   if (assembled.continuation === true) return continuationDeliveryDecision(input, observation, assembled);
@@ -596,7 +601,7 @@ async function decideAndAdmitDelivery(
 async function deliverAttempt(
   input: DeliverOperationInput,
   attempt: AttemptContext,
-): Promise<AttemptDecision<DeliverValue>> {
+): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
   const external = await prepareExternalDelivery(input);
   return await privateStateSeatAttempt(
     input.scope,
@@ -610,7 +615,7 @@ async function deliverAttempt(
   );
 }
 
-function isIntegrationConflict(refusal: IntentRefusal): refusal is IntegrationConflictRefusal {
+function isIntegrationConflict(refusal: DeliverOperationRefusal): refusal is IntegrationConflictRefusal {
   return refusal.kind === "integration-failed" && refusal.reason === "conflict";
 }
 
@@ -675,7 +680,7 @@ async function mergeStatePresentRefusal(
 async function materializeDeliverConflict(
   input: DeliverOperationInput,
   refusal: IntegrationConflictRefusal,
-): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
   if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed;
@@ -728,8 +733,8 @@ async function materializeDeliverConflict(
 
 async function finishDeliverRefusal(
   input: DeliverOperationInput,
-  refusal: IntentRefusal,
-): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
+  refusal: DeliverOperationRefusal,
+): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
   if (!isIntegrationConflict(refusal)) return { kind: "refused", refusal };
   if (input.materializeConflict !== true) return { kind: "refused", refusal: conflictDeliverRefusal(refusal) };
   return await materializeDeliverConflict(input, refusal);
@@ -737,9 +742,9 @@ async function finishDeliverRefusal(
 
 export async function admitDeliveryOperation(
   input: DeliverOperationInput,
-): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
   const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<DeliverValue>, { kind: "accepted" }> | null = null;
+  let first: Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }> | null = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const result = await deliverAttempt(input, attempts[index]!);
     if (result.kind === "accepted") {

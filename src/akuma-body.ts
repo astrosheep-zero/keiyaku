@@ -6,13 +6,12 @@ import { World } from "./world.js";
 import { selectionRequestPort } from "./akuma/selection-owner-port.js";
 import { selectionRequestCommands } from "./akuma/selection-request.js";
 import { worktreeHooksFrom } from "./git/hooks.js";
+import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
 import {
-  contractRequestCommands,
   executeForwardedAudit,
   executeForwardedDeliver,
   executeForwardedReview,
-  type ContractRequestPort,
-} from "./library/contract-operations.js";
+} from "./library/contract-forwarding.js";
 import { Repo } from "./library/repo.js";
 import { requireBranchesToBeUpToDateFrom, settings } from "./settings.js";
 import { executeTaskMutation, taskMutationRequestCommands, type TaskMutationRequestPort } from "./task/mutation.js";

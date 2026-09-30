@@ -1,5 +1,8 @@
-import { executionReceipt } from "./execution-result.js";
-import { decodeExecutionEvent, observeExecution, type ExecutionObserver } from "../protocol/execution-observation.js";
+import {
+  decodeExecutionObservation,
+  observeExecution,
+  type ExecutionObserver,
+} from "../protocol/execution-observation.js";
 import { contractId, snapshotId } from "../core/facts/types.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {
@@ -11,24 +14,26 @@ import {
 } from "../akuma/request-wire.js";
 import type { AuditReport } from "../protocol/audit.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { DeliveryValue } from "./delivery.js";
 import {
   auditReportSchema,
-  auditResultSchema,
-  deliveryResultSchema,
-  reviewResultSchema,
-  type MutationResult,
-} from "./mutation.js";
-import { decodeContractLiveFailure, encodeContractLiveFailure } from "./refusal.js";
-import type { DeliveryExecutionInput, Review } from "./contract-forwarding.js";
+  outcomeSchema,
+  reviewSchema,
+  decodeFailureWire,
+  encodeFailureWire,
+  KeiyakuError,
+  InvocationAccumulator,
+  project,
+} from "./outcome.js";
+import { deliveryValueSchema } from "./delivery.js";
+import type { ActorId } from "../core/facts/types.js";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 
-type DeliveryResult = MutationResult<DeliveryValue> | IntegrationConflictMaterialized;
-type ReviewResult = MutationResult<Review>;
-type AuditResult = MutationResult<AuditReport>;
+type DeliveryResult = import("./keiyaku.js").DeliverOutcome;
+type ReviewResult = import("./keiyaku.js").ReviewOutcome;
+type AuditResult = import("./keiyaku.js").AuditOutcome;
 type ContractResult = DeliveryResult | ReviewResult | AuditResult;
-type ContractRequester = NonNullable<DeliveryExecutionInput["actor"]>;
+type ContractRequester = ActorId;
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
@@ -173,7 +178,7 @@ function decodeContractService(action: ContractRequest["action"], value: unknown
         : reviewReferenceSchema;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`malformed stored Contract service evidence for ${action}`);
-  return parsed.data;
+  return parsed.data as unknown as ContractService;
 }
 
 function projectContractService(action: ContractRequest["action"], service: ContractService): ContractReference {
@@ -196,11 +201,18 @@ function executionObservation(facts: ExecutionFacts): Readonly<{ observe?: Execu
   return { observe: (event) => facts.progress?.(event) };
 }
 
+function servedContractReference(
+  result: ContractResult,
+  service: Extract<ContractService, { kind: "accepted-reference" }>,
+): import("../akuma/request-wire.js").ServiceCompletion<ContractResult, ContractService> {
+  return { kind: "served", result, service };
+}
+
 async function executeContractRequest(
   request: ContractRequest,
   facts: ExecutionFacts,
   port: ContractRequestPort,
-): Promise<Readonly<{ result: ContractResult; service: ContractService }>> {
+): Promise<import("../akuma/request-wire.js").ServiceCompletion<ContractResult, ContractService>> {
   const observation = executionObservation(facts);
   if (request.action === "contract.audit") {
     const served = await port.audit({
@@ -209,9 +221,11 @@ async function executeContractRequest(
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });
+    if (served.result.kind !== "accepted") return { kind: "voided", outcome: served.result };
     if (served.auditReport === undefined)
       throw new Error(`Contract ${request.action} completed without durable service evidence`);
     return {
+      kind: "served",
       result: served.result,
       service: {
         kind: "audit-report",
@@ -229,32 +243,32 @@ async function executeContractRequest(
       requester: facts.requester as ContractRequester,
       signal: facts.signal,
     });
-    if ("kind" in served.result && served.result.kind === "integration-conflict-materialized") {
+    if (served.result.kind === "refused" || served.result.kind === "retry")
+      return { kind: "voided", outcome: served.result };
+    if (served.result.kind === "handoff") {
       return {
+        kind: "served",
         result: served.result,
         service: {
           kind: "materialized-handoff",
           repoRoot: request.repoRoot,
           contractId: request.contractId,
-          targetHead: served.result.targetHead,
-          handoffBase: served.result.handoffBase,
-          recovery: served.result.recovery,
-          conflictPaths: served.result.conflictPaths,
-          workspace: served.result.workspace,
+          targetHead: served.result.value.targetHead,
+          handoffBase: served.result.value.handoffBase,
+          recovery: served.result.value.recovery,
+          conflictPaths: served.result.value.conflictPaths,
+          workspace: served.result.value.workspace,
         },
       };
     }
     if (served.deliveryFactId === undefined)
       throw new Error(`Contract ${request.action} completed without durable service evidence`);
-    return {
-      result: served.result,
-      service: {
-        kind: "accepted-reference",
-        repoRoot: request.repoRoot,
-        contractId: request.contractId,
-        deliveryFactId: served.deliveryFactId,
-      },
-    };
+    return servedContractReference(served.result, {
+      kind: "accepted-reference",
+      repoRoot: request.repoRoot,
+      contractId: request.contractId,
+      deliveryFactId: served.deliveryFactId,
+    });
   }
   const served = await port.review({
     ...request,
@@ -262,29 +276,27 @@ async function executeContractRequest(
     requester: facts.requester as ContractRequester,
     signal: facts.signal,
   });
+  if (served.result.kind !== "accepted") return { kind: "voided", outcome: served.result };
   if (served.reviewFactId === undefined)
     throw new Error(`Contract ${request.action} completed without durable service evidence`);
-  return {
-    result: served.result,
-    service: {
-      kind: "accepted-reference",
-      repoRoot: request.repoRoot,
-      contractId: request.contractId,
-      reviewFactId: served.reviewFactId,
-    },
-  };
+  return servedContractReference(served.result, {
+    kind: "accepted-reference",
+    repoRoot: request.repoRoot,
+    contractId: request.contractId,
+    reviewFactId: served.reviewFactId,
+  });
 }
 
 function decodedContractResult(action: ContractRequest["action"], value: unknown): ContractResult {
   const schema =
     action === "contract.audit"
-      ? auditResultSchema
+      ? outcomeSchema("audit", auditReportSchema)
       : action === "contract.deliver"
-        ? deliveryResultSchema
-        : reviewResultSchema;
+        ? outcomeSchema("deliver", deliveryValueSchema, materializedHandoffReferenceSchema)
+        : outcomeSchema("review", reviewSchema);
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`transport integrity: Contract ${action} returned an invalid live result`);
-  return parsed.data;
+  return parsed.data as unknown as ContractResult;
 }
 
 export function contractRequestProtocol(
@@ -300,8 +312,8 @@ export function contractRequestProtocol(
     decodeRequest: (value) => decodeContractRequest(action, value),
     encodeResult: (value) => value,
     decodeResult: (value) => decodedContractResult(action, value),
-    encodeFailure: encodeContractLiveFailure,
-    decodeFailure: decodeContractLiveFailure,
+    encodeFailure: encodeFailureWire,
+    decodeFailure: (value) => decodeFailureWire(value),
     decodeReference: (reference) => decodeContractReference(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
   };
@@ -347,29 +359,14 @@ export async function requestForwardedContractLive<Action extends ContractReques
     value: input.request,
     onProgress: (value) => {
       try {
-        observeExecution(input.observe, decodeExecutionEvent(value));
+        observeExecution(input.observe, decodeExecutionObservation(value));
       } catch {
         observeExecution(input.observe, { kind: "progress-dropped", count: 1 });
       }
     },
     onProgressGap: (count) => observeExecution(input.observe, { kind: "progress-dropped", count }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
-  }).catch((error: unknown) => {
-    if (
-      error instanceof AkumaBodyRequestError &&
-      error.outcome === "unproven" &&
-      error.cause instanceof Error &&
-      executionReceipt(error.cause) !== undefined
-    ) {
-      Object.defineProperties(error.cause, {
-        requestId: { value: error.requestId, enumerable: false },
-        action: { value: error.action, enumerable: false },
-        requestOutcome: { value: error.outcome, enumerable: false },
-      });
-      throw error.cause;
-    }
-    throw error;
-  });
+  }).catch((error: unknown) => mapForwardedContractFailure(error, input.request));
   if (response.kind === "reference") {
     throw new Error(
       `transport integrity: request ${response.requestId} action ${response.action} returned a durable reference without a live result`,
@@ -378,16 +375,31 @@ export async function requestForwardedContractLive<Action extends ContractReques
   return response.result as ContractResultFor<Action>;
 }
 
-export {
-  executeLocalDelivery,
-  executeLocalReview,
-  executeForwardedAudit,
-  executeForwardedDeliver,
-  executeForwardedReview,
-} from "./contract-forwarding.js";
-export type {
-  AttestationVerdict,
-  DeliveryExecutionInput,
-  Review,
-  ReviewExecutionInput,
-} from "./contract-forwarding.js";
+/** Map durable request disposition without reconstructing an expired owner answer. */
+export function mapForwardedContractFailure(error: unknown, request: ContractRequest) {
+  if (error instanceof AkumaBodyRequestError && error.outcome === "voided") {
+    const operation =
+      request.action === "contract.audit" ? "audit" : request.action === "contract.review" ? "review" : "deliver";
+    const projected = project(operation, new InvocationAccumulator().snapshot(), {
+      kind: "retry",
+      contract: request.contractId,
+      reason: { kind: "owner-reason-unavailable", diagnostic: error.diagnostic },
+    });
+    if (projected.kind === "failed") throw projected.error;
+    return { kind: "returned" as const, result: projected.outcome };
+  }
+  if (
+    error instanceof AkumaBodyRequestError &&
+    error.outcome === "unproven" &&
+    error.cause instanceof Error &&
+    error.cause instanceof KeiyakuError
+  ) {
+    Object.defineProperties(error.cause, {
+      requestId: { value: error.requestId, enumerable: false },
+      action: { value: error.action, enumerable: false },
+      requestOutcome: { value: error.outcome, enumerable: false },
+    });
+    throw error.cause;
+  }
+  throw error;
+}

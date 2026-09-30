@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
@@ -74,13 +75,13 @@ async function buildPostBindTemplate(
     repository.run(["config", "user.name", "Test User"]);
     repository.run(["config", "user.email", "test@example.com"]);
   }
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
     workspace: "worktree",
     ...(target === "targeted" ? { target: "refs/heads/main", ...(gates.length === 0 ? {} : { gates }) } : {}),
-  });
-  const state = await bound.keiyaku.state();
+  }));
+  const state = present(await bound.value.keiyaku.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   const generatedFiles = captureWorktreeFiles(worktree);
   repository.run(["worktree", "remove", "--force", worktree]);
@@ -148,19 +149,19 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
     },
     message: "tracked directory",
   });
-  const bound = await Keiyaku.with().bind({
+  const bound = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: contractBody(),
     workspace: "worktree",
     target: "refs/heads/main",
-  });
-  const state = await bound.keiyaku.state();
+  }));
+  const state = present(await bound.value.keiyaku.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   repository.run(["-C", worktree, "rm", "-r", "artifact"]);
   writeFileSync(join(worktree, "artifact"), "candidate file\n");
   repository.run(["-C", worktree, "add", "artifact"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace directory"]);
-  return { contract: bound.keiyaku, repository, worktree };
+  return { contract: bound.value.keiyaku, repository, worktree };
 }
 
 async function preparedAuditTarget() {
@@ -512,7 +513,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.ok(completion, "expected a completed placement");
     assert.equal(delivered.value.placement, undefined);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-    assert.deepEqual(delivered.retainedCheckouts, [{ path: repository.path, target: "refs/heads/main" }]);
+    assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "checkout-retained").map(({ path, target }) => ({ path, target })), [{ path: repository.path, target: "refs/heads/main" }]);
     assert.equal(readFileSync(join(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
     assert.equal(readFileSync(join(repository.path, "artifact", name), "utf8"), "untracked\n");
   });
@@ -520,12 +521,12 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   test("delivery preparation refuses an unregistered directory at the managed worktree path", async () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
-    });
-    const state = await bound.keiyaku.state();
+    }));
+    const state = present(await bound.value.keiyaku.state());
     const git = await cachedRepositoryAt(repository.path);
     const path = await appointedWorktreePath(git, state.id);
     repository.run(["worktree", "remove", path]);
@@ -552,16 +553,16 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
   test("reconcile recreates a registered managed worktree whose directory disappeared", async () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
-    });
-    await bound.keiyaku.reconcile();
-    const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
+    }));
+    await bound.value.keiyaku.reconcile();
+    const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.keiyaku.state())).id);
     renameSync(path, `${path}-moved`);
 
-    const repaired = await bound.keiyaku.reconcile();
+    const repaired = await bound.value.keiyaku.reconcile();
 
     assert.equal(existsSync(path), true);
     assert.equal(
@@ -651,16 +652,17 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       result.facts.map((fact) => fact.kind),
       ["bind"],
     );
-    assert.notEqual(result.head, null);
-    assert.equal(result.lags[0]?.kind, "reconcile-failed");
-    if (result.lags[0]?.kind === "reconcile-failed") {
-      assert.equal(result.lags[0].stage, "effect");
-      assert.match(result.lags[0].diagnostic, /forced managed worktree failure/);
+    assert.notEqual(accepted(result).head, null);
+    assert.equal(result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0]?.kind, "reconcile-failed");
+    const lag = result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0];
+  if (lag?.kind === "reconcile-failed") {
+      assert.equal(lag.stage, "effect");
+      assert.match(lag.diagnostic, /forced managed worktree failure/);
     }
-    assert.deepEqual(result.settlementLags, []);
-    const state = await result.keiyaku.state();
+    assert.deepEqual(result.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag), []);
+    const state = present(await accepted(result).value.keiyaku.state());
     assert.equal(state.id, result.facts[0]?.contract);
-    assert.equal(state.head, result.head);
+    assert.equal(state.head, accepted(result).head);
     assert.equal(state.terminal, null);
     const observation = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
     assert.equal(observation.kind, "present");
@@ -751,7 +753,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
     await contract.deliver();
     await contract.review({ verdict: "satisfied" });
-    const state = await contract.state();
+    const state = present(await contract.state());
     const id = state.id;
     assert.equal(state.terminal?.kind, "claimed");
     const git = await cachedRepositoryAt(repository.path);
@@ -768,7 +770,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
 
     assert.ok(report.kind === "completed", "expected report.kind = \"completed\"");
     assert.equal(report.contracts.find((item) => item.contractId === id)?.report.lag.length, 0);
-    assert.equal((await Keiyaku.with().select({ repo: fresh, id }).state()).terminal?.kind, "claimed");
+    assert.equal((present(await Keiyaku.with().select({ repo: fresh, id }).state())).terminal?.kind, "claimed");
     assert.equal(await readRef(git, deliveryRefFor(id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
@@ -782,28 +784,27 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
 
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-    const bound = await Keiyaku.with().bind({
+    const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
-    });
-    await bound.keiyaku.reconcile();
-    const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (await bound.keiyaku.state()).id);
+    }));
+    await bound.value.keiyaku.reconcile();
+    const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.keiyaku.state())).id);
     repository.run(["-C", path, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", child.path, "module"]);
     repository.run(["-C", path, "commit", "--quiet", "-am", "submodule"]);
     writeFileSync(join(path, "module", "child.txt"), "dirty child\n");
 
-    const abandoned = await bound.keiyaku.abandon();
+    const abandoned = await bound.value.keiyaku.abandon();
 
-    assert.equal(abandoned.recoverySnapshot, undefined);
+    assert.equal(abandoned.effects.some((effect) => effect.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot"), false);
     const head = mintSnapshotId(repository.run(["-C", path, "rev-parse", "HEAD"]).trim());
-    assert.deepEqual(abandoned.lags, [
+    assert.deepEqual(abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag), [
       {
         kind: "unsealed-bytes",
         path,
         paths: ["module"],
         head,
-        affects: "none",
       },
     ]);
     assert.equal(existsSync(path), true);

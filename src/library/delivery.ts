@@ -81,6 +81,8 @@ class DeliveryHandle {
     this.method = identity.method;
     this.policy = identity.policy;
     Object.assign(this, outcomes);
+    Object.defineProperty(this, "readDiff", { value: readDiff, enumerable: false });
+    Object.freeze(this);
   }
 
   diff(): Promise<string | null> {
@@ -99,6 +101,14 @@ export const Delivery: HandleType<DeliveryHandle> = Object.freeze({
   [Symbol.hasInstance]: (value: unknown) => value instanceof DeliveryHandle,
 });
 
+export function deliveryHandle(
+  delivery: DeliveryValue,
+  readDiff: () => Promise<string | null>,
+): Delivery & DeliveryValue;
+export function deliveryHandle(
+  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> & Partial<DeliveryValue>,
+  readDiff: () => Promise<string | null>,
+): Delivery;
 export function deliveryHandle(
   delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
     Partial<

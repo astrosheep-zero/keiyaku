@@ -70,6 +70,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/git-reconciliation.test.ts",
   "tests/git-repository.test.ts",
   "tests/grok-live-tell.test.ts",
+  "tests/invocation-failure-boundary.test.ts",
   "tests/kanshi.test.ts",
   "tests/library-akuma-creation.test.ts",
   "tests/library-concurrency-placement.test.ts",

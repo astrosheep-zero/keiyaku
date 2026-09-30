@@ -1,5 +1,5 @@
 import type { RefOperation } from "../core/facts/offer.js";
-import type { ExecutionProgress } from "./progress.js";
+import type { ProtocolProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
@@ -58,7 +58,7 @@ type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
   target: string | undefined;
   placement: PlacementProtocolInput;
   onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>;
-  progress?: ExecutionProgress;
+  progress?: ProtocolProgress;
 }>;
 
 function placementFailure(error: unknown): PlacementExecutionFailure {
@@ -165,7 +165,11 @@ async function runFencedPlacement(
     if (result.kind === "collision" && index + 1 < protocol.attempts.length) continue;
     if (result.kind !== "accepted") return result;
     if (preparedPhysical === undefined) throw new Error("accepted placement has no prepared target checkout");
-    return { ...result, physical: await followTargetPlacement(repository, preparedPhysical) };
+    const physical = await followTargetPlacement(repository, preparedPhysical, (report) =>
+      protocol.progress?.recordPlacementPhysical(input.contractId, report),
+    );
+    protocol.progress?.recordPlacementPhysical(input.contractId, physical);
+    return { ...result, physical };
   }
   return { kind: "exhausted" };
 }

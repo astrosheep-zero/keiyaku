@@ -10,7 +10,8 @@ import type { InvocationResult } from "../src/cli/result.js";
 import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
 import { renderText } from "../src/cli/render/text.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
-import { startContractExecution, type ExecutionEvent } from "../src/library/execution.js";
+import { Keiyaku, Repo, type ExecutionObservation } from "../src/index.js";
+import { accepted } from "./support/library-verbs.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
@@ -38,7 +39,7 @@ function progressOutput() {
   return {
     stream,
     text: () => text,
-    progress: (events: AsyncIterable<ExecutionEvent>) => writeExecutionProgress(events, stream),
+    progress: () => writeExecutionProgress(stream),
   };
 }
 
@@ -200,10 +201,8 @@ test("closing or failing CLI progress output does not cancel the operation", asy
   for (const failure of [undefined, new Error("output failed")]) {
     await t.test(failure === undefined ? "closed" : "failed", async () => {
       const { promise: completion, resolve: complete } = promiseBarrier<string>();
-      const execution = startContractExecution(async (observe) => {
-        observe({ kind: "progress-dropped", count: 1 });
-        return await completion;
-      });
+      const { raw, id } = await bindCandidate("printf 'callback output\n'", ["reviewed"]);
+      const native = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
       const stream = new Writable({
         highWaterMark: 1,
         write(_chunk, _encoding, callback) {
@@ -211,16 +210,19 @@ test("closing or failing CLI progress output does not cancel the operation", asy
           void setImmediate().then(() => this.destroy(failure));
         },
       });
+      const progress = await writeExecutionProgress(stream);
+      const pending = native.deliver({}, { observe: (event: ExecutionObservation) => {
+        progress.observe(event);
+        return completion.then(() => undefined);
+      } });
       try {
-        await assert.rejects(
-          writeExecutionProgress(execution.progress, stream),
-          failure ?? { code: "ERR_STREAM_PREMATURE_CLOSE" },
-        );
+        const result = accepted(await pending);
+        assert.ok(result.facts.some((fact) => fact.kind === "deliver"));
+        await assert.rejects(progress.finish(), failure ?? { code: "ERR_STREAM_PREMATURE_CLOSE" });
       } finally {
         complete("complete");
         stream.destroy();
       }
-      assert.equal(await execution.result, "complete");
     });
   }
 });

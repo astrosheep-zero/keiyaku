@@ -1,5 +1,6 @@
+import { KeiyakuError } from "../../library/keiyaku.js";
 import { actorFromEdge } from "../actor.js";
-import type { ContractExecution, ExecutionEvent } from "../../library/execution.js";
+import type { ExecutionObserver } from "../../library/keiyaku.js";
 import { consumeSettings } from "../usage.js";
 import type { InvocationResult } from "../result.js";
 import type { ParsedCommand } from "../parse.js";
@@ -15,21 +16,26 @@ type ContractMutation = Extract<
   { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" | "audit" }
 >;
 type ExistingCommand = Exclude<ContractMutation, { command: "bind" }>;
+type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>;
+
 type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
   signal?: AbortSignal;
-  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
+  progress?: () => Promise<ExecutionProgressDriver>;
 }>;
 
-async function consumeExecution<Result>(execution: ContractExecution<Result>, edge: InvocationEdge): Promise<Result> {
-  const observation =
-    edge.progress === undefined ? undefined : Promise.resolve().then(() => edge.progress!(execution.progress));
-  void observation?.catch(() => undefined);
+/** One promised operation plus an optional observer; observation never delays custody. */
+async function consumeExecution<Result>(
+  run: (observe: ExecutionObserver) => Promise<Result>,
+  edge: InvocationEdge,
+): Promise<Result> {
+  if (edge.progress === undefined) return await run(() => undefined);
+  const driver = await edge.progress();
   try {
-    return await execution.result;
+    return await run(driver.observe);
   } finally {
-    await observation?.catch(() => undefined);
+    await driver.finish().catch(() => undefined);
   }
 }
 
@@ -86,11 +92,12 @@ export async function admitMarkdownBindSyntax(
   input: Readonly<{ markdown: string; processCwd?: string; cwd?: string }>,
 ): Promise<void> {
   try {
-    const { parseMarkdownBindDocument } = await import("../../library/contract.js");
-    parseMarkdownBindDocument(input.markdown);
+    const { validateContractMarkdown } = await import("../../library/input.js");
+    validateContractMarkdown(input.markdown);
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (!(error instanceof TypeError)) throw error;
+    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
+      throw error;
     const { BindDraftError } = await import("../draft.js");
     throw new BindDraftError(error, await bindDraftReceiptAtCwd(input, input.markdown));
   }
@@ -144,7 +151,8 @@ async function invokeBind(input: ContractMutationInput): Promise<InvocationResul
     return { ...result, draft: await bindDraftReceipt(establishWorld, markdown) };
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (!(error instanceof TypeError)) throw error;
+    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
+      throw error;
     const { BindDraftError } = await import("../draft.js");
     throw new BindDraftError(error, await bindDraftReceipt(establishWorld, markdown));
   }
@@ -187,30 +195,27 @@ async function invokeDeliver(
   seat: ExistingSeat,
   edge: InvocationEdge,
 ): Promise<InvocationResult> {
-  const { acceptedDeliver } = await import("../accepted.js");
-  try {
-    const delivered = await consumeExecution(
-      seat.contract.startDelivery({
-        ...(parsed.message === undefined ? {} : { message: parsed.message }),
-        includeDirty: parsed.includeDirty,
-        materializeConflict: parsed.materializeConflict,
-        overwrite: parsed.overwrite,
-        ...(edge.signal === undefined ? {} : { signal: edge.signal }),
-      }),
-      edge,
-    );
-    if (!("facts" in delivered)) return delivered;
-    return acceptedDeliver(delivered, seat.id);
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    const { KeiyakuRefused, KeiyakuRetry } = await import("../../library/keiyaku.js");
-    if (error instanceof KeiyakuRefused) {
-      return { kind: "refused", verb: "deliver", contract: seat.id, refusal: deliverRefusal(error.refusal) };
-    }
-    if (error instanceof KeiyakuRetry)
-      return { kind: "retry", verb: "deliver", contract: seat.id, detail: error.reason };
-    throw error;
-  }
+  const { acceptedDeliver, resultFromMutationCall } = await import("../accepted.js");
+  return resultFromMutationCall(
+    "deliver",
+    () =>
+      consumeExecution(
+        (observe) =>
+          seat.contract.deliver(
+            {
+              ...(parsed.message === undefined ? {} : { message: parsed.message }),
+              includeDirty: parsed.includeDirty,
+              materializeConflict: parsed.materializeConflict,
+              overwrite: parsed.overwrite,
+              ...(edge.signal === undefined ? {} : { signal: edge.signal }),
+            },
+            { observe },
+          ),
+        edge,
+      ),
+    (delivered) => acceptedDeliver(delivered, seat.id),
+    { coordinate: seat.id, projectRefusal: deliverRefusal },
+  );
 }
 
 async function invokeReview(
@@ -227,7 +232,7 @@ async function invokeReview(
   };
   return resultFromMutationCall(
     "review",
-    () => consumeExecution(seat.contract.startReview(input), edge),
+    () => consumeExecution((observe) => seat.contract.review(input, { observe }), edge),
     (result) => acceptedReview(result, seat.id),
     { coordinate: seat.id },
   );
@@ -252,11 +257,12 @@ async function contractLibrary(input: ContractMutationInput, parsed: ExistingCom
 
 async function invokeArc(seat: ExistingSeat, edge: InvocationEdge): Promise<InvocationResult> {
   const markdown = await edge.readStdin();
-  const { parseMarkdownArcDocument } = await import("../../library/contract.js");
+  const { validateArcMarkdown } = await import("../../library/input.js");
   try {
-    parseMarkdownArcDocument(markdown);
+    validateArcMarkdown(markdown);
   } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
+    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
+      throw error;
     return {
       kind: "refused",
       verb: "arc",
@@ -332,11 +338,15 @@ export async function invokeContractMutation(input: ContractMutationInput): Prom
         "audit",
         () =>
           consumeExecution(
-            contract.startAudit({
-              includeDirty: parsed.includeDirty,
-              showDiff: parsed.showDiff,
-              ...(edge.signal === undefined ? {} : { signal: edge.signal }),
-            }),
+            (observe) =>
+              contract.audit(
+                {
+                  includeDirty: parsed.includeDirty,
+                  showDiff: parsed.showDiff,
+                  ...(edge.signal === undefined ? {} : { signal: edge.signal }),
+                },
+                { observe },
+              ),
             edge,
           ),
         (result) => acceptedAudit(result, id),

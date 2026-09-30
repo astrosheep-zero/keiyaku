@@ -1,23 +1,27 @@
 import type { NukeResult } from "../../index.js";
+import { renderRefusal } from "./refusal.js";
 
 export function renderNukeText(result: NukeResult): string {
   const seatClose =
-    result.seatClose === undefined || result.seatClose.length === 0
-      ? []
-      : result.seatClose.flatMap((lag) => [`  lag  ${lag.kind}`, `  reason  ${lag.diagnostic}`]);
-  if (result.kind === "success") {
+    result.effects.length > 0
+      ? result.effects.flatMap((effect) => [`  lag  ${effect.kind}`, `  reason  ${effect.diagnostic}`])
+      : [];
+  if (result.kind === "accepted") {
     return [
       `✓ nuke  ${result.world}`,
-      `  refs removed  ${result.removed.refs}`,
-      `  worktrees removed  ${result.removed.worktrees}`,
-      `  task stores removed  ${result.removed.tasks}`,
+      `  refs removed  ${result.value.removed.refs}`,
+      `  worktrees removed  ${result.value.removed.worktrees}`,
+      `  task stores removed  ${result.value.removed.tasks}`,
       "  locks  may remain · SQLite coordination files cannot be removed safely while concurrent writers may still hold them",
       ...seatClose,
     ].join("\n");
   }
-  return [`× nuke  ${result.world}`, `  reason  ${result.diagnostic}`, ...seatClose].join("\n");
+  if (result.kind === "refused") {
+    return renderRefusal({ kind: "refused", verb: "nuke", refusal: result.refusal });
+  }
+  return "";
 }
 
 export function nukeExitCode(result: NukeResult): number {
-  return result.kind === "failed" ? 2 : 0;
+  return result.kind === "refused" ? 1 : result.pending.some((surface) => surface.required) ? 2 : 0;
 }

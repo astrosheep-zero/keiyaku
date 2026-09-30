@@ -1,3 +1,4 @@
+import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { documentDiff } from "../markdown/diff.js";
 import {
   createTaskRelations,
@@ -64,9 +65,12 @@ import type {
   UpdateTaskInput,
 } from "./operation-types.js";
 
-export async function nukeTask(world: WorldRoot, options?: Readonly<{ timeoutMs?: number }>): Promise<number> {
+export async function nukeTask(
+  world: WorldRoot,
+  options?: Readonly<{ timeoutMs?: number; onRemoved?(count: number): void }>,
+): Promise<number> {
   const result = await nukeTaskAuthority(world, options);
-  if (result === "busy") throw new Error("Task reset lock contention");
+  if (result === "busy") throw new SqliteTransactionLockError("Task reset lock contention", "timeout");
   return result;
 }
 

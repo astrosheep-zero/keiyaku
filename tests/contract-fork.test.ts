@@ -1,30 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, KeiyakuRefused, Repo } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
 import { invoke } from "../src/cli/invoke.js";
 import { parseArgv } from "../src/cli/parse.js";
 import type { AcceptedResult } from "../src/cli/result.js";
 import { GIT_REF } from "../src/git/repository.js";
-import { document, repositoryWithMain } from "./support/library-verbs.js";
+import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 
 test("fork bind copies the source target and does not substitute the caller branch", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   repository.run(["branch", "release"]);
-  const source = await Keiyaku.with().bind({
+  const source = accepted(await Keiyaku.with().bind({
     repo,
     markdown: document().replace("# Library verbs", "# Targeted source"),
     workspace: "worktree",
     target: "release",
     gates: [],
-  });
-  const sourceState = await source.keiyaku.state();
+  }));
+  const sourceState = present(await source.value.keiyaku.state());
   assert.equal(sourceState.coordinates.target, "refs/heads/release");
 
   repository.run(["checkout", "-B", "caller"]);
-  const fork = await Keiyaku.with().bind({ repo, forkOf: sourceState.id });
-  const forkState = await fork.keiyaku.state();
+  const fork = accepted(await Keiyaku.with().bind({ repo, forkOf: sourceState.id }));
+  const forkState = present(await fork.value.keiyaku.state());
   assert.equal(forkState.coordinates.target, "refs/heads/release");
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
 });
@@ -32,29 +32,28 @@ test("fork bind copies the source target and does not substitute the caller bran
 test("fork bind refuses missing sources and incompatible term inputs", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  await assert.rejects(
-    () => Keiyaku.with().bind({ repo, forkOf: "kei/missing" as never }),
-    (error: unknown) =>
-      error instanceof KeiyakuRefused &&
-      error.refusal.kind === "fork-source-missing" &&
-      error.refusal.contractId === "kei/missing",
-  );
+  const missing = await Keiyaku.with().bind({ repo, forkOf: "kei/missing" as never });
+  assert.equal(missing.kind, "refused");
+  if (missing.kind === "refused") {
+    assert.equal(missing.refusal.kind, "fork-source-missing");
+    assert.equal(missing.refusal.contractId, "kei/missing");
+  }
   await assert.rejects(
     () => Keiyaku.with().bind({ repo, forkOf: "kei/source" as never, gates: [] } as never),
-    /fork bind input has unknown field: gates/u,
+    /Keiyaku.bind input has unknown field: gates/u,
   );
 });
 
 test("fork CLI reads no stdin and keeps its form disjoint", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const source = await Keiyaku.with().bind({
+  const source = accepted(await Keiyaku.with().bind({
     repo,
     markdown: document().replace("# Library verbs", "# CLI source"),
     workspace: "worktree",
     gates: [],
-  });
-  const sourceId = (await source.keiyaku.state()).id;
+  }));
+  const sourceId = (present(await source.value.keiyaku.state())).id;
   const parsed = parseArgv(["bind", "--fork-of", sourceId]);
   if (!("command" in parsed)) throw new Error("fork bind did not parse as executable");
   const result = await invoke(parsed, {
@@ -87,20 +86,19 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
 test("fork admission rejects a source amend interleaved at the state transaction", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const source = await Keiyaku.with().bind({
+  const source = accepted(await Keiyaku.with().bind({
     repo,
     markdown: document().replace("# Library verbs", "# Race source"),
     workspace: "worktree",
     gates: [],
-  });
-  const sourceState = await source.keiyaku.state();
+  }));
+  const sourceState = present(await source.value.keiyaku.state());
   const oldState = repository.run(["rev-parse", GIT_REF]).trim();
-  await source.keiyaku.amend({ gates: ["reviewed"] });
+  await source.value.keiyaku.amend({ gates: ["reviewed"] });
   const movedState = repository.run(["rev-parse", GIT_REF]).trim();
   repository.run(["update-ref", GIT_REF, oldState, movedState]);
   const marker = `${repository.path}/fork-race.marker`;
-  await assert.rejects(
-    withGitShim(
+  const raced = await withGitShim(
       [
         'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_FORK_RACE_MARKER" ]; then',
         '  touch "$KEIYAKU_FORK_RACE_MARKER"',
@@ -117,11 +115,11 @@ test("fork admission rejects a source amend interleaved at the state transaction
       },
       async (gitPath) =>
         Keiyaku.with().bind({ repo: await Repo.at({ path: repository.path, gitPath }), forkOf: sourceState.id }),
-    ),
-    (error: unknown) =>
-      error instanceof KeiyakuRefused &&
-      error.refusal.kind === "fork-source-moved" &&
-      error.refusal.contractId === sourceState.id,
   );
-  assert.deepEqual((await source.keiyaku.state()).terms.gates, ["reviewed"]);
+  assert.equal(raced.kind, "refused");
+  if (raced.kind === "refused") {
+    assert.equal(raced.refusal.kind, "fork-source-moved");
+    assert.equal(raced.refusal.contractId, sourceState.id);
+  }
+  assert.deepEqual((present(await source.value.keiyaku.state())).terms.gates, ["reviewed"]);
 });

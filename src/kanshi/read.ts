@@ -1,5 +1,5 @@
 import { Repo } from "../library/repo.js";
-import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../library/contract.js";
+import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../protocol/read/status.js";
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../task/identity.js";

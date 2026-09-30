@@ -98,3 +98,7 @@ effects and lags; one Contract's lag neither discards another's report nor
 becomes a world-wide exception. Contract and world reports expose effects that
 actually occurred and flat retryable lags, without inventing lifecycle state or
 a second cleanup report.
+
+Only an owner-recognized operational failure becomes reconciliation lag.
+Programming failures and corrupt authority remain exceptional; an invocation
+retains the physical observations already confirmed before they occurred.

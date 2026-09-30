@@ -83,7 +83,7 @@ for (const verb of ["review", "deliver"]) {
     }
   });
 }
-for (const owner of ["contract-execution", "continuation"]) {
+for (const owner of ["keiyaku", "continuation"]) {
   test(`${owner} calls completion, never raw admission`, () => {
     assert.deepEqual(graph(`library/${owner}.ts`, [["protocol/completion.ts", "completeCandidate"]]), []);
     for (const low of ["attempt", "placement", "run"]) {
@@ -97,7 +97,7 @@ const akuma: Edge = ["akuma/akuma.ts", "runtime"];
 const tasks: Edge = ["task/index.ts", "tasks"];
 const catalog: Edge = ["task/catalog.ts", "catalog"];
 const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
-  ["library/composition.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
+  ["library/keiyaku.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
   ["library/akumas.ts", [akuma, tasks], marker, true],
   ["library/akumas/index.ts", [akuma, catalog], marker, true],
   ["library/selection.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],

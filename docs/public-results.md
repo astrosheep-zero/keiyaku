@@ -24,35 +24,32 @@ is an integrity failure, not a reason to infer from newer state. Text names the
 candidate and integration result, patch-id as `content identity (not commit)`,
 keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
 
-Callers may derive one pure finality projection from these public outcomes. It
-distinguishes a fully settled accepted outcome, an accepted outcome with
-pending surfaces, and an outcome that admitted no fact. The projection does not
-replace the detailed result or become a second adjudicator: audit uses its own
-terminal Verification testimony, while audit and delivery expose required
-operational work separately from optional cleanup or retained-residue reporting.
-An explicit no-fact integration handoff likewise projects as not-admitted.
+Every mutation has one operation-owned answer, projected after independently
+awaited retirement of its owned resources. Non-admission is returned data; only
+delivery can return a no-fact conflict handoff. Acceptance requires the complete
+operation value and addressed admission evidence. Bind retains its native Contract
+ability, delivery retains its native diff ability, and their JSON representation
+keeps result data without exposing process custody or reconstructing capabilities
+from raw coordinates.
 
-`KeiyakuRefused` and `KeiyakuRetry` identify a leading attempt that admitted no
-fact. Their machine-readable code derives from their one structured reason. A
-post-admission physical, reconciliation, or settlement failure remains a typed
-lag on the accepted result; it cannot reclassify the leading act as refused or
-hide its facts. Each lag identifies either no affected next action or the
-specific pending action it affects. Retained residue alone does not imply that
-reconciliation is required; scope neither ranks lags nor prescribes a repair.
-Recovery evidence, when cleanup needs it, is transient Git
-custody rather than a new Contract fact or retention promise.
+Physical effects, required stops, settlement, and retained residue have one
+invocation-wide carrier. Candidate conclusions stay in the operation value.
+Pending work is judged once by the final projection from those conclusions and
+owner classifications, not by a second caller finality judgment or an independently
+transported summary. Optional resource residue stays observable without becoming
+mandatory replay or undoing admission. Recovery evidence is transient Git custody,
+not a new Contract fact or retention promise.
 
-The addressed operation is explicit in an invocation answer. Consumers never
-infer which operation ran from coincidental members of its value. Finality is
-projected once from the operation's conclusions and outstanding work, not from
-a separately transported pending summary.
+Refusal and retry reasons belong to their addressed operation. Neither can claim
+safe retry when publication is unknown. A later operational stop preserves known
+leading evidence, while an unexpected programming failure or corruption remains
+exceptional with the same operation envelope at its actual, possibly incomplete,
+failure point. The exceptional value never pretends that an unfinished audit or
+completion finished.
 
-A programming error or corrupt authority remains exceptional even after a
-leading act was accepted. The exceptional answer retains the original failure
-category and the invocation's confirmed receipts; it is neither a normal
-success nor a refusal proving no effect. Ordinary trailing execution failures
-instead remain explicit stops on the accepted answer. Neither path reconstructs
-invocation ownership by scanning whatever facts happen to exist afterward.
+The addressed operation is explicit. Consumers never infer it from coincidental
+members of its value, and no later authority scan reconstructs which facts an
+invocation owns.
 
 ## Contract Outcomes
 
@@ -74,6 +71,9 @@ movement instead of deriving it from journal facts or folded state. Reused
 Verification evidence is identified as reuse, not a cache or a new evidence
 source. A completed placement that retained a non-blocking Verification stop
 reports that stop beside its movement.
+
+Known completion and movement precede optional presentation observation. Failure
+to observe that presentation never reruns completion or erases witnessed movement.
 
 An admitted current candidate with declared Verification but no terminal fact
 is `unrecorded`, distinct from undeclared or terminal Verification and implying
@@ -131,7 +131,7 @@ including an empty diff, not journal, gate, or cache authority.
 
 Read-only workspace and board observations are owned by
 [public-api.md](public-api.md), not duplicated here. Nuke confirmation refusals
-and success or failure answers remain public result concepts; the reset and
+and accepted reset answers remain public result concepts; reset and
 preservation semantics are owned by [world.md](world.md).
 
 ## Cleanup Boundary
@@ -154,3 +154,24 @@ candidate coordinates. A newer verification can replace candidate conclusions,
 but cannot overwrite an earlier resource problem or discard a dependent's
 cleanup report. Cleanup reporting has one public carrier; operation values do
 not repeat it as another source of truth.
+
+Every confirmed conclusion and completed owner effect is retained before later
+work can fail. The final exceptional envelope includes later retirement residue
+even when an earlier exceptional envelope was already attached to the cause.
+
+## Forwarded evidence availability
+
+A live returned refusal or retry is owner testimony of no committed product
+effect, separate from Heart's service disposition. Its precise reason and
+invocation-local observations exist only in live transport. When those bytes
+are gone, a voided request proves no committed product effect but cannot establish its
+original owner reason or physical residue. Forwarding exposes that unavailability
+with raw diagnostic evidence and never parses prose to reconstruct typed facts.
+A retry permits a fresh request identity only; old identities never re-execute.
+
+An exceptional live owner answer retains its original category, native cause,
+and invocation envelope even when Heart records the service as unproven.
+Disposition and error category are independent. Without that decoded owner proof,
+unproven service or post-publication channel loss remains unknown outcome. An
+exact served reference proves the leading operation identity, not its missing
+trailing observations; expiration does not authorize reconstruction or replay.

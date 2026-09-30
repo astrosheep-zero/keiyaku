@@ -61,6 +61,7 @@ function exportDeclarationSymbols(node: ts.ExportDeclaration): ImportedSymbols {
 }
 
 function importSymbols(node: ts.Node): ImportedSymbols {
+  if (ts.isImportTypeNode(node)) return { runtime: [], types: ["*"] };
   if (ts.isImportDeclaration(node)) return importDeclarationSymbols(node);
   if (ts.isExportDeclaration(node)) return exportDeclarationSymbols(node);
   return { runtime: ["*"], types: [] };

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { actorFromEdge } from "./actor.js";
-import type { ExecutionEvent } from "../library/execution.js";
+import type { ExecutionObserver } from "../library/keiyaku.js";
 import { isParsedAkumaCommand, type InvokedAkumaCommand } from "./commands/akuma.js";
 import type { AkumaInvocationResult } from "./commands/akuma-invoke.js";
 import { invokeContractMutation } from "./commands/contract-invoke.js";
@@ -40,7 +40,7 @@ type InvokeRuntime = Readonly<{
   readStdin?: () => Promise<string>;
   actor?: ActorId;
   signal?: AbortSignal;
-  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
+  progress?: () => Promise<Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>>;
 }>;
 
 type NonInstallExecution = Readonly<{
@@ -53,7 +53,7 @@ type InvocationEdge = Readonly<{
   environment: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
   signal?: AbortSignal;
-  progress?: (events: AsyncIterable<ExecutionEvent>) => Promise<void>;
+  progress?: () => Promise<Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>>;
 }>;
 
 async function readStdin(): Promise<string> {
@@ -387,7 +387,7 @@ async function invokeRegion(
   const report = await read({ kind: "declarations" });
   const { resolveKanshiContract } = await import("./selectors.js");
   const contract = resolveKanshiContract(report, parsed.contract) as ContractId;
-  const { observeKeiyaku } = await import("../library/contract.js");
+  const { observeKeiyaku } = await import("../library/keiyaku.js");
   const observed = await observeKeiyaku({ repo, id: contract });
   if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
     return {
@@ -424,14 +424,17 @@ async function invokeContractHistory(
   const { contractFromInput } = await import("./selectors.js");
   const selected = contractFromInput(repo, contract);
   try {
-    return { kind: "contract-history" as const, history: await selected.contract.history(), full };
+    const history = await selected.contract.history();
+    if (history === null)
+      return {
+        kind: "refused" as const,
+        verb: "history",
+        contract: selected.id,
+        refusal: { kind: "contract-missing" as const, contractId: selected.id },
+      };
+    return { kind: "contract-history" as const, history, full };
   } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
-    const { KeiyakuRefused } = await import("../library/keiyaku.js");
-    if (error instanceof KeiyakuRefused) {
-      return { kind: "refused" as const, verb: "history", contract: selected.id, refusal: error.refusal };
-    }
     throw error;
   }
 }
@@ -558,14 +561,15 @@ async function invokeParsed(
 
   if (parsed.command === "show") {
     const selected = await selectContract(repo, parsed.contract, scope);
-    try {
-      return { kind: "guidance", contract: selected.id, guidance: await selected.contract.guidance() };
-    } catch (error) {
-      const { KeiyakuRefused } = await import("../library/keiyaku.js");
-      if (error instanceof KeiyakuRefused)
-        return { kind: "refused" as const, verb: "show", contract: selected.id, refusal: error.refusal };
-      throw error;
-    }
+    const guidance = await selected.contract.guidance();
+    if (guidance === null)
+      return {
+        kind: "refused" as const,
+        verb: "show",
+        contract: selected.id,
+        refusal: { kind: "contract-missing" as const, contractId: selected.id },
+      };
+    return { kind: "guidance", contract: selected.id, guidance };
   }
   if (parsed.command === "reconcile") {
     if (parsed.contract === undefined) {
@@ -575,7 +579,7 @@ async function invokeParsed(
       };
     }
     const { id, contract } = await selectContract(repo, parsed.contract, scope);
-    const observed = await (await import("../library/contract.js")).observeKeiyaku({ repo, id });
+    const observed = await (await import("../library/keiyaku.js")).observeKeiyaku({ repo, id });
     if (observed.kind === "missing") {
       return {
         kind: "refused" as const,
@@ -584,17 +588,10 @@ async function invokeParsed(
         refusal: { kind: "contract-missing" as const, contractId: id },
       };
     }
-    try {
-      return {
-        kind: "reconcile",
-        report: await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
-      };
-    } catch (error) {
-      const { KeiyakuRefused } = await import("../library/keiyaku.js");
-      if (error instanceof KeiyakuRefused)
-        return { kind: "refused" as const, verb: "reconcile", contract: id, refusal: error.refusal };
-      throw error;
-    }
+    return {
+      kind: "reconcile",
+      report: await contract.reconcile({ ...(hooks === undefined ? {} : { hooks }), retryHooks: parsed.retryHooks }),
+    };
   }
   return invokeContractMutation({
     parsed,

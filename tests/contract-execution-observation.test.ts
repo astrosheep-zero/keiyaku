@@ -1,50 +1,40 @@
-import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { startContractExecution } from "../src/library/execution.js";
+import { InvocationAccumulator } from "../src/library/outcome.js";
+import { bind, commitCandidate, acceptedDelivery, repositoryWithMain } from "./support/library-verbs.js";
+import { deferred } from "./support/process.js";
+import type { ExecutionObservation } from "../src/index.js";
 
-function deferred<Value>() {
-  const { promise: promise, resolve } = promiseBarrier<Value>();
-  return { promise, resolve };
-}
-
-test("leaving the only progress subscription does not cancel an execution", async () => {
-  const completion = deferred<string>();
-  const execution = startContractExecution(async (observe) => {
-    observe({ kind: "progress-dropped", count: 1 });
-    return await completion.promise;
-  });
-  const iterator = execution.progress[Symbol.asyncIterator]();
-
-  assert.deepEqual(await iterator.next(), { done: false, value: { kind: "progress-dropped", count: 1 } });
-  await iterator.return?.();
-  completion.resolve("complete");
-  assert.equal(await execution.result, "complete");
+test("callback observations preserve order and transported gaps without subscription state", () => {
+  const observed: ExecutionObservation[] = [];
+  const progress = new InvocationAccumulator((event) => { observed.push(event); });
+  for (const count of [1, 300, 2]) progress.observe({ kind: "progress-dropped", count });
+  assert.deepEqual(observed, [1, 300, 2].map((count) => ({ kind: "progress-dropped", count })));
 });
 
-test("contract execution reports bounded-progress overflow without changing the final result", async () => {
-  const completion = deferred<string>();
-  const execution = startContractExecution(async (observe) => {
-    for (let count = 1; count <= 300; count += 1) observe({ kind: "progress-dropped", count });
-    return await completion.promise;
-  });
-  const iterator = execution.progress[Symbol.asyncIterator]();
-  const first = await iterator.next();
-
-  assert.equal(first.done, false);
-  assert.equal(first.value?.kind, "progress-dropped");
-  assert.ok(first.value !== undefined && first.value.count > 1);
-  completion.resolve("complete");
-  assert.equal(await execution.result, "complete");
+test("synchronous and asynchronous observer failures cannot change delivery admission or completion", async () => {
+  for (const observer of [() => { throw new TypeError("observer failure"); }, async () => { throw new TypeError("observer rejection"); }]) {
+    const repository = repositoryWithMain();
+    const contract = await bind(repository);
+    commitCandidate(repository);
+    const outcome = acceptedDelivery(await contract.deliver({}, { observe: observer }));
+    assert.ok(outcome.facts.some((fact) => fact.kind === "deliver"));
+    assert.equal(outcome.value.leading.kind, "admitted-now");
+  }
 });
 
-test("a rejected result closes observation and a second subscription is refused", async () => {
-  const execution = startContractExecution(async () => {
-    throw new TypeError("expected rejection");
-  });
-  const first = execution.progress[Symbol.asyncIterator]();
-
-  assert.throws(() => execution.progress[Symbol.asyncIterator](), /one subscription/u);
-  await assert.rejects(execution.result, /expected rejection/u);
-  assert.deepEqual(await first.next(), { done: true, value: undefined });
+test("slow observers and callers that stop observing never delay or cancel delivery", async () => {
+  const repository = repositoryWithMain();
+  const contract = await bind(repository);
+  commitCandidate(repository);
+  const barrier = deferred<void>();
+  let seen = 0;
+  try {
+    const outcome = acceptedDelivery(await contract.deliver({}, { observe: () => {
+      seen += 1;
+      return barrier.promise;
+    } }));
+    assert.ok(seen > 0);
+    assert.ok(outcome.facts.some((fact) => fact.kind === "deliver"));
+  } finally { barrier.resolve(); }
 });

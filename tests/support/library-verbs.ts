@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { Keiyaku, KeiyakuRefused, Repo, type Keiyaku as KeiyakuHandle, type KeiyakuRefusal } from "../../src/index.js";
+import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle, type KeiyakuRefusal } from "../../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -51,12 +51,22 @@ export function repositoryWithMain(options: RepositoryWithMainOptions = {}): Tes
   return snapshotGitRepository(templateFor(options.files ?? {}, options.message ?? "initial"));
 }
 
-export function refused(expected: KeiyakuRefusal): (error: unknown) => boolean {
-  return (error) => {
-    assert.ok(error instanceof KeiyakuRefused);
-    assert.deepEqual(error.refusal, expected);
-    return true;
-  };
+/** Expected non-admission is returned data, never an exception adapter. */
+export async function assertRefused(run: () => Promise<unknown>, expected: KeiyakuRefusal): Promise<void> {
+  const result = await run();
+  assert.ok(result !== null && typeof result === "object" && "kind" in result && result.kind === "refused");
+  assert.ok("refusal" in result);
+  assert.deepEqual(result.refusal, expected);
+}
+
+export function accepted<Outcome extends { readonly kind: string }>(outcome: Outcome): Extract<Outcome, { kind: "accepted" }> {
+  assert.equal(outcome.kind, "accepted", JSON.stringify(outcome));
+  return outcome as Extract<Outcome, { kind: "accepted" }>;
+}
+
+export function present<Value>(value: Value | null): Value {
+  assert.notEqual(value, null);
+  return value as Value;
 }
 
 export function document(verification?: string): string {
@@ -92,7 +102,7 @@ export async function bind(repository: TestGitRepository, verification?: string)
     workspace: "worktree",
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
-  return result.keiyaku;
+  return accepted(result).value.keiyaku;
 }
 
 export function commitCandidate(repository: TestGitRepository, worktreePath = repository.path): void {
@@ -101,16 +111,9 @@ export function commitCandidate(repository: TestGitRepository, worktreePath = re
   repository.run(["-C", worktreePath, "commit", "--quiet", "-m", "candidate"]);
 }
 
-type AcceptedDelivery = Exclude<
-  Awaited<ReturnType<KeiyakuHandle["deliver"]>>,
-  { kind: "integration-conflict-materialized" }
->;
-
+type AcceptedDelivery = Extract<Awaited<ReturnType<KeiyakuHandle["deliver"]>>, { kind: "accepted" }>;
 export function acceptedDelivery(result: Awaited<ReturnType<KeiyakuHandle["deliver"]>>): AcceptedDelivery {
-  if (result.kind === "integration-conflict-materialized") {
-    throw new Error(`unexpected integration conflict: ${result.conflictPaths.join(",")}`);
-  }
-  return result;
+  return accepted(result);
 }
 
 export const TARGET_PLACEMENT_FILES = {
@@ -136,8 +139,8 @@ export async function managedCandidate(repository: TestGitRepository, gates: rea
     target: "refs/heads/main",
     gates,
   });
-  const contract = bound.keiyaku;
-  const state = await contract.state();
+  const contract = accepted(bound).value.keiyaku;
+  const state = present(await contract.state());
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(resolve(path, "delivered.txt"), "candidate\n");
   repository.run(["-C", path, "add", "delivered.txt"]);

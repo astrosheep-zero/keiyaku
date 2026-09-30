@@ -1,4 +1,4 @@
-import type { ActorId } from "../index.js";
+import { actorId as mintActorId, type ActorId } from "../index.js";
 import { CliUsageError } from "./usage.js";
 
 const ACTOR_ID_ENV = "KEIYAKU_ACTOR_ID";
@@ -12,10 +12,10 @@ type ActorResolutionInput = Readonly<{
 export function resolveActor(input: ActorResolutionInput = {}): ActorId | undefined {
   if (input.actor !== undefined) {
     if (input.actor.trim().length === 0) throw new TypeError("actor must be a nonblank string");
-    return input.actor;
+    return mintActorId(input.actor);
   }
   const actorId = input.env?.[ACTOR_ID_ENV];
-  return actorId !== undefined && actorId.trim().length > 0 ? actorId : undefined;
+  return actorId !== undefined && actorId.trim().length > 0 ? mintActorId(actorId) : undefined;
 }
 
 /** Resolve edge actor testimony, refusing malformed caller input as usage. */

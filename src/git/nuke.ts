@@ -26,6 +26,13 @@ import {
 } from "./repository.js";
 import { worktreePath } from "./workspace.js";
 
+export class GitResetStopError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GitResetStopError";
+  }
+}
+
 type ManagedEntry = Readonly<{ contract: ContractId; path: string }>;
 
 async function managedCustody(repository: GitRepository): Promise<Readonly<{ entries: readonly ManagedEntry[] }>> {
@@ -80,7 +87,7 @@ async function removeUnregisteredResidue(repository: GitRepository, entry: Manag
   }
   if (!present) return true;
   if (!(await unregisteredResidueBelongsToRepository(repository, entry.path))) {
-    throw new Error(`managed Place path has foreign custody: ${entry.path}`);
+    throw new GitResetStopError(`managed Place path has foreign custody: ${entry.path}`);
   }
   await rm(entry.path, { recursive: true, force: true });
   try {
@@ -89,7 +96,7 @@ async function removeUnregisteredResidue(repository: GitRepository, entry: Manag
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw error;
   }
-  throw new Error(`managed Place worktree remains present: ${entry.path}`);
+  throw new GitResetStopError(`managed Place worktree remains present: ${entry.path}`);
 }
 
 async function removeManagedWorktree(repository: GitRepository, entry: ManagedEntry): Promise<boolean> {
@@ -98,7 +105,7 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   if (registered.branch !== null) return false;
   await runGit(repository, ["worktree", "remove", "--force", entry.path]);
   if ((await registeredWorktrees(repository)).some((candidate) => candidate.path === entry.path)) {
-    throw new Error(`managed Place worktree remains registered: ${entry.path}`);
+    throw new GitResetStopError(`managed Place worktree remains registered: ${entry.path}`);
   }
   try {
     await access(entry.path);
@@ -106,7 +113,7 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
     throw error;
   }
-  throw new Error(`managed Place worktree remains present: ${entry.path}`);
+  throw new GitResetStopError(`managed Place worktree remains present: ${entry.path}`);
 }
 
 async function deleteRefAt(repository: GitRepository, ref: string, expectedOid: string): Promise<void> {
@@ -130,10 +137,10 @@ async function deleteObservedStateRef(
     confirmPrivateStatePublication(seat);
     return;
   }
-  throw new Error("state-ref deletion outcome is unknown");
+  throw new GitResetStopError("state-ref deletion outcome is unknown");
 }
 
-async function removeOwnedRefs(repository: GitRepository): Promise<number> {
+async function removeOwnedRefs(repository: GitRepository, onRemoved?: (count: number) => void): Promise<number> {
   let removed = 0;
   const roots = [DELIVERY_REF_NAMESPACE, CANDIDATE_PIN_REF_NAMESPACE] as const;
   for (const root of roots) {
@@ -146,6 +153,7 @@ async function removeOwnedRefs(repository: GitRepository): Promise<number> {
       if (oid !== null) {
         await deleteRefAt(repository, ref, oid);
         removed += 1;
+        onRemoved?.(1);
       }
     }
   }
@@ -156,6 +164,7 @@ export async function nukeGit(
   world: WorldRoot,
   gitPath = "git",
   options?: Readonly<Pick<GitRepository, "onPrivateStateSeatContention" | "onPrivateStateSeatClose">>,
+  progress?: (confirmed: Readonly<{ refs?: number; worktrees?: number }>) => void,
 ): Promise<PrivateStateSeatOutcome<Readonly<{ refs: number; worktrees: number }>>> {
   let repository: GitRepository;
   try {
@@ -173,16 +182,19 @@ export async function nukeGit(
       if (state !== null) {
         await deleteObservedStateRef(repository, state, seat);
         refs += 1;
+        progress?.({ refs: 1 });
       }
 
       for (const entry of custody.entries) {
         if (await removeManagedWorktree(repository, entry)) {
           worktrees += 1;
+          progress?.({ worktrees: 1 });
           await releaseManagedWorktrees(repository, [entry.contract], placeFence);
         }
       }
       await nukeEmptyPlaceAuthority(repository, placeFence);
-      refs += await removeOwnedRefs(repository);
+      const ownedRefs = await removeOwnedRefs(repository, (count) => progress?.({ refs: count }));
+      refs += ownedRefs;
       return { refs, worktrees };
     });
   });

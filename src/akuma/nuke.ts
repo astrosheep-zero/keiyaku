@@ -7,6 +7,13 @@ import { acquireLeash } from "./control.js";
 import { settleAkumaKill } from "./akuma-handle.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
 
+export class AkumaResetStopError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AkumaResetStopError";
+  }
+}
+
 type NukeAkumaEntry = Readonly<{ id: AkuId; paths: AkumaPaths }>;
 
 async function hasAkumaCustody(paths: AkumaPaths): Promise<boolean> {
@@ -22,13 +29,14 @@ async function hasAkumaCustody(paths: AkumaPaths): Promise<boolean> {
 async function stopRunningAkuma(entry: NukeAkumaEntry): Promise<HeldAkumaLeash> {
   const settled = await settleAkumaKill(entry.paths, undefined, true);
   if (settled.leash !== undefined) return settled.leash;
-  throw new Error(`Akuma ${entry.id} could not be stopped: ${settled.evidence}`);
+  throw new AkumaResetStopError(`Akuma ${entry.id} could not be stopped: ${settled.evidence}`);
 }
 
 async function removeKnownRegularFile(path: string): Promise<void> {
   try {
     const value = await lstat(path);
-    if (!value.isFile() || value.isSymbolicLink()) throw new Error(`Akuma custody is not a regular file: ${path}`);
+    if (!value.isFile() || value.isSymbolicLink())
+      throw new AkumaResetStopError(`Akuma custody is not a regular file: ${path}`);
     await rm(path, { force: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -69,7 +77,8 @@ async function removeKnownRequestFile(path: string): Promise<void> {
 async function removeKnownRequestChannel(path: string): Promise<void> {
   try {
     const value = await lstat(path);
-    if (!value.isDirectory() || value.isSymbolicLink()) throw new Error(`Akuma custody is not a directory: ${path}`);
+    if (!value.isDirectory() || value.isSymbolicLink())
+      throw new AkumaResetStopError(`Akuma custody is not a directory: ${path}`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
@@ -163,14 +172,14 @@ export async function stopAkuma(world: WorldRoot): Promise<() => Promise<void>> 
         snapshot.soul !== null && snapshot.latestBody?.end === undefined
           ? await stopRunningAkuma(entry)
           : await acquireLeash(entry.paths);
-      if (leash === null) throw new Error(`Akuma ${entry.id} could not be verified stopped`);
+      if (leash === null) throw new AkumaResetStopError(`Akuma ${entry.id} could not be verified stopped`);
       try {
         const after = await readHeart(entry.paths);
         if (after.soul === null || after.latestBody?.end !== undefined) {
           held.push(leash);
           continue;
         }
-        throw new Error(`Akuma ${entry.id} stopped without a durable end`);
+        throw new AkumaResetStopError(`Akuma ${entry.id} stopped without a durable end`);
       } catch (error) {
         leash.release();
         throw error;

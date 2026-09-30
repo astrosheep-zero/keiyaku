@@ -1,15 +1,22 @@
 import type {
   AuditReport,
+  ContractHead,
   ContractHistory,
   ContractId,
   ContinuationReport,
   Delivery,
+  ExecutionCleanup,
+  ExecutionStop,
   Fact,
   IntegrationConflictMaterialized,
-  MutationResult,
+  InvocationEffect,
+  PendingSurface,
   PlacementStop,
   ReconcileReport,
+  ReconciliationLag,
   Review,
+  SettlementLag,
+  SnapshotId,
   VerificationReuse,
   VerificationStop,
 } from "../index.js";
@@ -25,53 +32,29 @@ export type BindDraftReceipt = Readonly<{ path: string; warning?: string } | { p
 
 export type Effect = ReconcileReport["effects"][number];
 
-type AcceptedFactEnvelope = Readonly<{
-  contract: ContractId;
-  entry: string;
-}>;
+export type AcceptedFact = Fact;
 
-export type AcceptedFact =
-  | (AcceptedFactEnvelope &
-      Readonly<{
-        kind: Exclude<Fact["kind"], "reintegrated">;
-        data?: never;
-      }>)
-  | (AcceptedFactEnvelope &
-      Readonly<{
-        kind: "reintegrated";
-        data: Extract<Fact, { kind: "reintegrated" }>["data"];
-      }>);
-
-export type Lag = MutationResult<unknown>["lags"][number];
-
-type MutationEnvelope = Pick<
-  MutationResult<unknown>,
-  | "head"
-  | "settlementLags"
-  | "recoverySnapshot"
-  | "retiredWorktree"
-  | "retainedWorktree"
-  | "retainedCheckouts"
-  | "cleanup"
-  | "executionStops"
->;
+export type Lag = ReconciliationLag;
 
 export type AcceptedEnvelope = Readonly<{
   kind: "accepted";
   contract: ContractId;
-  head: MutationEnvelope["head"];
-  facts: readonly AcceptedFact[];
-  settlementLags: MutationEnvelope["settlementLags"];
-  recoverySnapshot?: MutationEnvelope["recoverySnapshot"];
+  head: ContractHead;
+  facts: readonly Fact[];
+  /** The one invocation-wide effect carrier, kept for the CLI's JSON projection. */
+  effects: readonly InvocationEffect[];
+  pending: readonly PendingSurface[];
+  settlementLags: readonly SettlementLag[];
+  recoverySnapshot?: SnapshotId;
   /** The appointed worktree's short name when this invocation retired it. */
-  retiredWorktree?: MutationEnvelope["retiredWorktree"];
+  retiredWorktree?: string;
   /** The appointed worktree's path when this invocation's own removal of it was retained. */
-  retainedWorktree?: MutationEnvelope["retainedWorktree"];
+  retainedWorktree?: string;
   /** Target checkouts this invocation's own follow left behind, in arm order. */
-  retainedCheckouts?: MutationEnvelope["retainedCheckouts"];
+  retainedCheckouts?: readonly Readonly<{ path: string; target: string; diagnostic: string }>[];
   lag?: readonly [Lag, ...Lag[]];
-  cleanup?: MutationEnvelope["cleanup"];
-  executionStops?: MutationEnvelope["executionStops"];
+  cleanup?: readonly ExecutionCleanup[];
+  executionStops?: readonly ExecutionStop[];
 }>;
 
 export type AcceptedBindResult = AcceptedEnvelope &

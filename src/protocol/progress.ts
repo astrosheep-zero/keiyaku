@@ -1,14 +1,14 @@
-import { encodeEntry } from "../core/facts/codec.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractHead, ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { GitPlumbingError } from "../git/process.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { WorktreeLeak } from "../git/scratch.js";
-import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
+import { GitPrivateStateSeatContentionError, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { VerificationCleanupFailure } from "./intent.js";
-import type { AcceptedProtocolStep, IntentOutcome } from "./outcome.js";
-import { observeExecution, type ExecutionEvent, type ExecutionObserver } from "./execution-observation.js";
+import type { AcceptedProtocolStep } from "./outcome.js";
+import type { ExecutionObservation } from "./execution-observation.js";
+import type { CandidateCompletion, CompletionEvidence } from "./completion.js";
 
 /** A captured interpretation is not an invocation's admission receipt. */
 export type ContractCheckpoint = Readonly<{ state: ContractState; journal: readonly JournalEntry[] }>;
@@ -18,6 +18,7 @@ export function contractCheckpoint(input: ContractCheckpoint): ContractCheckpoin
 }
 
 export type ExecutionCleanup =
+  | Readonly<{ kind: "decode-channel-retirement"; contractId: ContractId; diagnostic: string }>
   | Readonly<{
       kind: "verification-cleanup";
       contractId: ContractId;
@@ -42,6 +43,39 @@ export type ExecutionStop = Readonly<{
   diagnostic: string;
 }>;
 
+/** Only owner-declared operational classes and native system I/O failures are operational. */
+export function isOperationalFailure(error: unknown): error is Error {
+  if (
+    !(error instanceof Error) ||
+    error instanceof AuthorityCorruptionError ||
+    error instanceof TypeError ||
+    error instanceof RangeError ||
+    error instanceof ReferenceError ||
+    error instanceof SyntaxError
+  )
+    return false;
+  return (
+    error instanceof GitPlumbingError ||
+    error instanceof SqliteTransactionLockError ||
+    error instanceof GitPrivateStateSeatContentionError ||
+    ("code" in error && typeof error.code === "string" && /^E[A-Z0-9]+$/u.test(error.code))
+  );
+}
+
+/** Cancellation is witnessed by this exact signal reason, not by a signal merely being aborted. */
+export function isOperationalStop(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted === true && error === signal.reason) return true;
+  if (
+    error instanceof AuthorityCorruptionError ||
+    error instanceof TypeError ||
+    error instanceof RangeError ||
+    error instanceof ReferenceError ||
+    error instanceof SyntaxError
+  )
+    return false;
+  return isOperationalFailure(error);
+}
+
 /** Classify operational failures only; programming errors and corrupt authority still throw. */
 export function executionStop(
   contractId: ContractId,
@@ -49,11 +83,10 @@ export function executionStop(
   error: unknown,
   signal?: AbortSignal,
 ): ExecutionStop {
-  if (error instanceof AuthorityCorruptionError || error instanceof TypeError) throw error;
   const cancelled =
     signal?.aborted === true &&
     (error === signal.reason || error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError);
-  if (!cancelled && !(error instanceof GitPlumbingError) && !(error instanceof SqliteTransactionLockError)) throw error;
+  if (!cancelled && !isOperationalFailure(error)) throw error;
   return {
     kind: "execution-stopped",
     contractId,
@@ -63,145 +96,34 @@ export function executionStop(
   };
 }
 
-export type ExecutionSnapshot = Readonly<{
-  facts: readonly JournalEntry[];
-  checkpoints: ReadonlyMap<ContractId, ContractCheckpoint>;
-  heads: ReadonlyMap<ContractId, ContractHead>;
-  affected: readonly ContractId[];
-  physical: ReconcileResult;
-  cleanup: readonly ExecutionCleanup[];
-  stops: readonly ExecutionStop[];
+/** Physical residue and custodial residue a leading admission or reconciliation step reports. */
+export type ProgressResidue = Readonly<{
+  physical?: ReconcileResult;
+  seatClose?: readonly PrivateStateSeatCloseLag[];
 }>;
 
-type Residue = Readonly<{ physical?: ReconcileResult; seatClose?: readonly PrivateStateSeatCloseLag[] }>;
+export type VerificationResidue = Readonly<{ cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>;
 
-/** Invocation-local receipts and ephemeral observations; no scheduling or authority reads. */
-export class ExecutionProgress {
-  constructor(private readonly observer?: ExecutionObserver) {}
-
-  observe(event: ExecutionEvent): void {
-    observeExecution(this.observer, event);
-  }
-  private readonly entries = new Map<string, string>();
-  private readonly admittedFacts: JournalEntry[] = [];
-  private readonly admittedHeads = new Map<ContractId, ContractHead>();
-  private readonly admittedCheckpoints = new Map<ContractId, ContractCheckpoint>();
-  private readonly affectedContracts = new Set<ContractId>();
-  private readonly effects: ReconcileResult["effects"][number][] = [];
-  private readonly lags: ReconcileResult["lag"][number][] = [];
-  private readonly cleanupIssues: ExecutionCleanup[] = [];
-  private readonly executionStops: ExecutionStop[] = [];
-  private readonly reportedResidue = new WeakSet<object>();
-
-  /** A confirmed publication is retained even if folding or later physical work throws. */
-  recordPublication(contractId: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void {
-    const incoming = new Map<string, Readonly<{ fact: JournalEntry; bytes: string }>>();
-    for (const fact of facts) {
-      const key = `${fact.contract}\0${fact.entry}`;
-      const bytes = encodeEntry(fact);
-      const previous = incoming.get(key)?.bytes ?? this.entries.get(key);
-      if (previous !== undefined && previous !== bytes)
-        throw new AuthorityCorruptionError("conflicting invocation receipt");
-      incoming.set(key, { fact, bytes });
-    }
-    let fresh = false;
-    for (const [key, { fact, bytes }] of incoming) {
-      if (this.entries.has(key)) continue;
-      this.entries.set(key, bytes);
-      this.admittedFacts.push(fact);
-      this.observe({ kind: "admitted", contractId, fact });
-      this.affectedContracts.add(fact.contract);
-      fresh = true;
-    }
-    if (fresh || !this.admittedHeads.has(contractId)) this.admittedHeads.set(contractId, head);
-  }
-
-  recordAdmission(step: AcceptedProtocolStep): void {
-    if (step.state.head === null) throw new Error("admission requires a journal head");
-    this.recordPublication(step.state.id, step.state.head, step.facts);
-    if (this.admittedHeads.get(step.state.id) === step.state.head) {
-      this.admittedCheckpoints.set(step.state.id, contractCheckpoint(step));
-    }
-    this.recordResidue(step.state.id, step);
-  }
-
-  hasFact(fact: JournalEntry): boolean {
-    return this.entries.get(`${fact.contract}\0${fact.entry}`) === encodeEntry(fact);
-  }
-
-  head(contractId: ContractId): ContractHead | undefined {
-    return this.admittedHeads.get(contractId);
-  }
-
-  recordResidue(contractId: ContractId, residue: Residue): void {
-    if (residue.physical !== undefined) this.recordPhysical(contractId, residue.physical);
-    for (const failure of residue.seatClose ?? []) {
-      if (this.reportedResidue.has(failure)) continue;
-      this.reportedResidue.add(failure);
-      this.cleanupIssues.push({ kind: "private-state-seat-close", contractId, failure });
-    }
-  }
-
-  recordPhysical(contractId: ContractId, physical: ReconcileResult): void {
-    if (physical.effects.length > 0 || physical.lag.length > 0) this.affectedContracts.add(contractId);
-    for (const effect of physical.effects) {
-      if (this.reportedResidue.has(effect)) continue;
-      this.reportedResidue.add(effect);
-      this.effects.push(effect);
-    }
-    for (const lag of physical.lag) {
-      if (this.reportedResidue.has(lag)) continue;
-      this.reportedResidue.add(lag);
-      this.lags.push(lag);
-    }
-  }
-
-  recordVerification(
-    contractId: ContractId,
-    snapshot: SnapshotId | undefined,
-    result: Readonly<{ cleanup?: VerificationCleanupFailure; leak?: WorktreeLeak }>,
-  ): void {
-    if (result.cleanup !== undefined)
-      this.cleanupIssues.push({
-        kind: "verification-cleanup",
-        contractId,
-        ...(snapshot === undefined ? {} : { snapshot }),
-        failure: result.cleanup,
-      });
-    if (result.leak !== undefined)
-      this.cleanupIssues.push({
-        kind: "worktree-leak",
-        contractId,
-        ...(snapshot === undefined ? {} : { snapshot }),
-        leak: result.leak,
-      });
-  }
-
-  recordStop(stop: ExecutionStop): void {
-    if (!this.executionStops.includes(stop)) this.executionStops.push(stop);
-  }
-
-  checkpoint(contractId: ContractId): ContractCheckpoint | undefined {
-    return this.admittedCheckpoints.get(contractId);
-  }
-
-  snapshot(): ExecutionSnapshot {
-    return {
-      facts: Object.freeze([...this.admittedFacts]),
-      checkpoints: new Map(this.admittedCheckpoints),
-      heads: new Map(this.admittedHeads),
-      affected: Object.freeze([...this.affectedContracts]),
-      physical: { effects: Object.freeze([...this.effects]), lag: Object.freeze([...this.lags]) },
-      cleanup: Object.freeze([...this.cleanupIssues]),
-      stops: Object.freeze([...this.executionStops]),
-    };
-  }
-
-  /** One final assembly; a dependent's checkpoint can never replace the addressed head. */
-  accepted<Value>(contractId: ContractId, value: Value): Extract<IntentOutcome<Value>, { kind: "accepted" }> {
-    const head = this.head(contractId);
-    if (head === undefined) throw new Error("missing leading admission receipt");
-    const snapshot = this.snapshot();
-    return { kind: "accepted", head, facts: snapshot.facts, value, physical: snapshot.physical };
-  }
+/**
+ * The narrow lower sink an invocation offers to protocol operations. Operation nodes report
+ * observations here and never assemble a public result.
+ */
+export interface ProtocolProgress {
+  observe(event: ExecutionObservation): void;
+  recordPublication(contractId: ContractId, head: ContractHead, facts: readonly JournalEntry[]): void;
+  recordAdmission(step: AcceptedProtocolStep): void;
+  recordResidue(contractId: ContractId, residue: ProgressResidue): void;
+  recordPhysical(contractId: ContractId, report: ReconcileResult): void;
+  /** Physical follow owned by this invocation's target movement, distinct from retained topology. */
+  recordPlacementPhysical(contractId: ContractId, report: ReconcileResult): void;
+  recordVerification(contractId: ContractId, snapshot: SnapshotId | undefined, result: VerificationResidue): void;
+  recordStop(stop: ExecutionStop): void;
+  recordAudit(contractId: ContractId, report: Partial<import("./audit.js").AuditReport>): void;
+  /** Current candidate conclusions, retained before the next await can fail. */
+  recordCandidate(contractId: ContractId, evidence: CompletionEvidence): void;
+  /** The candidate's completion base, retained before an optional scope read can fail. */
+  recordCompletion(contractId: ContractId, completion: CandidateCompletion): void;
+  checkpoint(contractId: ContractId): ContractCheckpoint | undefined;
+  hasFact(fact: JournalEntry): boolean;
+  head(contractId: ContractId): ContractHead | undefined;
 }

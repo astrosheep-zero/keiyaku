@@ -100,6 +100,18 @@ async function readRequestReceipt<Input, Output, Reference>(
     if (receipt.state === "refused") {
       throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic, receipt.id);
     }
+    if (receipt.state === "voided" && receipt.outcome !== undefined) {
+      let result: Output;
+      try {
+        result = input.command.decodeResult(receipt.outcome);
+      } catch (error) {
+        throw new Error(
+          `transport integrity: invalid voided live result: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
+    }
+
     if (receipt.state === "voided") {
       throwVoidedRequestFailure(
         receipt.action,

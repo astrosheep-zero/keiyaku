@@ -15,6 +15,7 @@ type ReconcileOptions = Readonly<{
   retainTerminalWorktree?: boolean;
   place?: string;
   places?: ReadonlyMap<ContractId, string>;
+  onPhysical?: (report: ReconcileResult) => void;
 }>;
 
 export async function reconcileOperation(
@@ -27,6 +28,10 @@ export async function reconcileOperation(
       contractId: input.contractId,
       hooks: input.hooks,
       retryHooks: input.retryHooks,
+      onPhysical: (report) => {
+        input.progress?.recordPhysical(input.contractId, report);
+        input.onPhysical?.(report);
+      },
       ...(input.retainTerminalWorktree === undefined ? {} : { retainTerminalWorktree: input.retainTerminalWorktree }),
       ...(input.place === undefined ? {} : { place: input.place }),
     });

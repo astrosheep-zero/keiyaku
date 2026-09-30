@@ -1,3 +1,4 @@
+import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -26,18 +27,18 @@ function document(title: string, region: readonly string[]): string {
 }
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
-  const result = await Keiyaku.with().bind({
+  const result = accepted(await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(title, region),
     workspace: "worktree",
-  });
+  }));
   return result;
 }
 
 test("bind warns about a whitespace Region pattern and still admits the Contract", async () => {
   const repository = repositoryWithHead();
   const bound = await bind(repository, "Whitespace", ["src/a b", "docs/**"]);
-  assert.deepEqual(bound.warnings, ["Region pattern 'src/a b' contains whitespace and will never match a path"]);
+  assert.deepEqual(accepted(bound).value.warnings, ["Region pattern 'src/a b' contains whitespace and will never match a path"]);
   assert.deepEqual(
     bound.facts.map((fact) => fact.kind),
     ["bind"],
@@ -48,11 +49,11 @@ test("bind warns about a whitespace Region pattern and still admits the Contract
 test("bind and amend expose only live-peer Region witnesses from one document read", async () => {
   const repository = repositoryWithHead();
   const first = await bind(repository, "First", ["src/**"]);
-  const firstId = (await first.keiyaku.state()).id;
+  const firstId = (present(await first.value.keiyaku.state())).id;
 
   const second = await bind(repository, "Second", ["src/api/**"]);
-  const secondId = (await second.keiyaku.state()).id;
-  assert.deepEqual(second.overlaps, [
+  const secondId = (present(await second.value.keiyaku.state())).id;
+  assert.deepEqual(accepted(second).value.overlaps, [
     {
       contract: firstId,
       patterns: [{ mine: "src/api/**", theirs: "src/**", relation: "mine-within-theirs" }],
@@ -60,21 +61,21 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   ]);
   assert.equal("overlapFailure" in second, false);
 
-  await first.keiyaku.abandon();
+  await first.value.keiyaku.abandon();
 
   const third = await bind(repository, "Third", ["src/api/internal/**"]);
-  const thirdId = (await third.keiyaku.state()).id;
-  assert.deepEqual(third.overlaps, [
+  const thirdId = (present(await third.value.keiyaku.state())).id;
+  assert.deepEqual(accepted(third).value.overlaps, [
     {
       contract: secondId,
       patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**", relation: "mine-within-theirs" }],
     },
   ]);
 
-  const amended = await second.keiyaku.amend({
+  const amended = await second.value.keiyaku.amend({
     markdown: ["## Replace: Region", "~~~", "src/api/internal/**", "~~~", ""].join("\n"),
   });
-  assert.deepEqual(amended.overlaps, [
+  assert.deepEqual(accepted(amended).value.overlaps, [
     {
       contract: thirdId,
       patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**", relation: "same" }],
@@ -86,8 +87,8 @@ test("bind and amend expose only live-peer Region witnesses from one document re
 test("region names a terminal Contract instead of reporting it missing", async () => {
   const repository = repositoryWithHead();
   const bound = await bind(repository, "Terminal region", ["src/**"]);
-  const id = (await bound.keiyaku.state()).id;
-  await bound.keiyaku.abandon();
+  const id = (present(await bound.value.keiyaku.state())).id;
+  await bound.value.keiyaku.abandon();
   const parsed = parseArgv(["-C", repository.path, "region", id]);
   if (!("command" in parsed)) throw new Error("region did not parse");
   const result = await invoke(parsed, { cwd: repository.path });
@@ -127,15 +128,16 @@ test("post-admission observation failure preserves the admitted Contract without
     result.facts.map((fact) => fact.kind),
     ["bind"],
   );
-  assert.notEqual(result.head, null);
-  assert.equal(result.lags[0]?.kind, "reconcile-failed");
-  if (result.lags[0]?.kind === "reconcile-failed") {
-    assert.equal(result.lags[0].stage, "observation");
-    assert.match(result.lags[0].diagnostic, /git cat-file --batch/u);
+  assert.notEqual(accepted(result).head, null);
+  assert.equal(result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0]?.kind, "reconcile-failed");
+  const lag = result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0];
+  if (lag?.kind === "reconcile-failed") {
+    assert.equal(lag.stage, "observation");
+    assert.match(lag.diagnostic, /git cat-file --batch/u);
   }
-  const state = await result.keiyaku.state();
+  const state = present(await accepted(result).value.keiyaku.state());
   assert.equal(state.id, result.facts[0]?.contract);
-  assert.equal(state.head, result.head);
+  assert.equal(state.head, accepted(result).head);
   assert.equal(state.terminal, null);
   const observed = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
   assert.equal(observed.kind, "present");

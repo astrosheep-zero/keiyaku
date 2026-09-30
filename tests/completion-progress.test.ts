@@ -9,9 +9,9 @@ import {
   type JournalEntry,
 } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
+import { InvocationAccumulator, physicalOf, project } from "../src/library/outcome.js";
 import type { AcceptedProtocolStep } from "../src/protocol/outcome.js";
 import {
-  ExecutionProgress,
   contractCheckpoint,
   executionStop,
   type ContractCheckpoint,
@@ -56,12 +56,17 @@ function admission(before: ContractCheckpoint, sequence: number): AcceptedProtoc
 }
 
 test("an observed checkpoint cannot manufacture an invocation receipt", () => {
-  const progress = new ExecutionProgress();
+  const progress = new InvocationAccumulator();
   const captured = contractCheckpoint(admission(checkpoint(), 1));
   assert.deepEqual(Object.keys(captured).sort(), ["journal", "state"]);
   assert.deepEqual(progress.snapshot().facts, []);
   assert.equal(progress.head(captured.state.id), undefined);
-  assert.throws(() => progress.accepted(captured.state.id, undefined), /missing leading admission receipt/u);
+  assert.equal(progress.snapshot().checkpoints.size, 0);
+  const projected = project("arc", progress.snapshot(), { kind: "failed", contract: captured.state.id, error: new Error("stopped") });
+  assert.equal(projected.kind, "failed");
+  if (projected.kind === "failed") {
+    assert.equal(projected.error.outcome && "head" in projected.error.outcome ? projected.error.outcome.head : undefined, undefined);
+  }
 });
 
 test("physical and seat-close reports accumulate without replay duplication or input mutation", () => {
@@ -75,15 +80,15 @@ test("physical and seat-close reports accumulate without replay duplication or i
     physical: { effects: [], lag: [{ kind: "worktree-retained", path: "/next" }] },
     seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "second" }],
   };
-  const progress = new ExecutionProgress();
+  const progress = new InvocationAccumulator();
   progress.recordAdmission(leading);
   progress.recordAdmission(next);
   progress.recordAdmission(next);
-  assert.deepEqual(progress.snapshot().physical.lag, [...leading.physical!.lag, ...next.physical!.lag]);
+  assert.deepEqual(physicalOf(progress.snapshot()).lag, [...leading.physical!.lag, ...next.physical!.lag]);
   assert.deepEqual(
     progress
       .snapshot()
-      .cleanup.map((issue) => (issue.kind === "private-state-seat-close" ? issue.failure.diagnostic : null)),
+      .effects.filter((effect) => effect.kind === "cleanup").map((effect) => effect.issue).map((issue) => (issue.kind === "private-state-seat-close" ? issue.failure.diagnostic : null)),
     ["first", "second"],
   );
   assert.equal(leading.physical!.lag.length, 1);
@@ -92,7 +97,7 @@ test("physical and seat-close reports accumulate without replay duplication or i
 test("receipt replay cannot rewind a newer admitted checkpoint", () => {
   const leading = admission(checkpoint(), 1),
     next = admission(leading, 2);
-  const progress = new ExecutionProgress();
+  const progress = new InvocationAccumulator();
   progress.recordAdmission(leading);
   progress.recordAdmission(next);
   progress.recordAdmission(leading);
@@ -104,7 +109,7 @@ test("conflicting identities reject an entire receipt before mutating progress",
   const leading = admission(checkpoint(), 1),
     next = admission(leading, 2);
   const conflict: JournalEntry = { ...leading.facts[0]!, actor: "different" as NonNullable<JournalEntry["actor"]> };
-  const progress = new ExecutionProgress();
+  const progress = new InvocationAccumulator();
   progress.recordAdmission(leading);
   assert.throws(
     () => progress.recordPublication(leading.state.id, next.state.head!, [...next.facts, conflict]),
@@ -112,7 +117,7 @@ test("conflicting identities reject an entire receipt before mutating progress",
   );
   assert.deepEqual(progress.snapshot().facts, leading.facts);
   assert.equal(progress.head(leading.state.id), leading.state.head);
-  const empty = new ExecutionProgress();
+  const empty = new InvocationAccumulator();
   assert.throws(
     () => empty.recordPublication(leading.state.id, leading.state.head!, [leading.facts[0]!, conflict]),
     AuthorityCorruptionError,
@@ -121,7 +126,7 @@ test("conflicting identities reject an entire receipt before mutating progress",
 });
 
 test("all verification cleanup and leaks survive repeated candidates and dependent execution", () => {
-  const progress = new ExecutionProgress(),
+  const progress = new InvocationAccumulator(),
     primary = contractId("kei/primary"),
     child = contractId("kei/child");
   for (const [id, snapshot] of [
@@ -134,11 +139,11 @@ test("all verification cleanup and leaks survive repeated candidates and depende
       leak: { path: `/scratch/${snapshot}`, diagnostic: "retained" },
     });
   }
-  assert.equal(progress.snapshot().cleanup.length, 6);
+  assert.equal(progress.snapshot().effects.filter((effect) => effect.kind === "cleanup").length, 6);
   assert.deepEqual(
     progress
       .snapshot()
-      .cleanup.filter((item) => item.kind === "worktree-leak")
+      .effects.filter((effect) => effect.kind === "cleanup").map((effect) => effect.issue).filter((item) => item.kind === "worktree-leak")
       .map((item) => [item.contractId, item.snapshot, item.leak.path]),
     [
       [primary, "one", "/scratch/one"],
