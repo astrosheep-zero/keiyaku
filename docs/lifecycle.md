@@ -105,6 +105,8 @@ It alone judges Contract existence, terminality, document currency, and
 verb-specific legality. A changed document is a refusal for operations using a
 stamped derivation; review's later currency is a gate question.
 
+Admission currentness is witnessed per semantic attempt. Shared protocol owns the classification of lower attempt conclusions and the bounded availability of fresh custody, while each verb retains ownership of preparation, legal decision, publication, and any recovery meaning. A publication failure is a terminal typed non-admission and never licenses replay of its offer; spent currentness evidence is discarded before a later attempt obtains fresh custody. Collision and exhaustion remain distinct terminal observations.
+
 Protocol alone joins that decision to Git observation and admission. It holds
 the necessary publication custody, submits at most one decision offer, and Git
 atomically proves its expected durable state. Mechanical preparation cannot

@@ -12,6 +12,7 @@ import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   contractStateWitness,
   privateStateSeatAttempt,
+  runBoundedAttempts,
   sameWorktreeWitness,
   STALE_PRIVATE_STATE_PREPARATION,
   type ContractStateWitness,
@@ -300,20 +301,12 @@ async function reviewAttempt(
 export async function admitReviewOperation(
   input: ReviewOperationInput,
 ): Promise<LeadingOutcome<ReviewAdmissionValue, ReviewRefusal>> {
-  const attempts = mintAttempts({ entryCount: 1 });
-  let review: Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" | "refused" }> | null = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const result = await reviewAttempt(input, attempts[index]!);
-    if (result.kind === "accepted" || result.kind === "refused") {
-      review = result;
-      break;
-    }
-    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
-    if (result.kind === "stale" || result.kind === "redecide") continue;
-    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
-  }
-  if (review === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  if (review.kind !== "accepted") return review;
-  input.progress?.recordResidue(input.contractId, review);
-  return review;
+  const result = await runBoundedAttempts<
+    Extract<AttemptDecision<PreparedReview, ReviewRefusal>, { kind: "accepted" }>,
+    ReviewRefusal
+  >(mintAttempts({ entryCount: 1 }), (attempt) => reviewAttempt(input, attempt));
+  if (result.kind === "refused") return result;
+  if (result.kind !== "accepted") return { kind: "retry", reason: result };
+  input.progress?.recordResidue(input.contractId, result);
+  return result;
 }

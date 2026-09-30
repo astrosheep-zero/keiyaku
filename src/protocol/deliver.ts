@@ -25,6 +25,7 @@ import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   contractStateWitness,
   privateStateSeatAttempt,
+  runBoundedAttempts,
   sameWorktreeWitness,
   STALE_PRIVATE_STATE_PREPARATION,
   type ContractStateWitness,
@@ -743,20 +744,12 @@ async function finishDeliverRefusal(
 export async function admitDeliveryOperation(
   input: DeliverOperationInput,
 ): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
-  const attempts = mintAttempts({ entryCount: 2 });
-  let first: Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }> | null = null;
-  for (let index = 0; index < attempts.length; index += 1) {
-    const result = await deliverAttempt(input, attempts[index]!);
-    if (result.kind === "accepted") {
-      first = result;
-      break;
-    }
-    if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
-    if (result.kind === "publication-failed") return { kind: "retry", reason: result };
-    if (result.kind === "stale" || result.kind === "redecide") continue;
-    if (result.kind === "collision" && index + 1 === attempts.length) return { kind: "retry", reason: result };
-  }
-  if (first === null) return { kind: "retry", reason: { kind: "exhausted" } };
-  input.progress?.recordResidue(input.contractId, first);
-  return first;
+  const result = await runBoundedAttempts<
+    Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }>,
+    DeliverOperationRefusal
+  >(mintAttempts({ entryCount: 2 }), (attempt) => deliverAttempt(input, attempt));
+  if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
+  if (result.kind !== "accepted") return { kind: "retry", reason: result };
+  input.progress?.recordResidue(input.contractId, result);
+  return result;
 }

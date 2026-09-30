@@ -83,6 +83,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/plugin-runtime.test.ts",
   "tests/plugin-square.test.ts",
   "tests/private-state-seat.test.ts",
+  "tests/protocol-attempt-classification.test.ts",
   "tests/protocol-bind-observe.test.ts",
   "tests/protocol-concurrent-publication.test.ts",
   "tests/region-observation.test.ts",

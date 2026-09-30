@@ -29,6 +29,30 @@ export type ProtocolResult<Refusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | ProtocolTerminal;
 
+export type BoundedAttemptResult<Accepted extends Readonly<{ kind: "accepted" }>, Refusal> =
+  | Accepted
+  | Readonly<{ kind: "refused"; refusal: Refusal }>
+  | Readonly<{ kind: "stale" }>
+  | Readonly<{ kind: "redecide" }>
+  | AttemptTerminal;
+
+/**
+ * Classify one bounded sequence of fresh semantic attempts. The callback owns every verb-specific
+ * observation, preparation, decision, and publication; this function only decides whether its
+ * result is terminal or whether the next fresh context may be tried.
+ */
+export async function runBoundedAttempts<Accepted extends Readonly<{ kind: "accepted" }>, Refusal>(
+  attempts: readonly AttemptContext[],
+  attempt: (context: AttemptContext, index: number) => Promise<BoundedAttemptResult<Accepted, Refusal>>,
+): Promise<Accepted | Readonly<{ kind: "refused"; refusal: Refusal }> | ProtocolTerminal> {
+  for (let index = 0; index < attempts.length; index += 1) {
+    const result = await attempt(attempts[index]!, index);
+    if (result.kind === "accepted" || result.kind === "refused" || result.kind === "publication-failed") return result;
+    if (result.kind === "collision" && index + 1 === attempts.length) return result;
+  }
+  return { kind: "exhausted" };
+}
+
 export type CompanionDecorator = (
   input: Readonly<{
     repository: GitRepository;
@@ -380,16 +404,9 @@ export async function runProtocol<
   Seed extends Readonly<{ contractId: ContractId }> = Input,
   Prepared = Seed,
 >(input: RunProtocolInput<Input, Refusal, Seed, Prepared>): Promise<ProtocolResult<Refusal>> {
-  const attempts = input.attempts;
-
-  for (let index = 0; index < attempts.length; index += 1) {
-    const attempt = attempts[index]!;
-    const result =
-      input.preparation === undefined
-        ? await runDirectProtocolAttempt(input, attempt)
-        : await runSplitProtocolAttempt(input, attempt);
-    if (result.kind === "refused" || result.kind === "accepted" || result.kind === "publication-failed") return result;
-    if (result.kind === "collision" && index + 1 === attempts.length) return result;
-  }
-  return { kind: "exhausted" };
+  return await runBoundedAttempts<AcceptedAdmission, Refusal>(input.attempts, (attempt) =>
+    input.preparation === undefined
+      ? runDirectProtocolAttempt(input, attempt)
+      : runSplitProtocolAttempt(input, attempt),
+  );
 }
