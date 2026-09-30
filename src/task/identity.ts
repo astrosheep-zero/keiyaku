@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { contractSegment, type ContractId } from "../core/facts/types.js";
@@ -49,6 +50,23 @@ export function canonicalTaskId(value: string): TaskId {
   if (id !== value) throw new TypeError("task ID is not canonical");
   return id;
 }
+
+export const taskIdSchema = z.string().transform((value, context) => {
+  try {
+    return canonicalTaskId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical TaskId" });
+    return z.NEVER;
+  }
+});
+
+export const taskNamespaceSchema = z.array(z.string().refine(isTaskSegment)).readonly();
+export const taskIdsSchema = z
+  .array(taskIdSchema)
+  .superRefine((ids, context) => {
+    if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "TaskIds must be unique" });
+  })
+  .readonly();
 
 export function contractNamespace(id: ContractId): readonly string[] {
   return ["kei", contractSegment(id)];

@@ -1,3 +1,6 @@
+import { contractIdSchema } from "../git/identity.js";
+import { z } from "zod";
+import { taskIdSchema } from "../task/identity.js";
 import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
@@ -20,19 +23,24 @@ import {
 } from "./holder.js";
 import { acquireTaskSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
-export { decodeSettlementLag } from "./result-codec.js";
-
-export type SettlementAction = Readonly<{ kind: "task"; taskId: TaskId; action: "done" }>;
-
-export type SettlementLag = Readonly<{
-  kind: "settlement-failed";
-  surface: "task-holder" | "task";
-  contractId: ContractId;
-  taskId?: TaskId;
-  path?: string;
-  diagnostic: string;
-}>;
-
+export const settlementActionSchema = z
+  .object({ kind: z.literal("task"), taskId: taskIdSchema, action: z.literal("done") })
+  .strict();
+export type SettlementAction = z.infer<typeof settlementActionSchema>;
+export const settlementLagSchema = z
+  .object({
+    kind: z.literal("settlement-failed"),
+    surface: z.enum(["task-holder", "task"]),
+    contractId: contractIdSchema,
+    taskId: taskIdSchema.optional(),
+    path: z
+      .string()
+      .refine((value) => value.trim() !== "")
+      .optional(),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type SettlementLag = z.infer<typeof settlementLagSchema>;
 export type SettlementReport = Readonly<{
   actions: readonly SettlementAction[];
   lags: readonly SettlementLag[];

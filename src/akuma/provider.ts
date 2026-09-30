@@ -1,8 +1,9 @@
-import { decodeResumeCoordinate, encodeResumeCoordinate, type ResumeCoordinate } from "./coordinate.js";
+import { type ResumeCoordinate } from "./coordinate.js";
 import type { ProviderOptions } from "./provider-recipe.js";
 
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
+export { decodeResumeCoordinate, encodeResumeCoordinate } from "./coordinate.js";
 
 export { AKUMA_REQUESTS_ENV } from "./providers/execution-environment.js";
 
@@ -10,265 +11,9 @@ export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
-export type SearchScope = "content" | "files" | "web";
-
-export type ToolInput = Readonly<{ json: string; truncated: boolean }>;
-
-export type ToolCall =
-  | Readonly<{ kind: "run"; command: string }>
-  | Readonly<{ kind: "read"; path: string; offset?: number; limit?: number }>
-  | Readonly<{
-      kind: "search";
-      query: string;
-      scope?: SearchScope;
-      path?: string;
-      glob?: string;
-    }>
-  | Readonly<{
-      kind: "fileChange";
-      changes: readonly Readonly<{
-        op: "add" | "update" | "delete" | "unspecified";
-        path: string;
-        diffstat?: Readonly<{ added: number; removed: number }>;
-      }>[];
-    }>
-  | Readonly<{ kind: "other"; display: string; input?: ToolInput }>;
-
-export type ToolResult = Readonly<{
-  status: "ok" | "error";
-  message?: string;
-  exitCode?: number;
-}>;
-
-export type ToolEvent = Readonly<{
-  type: "tool";
-  id: string;
-  name: string;
-  call: ToolCall;
-  truncated?: true;
-}> &
-  (Readonly<{ phase: "started"; result?: never }> | Readonly<{ phase: "completed"; result: ToolResult }>);
-
-export type AgentEvent =
-  | Readonly<{ type: "session"; coordinate: ResumeCoordinate }>
-  | Readonly<{ type: "assistant"; text: string; truncated?: true }>
-  | Readonly<{ type: "thought"; text: string; truncated?: true }>
-  | ToolEvent
-  | Readonly<{ type: "note"; text: string; truncated?: true }>
-  | Readonly<{ type: "unknown"; kind: string; truncated?: true }>;
-
-const AGENT_EVENT_TYPES = {
-  session: true,
-  assistant: true,
-  thought: true,
-  tool: true,
-  note: true,
-  unknown: true,
-} as const satisfies Readonly<Record<AgentEvent["type"], true>>;
-
-function object(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-export { decodeResumeCoordinate, encodeResumeCoordinate };
-
-function eventType(value: unknown): value is AgentEvent["type"] {
-  return typeof value === "string" && Object.hasOwn(AGENT_EVENT_TYPES, value);
-}
-
-const SEARCH_SCOPES = {
-  content: true,
-  files: true,
-  web: true,
-} as const satisfies Readonly<Record<SearchScope, true>>;
-
-function decodePositiveLine(value: unknown): number | null | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : null;
-}
-
-function decodeOptionalText(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "string" ? value : null;
-}
-
-function decodeSearchScope(value: unknown): SearchScope | null | undefined {
-  if (value === undefined) return undefined;
-  return typeof value === "string" && Object.hasOwn(SEARCH_SCOPES, value) ? (value as SearchScope) : null;
-}
-
-function decodeRunCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  return typeof call.command === "string" ? { kind: "run", command: call.command } : null;
-}
-
-function decodeReadCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  if (typeof call.path !== "string") return null;
-  const offset = decodePositiveLine(call.offset);
-  const limit = decodePositiveLine(call.limit);
-  if (offset === null || limit === null) return null;
-  return {
-    kind: "read",
-    path: call.path,
-    ...(offset === undefined ? {} : { offset }),
-    ...(limit === undefined ? {} : { limit }),
-  };
-}
-
-function decodeSearchCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  if (typeof call.query !== "string") return null;
-  const scope = decodeSearchScope(call.scope);
-  const path = decodeOptionalText(call.path);
-  const glob = decodeOptionalText(call.glob);
-  if (scope === null || path === null || glob === null) return null;
-  return {
-    kind: "search",
-    query: call.query,
-    ...(scope === undefined ? {} : { scope }),
-    ...(path === undefined ? {} : { path }),
-    ...(glob === undefined ? {} : { glob }),
-  };
-}
-
-function decodeNonnegativeCount(value: unknown): number | null {
-  return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
-}
-
-function decodeDiffstat(value: unknown): Readonly<{ added: number; removed: number }> | null | undefined {
-  if (value === undefined) return undefined;
-  const diffstat = object(value);
-  if (diffstat === null) return null;
-  const added = decodeNonnegativeCount(diffstat.added);
-  const removed = decodeNonnegativeCount(diffstat.removed);
-  return added === null || removed === null ? null : { added, removed };
-}
-
-function decodeFileChangeMember(value: unknown): Extract<ToolCall, { kind: "fileChange" }>["changes"][number] | null {
-  const change = object(value);
-  if (
-    change === null ||
-    (change.op !== "add" && change.op !== "update" && change.op !== "delete" && change.op !== "unspecified") ||
-    typeof change.path !== "string"
-  )
-    return null;
-  const diffstat = decodeDiffstat(change.diffstat);
-  if (diffstat === null) return null;
-  return {
-    op: change.op,
-    path: change.path,
-    ...(diffstat === undefined ? {} : { diffstat }),
-  };
-}
-
-function decodeFileChangeCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  if (!Array.isArray(call.changes)) return null;
-  const changes = call.changes.map(decodeFileChangeMember);
-  return changes.every((change) => change !== null) ? { kind: "fileChange", changes } : null;
-}
-
-function decodeToolInput(value: unknown): ToolInput | null | undefined {
-  if (value === undefined) return undefined;
-  const input = object(value);
-  if (input === null || typeof input.json !== "string" || typeof input.truncated !== "boolean") return null;
-  return { json: input.json, truncated: input.truncated };
-}
-
-function decodeOtherCall(call: Readonly<Record<string, unknown>>): ToolCall | null {
-  if (typeof call.display !== "string") return null;
-  const input = decodeToolInput(call.input);
-  return input === null ? null : { kind: "other", display: call.display, ...(input === undefined ? {} : { input }) };
-}
-
-function decodeToolCall(value: unknown): ToolCall | null {
-  const call = object(value);
-  if (call === null) return null;
-  switch (call.kind) {
-    case "run":
-      return decodeRunCall(call);
-    case "read":
-      return decodeReadCall(call);
-    case "search":
-      return decodeSearchCall(call);
-    case "fileChange":
-      return decodeFileChangeCall(call);
-    case "other":
-      return decodeOtherCall(call);
-    default:
-      return null;
-  }
-}
-
-function decodeToolResult(value: unknown): ToolResult | null {
-  const result = object(value);
-  if (result === null || (result.status !== "ok" && result.status !== "error")) return null;
-  if (result.message !== undefined && typeof result.message !== "string") return null;
-  if (result.exitCode !== undefined && !Number.isSafeInteger(result.exitCode)) return null;
-  return {
-    status: result.status,
-    ...(result.message === undefined ? {} : { message: result.message }),
-    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode as number }),
-  };
-}
-
-function decodeToolEvent(event: Readonly<Record<string, unknown>>): ToolEvent | null {
-  if (event.truncated !== undefined && event.truncated !== true) return null;
-  if (typeof event.id !== "string" || typeof event.name !== "string") return null;
-  const call = decodeToolCall(event.call);
-  if (call !== null && event.phase === "started" && event.result === undefined) {
-    return {
-      type: "tool",
-      phase: "started",
-      id: event.id,
-      name: event.name,
-      call,
-      ...(event.truncated === true ? { truncated: true } : {}),
-    };
-  }
-  const result = decodeToolResult(event.result);
-  if (call !== null && event.phase === "completed" && result !== null) {
-    return {
-      type: "tool",
-      phase: "completed",
-      id: event.id,
-      name: event.name,
-      call,
-      result,
-      ...(event.truncated === true ? { truncated: true } : {}),
-    };
-  }
-  return null;
-}
-
-function decodeTypedEvent(type: AgentEvent["type"], event: Readonly<Record<string, unknown>>): AgentEvent | null {
-  if (type !== "session" && event.truncated !== undefined && event.truncated !== true) return null;
-  const truncated = event.truncated === true ? { truncated: true as const } : {};
-  switch (type) {
-    case "assistant":
-    case "thought":
-      return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
-    case "note":
-      return typeof event.text === "string" ? { type, text: event.text, ...truncated } : null;
-    case "unknown":
-      return typeof event.kind === "string" ? { type, kind: event.kind, ...truncated } : null;
-    case "session": {
-      const coordinate = decodeResumeCoordinate(event.coordinate);
-      return coordinate === null ? null : { type, coordinate };
-    }
-    case "tool":
-      return decodeToolEvent(event);
-    default:
-      return type satisfies never;
-  }
-}
-
-export function decodeAgentEvent(value: unknown): AgentEvent {
-  const event = object(value);
-  if (event === null || !eventType(event.type)) throw new Error("Akuma activity has an invalid event shape");
-  const decoded = decodeTypedEvent(event.type, event);
-  if (decoded === null) throw new Error("Akuma activity has an invalid event shape");
-  return decoded;
-}
+export { agentEventSchema, decodeAgentEvent } from "./heart/activity-schema.js";
+export type { AgentEvent, SearchScope, ToolCall, ToolEvent, ToolInput, ToolResult } from "./heart/activity-schema.js";
+import type { AgentEvent, ToolCall, ToolResult, ToolInput } from "./heart/activity-schema.js";
 
 function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
   switch (call.kind) {
@@ -342,14 +87,19 @@ function boundedToolResult(result: ToolResult): Readonly<{ value: ToolResult; tr
   };
 }
 
-export function encodeAgentEvent(event: AgentEvent): unknown {
-  const marked = (value: Readonly<Record<string, unknown>>, changed: boolean): unknown => ({
-    ...value,
-    ...(changed || ("truncated" in event && event.truncated === true) ? { truncated: true } : {}),
-  });
+export function encodeAgentEvent(event: AgentEvent): AgentEvent {
+  const marked = <T extends AgentEvent>(value: T, changed: boolean): T =>
+    changed || ("truncated" in event && event.truncated === true) ? { ...value, truncated: true } : value;
   switch (event.type) {
-    case "session":
-      return { type: event.type, coordinate: encodeResumeCoordinate(event.coordinate) };
+    case "session": {
+      const coordinate =
+        "sessionFile" in event.coordinate
+          ? event.coordinate.sessionId === undefined
+            ? { sessionFile: event.coordinate.sessionFile }
+            : { sessionFile: event.coordinate.sessionFile, sessionId: event.coordinate.sessionId }
+          : { sessionId: event.coordinate.sessionId };
+      return { type: event.type, coordinate };
+    }
     case "assistant":
       return marked(
         { type: event.type, text: boundedEventText(event.text) },

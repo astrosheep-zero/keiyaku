@@ -1,12 +1,10 @@
 import { akumaIdSchema, akumaStatusSchema } from "./akuma.js";
-import type { TellResult } from "./akuma.js";
+import { tellResultSchema } from "./call-initial-tell.js";
 import type { KillEvidence } from "./heart/index.js";
-import { tellRowSchema } from "./projection.js";
 import { dispatchAssociationSchema } from "./dispatch-association.js";
 import { createdTaskObservationSchema } from "../task/created-observation.js";
 import { z } from "zod";
 
-const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const killEvidenceSchema = z.enum([
   "killed",
   "already-killed",
@@ -22,44 +20,17 @@ const akumaObservationSchema = z
     createdTasks: createdTaskObservationSchema,
   })
   .strict();
-const runLogReferenceSchema = z
-  .object({ path: z.string(), from: z.number().int().nonnegative(), to: z.number().int().nonnegative() })
-  .strict();
-const failedTellWakeSchema = z
-  .object({
-    kind: z.literal("failed"),
-    diagnostic: z.string(),
-    child: z
-      .object({ code: z.number().int().nullable(), signal: z.string().nullable(), log: runLogReferenceSchema })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
-const tellWakeSchema = z.union([
-  z.object({ kind: z.literal("told") }).strict(),
-  z.object({ kind: z.literal("held") }).strict(),
-  z.object({ kind: z.literal("pursuing"), bodySequence: z.number().int().nonnegative() }).strict(),
-  failedTellWakeSchema,
-]);
-const tellResultSchema = z
-  .object({
-    admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
-    row: tellRowSchema,
-    wake: tellWakeSchema,
-  })
-  .strict() satisfies z.ZodType<TellResult>;
 const akumaUnobservedSchema = z.object({ id: akumaIdSchema, diagnostic: z.string() }).strict();
 const akumaKillResultItemSchema = z.object({ id: akumaIdSchema, evidence: killEvidenceSchema }).strict();
 const akumaWaitResultSchema = z
   .object({
     mode: z.enum(["any", "all"]),
     reason: z.enum(["completed", "deadline"]),
-    observations: z.array(akumaObservationSchema),
-    unobserved: z.array(akumaUnobservedSchema),
+    observations: z.array(akumaObservationSchema).readonly(),
+    unobserved: z.array(akumaUnobservedSchema).readonly(),
   })
   .strict();
-const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema) }).strict();
+const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema).readonly() }).strict();
 const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultSchema }).strict();
 const askObservationSchema = z.union([
   z.object({ reason: z.literal("answered"), answer: z.unknown() }).strict(),

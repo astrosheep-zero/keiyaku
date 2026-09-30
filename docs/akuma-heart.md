@@ -118,6 +118,12 @@ cross-database atomicity exists.
 
 ## Boundary
 
+Heart owns the single provider-neutral narration declaration used when activity
+is written and read. Native adapters construct trusted neutral narration; neither
+Body nor projection supplies a competing event interpretation. Validation of
+retained activity preserves historical acceptance and never manufactures
+execution, resume, fork, or recovery evidence.
+
 Heart owns durable fact decoding and conditional judgments. Provider owns native
 execution evidence; [akuma-provider.md](akuma-provider.md) defines its boundary.
 The public surface consumes Heart's pure projection without accessing database

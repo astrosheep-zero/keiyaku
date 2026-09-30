@@ -5,6 +5,15 @@ non-admission, audit, and post-admission work. Exact TypeScript unions, fields,
 and literal codes belong to the exported declarations and executable
 specifications.
 
+## Structural Boundary
+
+Unknown caller and transported operation values are structurally validated
+once at their Library or Body transport boundary. Nested evidence retains its
+native structural owner within the operation answer and its invocation envelope;
+schema validation proves structure only and never decides
+legality, finality, pending work, or recovery. A local owner value is not
+re-decoded merely because it is later projected or forwarded.
+
 ## Leading Outcome
 
 Library alone projects protocol work into public answers. A successful mutation

@@ -10,10 +10,6 @@ import {
 import type { AkumaStatus } from "./akuma.js";
 import {
   selectionResultSchemas,
-  isKillResult,
-  isTellResult,
-  isAskResult,
-  isWaitResult,
   type AkumaKillResult,
   type AkumaTellResult,
   type AkumaAskResult,
@@ -31,7 +27,8 @@ const selectionTargetsSchema = z
   .superRefine((ids, context) => {
     if (new Set(ids).size !== ids.length)
       context.addIssue({ code: "custom", message: "expected a deduplicated target set" });
-  });
+  })
+  .readonly();
 const waitRequestSchema = z
   .object({
     targets: selectionTargetsSchema,
@@ -78,7 +75,9 @@ const askServiceSchema = z
 const killServiceSchema = z
   .object({
     action: z.literal("akuma.kill"),
-    results: z.array(z.object({ id: akumaIdSchema, evidence: selectionResultSchemas.killEvidence }).strict()),
+    results: z
+      .array(z.object({ id: akumaIdSchema, evidence: selectionResultSchemas.killEvidence }).strict())
+      .readonly(),
   })
   .strict();
 
@@ -120,16 +119,16 @@ export function decodeSelectionLiveFailure(value: unknown): Error | null {
 }
 
 export type SelectionRequest =
-  | (Omit<z.infer<typeof waitRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>)
+  | z.infer<typeof waitRequestSchema>
   | z.infer<typeof tellRequestSchema>
   | z.infer<typeof askRequestSchema>
-  | (Omit<z.infer<typeof killRequestSchema>, "targets"> & Readonly<{ targets: readonly AkumaStatus["id"][] }>);
+  | z.infer<typeof killRequestSchema>;
 export type SelectionService =
   | z.infer<typeof waitServiceSchema>
   | z.infer<typeof tellServiceSchema>
   | z.infer<typeof askServiceSchema>
-  | (Omit<z.infer<typeof killServiceSchema>, "results"> &
-      Readonly<{ results: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>);
+  | z.infer<typeof killServiceSchema>;
+type SelectionResult = AkumaWaitResult | AkumaTellResult | AkumaAskResult | AkumaKillResult;
 
 export type SelectionRequestPort = Readonly<{
   wait(
@@ -164,11 +163,12 @@ export type SelectionRequestPort = Readonly<{
       signal: AbortSignal;
     }>,
   ): Promise<AkumaAskResult>;
-  kill(
-    input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>,
-  ): Promise<
+  kill(input: Readonly<{ targets: readonly AkumaStatus["id"][]; signal: AbortSignal }>): Promise<
     | AkumaKillResult
-    | Readonly<{ result: unknown; service: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[] }>
+    | Readonly<{
+        result: AkumaKillResult;
+        service: readonly Readonly<{ id: AkumaStatus["id"]; evidence: KillEvidence }>[];
+      }>
   >;
 }>;
 
@@ -199,7 +199,7 @@ function decodeSelectionService(action: SelectionRequest["action"], value: unkno
   return parsed.data;
 }
 
-function decodedSelectionResult(action: SelectionRequest["action"], value: unknown): unknown {
+function decodedSelectionResult(action: SelectionRequest["action"], value: unknown): SelectionResult {
   const schema =
     action === "akuma.wait"
       ? selectionResultSchemas.wait
@@ -216,7 +216,7 @@ function decodedSelectionResult(action: SelectionRequest["action"], value: unkno
 /** Akuma owns Body Request payload, live result, and durable service codecs for wait/tell/kill. */
 export function selectionRequestProtocol(
   action: SelectionRequest["action"],
-): RequestProtocol<SelectionRequest, unknown, SelectionService> {
+): RequestProtocol<SelectionRequest, SelectionResult, SelectionService> {
   return {
     action,
     supportsCancellation: true,
@@ -240,13 +240,13 @@ export function selectionRequestProtocol(
 export function selectionRequestCommand(
   action: SelectionRequest["action"],
   port: SelectionRequestPort,
-): ServiceRequestCommand<SelectionRequest, unknown, SelectionService, SelectionService> {
+): ServiceRequestCommand<SelectionRequest, SelectionResult, SelectionService, SelectionService> {
   return {
     completion: "service",
     protocol: selectionRequestProtocol(action),
-    encodeService: (service) => decodeSelectionService(action, service),
+    encodeService: (service) => service,
     decodeService: (service) => decodeSelectionService(action, service),
-    projectService: (service) => decodeSelectionService(action, service),
+    projectService: (service) => service,
     execute: async (request, facts) => {
       if (request.action === "akuma.wait") {
         return {
@@ -312,32 +312,26 @@ export function selectionRequestCommands(
 }
 
 function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
   action: "akuma.wait",
 ): AkumaWaitResult;
 function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
   action: "akuma.tell",
 ): AkumaTellResult;
 function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
   action: "akuma.ask",
 ): AkumaAskResult;
 function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
   action: "akuma.kill",
 ): AkumaKillResult;
 function forwardedSelectionCommandResult(
-  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, unknown, SelectionService>>>,
-  action: SelectionRequest["action"],
+  response: Awaited<ReturnType<typeof requestBodyCommand<SelectionRequest, SelectionResult, SelectionService>>>,
+  _action: SelectionRequest["action"],
 ): AkumaWaitResult | AkumaTellResult | AkumaAskResult | AkumaKillResult {
-  if (response.kind === "returned") {
-    if (action === "akuma.wait" && isWaitResult(response.result)) return response.result;
-    if (action === "akuma.tell" && isTellResult(response.result)) return response.result;
-    if (action === "akuma.ask" && isAskResult(response.result)) return response.result;
-    if (action === "akuma.kill" && isKillResult(response.result)) return response.result;
-    throw new Error(`transport integrity: request Selection ${action} returned an invalid live result`);
-  }
+  if (response.kind === "returned") return response.result;
   throw new Error("Akuma body request terminal Selection reference cannot reproduce an expired live result");
 }
 

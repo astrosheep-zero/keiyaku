@@ -1,49 +1,18 @@
-import { decodeDeliverData } from "../core/facts/codec.js";
+import { deliverDataSchema } from "../protocol/operations.js";
 import type { SnapshotId } from "../core/facts/types.js";
-import type { DeliverValue as ProtocolDeliverValue } from "../protocol/deliver.js";
-import { decodeCompletionEvidenceFields, decodeDeliverLeading } from "../protocol/result-codec.js";
-import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
-import { ownerSchema } from "./result-codec.js";
+import { deliverLeadingSchema } from "../protocol/deliver.js";
+import { completionEvidenceSchema } from "../protocol/completion.js";
+import { continuationReportSchema } from "./continuation.js";
 import { z } from "zod";
 
-export type DeliveryValue = ProtocolDeliverValue & Readonly<{ continuation?: ContinuationReport }>;
-
-export function decodeDeliveryValue(value: unknown): DeliveryValue {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed delivery value");
-  const object = value as Record<string, unknown>;
-  const allowed = new Set([
-    "tenderSnapshot",
-    "integration",
-    "method",
-    "policy",
-    "leading",
-    "completion",
-    "verification",
-    "verificationReuse",
-    "verificationSubject",
-    "verificationSummary",
-    "placement",
-    "continuation",
-  ]);
-  for (const key of Object.keys(object)) if (!allowed.has(key)) throw new Error("malformed delivery value");
-  const identity = decodeDeliverData({
-    tenderSnapshot: object.tenderSnapshot,
-    integration: object.integration,
-    method: object.method,
-    policy: object.policy,
-  });
-  return {
-    ...identity,
-    leading: decodeDeliverLeading(object.leading),
-    ...decodeCompletionEvidenceFields(object),
-    ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
-  };
-}
-
-export const deliveryValueSchema = ownerSchema(
-  decodeDeliveryValue,
-  "expected delivery value",
-) satisfies z.ZodType<DeliveryValue>;
+export const deliveryValueSchema = completionEvidenceSchema
+  .extend({
+    ...deliverDataSchema.shape,
+    leading: deliverLeadingSchema,
+    continuation: continuationReportSchema.optional(),
+  })
+  .strict();
+export type DeliveryValue = z.infer<typeof deliveryValueSchema>;
 
 class DeliveryHandle {
   declare readonly leading?: DeliveryValue["leading"];

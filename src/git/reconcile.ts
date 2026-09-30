@@ -1,3 +1,8 @@
+import { snapshotIdSchema, mintedSnapshotInputSchema } from "./identity.js";
+import { z } from "zod";
+import { targetCheckoutEffectSchema, targetCheckoutLagSchema } from "./target-placement.js";
+import { worktreeHookLagSchema } from "./hooks.js";
+import { unsealedBytesSchema } from "./terminal-seal.js";
 import { access, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -11,24 +16,17 @@ import {
   commonGitDirectory,
   DELIVERY_REF_NAMESPACE,
   registeredWorktreePaths,
-  type GitOid,
 } from "./repository.js";
 import { runGit, GitPlumbingError, type GitRepository } from "./process.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContractAt } from "./observe.js";
 import type { GitDecodeChannel } from "./read-observation.js";
-import {
-  acquireTargetPlacementFence,
-  recoverTargetPlacement,
-  type TargetCheckoutEffect,
-  type TargetCheckoutLag,
-} from "./target-placement.js";
-import { runCreateHooks, type WorktreeHookLag, type WorktreeHooks } from "./hooks.js";
+import { acquireTargetPlacementFence, recoverTargetPlacement } from "./target-placement.js";
+import { runCreateHooks, type WorktreeHooks } from "./hooks.js";
 import { followDependentManagedWorktree, retireConflictHandoff, worktreePath } from "./workspace.js";
 import { removeCollectableScratchWorktrees } from "./scratch.js";
 import { reconcileTerminalManagedWorktree, removeRef, updateRef } from "./terminal-reconcile.js";
-import type { UnsealedBytes } from "./terminal-seal.js";
 
 class WorktreeCustodyError extends Error {}
 
@@ -38,23 +36,46 @@ const pathExists = (path: string) =>
     () => false,
   );
 
-export type Effect =
-  | Readonly<{ kind: "worktree"; path: string; action: "created" | "removed" | "unchanged" }>
-  | Readonly<{ kind: "worktree"; path: string; action: "followed"; before: SnapshotId; after: SnapshotId }>
-  | Readonly<{
-      kind: "recovery-snapshot";
-      action: "created";
-      snapshot: SnapshotId;
-      retention: "ephemeral";
-    }>
-  | TargetCheckoutEffect
-  | Readonly<{
-      kind: "ref";
-      name: string;
-      before: GitOid | null;
-      after: GitOid | null;
-      action: "created" | "updated" | "removed" | "unchanged";
-    }>;
+export const reconcileEffectSchema = z.union([
+  z
+    .object({
+      kind: z.literal("worktree"),
+      path: z.string().refine((value) => value.trim() !== ""),
+      action: z.enum(["created", "removed", "unchanged"]),
+      before: z.unknown().optional(),
+      after: z.unknown().optional(),
+    })
+    .strict()
+    .transform(({ before: _before, after: _after, ...effect }) => effect),
+  z
+    .object({
+      kind: z.literal("worktree"),
+      path: z.string().refine((value) => value.trim() !== ""),
+      action: z.literal("followed"),
+      before: snapshotIdSchema,
+      after: snapshotIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("recovery-snapshot"),
+      action: z.literal("created"),
+      snapshot: snapshotIdSchema,
+      retention: z.literal("ephemeral"),
+    })
+    .strict(),
+  targetCheckoutEffectSchema,
+  z
+    .object({
+      kind: z.literal("ref"),
+      name: z.string().refine((value) => value.trim() !== ""),
+      before: z.string().min(1).nullable(),
+      after: z.string().min(1).nullable(),
+      action: z.enum(["created", "updated", "removed", "unchanged"]),
+    })
+    .strict(),
+]);
+export type Effect = z.infer<typeof reconcileEffectSchema>;
 type ReconcileInput = Readonly<{
   repository: GitRepository;
   channel: GitDecodeChannel;
@@ -66,27 +87,44 @@ type ReconcileInput = Readonly<{
   onPhysical?: (report: ReconcileResult) => void;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
-type WorktreeRetained = Readonly<{ kind: "worktree-retained"; path: string; diagnostic?: string }>;
-type WorktreeFollowRetained = Readonly<{
-  kind: "worktree-follow-retained";
-  path: string;
-  tender: SnapshotId;
-  head: SnapshotId;
-  reason: "head-moved" | "head-attached" | "operation-in-progress" | "unsupported-parent-shape";
-  paths?: readonly string[];
-}>;
-export type ReconcileFailure = Readonly<{
-  kind: "reconcile-failed";
-  stage: "observation" | "effect";
-  diagnostic: string;
-}>;
-export type ReconcileLag =
-  | WorktreeRetained
-  | WorktreeFollowRetained
-  | UnsealedBytes
-  | TargetCheckoutLag
-  | WorktreeHookLag
-  | ReconcileFailure;
+export const reconcileFailureSchema = z
+  .object({
+    kind: z.literal("reconcile-failed"),
+    stage: z.enum(["observation", "effect"]),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type ReconcileFailure = z.infer<typeof reconcileFailureSchema>;
+export const gitReconcileLagSchema = z.union([
+  z
+    .object({
+      kind: z.literal("worktree-retained"),
+      path: z.string().refine((value) => value.trim() !== ""),
+      diagnostic: z
+        .string()
+        .refine((value) => value.trim() !== "")
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("worktree-follow-retained"),
+      path: z.string().refine((value) => value.trim() !== ""),
+      tender: mintedSnapshotInputSchema,
+      head: mintedSnapshotInputSchema,
+      reason: z.enum(["head-moved", "head-attached", "operation-in-progress", "unsupported-parent-shape"]),
+      paths: z
+        .array(z.string().refine((value) => value.trim() !== ""))
+        .readonly()
+        .optional(),
+    })
+    .strict(),
+  unsealedBytesSchema,
+  targetCheckoutLagSchema,
+  worktreeHookLagSchema,
+  reconcileFailureSchema,
+]);
+export type ReconcileLag = z.infer<typeof gitReconcileLagSchema>;
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];

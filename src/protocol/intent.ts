@@ -1,9 +1,11 @@
+import { entryUlidSchema } from "./attempt.js";
+import { z } from "zod";
+import { hookFailureSchema } from "../git/hooks.js";
 import type { ProtocolProgress } from "./progress.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
 import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
-import type { HookFailure } from "../git/hooks.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { activeContract } from "../core/facts/observation.js";
@@ -14,7 +16,6 @@ import type {
   ContractId,
   ContractState,
   DependencyKeySet,
-  EntryUlid,
   SnapshotId,
 } from "../core/facts/types.js";
 import { latestCurrentAttestations } from "../core/facts/gate.js";
@@ -22,7 +23,6 @@ import { decideAttestation, type AttestationInput, type AttestationRefusal } fro
 import {
   executeVerification,
   capturedOutput,
-  type CapturedOutput,
   type VerificationExecution,
   type VerificationNonterminalOutcome,
   type VerificationTerminalOutcome,
@@ -124,32 +124,45 @@ type VerifyDeliveryInput = Readonly<{
   progress?: ProtocolProgress;
 }>;
 
-export type VerificationRuntimeStop = CapturedOutput &
-  (
-    | Readonly<{
-        failure: "unknown-exit" | "cancelled";
-      }>
-    | Readonly<{
-        failure: "candidate-unavailable" | "spawn-error";
-        diagnostic: string;
-      }>
-    | Readonly<{
-        failure: "environment-failure";
-        diagnostic: string;
-      }>
-    | Readonly<{
-        failure: "environment-failure";
-        name: string;
-        detail: HookFailure;
-      }>
-  );
-
-export type VerificationCleanupFailure = Readonly<{
-  phase: "destroy";
-  name: string;
-  detail: HookFailure;
-}>;
-
+const verificationCapturedOutputFields = {
+  stdout: z.string().min(1).optional(),
+  stderr: z.string().min(1).optional(),
+  truncated: z.literal(true).optional(),
+};
+export const verificationRuntimeStopSchema = z.union([
+  z.object({ failure: z.enum(["unknown-exit", "cancelled"]), ...verificationCapturedOutputFields }).strict(),
+  z
+    .object({
+      failure: z.enum(["candidate-unavailable", "spawn-error"]),
+      diagnostic: z.string().refine((value) => value.trim() !== ""),
+      ...verificationCapturedOutputFields,
+    })
+    .strict(),
+  z
+    .object({
+      failure: z.literal("environment-failure"),
+      diagnostic: z.string().refine((value) => value.trim() !== ""),
+      ...verificationCapturedOutputFields,
+    })
+    .strict(),
+  z
+    .object({
+      failure: z.literal("environment-failure"),
+      name: z.string().refine((value) => value.trim() !== ""),
+      detail: hookFailureSchema,
+      ...verificationCapturedOutputFields,
+    })
+    .strict(),
+]);
+export type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
+export const verificationCleanupFailureSchema = z
+  .object({
+    phase: z.literal("destroy"),
+    name: z.string().refine((value) => value.trim() !== ""),
+    detail: hookFailureSchema,
+  })
+  .strict();
+export type VerificationCleanupFailure = z.infer<typeof verificationCleanupFailureSchema>;
 type VerificationReuseRefusal = Readonly<{
   kind: "verification-reuse";
   reuse: CurrentVerifiedAttestation;
@@ -198,12 +211,14 @@ function verificationInput(
   };
 }
 
-export type CurrentVerifiedAttestation = Readonly<{
-  entry: EntryUlid;
-  verdict: "satisfied" | "unsatisfied";
-  summary?: string;
-}>;
-
+export const verificationReuseSchema = z
+  .object({
+    entry: entryUlidSchema,
+    verdict: z.enum(["satisfied", "unsatisfied"]),
+    summary: z.string().optional(),
+  })
+  .strict();
+export type CurrentVerifiedAttestation = z.infer<typeof verificationReuseSchema>;
 export function reusableVerificationAttestation(
   current: AttestationEntry | undefined,
   subject: DependencyKeySet,

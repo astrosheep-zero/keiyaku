@@ -1,9 +1,10 @@
+import { materializedConflictSchema } from "../protocol/deliver.js";
 import {
   decodeExecutionObservation,
   observeExecution,
   type ExecutionObserver,
 } from "../protocol/execution-observation.js";
-import { contractId, snapshotId } from "../core/facts/types.js";
+import { contractIdSchema } from "../protocol/operations.js";
 import { AkumaBodyRequestError, requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -13,7 +14,6 @@ import {
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
 import type { AuditReport } from "../protocol/audit.js";
-import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import {
   auditReportSchema,
   outcomeSchema,
@@ -37,30 +37,7 @@ type ContractRequester = ActorId;
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
-const contractIdSchema = z.string().transform((value, context) => {
-  try {
-    return contractId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "expected ContractId" });
-    return z.NEVER;
-  }
-});
-const snapshotIdSchema = z.string().transform((value, context) => {
-  try {
-    return snapshotId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "expected SnapshotId" });
-    return z.NEVER;
-  }
-});
 const contractRequestBaseSchema = z.object({ repoRoot: absolutePathSchema, contractId: contractIdSchema }).strict();
-const conflictRecoverySchema = z
-  .object({
-    materialize: z.literal("deliver --materialize-conflict --include-dirty"),
-    deliver: z.literal("deliver --include-dirty"),
-    staging: z.literal("not-required"),
-  })
-  .strict();
 const auditRequestSchema = contractRequestBaseSchema
   .extend({
     includeDirty: z.boolean(),
@@ -116,28 +93,14 @@ const reviewReferenceSchema = z
     reviewFactId: nonblankStringSchema,
   })
   .strict();
-const materializedHandoffServiceSchema = z
-  .object({
+const materializedHandoffReferenceSchema = materializedConflictSchema;
+const materializedHandoffServiceSchema = materializedConflictSchema
+  .extend({
     kind: z.literal("materialized-handoff"),
     repoRoot: absolutePathSchema,
     contractId: contractIdSchema,
-    targetHead: snapshotIdSchema,
-    handoffBase: snapshotIdSchema,
-    recovery: conflictRecoverySchema,
-    conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
-    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
   })
   .strict();
-const materializedHandoffReferenceSchema = z
-  .object({
-    kind: z.literal("integration-conflict-materialized"),
-    targetHead: snapshotIdSchema,
-    handoffBase: snapshotIdSchema,
-    recovery: conflictRecoverySchema,
-    conflictPaths: z.array(nonblankStringSchema).transform((paths) => Object.freeze(paths) as readonly string[]),
-    workspace: z.object({ kind: z.literal("worktree"), path: nonblankStringSchema }).strict(),
-  })
-  .strict() satisfies z.ZodType<IntegrationConflictMaterialized>;
 const contractServiceSchema = z.union([
   auditServiceSchema,
   deliveryReferenceSchema,

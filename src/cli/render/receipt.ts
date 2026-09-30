@@ -90,7 +90,7 @@ export function hookFailureSummary(failure: HookFailure): string {
 export function appendHookPayload(lines: string[], failure: HookFailure): void {
   if (failure.kind === "spawn-error") receiptPayload(lines, "reason", failure.diagnostic);
   if (!("stdout" in failure)) return;
-  if (failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
+  if (failure.stdout !== undefined && failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
   if (failure.stderr !== undefined && failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
 }
 
@@ -172,8 +172,8 @@ function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved
 }
 
 function directStopName(stop: VerificationStop | PlacementStop): string {
-  if ("refusal" in stop && stop.refusal !== undefined) return stop.refusal.kind.replaceAll("-", " ");
-  if ("retry" in stop && stop.retry !== undefined) return stop.retry.kind.replaceAll("-", " ");
+  if ("refusal" in stop) return stop.refusal.kind.replaceAll("-", " ");
+  if ("retry" in stop) return stop.retry.kind.replaceAll("-", " ");
   return stop.failure.replaceAll("-", " ");
 }
 

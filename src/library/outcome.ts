@@ -1,30 +1,13 @@
+import { contractHeadSchema } from "../git/identity.js";
 /** @architectureCompositionRoot */
-import { decodeJournalEntry, decodeDeliverData, encodeEntry } from "../core/facts/codec.js";
+import { z } from "zod";
+import { decodeJournalEntry, encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import {
-  contractHead,
-  contractId,
-  snapshotId,
-  gate,
-  type ContractHead,
-  type ContractId,
-  type JournalEntry,
-} from "../core/facts/types.js";
-import type { Effect, ReconcileResult, ReconcileLag } from "../git/reconcile.js";
-import {
-  decodeGitReconcileLag,
-  decodePrivateStateSeatCloseLag,
-  decodeReconcileEffect,
-  decodeWorktreeLeak,
-} from "../git/result-codec.js";
-import {
-  decodeContractFileEffect,
-  decodeContractFileLag,
-  type ContractFileEffect,
-  type ContractFileLag,
-} from "../contract-worktree.js";
-import { decodeSettlementAction, decodeSettlementLag } from "../settlement/result-codec.js";
-import type { SettlementAction, SettlementLag, SettlementReport } from "../settlement/settle.js";
+import { type ContractHead, type ContractId, type JournalEntry } from "../core/facts/types.js";
+import { reconcileEffectSchema, type Effect, type ReconcileResult, type ReconcileLag } from "../git/reconcile.js";
+import { contractFileEffectSchema } from "../contract-worktree.js";
+import { settlementActionSchema, settlementLagSchema } from "../settlement/settle.js";
+import type { SettlementReport } from "../settlement/settle.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import {
   observeExecution,
@@ -33,42 +16,39 @@ import {
 } from "../protocol/execution-observation.js";
 import {
   executionStop,
+  executionCleanupSchema,
+  executionStageSchema,
   type ContractCheckpoint,
-  type ExecutionCleanup,
-  type ExecutionStage,
-  type ExecutionStop,
   type ProtocolProgress,
   type ProgressResidue,
   type VerificationResidue,
+  type ExecutionStage,
+  type ExecutionStop,
 } from "../protocol/progress.js";
-import {
-  decodeExecutionStop,
-  decodePartialAuditReport,
-  decodeCompletionEvidenceFields,
-  decodeDeliverLeading,
-  decodeVerificationCleanupFailure,
-} from "../protocol/result-codec.js";
 import type { AcceptedProtocolStep } from "../protocol/outcome.js";
+import { completionEvidenceSchema } from "../protocol/completion.js";
 import type { CandidateCompletion, CompletionEvidence } from "../protocol/completion.js";
+import { materializedConflictSchema } from "../protocol/deliver.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { AuditReport } from "../protocol/audit.js";
-import { decodeAuditReport } from "../protocol/audit.js";
-import { decodeReviewValue, type ReviewValue } from "../protocol/review.js";
-import { decodeContinuationReport, type ContinuationReport } from "./continuation.js";
-import { reconcileLagScope, type ReconcileLagScope } from "./reconcile.js";
+import { auditReportSchema, type AuditReport } from "../protocol/audit.js";
+import { reviewAdmissionValueSchema } from "../protocol/review.js";
+import { continuationReportSchema, type ContinuationReport } from "./continuation.js";
+import { reconciliationLagSchema, reconcileLagScope } from "./reconcile.js";
 import {
-  decodeOperationRefusal,
-  decodeOperationRetry,
+  operationRefusalSchemas,
+  operationRetrySchemas,
+  nukeConfirmationRefusalSchema,
+  nukeConfirmationRequiredRefusalSchema,
   type OperationRefusals,
   type OperationRetries,
 } from "./refusal.js";
-import { ownerSchema } from "./result-codec.js";
-import { z } from "zod";
+import { contractIdSchema, gateSchema, deliverDataSchema } from "../protocol/operations.js";
+import { worktreeWorkspaceSchema } from "../git/workspace.js";
+import { deliveryValueSchema } from "./delivery.js";
+import { regionOverlapSchema } from "./region.js";
 import type { WorldRoot } from "../world.js";
-import type { NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "./refusal.js";
-
 export type { ExecutionCleanup, ExecutionStop } from "../protocol/progress.js";
-export { executionStop };
+export { executionStop, auditReportSchema };
 
 /** The seven Contract verbs, plus the World reset that shares the same envelope shape. */
 export type ContractVerb = "bind" | "amend" | "deliver" | "review" | "audit" | "arc" | "abandon";
@@ -78,43 +58,78 @@ export type OutcomeOperation = ContractVerb | "nuke";
 // One invocation-wide tagged Effect carrier
 // ---------------------------------------------------------------------------
 
-export type ReconciliationEffect = Effect | ContractFileEffect;
-export type ReconciliationLag = ReconcileLag | ContractFileLag;
-export type ResetOwner = "akuma" | "git" | "task" | "world";
-
-export type InvocationEffect =
-  | Readonly<{ kind: "reconciliation-effect"; contract: ContractId; effect: ReconciliationEffect }>
-  | Readonly<{ kind: "reconciliation-lag"; contract: ContractId; affects: ReconcileLagScope; lag: ReconciliationLag }>
-  | Readonly<{ kind: "checkout-retained"; contract: ContractId; path: string; target: string; diagnostic: string }>
-  | Readonly<{ kind: "settlement-action"; contract: ContractId; action: SettlementAction }>
-  | Readonly<{ kind: "settlement-lag"; contract: ContractId; lag: SettlementLag }>
-  | Readonly<{ kind: "cleanup"; contract: ContractId; issue: ExecutionCleanup }>
-  | Readonly<{
-      kind: "execution-stopped";
-      contract: ContractId;
-      stage: ExecutionStage;
-      reason: "cancelled" | "failed";
-      diagnostic: string;
-    }>
-  | Readonly<{ kind: "worktree-retired"; contract: ContractId; name: string }>
-  | Readonly<{ kind: "worktree-retained"; contract: ContractId; path: string }>
-  | Readonly<{ kind: "reset-owner-stopped"; world: string; owner: ResetOwner; diagnostic: string }>
-  | Readonly<{ kind: "reset-residue"; world: string; owner: ResetOwner; diagnostic: string }>;
-
-export type ResetEffect = Extract<InvocationEffect, { kind: "reset-owner-stopped" | "reset-residue" }>;
-
-export type PendingAction =
-  | "reset"
-  | "verification"
-  | "placement"
-  | "continuation"
-  | "reconciliation"
-  | "settlement"
-  | "cleanup"
-  | "execution";
-
-/** A surface this invocation did not finish; `required` separates owed work from retained residue. */
-export type PendingSurface = Readonly<{ surface: PendingAction; required: boolean }>;
+export const reconciliationEffectSchema = z.union([reconcileEffectSchema, contractFileEffectSchema]);
+export type ReconciliationEffect = z.infer<typeof reconciliationEffectSchema>;
+export type ReconciliationLag = z.infer<typeof reconciliationLagSchema>;
+const resetOwnerSchema = z.enum(["akuma", "git", "task", "world"]);
+export type ResetOwner = z.infer<typeof resetOwnerSchema>;
+const resetEffectFields = { world: z.string().min(1), owner: resetOwnerSchema, diagnostic: z.string().min(1) };
+export const resetEffectSchema = z.union([
+  z.object({ kind: z.literal("reset-owner-stopped"), ...resetEffectFields }).strict(),
+  z.object({ kind: z.literal("reset-residue"), ...resetEffectFields }).strict(),
+]);
+export type ResetEffect = z.infer<typeof resetEffectSchema>;
+export const contractEffectSchema = z.union([
+  z
+    .object({
+      kind: z.literal("reconciliation-effect"),
+      contract: contractIdSchema,
+      effect: reconciliationEffectSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("reconciliation-lag"),
+      contract: contractIdSchema,
+      affects: z.enum(["none", "reconciliation", "placement", "continuation"]),
+      lag: reconciliationLagSchema,
+    })
+    .strict()
+    .refine((value) => value.affects === reconcileLagScope(value.lag), "invalid reconciliation requiredness"),
+  z
+    .object({
+      kind: z.literal("checkout-retained"),
+      contract: contractIdSchema,
+      path: z.string().min(1),
+      target: z.string().min(1),
+      diagnostic: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal("settlement-action"), contract: contractIdSchema, action: settlementActionSchema })
+    .strict(),
+  z.object({ kind: z.literal("settlement-lag"), contract: contractIdSchema, lag: settlementLagSchema }).strict(),
+  z
+    .object({ kind: z.literal("cleanup"), contract: contractIdSchema, issue: executionCleanupSchema })
+    .strict()
+    .refine((value) => value.contract === value.issue.contractId, "invalid cleanup owner"),
+  z
+    .object({
+      kind: z.literal("execution-stopped"),
+      contract: contractIdSchema,
+      stage: executionStageSchema,
+      reason: z.enum(["cancelled", "failed"]),
+      diagnostic: z.string().refine((value) => value.trim() !== ""),
+    })
+    .strict(),
+  z.object({ kind: z.literal("worktree-retired"), contract: contractIdSchema, name: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("worktree-retained"), contract: contractIdSchema, path: z.string().min(1) }).strict(),
+]);
+export const invocationEffectSchema = z.union([contractEffectSchema, resetEffectSchema]);
+export type InvocationEffect = z.infer<typeof invocationEffectSchema>;
+const pendingActionSchema = z.enum([
+  "reset",
+  "verification",
+  "placement",
+  "continuation",
+  "reconciliation",
+  "settlement",
+  "cleanup",
+  "execution",
+]);
+export type PendingAction = z.infer<typeof pendingActionSchema>;
+const pendingSurfaceSchema = z.object({ surface: pendingActionSchema, required: z.boolean() }).strict();
+export type PendingSurface = z.infer<typeof pendingSurfaceSchema>;
 
 // ---------------------------------------------------------------------------
 // The one accumulator
@@ -456,64 +471,32 @@ export function physicalOf(snapshot: InvocationSnapshot): ReconcileResult {
 // The public envelope
 // ---------------------------------------------------------------------------
 
-export type EnvelopeFields = Readonly<{
-  operation: ContractVerb;
-  contract?: ContractId;
-  facts: readonly JournalEntry[];
-  effects: readonly InvocationEffect[];
-  pending: readonly PendingSurface[];
-}>;
-
-export type AcceptedOutcome<Operation extends ContractVerb, Value> = EnvelopeFields &
-  Readonly<{ operation: Operation; kind: "accepted"; contract: ContractId; head: ContractHead; value: Value }>;
-
-export type RefusedOutcome<Operation extends ContractVerb, Refusal> = EnvelopeFields &
-  Readonly<{ operation: Operation; kind: "refused"; refusal: Refusal }>;
-
-export type RetryOutcome<Operation extends ContractVerb> = EnvelopeFields &
-  Readonly<{ operation: Operation; kind: "retry"; reason: OperationRetries[Operation] }>;
-
-/** A no-fact integration handoff; only delivery produces one. */
-export type HandoffOutcome = EnvelopeFields &
-  Readonly<{
-    operation: "deliver";
-    kind: "handoff";
-    contract: ContractId;
-    value: IntegrationConflictMaterialized;
-  }>;
-
+export type EnvelopeFields = Omit<z.infer<typeof envelopeFieldsSchema>, "contract"> & {
+  readonly contract?: ContractId;
+};
+export type AcceptedOutcome<Operation extends ContractVerb, Value> = Omit<
+  z.infer<ReturnType<typeof acceptedOutcomeSchema<Operation, Value>>>,
+  "value"
+> & { readonly value: Value };
+export type RefusedOutcome<Operation extends ContractVerb, Refusal> = z.infer<
+  ReturnType<typeof refusedOutcomeSchema<Operation, Refusal>>
+>;
+export type RetryOutcome<Operation extends ContractVerb> = z.infer<ReturnType<typeof retryOutcomeSchema<Operation>>>;
+export type HandoffOutcome = z.infer<typeof handoffOutcomeSchema>;
 export type OperationOutcome<Operation extends ContractVerb, Value, Refusal> =
   | AcceptedOutcome<Operation, Value>
   | RefusedOutcome<Operation, Refusal>
   | RetryOutcome<Operation>;
-
-/** Every public answer this owner can project for one operation. Only delivery hands off. */
 export type ProjectedOutcome<Operation extends ContractVerb, Value, Refusal> =
-  | AcceptedOutcome<Operation, Value>
-  | RefusedOutcome<Operation, Refusal>
-  | RetryOutcome<Operation>
+  | OperationOutcome<Operation, Value, Refusal>
   | (Operation extends "deliver" ? HandoffOutcome : never);
-
-export type ResetCounts = Readonly<{ refs: number; worktrees: number; tasks: number }>;
-export type ResetValue = Readonly<{ removed: ResetCounts }>;
-export type ResetRefusal = NukeConfirmationRefusal | NukeConfirmationRequiredRefusal;
-export type ResetOutcome =
-  | Readonly<{
-      operation: "nuke";
-      kind: "accepted";
-      world: WorldRoot;
-      value: ResetValue;
-      effects: readonly ResetEffect[];
-      pending: readonly PendingSurface[];
-    }>
-  | Readonly<{
-      operation: "nuke";
-      kind: "refused";
-      world: WorldRoot;
-      refusal: ResetRefusal;
-      effects: readonly ResetEffect[];
-      pending: readonly PendingSurface[];
-    }>;
+export type ResetCounts = z.infer<typeof resetCountsSchema>;
+export type ResetValue = z.infer<typeof resetValueSchema>;
+export type ResetRefusal =
+  | z.infer<typeof nukeConfirmationRefusalSchema>
+  | z.infer<typeof nukeConfirmationRequiredRefusalSchema>;
+type WithWorld<Value> = Value extends { world: string } ? Omit<Value, "world"> & { readonly world: WorldRoot } : never;
+export type ResetOutcome = WithWorld<z.infer<typeof resetOutcomeSchema>>;
 
 type ResetProjection = Readonly<{ world: WorldRoot }> &
   (
@@ -532,23 +515,8 @@ export type OperationEvidenceValues = Readonly<{
   abandon: Readonly<Record<string, never>>;
 }>;
 
-type PartialContractEnvelope = {
-  [Operation in ContractVerb]: Omit<EnvelopeFields, "operation"> &
-    Readonly<{
-      operation: Operation;
-      head?: ContractHead;
-      value?: Partial<OperationEvidenceValues[Operation]>;
-    }>;
-}[ContractVerb];
-export type PartialOutcomeEnvelope =
-  | PartialContractEnvelope
-  | Readonly<{
-      operation: "nuke";
-      world: string;
-      effects: readonly ResetEffect[];
-      pending: readonly PendingSurface[];
-      value?: ResetValue;
-    }>;
+type PartialContractEnvelope = z.infer<typeof partialContractEnvelopeSchema>;
+export type PartialOutcomeEnvelope = z.infer<typeof partialOutcomeEnvelopeSchema>;
 
 function surface(surface: PendingAction, required: boolean): PendingSurface {
   return { surface, required };
@@ -639,7 +607,10 @@ function envelopeOf(
     fields: {
       ...(contract === undefined ? {} : { contract }),
       facts: snapshot.facts,
-      effects: snapshot.effects,
+      effects: snapshot.effects.filter(
+        (effect): effect is z.infer<typeof contractEffectSchema> =>
+          effect.kind !== "reset-owner-stopped" && effect.kind !== "reset-residue",
+      ),
     },
     pending: projectPending(operation, value, snapshot.effects),
   };
@@ -799,263 +770,18 @@ export function withOutcomeReceipt(error: unknown, outcome: PartialOutcomeEnvelo
   return new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error, outcome });
 }
 
-// ---------------------------------------------------------------------------
-// Public value decoders shared by the wire and the CLI adapter
-// ---------------------------------------------------------------------------
-
-export type Review = ReviewValue & Readonly<{ continuation?: ContinuationReport }>;
-
-export function decodeReview(value: unknown): Review {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("malformed review");
-  const { continuation, ...protocol } = value as Record<string, unknown>;
-  const review = decodeReviewValue(protocol);
-  return continuation === undefined ? review : { ...review, continuation: decodeContinuationReport(continuation) };
-}
-
-export const auditReportSchema = ownerSchema(
-  decodeAuditReport,
-  "expected audit report",
-) satisfies z.ZodType<AuditReport>;
-export const reviewSchema = ownerSchema(decodeReview, "expected review") satisfies z.ZodType<Review>;
-
-// ---------------------------------------------------------------------------
-// Interim wire schema for the one envelope
-// ---------------------------------------------------------------------------
-
-function plainRecord(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`malformed ${label}`);
-  return value as Record<string, unknown>;
-}
-
-function nonblank(value: unknown): string {
-  if (typeof value !== "string" || value === "") throw new Error("expected nonblank text");
-  return value;
-}
-
-function decodeCoordinate(value: unknown): ContractId {
-  if (typeof value !== "string") throw new Error("expected contract identity");
-  return contractId(value);
-}
-
-function decodeReconciliationEffect(value: unknown): ReconciliationEffect {
-  try {
-    return decodeContractFileEffect(value);
-  } catch {
-    return decodeReconcileEffect(value);
-  }
-}
-
-function decodeReconciliationLag(value: unknown): ReconciliationLag {
-  try {
-    return decodeGitReconcileLag(value);
-  } catch {
-    return decodeContractFileLag(value);
-  }
-}
-
-function decodeCleanup(value: unknown): ExecutionCleanup {
-  const record = plainRecord(value, "cleanup");
-  const contract = decodeCoordinate(record.contractId);
-  if (record.kind === "decode-channel-retirement") {
-    if (Object.keys(record).some((key) => !["kind", "contractId", "diagnostic"].includes(key)))
-      throw new Error("malformed cleanup");
-    return { kind: "decode-channel-retirement", contractId: contract, diagnostic: nonblank(record.diagnostic) };
-  }
-  const allowed =
-    record.kind === "private-state-seat-close"
-      ? ["kind", "contractId", "failure"]
-      : record.kind === "verification-cleanup"
-        ? ["kind", "contractId", "snapshot", "failure"]
-        : ["kind", "contractId", "snapshot", "leak"];
-  if (Object.keys(record).some((key) => !allowed.includes(key))) throw new Error("malformed cleanup");
-  if (record.kind === "private-state-seat-close")
-    return {
-      kind: "private-state-seat-close",
-      contractId: contract,
-      failure: decodePrivateStateSeatCloseLag(record.failure),
-    };
-  const snapshot =
-    record.snapshot === undefined
-      ? {}
-      : typeof record.snapshot === "string"
-        ? { snapshot: snapshotId(record.snapshot) }
-        : (() => {
-            throw new Error("malformed cleanup");
-          })();
-  if (record.kind === "verification-cleanup")
-    return {
-      kind: "verification-cleanup",
-      contractId: contract,
-      ...snapshot,
-      failure: decodeVerificationCleanupFailure(record.failure),
-    };
-  if (record.kind === "worktree-leak")
-    return { kind: "worktree-leak", contractId: contract, ...snapshot, leak: decodeWorktreeLeak(record.leak) };
-  throw new Error("malformed cleanup");
-}
-
-const EFFECT_KEYS: Readonly<Record<string, readonly string[]>> = {
-  "reconciliation-effect": ["kind", "contract", "effect"],
-  "reconciliation-lag": ["kind", "contract", "affects", "lag"],
-  "settlement-action": ["kind", "contract", "action"],
-  "settlement-lag": ["kind", "contract", "lag"],
-  cleanup: ["kind", "contract", "issue"],
-  "checkout-retained": ["kind", "contract", "path", "target", "diagnostic"],
-  "execution-stopped": ["kind", "contract", "stage", "reason", "diagnostic"],
-  "worktree-retired": ["kind", "contract", "name"],
-  "worktree-retained": ["kind", "contract", "path"],
-  "reset-owner-stopped": ["kind", "world", "owner", "diagnostic"],
-  "reset-residue": ["kind", "world", "owner", "diagnostic"],
-};
-
-function effectKeys(kind: unknown): readonly string[] {
-  return typeof kind === "string" ? (EFFECT_KEYS[kind] ?? []) : [];
-}
-
-export function decodeInvocationEffect(value: unknown): InvocationEffect {
-  const record = plainRecord(value, "invocation effect");
-  const kind = record.kind;
-  const expected = effectKeys(kind);
-  if (expected.length === 0 || Object.keys(record).some((key) => !expected.includes(key)))
-    throw new Error("malformed invocation effect");
-  if (expected.some((key) => !(key in record))) throw new Error("malformed invocation effect");
-  if (kind === "reconciliation-effect")
-    return { kind, contract: decodeCoordinate(record.contract), effect: decodeReconciliationEffect(record.effect) };
-  if (kind === "reconciliation-lag") {
-    const lag = decodeReconciliationLag(record.lag);
-    const affects = reconcileLagScope(lag);
-    if (record.affects !== affects) throw new Error("malformed reconciliation requiredness");
-    return { kind, contract: decodeCoordinate(record.contract), affects, lag };
-  }
-  if (kind === "checkout-retained")
-    return {
-      kind,
-      contract: decodeCoordinate(record.contract),
-      path: nonblank(record.path),
-      target: nonblank(record.target),
-      diagnostic: nonblank(record.diagnostic),
-    };
-  if (kind === "settlement-action")
-    return { kind, contract: decodeCoordinate(record.contract), action: decodeSettlementAction(record.action) };
-  if (kind === "settlement-lag")
-    return { kind, contract: decodeCoordinate(record.contract), lag: decodeSettlementLag(record.lag) };
-  if (kind === "cleanup") {
-    const contract = decodeCoordinate(record.contract);
-    const issue = decodeCleanup(record.issue);
-    if (issue.contractId !== contract) throw new Error("malformed cleanup owner");
-    return { kind, contract, issue };
-  }
-  if (kind === "execution-stopped") {
-    const stop = decodeExecutionStop({
-      kind: record.kind,
-      contractId: record.contract,
-      stage: record.stage,
-      reason: record.reason,
-      diagnostic: record.diagnostic,
-    });
-    return {
-      kind,
-      contract: stop.contractId,
-      stage: stop.stage,
-      reason: stop.reason,
-      diagnostic: stop.diagnostic,
-    };
-  }
-  if (kind === "worktree-retired")
-    return { kind, contract: decodeCoordinate(record.contract), name: nonblank(record.name) };
-  if (kind === "worktree-retained")
-    return { kind, contract: decodeCoordinate(record.contract), path: nonblank(record.path) };
-  if (kind !== "reset-owner-stopped" && kind !== "reset-residue") throw new Error("malformed invocation effect");
-  return decodeResetEffect(record, kind);
-}
-
-function decodeResetEffect(record: Record<string, unknown>, kind: ResetEffect["kind"]): ResetEffect {
-  const owner = record.owner;
-  if (owner !== "akuma" && owner !== "git" && owner !== "task" && owner !== "world")
-    throw new Error("malformed invocation effect");
-  return { kind, world: nonblank(record.world), owner, diagnostic: nonblank(record.diagnostic) };
-}
-
-function decodePending(value: unknown): PendingSurface {
-  const record = plainRecord(value, "pending surface");
-  const surfaces: readonly PendingAction[] = [
-    "reset",
-    "verification",
-    "placement",
-    "continuation",
-    "reconciliation",
-    "settlement",
-    "cleanup",
-    "execution",
-  ];
-  if (!surfaces.includes(record.surface as PendingAction) || typeof record.required !== "boolean")
-    throw new Error("malformed pending surface");
-  if (Object.keys(record).some((key) => key !== "surface" && key !== "required"))
-    throw new Error("malformed pending surface");
-  return { surface: record.surface as PendingAction, required: record.required };
-}
-
-const VERBS: readonly OutcomeOperation[] = ["bind", "amend", "deliver", "review", "audit", "arc", "abandon", "nuke"];
-
-function envelopeRecord(
-  input: unknown,
-  label: "partial" | "complete",
-): { envelope: Record<string, unknown>; operation: OutcomeOperation } {
-  const record = plainRecord(input, label);
-  const operation = record.operation;
-  if (typeof operation !== "string" || !(VERBS as readonly string[]).includes(operation))
-    throw new Error(`malformed ${label}`);
-  const allowed = [
-    "operation",
-    "effects",
-    "pending",
-    ...(operation === "nuke" ? ["world"] : ["contract", "head", "facts"]),
-    ...(label === "partial"
-      ? ["value"]
-      : record.kind === "accepted" || record.kind === "handoff"
-        ? ["kind", "value"]
-        : record.kind === "refused"
-          ? ["kind", "refusal"]
-          : record.kind === "retry"
-            ? ["kind", "reason"]
-            : []),
-  ];
-  if (Object.keys(record).some((key) => !allowed.includes(key))) throw new Error(`malformed ${label}`);
-  if (
-    (operation !== "nuke" && !Array.isArray(record.facts)) ||
-    !Array.isArray(record.effects) ||
-    !Array.isArray(record.pending)
-  )
-    throw new Error(`malformed ${label}`);
-  return { envelope: record, operation: operation as OutcomeOperation };
-}
-
-const regionOverlapSchema = z
-  .object({
-    contract: z.string().transform(contractId),
-    patterns: z
-      .array(
-        z
-          .object({
-            mine: z.string(),
-            theirs: z.string(),
-            relation: z.enum(["same", "mine-within-theirs", "theirs-within-mine", "intersect"]).optional(),
-          })
-          .strict(),
-      )
-      .readonly(),
+// Public value composition: owned nested declarations, no local re-decoding.
+export const reviewSchema = completionEvidenceSchema
+  .extend({
+    ...reviewAdmissionValueSchema.shape,
+    continuation: continuationReportSchema.optional(),
   })
   .strict();
+export type Review = z.infer<typeof reviewSchema>;
 const bindEvidenceSchema = z
   .object({
-    keiyaku: z
-      .object({ contract: z.string().transform(contractId) })
-      .strict()
-      .optional(),
-    workspace: z
-      .object({ kind: z.literal("worktree"), path: z.string().min(1) })
-      .strict()
-      .optional(),
+    keiyaku: z.object({ contract: contractIdSchema }).strict().optional(),
+    workspace: worktreeWorkspaceSchema.optional(),
     warnings: z.array(z.string()).readonly().optional(),
     overlaps: z.array(regionOverlapSchema).readonly().optional(),
     overlapFailure: z.string().optional(),
@@ -1067,8 +793,8 @@ const amendEvidenceSchema = z
     documentDiff: z.string().optional(),
     changes: z
       .object({
-        gates: z.array(z.string().transform(gate)).readonly().optional(),
-        after: z.array(z.string().transform(contractId)).readonly().optional(),
+        gates: z.array(gateSchema).readonly().optional(),
+        after: z.array(contractIdSchema).readonly().optional(),
       })
       .strict()
       .optional(),
@@ -1077,154 +803,163 @@ const amendEvidenceSchema = z
   })
   .strict()
   .refine((value) => value.overlaps === undefined || value.overlapFailure === undefined);
-
-function decodePartialDelivery(value: unknown): Partial<OperationEvidenceValues["deliver"]> {
-  const object = plainRecord(value, "delivery evidence");
-  const identityKeys = ["tenderSnapshot", "integration", "method", "policy"];
-  const conclusionKeys = [
-    "leading",
-    "completion",
-    "verification",
-    "verificationReuse",
-    "verificationSubject",
-    "verificationSummary",
-    "placement",
-    "continuation",
-  ];
-  if (Object.keys(object).some((key) => !identityKeys.includes(key) && !conclusionKeys.includes(key)))
-    throw new Error("malformed delivery evidence");
-  const identity = identityKeys.some((key) => key in object)
-    ? decodeDeliverData(Object.fromEntries(identityKeys.map((key) => [key, object[key]])))
-    : {};
-  return {
-    ...identity,
-    ...decodeCompletionEvidenceFields(object),
-    ...(object.leading === undefined ? {} : { leading: decodeDeliverLeading(object.leading) }),
-    ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
-  };
-}
-
-function decodePartialValue(operation: ContractVerb, value: unknown): Partial<OperationEvidenceValues[ContractVerb]> {
-  if (operation === "audit") return decodePartialAuditReport(value);
-  if (operation === "review") return decodeReview(value);
-  if (operation === "deliver") return decodePartialDelivery(value);
-  if (operation === "bind") {
-    const input = plainRecord(value, "bind evidence");
-    const ability = input.keiyaku;
-    const identity =
-      ability !== null && typeof ability === "object" && "toJSON" in ability && typeof ability.toJSON === "function"
-        ? ability.toJSON()
-        : ability;
-    return bindEvidenceSchema.parse({ ...input, ...(ability === undefined ? {} : { keiyaku: identity }) });
+const partialDeliverySchema = deliveryValueSchema.partial().superRefine((value, context) => {
+  const fields = deliverDataSchema.keyof().options;
+  const present = fields.filter((field) => value[field] !== undefined);
+  if (present.length !== 0 && present.length !== fields.length)
+    context.addIssue({ code: "custom", message: "delivery identity must be complete when present" });
+});
+const partialValueSchemas = {
+  bind: bindEvidenceSchema,
+  amend: amendEvidenceSchema,
+  deliver: partialDeliverySchema,
+  review: reviewSchema,
+  audit: auditReportSchema.partial(),
+  arc: z.object({}).strict(),
+  abandon: z.object({}).strict(),
+} as const;
+const journalEntrySchema = z.unknown().transform((value, context) => {
+  try {
+    return decodeJournalEntry(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid journal fact" });
+    return z.NEVER;
   }
-  if (operation === "amend") return amendEvidenceSchema.parse(value);
-  if (Object.keys(plainRecord(value, "empty evidence")).length !== 0) throw new Error("malformed empty evidence");
-  return {};
+});
+const envelopeFieldsSchema = z
+  .object({
+    operation: z.enum(["bind", "amend", "deliver", "review", "audit", "arc", "abandon"]),
+    contract: contractIdSchema.optional(),
+    facts: z.array(journalEntrySchema).readonly(),
+    effects: z.array(contractEffectSchema).readonly(),
+    pending: z.array(pendingSurfaceSchema).readonly(),
+  })
+  .strict();
+function definedContract<Value extends { contract?: ContractId | undefined }>(
+  value: Value,
+): Omit<Value, "contract"> & { readonly contract?: ContractId } {
+  const { contract, ...fields } = value;
+  return { ...fields, ...(contract === undefined ? {} : { contract }) };
 }
-
-/** Complete and partial modes consume the same envelope and operation-owned payload decoders. */
-function decodeEnvelope(input: unknown, mode: "partial"): PartialOutcomeEnvelope {
-  const { envelope, operation } = envelopeRecord(input, mode);
-  const effects = (envelope.effects as unknown[]).map(decodeInvocationEffect);
-  const pending = (envelope.pending as unknown[]).map(decodePending);
-  if (operation === "nuke") {
-    const resetEffects = effects.map((effect) => {
-      if (effect.kind !== "reset-owner-stopped" && effect.kind !== "reset-residue")
-        throw new Error("malformed reset effect");
-      return effect;
-    });
-    const value =
-      envelope.value === undefined
-        ? undefined
-        : z
-            .object({
-              removed: z
-                .object({
-                  refs: z.number().int().nonnegative(),
-                  worktrees: z.number().int().nonnegative(),
-                  tasks: z.number().int().nonnegative(),
-                })
-                .strict(),
-            })
-            .strict()
-            .parse(envelope.value);
-    return {
-      operation,
-      world: nonblank(envelope.world),
-      effects: resetEffects,
-      pending,
-      ...(value === undefined ? {} : { value }),
-    };
-  }
-  if (effects.some((effect) => effect.kind === "reset-owner-stopped" || effect.kind === "reset-residue"))
-    throw new Error("reset effect on Contract operation");
-  const base = {
-    operation,
-    ...(envelope.contract === undefined ? {} : { contract: decodeCoordinate(envelope.contract) }),
-    ...(envelope.head === undefined ? {} : { head: contractHead(nonblank(envelope.head)) }),
-    facts: (envelope.facts as unknown[]).map(decodeJournalEntry),
-    effects,
-    pending,
-  };
-  const value = envelope.value === undefined ? undefined : decodePartialValue(operation, envelope.value);
-  // The operation selects its exact partial payload; no independent receipt schema or unknown value exists.
-  return { ...base, ...(value === undefined ? {} : { value }) } as PartialContractEnvelope;
+function acceptedOutcomeSchema<Operation extends ContractVerb, Value>(operation: Operation, value: z.ZodType<Value>) {
+  return envelopeFieldsSchema
+    .extend({
+      operation: z.literal(operation),
+      kind: z.literal("accepted"),
+      contract: contractIdSchema,
+      head: contractHeadSchema,
+      value,
+    })
+    .strict();
 }
-
-/** One envelope decoder for every operation; the operation's own value schema supplies its value. */
+function refusedOutcomeSchema<Operation extends ContractVerb, Refusal>(
+  operation: Operation,
+  refusal: z.ZodType<Refusal>,
+) {
+  return envelopeFieldsSchema
+    .extend({ operation: z.literal(operation), kind: z.literal("refused"), refusal })
+    .strict()
+    .transform(definedContract);
+}
+function retryOutcomeSchema<Operation extends ContractVerb>(operation: Operation) {
+  return envelopeFieldsSchema
+    .extend({
+      operation: z.literal(operation),
+      kind: z.literal("retry"),
+      reason: operationRetrySchemas[operation] as z.ZodType<OperationRetries[Operation]>,
+    })
+    .strict()
+    .transform(definedContract);
+}
+const handoffOutcomeSchema = envelopeFieldsSchema
+  .extend({
+    operation: z.literal("deliver"),
+    kind: z.literal("handoff"),
+    contract: contractIdSchema,
+    value: materializedConflictSchema,
+  })
+  .strict();
+/** Complete and exceptional modes use the same envelope and nested owner declarations. */
 export function outcomeSchema<Operation extends ContractVerb, Value>(
   operation: Operation,
-  valueSchema: z.ZodType<Value>,
-  handoffSchema?: z.ZodType<IntegrationConflictMaterialized>,
-): z.ZodType<ProjectedOutcome<Operation, Value, OperationRefusals[Operation]> | HandoffOutcome> {
-  return ownerSchema((input): ProjectedOutcome<Operation, Value, OperationRefusals[Operation]> | HandoffOutcome => {
-    const { envelope, operation: seen } = envelopeRecord(input, "complete");
-    if (seen !== operation) throw new Error("malformed outcome");
-    const base = {
-      operation,
-      ...(envelope.contract === undefined ? {} : { contract: decodeCoordinate(envelope.contract) }),
-      facts: (envelope.facts as unknown[]).map(decodeJournalEntry),
-      effects: (envelope.effects as unknown[]).map(decodeInvocationEffect),
-      pending: (envelope.pending as unknown[]).map(decodePending),
-    };
-    if (base.effects.some((effect) => effect.kind === "reset-owner-stopped" || effect.kind === "reset-residue"))
-      throw new Error("malformed Contract effects");
-    if (envelope.kind === "accepted") {
-      if (base.contract === undefined || typeof envelope.head !== "string") throw new Error("malformed outcome");
-      const parsed = valueSchema.safeParse(envelope.value);
-      if (!parsed.success) throw new Error("malformed outcome");
-      return {
-        ...base,
-        kind: "accepted",
-        contract: base.contract,
-        head: contractHead(envelope.head),
-        value: parsed.data,
-      };
-    }
-    if (envelope.kind === "refused")
-      return { ...base, kind: "refused", refusal: decodeOperationRefusal(operation, envelope.refusal) };
-    if (envelope.kind === "retry")
-      return { ...base, kind: "retry", reason: decodeOperationRetry(operation, envelope.reason) };
-    if (envelope.kind !== "handoff" || handoffSchema === undefined || base.contract === undefined)
-      throw new Error("malformed outcome");
-    const parsed = handoffSchema.safeParse(envelope.value);
-    if (!parsed.success) throw new Error("malformed outcome");
-    return { ...base, operation: "deliver", kind: "handoff", contract: base.contract, value: parsed.data };
-  }, "expected outcome");
+  value: z.ZodType<Value>,
+  handoff?: Operation extends "deliver" ? z.ZodType<IntegrationConflictMaterialized> : never,
+) {
+  const accepted = acceptedOutcomeSchema(operation, value);
+  const refused = refusedOutcomeSchema(
+    operation,
+    operationRefusalSchemas[operation] as unknown as z.ZodType<OperationRefusals[Operation]>,
+  );
+  const retry = retryOutcomeSchema(operation);
+  const ordinary = z.union([accepted, refused, retry]);
+  return (
+    handoff === undefined ? ordinary : z.union([ordinary, handoffOutcomeSchema.extend({ value: handoff }).strict()])
+  ) as z.ZodType<ProjectedOutcome<Operation, Value, OperationRefusals[Operation]>>;
 }
+function partialContractSchema<Operation extends ContractVerb, Value>(operation: Operation, value: z.ZodType<Value>) {
+  return envelopeFieldsSchema
+    .extend({ operation: z.literal(operation), head: contractHeadSchema.optional(), value: value.optional() })
+    .strict();
+}
+const resetCountsSchema = z
+  .object({
+    refs: z.number().int().nonnegative(),
+    worktrees: z.number().int().nonnegative(),
+    tasks: z.number().int().nonnegative(),
+  })
+  .strict();
+const resetValueSchema = z.object({ removed: resetCountsSchema }).strict();
+const resetBaseSchema = z
+  .object({
+    operation: z.literal("nuke"),
+    world: z.string().min(1),
+    effects: z.array(resetEffectSchema).readonly(),
+    pending: z.array(pendingSurfaceSchema).readonly(),
+  })
+  .strict();
+const resetOutcomeSchema = z.union([
+  resetBaseSchema.extend({ kind: z.literal("accepted"), value: resetValueSchema }).strict(),
+  resetBaseSchema
+    .extend({
+      kind: z.literal("refused"),
+      refusal: z.union([nukeConfirmationRefusalSchema, nukeConfirmationRequiredRefusalSchema]),
+    })
+    .strict(),
+]);
+const partialContractEnvelopeSchema = z.union([
+  partialContractSchema("bind", partialValueSchemas.bind),
+  partialContractSchema("amend", partialValueSchemas.amend),
+  partialContractSchema("deliver", partialValueSchemas.deliver),
+  partialContractSchema("review", partialValueSchemas.review),
+  partialContractSchema("audit", partialValueSchemas.audit),
+  partialContractSchema("arc", partialValueSchemas.arc),
+  partialContractSchema("abandon", partialValueSchemas.abandon),
+]);
+export const partialOutcomeEnvelopeSchema = z.union([
+  partialContractEnvelopeSchema,
+  resetBaseSchema.extend({ value: resetValueSchema.optional() }).strict(),
+]);
 
 // ---------------------------------------------------------------------------
 // Wire failure: category, diagnostic, and the same-envelope receipt
 // ---------------------------------------------------------------------------
 
-export type FailureWire = Readonly<{
-  kind: "failed";
-  category: KeiyakuErrorCategory;
-  diagnostic: string;
-  causeClass?: string;
-  causeDiagnostic?: string;
-  outcome?: PartialOutcomeEnvelope;
-}>;
+const errorCategorySchema = z.enum(["invalid-input", "authority-corruption", "unknown-outcome", "aborted", "internal"]);
+export const failureWireSchema = z
+  .object({
+    kind: z.literal("failed"),
+    category: errorCategorySchema,
+    diagnostic: z.string(),
+    causeClass: z.string().optional(),
+    causeDiagnostic: z.string().optional(),
+    outcome: partialOutcomeEnvelopeSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => (value.causeClass === undefined) === (value.causeDiagnostic === undefined),
+    "native cause requires class and diagnostic",
+  );
+export type FailureWire = z.infer<typeof failureWireSchema>;
 
 const NATIVE_CAUSES = {
   Error,
@@ -1254,34 +989,19 @@ export function encodeFailureWire(error: unknown): FailureWire {
 }
 
 export function decodeFailureWire(value: unknown): KeiyakuError | null {
-  try {
-    const record = plainRecord(value, "failure");
-    const allowed = ["kind", "category", "diagnostic", "causeClass", "causeDiagnostic", "outcome"];
-    if (Object.keys(record).some((key) => !allowed.includes(key)) || record.kind !== "failed") return null;
-    const category = record.category;
-    if (
-      category !== "invalid-input" &&
-      category !== "authority-corruption" &&
-      category !== "unknown-outcome" &&
-      category !== "aborted" &&
-      category !== "internal"
-    )
-      return null;
-    if (typeof record.diagnostic !== "string") return null;
-    let cause: Error | undefined;
-    if (record.causeClass !== undefined || record.causeDiagnostic !== undefined) {
-      if (typeof record.causeClass !== "string" || typeof record.causeDiagnostic !== "string") return null;
-      const constructor = Object.hasOwn(NATIVE_CAUSES, record.causeClass)
-        ? NATIVE_CAUSES[record.causeClass as keyof typeof NATIVE_CAUSES]
-        : Error;
-      cause = new constructor(record.causeDiagnostic);
-      cause.name = record.causeClass;
-    }
-    return new KeiyakuError(category, record.diagnostic, {
-      ...(cause === undefined ? {} : { cause }),
-      ...(record.outcome === undefined ? {} : { outcome: decodeEnvelope(record.outcome, "partial") }),
-    });
-  } catch {
-    return null;
+  const parsed = failureWireSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const wire = parsed.data;
+  let cause: Error | undefined;
+  if (wire.causeClass !== undefined && wire.causeDiagnostic !== undefined) {
+    const constructor = Object.hasOwn(NATIVE_CAUSES, wire.causeClass)
+      ? NATIVE_CAUSES[wire.causeClass as keyof typeof NATIVE_CAUSES]
+      : Error;
+    cause = new constructor(wire.causeDiagnostic);
+    cause.name = wire.causeClass;
   }
+  return new KeiyakuError(wire.category, wire.diagnostic, {
+    ...(cause === undefined ? {} : { cause }),
+    ...(wire.outcome === undefined ? {} : { outcome: wire.outcome }),
+  });
 }

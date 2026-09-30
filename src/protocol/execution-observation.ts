@@ -1,30 +1,28 @@
 import { z } from "zod";
 import { decodeJournalEntry } from "../core/facts/codec.js";
-import { contractId, snapshotId } from "../core/facts/types.js";
+import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { verificationObservationSchema } from "../verification/observation.js";
 
-const contract = z.string().transform((value) => contractId(value));
-const snapshot = z.string().transform((value) => snapshotId(value));
 const observationSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("admitted"),
-      contractId: contract,
+      contractId: contractIdSchema,
       fact: z.unknown().transform(decodeJournalEntry),
     })
     .strict(),
   z
     .object({
       kind: z.literal("verification"),
-      contractId: contract,
-      snapshot,
+      contractId: contractIdSchema,
+      snapshot: snapshotIdSchema,
       observation: verificationObservationSchema,
     })
     .strict(),
   z
     .object({
       kind: z.literal("stage"),
-      contractId: contract,
+      contractId: contractIdSchema,
       stage: z.enum(["placement", "continuation", "reconciliation"]),
       state: z.enum(["started", "finished"]),
     })

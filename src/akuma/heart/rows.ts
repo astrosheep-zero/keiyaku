@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { providerOptionsSchema } from "../provider-recipe.js";
+import { resumeCoordinateSchema } from "../coordinate.js";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   BodyEnd,
@@ -15,6 +18,7 @@ import type {
 } from "./facts.js";
 import type { ProviderOptions } from "../provider-recipe.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
+import { agentEventSchema, type AgentEvent } from "./activity-schema.js";
 
 export type SealRow = Readonly<{ evidence: string; at: string }>;
 
@@ -26,6 +30,17 @@ export type BodyRow = Readonly<{
   end: BodyEnd | null;
   ended_at: string | null;
 }>;
+
+const sessionText = z.string().refine((value) => value.trim() !== "");
+export const sessionAdmissionSchema = z
+  .object({
+    provider: sessionText,
+    coordinate: resumeCoordinateSchema,
+    cwd: sessionText,
+    options: providerOptionsSchema,
+    admittedAt: sessionText,
+  })
+  .strict();
 
 export type SessionRow = Readonly<{
   sequence: number;
@@ -69,7 +84,7 @@ export type ActivityFact = Readonly<{
   kind: "activity";
   sequence: number;
   turnSequence: number;
-  event: unknown;
+  event: AgentEvent;
   at: string;
 }>;
 export type KillRow = Readonly<{ sequence: number; body_sequence: number; evidence: "killed"; at: string }>;
@@ -174,7 +189,7 @@ export function decodeCallRow(row: CallRow): CallFact {
 }
 
 export function encodeActivityEvent(event: unknown): string {
-  return json(event);
+  return json(agentEventSchema.parse(event));
 }
 
 export function decodeActivityRow(row: ActivityRow): ActivityFact {
@@ -182,7 +197,7 @@ export function decodeActivityRow(row: ActivityRow): ActivityFact {
     kind: "activity",
     sequence: row.sequence,
     turnSequence: row.turn_sequence,
-    event: parsed(row.event_json),
+    event: agentEventSchema.parse(parsed(row.event_json)),
     at: row.at,
   };
 }
@@ -230,7 +245,7 @@ export function insertSessionFact(database: DatabaseSync, input: Omit<SessionFac
 
 export function insertActivityFact(
   database: DatabaseSync,
-  input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
+  input: Readonly<{ turnSequence: number; event: AgentEvent; at: string }>,
 ): number {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('activity')").run().lastInsertRowid);
   database

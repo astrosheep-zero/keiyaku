@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -16,13 +17,17 @@ export function parsePublicHistoryId(value: string): number | null {
   return Number.isSafeInteger(sequence) ? sequence : null;
 }
 
-export type AkumaPaths = Readonly<{
-  directory: string;
-  heart: string;
-  leash: string;
-  log: string;
-  requests: string;
-}>;
+const pathText = z.string().refine((value) => value.trim() !== "");
+export const akumaPathsSchema = z
+  .object({
+    directory: pathText,
+    heart: pathText,
+    leash: pathText,
+    log: pathText,
+    requests: pathText,
+  })
+  .strict();
+export type AkumaPaths = z.infer<typeof akumaPathsSchema>;
 
 export type AllocatedAkuma = Readonly<{
   id: AkuId;
@@ -57,6 +62,16 @@ export function parseAkuId(value: string): Readonly<{ id: AkuId; archetype: stri
   return { id: value as AkuId, archetype, suffix };
 }
 
+export const akumaIdSchema = z.string().transform((value, context) => {
+  try {
+    const id = parseAkuId(value).id;
+    if (id !== value) throw new Error("not canonical");
+    return id;
+  } catch {
+    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
+    return z.NEVER;
+  }
+});
 export function akumaRunRoot(worldRoot: string): string {
   return join(worldRoot, ".keiyaku", "akuma", "run");
 }

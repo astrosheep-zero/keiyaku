@@ -19,14 +19,14 @@ import {
   type UpdateTaskInput,
 } from "./operations.js";
 import { composeTasks, type TaskCompositionResult } from "./compose.js";
-import { isTaskSegment } from "./identity.js";
+import { taskIdsSchema, taskNamespaceSchema } from "./identity.js";
+import { taskNonblankTextSchema, taskStateSchema, taskPrioritySchema } from "./document.js";
 import {
   taskBatchResultSchema,
   taskCompositionResultSchema,
   taskMutationIdSchema,
   taskMutationResultSchema,
   taskUpdateResultSchema,
-  isTaskMutationExecutionResult,
   type TaskMutationExecutionResult,
 } from "./mutation-result.js";
 import { z } from "zod";
@@ -45,21 +45,14 @@ export const TASK_MUTATION_ACTIONS = Object.freeze([
   "task.update",
 ] as const);
 
-export type TaskMutationAction = (typeof TASK_MUTATION_ACTIONS)[number];
+const taskMutationActionSchema = z.enum(TASK_MUTATION_ACTIONS);
+export type TaskMutationAction = z.infer<typeof taskMutationActionSchema>;
 
-const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
-const namespaceSchema = z.array(z.string().refine(isTaskSegment)).readonly();
-const taskIdsBaseSchema = z.array(taskMutationIdSchema).superRefine((ids, context) => {
-  if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "TaskIds must be unique" });
-});
-const taskIdsSchema = taskIdsBaseSchema.readonly();
-const nonemptyTaskIdsSchema = taskIdsBaseSchema.min(1).readonly();
-const taskStateSchema = z.enum(["open", "in_progress", "on_hold", "done", "drop"]);
-const taskPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+const nonemptyTaskIdsSchema = taskIdsSchema.unwrap().min(1).readonly();
 const addInputSchema = z
   .object({
-    title: nonblankTextSchema,
-    namespace: namespaceSchema,
+    title: taskNonblankTextSchema,
+    namespace: taskNamespaceSchema,
     body: z.string().optional(),
     note: z.string().optional(),
     state: taskStateSchema.optional(),
@@ -72,7 +65,7 @@ const addInputSchema = z
   .strict();
 const updateInputSchema = z
   .object({
-    title: nonblankTextSchema.optional(),
+    title: taskNonblankTextSchema.optional(),
     body: z.string().optional(),
     appendBody: z.string().optional(),
     note: z.string().optional(),
@@ -100,11 +93,11 @@ const addRequestSchema = z
   .strict()
   .transform(({ input }) => ({ action: "task.add" as const, input }));
 const addDocumentRequestSchema = z
-  .object({ input: z.object({ markdown: z.string(), namespace: namespaceSchema }).strict() })
+  .object({ input: z.object({ markdown: z.string(), namespace: taskNamespaceSchema }).strict() })
   .strict()
   .transform(({ input }) => ({ action: "task.addDocument" as const, input }));
 const composeRequestSchema = z
-  .object({ markdown: z.string(), namespace: namespaceSchema })
+  .object({ markdown: z.string(), namespace: taskNamespaceSchema })
   .strict()
   .transform((request) => ({ action: "task.compose" as const, ...request }));
 const updateRequestSchema = z
@@ -151,28 +144,16 @@ const taskRequestSchemas = {
 export type TaskMutationRequest = z.infer<(typeof taskRequestSchemas)[TaskMutationAction]>;
 
 const worldPathSchema = z.string().min(1);
-const taskBodyRequestSchemas = {
-  "task.add": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.add"] }).strict(),
-  "task.addDocument": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.addDocument"] }).strict(),
-  "task.compose": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.compose"] }).strict(),
-  "task.done": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.done"] }).strict(),
-  "task.drop": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.drop"] }).strict(),
-  "task.hold": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.hold"] }).strict(),
-  "task.resume": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.resume"] }).strict(),
-  "task.start": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.start"] }).strict(),
-  "task.stop": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.stop"] }).strict(),
-  "task.update": z.object({ world: worldPathSchema, request: taskRequestSchemas["task.update"] }).strict(),
-} as const;
-export type TaskMutationBodyRequest = Readonly<{
-  world: z.infer<(typeof taskBodyRequestSchemas)[TaskMutationAction]>["world"];
-  request: TaskMutationRequest;
-}>;
+const taskBodyRequestSchema = z
+  .object({ world: worldPathSchema, request: z.union(Object.values(taskRequestSchemas)) })
+  .strict();
+export type TaskMutationBodyRequest = z.infer<typeof taskBodyRequestSchema>;
 
-export const taskMutationServiceSchema = z.object({ action: z.enum(TASK_MUTATION_ACTIONS) }).strict();
+export const taskMutationServiceSchema = z.object({ action: taskMutationActionSchema }).strict();
 export type TaskMutationService = z.infer<typeof taskMutationServiceSchema>;
 
 export const forwardedTaskReferenceSchema = z
-  .object({ kind: z.literal("served-reference"), action: z.enum(TASK_MUTATION_ACTIONS) })
+  .object({ kind: z.literal("served-reference"), action: taskMutationActionSchema })
   .strict();
 export type ForwardedTaskReference = z.infer<typeof forwardedTaskReferenceSchema>;
 
@@ -190,7 +171,7 @@ export type TaskMutationRequestPort = Readonly<{
   ): Promise<TaskMutationExecutionResult>;
 }>;
 function decodeTaskBodyRequest(action: TaskMutationAction, value: unknown): TaskMutationBodyRequest | null {
-  const parsed = taskBodyRequestSchemas[action].safeParse(value);
+  const parsed = taskBodyRequestSchema.extend({ request: taskRequestSchemas[action] }).safeParse(value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -211,6 +192,7 @@ function decodeTaskReference(action: TaskMutationAction, value: unknown): Forwar
 /** Task owns forwarded mutation payload, live result, and durable service evidence. */
 export function taskMutationRequestProtocol(
   action: TaskMutationAction,
+  batch?: boolean,
 ): RequestProtocol<TaskMutationBodyRequest, TaskMutationExecutionResult, ForwardedTaskReference> {
   return {
     action,
@@ -221,10 +203,19 @@ export function taskMutationRequestProtocol(
     decodeRequest: (value) => decodeTaskBodyRequest(action, value),
     encodeResult: (result) => result,
     decodeResult: (result) => {
-      if (!isTaskMutationExecutionResult(result)) {
-        throw new Error(`transport integrity: Task ${action} returned an invalid live result`);
-      }
-      return result;
+      const schema =
+        action === "task.compose"
+          ? taskCompositionResultSchema
+          : action === "task.update"
+            ? taskUpdateResultSchema
+            : batch === undefined
+              ? z.union([taskMutationResultSchema, taskBatchResultSchema])
+              : batch
+                ? taskBatchResultSchema
+                : taskMutationResultSchema;
+      const parsed = schema.safeParse(result);
+      if (!parsed.success) throw new Error(`transport integrity: Task ${action} returned an invalid live result`);
+      return parsed.data;
     },
     decodeReference: (reference) => decodeTaskReference(action, reference),
     isPermitted: (allowed) => allowed.includes(action),
@@ -243,9 +234,9 @@ export function taskMutationRequestCommand(
   return {
     completion: "service",
     protocol: taskMutationRequestProtocol(action),
-    encodeService: (service) => decodeTaskService(action, service),
+    encodeService: (service) => service,
     decodeService: (service) => decodeTaskService(action, service),
-    projectService: (service) => decodeTaskReference(action, { kind: "served-reference", action: service.action }),
+    projectService: (service) => ({ kind: "served-reference", action: service.action }),
     execute: async (request, facts) => {
       const world = await World.prove(request.world);
       return {
@@ -268,21 +259,6 @@ export function taskMutationRequestCommands(
   return Object.fromEntries(
     TASK_MUTATION_ACTIONS.map((action) => [action, eraseRequestCommand(taskMutationRequestCommand(action, port))]),
   ) as Record<TaskMutationAction, ErasedRequestCommand>;
-}
-
-function taskResultForRequest<Request extends TaskMutationRequest>(
-  request: Request,
-  value: unknown,
-): value is TaskMutationResultForRequest<Request> {
-  const schema =
-    request.action === "task.compose"
-      ? taskCompositionResultSchema
-      : request.action === "task.update"
-        ? taskUpdateResultSchema
-        : "ids" in request
-          ? taskBatchResultSchema
-          : taskMutationResultSchema;
-  return schema.safeParse(value).success;
 }
 
 export function requestForwardedTask<Request extends TaskMutationRequest>(
@@ -315,15 +291,12 @@ export async function requestForwardedTask<Request extends TaskMutationRequest>(
   const response = await requestBodyCommand({
     directory: input.directory,
     ...(input.id === undefined ? {} : { id: input.id }),
-    command: taskMutationRequestProtocol(input.request.action),
+    command: taskMutationRequestProtocol(input.request.action, "ids" in input.request),
     value: { world: input.world, request: input.request },
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   if (response.kind === "reference") return response.reference;
-  if (!taskResultForRequest(input.request, response.result)) {
-    throw new Error(`transport integrity: request Task ${input.request.action} returned an invalid live result`);
-  }
-  return response.result;
+  return response.result as TaskMutationResultForRequest<Request>;
 }
 
 export function decodeTaskMutationRequest(action: TaskMutationAction, value: unknown): TaskMutationRequest {

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
+import { LEASH_HELD_EXIT, runAkumaBody, bodyLaunchSchema, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { selectionRequestPort } from "./akuma/selection-owner-port.js";
@@ -129,7 +129,7 @@ function bodyProcessConfiguration(): BodyProcessConfiguration {
 async function runBodyEntrypoint(): Promise<void> {
   const encoded = process.argv[2];
   if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
-  const launch = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as BodyLaunch;
+  const launch = bodyLaunchSchema.parse(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
   const { world, commands } = await externalRequestCommandsFor(launch, bodyProcessConfiguration());
   if ((await runAkumaBody(launch, world, commands)) === "held") process.exitCode = LEASH_HELD_EXIT;
 }

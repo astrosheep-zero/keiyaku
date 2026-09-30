@@ -6,7 +6,7 @@ Verb owners alone define their payloads, results, and service evidence.
 
 ## Transport And Authority
 
-Each provider drive receives one disposable request channel. The provider captures
+Each provider drive receives one disposable request channel. The descriptor remains the structural owner of its request, result, reference, and failure shapes; the parent executes the local owner and the child receives that owner result. Wire validation occurs at the actual transport boundary, not by re-decoding trusted local values. The provider captures
 that explicit direct-parent channel once; public inputs never carry routes and
 the parent serves requests with forced-local composition. There is no second
 public verb, generic messaging surface, or multi-hop forwarding.

@@ -1,4 +1,5 @@
 /** @architectureCompositionRoot */
+import { z } from "zod";
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import {
@@ -14,13 +15,13 @@ import { settle, settleAll, type SettlementReport } from "../settlement/settle.j
 import type { WorktreeHooks } from "./configuration.js";
 import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
 import {
-  decodeContractFileLag,
+  contractFileLagSchema,
   projectContractWorktree,
   type ContractFileEffect,
   type ContractFileLag,
   type ContractWorktreeResult,
 } from "../contract-worktree.js";
-import { decodeGitReconcileLag } from "../git/result-codec.js";
+import { gitReconcileLagSchema } from "../git/reconcile.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -80,13 +81,7 @@ export function reconcileLagIsFailure(lag: ReconcileCompletion["lag"][number]): 
   return classifyReconcileLag(lag.kind).failure;
 }
 
-export function decodeReconciliationLag(value: unknown): ReconcileCompletion["lag"][number] {
-  try {
-    return decodeGitReconcileLag(value);
-  } catch {
-    return decodeContractFileLag(value);
-  }
-}
+export const reconciliationLagSchema = z.union([gitReconcileLagSchema, contractFileLagSchema]);
 
 export type RepoContractReconcileReport = ReconcileCompletion;
 

@@ -1,4 +1,5 @@
 import type { TaskBoard } from "./board.js";
+import type { TaskCompositionResult } from "./mutation-result.js";
 import { serializeTaskDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
 import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { parseTaskComposition, type Assignment, type ParsedComposition, type ParsedNode } from "./compose-parser.js";
@@ -15,33 +16,13 @@ export function taskCompositionNamespaceHeader(markdown: string): Readonly<{
   };
 }
 
-export type TaskCompositionAlias = Readonly<{ alias: string; taskId: TaskId }>;
-export type TaskCompositionPlanAlias = Readonly<{ alias: string; position: number }>;
-export type TaskCompositionPlanOrder = Readonly<{
-  position: number;
-  alias?: string | undefined;
-  taskId?: TaskId | undefined;
-}>;
-export type TaskCompositionBodyPreview = Readonly<{
-  position: number;
-  title: string;
-  bytes: number;
-  firstLine: string;
-  lastLine: string;
-}>;
-export type TaskCompositionAdmission =
-  | Readonly<{
-      position: number;
-      kind: "new";
-      alias?: string | undefined;
-      title: string;
-    }>
-  | Readonly<{
-      position: number;
-      kind: "existing";
-      taskId: TaskId;
-      title: string;
-    }>;
+type PlannedComposition = Extract<TaskCompositionResult, { kind: "planned" }>;
+type AcceptedComposition = Extract<TaskCompositionResult, { kind: "accepted" }>;
+export type TaskCompositionAlias = Readonly<AcceptedComposition["aliases"][number]>;
+export type TaskCompositionPlanAlias = Readonly<PlannedComposition["aliases"][number]>;
+export type TaskCompositionPlanOrder = Readonly<PlannedComposition["admissionOrder"][number]>;
+export type TaskCompositionBodyPreview = Readonly<PlannedComposition["bodies"][number]>;
+export type TaskCompositionAdmission = Readonly<PlannedComposition["admissions"][number]>;
 export type PlannedTask = Readonly<{
   index: number;
   line: number;

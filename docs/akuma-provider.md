@@ -62,8 +62,9 @@ composed config variable; that remains the documented escape hatch.
 
 ## Narration And Admission
 
-Adapters translate native events into bounded provider-neutral narration, drop
-raw payloads, deltas, raw thinking, usage telemetry, and unsupported detail, and
+Adapters translate native events into bounded provider-neutral narration, using typed construction rather than decoding their own trusted neutral values. The neutral structural declaration belongs to Heart; provider code owns only native dialect adaptation and capability meaning.
+
+Adapters drop raw payloads, deltas, raw thinking, usage telemetry, and unsupported detail, and
 preserve unknown kinds as bounded unknown narration. Activity is execution
 history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain

@@ -1,32 +1,21 @@
-export type ResumeCoordinate =
-  | Readonly<{ sessionId: string; sessionFile?: never }>
-  | Readonly<{ sessionFile: string; sessionId?: string }>;
+import { z } from "zod";
 
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
+const coordinateText = z.string().refine((value) => value.trim() !== "");
+// File coordinates take precedence, including coordinates that also name a session.
+export const resumeCoordinateSchema = z.union([
+  z
+    .object({ sessionFile: coordinateText, sessionId: coordinateText.optional() })
+    .strict()
+    .transform(({ sessionFile, sessionId }) =>
+      sessionId === undefined ? { sessionFile } : { sessionFile, sessionId },
+    ),
+  z.object({ sessionId: coordinateText }).strict(),
+]);
+export type ResumeCoordinate = z.infer<typeof resumeCoordinateSchema>;
 
 export function decodeResumeCoordinate(value: unknown): ResumeCoordinate | null {
-  const coordinate = record(value);
-  if (coordinate === null) return null;
-  const keys = Object.keys(coordinate);
-  if (
-    typeof coordinate.sessionFile === "string" &&
-    coordinate.sessionFile.trim().length > 0 &&
-    (coordinate.sessionId === undefined ||
-      (typeof coordinate.sessionId === "string" && coordinate.sessionId.trim().length > 0)) &&
-    keys.every((key) => key === "sessionFile" || key === "sessionId")
-  ) {
-    return {
-      sessionFile: coordinate.sessionFile,
-      ...(coordinate.sessionId === undefined ? {} : { sessionId: coordinate.sessionId }),
-    };
-  }
-  return typeof coordinate.sessionId === "string" && coordinate.sessionId.trim().length > 0 && keys.length === 1
-    ? { sessionId: coordinate.sessionId }
-    : null;
+  const result = resumeCoordinateSchema.safeParse(value);
+  return result.success ? result.data : null;
 }
 
 export function encodeResumeCoordinate(coordinate: ResumeCoordinate): unknown {

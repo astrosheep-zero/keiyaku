@@ -41,8 +41,6 @@ import {
 } from "./address.js";
 import { requireInput } from "./input.js";
 import {
-  selectionResultSchemas,
-  parseAkumaObservation,
   type AkumaKillResult,
   type AkumaObservation,
   type AkumaTellResult,
@@ -207,11 +205,11 @@ async function observeAkumaSet(
   return await Promise.all(
     statuses.map(async (status, index) => {
       const contract = await dispatchAssociation(repo, status.id);
-      return parseAkumaObservation({
+      return {
         status: await composeObservation(status, contract, discharged),
         contract,
         createdTasks: created[index]!,
-      });
+      };
     }),
   );
 }
@@ -240,19 +238,19 @@ async function attachWaitAssociations(
     result.observations.map((observation) => observation.status),
   );
   const discharged = placementDischarged(repo);
-  return selectionResultSchemas.wait.parse({
+  return {
     ...result,
     observations: await Promise.all(
       result.observations.map(async (observation, index) => {
         const contract = await dispatchAssociation(repo, observation.status.id);
-        return parseAkumaObservation({
+        return {
           status: await composeObservation(observation.status, contract, discharged),
           contract,
           createdTasks: created[index]!,
-        });
+        };
       }),
     ),
-  });
+  };
 }
 
 function directAddress(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {

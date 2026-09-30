@@ -1,9 +1,20 @@
-import { readDeliveryDiff, readDeliveryScope, type DeliveryDiffScope } from "../git/integration.js";
+import { z } from "zod";
+import {
+  deliverDataSchema,
+  deliveryPreparationRefusalSchema,
+  verificationStopSchema,
+  changeIdSchema,
+  verdictSchema,
+  entryUlidSchema,
+} from "./operations.js";
+import { auditTargetAnswerSchema } from "../git/target-placement.js";
+import { verificationReuseSchema } from "./intent.js";
+import { deliveryDiffScopeSchema, readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { activeContract, documentIsCurrent } from "../core/facts/observation.js";
-import type { ChangeId, ContractState, DeliverData, EntryUlid, SnapshotId } from "../core/facts/types.js";
-import { adjudicateAuditTarget, type AuditTargetAnswer } from "../git/target-placement.js";
-import { observeTargetLag, type ContractTargetLag } from "../git/workspace.js";
+import type { ContractState, DeliverData, SnapshotId } from "../core/facts/types.js";
+import { adjudicateAuditTarget } from "../git/target-placement.js";
+import { observeTargetLag, contractTargetLagSchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import { readManagedWorktreeAppointment, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
 import { accepted, admitted } from "./outcome.js";
@@ -14,43 +25,53 @@ import type {
   IntentOutcome,
   MutationOperationInput,
   RepositoryScope,
-  VerificationStop,
 } from "./operations.js";
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
-export { decodeAuditReport } from "./result-codec.js";
-
-type AuditWorkspace = Readonly<{
-  kind: "worktree";
-  path: string;
-}>;
-type DiffScope = DeliveryDiffScope;
-export type AuditReport = Readonly<{
-  candidate:
-    | Readonly<{ kind: "blocked"; refusal: DeliveryPreparationRefusal }>
-    | Readonly<{
-        kind: "ready";
-        workspace: AuditWorkspace;
-        identity: DeliverData;
-        scope: DiffScope;
-        diff?: string;
-      }>;
-  verification:
-    | Readonly<{ kind: "not-run" }>
-    | Readonly<{ kind: "undeclared" }>
-    | Readonly<{ kind: "satisfied"; passed: number; total: number; summary?: string }>
-    | Readonly<{ kind: "unsatisfied"; passed: number; total: number; summary?: string }>
-    | Readonly<{ kind: "reused"; entry: EntryUlid; verdict: "satisfied" | "unsatisfied"; summary?: string }>
-    | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
-  target: Readonly<{ kind: "not-observed" }> | AuditTargetAnswer;
-  targetLag?: ContractTargetLag;
-  delivery?: Readonly<{
-    changeId: ChangeId;
-    relation: "identical" | "differs";
-    verification:
-      | Readonly<{ kind: "undeclared" | "unrecorded" }>
-      | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; fact: EntryUlid }>;
-  }>;
-}>;
+export const auditReportSchema = z
+  .object({
+    candidate: z.union([
+      z.object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema }).strict(),
+      z
+        .object({
+          kind: z.literal("ready"),
+          workspace: worktreeWorkspaceSchema,
+          identity: deliverDataSchema,
+          scope: deliveryDiffScopeSchema,
+          diff: z.string().optional(),
+        })
+        .strict(),
+    ]),
+    verification: z.union([
+      z.object({ kind: z.literal("not-run") }).strict(),
+      z.object({ kind: z.literal("undeclared") }).strict(),
+      z.object({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
+      z
+        .object({
+          kind: z.enum(["satisfied", "unsatisfied"]),
+          passed: z.number(),
+          total: z.number(),
+          summary: z.string().optional(),
+        })
+        .strict(),
+      verificationReuseSchema.extend({ kind: z.literal("reused") }).strict(),
+    ]),
+    target: z.union([z.object({ kind: z.literal("not-observed") }).strict(), auditTargetAnswerSchema]),
+    targetLag: contractTargetLagSchema.optional(),
+    delivery: z
+      .object({
+        changeId: changeIdSchema,
+        relation: z.enum(["identical", "differs"]),
+        verification: z.union([
+          z.object({ kind: z.enum(["undeclared", "unrecorded"]) }).strict(),
+          z.object({ kind: z.literal("recorded"), verdict: verdictSchema, fact: entryUlidSchema }).strict(),
+        ]),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+type AuditWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
+export type AuditReport = z.infer<typeof auditReportSchema>;
 
 type AuditOperationInput = MutationOperationInput &
   Readonly<{

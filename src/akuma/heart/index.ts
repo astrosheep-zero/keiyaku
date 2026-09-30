@@ -42,6 +42,7 @@ import {
   turnFact,
 } from "./rows.js";
 import type { ActivityFact } from "./rows.js";
+import type { AgentEvent } from "./activity-schema.js";
 import {
   insertTellDeliveryFact,
   dispositionSnapshotProven,
@@ -162,7 +163,7 @@ export async function recordSession(paths: AkumaPaths, input: Omit<SessionFact, 
 
 export async function appendActivity(
   paths: AkumaPaths,
-  input: Readonly<{ turnSequence: number; event: unknown; at: string }>,
+  input: Readonly<{ turnSequence: number; event: AgentEvent; at: string }>,
 ): Promise<number> {
   return await withHeartTransaction(paths, (heart) => {
     const sequence = insertActivityFact(heart, input);

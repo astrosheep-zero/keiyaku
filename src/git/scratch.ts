@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { access, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,11 +25,8 @@ type CollectableScratchWorktree = Readonly<{
   release(): void;
 }>;
 
-export type WorktreeLeak = Readonly<{
-  path: string;
-  diagnostic: string;
-}>;
-
+export const worktreeLeakSchema = z.object({ path: z.string(), diagnostic: z.string() }).strict();
+export type WorktreeLeak = z.infer<typeof worktreeLeakSchema>;
 type CollectableScratchRemoval = Readonly<{
   path: string;
   action: "removed" | "unchanged";

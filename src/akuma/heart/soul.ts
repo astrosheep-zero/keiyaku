@@ -48,7 +48,7 @@ function decodeOrigin(value: unknown): AkumaOrigin {
   throw new Error("Akuma soul origin must be direct, request, or fork");
 }
 
-function validateSoul(value: unknown): Soul {
+export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   const soul = record(value);
   if (soul === null) throw new Error("Akuma soul must be an object");
   const identity = soulAkuIdentity(soul.id, "id");
@@ -67,7 +67,6 @@ function validateSoul(value: unknown): Soul {
     cwd: nonblank(soul.cwd, "cwd"),
     origin: decodeOrigin(soul.origin),
     allowed: historicalAllowedActions(soul.allowed),
-    createdAt: nonblank(soul.createdAt, "createdAt"),
   };
 }
 
@@ -82,11 +81,13 @@ function deepFreeze<T>(value: T): T {
 }
 
 export function decodeSoul(value: unknown): Soul {
-  return deepFreeze(validateSoul(value));
+  const soul = record(value);
+  if (soul === null) throw new Error("Akuma soul must be an object");
+  return deepFreeze({ ...decodeSoulSeed(soul), createdAt: nonblank(soul.createdAt, "createdAt") });
 }
 
 export function encodeSoul(soul: Soul): string {
-  return JSON.stringify(validateSoul(soul));
+  return JSON.stringify(decodeSoul(soul));
 }
 
 export function encodeSoulRow(soul: Soul): readonly [string] {

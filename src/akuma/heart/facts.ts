@@ -40,14 +40,8 @@ export type BodyFact = Readonly<{
   endedAt?: string;
 }>;
 
-export type SessionFact = Readonly<{
-  sequence: number;
-  provider: string;
-  coordinate: ResumeCoordinate;
-  cwd: string;
-  options: ProviderOptions;
-  admittedAt: string;
-}>;
+export type SessionFact = import("zod").infer<typeof import("./rows.js").sessionAdmissionSchema> &
+  Readonly<{ sequence: number }>;
 
 export type ForkPoint = Readonly<{
   historyId: string;

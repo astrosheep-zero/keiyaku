@@ -32,7 +32,5 @@ export async function observeCreatedTaskObservations(
     const failed = { kind: "failed" as const, diagnostic: observationDiagnostic(error) };
     return createdByIds.map(() => failed);
   }
-  return createdByIds.map((createdBy) =>
-    parseCreatedTaskObservation({ kind: "present", rows: board.selectCreatedBy(createdBy) }),
-  );
+  return createdByIds.map((createdBy) => ({ kind: "present", rows: board.selectCreatedBy(createdBy) }));
 }

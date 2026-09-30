@@ -1,8 +1,11 @@
-import type { ActorId, ContractId, EntryUlid, SnapshotId } from "../core/facts/types.js";
-import { readDeliveryScope } from "../git/integration.js";
+import { z } from "zod";
+import { snapshotIdSchema, verdictSchema, verificationStopSchema, placementStopSchema } from "./operations.js";
+import { verificationReuseSchema } from "./intent.js";
+import type { ActorId, ContractId, EntryUlid } from "../core/facts/types.js";
+import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { currentVerifiedAttestation, verifyDelivery, type CurrentVerifiedAttestation } from "./intent.js";
+import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
 import { admitPlacement, observeTargetPlacement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
@@ -21,33 +24,36 @@ import { VERIFIED } from "../verification/declaration.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-export type CandidateCompletion = Readonly<{
-  integration: SnapshotId;
-  /** The reference this placement advanced and the head it advanced from, both observed at completion time. */
-  predecessor?: SnapshotId;
-  target?: string;
-  /** The landed diff's shape, read from the recorded integration pair at completion time. */
-  scope?: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
-  verification?: Readonly<{ mode: "ran" | "reused"; verdict: "satisfied" | "unsatisfied" }>;
-}>;
-
-/** The terminal Verification attempt's own subject: the captured integration snapshot and its provenance. */
-export type VerificationSubject = Readonly<{
-  snapshot: SnapshotId;
-  mode: "ran" | "reused";
-  verdict: "satisfied" | "unsatisfied";
-}>;
-
-/** Candidate conclusions only. Invocation-owned receipts and cleanup live in progress. */
-export type CompletionEvidence = Readonly<{
-  completion?: CandidateCompletion;
-  verification?: VerificationStop;
-  verificationReuse?: CurrentVerifiedAttestation;
-  verificationSubject?: VerificationSubject;
-  verificationSummary?: string;
-  placement?: PlacementStop;
-}>;
-
+const verdictProvenanceSchema = z.object({ mode: z.enum(["ran", "reused"]), verdict: verdictSchema }).strict();
+export const candidateCompletionSchema = z
+  .object({
+    integration: snapshotIdSchema,
+    predecessor: snapshotIdSchema.optional(),
+    target: z
+      .string()
+      .refine((value) => value.trim() !== "")
+      .optional(),
+    scope: deliveryDiffScopeSchema.omit({ paths: true }).optional(),
+    verification: verdictProvenanceSchema.optional(),
+  })
+  .strict();
+export type CandidateCompletion = z.infer<typeof candidateCompletionSchema>;
+export const verificationSubjectSchema = verdictProvenanceSchema.extend({ snapshot: snapshotIdSchema }).strict();
+export type VerificationSubject = z.infer<typeof verificationSubjectSchema>;
+export const completionEvidenceSchema = z
+  .object({
+    completion: candidateCompletionSchema.optional(),
+    verification: verificationStopSchema.optional(),
+    verificationReuse: verificationReuseSchema.optional(),
+    verificationSubject: verificationSubjectSchema.optional(),
+    verificationSummary: z
+      .string()
+      .refine((value) => value.trim() !== "")
+      .optional(),
+    placement: placementStopSchema.optional(),
+  })
+  .strict();
+export type CompletionEvidence = z.infer<typeof completionEvidenceSchema>;
 export type CompletionInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;

@@ -3096,14 +3096,9 @@ test("call, wait, and ask stream projected overlapping tool completions once in 
   const id = parseAkuId("aku/worker/abcd0104").id;
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
-    activityFact(sequence, 1, at(sequence), {
-      type: "tool",
-      phase,
-      id: name,
-      name: "bash",
-      call: { kind: "run", command: name },
-      ...(phase === "completed" ? { result: { status: "ok" as const } } : {}),
-    });
+    phase === "completed"
+      ? activityFact(sequence, 1, at(sequence), { type: "tool", phase: "completed", id: name, name: "bash", call: { kind: "run", command: name }, result: { status: "ok" as const } })
+      : activityFact(sequence, 1, at(sequence), { type: "tool", phase: "started", id: name, name: "bash", call: { kind: "run", command: name } });
   const first: TimelineFact[] = [
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at(1) },
     { kind: "call", sequence: 2, turnSequence: 1, at: at(2), body: "first question" },

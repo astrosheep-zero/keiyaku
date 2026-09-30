@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -253,11 +254,14 @@ export type WorkspaceChangeCounts = Readonly<{
   submodules: number;
 }>;
 
-export type ConflictRecovery = Readonly<{
-  materialize: "deliver --materialize-conflict --include-dirty";
-  deliver: "deliver --include-dirty";
-  staging: "not-required";
-}>;
+export const conflictRecoverySchema = z
+  .object({
+    materialize: z.literal("deliver --materialize-conflict --include-dirty"),
+    deliver: z.literal("deliver --include-dirty"),
+    staging: z.literal("not-required"),
+  })
+  .strict();
+export type ConflictRecovery = z.infer<typeof conflictRecoverySchema>;
 
 export const conflictRecovery: ConflictRecovery = Object.freeze({
   materialize: "deliver --materialize-conflict --include-dirty",
@@ -283,10 +287,21 @@ export type ContractWorkspaceObservation =
   | Readonly<{ kind: "unappointed" }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
-export type ContractTargetLag =
-  | Readonly<{ kind: "counted"; behind: number; subject?: ContractWorkspaceLocation }>
-  | Readonly<{ kind: "unknown"; subject?: ContractWorkspaceLocation }>
-  | Readonly<{ kind: "none" }>;
+export const worktreeWorkspaceSchema = z
+  .object({ kind: z.literal("worktree"), path: z.string().refine((value) => value.trim() !== "") })
+  .strict();
+export const contractTargetLagSchema = z.union([
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({ kind: z.literal("unknown"), subject: worktreeWorkspaceSchema.optional() }).strict(),
+  z
+    .object({
+      kind: z.literal("counted"),
+      behind: z.number().int().nonnegative(),
+      subject: worktreeWorkspaceSchema.optional(),
+    })
+    .strict(),
+]);
+export type ContractTargetLag = z.infer<typeof contractTargetLagSchema>;
 
 function countsOf(changes: WorkspaceChanges): WorkspaceChangeCounts {
   return {

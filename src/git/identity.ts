@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createHash } from "node:crypto";
 import {
   changeId,
@@ -9,6 +10,48 @@ import {
   type ContractId,
   type SnapshotId,
 } from "../core/facts/types.js";
+
+// Structural admission reuses the pure identity constructors; physical minting remains distinct.
+export const contractIdSchema = z.string().transform((value, context) => {
+  try {
+    return contractId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid contractId" });
+    return z.NEVER;
+  }
+});
+export const snapshotIdSchema = z.string().transform((value, context) => {
+  try {
+    return snapshotId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid snapshotId" });
+    return z.NEVER;
+  }
+});
+export const contractHeadSchema = z.string().transform((value, context) => {
+  try {
+    return contractHead(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid ContractHead" });
+    return z.NEVER;
+  }
+});
+export const changeIdSchema = z.string().transform((value, context) => {
+  try {
+    return changeId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid changeId" });
+    return z.NEVER;
+  }
+});
+export const mintedSnapshotInputSchema = z.string().transform((value, context) => {
+  try {
+    return mintSnapshotId(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid mintSnapshotId" });
+    return z.NEVER;
+  }
+});
 
 declare const gitObjectIdBrand: unique symbol;
 

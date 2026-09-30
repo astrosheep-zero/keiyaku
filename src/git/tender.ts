@@ -1,3 +1,5 @@
+import { contractIdSchema } from "./identity.js";
+import { z } from "zod";
 import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
@@ -16,36 +18,47 @@ export type TenderCaptureCoordinates = Readonly<{
   rejectUnmerged?: boolean;
 }>;
 
-export type WorktreeMissingRefusal = Readonly<{
-  kind: "worktree-missing";
-  contractId: ContractId;
-}>;
-
-export type TenderCaptureRefusal =
-  | WorktreeMissingRefusal
-  | Readonly<{
-      kind: "unmerged-paths";
-      contractId: ContractId;
-      paths: readonly string[];
-    }>;
-
-export type WorkspaceDirtyDelta = Readonly<{
-  staged: readonly string[];
-  unstaged: readonly string[];
-  untracked: readonly string[];
-  shortStat: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
-}>;
-
-export type DirtyWorkspaceRefusal = Readonly<{
-  kind: "dirty-workspace";
-  contractId: ContractId;
-  staged: readonly string[];
-  unstaged: readonly string[];
-  untracked: readonly string[];
-  submodules: readonly string[];
-  shortStat: WorkspaceDirtyDelta["shortStat"];
-}>;
-
+export const worktreeMissingRefusalSchema = z
+  .object({ kind: z.literal("worktree-missing"), contractId: contractIdSchema })
+  .strict();
+export type WorktreeMissingRefusal = z.infer<typeof worktreeMissingRefusalSchema>;
+export const unmergedPathsRefusalSchema = z
+  .object({
+    kind: z.literal("unmerged-paths"),
+    contractId: contractIdSchema,
+    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+  })
+  .strict();
+export type TenderCaptureRefusal = WorktreeMissingRefusal | z.infer<typeof unmergedPathsRefusalSchema>;
+export const workspaceDirtyDeltaSchema = z
+  .object({
+    staged: z.array(z.string()).readonly(),
+    unstaged: z.array(z.string()).readonly(),
+    untracked: z.array(z.string()).readonly(),
+    shortStat: z
+      .object({ filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() })
+      .strict(),
+  })
+  .strict();
+export type WorkspaceDirtyDelta = z.infer<typeof workspaceDirtyDeltaSchema>;
+export const dirtyWorkspaceRefusalSchema = z
+  .object({
+    kind: z.literal("dirty-workspace"),
+    contractId: contractIdSchema,
+    staged: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    unstaged: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    untracked: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    submodules: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    shortStat: z
+      .object({
+        filesChanged: z.number().int().nonnegative(),
+        insertions: z.number().int().nonnegative(),
+        deletions: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type DirtyWorkspaceRefusal = z.infer<typeof dirtyWorkspaceRefusalSchema>;
 export type TenderCapture = Readonly<{
   tree: GitObjectId;
   head: SnapshotId;

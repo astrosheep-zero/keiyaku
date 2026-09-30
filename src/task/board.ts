@@ -1,26 +1,23 @@
-import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
-import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
+import {
+  taskNonblankTextSchema,
+  taskStateSchema,
+  taskPrioritySchema,
+  type TaskDocument,
+  type TaskPriority,
+  type TaskState,
+} from "./document.js";
+import { taskIdSchema, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
 import { z } from "zod";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export type TaskRef = Readonly<{ id: TaskId; title: string | null; state: TaskState | "missing" }>;
-const taskRowIdSchema = z.string().transform((value, context) => {
-  try {
-    const id = formatTaskId(parseTaskId(value));
-    if (id !== value) throw new Error("not canonical");
-    return id;
-  } catch {
-    context.addIssue({ code: "custom", message: "expected canonical TaskId" });
-    return z.NEVER;
-  }
-});
 const taskRowTimestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
 export const taskRowSchema = z
   .object({
-    id: taskRowIdSchema,
-    title: z.string().refine((value) => value.trim() !== ""),
-    state: z.enum(["open", "in_progress", "on_hold", "done", "drop"]),
-    priority: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+    id: taskIdSchema,
+    title: taskNonblankTextSchema,
+    state: taskStateSchema,
+    priority: taskPrioritySchema,
     disposition: z.enum(["ready", "blocked", "in_progress", "on_hold", "done", "drop"]),
     updatedAt: taskRowTimestampSchema,
     bodyPresent: z.boolean(),

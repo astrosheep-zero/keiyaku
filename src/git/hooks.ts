@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
 import { SettingsError, type Settings } from "../settings.js";
 
@@ -6,20 +7,37 @@ export type WorktreeHooks = Readonly<{
   create: readonly HookCommand[];
   destroy: readonly HookCommand[];
 }>;
-export type HookFailure =
-  | Readonly<{ kind: "exit"; code: number; stdout: string; stderr: string; truncated: boolean }>
-  | Readonly<{ kind: "timeout"; stdout?: string; stderr?: string; truncated?: boolean }>
-  | Readonly<{ kind: "spawn-error"; diagnostic: string }>
-  | Readonly<{ kind: "unknown-exit"; stdout?: string; stderr?: string; truncated?: boolean }>;
-export type WorktreeHookLag = Readonly<{
-  kind: "worktree-hook-failed";
-  phase: HookPhase;
-  path: string;
-  command: number;
-  name: string;
-  failure: HookFailure;
-}>;
-
+const hookOutputFields = {
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+  truncated: z.boolean().optional(),
+};
+export const hookFailureSchema = z.union([
+  z
+    .object({
+      kind: z.literal("exit"),
+      code: z.number().int(),
+      stdout: z.string(),
+      stderr: z.string(),
+      truncated: z.boolean(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("timeout"), ...hookOutputFields }).strict(),
+  z.object({ kind: z.literal("unknown-exit"), ...hookOutputFields }).strict(),
+  z.object({ kind: z.literal("spawn-error"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
+]);
+export type HookFailure = z.infer<typeof hookFailureSchema>;
+export const worktreeHookLagSchema = z
+  .object({
+    kind: z.literal("worktree-hook-failed"),
+    phase: z.enum(["create", "destroy"]),
+    path: z.string().refine((value) => value.trim() !== ""),
+    command: z.number().int().nonnegative(),
+    name: z.string().refine((value) => value.trim() !== ""),
+    failure: hookFailureSchema,
+  })
+  .strict();
+export type WorktreeHookLag = z.infer<typeof worktreeHookLagSchema>;
 export type HookPhase = "create" | "destroy";
 export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 

@@ -10,8 +10,6 @@ import { EMPTY_CREATED_TASK_OBSERVATION } from "../task/created-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import {
-  selectionResultSchemas,
-  parseAkumaObservation,
   type AkumaKillResult,
   type AkumaTellResult,
   type AkumaAskObservation,
@@ -36,11 +34,11 @@ type WaitRound = Readonly<{
 }>;
 
 function akumaOnlyObservation(status: AkumaStatus) {
-  return parseAkumaObservation({
+  return {
     status,
     contract: NO_DISPATCH_ASSOCIATION,
     createdTasks: EMPTY_CREATED_TASK_OBSERVATION,
-  });
+  };
 }
 
 async function observeWaitRound(
@@ -177,12 +175,12 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Akuma
     complete: (round) => roundComplete(round, input.completion),
     onObserve: async (round) => await observeRound(round),
   });
-  return selectionResultSchemas.wait.parse({
+  return {
     mode: input.completion,
     reason: waited.reason,
     observations: waited.value.observations.map((observation) => akumaOnlyObservation(observation.status)),
     unobserved: waited.value.unobserved,
-  });
+  };
 }
 
 export type AskObserver = Readonly<{
@@ -222,7 +220,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     });
   }
   input.signal?.throwIfAborted();
-  return selectionResultSchemas.tell.parse({ akuma: input.id, tell });
+  return { akuma: input.id, tell };
 }
 
 function askObservation(observed: Awaited<ReturnType<AkumaHandle["tellOutcome"]>>): AkumaAskObservation {
@@ -298,12 +296,12 @@ export async function observeAdmittedAskAkuma(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
-  return selectionResultSchemas.ask.parse({
+  return {
     akuma: input.id,
     tell: settled ?? tell,
     observation: askObservation(observed),
     completedAt: observed.completedAt,
-  });
+  };
 }
 
 export async function executeAskAkuma(
@@ -352,7 +350,7 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
     handles.map(async (handle) => await handle.kill(input.signal === undefined ? {} : { signal: input.signal })),
   );
   input.signal?.throwIfAborted();
-  return selectionResultSchemas.kill.parse({
+  return {
     results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),
-  });
+  };
 }

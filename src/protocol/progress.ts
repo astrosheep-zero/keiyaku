@@ -1,3 +1,8 @@
+import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import { z } from "zod";
+import { worktreeLeakSchema } from "../git/scratch.js";
+import { privateStateSeatCloseLagSchema } from "../git/private-state-seat.js";
+import { verificationCleanupFailureSchema } from "./intent.js";
 import type { ContractHead, ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { GitPlumbingError } from "../git/process.js";
@@ -17,32 +22,58 @@ export function contractCheckpoint(input: ContractCheckpoint): ContractCheckpoin
   return { state: input.state, journal: input.journal };
 }
 
-export type ExecutionCleanup =
-  | Readonly<{ kind: "decode-channel-retirement"; contractId: ContractId; diagnostic: string }>
-  | Readonly<{
-      kind: "verification-cleanup";
-      contractId: ContractId;
-      snapshot?: SnapshotId;
-      failure: VerificationCleanupFailure;
-    }>
-  | Readonly<{ kind: "worktree-leak"; contractId: ContractId; snapshot?: SnapshotId; leak: WorktreeLeak }>
-  | Readonly<{ kind: "private-state-seat-close"; contractId: ContractId; failure: PrivateStateSeatCloseLag }>;
-
-export type ExecutionStage =
-  | "admission"
-  | "verification"
-  | "placement"
-  | "reintegration"
-  | "continuation"
-  | "reconciliation";
-export type ExecutionStop = Readonly<{
-  kind: "execution-stopped";
-  contractId: ContractId;
-  stage: ExecutionStage;
-  reason: "cancelled" | "failed";
-  diagnostic: string;
-}>;
-
+export const executionCleanupSchema = z.union([
+  z
+    .object({
+      kind: z.literal("decode-channel-retirement"),
+      contractId: contractIdSchema,
+      diagnostic: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("verification-cleanup"),
+      contractId: contractIdSchema,
+      snapshot: snapshotIdSchema.optional(),
+      failure: verificationCleanupFailureSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("worktree-leak"),
+      contractId: contractIdSchema,
+      snapshot: snapshotIdSchema.optional(),
+      leak: worktreeLeakSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("private-state-seat-close"),
+      contractId: contractIdSchema,
+      failure: privateStateSeatCloseLagSchema,
+    })
+    .strict(),
+]);
+export type ExecutionCleanup = z.infer<typeof executionCleanupSchema>;
+export const executionStageSchema = z.enum([
+  "admission",
+  "verification",
+  "placement",
+  "reintegration",
+  "continuation",
+  "reconciliation",
+]);
+export type ExecutionStage = z.infer<typeof executionStageSchema>;
+export const executionStopSchema = z
+  .object({
+    kind: z.literal("execution-stopped"),
+    contractId: contractIdSchema,
+    stage: executionStageSchema,
+    reason: z.enum(["cancelled", "failed"]),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type ExecutionStop = z.infer<typeof executionStopSchema>;
 /** Only owner-declared operational classes and native system I/O failures are operational. */
 export function isOperationalFailure(error: unknown): error is Error {
   if (

@@ -1603,13 +1603,14 @@ test("transport rejects malformed target sets and foreign World coordinates befo
         payload: { target: "aku/worker/22222222", body: "x", world: "/foreign" },
       },
     ];
+    const rejectedPayload = assert.rejects(pump.failure, /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
     await Promise.all(
       claims.map(
         async (claim) =>
           await writeFile(join(pump.directory, `${claim.id}.request.json`), `${JSON.stringify(claim)}\n`),
       ),
     );
-    await assert.rejects(pump.failure, /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
+    await rejectedPayload;
     const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
     await assert.rejects(pump.close(), /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
     closed = true;

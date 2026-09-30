@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ProtocolProgress } from "./progress.js";
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
@@ -23,6 +24,15 @@ import {
   type JournalEntry,
   entryUlid,
 } from "../core/facts/types.js";
+
+export const entryUlidSchema = z.string().transform((value, context) => {
+  try {
+    return entryUlid(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid entryUlid" });
+    return z.NEVER;
+  }
+});
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const MAX_SEMANTIC_ATTEMPTS = 3;

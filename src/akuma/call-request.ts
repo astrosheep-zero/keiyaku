@@ -1,11 +1,11 @@
 import { isAbsolute, resolve } from "node:path";
-import { clipAllowedActions, decodeAllowedActions } from "./allowed.js";
+import { clipAllowedActions, allowedActionsSchema } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
-import { archetypeName, parseAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { archetypeName, akumaIdSchema, type AkuId, type AkumaPaths } from "./identity.js";
 import { publishAkuma } from "./publication.js";
 import type { CallInitialTell, CallInitialTellAdmission } from "./call-initial-tell.js";
-import { decodeProviderOptions } from "./provider-recipe.js";
-import { decodeProviderExecution, resolveProviderExecution } from "./providers/index.js";
+import { providerOptionsSchema, providerRecipeSchema } from "./provider-recipe.js";
+import { resolveProviderExecution } from "./providers/index.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -18,34 +18,7 @@ import type { OwnedProcess } from "../runtime/proc/run.js";
 import { z } from "zod";
 import { World, type WorldRoot } from "../world.js";
 
-function schemaDecode<Value>(
-  decode: (value: unknown) => Value,
-  message: string,
-): z.ZodPipe<z.ZodUnknown, z.ZodTransform<Value, unknown>> {
-  return z.unknown().transform((value, context) => {
-    try {
-      return decode(value);
-    } catch {
-      context.addIssue({ code: "custom", message });
-      return z.NEVER;
-    }
-  });
-}
-
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
-const akuIdSchema = z.string().transform((value, context) => {
-  try {
-    const id = parseAkuId(value).id;
-    if (id !== value) {
-      context.addIssue({ code: "custom", message: "expected canonical AkuId" });
-      return z.NEVER;
-    }
-    return id;
-  } catch {
-    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
-    return z.NEVER;
-  }
-});
 const archetypeSchema = z.string().transform((value, context) => {
   try {
     return archetypeName(value);
@@ -54,15 +27,12 @@ const archetypeSchema = z.string().transform((value, context) => {
     return z.NEVER;
   }
 });
-const allowedActionsSchema = schemaDecode(decodeAllowedActions, "expected allowed actions");
-const providerExecutionSchema = schemaDecode(decodeProviderExecution, "expected provider execution");
-const providerOptionsSchema = schemaDecode(decodeProviderOptions, "expected provider options");
 
 const akumaCallRecipeSchema = z
   .object({
     description: z.string().trim().min(1).optional(),
     allowed: allowedActionsSchema,
-    provider: providerExecutionSchema,
+    provider: providerRecipeSchema,
     options: providerOptionsSchema,
   })
   .strict();
@@ -184,12 +154,12 @@ export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, Ak
     decodeRequest: decodeAkumaCallRequest,
     encodeResult: (result) => result,
     decodeResult: (result) => {
-      const child = akuIdSchema.safeParse(result);
+      const child = akumaIdSchema.safeParse(result);
       if (!child.success) throw new Error("Akuma call returned an invalid child");
       return child.data;
     },
     decodeReference: (reference) => {
-      const child = akuIdSchema.safeParse(reference);
+      const child = akumaIdSchema.safeParse(reference);
       if (!child.success) throw new Error("Akuma call stored an invalid child reference");
       return child.data;
     },
@@ -204,7 +174,7 @@ export function akumaCallRequestCommand(
     completion: "child",
     protocol: akumaCallRequestProtocol(),
     projectChild: (child) => {
-      const id = akuIdSchema.safeParse(child);
+      const id = akumaIdSchema.safeParse(child);
       if (!id.success) throw new Error("Akuma call stored an invalid child reference");
       return id.data;
     },

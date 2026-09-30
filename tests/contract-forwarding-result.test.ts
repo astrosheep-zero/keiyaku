@@ -10,18 +10,19 @@ import {
   withOutcomeReceipt,
 } from "../src/library/outcome.js";
 import { deliveryValueSchema } from "../src/library/delivery.js";
-import { ownerSchema } from "../src/library/result-codec.js";
-import { decodeMaterializedConflict } from "../src/protocol/result-codec.js";
+import { materializedConflictSchema } from "../src/protocol/deliver.js";
 const deliveryResultSchema = outcomeSchema(
   "deliver",
   deliveryValueSchema,
-  ownerSchema(decodeMaterializedConflict, "expected handoff"),
+  materializedConflictSchema,
 );
 const reviewResultSchema = outcomeSchema("review", reviewSchema);
 const auditResultSchema = outcomeSchema("audit", auditReportSchema);
 import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
-import { decodeDeliverConflictRefusal, decodeVerificationRuntimeStop } from "../src/protocol/result-codec.js";
-import { decodeSettlementLag } from "../src/settlement/settle.js";
+import { deliverConflictRefusalSchema } from "../src/protocol/operations.js";
+import { verificationRuntimeStopSchema } from "../src/protocol/intent.js";
+import { settlementLagSchema } from "../src/settlement/settle.js";
+import { keiyakuRetryReasonSchema, operationRetrySchemas, type OperationRetries } from "../src/library/refusal.js";
 
 const contract = contractId("kei/forwarding-codec");
 const head = contractHead("head");
@@ -103,7 +104,7 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
         {
           kind: "settlement-lag",
           contract,
-          lag: decodeSettlementLag({
+          lag: settlementLagSchema.parse({
             kind: "settlement-failed",
             surface: "task",
             contractId: contract,
@@ -392,25 +393,25 @@ test("conflict recovery codecs reject the legacy continue field", () => {
     conflictPaths: ["src/a.ts"],
     recovery,
   };
-  assert.deepEqual(decodeDeliverConflictRefusal(JSON.parse(JSON.stringify(refusal))), refusal);
-  assert.throws(() => decodeDeliverConflictRefusal({ ...refusal, recovery: legacyRecovery }));
+  assert.deepEqual(deliverConflictRefusalSchema.parse(JSON.parse(JSON.stringify(refusal))), refusal);
+  assert.throws(() => deliverConflictRefusalSchema.parse({ ...refusal, recovery: legacyRecovery }));
   assert.throws(() =>
-    decodeDeliverConflictRefusal({ ...refusal, recovery: { ...recovery, continue: recovery.deliver } }),
+    deliverConflictRefusalSchema.parse({ ...refusal, recovery: { ...recovery, continue: recovery.deliver } }),
   );
 });
 
 test("Verification runtime stops preserve only canonical captured output fields", () => {
-  assert.deepEqual(decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "tail", truncated: true }), {
+  assert.deepEqual(verificationRuntimeStopSchema.parse({ failure: "cancelled", stdout: "tail", truncated: true }), {
     failure: "cancelled",
     stdout: "tail",
     truncated: true,
   });
-  assert.deepEqual(decodeVerificationRuntimeStop({ failure: "unknown-exit", stderr: " " }), {
+  assert.deepEqual(verificationRuntimeStopSchema.parse({ failure: "unknown-exit", stderr: " " }), {
     failure: "unknown-exit",
     stderr: " ",
   });
   assert.deepEqual(
-    decodeVerificationRuntimeStop({
+    verificationRuntimeStopSchema.parse({
       failure: "environment-failure",
       name: "setup",
       detail: { kind: "timeout" },
@@ -424,16 +425,13 @@ test("Verification runtime stops preserve only canonical captured output fields"
     },
   );
   assert.throws(
-    () => decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "" }),
-    /malformed protocol result/u,
+    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", stdout: "" }),
   );
   assert.throws(
-    () => decodeVerificationRuntimeStop({ failure: "cancelled", truncated: false }),
-    /malformed protocol result/u,
+    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", truncated: false }),
   );
   assert.throws(
-    () => decodeVerificationRuntimeStop({ failure: "cancelled", diagnostic: "not this variant" }),
-    /malformed protocol result/u,
+    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", diagnostic: "not this variant" }),
   );
 });
 
@@ -624,4 +622,85 @@ test("result codecs reject obsolete cleanup fields, missing operation and cross-
     }).success,
     false,
   );
+});
+
+
+test("forwarded contract-file effects retain the owner's nonblank path boundary", () => {
+  const effect = { kind: "reconciliation-effect", contract, effect: { kind: "contract-file", path: "workspace", action: "updated" } };
+  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { effects: [effect] })).success, true);
+  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { effects: [{ ...effect, effect: { ...effect.effect, path: "  " } }] })).success, false);
+});
+
+test("forwarded worktree descriptors preserve strict nonblank grammar in handoff and target lag", () => {
+  const workspace = { kind: "worktree", path: " relative workspace " };
+  const handoff = {
+    operation: "deliver",
+    kind: "handoff",
+    contract,
+    facts: [],
+    effects: [],
+    pending: [],
+    value: {
+      kind: "integration-conflict-materialized",
+      targetHead: snapshot,
+      handoffBase: snapshot,
+      recovery: {
+        materialize: "deliver --materialize-conflict --include-dirty",
+        deliver: "deliver --include-dirty",
+        staging: "not-required",
+      },
+      conflictPaths: ["src/a.ts"],
+      workspace,
+    },
+  };
+  const audit = {
+    kind: "accepted",
+    operation: "audit",
+    contract,
+    effects: [],
+    facts: [],
+    head,
+    pending: [],
+    value: {
+      candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
+      verification: { kind: "not-run" },
+      target: { kind: "not-observed" },
+      targetLag: { kind: "counted", behind: 0, subject: workspace },
+    },
+  };
+  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(handoff))), handoff);
+  assert.deepEqual(auditResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
+  for (const invalid of [
+    { ...workspace, path: " \t" },
+    { ...workspace, foreign: true },
+    { ...workspace, kind: "directory" },
+  ]) {
+    assert.equal(
+      deliveryResultSchema.safeParse({ ...handoff, value: { ...handoff.value, workspace: invalid } }).success,
+      false,
+    );
+    assert.equal(
+      auditResultSchema.safeParse({
+        ...audit,
+        value: { ...audit.value, targetLag: { ...audit.value.targetLag, subject: invalid } },
+      }).success,
+      false,
+    );
+  }
+});
+
+test("forwarding retry is canonical only for deliver, review and audit, with unchanged operation narrowing", () => {
+  const reason = { kind: "owner-reason-unavailable", diagnostic: "expired live answer" } as const;
+  const admitsForwarding: {
+    [Operation in keyof OperationRetries]: typeof reason extends OperationRetries[Operation] ? true : false;
+  } = { bind: false, amend: false, deliver: true, review: true, audit: true, arc: false, abandon: false };
+  for (const operation of ["deliver", "review", "audit"] as const) {
+    assert.equal(operationRetrySchemas[operation], keiyakuRetryReasonSchema);
+  }
+  for (const operation of ["bind", "amend", "deliver", "review", "audit", "arc", "abandon"] as const) {
+    const schema = outcomeSchema(operation, reviewSchema);
+    const retry = { kind: "retry", operation, contract, facts: [], effects: [], pending: [], reason };
+    assert.equal(schema.safeParse(JSON.parse(JSON.stringify(retry))).success, admitsForwarding[operation]);
+    assert.equal(schema.safeParse({ ...retry, reason: { kind: "publication-failed", diagnostic: "" } }).success, true);
+  }
 });

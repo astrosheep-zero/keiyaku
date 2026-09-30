@@ -1,16 +1,7 @@
 import type { ProviderAdapter } from "../provider.js";
-import { decodeProviderRecipe, type ProviderExecution } from "../provider-recipe.js";
+import type { ProviderExecution } from "../provider-recipe.js";
 
-export function decodeProviderExecution(input: unknown): ProviderExecution {
-  const decoded = decodeProviderRecipe(input);
-  return Object.freeze({
-    name: decoded.name,
-    kind: decoded.kind,
-    ...(decoded.executable === undefined ? {} : { executable: decoded.executable }),
-    ...(decoded.config === undefined ? {} : { config: decoded.config }),
-    ...(decoded.env === undefined ? {} : { env: decoded.env }),
-  });
-}
+export { decodeProviderRecipe as decodeProviderExecution } from "../provider-recipe.js";
 
 async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter> {
   if (execution.kind === "acp") return (await import("./acp/index.js")).createAcpProvider(execution);
@@ -30,12 +21,11 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }
 
-export async function resolveProviderExecution(input: unknown): Promise<
+export async function resolveProviderExecution(execution: ProviderExecution): Promise<
   Readonly<{
     execution: ProviderExecution;
     adapter: ProviderAdapter;
   }>
 > {
-  const execution = decodeProviderExecution(input);
   return Object.freeze({ execution, adapter: await adapterFor(execution) });
 }

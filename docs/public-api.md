@@ -19,6 +19,11 @@ the same public value; forwarding cannot recurse or establish an ambient route.
 Operation inputs do not carry routing, and construction captures one immutable
 execution channel.
 
+Each crossing value has one structural declaration at its coherent domain owner.
+Library composes those declarations at caller and process boundaries; trusted
+owner values are not revalidated while flowing through local composition.
+Structural admission grants no product capability or business judgment.
+
 Every public domain operation takes one readonly input object unless genuinely
 inputless. Any operation that observes filesystem, SQLite, process, or Git state
 is asynchronous and resolves only after its owned observation and ordered effect

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { decodeGateReport } from "../src/core/facts/gate.js";
+import { gateReportSchema, activeContractRefusalSchema, bindRefusalSchema, amendRefusalSchema, deliverRefusalSchema, placementRefusalSchema } from "../src/protocol/operations.js";
 import {
   changeId,
   contractId,
@@ -12,16 +12,10 @@ import {
   snapshotId,
   type ContractId, type JournalEntry
 } from "../src/core/facts/types.js";
-import { decodeAbandonRefusal } from "../src/core/verbs/abandon.js";
 import { applyAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody } from "../src/body/types.js";
-import { decodeAmendRefusal } from "../src/core/verbs/amend.js";
-import { decodeAttestationRefusal } from "../src/core/verbs/attestation.js";
-import { decodeBindRefusal } from "../src/core/verbs/bind.js";
-import { decodeDeliverRefusal } from "../src/core/verbs/deliver.js";
-import { decodePlacementRefusal } from "../src/core/verbs/placement.js";
 
 const id = contractId("kei/lifecycle-cycle");
 const prerequisite = contractId("kei/lifecycle-prerequisite");
@@ -107,29 +101,26 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
   );
 
   const malformed = { kind: "terminal", contractId: String(id), extra: true };
-  for (const decode of [
-    decodeBindRefusal,
-    decodeAmendRefusal,
-    decodeDeliverRefusal,
-    decodeAbandonRefusal,
-    decodeAttestationRefusal,
+  for (const schema of [
+    bindRefusalSchema,
+    amendRefusalSchema,
+    deliverRefusalSchema,
+    activeContractRefusalSchema,
   ]) {
-    assert.throws(() => decode(malformed), /malformed .*refusal/);
+    assert.equal(schema.safeParse(malformed).success, false);
   }
   assert.throws(
     () =>
-      decodePlacementRefusal({
+      placementRefusalSchema.parse({
         kind: "prerequisites-unsatisfied",
         contractId: String(id),
         unmet: [{ contractId: String(prerequisite), state: "unknown" }],
       }),
-    /malformed placement refusal/,
   );
   assert.throws(
-    () => decodeGateReport({ gate: "reviewed", current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" } }),
-    /malformed gate report/,
+    () => gateReportSchema.parse({ gate: "reviewed", current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" } }),
   );
-  assert.deepEqual(decodePlacementRefusal({ kind: "delivery-missing", contractId: String(id) }), {
+  assert.deepEqual(placementRefusalSchema.parse({ kind: "delivery-missing", contractId: String(id) }), {
     kind: "delivery-missing",
     contractId: id,
   });

@@ -1,4 +1,11 @@
-import { decodeAgentEvent } from "./provider.js";
+import {
+  toolCallSchema,
+  toolResultSchema,
+  toolInputSchema,
+  fileChangeSchema,
+  diffstatSchema,
+  type AgentEvent,
+} from "./heart/activity-schema.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
 import { projectTell, type TellDelivery, type TellRow } from "./heart/facts.js";
 import { z } from "zod";
@@ -7,40 +14,22 @@ const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const countSchema = z.number().int().nonnegative();
 const sequenceSchema = z.number().int().positive();
 const timestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
-const diffstatSchema = z.object({ added: countSchema, removed: countSchema }).strict();
-const fileChangeSchema = z
-  .object({
-    op: z.enum(["add", "update", "delete", "unspecified"]),
-    path: z.string(),
-    diffstat: diffstatSchema.optional(),
-  })
-  .strict();
-const toolInputSchema = z.object({ json: z.string(), truncated: z.boolean() }).strict();
-const toolCallSchema = z.union([
-  z.object({ kind: z.literal("run"), command: z.string() }).strict(),
-  z
-    .object({
-      kind: z.literal("read"),
-      path: z.string(),
-      offset: countSchema.optional(),
-      limit: countSchema.optional(),
+const strictDiffstatSchema = diffstatSchema.strict();
+const [runCall, readCall, searchCall, changeCall, otherCall] = toolCallSchema.options;
+// Public observation historically admits zero-based read positions, unlike native narration.
+const publicToolCallSchema = z.union([
+  runCall.strict(),
+  readCall.extend({ offset: countSchema.optional(), limit: countSchema.optional() }).strict(),
+  searchCall.strict(),
+  changeCall
+    .extend({
+      changes: z.array(fileChangeSchema.extend({ diffstat: strictDiffstatSchema.optional() }).strict()).readonly(),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal("search"),
-      query: z.string(),
-      scope: z.enum(["content", "files", "web"]).optional(),
-      path: z.string().optional(),
-      glob: z.string().optional(),
-    })
-    .strict(),
-  z.object({ kind: z.literal("fileChange"), changes: z.array(fileChangeSchema).readonly() }).strict(),
-  z.object({ kind: z.literal("other"), display: z.string(), input: toolInputSchema.optional() }).strict(),
+  otherCall.extend({ input: toolInputSchema.strict().optional() }).strict(),
 ]);
-const toolResultSchema = z
-  .object({ status: z.enum(["ok", "error"]), message: z.string().optional(), exitCode: z.number().int().optional() })
-  .strict();
+const publicToolResultSchema = toolResultSchema.strict();
+
 const tellDeliverySchema = z
   .object({
     deliveredAt: timestampSchema,
@@ -110,7 +99,7 @@ const activeToolRowSchema = z
     turnSequence: countSchema,
     at: timestampSchema,
     name: nonblankTextSchema,
-    call: toolCallSchema,
+    call: publicToolCallSchema,
     state: z.literal("active"),
     truncated: z.literal(true).optional(),
   })
@@ -123,8 +112,8 @@ const completedToolRowSchema = z
     at: timestampSchema,
     durationMs: z.number().finite().nonnegative().optional(),
     name: nonblankTextSchema,
-    call: toolCallSchema,
-    state: toolResultSchema,
+    call: publicToolCallSchema,
+    state: publicToolResultSchema,
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -135,7 +124,7 @@ const unsettledToolRowSchema = z
     turnSequence: countSchema,
     at: timestampSchema,
     name: nonblankTextSchema,
-    call: toolCallSchema,
+    call: publicToolCallSchema,
     state: z.literal("unsettled"),
     truncated: z.literal(true).optional(),
   })
@@ -160,7 +149,7 @@ const reportedFileChangeSchema = z
     at: timestampSchema,
     op: z.enum(["add", "update", "delete", "unspecified"]),
     path: z.string(),
-    diffstat: diffstatSchema.optional(),
+    diffstat: strictDiffstatSchema.optional(),
   })
   .strict();
 const reportedChangeFields = {
@@ -325,10 +314,7 @@ function toolKey(turnSequence: number, id: string): string {
   return `${turnSequence}:${id}`;
 }
 
-function narrationRow(
-  fact: Extract<TimelineFact, { event: unknown }>,
-  event: ReturnType<typeof decodeAgentEvent>,
-): TurnNarrationRow | null {
+function narrationRow(fact: Extract<TimelineFact, { event: unknown }>, event: AgentEvent): TurnNarrationRow | null {
   if (event.type === "assistant") {
     return {
       kind: "said",
@@ -356,7 +342,7 @@ function projectToolEvent(
   rows: (OpenTurnRow | UnsettledToolRow)[],
   running: Map<string, number>,
   fact: Extract<TimelineFact, { kind: "activity" }>,
-  event: Extract<ReturnType<typeof decodeAgentEvent>, { type: "tool" }>,
+  event: Extract<AgentEvent, { type: "tool" }>,
   phase: "open" | "closed",
 ): void {
   const key = toolKey(fact.turnSequence, event.id);
@@ -405,7 +391,7 @@ function projectToolEvent(
 }
 
 function projectActivityEvent(state: ProjectionState, fact: Extract<TimelineFact, { kind: "activity" }>): void {
-  const event = decodeAgentEvent(fact.event);
+  const event: AgentEvent = fact.event;
   const narration = narrationRow(fact, event);
   if (narration !== null) {
     const turn = state.turnsBySequence.get(fact.turnSequence);

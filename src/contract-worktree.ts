@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { chmod, lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { repairDerivedFile, type DerivedFileAction } from "./coordination/durable-file.js";
+import { repairDerivedFile } from "./coordination/durable-file.js";
 import { type ContractState } from "./core/facts/types.js";
 import {
   CONTRACT_DELIVERER_SKILL,
@@ -22,33 +23,23 @@ const SEAT_SKILLS = [
   ["keiyaku-deliver", CONTRACT_DELIVERER_SKILL],
   ["keiyaku-review", CONTRACT_REVIEWER_SKILL],
 ] as const;
-export type ContractFileEffect = Readonly<{
-  kind: "contract-file";
-  path: string;
-  action: DerivedFileAction | "removed";
-}>;
-
-export type ContractFileLag = Readonly<{
-  kind: "contract-file-failed";
-  worktree: string;
-  path: string;
-  diagnostic: string;
-}>;
-
-export function decodeContractFileLag(value: unknown): ContractFileLag {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error("malformed contract-file lag");
-  const object = value as Record<string, unknown>;
-  if (object.kind !== "contract-file-failed") throw new Error("malformed contract-file lag");
-  if (Object.keys(object).some((key) => key !== "kind" && key !== "worktree" && key !== "path" && key !== "diagnostic"))
-    throw new Error("malformed contract-file lag");
-  if (typeof object.worktree !== "string" || object.worktree.trim() === "")
-    throw new Error("malformed contract-file lag");
-  if (typeof object.path !== "string" || object.path.trim() === "") throw new Error("malformed contract-file lag");
-  if (typeof object.diagnostic !== "string" || object.diagnostic.trim() === "")
-    throw new Error("malformed contract-file lag");
-  return { kind: "contract-file-failed", worktree: object.worktree, path: object.path, diagnostic: object.diagnostic };
-}
+export const contractFileEffectSchema = z
+  .object({
+    kind: z.literal("contract-file"),
+    path: z.string().refine((value) => value.trim() !== ""),
+    action: z.enum(["created", "updated", "unchanged", "removed"]),
+  })
+  .strict();
+export type ContractFileEffect = z.infer<typeof contractFileEffectSchema>;
+export const contractFileLagSchema = z
+  .object({
+    kind: z.literal("contract-file-failed"),
+    worktree: z.string().refine((value) => value.trim() !== ""),
+    path: z.string().refine((value) => value.trim() !== ""),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type ContractFileLag = z.infer<typeof contractFileLagSchema>;
 
 export type ContractWorktreeResult = Readonly<{
   effects: readonly ContractFileEffect[];
@@ -215,17 +206,4 @@ export async function projectContractWorktree(
     renderContractGuidance(state),
     contractNamespace(state.id),
   );
-}
-
-export function decodeContractFileEffect(value: unknown): ContractFileEffect {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error("malformed contract-file effect");
-  const object = value as Record<string, unknown>;
-  if (object.kind !== "contract-file") throw new Error("malformed contract-file effect");
-  if (Object.keys(object).some((key) => key !== "kind" && key !== "path" && key !== "action"))
-    throw new Error("malformed contract-file effect");
-  if (typeof object.path !== "string" || object.path.trim() === "") throw new Error("malformed contract-file effect");
-  if (typeof object.action !== "string" || object.action.trim() === "")
-    throw new Error("malformed contract-file effect");
-  return { kind: "contract-file", path: object.path, action: object.action as ContractFileEffect["action"] };
 }

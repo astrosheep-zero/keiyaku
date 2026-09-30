@@ -1,4 +1,6 @@
 import { fixtureAdapter } from "./support/akuma-tell.js";
+import { selectionRequestProtocol } from "../src/akuma/selection-request.js";
+import { decodeAgentEvent } from "../src/akuma/heart/activity-schema.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import { activityFact, bornBody, claudeBodyLaunch, seedLegacySchema, turnEndFact } from "./support/akuma-fixtures.js";
@@ -265,14 +267,14 @@ test("overlapping file tools order each Turn and reported changes by completion"
     changes: [{ op: "update", path, diffstat: { added: 1, removed: 0 } }],
   });
   const event = (sequence: number, phase: "started" | "completed", id: string, path: string) =>
-    activityFact(sequence, 1, at(sequence), {
-      type: "tool",
-      phase,
-      id,
-      name: "edit",
-      call: file(path),
-      ...(phase === "completed" ? { result: { status: "ok" as const } } : {}),
-    });
+    activityFact(
+      sequence,
+      1,
+      at(sequence),
+      phase === "completed"
+        ? { type: "tool", phase: "completed", id, name: "edit", call: file(path), result: { status: "ok" as const } }
+        : { type: "tool", phase: "started", id, name: "edit", call: file(path) },
+    );
   const facts: readonly TimelineFact[] = [
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at(0) },
     event(2, "started", "a", "src/a.ts"),
@@ -1809,4 +1811,21 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   assert.equal(aborted, true);
   assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
   assert.equal((await handle.status()).life, "killed");
+});
+
+
+test("Selection wire retains strict derived tool views without tightening neutral narration", () => {
+  const at = "2026-08-08T00:00:00.000Z";
+  const row = { kind: "tool", sequence: 2, turnSequence: 1, at, name: "run", call: { kind: "run", command: "x" }, state: { status: "ok" } };
+  const timeline = { kind: "idle", entries: [{ kind: "row", row }], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 };
+  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }], unobserved: [] };
+  const protocol = selectionRequestProtocol("akuma.wait");
+  assert.doesNotThrow(() => protocol.decodeResult(value));
+  const withRow = (changed: unknown) => ({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, entries: [{ kind: "row", row: changed }] } } }] });
+  assert.throws(() => protocol.decodeResult(withRow({ ...row, call: { ...row.call, foreign: true } })));
+  assert.throws(() => protocol.decodeResult(withRow({ ...row, state: { ...row.state, foreign: true } })));
+  assert.throws(() => protocol.decodeResult({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, reportedChanges: [{ sequence: 2, at, op: "update", path: "x", diffstat: { added: 1, removed: 0, foreign: true } }] } } }] }));
+  assert.doesNotThrow(() => protocol.decodeResult(withRow({ ...row, call: { kind: "read", path: "x", offset: 0 } })));
+  assert.deepEqual(decodeAgentEvent({ type: "tool", phase: "completed", id: "tool", name: "run", call: { ...row.call, foreign: true }, result: { ...row.state, foreign: true } }), { type: "tool", phase: "completed", id: "tool", name: "run", call: row.call, result: row.state });
+  assert.throws(() => decodeAgentEvent({ type: "tool", phase: "started", id: "read", name: "read", call: { kind: "read", path: "x", offset: 0 } }));
 });

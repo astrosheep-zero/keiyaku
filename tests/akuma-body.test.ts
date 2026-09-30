@@ -15,6 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   bodyProcessInput,
+  bodyLaunchSchema,
   CONTROL_RESPONSE_MS,
   LEASH_HELD_EXIT,
   handoffPendingTells,
@@ -316,7 +317,7 @@ function bodyAdapter(adapter: FixtureProviderAdapter): ProviderAdapter {
 }
 
 type FixtureBodyLaunch = Omit<BodyLaunch, "seed"> & {
-  seed?: Omit<NonNullable<BodyLaunch["seed"]>, "allowed"> & { allowed?: NonNullable<BodyLaunch["seed"]>["allowed"] };
+  seed?: (Omit<NonNullable<BodyLaunch["seed"]>, "allowed"> & { allowed?: NonNullable<BodyLaunch["seed"]>["allowed"] }) | undefined;
 };
 
 function normalizeLaunch(launch: FixtureBodyLaunch): BodyLaunch {
@@ -1875,4 +1876,20 @@ test("spawn ENOENT diagnosis preserves the original failure as cause", async () 
     Object.defineProperty(process, "execPath", { value: liveExecPath, configurable: true });
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test("Body launch validates the real argv value without minting World or process authority", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-launch-schema-"));
+  try {
+    const allocated = await allocatedHeart(root, "claude", "1234abcd");
+    const launch = claudeBodyLaunch(allocated, root, "work");
+    const input = await bodyProcessInput(launch);
+    const raw: unknown = JSON.parse(Buffer.from(input.argv.at(-1)!, "base64url").toString("utf8"));
+    assert.deepEqual(bodyLaunchSchema.parse(raw), launch);
+    assert.equal(bodyLaunchSchema.safeParse({ ...launch, process: { pid: 1 } }).success, false);
+    assert.equal(bodyLaunchSchema.safeParse({ ...launch, paths: { ...launch.paths, heart: 1 } }).success, false);
+    assert.equal(bodyLaunchSchema.safeParse({ ...launch, seed: { ...launch.seed, id: "aku/not-a-coordinate" } }).success, false);
+    assert.equal(bodyLaunchSchema.safeParse({ paths: launch.paths }).success, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

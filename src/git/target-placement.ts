@@ -1,3 +1,5 @@
+import { contractIdSchema, snapshotIdSchema } from "./identity.js";
+import { z } from "zod";
 import { StringDecoder } from "node:string_decoder";
 import { lstat } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -12,31 +14,36 @@ import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } f
 import { consumeGitStdout, GitPlumbingError, runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
-export type CheckoutNotFollowableRefusal = Readonly<{
-  kind: "checkout-not-followable";
-  contractId: ContractId;
-  target: string;
-  path: string;
-  reason: "untracked";
-  paths: readonly string[];
-}>;
-
+export const checkoutNotFollowableRefusalSchema = z
+  .object({
+    kind: z.literal("checkout-not-followable"),
+    contractId: contractIdSchema,
+    target: z.string().refine((value) => value.trim() !== ""),
+    path: z.string().refine((value) => value.trim() !== ""),
+    reason: z.literal("untracked"),
+    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+  })
+  .strict();
+export type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
 export type TargetPlacementRefusal = CheckoutNotFollowableRefusal;
-
-export type TargetCheckoutEffect = Readonly<{
-  kind: "target-checkout";
-  path: string;
-  target: string;
-  action: "followed" | "recovered";
-}>;
-
-export type TargetCheckoutLag = Readonly<{
-  kind: "target-checkout-retained";
-  path: string;
-  target: string;
-  diagnostic: string;
-}>;
-
+export const targetCheckoutEffectSchema = z
+  .object({
+    kind: z.literal("target-checkout"),
+    path: z.string().refine((value) => value.trim() !== ""),
+    target: z.string().refine((value) => value.trim() !== ""),
+    action: z.enum(["followed", "recovered"]),
+  })
+  .strict();
+export type TargetCheckoutEffect = z.infer<typeof targetCheckoutEffectSchema>;
+export const targetCheckoutLagSchema = z
+  .object({
+    kind: z.literal("target-checkout-retained"),
+    path: z.string().refine((value) => value.trim() !== ""),
+    target: z.string().refine((value) => value.trim() !== ""),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
 export type TargetPlacementPhysicalResult = Readonly<{
   effects: readonly TargetCheckoutEffect[];
   lag: readonly TargetCheckoutLag[];
@@ -369,12 +376,26 @@ export async function observeTargetPlacement(
   return { kind: "ready", arms };
 }
 
-export type AuditTargetAnswer =
-  | Readonly<{ kind: "placeable"; ref: string; head: SnapshotId }>
-  | Readonly<{ kind: "moved"; ref: string; expected: SnapshotId; observed: SnapshotId | null }>
-  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
-
+export const auditTargetAnswerSchema = z.union([
+  z
+    .object({
+      kind: z.literal("placeable"),
+      ref: z.string().refine((value) => value.trim() !== ""),
+      head: snapshotIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("moved"),
+      ref: z.string().refine((value) => value.trim() !== ""),
+      expected: snapshotIdSchema,
+      observed: snapshotIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("refused"), refusal: checkoutNotFollowableRefusalSchema }).strict(),
+  z.object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
+]);
+export type AuditTargetAnswer = z.infer<typeof auditTargetAnswerSchema>;
 /** Adjudicate the complete post-Verification audit target answer without placing. */
 export async function adjudicateAuditTarget(
   repository: GitRepository,

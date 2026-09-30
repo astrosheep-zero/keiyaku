@@ -1,16 +1,20 @@
+import { mintedSnapshotInputSchema } from "./identity.js";
+import { z } from "zod";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import type { GitOid } from "./repository.js";
 import { runGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
-export type UnsealedBytes = Readonly<{
-  kind: "unsealed-bytes";
-  path: string;
-  paths: readonly string[];
-  head?: SnapshotId;
-}>;
-
+export const unsealedBytesSchema = z
+  .object({
+    kind: z.literal("unsealed-bytes"),
+    path: z.string().refine((value) => value.trim() !== ""),
+    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    head: mintedSnapshotInputSchema.optional(),
+  })
+  .strict();
+export type UnsealedBytes = z.infer<typeof unsealedBytesSchema>;
 export type TerminalSealExpectations = Readonly<{
   heads: readonly SnapshotId[];
   trees: readonly GitObjectId[];

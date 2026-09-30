@@ -24,6 +24,8 @@ import {
   type TurnResult,
   type DriveInput,
 } from "../src/akuma/provider.js";
+import { encodeActivityEvent, decodeActivityRow } from "../src/akuma/heart/rows.js";
+import { decodeResumeCoordinate } from "../src/akuma/coordinate.js";
 import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
@@ -105,6 +107,27 @@ test("generic tool input admission and event codecs preserve bounded evidence", 
     truncated: true,
     call: { kind: "other", display: "future_tool", input: { json: '{"value":"x', truncated: true } },
   };
+  assert.deepEqual(decodeAgentEvent({ type: "assistant", text: "x", extra: true }), { type: "assistant", text: "x" });
+  assert.deepEqual(
+    decodeAgentEvent({
+      type: "tool",
+      phase: "started",
+      id: "extra",
+      name: "future",
+      call: { kind: "other", display: "future", extra: true },
+      extra: true,
+    }),
+    { type: "tool", phase: "started", id: "extra", name: "future", call: { kind: "other", display: "future" } },
+  );
+  assert.throws(() =>
+    decodeAgentEvent({
+      type: "tool",
+      phase: "completed",
+      id: "missing",
+      name: "future",
+      call: { kind: "other", display: "future" },
+    }),
+  );
   assert.deepEqual(decodeAgentEvent(encodeAgentEvent(truncated)), truncated);
 });
 
@@ -141,17 +164,41 @@ function acpToolUpdate(
 function opencodeToolPart(status: string, input?: unknown) {
   return {
     type: "message.part.updated",
-    properties: { part: { type: "tool", callID: "oc-1", tool: "future_tool", sessionID: "session-1", state: { status, ...(input === undefined ? {} : { input }) } } },
+    properties: {
+      part: {
+        type: "tool",
+        callID: "oc-1",
+        tool: "future_tool",
+        sessionID: "session-1",
+        state: { status, ...(input === undefined ? {} : { input }) },
+      },
+    },
   };
 }
 
-function toolPreview(events: readonly AgentEvent[]) { const event = events.at(-1); return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined; }
+function toolPreview(events: readonly AgentEvent[]) {
+  const event = events.at(-1);
+  return event?.type === "tool" && event.call.kind === "other" ? event.call.input : undefined;
+}
 
 async function claudeToolCall(input: unknown) {
   const state: ClaudeObservationState = { tools: new Map() };
   const channel = new AgentEventChannel();
-  const block = input === undefined ? { type: "tool_use", id: "bash-1", name: "Bash" } : { type: "tool_use", id: "bash-1", name: "Bash", input };
-  emitClaudeMessage({ type: "assistant", uuid: "assistant-1", session_id: "session-claude", parent_tool_use_id: null, message: { content: [block] } } as unknown as SDKMessage, channel, state);
+  const block =
+    input === undefined
+      ? { type: "tool_use", id: "bash-1", name: "Bash" }
+      : { type: "tool_use", id: "bash-1", name: "Bash", input };
+  emitClaudeMessage(
+    {
+      type: "assistant",
+      uuid: "assistant-1",
+      session_id: "session-claude",
+      parent_tool_use_id: null,
+      message: { content: [block] },
+    } as unknown as SDKMessage,
+    channel,
+    state,
+  );
   const [event] = await drainChannel(channel);
   return event?.type === "tool" ? event.call : undefined;
 }
@@ -159,22 +206,59 @@ async function claudeToolCall(input: unknown) {
 test("native adapters admit structured unknown arguments into one bounded generic call", async () => {
   const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
   const piArgs = { alpha: 1, nested: { ok: true } };
-  const [piStart] = translatePiEvent({ type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs }, piState);
+  const [piStart] = translatePiEvent(
+    { type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs },
+    piState,
+  );
   const piCall = { kind: "other", display: "future_tool", input: { json: JSON.stringify(piArgs), truncated: false } };
   assert.deepEqual(piStart, { type: "tool", phase: "started", id: "pi-1", name: "future_tool", call: piCall });
-  const [piEnd] = translatePiEvent({ type: "tool_execution_end", toolCallId: "pi-1", toolName: "future_tool", isError: false, result: { secret: true } }, piState);
-  assert.deepEqual(piEnd, { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } }, "a completion reuses its correlated start and never carries result bytes");
+  const [piEnd] = translatePiEvent(
+    {
+      type: "tool_execution_end",
+      toolCallId: "pi-1",
+      toolName: "future_tool",
+      isError: false,
+      result: { secret: true },
+    },
+    piState,
+  );
+  assert.deepEqual(
+    piEnd,
+    { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } },
+    "a completion reuses its correlated start and never carries result bytes",
+  );
 
   const call = { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } };
   const acpStart = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }), EMPTY_ACP_EVENT_STATE);
   assert.deepEqual(acpStart.events, [{ type: "tool", phase: "started", id: "acp-1", name: "future_tool", call }]);
   const acpEnd = mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1"), acpStart.state);
-  assert.deepEqual(acpEnd.events, [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call, result: { status: "ok" } }], "an acknowledging update without arguments inherits its correlated start");
+  assert.deepEqual(
+    acpEnd.events,
+    [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call, result: { status: "ok" } }],
+    "an acknowledging update without arguments inherits its correlated start",
+  );
 
   const claudeState: ClaudeObservationState = { tools: new Map() };
   const claudeChannel = new AgentEventChannel();
-  emitClaudeMessage({ type: "assistant", uuid: "assistant-1", session_id: "session-claude", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "claude-1", name: "future_tool", input: { alpha: 1 } }] } } as unknown as SDKMessage, claudeChannel, claudeState);
-  emitClaudeMessage({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "claude-1", is_error: false }] } } as unknown as SDKMessage, claudeChannel, claudeState);
+  emitClaudeMessage(
+    {
+      type: "assistant",
+      uuid: "assistant-1",
+      session_id: "session-claude",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "claude-1", name: "future_tool", input: { alpha: 1 } }] },
+    } as unknown as SDKMessage,
+    claudeChannel,
+    claudeState,
+  );
+  emitClaudeMessage(
+    {
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "claude-1", is_error: false }] },
+    } as unknown as SDKMessage,
+    claudeChannel,
+    claudeState,
+  );
   assert.deepEqual(await drainChannel(claudeChannel), [
     { type: "tool", phase: "started", id: "claude-1", name: "future_tool", call },
     { type: "tool", phase: "completed", id: "claude-1", name: "future_tool", call, result: { status: "ok" } },
@@ -185,10 +269,14 @@ test("native adapters admit structured unknown arguments into one bounded generi
   const emitter = { emit: (mapped: AgentEvent): void => void opencodeEvents.push(mapped) };
   mapEvent(opencodeToolPart("running", { alpha: 1 }), emitter, opencodeState);
   mapEvent(opencodeToolPart("completed"), emitter, opencodeState);
-  assert.deepEqual(opencodeEvents, [
-    { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call },
-    { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call, result: { status: "ok" } },
-  ], "an OpenCode completion without input inherits its correlated start");
+  assert.deepEqual(
+    opencodeEvents,
+    [
+      { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call },
+      { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call, result: { status: "ok" } },
+    ],
+    "an OpenCode completion without input inherits its correlated start",
+  );
 });
 
 test("Claude keeps supplied scalar, null, empty-object, and absent Bash input distinct", async () => {
@@ -198,14 +286,26 @@ test("Claude keeps supplied scalar, null, empty-object, and absent Bash input di
     display: "Bash",
     input: { json: '{"description":"x"}', truncated: false },
   });
-  assert.deepEqual(await claudeToolCall({}), { kind: "other", display: "Bash", input: { json: "{}", truncated: false } });
-  assert.deepEqual(await claudeToolCall(null), { kind: "other", display: "Bash", input: { json: "null", truncated: false } });
+  assert.deepEqual(await claudeToolCall({}), {
+    kind: "other",
+    display: "Bash",
+    input: { json: "{}", truncated: false },
+  });
+  assert.deepEqual(await claudeToolCall(null), {
+    kind: "other",
+    display: "Bash",
+    input: { json: "null", truncated: false },
+  });
   assert.deepEqual(await claudeToolCall("run it"), {
     kind: "other",
     display: "Bash",
     input: { json: '"run it"', truncated: false },
   });
-  assert.deepEqual(await claudeToolCall(42), { kind: "other", display: "Bash", input: { json: "42", truncated: false } });
+  assert.deepEqual(await claudeToolCall(42), {
+    kind: "other",
+    display: "Bash",
+    input: { json: "42", truncated: false },
+  });
   assert.deepEqual(await claudeToolCall(undefined), { kind: "other", display: "Bash" });
 });
 
@@ -518,7 +618,10 @@ test("provider answered results may omit an exact fork point", () => {
   assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
 });
 
-function fakeAcp(root: string, mode: "complete" | "cancel" | "reverse" | "prompt-error" | "config" | "config-missing" = "complete") {
+function fakeAcp(
+  root: string,
+  mode: "complete" | "cancel" | "reverse" | "prompt-error" | "config" | "config-missing" = "complete",
+) {
   const executable = join(root, "fake-acp.mjs");
   const log = join(root, "acp-log.jsonl");
   const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -722,7 +825,12 @@ test("ACP applies model then effort session selectors before prompting on fresh 
   const fake = fakeAcp(root, "config");
   const execution = {
     ...fake.execution,
-    config: { argvBefore: [fake.execution.config.argvBefore[0]!], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+    config: {
+      argvBefore: [fake.execution.config.argvBefore[0]!],
+      argvAfter: [],
+      modelConfigId: "model",
+      effortConfigId: "thinking",
+    },
   };
   const provider = createAcpProvider(execution);
   assert.deepEqual(provider.admitOptions({ model: "k28", effort: "low" }), {
@@ -741,17 +849,30 @@ test("ACP applies model then effort session selectors before prompting on fresh 
         })
       : provider.start(freshInput("build", { cwd: root, options: { model: "k28", effort: "low" } }));
     const drive = await attempt.result;
-    for await (const _event of drive.events) { /* drain */ }
+    for await (const _event of drive.events) {
+      /* drain */
+    }
     assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
     await attempt.closed;
   };
   await run(false);
   await run(true);
   const records = acpLog(fake.log);
-  assert.deepEqual(records.map((record) => record.kind), [
-    "initialize", "new", "set-config", "set-config", "prompt",
-    "initialize", "load", "set-config", "set-config", "prompt",
-  ]);
+  assert.deepEqual(
+    records.map((record) => record.kind),
+    [
+      "initialize",
+      "new",
+      "set-config",
+      "set-config",
+      "prompt",
+      "initialize",
+      "load",
+      "set-config",
+      "set-config",
+      "prompt",
+    ],
+  );
   for (const record of records.filter((entry) => entry.kind === "set-config")) {
     const params = record.params as { sessionId: string; configId: string; value: string };
     assert.equal(params.sessionId, records.indexOf(record) < 5 ? "fresh-session" : "retained-session");
@@ -773,12 +894,20 @@ test("ACP refuses unavailable model and effort choices before sending a prompt",
   const fake = fakeAcp(root, "config");
   const provider = createAcpProvider({
     ...fake.execution,
-    config: { argvBefore: [fake.execution.config.argvBefore[0]!], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
+    config: {
+      argvBefore: [fake.execution.config.argvBefore[0]!],
+      argvAfter: [],
+      modelConfigId: "model",
+      effortConfigId: "thinking",
+    },
   });
   const invalid = provider.start(freshInput("build", { cwd: root, options: { model: "k28", effort: "medium" } }));
   await assert.rejects(invalid.result, /ACP effort value 'medium' is unavailable/u);
   await invalid.closed;
-  assert.deepEqual(acpLog(fake.log).map((record) => record.kind), ["initialize", "new", "set-config"]);
+  assert.deepEqual(
+    acpLog(fake.log).map((record) => record.kind),
+    ["initialize", "new", "set-config"],
+  );
 
   const missing = fakeAcp(temporaryDirectory(context, "keiyaku-acp-missing-"), "config-missing");
   const missingProvider = createAcpProvider({
@@ -788,9 +917,16 @@ test("ACP refuses unavailable model and effort choices before sending a prompt",
   const attempt = missingProvider.start(freshInput("build", { cwd: root, options: { model: "k28" } }));
   await assert.rejects(attempt.result, /ACP model option 'model' is unavailable/u);
   await attempt.closed;
-  assert.deepEqual(acpLog(missing.log).map((record) => record.kind), ["initialize", "new"]);
+  assert.deepEqual(
+    acpLog(missing.log).map((record) => record.kind),
+    ["initialize", "new"],
+  );
   assert.throws(
-    () => createAcpProvider({ ...fake.execution, config: { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" } }),
+    () =>
+      createAcpProvider({
+        ...fake.execution,
+        config: { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" },
+      }),
     /cannot map model to both/u,
   );
 });
@@ -858,7 +994,8 @@ function controlledAcpProcess(
     resolveCleanup = resolve;
     rejectCleanup = reject;
   });
-  const { promise: exited, resolve: resolveExited } = promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
+  const { promise: exited, resolve: resolveExited } =
+    promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
   const app = acp
     .agent({ name: "controlled-acp" })
     .onRequest(acp.methods.agent.initialize, async ({ params }) => {
@@ -1114,15 +1251,21 @@ function fakePiSdk(
   const nativeListeners = new Set<(event: Record<string, unknown>) => void>();
   let emitSession = (_event: Record<string, unknown>) => {};
   let releasePrompt = () => {};
-  const promptReleased = new Promise<void>((resolve) => { releasePrompt = resolve; });
+  const promptReleased = new Promise<void>((resolve) => {
+    releasePrompt = resolve;
+  });
   const seen: FakePiObservation = {
-    aborted: 0, disposed: 0, steered: [],
+    aborted: 0,
+    disposed: 0,
+    steered: [],
     emitNative: (event) => {
       if (event.type === "agent_end") emitSession({ ...event, messages: [], willRetry: event.willRetry === true });
       for (const listener of nativeListeners) listener(event);
     },
     finishPrompt: () => releasePrompt(),
-    get agentListeners() { return nativeListeners.size; },
+    get agentListeners() {
+      return nativeListeners.size;
+    },
   };
   const manager = {
     getLeafId: () => (input.historyId === undefined ? "entry-final" : input.historyId),
@@ -1138,9 +1281,13 @@ function fakePiSdk(
     agent: {
       subscribe(listener: (event: Record<string, unknown>) => void) {
         nativeListeners.add(listener);
-        return () => { nativeListeners.delete(listener); };
+        return () => {
+          nativeListeners.delete(listener);
+        };
       },
-      steer(message: Record<string, unknown>) { seen.steered.push(message); },
+      steer(message: Record<string, unknown>) {
+        seen.steered.push(message);
+      },
     },
     subscribe(listener: (event: Record<string, unknown>) => void) {
       if (input.subscriptionFailure === true) throw new Error("Pi subscription failed");
@@ -1613,7 +1760,9 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
 test("Pi live tells require exact native message evidence, not queue acknowledgement", async () => {
   const fake = fakePiSdk({
     waitForRelease: true,
-    events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "after steering" }] } }],
+    events: [
+      { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "after steering" }] } },
+    ],
   });
   const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
     freshInput("work", { cwd: tmpdir() }),
@@ -1621,13 +1770,20 @@ test("Pi live tells require exact native message evidence, not queue acknowledge
   const drive = await attempt.result;
   let firstResult: unknown;
   let secondResult: unknown;
-  const first = drive.tell!({ id: "first", text: "same text" }).then((result) => { firstResult = result; return result; });
-  const second = drive.tell!({ id: "second", text: "same text" }).then((result) => { secondResult = result; return result; });
+  const first = drive.tell!({ id: "first", text: "same text" }).then((result) => {
+    firstResult = result;
+    return result;
+  });
+  const second = drive.tell!({ id: "second", text: "same text" }).then((result) => {
+    secondResult = result;
+    return result;
+  });
   assert.equal(fake.seen.steered.length, 2);
   assert.notEqual(fake.seen.steered[0], fake.seen.steered[1]);
-  assert.deepEqual(fake.seen.steered.map((message) => message.content), [
-    [{ type: "text", text: "same text" }], [{ type: "text", text: "same text" }],
-  ]);
+  assert.deepEqual(
+    fake.seen.steered.map((message) => message.content),
+    [[{ type: "text", text: "same text" }], [{ type: "text", text: "same text" }]],
+  );
   fake.seen.emitNative({ type: "message_end", message: { ...fake.seen.steered[0] } });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(firstResult, undefined);
@@ -1661,7 +1817,10 @@ test("Pi returns turn-ended for an unmatched steer only after native prompt sett
   );
   const drive = await attempt.result;
   let result: unknown;
-  const pending = drive.tell!({ id: "late", text: "unobserved" }).then((value) => { result = value; return value; });
+  const pending = drive.tell!({ id: "late", text: "unobserved" }).then((value) => {
+    result = value;
+    return value;
+  });
   fake.seen.emitNative({ type: "agent_end", messages: [] });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(result, undefined);
@@ -2648,9 +2807,7 @@ test("Codex leaves sandbox policy to native configuration", async (context) => {
   const provider = createCodexAppServerProvider(fake.executable);
   const drive = await provider.start(freshInput("write", { cwd: root })).result;
   await drive.completion;
-  const turn = fake
-    .requests()
-    .find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
+  const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
   assert.equal(Object.hasOwn(turn, "sandboxPolicy"), false);
 });
 
@@ -2767,4 +2924,26 @@ test("Codex terminal closure fails a hung steer acknowledgement without waiting"
     /line RPC process is closed/u,
   );
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
+});
+
+
+test("Heart activity write and read share historical shape acceptance and exact file coordinates", () => {
+  const coordinate = { sessionFile: "/native/session.jsonl", sessionId: "native-id" };
+  assert.deepEqual(decodeResumeCoordinate(coordinate), coordinate);
+  assert.equal(decodeResumeCoordinate({ sessionId: "native-id", sessionFile: undefined }), null);
+  assert.equal(decodeResumeCoordinate({ ...coordinate, foreign: undefined }), null);
+  const event = { type: "session", coordinate, extra: "historically ignored" };
+  const row = { sequence: 2, turn_sequence: 1, at: "at", event_json: JSON.stringify(event) };
+  assert.deepEqual(JSON.parse(encodeActivityEvent(event)), { type: "session", coordinate });
+  assert.deepEqual(decodeActivityRow(row).event, { type: "session", coordinate });
+  const completed = { type: "tool", phase: "completed", id: "tool", name: "future", call: { kind: "other", display: "future", extra: true }, result: { status: "ok", extra: true }, extra: true };
+  const decoded = decodeActivityRow({ ...row, event_json: encodeActivityEvent(completed) }).event;
+  if (decoded.type !== "tool" || decoded.phase !== "completed") throw new Error("missing completion");
+  const status: "ok" | "error" = decoded.result.status;
+  assert.equal(status, "ok");
+  assert.deepEqual(decoded.call, { kind: "other", display: "future" });
+  const corrupt = { ...completed, result: undefined };
+  assert.throws(() => encodeActivityEvent(corrupt));
+  assert.throws(() => decodeActivityRow({ ...row, event_json: JSON.stringify(corrupt) }));
+  assert.throws(() => decodeActivityRow({ ...row, event_json: JSON.stringify({ ...event, coordinate: { ...coordinate, foreign: true } }) }));
 });

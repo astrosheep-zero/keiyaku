@@ -1,8 +1,12 @@
 import { isMap, parseDocument, stringify } from "yaml";
+import { z } from "zod";
 import { formatTaskId, parseTaskId, type TaskCoordinate, type TaskId } from "./identity.js";
 
-export type TaskState = "open" | "in_progress" | "on_hold" | "done" | "drop";
-export type TaskPriority = 0 | 1 | 2 | 3;
+export const taskNonblankTextSchema = z.string().refine((value) => value.trim() !== "");
+export const taskStateSchema = z.enum(["open", "in_progress", "on_hold", "done", "drop"]);
+export const taskPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+export type TaskState = z.infer<typeof taskStateSchema>;
+export type TaskPriority = z.infer<typeof taskPrioritySchema>;
 export type TaskDocument = Readonly<{
   id: TaskId;
   title: string;

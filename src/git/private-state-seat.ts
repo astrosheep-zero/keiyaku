@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { acquireSqliteTransactionLock, SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
@@ -23,12 +24,13 @@ export class GitPrivateStateSeatContentionError extends Error {
 export type PrivateStatePublicationSeat = Readonly<{ readonly [privateStateSeat]: true }>;
 
 /** Post-confirmation failure to release the private-state publication seat. */
-export type PrivateStateSeatCloseLag = Readonly<{
-  kind: "private-state-seat-close-failed";
-  diagnostic: string;
-}>;
-
-/** Action result plus any confirmed-publication seat-close lag. */
+export const privateStateSeatCloseLagSchema = z
+  .object({
+    kind: z.literal("private-state-seat-close-failed"),
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
+  })
+  .strict();
+export type PrivateStateSeatCloseLag = z.infer<typeof privateStateSeatCloseLagSchema>;
 export type PrivateStateSeatOutcome<T> = Readonly<{
   value: T;
   closeLag?: PrivateStateSeatCloseLag;

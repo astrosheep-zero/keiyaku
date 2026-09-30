@@ -1,5 +1,8 @@
+import { z } from "zod";
+import { tellRowSchema } from "./projection.js";
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 import { defaultWaitComplete, bornStatus, readWaitComplete, waitForObservation } from "./akuma-observe.js";
-import { recordTell, type TellFact, type TellRow } from "./heart/index.js";
+import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkuId, type AkuId } from "./identity.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
 import type { WorldRoot } from "../world.js";
@@ -11,25 +14,35 @@ export type CallInitialTell = Readonly<{
   initiator?: string;
 }>;
 
-export type TellWake =
-  | Readonly<{ kind: "told" }>
-  | Readonly<{ kind: "pursuing"; bodySequence: number }>
-  | Readonly<{ kind: "held" }>
-  | Readonly<{
-      kind: "failed";
-      diagnostic: string;
-      child?: Readonly<{
-        code: number | null;
-        signal: string | null;
-        log: Readonly<{ path: string; from: number; to: number }>;
-      }>;
-    }>;
-
-export type TellResult = Readonly<{
-  admission: Readonly<{ tellId: string; fact: "recorded" }>;
-  row: TellRow;
-  wake: TellWake;
-}>;
+const runLogReferenceSchema = z
+  .object({ path: z.string(), from: z.number().int().nonnegative(), to: z.number().int().nonnegative() })
+  .strict();
+const failedTellWakeSchema = z
+  .object({
+    kind: z.literal("failed"),
+    diagnostic: z.string(),
+    child: z
+      .object({ code: z.number().int().nullable(), signal: z.string().nullable(), log: runLogReferenceSchema })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
+export const tellWakeSchema = z.union([
+  z.object({ kind: z.literal("told") }).strict(),
+  z.object({ kind: z.literal("held") }).strict(),
+  z.object({ kind: z.literal("pursuing"), bodySequence: z.number().int().nonnegative() }).strict(),
+  failedTellWakeSchema,
+]);
+export const tellResultSchema = z
+  .object({
+    admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
+    row: tellRowSchema,
+    wake: tellWakeSchema,
+  })
+  .strict();
+export type TellWake = z.infer<typeof tellWakeSchema>;
+export type TellResult = z.infer<typeof tellResultSchema>;
 
 export type CallInitialTellAdmission =
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>

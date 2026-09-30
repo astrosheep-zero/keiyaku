@@ -309,19 +309,19 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
   const reviewer = await answered(root, "reviewer", "00000001");
   await appendActivity(first.paths, {
     turnSequence: 1,
-    event: { type: "activity", event: { provider: "fixture" } },
+    event: { type: "unknown", kind: "fixture" },
     at: "2026-08-11T00:00:01.000Z",
   });
   for (const source of [tiedFirst, tiedSecond]) {
     await appendActivity(source.paths, {
       turnSequence: 1,
-      event: { type: "activity", event: { provider: "fixture" } },
+      event: { type: "unknown", kind: "fixture" },
       at: "2026-08-11T00:00:02.000Z",
     });
   }
   await appendActivity(reviewer.paths, {
     turnSequence: 1,
-    event: { type: "activity", event: { provider: "fixture" } },
+    event: { type: "unknown", kind: "fixture" },
     at: "2026-08-11T00:00:03.000Z",
   });
 
@@ -381,7 +381,7 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
         const source = await answered(root, "worker", `a00000${index.toString(16).padStart(2, "0")}`);
         await appendActivity(source.paths, {
           turnSequence: 1,
-          event: { type: "activity", event: { provider: "fixture" } },
+          event: { type: "unknown", kind: "fixture" },
           at: `2099-01-01T00:00:${String(index).padStart(2, "0")}.000Z`,
         });
         return source;

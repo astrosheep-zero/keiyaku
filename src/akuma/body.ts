@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { decodeSoulSeed } from "./heart/soul.js";
+import { sessionAdmissionSchema } from "./heart/rows.js";
 import { appendFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { abortable, abortableDelay } from "./abort.js";
@@ -27,11 +30,10 @@ import {
   resolvePendingTellDisposition,
   type PendingTellDisposition,
   type BodyEnd,
-  type SessionFact,
   type Soul,
   type TurnOutcome,
 } from "./heart/index.js";
-import { pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { akumaPathsSchema, pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import {
   admitCallInitialTell,
   type CallInitialTellAdmission,
@@ -53,16 +55,27 @@ const WAKE_REREAD_MS = 100;
 export const LEASH_HELD_EXIT = 75;
 export { CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
-export type BodyLaunch = Readonly<{
-  paths: AkumaPaths;
-  seed?: Omit<Soul, "createdAt">;
-  birthSession?: Omit<SessionFact, "sequence">;
-  initialBody?: string;
-  initiator?: string;
-  initialSchemaJson?: string;
-  refuseIfHeld?: boolean;
-  completion?: Readonly<{ contractId?: string }>;
-}>;
+const launchSeedSchema = z.unknown().transform((value, context) => {
+  try {
+    return decodeSoulSeed(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid Body birth seed" });
+    return z.NEVER;
+  }
+});
+export const bodyLaunchSchema = z
+  .object({
+    paths: akumaPathsSchema,
+    seed: launchSeedSchema.optional(),
+    birthSession: sessionAdmissionSchema.optional(),
+    initialBody: z.string().optional(),
+    initiator: z.string().optional(),
+    initialSchemaJson: z.string().optional(),
+    refuseIfHeld: z.boolean().optional(),
+    completion: z.object({ contractId: z.string().optional() }).strict().optional(),
+  })
+  .strict();
+export type BodyLaunch = z.infer<typeof bodyLaunchSchema>;
 
 export type TellWakeRuntime = Readonly<{
   spawn(paths: AkumaPaths): Promise<OwnedProcess>;

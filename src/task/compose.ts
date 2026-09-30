@@ -1,18 +1,10 @@
 import { documentDiff } from "../markdown/diff.js";
 import type { WorldRoot } from "../world.js";
-import {
-  planTaskComposition,
-  type PlannedTask,
-  type TaskCompositionAdmission,
-  type TaskCompositionPlanAlias,
-  type TaskCompositionPlanOrder,
-  type TaskCompositionAlias,
-  type TaskCompositionBodyPreview,
-  type TaskCompositionPlan,
-} from "./compose-language.js";
+import type { TaskCompositionResult } from "./mutation-result.js";
+import { planTaskComposition, type PlannedTask, type TaskCompositionPlan } from "./compose-language.js";
 import { serializeTaskDocument } from "./document.js";
 import { parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
-import type { TaskCleanupFailure, TaskCompositionDiagnostic, TaskRefusal, TaskRetry } from "./operations.js";
+import type { TaskCompositionDiagnostic } from "./operations.js";
 import { readBoard, replaceAuthority, withTaskLocks } from "./store.js";
 
 export type {
@@ -24,40 +16,10 @@ export type {
 export type { TaskCompositionAlias } from "./compose-language.js";
 export { taskCompositionNamespaceHeader } from "./compose-language.js";
 
-export type TaskDocumentChange = Readonly<{
-  taskId: TaskId;
-  kind: "created" | "updated";
-  documentDiff: string;
-}>;
-export type TaskCompositionFacts = Readonly<{
-  aliases: readonly TaskCompositionAlias[];
-  admissionOrder: readonly TaskId[];
-  admissions: readonly TaskCompositionAdmission[];
-}>;
-export type TaskCompositionResult =
-  | Readonly<{
-      kind: "planned";
-      aliases: readonly TaskCompositionPlanAlias[];
-      admissionOrder: readonly TaskCompositionPlanOrder[];
-      admissions: readonly TaskCompositionAdmission[];
-      bodies: readonly TaskCompositionBodyPreview[];
-    }>
-  | Readonly<
-      {
-        kind: "accepted";
-        documentChanges: readonly TaskDocumentChange[];
-        cleanup?: TaskCleanupFailure;
-      } & TaskCompositionFacts
-    >
-  | Readonly<{ kind: "refused"; refusal: Extract<TaskRefusal, { kind: "invalid-composition" }> }>
-  | (Readonly<{
-      kind: "incomplete";
-      documentChanges: readonly TaskDocumentChange[];
-      cleanup?: TaskCleanupFailure;
-      stopped: TaskRefusal | Readonly<{ kind: "retry"; reason: TaskRetry }>;
-      draft: string;
-    }> &
-      TaskCompositionFacts);
+type AcceptedComposition = Extract<TaskCompositionResult, { kind: "accepted" }>;
+export type TaskDocumentChange = Readonly<AcceptedComposition["documentChanges"][number]>;
+export type TaskCompositionFacts = Readonly<Pick<AcceptedComposition, "aliases" | "admissionOrder" | "admissions">>;
+export type { TaskCompositionResult } from "./mutation-result.js";
 
 function refusal(
   diagnostics: readonly TaskCompositionDiagnostic[],

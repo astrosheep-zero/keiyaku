@@ -1,6 +1,6 @@
-import { decodeGateReport, gateReports, type GateReport } from "../facts/gate.js";
+import { gateReports, type GateReport } from "../facts/gate.js";
 import { activeContract, contractState } from "../facts/observation.js";
-import { contractId, type ActorId, type ContractId, type ContractState, type JournalEntry } from "../facts/types.js";
+import { type ActorId, type ContractId, type ContractState, type JournalEntry } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
@@ -31,61 +31,6 @@ export type PlacementRefusal =
       contractId: ContractId;
       unmet: readonly UnmetPrerequisite[];
     }>;
-function exactRecord(value: unknown, allowed: readonly string[]): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error("malformed placement refusal");
-  const object = value as Record<string, unknown>;
-  for (const key of Object.keys(object)) if (!allowed.includes(key)) throw new Error("malformed placement refusal");
-  return object;
-}
-
-export function decodePlacementRefusal(value: unknown): PlacementRefusal {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    throw new Error("malformed placement refusal");
-  const object = value as Record<string, unknown>;
-  if (object.kind === "contract-missing" || object.kind === "delivery-missing" || object.kind === "terminal") {
-    const { contractId: id } = exactRecord(value, ["kind", "contractId"]);
-    try {
-      return { kind: object.kind, contractId: contractId(String(id)) };
-    } catch {
-      throw new Error("malformed placement refusal");
-    }
-  }
-  if (object.kind === "gates-unsatisfied") {
-    const { contractId: id, unmet, target } = exactRecord(value, ["kind", "contractId", "unmet", "target"]);
-    if (!Array.isArray(unmet)) throw new Error("malformed placement refusal");
-    if (target !== undefined && (typeof target !== "string" || target.length === 0))
-      throw new Error("malformed placement refusal");
-    try {
-      return {
-        kind: "gates-unsatisfied",
-        contractId: contractId(String(id)),
-        unmet: unmet.map(decodeGateReport),
-        ...(target === undefined ? {} : { target }),
-      };
-    } catch {
-      throw new Error("malformed placement refusal");
-    }
-  }
-  if (object.kind !== "prerequisites-unsatisfied") throw new Error("malformed placement refusal");
-  const { contractId: id, unmet } = exactRecord(value, ["kind", "contractId", "unmet"]);
-  if (!Array.isArray(unmet)) throw new Error("malformed placement refusal");
-  try {
-    return {
-      kind: "prerequisites-unsatisfied",
-      contractId: contractId(String(id)),
-      unmet: unmet.map((item) => {
-        const entry = exactRecord(item, ["contractId", "state"]);
-        if (entry.state !== "missing" && entry.state !== "active" && entry.state !== "abandoned")
-          throw new Error("malformed placement refusal");
-        return { contractId: contractId(String(entry.contractId)), state: entry.state };
-      }),
-    };
-  } catch {
-    throw new Error("malformed placement refusal");
-  }
-}
-
 function unmetPrerequisites(
   prerequisites: readonly ContractId[],
   observation: ReadonlyMap<ContractId, ContractState | null>,

@@ -1,37 +1,22 @@
-import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
+import type { TaskPriority, TaskState } from "./document.js";
 import type { TaskId } from "./identity.js";
 
-export type TaskView = Readonly<TaskDocument & { namespace: readonly string[] }>;
-export type TaskCleanupFailure = Readonly<{
-  kind: "lock-release-failed";
-  diagnostics: readonly string[];
-}>;
-export type TaskCompositionDiagnostic = Readonly<{ line: number; reason: string; token: string }>;
-export type TaskRefusal =
-  | Readonly<{ kind: "task-missing"; taskId: TaskId }>
-  | Readonly<{ kind: "invalid-lifecycle-transition"; taskId: TaskId; state: TaskState; verb: TaskLifecycleVerb }>
-  | Readonly<{ kind: "invalid-graph"; diagnostic: string }>
-  | Readonly<{ kind: "invalid-namespace-context"; path: string }>
-  | Readonly<{ kind: "relation-owned-by-other"; taskId: TaskId; related: TaskId; declaringTask: TaskId }>
-  | Readonly<{ kind: "invalid-composition"; diagnostics: readonly TaskCompositionDiagnostic[] }>;
-export type TaskRetry = "busy" | "concurrent-modification";
+import type { TaskCleanupFailure, TaskRefusal, TaskRetry, TaskView } from "./mutation-result.js";
+export type {
+  TaskView,
+  TaskCleanupFailure,
+  TaskCompositionDiagnostic,
+  TaskRefusal,
+  TaskRetry,
+  TaskMutationResult,
+  TaskUpdateResult,
+  TaskBatchResult,
+} from "./mutation-result.js";
 export type TaskOutcome<A> =
   | Readonly<{ kind: "accepted"; value: A; cleanup?: TaskCleanupFailure }>
   | Readonly<{ kind: "refused"; refusal: TaskRefusal }>
   | Readonly<{ kind: "retry"; reason: TaskRetry }>;
-export type TaskMutationResult = TaskOutcome<TaskView>;
-export type TaskUpdateResult = TaskOutcome<
-  Readonly<{
-    task: TaskView;
-    documentDiff: string;
-    changedFields: readonly Readonly<{
-      field: string;
-      action: "added" | "replaced" | "cleared" | "changed" | "appended";
-    }>[];
-  }>
->;
-export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
-export type TaskBatchResult = Readonly<{ items: readonly Readonly<{ id: TaskId; outcome: TaskMutationResult }>[] }>;
+export type TaskLifecycleVerb = Extract<TaskRefusal, { kind: "invalid-lifecycle-transition" }>["verb"];
 export type SettledTaskAction = "done";
 export type SettledTaskResult =
   | Readonly<{ kind: "changed"; task: TaskView; action: SettledTaskAction; cleanup?: TaskCleanupFailure }>

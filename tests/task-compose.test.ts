@@ -4,6 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { Tasks } from "../src/task/index.js";
+import { taskMutationRequestProtocol } from "../src/task/mutation.js";
+import {
+  taskCompositionResultSchema,
+  taskRefusalSchema,
+  taskMutationResultSchema,
+  taskUpdateResultSchema,
+} from "../src/task/mutation-result.js";
+import type { TaskCompositionFacts, TaskDocumentChange } from "../src/task/compose.js";
 import { World } from "../src/world.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 
@@ -159,4 +167,65 @@ test("empty compose has no admissions or document changes", async (t) => {
     documentChanges: [],
   });
   assert.deepEqual(await rows(product), []);
+});
+
+test("actual composition results round-trip the Task wire reader without losing projected nested facts", async (t) => {
+  const product = await fixture(t);
+  const protocol = taskMutationRequestProtocol("task.compose");
+  const markdown = "+ Parent\nas = parent\nbody <<BODY\nfirst\nlast\nBODY\n+ Child\nneeds = ^parent\n";
+  const plan = await product.compose({ markdown, plan: true });
+  assert.ok(plan.kind === "planned");
+  assert.deepEqual(protocol.decodeResult(JSON.parse(JSON.stringify(plan))), plan);
+  assert.equal(plan.bodies[0]?.firstLine, "first");
+  assert.equal(plan.bodies[0]?.lastLine, "last");
+  const optionalOrder = { ...plan, admissionOrder: [{ position: 1, alias: undefined, taskId: undefined }] };
+  assert.deepEqual(protocol.decodeResult(optionalOrder), optionalOrder);
+
+  const accepted = await product.compose({ markdown });
+  assert.ok(accepted.kind === "accepted");
+  const facts: TaskCompositionFacts = accepted;
+  const change: TaskDocumentChange = accepted.documentChanges[0]!;
+  assert.equal(facts.aliases[0]?.taskId, change.taskId);
+  assert.deepEqual(protocol.decodeResult(JSON.parse(JSON.stringify(accepted))), accepted);
+  assert.deepEqual(protocol.decodeResult({ ...accepted, cleanup: undefined }), accepted);
+  const incomplete = {
+    ...accepted,
+    kind: "incomplete",
+    stopped: { kind: "retry", reason: "busy" },
+    draft: "+ Remaining\n",
+  };
+  assert.deepEqual(protocol.decodeResult(JSON.parse(JSON.stringify(incomplete))), incomplete);
+
+  const refused = await product.compose({ markdown: "+ Broken\nneeds = @task/missing\n" });
+  assert.ok(refused.kind === "refused");
+  assert.deepEqual(protocol.decodeResult(JSON.parse(JSON.stringify(refused))), refused);
+  assert.throws(
+    () => protocol.decodeResult({ ...refused, refusal: { kind: "invalid-composition" } }),
+    /transport integrity/,
+  );
+  assert.throws(
+    () => protocol.decodeResult({ ...refused, refusal: { ...refused.refusal, foreign: undefined } }),
+    /transport integrity/,
+  );
+  assert.throws(
+    () =>
+      protocol.decodeResult({
+        ...refused,
+        refusal: { kind: "invalid-composition", diagnostics: [{ line: 1, reason: "missing token" }] },
+      }),
+    /transport integrity/,
+  );
+  assert.throws(
+    () => protocol.decodeResult({ ...accepted, aliases: [{ alias: "parent", taskId: "task/Bad" }] }),
+    /transport integrity/,
+  );
+  assert.throws(
+    () => protocol.decodeResult({ ...plan, bodies: [{ ...plan.bodies[0], bytes: -1 }] }),
+    /transport integrity/,
+  );
+});
+
+test("composition and ordinary Task results share their actual refusal schema objects", () => {
+  assert.equal(taskCompositionResultSchema.options[2].shape.refusal, taskRefusalSchema.options[5]);
+  assert.equal(taskMutationResultSchema.options[1], taskUpdateResultSchema.options[1]);
 });

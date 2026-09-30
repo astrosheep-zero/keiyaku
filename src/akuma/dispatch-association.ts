@@ -1,14 +1,5 @@
-import { contractId } from "../core/facts/types.js";
+import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
-
-const contractIdSchema = z.string().transform((value, context) => {
-  try {
-    return contractId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "expected ContractId" });
-    return z.NEVER;
-  }
-});
 
 export const dispatchAssociationSchema = z.union([
   z.object({ kind: z.literal("none") }).strict(),

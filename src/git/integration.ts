@@ -1,3 +1,5 @@
+import { contractIdSchema, snapshotIdSchema } from "./identity.js";
+import { z } from "zod";
 import type { Preparation } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
@@ -26,20 +28,34 @@ async function runAllowingNonzero(
   }
 }
 
-export type IntegrationPreparationRefusal =
-  | Readonly<{
-      kind: "integration-failed";
-      contractId: ContractId;
-      reason: "not-based-on-target" | "unrelated-histories" | "conflict";
-      targetHead: SnapshotId;
-      conflictPaths?: readonly string[];
-    }>
-  | Readonly<{
-      kind: "integration-unsupported";
-      contractId: ContractId;
-      requiredGit: typeof REQUIRED_GIT;
-    }>;
-
+export const integrationPreparationRefusalSchema = z.union([
+  z
+    .object({
+      kind: z.literal("integration-failed"),
+      contractId: contractIdSchema,
+      reason: z.enum(["not-based-on-target", "unrelated-histories", "conflict"]),
+      targetHead: snapshotIdSchema,
+      conflictPaths: z
+        .array(z.string().refine((value) => value.trim() !== ""))
+        .readonly()
+        .optional(),
+    })
+    .strict()
+    .transform(
+      ({ conflictPaths, ...refusal }) =>
+        ({ ...refusal, ...(conflictPaths === undefined ? {} : { conflictPaths }) }) as typeof refusal & {
+          conflictPaths?: readonly string[];
+        },
+    ),
+  z
+    .object({
+      kind: z.literal("integration-unsupported"),
+      contractId: contractIdSchema,
+      requiredGit: z.literal(REQUIRED_GIT),
+    })
+    .strict(),
+]);
+export type IntegrationPreparationRefusal = z.infer<typeof integrationPreparationRefusalSchema>;
 export type IntegrationCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
@@ -384,14 +400,16 @@ async function deliverySnapshotAvailability(
   return "available";
 }
 
-export type DeliveryDiffScope = Readonly<{
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
-  paths?: readonly string[];
-}>;
+export const deliveryDiffScopeSchema = z
+  .object({
+    filesChanged: z.number().int(),
+    insertions: z.number().int(),
+    deletions: z.number().int(),
+    paths: z.array(z.string()).readonly().optional(),
+  })
+  .strict();
+export type DeliveryDiffScope = z.infer<typeof deliveryDiffScopeSchema>;
 
-/** Compute predecessor-to-candidate scope from the exact integration trees. */
 export async function readDeliveryScope(
   repository: GitRepository,
   predecessor: SnapshotId,

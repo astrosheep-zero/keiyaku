@@ -1,6 +1,7 @@
 import { type AkumaLife, type KillEvidence, type ResumeCoordinate } from "./heart/index.js";
 export type { KillEvidence };
-import { parseAkuId, type AkuId } from "./identity.js";
+export { akumaIdSchema } from "./identity.js";
+import { akumaIdSchema, type AkuId } from "./identity.js";
 import { activitySnapshotSchema } from "./projection.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { Settings } from "../settings.js";
@@ -28,16 +29,6 @@ export type AkumaListRow = Readonly<{
   aliases: readonly AkumaAlias[];
 }>;
 
-export const akumaIdSchema = z.string().transform((value, context) => {
-  try {
-    const id = parseAkuId(value).id;
-    if (id !== value) throw new Error("not canonical");
-    return id;
-  } catch {
-    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
-    return z.NEVER;
-  }
-});
 export const akumaStatusSchema = z
   .object({
     id: akumaIdSchema,

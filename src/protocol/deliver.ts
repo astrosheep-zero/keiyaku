@@ -1,3 +1,7 @@
+import { entryUlidSchema } from "./attempt.js";
+import { z } from "zod";
+import { snapshotIdSchema } from "./operations.js";
+import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
   materializeIntegrationSnapshot,
   materializeJudgedConflict,
@@ -18,7 +22,6 @@ import {
   workspaceMergeStatePresent,
   worktreePath,
   conflictRecovery,
-  type ConflictRecovery,
 } from "../git/workspace.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -33,15 +36,7 @@ import {
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type {
-  ActorId,
-  ContractId,
-  ContractState,
-  DeliverData,
-  EntryUlid,
-  JournalEntry,
-  SnapshotId,
-} from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
@@ -59,25 +54,23 @@ import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
-export type DeliverLeading =
-  | Readonly<{ kind: "admitted-now"; fact: EntryUlid }>
-  | Readonly<{ kind: "already-admitted"; fact: EntryUlid }>;
+export const deliverLeadingSchema = z
+  .object({ kind: z.enum(["admitted-now", "already-admitted"]), fact: entryUlidSchema })
+  .strict();
+export type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
 export type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
-
-export type AppointedWorkspace = Readonly<{
-  kind: "worktree";
-  path: string;
-}>;
-
-export type IntegrationConflictMaterialized = Readonly<{
-  kind: "integration-conflict-materialized";
-  targetHead: SnapshotId;
-  conflictPaths: readonly string[];
-  workspace: AppointedWorkspace;
-  handoffBase: SnapshotId;
-  recovery: ConflictRecovery;
-}>;
-export { decodeMaterializedConflict } from "./result-codec.js";
+export type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
+export const materializedConflictSchema = z
+  .object({
+    kind: z.literal("integration-conflict-materialized"),
+    targetHead: snapshotIdSchema,
+    conflictPaths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
+    workspace: worktreeWorkspaceSchema,
+    handoffBase: snapshotIdSchema,
+    recovery: conflictRecoverySchema,
+  })
+  .strict();
+export type IntegrationConflictMaterialized = z.infer<typeof materializedConflictSchema>;
 
 const DELIVER_CONFLICT_RECOVERY = conflictRecovery;
 

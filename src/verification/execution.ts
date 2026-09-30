@@ -26,7 +26,9 @@ export type VerificationNonterminalOutcome = CapturedOutput &
     | Readonly<{ kind: "spawn-error"; diagnostic: string }>
   );
 
-export function capturedOutput(value: CapturedOutput): CapturedOutput {
+export function capturedOutput(
+  value: CapturedOutput,
+): Readonly<{ stdout?: string; stderr?: string; truncated?: true }> {
   return {
     ...(value.stdout ? { stdout: value.stdout } : {}),
     ...(value.stderr ? { stderr: value.stderr } : {}),

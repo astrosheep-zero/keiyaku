@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { decodeJournal, encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
@@ -31,11 +32,10 @@ type Accepted = Readonly<{
   heads: Readonly<Record<string, ContractHead>>;
 }>;
 
-export type PublicationFailed = Readonly<{
-  kind: "publication-failed";
-  diagnostic: string;
-}>;
-
+export const publicationFailedSchema = z
+  .object({ kind: z.literal("publication-failed"), diagnostic: z.string() })
+  .strict();
+export type PublicationFailed = z.infer<typeof publicationFailedSchema>;
 type Unknown = Readonly<{ kind: "unknown" }>;
 
 export type Admission = Accepted | PublicationFailed | Unknown;

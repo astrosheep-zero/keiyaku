@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { publicationFailedSchema } from "../git/admission.js";
 import type { ProtocolProgress } from "./progress.js";
 import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
@@ -22,8 +24,11 @@ export const STALE_PRIVATE_STATE_PREPARATION = {
   kind: "stale",
 } as const;
 
-export type ProtocolTerminal = Readonly<{ kind: "exhausted" }> | AttemptTerminal;
-
+export const protocolTerminalSchema = z.union([
+  z.object({ kind: z.enum(["exhausted", "collision"]) }).strict(),
+  publicationFailedSchema,
+]);
+export type ProtocolTerminal = z.infer<typeof protocolTerminalSchema>;
 export type ProtocolResult<Refusal> =
   | AcceptedAdmission
   | Readonly<{ kind: "refused"; refusal: Refusal }>

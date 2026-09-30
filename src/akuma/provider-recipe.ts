@@ -1,111 +1,81 @@
-export type SystemPromptMode = "append" | "replace";
+import { z } from "zod";
 
-export type ProviderOptions = Readonly<{
-  model?: string;
-  effort?: string;
-  network?: "disabled" | "enabled";
-  systemPrompt?: string;
-  systemPromptMode?: SystemPromptMode;
-}>;
+const modelText = z
+  .string({ error: "provider option model must be a nonblank string" })
+  .refine((value) => value.trim() !== "", "provider option model must be a nonblank string");
+const effortText = z
+  .string({ error: "provider option effort must be a nonblank string" })
+  .refine((value) => value.trim() !== "", "provider option effort must be a nonblank string");
+export const systemPromptModeSchema = z.enum(["append", "replace"], {
+  error: "provider option systemPromptMode must be append, replace",
+});
+export type SystemPromptMode = z.infer<typeof systemPromptModeSchema>;
+export const providerOptionsSchema = z
+  .object({
+    model: modelText.optional(),
+    effort: effortText.optional(),
+    network: z.enum(["disabled", "enabled"], { error: "provider option network must be disabled, enabled" }).optional(),
+    systemPrompt: z.string({ error: "provider option systemPrompt must be a string" }).optional(),
+    systemPromptMode: systemPromptModeSchema.optional(),
+  })
+  .refine(
+    (value) => value.systemPromptMode === undefined || value.systemPrompt !== undefined,
+    "provider option systemPromptMode requires systemPrompt",
+  )
+  .transform(({ model, effort, network, systemPrompt, systemPromptMode }) =>
+    Object.freeze({
+      ...(model === undefined ? {} : { model }),
+      ...(effort === undefined ? {} : { effort }),
+      ...(network === undefined ? {} : { network }),
+      ...(systemPrompt === undefined ? {} : { systemPrompt }),
+      ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
+    }),
+  );
+export type ProviderOptions = z.infer<typeof providerOptionsSchema>;
 
-export type ProviderExecution = Readonly<{
-  name: string;
-  kind: "acp" | "claude-agent-sdk" | "codex-app-server" | "grok-build" | "opencode-sdk" | "pi";
-  executable?: string;
-  config?: Readonly<Record<string, unknown>>;
-  env?: Readonly<Record<string, string>>;
-}>;
-
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
+// Recipe configuration deliberately stays adapter-owned opaque data, including historical keys.
 function snapshot(value: unknown): unknown {
   if (Array.isArray(value)) return Object.freeze(value.map(snapshot));
-  const object = record(value);
-  if (object === null) return value;
-  return Object.freeze(Object.fromEntries(Object.entries(object).map(([key, item]) => [key, snapshot(item)])));
+  if (value === null || typeof value !== "object") return value;
+  return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, snapshot(item)])));
 }
-
-function optionText(
-  options: Readonly<Record<string, unknown>>,
-  field: "model" | "effort" | "systemPrompt",
-  blank: "allow" | "refuse",
-): string | undefined {
-  const selected = options[field];
-  if (selected === undefined) return undefined;
-  if (typeof selected !== "string" || (blank === "refuse" && selected.trim().length === 0)) {
-    throw new TypeError(`provider option ${field} must be ${blank === "allow" ? "a string" : "a nonblank string"}`);
-  }
-  return selected;
-}
+export const providerRecipeSchema = z
+  .object({
+    name: z.string().refine((value) => value.trim() !== "", "provider execution name must be a nonblank string"),
+    kind: z.enum(["acp", "claude-agent-sdk", "codex-app-server", "grok-build", "opencode-sdk", "pi"], {
+      error: "provider execution has unknown kind",
+    }),
+    executable: z
+      .string()
+      .refine((value) => value.trim() !== "", "provider execution executable must be a nonblank string")
+      .optional(),
+    config: z.record(z.string(), z.unknown()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .transform(({ name, kind, executable, config, env }) =>
+    Object.freeze({
+      name,
+      kind,
+      ...(executable === undefined ? {} : { executable }),
+      ...(config === undefined ? {} : { config: snapshot(config) as Readonly<Record<string, unknown>> }),
+      ...(env === undefined ? {} : { env: Object.freeze(env) }),
+    }),
+  );
+export type ProviderExecution = z.infer<typeof providerRecipeSchema>;
 
 export function decodeProviderOptions(value: unknown): ProviderOptions {
-  const options = record(value);
-  if (options === null) throw new TypeError("provider options must be an object");
-  const model = optionText(options, "model", "refuse");
-  const effort = optionText(options, "effort", "refuse");
-  const network = options.network;
-  if (network !== undefined && network !== "disabled" && network !== "enabled") {
-    throw new TypeError("provider option network must be disabled, enabled");
-  }
-  const systemPrompt = optionText(options, "systemPrompt", "allow");
-  const systemPromptMode = options.systemPromptMode;
-  if (systemPromptMode !== undefined) {
-    if (systemPromptMode !== "append" && systemPromptMode !== "replace") {
-      throw new TypeError("provider option systemPromptMode must be append, replace");
-    }
-    if (systemPrompt === undefined) {
-      throw new TypeError("provider option systemPromptMode requires systemPrompt");
-    }
-  }
-  return Object.freeze({
-    ...(model === undefined ? {} : { model }),
-    ...(effort === undefined ? {} : { effort }),
-    ...(network === undefined ? {} : { network }),
-    ...(systemPrompt === undefined ? {} : { systemPrompt }),
-    ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
-  });
+  const parsed = providerOptionsSchema.safeParse(value);
+  if (!parsed.success)
+    throw new TypeError(parsed.error.issues[0]?.message ?? "provider options must be an object", {
+      cause: parsed.error,
+    });
+  return parsed.data;
 }
-
-function providerKind(value: unknown): value is ProviderExecution["kind"] {
-  return (
-    value === "acp" ||
-    value === "claude-agent-sdk" ||
-    value === "codex-app-server" ||
-    value === "grok-build" ||
-    value === "opencode-sdk" ||
-    value === "pi"
-  );
-}
-
-export function decodeProviderRecipe(input: unknown): ProviderExecution {
-  const value = record(input);
-  if (value === null) throw new TypeError("provider execution must be an object");
-  if (typeof value.name !== "string" || value.name.trim().length === 0) {
-    throw new TypeError("provider execution name must be a nonblank string");
-  }
-  if (!providerKind(value.kind)) throw new TypeError("provider execution has unknown kind");
-  if (
-    value.executable !== undefined &&
-    (typeof value.executable !== "string" || value.executable.trim().length === 0)
-  ) {
-    throw new TypeError("provider execution executable must be a nonblank string");
-  }
-  const config = value.config === undefined ? undefined : record(value.config);
-  if (config === null) throw new TypeError("provider execution config must be an object");
-  const env = value.env === undefined ? undefined : record(value.env);
-  if (env === null) throw new TypeError("provider execution env must be an object");
-  if (env !== undefined && Object.values(env).some((item) => typeof item !== "string")) {
-    throw new TypeError("provider execution env must contain only string values");
-  }
-  return Object.freeze({
-    name: value.name,
-    kind: value.kind,
-    ...(value.executable === undefined ? {} : { executable: value.executable }),
-    ...(config === undefined ? {} : { config: snapshot(config) as Readonly<Record<string, unknown>> }),
-    ...(env === undefined ? {} : { env: Object.freeze({ ...env }) as Readonly<Record<string, string>> }),
-  });
+export function decodeProviderRecipe(value: unknown): ProviderExecution {
+  const parsed = providerRecipeSchema.safeParse(value);
+  if (!parsed.success)
+    throw new TypeError(parsed.error.issues[0]?.message ?? "provider execution must be an object", {
+      cause: parsed.error,
+    });
+  return parsed.data;
 }
