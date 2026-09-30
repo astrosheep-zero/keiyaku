@@ -55,7 +55,7 @@ import {
   type ContractRequestPort,
 } from "../src/library/contract-operations.js";
 import { KeiyakuRefused } from "../src/library/refusal.js";
-import { changeId, contractHead, contractId as makeContractId, snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId as makeContractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Tasks } from "../src/task/index.js";
 import {
@@ -335,6 +335,7 @@ function acceptedContract(marker: string, action: "deliver" | "review"): Fixture
             },
             method: "squash",
             policy: { requireBranchesToBeUpToDate: false },
+            leading: { kind: "already-admitted", fact: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
             verificationSummary: marker,
           }
         : { verificationSummary: marker },
@@ -1903,7 +1904,6 @@ test("forwarded materialization retains and replays its handoff evidence", async
 
 import { requestForwardedContractLive } from "../src/library/contract-operations.js";
 import { withExecutionReceipt, executionReceipt } from "../src/library/execution-result.js";
-import { entryUlid } from "../src/core/facts/types.js";
 
 // A partial owner receipt does not turn Heart's unproven service into a voided request.
 test("forwarded fatal receipts survive unproven transport without claiming no product effect", async () => {

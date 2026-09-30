@@ -395,8 +395,8 @@ export function decodeCompletionEvidenceFields(object: Record<string, unknown>):
 
 export function decodeDeliverLeading(value: unknown): DeliverLeading {
   const object = record(value, ["kind", "fact"]);
-  if (object.kind !== "already-admitted") fail();
-  return { kind: "already-admitted", fact: decodeEntryUlid(object.fact) };
+  if (object.kind !== "already-admitted" && object.kind !== "admitted-now") fail();
+  return { kind: object.kind, fact: decodeEntryUlid(object.fact) };
 }
 
 export function decodeMaterializedConflict(value: unknown): IntegrationConflictMaterialized {

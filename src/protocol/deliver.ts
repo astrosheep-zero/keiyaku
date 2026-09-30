@@ -59,8 +59,10 @@ import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
-export type DeliverLeading = Readonly<{ kind: "already-admitted"; fact: EntryUlid }>;
-export type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading?: DeliverLeading }>;
+export type DeliverLeading =
+  | Readonly<{ kind: "admitted-now"; fact: EntryUlid }>
+  | Readonly<{ kind: "already-admitted"; fact: EntryUlid }>;
+export type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
 
 export type AppointedWorkspace = Readonly<{
   kind: "worktree";
@@ -526,13 +528,18 @@ function continuationDeliveryDecision(
   if (record === undefined || state === null || state.delivery === null || assembled.derivation === undefined) {
     return { kind: "redecide" };
   }
+  const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
+  if (delivery === undefined) throw new Error("current delivery is missing its journal fact");
   input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
   return {
     kind: "accepted",
     facts: [],
     state,
     journal: record.entries,
-    value: state.delivery.data,
+    value: {
+      ...state.delivery.data,
+      leading: { kind: "already-admitted", fact: delivery.entry },
+    },
   };
 }
 
@@ -571,9 +578,14 @@ async function decideAndAdmitDelivery(
     ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   if (admission.kind !== "accepted") return admission;
+  const deliverFact = admission.facts.find((fact) => fact.contract === input.contractId && fact.kind === "deliver");
+  if (deliverFact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");
   return {
     ...admission,
-    value: preparation.data,
+    value: {
+      ...preparation.data,
+      leading: { kind: "admitted-now", fact: deliverFact.entry },
+    },
   };
 }
 
@@ -663,7 +675,7 @@ async function mergeStatePresentRefusal(
 async function materializeDeliverConflict(
   input: DeliverOperationInput,
   refusal: IntegrationConflictRefusal,
-): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
   if (refusal.conflictPaths === undefined) throw new Error("conflicted integration is missing conflict paths");
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed;
@@ -717,7 +729,7 @@ async function materializeDeliverConflict(
 async function finishDeliverRefusal(
   input: DeliverOperationInput,
   refusal: IntentRefusal,
-): Promise<LeadingOutcome<DeliveryIdentity, IntentRefusal> | IntegrationConflictMaterialized> {
+): Promise<LeadingOutcome<DeliverValue, IntentRefusal> | IntegrationConflictMaterialized> {
   if (!isIntegrationConflict(refusal)) return { kind: "refused", refusal };
   if (input.materializeConflict !== true) return { kind: "refused", refusal: conflictDeliverRefusal(refusal) };
   return await materializeDeliverConflict(input, refusal);

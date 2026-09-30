@@ -12,7 +12,17 @@ reports every fact admitted by that invocation, the addressed Contract's
 resulting head, its operation value, and any post-admission lags. The answer is
 invocation-scoped, not Contract state, a durable receipt, an effects log, or a
 result retained on a handle. Local and forwarded execution return this same
-answer without a transport-specific receipt. Text names the candidate and integration result, patch-id as `content identity (not commit)`, keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
+answer without a transport-specific receipt. An accepted delivery also carries
+its witnessed leading provenance: whether this invocation admitted the
+candidate or continues a candidate already admitted before this attempt. Fresh
+provenance comes only from the confirmed admission of this invocation; continued
+provenance comes only from the historical entry observed in custody during this
+attempt, and that historical entry never appears among the invocation's newly
+admitted facts. Forwarded execution preserves that provenance as returned and
+never rereads later authority to recover it; a missing or disagreeing provenance
+is an integrity failure, not a reason to infer from newer state. Text names the
+candidate and integration result, patch-id as `content identity (not commit)`,
+keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
 
 Callers may derive one pure finality projection from these public outcomes. It
 distinguishes a fully settled accepted outcome, an accepted outcome with
@@ -52,7 +62,9 @@ are independent: a satisfied review can still find no delivery to place, and a
 verification or placement stop cannot undo an accepted delivery or review.
 Verification blocks placement only when the Contract selected `verified`;
 otherwise an unsatisfied or stopped Verification remains observable evidence,
-keeps its typed shape, and does not prevent a claim. Recovery names an existing
+keeps its typed shape, and does not prevent a claim. A typed trailing stop after
+a confirmed admission keeps the witnessed provenance alongside that stop.
+Recovery names an existing
 delivery fact as already admitted, reports only this invocation's facts, and does
 not disguise later workspace bytes as a candidate. Successful placement is
 represented once as completion; callers do not rebuild it from facts or folded

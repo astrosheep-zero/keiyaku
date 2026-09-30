@@ -23,7 +23,12 @@ function runtimeStopSettings(): string {
   });
 }
 
-async function bindAndCommit(options: { gates: readonly string[]; verification: string; runtimeStop?: boolean; target?: string }) {
+async function bindAndCommit(options: {
+  gates: readonly string[];
+  verification: string;
+  runtimeStop?: boolean;
+  target?: string;
+}) {
   const repository = repositoryWithMain();
   const bound = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
@@ -151,7 +156,10 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.ok(placement !== undefined && "refusal" in placement);
     assert.equal(placement.refusal.kind, "gates-unsatisfied");
     if (placement.refusal.kind === "gates-unsatisfied") {
-      assert.deepEqual(placement.refusal.unmet.map((report) => report.gate), ["verified"]);
+      assert.deepEqual(
+        placement.refusal.unmet.map((report) => report.gate),
+        ["verified"],
+      );
       assert.equal(state.id, placement.refusal.contractId);
     }
     assert.equal((await keiyaku.state()).terminal, null);
@@ -251,6 +259,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
 
     const first = await deliver(state.id, false);
     const firstValue = acceptedDeliveryValue(first.result);
+    assert.deepEqual(firstValue.leading, { kind: "admitted-now", fact: first.deliveryFactId });
     assertRuntimeStop(firstValue.verification);
     assert.equal((await keiyaku.state()).terminal, null, "the stopped Verification keeps the Contract nonterminal");
 
@@ -263,12 +272,56 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const reusedValue = acceptedDeliveryValue(reused.result);
     assert.deepEqual(reusedValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
     assert.deepEqual(reusedValue.integration, firstValue.integration, "overwrite=false keeps the old tender bytes");
+    assert.ok(typeof reused.result === "object" && reused.result !== null && "facts" in reused.result);
+    assert.ok(Array.isArray(reused.result.facts));
+    assert.deepEqual(
+      reused.result.facts.filter(
+        (entry) => typeof entry === "object" && entry !== null && "kind" in entry && entry.kind === "deliver",
+      ),
+      [],
+      "reuse admits no extra delivery fact",
+    );
 
     const replaced = await deliver(state.id, true);
     assert.notEqual(replaced.deliveryFactId, first.deliveryFactId, "overwrite=true admits a new deliver fact");
     const replacedValue = acceptedDeliveryValue(replaced.result);
+    assert.deepEqual(replacedValue.leading, { kind: "admitted-now", fact: replaced.deliveryFactId });
     assert.notDeepEqual(replacedValue.integration, firstValue.integration, "overwrite=true captures the new bytes");
     assert.equal((await keiyaku.state()).terminal, null);
+  });
+
+  test("an unchanged second forwarded deliver continues without a new delivery fact", async () => {
+    // No declared Verification, so the same-content path cannot be current-candidate reuse.
+    const repository = repositoryWithMain();
+    const bound = await Keiyaku.with().bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document(),
+      workspace: "worktree",
+      gates: ["reviewed"],
+    });
+    const state = await bound.keiyaku.state();
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+    repository.run(["-C", worktree, "add", "candidate.txt"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+    const deliver = await forwardedDeliverChannel(repository.path);
+
+    const first = await deliver(state.id, false);
+    const firstValue = acceptedDeliveryValue(first.result);
+    assert.deepEqual(firstValue.leading, { kind: "admitted-now", fact: first.deliveryFactId });
+
+    const second = await deliver(state.id, false);
+    assert.equal(second.deliveryFactId, first.deliveryFactId);
+    const secondValue = acceptedDeliveryValue(second.result);
+    assert.deepEqual(secondValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
+    assert.ok(typeof second.result === "object" && second.result !== null && "facts" in second.result);
+    assert.ok(Array.isArray(second.result.facts));
+    assert.deepEqual(
+      second.result.facts.filter(
+        (entry) => typeof entry === "object" && entry !== null && "kind" in entry && entry.kind === "deliver",
+      ),
+      [],
+    );
   });
 });
 

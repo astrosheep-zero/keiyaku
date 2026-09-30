@@ -472,7 +472,7 @@ function deliverIdentityLines(
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  if (result.leading !== undefined)
+  if (result.leading !== undefined && result.leading.kind === "already-admitted")
     receiptRow(lines, " ", "leading", [{ text: result.leading.kind.replaceAll("-", " ") }], columns);
   if (result.tenderSnapshot !== undefined)
     receiptRow(

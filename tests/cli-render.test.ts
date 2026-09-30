@@ -3,7 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { changeId, contractHead, contractId, entryUlid, gate, snapshotId, type ContractId } from "../src/core/facts/types.js";
+import {
+  changeId,
+  contractHead,
+  contractId,
+  entryUlid,
+  gate,
+  snapshotId,
+  type ContractId,
+} from "../src/core/facts/types.js";
 import type { GateReport } from "../src/core/facts/gate.js";
 import type { CandidateCompletion } from "../src/protocol/completion.js";
 import type { InvocationResult } from "../src/cli/result.js";
@@ -1094,7 +1102,13 @@ test("refusals use reason and option for missing contract and nuke confirmation"
 });
 
 test("query displays dropped while the Task state remains drop", () => {
-  const row = taskRow({ id: "task/dropped" as never, title: "Retired", priority: 1, state: "drop", disposition: "drop" });
+  const row = taskRow({
+    id: "task/dropped" as never,
+    title: "Retired",
+    priority: 1,
+    state: "drop",
+    disposition: "drop",
+  });
   const text = renderTaskText(parseTaskCommand(["query"]), {
     kind: "accepted",
     value: { rows: [row], hasMore: false },
@@ -1209,9 +1223,7 @@ test("reconcile lists changed effects once with path last and no null sentinels"
     before: "a".repeat(40) as never,
     after: null,
   };
-  const text = renderText(
-    reconcile({ effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }] }),
-  );
+  const text = renderText(reconcile({ effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }] }));
   assert.equal(text, "✓ reconcile\n  effect  ref  removed · aaaaaaa  refs/keiyaku/delivery/example");
   assert.doesNotMatch(text, /null/u);
 });
@@ -1494,6 +1506,28 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
   assert.equal(JSON.parse(JSON.stringify(result)).recoverySnapshot, result.recoverySnapshot);
 });
 
+test("fresh admitted-now leading stays in JSON while receipt text stays quiet", () => {
+  const contract = contractId("kei/fresh-provenance");
+  const result: InvocationResult = {
+    kind: "accepted",
+    verb: "deliver",
+    contract,
+    head: contractHead("head"),
+    facts: [{ contract, entry: "01K4AJ8F6K7JH8Y6Q5NEPRT41V", kind: "deliver" }],
+    settlementLags: [],
+    leading: { kind: "admitted-now", fact: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V") },
+    tenderSnapshot: snapshotId("tender-commit"),
+    integration: { changeId: changeId("content-id") },
+  };
+  const text = renderText(result);
+  assert.doesNotMatch(text, /already admitted/u);
+  assert.doesNotMatch(text, /admitted now/u);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).leading, {
+    kind: "admitted-now",
+    fact: "01K4AJ8F6K7JH8Y6Q5NEPRT41V",
+  });
+});
+
 test("direct placement stops render the public unmet prerequisites in order", () => {
   const contract = contractId("kei/waiting-on-prerequisites");
   const unmet = [
@@ -1632,7 +1666,11 @@ test("a gates-refused placement awaits each not-yet-happened requirement as a pl
     { gate: gate("reviewed"), current: { kind: "missing" } },
     { gate: gate("verified"), current: { kind: "stale", priorVerdict: "satisfied" } },
   ]);
-  assert.equal(text.split("\n").at(-1), "⧗ awaiting review, verification", "a stale requirement folds into the same await");
+  assert.equal(
+    text.split("\n").at(-1),
+    "⧗ awaiting review, verification",
+    "a stale requirement folds into the same await",
+  );
 });
 
 test("four or more awaited requirements bound the margin line", () => {
@@ -1786,10 +1824,13 @@ test("a retry placement stop renders through the delivered receipt without the f
 });
 
 test("detail facts sink behind ordered refusal facts", () => {
-  assert.deepEqual(
-    orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "task  t"]),
-    ["reason  first", "path  /repo", "task  t", "detail  alpha", "detail  beta"],
-  );
+  assert.deepEqual(orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "task  t"]), [
+    "reason  first",
+    "path  /repo",
+    "task  t",
+    "detail  alpha",
+    "detail  beta",
+  ]);
   assert.deepEqual(orderRefusalFacts(["detail  only", "reason  kept"]), ["reason  kept", "detail  only"]);
 });
 
@@ -3272,8 +3313,7 @@ test("a say omits earlier tail tools and only keeps the last two after the final
   for (const sequence of [2, 3, 4, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
   assert.doesNotMatch(text, /src\/(middle|selected)\.ts/u, "only deferred pre-say tools are omitted");
   assert.match(text, /! edit   src\/last\.ts — \+4 -2 — error · refused/u);
-  for (const sequence of [6, 7, 8, 11, 12])
-    assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  for (const sequence of [6, 7, 8, 11, 12]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
   assert.match(text, /⋮ 5 omitted[\s\S]*flush-now[\s\S]*⋮ 2 omitted/u);
   assert.equal(text.split("flush-now").length - 1, 1);
 });

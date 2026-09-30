@@ -46,6 +46,7 @@ function acceptedDelivery(value: Record<string, unknown> = {}, extras: Record<st
       integration: { predecessor, snapshot, changeId: patch },
       method: "squash",
       policy: { requireBranchesToBeUpToDate: false },
+      leading: { kind: "admitted-now", fact: fact.entry },
       ...value,
     },
     lags: [],
@@ -145,6 +146,20 @@ test("forwarded reconciliation lags preserve their repair scope", () => {
     },
   );
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(result))), result);
+});
+
+test("delivery leading preserves both witnessed arms and refuses a missing provenance", () => {
+  const fresh = acceptedDelivery();
+  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(fresh))), fresh);
+  const continued = acceptedDelivery({ leading: { kind: "already-admitted", fact: fact.entry } }, { facts: [] });
+  assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(continued))), continued);
+  const { leading: _dropped, ...withoutLeading } = fresh.value;
+  void _dropped;
+  assert.equal(deliveryResultSchema.safeParse({ ...fresh, value: withoutLeading }).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse(acceptedDelivery({ leading: { kind: "fresh", fact: fact.entry } })).success,
+    false,
+  );
 });
 
 test("malformed settlement lag and extra envelope fields are transport-integrity refusals", () => {
@@ -316,7 +331,10 @@ test("Verification runtime stops preserve only canonical captured output fields"
       stderr: "hook tail",
     },
   );
-  assert.throws(() => decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "" }), /malformed protocol result/u);
+  assert.throws(
+    () => decodeVerificationRuntimeStop({ failure: "cancelled", stdout: "" }),
+    /malformed protocol result/u,
+  );
   assert.throws(
     () => decodeVerificationRuntimeStop({ failure: "cancelled", truncated: false }),
     /malformed protocol result/u,

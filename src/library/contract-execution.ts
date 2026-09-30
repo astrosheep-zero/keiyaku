@@ -159,9 +159,10 @@ function admittedDeliveryValue(context: ExecutionContext): DeliveryValue {
   const fact = context.progress
     .snapshot()
     .facts.find((entry) => entry.contract === context.contractId && entry.kind === "deliver");
-  if (fact?.kind === "deliver") return fact.data;
-  const delivery = context.progress.checkpoint(context.contractId)?.state.delivery?.data;
-  if (delivery !== undefined) return delivery;
+  if (fact?.kind === "deliver") return { ...fact.data, leading: { kind: "admitted-now", fact: fact.entry } };
+  const delivery = context.progress.checkpoint(context.contractId)?.state.delivery;
+  if (delivery !== undefined && delivery !== null)
+    return { ...delivery.data, leading: { kind: "already-admitted", fact: delivery.entry } };
   throw new Error("confirmed delivery requires its own receipt");
 }
 
@@ -182,7 +183,13 @@ export async function executeLocalDelivery(
     } catch (error) {
       retainTrailingFailure(context, "deliver", error);
     }
-    const value: DeliveryValue = { ...admittedDeliveryValue(context), ...leadingValue, ...trailing };
+    const base = admittedDeliveryValue(context);
+    if (
+      leadingValue !== undefined &&
+      (leadingValue.leading.kind !== base.leading.kind || leadingValue.leading.fact !== base.leading.fact)
+    )
+      throw new Error("accepted delivery leading disagrees with its admitted fact");
+    const value: DeliveryValue = { ...base, ...leadingValue, ...trailing };
     return await completeMutation({
       ...context,
       operation: "deliver",

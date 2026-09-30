@@ -34,7 +34,7 @@ export function decodeDeliveryValue(value: unknown): DeliveryValue {
   });
   return {
     ...identity,
-    ...(object.leading === undefined ? {} : { leading: decodeDeliverLeading(object.leading) }),
+    leading: decodeDeliverLeading(object.leading),
     ...decodeCompletionEvidenceFields(object),
     ...(object.continuation === undefined ? {} : { continuation: decodeContinuationReport(object.continuation) }),
   };
@@ -99,6 +99,22 @@ export const Delivery: HandleType<DeliveryHandle> = Object.freeze({
   [Symbol.hasInstance]: (value: unknown) => value instanceof DeliveryHandle,
 });
 
-export function deliveryHandle(delivery: DeliveryValue, readDiff: () => Promise<string | null>): Delivery {
+export function deliveryHandle(
+  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
+    Partial<
+      Pick<
+        DeliveryValue,
+        | "leading"
+        | "completion"
+        | "verification"
+        | "verificationReuse"
+        | "verificationSubject"
+        | "verificationSummary"
+        | "placement"
+        | "continuation"
+      >
+    >,
+  readDiff: () => Promise<string | null>,
+): Delivery {
   return new DeliveryHandle(delivery, readDiff, delivery);
 }

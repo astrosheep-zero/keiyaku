@@ -471,7 +471,22 @@ export class Keiyaku {
     );
   }
 
-  private deliveryHandle(delivery: DeliveryValue): Delivery {
+  private deliveryHandle(
+    delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
+      Partial<
+        Pick<
+          DeliveryValue,
+          | "leading"
+          | "completion"
+          | "verification"
+          | "verificationReuse"
+          | "verificationSubject"
+          | "verificationSummary"
+          | "placement"
+          | "continuation"
+        >
+      >,
+  ): Delivery {
     return deliveryHandle(delivery, () =>
       deliveryDiffOperation({
         scope: this.scope,
