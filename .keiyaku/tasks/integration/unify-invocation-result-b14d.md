@@ -1,0 +1,15 @@
+---
+id: task/integration/unify-invocation-result-b14d
+title: Unify Contract Outcome effects and observer execution
+state: done
+priority: 1
+needs: []
+parent: task/integration/deep-implementation-integration-5cf9
+supersedes: []
+relates: []
+note: ""
+createdAt: 2026-09-30T01:12:32.032Z
+updatedAt: 2026-09-30T11:34:32.991Z
+---
+Review gate: human PUBLIC act1742 requires external Faye review of this Task tree before any implementation or new bind. Source baseline69637c8fd. Implements result section of1738 plus1741.1/2/3. Every bind/amend/deliver/review/audit/arc/abandon creates one invocation accumulator before any effect, retains confirmed fact identity/head, witnessed leading and incremental candidate/continuation/reconciliation/workspace/settlement/retirement conclusions, then projects public Outcome once after resource retirement. Expected accepted/refused/retry plus delivery-only handoff are returned, not thrown classes; no exceptional subset receipt. Effects is one tagged union/schema for previous lags/settlementLags/cleanup/stops/recoverySnapshot/retirement/checkout retention; effect retains owner/candidate/stage/affects evidence, no temporal fact invention. pending generated once from authoritative conclusions and effects, projectMutationFinality removed. Single deliver/review/audit observer API replaces startX/ContractExecution subscription, observation cannot change result or publication and routing never ships callbacks. Lower pure protocol/custody stays separate, candidate cursor and distinct continuation/reconciliation loops stay. Public failure/operational exception arm gap is raised for Faye decision before binding; malformed caller input remains pre-effect, corrupt authority exceptional, channel loss never implies no effect or safe retry. Library public result preserves detailed evidence and process-local bind/Delivery handle ability, without serializing scope/hooks/settings. Owner public-results/public-api/lifecycle concepts updated with result law, no schema inventories in law. Acceptance: all verbs/discriminants typecheck through root consumer fixtures; expected failures do not throw; fresh/historical leading exact; no result envelope rebuild or post-teardown pending patch; earlier sibling success/settlement and invocation-wide cleanup survive later failure; observer cancellation/gaps/exception cannot undo admission; full npm test/typecheck/lint/build/architecture. Completion of leading child alone does NOT complete this phase.
+Task tree APPROVED1744, add P1c shared outer attempt as child. Phase completion waits leading/projection/outer-loop children; P2 needs P1b specifically, parallel P1c. Failure gap RESOLVED1744: one KeiyakuError anomalies with five categories/native cause/same-projector receipt; expected domain conditions Outcome returns; operational/cancel stops after admission accepted effects. Four-shell owner consolidation explicit P1b acceptance. All owner laws same phase change.

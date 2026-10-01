@@ -1,0 +1,19 @@
+---
+id: task/integration/declare-wire-shapes-once-and-cca7
+title: Declare wire shapes once and retire duplicate decoders
+state: done
+priority: 1
+needs:
+  - task/integration/project-accepted-and-exceptional-0c2d
+parent: task/integration/deep-implementation-integration-5cf9
+supersedes: []
+relates: []
+note: "P2 ACTUALLY CLAIMED 2026-09-30 22:03:21: kei/declare-wire-shapes-once-dbf7, reviewed 01M3SA10SV0TYEDZFABMDG8DZV then claimed 01M3SA118Q6MSF4AQ799A4RNNN. Accepted main80e590b0a0e0602fde5021480fca24d5214586bf/tree4e8f31e8971eba2bb81e4c3b17aeed0028f64d87 equals delivered sourcec4fd8fdf8 integration. Independent elite whole5Criteria+Objective SATISFIED21:58:25; holder full source/evidence/pin audit and real satisfied review. 11 fresh checks plus declared Verification passed; native63 independent probes and25 fresh ESM entry orders. Task DONE by Settlement; worktree laputa removed; pending/lag empty. Historical0bb/d89 UNSATISFIED Task crossing duplicates actually corrected, not waived. P2 source-only -1878 vs acceptedP1c; -1875 vs postP1b includes P1c+3; final correction -35. Cumulative accepted src since69637c8fd -748, NOT target-11k. P3 now released; P3..P7 remain."
+createdAt: 2026-09-30T01:12:32.032Z
+updatedAt: 2026-09-30T14:43:25.464Z
+---
+Replace hand decoder plus TS type plus ownerSchema wrappers with canonical zod schema + inferred type for actual cross-process input/result/event/service shapes. Eliminate obsolete protocol/git/settlement/library result-codec layer files and duplicated primitive helpers where those are only shape reconstruction; do not erase validation of nested wire fields. Keep durable journal version codec and Heart persistent-boundary codecs. Provider neutral event persistent read ownership contradiction sent to Faye at act1739; apply ruling before binding. Pure internal owner values need no revalidation codec. Keep strict unknown fields, malformed input/result failure category, canonical identity proof and historical authority acceptance; no speculative generic validation framework. All removal accounting includes replacement schema cost. Owner law conceptual only; update precise schema/render/codec tests at their real trust boundaries.
+Boundary settled PUBLIC act1740: one neutral AgentEvent zod schema belongs to Heart activity/timeline; Body write and persisted projection read use same schema. Delete provider-owned handwritten event decoder, not validation of persisted event_json. Rule is one schema per process or persistence boundary; pure internal values zero codec. All other phase criteria unchanged.
+Maps to1738 knife1 and1740.1. New1741 Outcome/Effect[] plus observer event shapes from results phase are canonical schema inputs; nested stops/refusals crossing wire still validated via this one boundary schema, not falsely declared never-cross-process. Acceptance includes removing obsolete codec/ownerSchema files plus duplicate helpers with replacement costs counted, no journal/Heart corruption validation erased, canonical zod type inference and owner dependency direction enforced. Await Task tree review1742.
+Task tree APPROVED1744; dependency is P1b specifically so P2 can run parallel with P1c outer-attempt consolidation. This phase owning conceptual law updates SAME change (public-results/public-api and Heart/provider chapter as relevant), not deferred to root. Canonical KeiyakuError category/outcome/effect schema follows1744.
+Actual scheduling correction 2026-09-30: removed obsolete parent-P1 needs edge b14d, retaining P1b0c2d only, exactly as reviewed PUBLIC1744. Parent P1 also contains P1c; depending on it would incorrectly serialize P2 behind P1c. P2 and P1c may proceed in parallel once P1b is accepted; overlap is reconciled, not a dependency.

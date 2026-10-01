@@ -1,7 +1,7 @@
 ---
 id: task/completion/verify-both-completed-contracts-aaea
 title: Verify completed Contracts and temporary-root fix on main
-state: open
+state: drop
 priority: 2
 needs:
   - task/completion/finish-verification-action-abee
@@ -9,9 +9,9 @@ needs:
 parent: null
 supersedes: []
 relates: []
-note: ""
+note: User retired historical aggregate bookkeeping. Identity, Recovery, and temporary-root Contracts are already claimed. No fresh aggregate main verification is asserted; current verification and unresolved defects remain in active integration and usability work.
 createdAt: 2026-09-05T05:12:40.248Z
-updatedAt: 2026-09-05T12:34:55.005Z
+updatedAt: 2026-09-30T17:31:40.586Z
 ---
 Inspect accepted diffs, confirm both Contracts claimed, run npm test, npm run test:typecheck, npm run build on main while preserving pre-existing unrelated dirty files.
 User added a separate root-cause Contract kei/prevent-akuma-fork-test-temporary-directory-resu. Final verification also requires its independent review and verified landing; existing local ignore entries are only temporary isolation, not its acceptance.

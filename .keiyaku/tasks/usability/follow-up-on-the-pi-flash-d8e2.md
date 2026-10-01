@@ -9,7 +9,7 @@ supersedes: []
 relates: []
 note: ""
 createdAt: 2026-09-09T12:54:16.998Z
-updatedAt: 2026-09-09T15:15:48.702Z
+updatedAt: 2026-09-30T17:38:01.233Z
 ---
 Record the user discussion and independently verified trial findings. This is planning only: no implementation, Contract binding, or worker commission has started.
 
@@ -20,3 +20,4 @@ The user accepted the name --workdir and the separation from -C. Track the confi
 Square presence-file pollution is excluded: the user reports fixing it in the Square repository. Do not change Task terminal behavior, default Contract board membership, or audit subject semantics merely to accommodate individual agent misunderstandings.
 
 SOUL.md and the registered docs owner chapters remain product authority. These Tasks preserve decisions, evidence, and procedure, not alternate owner law. npm only. Preserve unrelated work; no changes to global Akuma configurations.
+Oct1 child investigation6096 actively resumed under user-authorized genuine repair work; sole prebind fixture analyst7ac8ed23 also examines Task6678 with separate cause conclusions. Historical evidence-only child records7203/1da1 retired without declaring underlying symptoms resolved; parent remains live for its unresolved child.
