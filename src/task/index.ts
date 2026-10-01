@@ -1,11 +1,5 @@
 import type { WorldRoot } from "../world.js";
-import {
-  executionChannel,
-  libraryExecution,
-  localExecutionContext,
-  type ExecutionContext,
-  type LibraryExecution,
-} from "../akuma/requests.js";
+import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
   requestForwardedTask,
   type TaskLifecycleVerb,
@@ -526,19 +520,17 @@ class TasksHandle {
 }
 export type Tasks = TasksHandle;
 
-type TasksOfInput = Readonly<{ execution?: LibraryExecution }>;
-
-function tasksOfExecution(input: TasksOfInput | undefined): ExecutionContext {
-  if (input === undefined) return localExecutionContext();
-  const values = record(input, "Tasks.of input");
-  closed(values, ["execution"], "Tasks.of input");
-  return values.execution === undefined ? localExecutionContext() : libraryExecution(values.execution);
+/**
+ * The one Tasks composition. Public `of` fixes local execution; CLI and Body pass their captured
+ * internal channel through `tasksWithExecution` instead of a second constructor.
+ */
+export function tasksWithExecution(world: WorldRoot, execution: ExecutionContext): Tasks {
+  if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
+  return new TasksHandle(world, execution);
 }
 
 export const Tasks = Object.freeze({
-  of(world: WorldRoot, input?: TasksOfInput): Tasks {
-    const execution = tasksOfExecution(input);
-    if (typeof world !== "string") throw new TypeError("Tasks.of world must be a WorldRoot");
-    return new TasksHandle(world, execution);
+  of(world: WorldRoot): Tasks {
+    return tasksWithExecution(world, localExecutionContext());
   },
 });

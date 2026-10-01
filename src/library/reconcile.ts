@@ -12,7 +12,7 @@ import { reconcileObservationFailure } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
-import type { WorktreeHooks } from "./configuration.js";
+import type { WorktreeHooks } from "../git/hooks.js";
 import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
 import {
   contractFileLagSchema,

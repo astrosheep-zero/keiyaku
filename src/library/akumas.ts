@@ -3,12 +3,7 @@ import { readAkumaRoster } from "../akuma/akuma.js";
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import type { AkumaAlias } from "../identity/selector.js";
-import {
-  libraryExecution,
-  localExecutionContext,
-  type ExecutionContext,
-  type LibraryExecution,
-} from "../akuma/requests.js";
+import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import type {
   CallInput as LibraryCallInput,
   CallResult,
@@ -56,7 +51,6 @@ export type AkumaAskInput<T = string> = Omit<LibraryAkumaAskInput<T>, "path">;
 export type AkumaHistoryInput = Omit<LibraryAkumaHistoryInput, "path">;
 export type CallInput = Omit<LibraryCallInput, "path">;
 export type ForkInput = Omit<LibraryForkInput, "path">;
-export type AkumasOfInput = Readonly<{ execution?: LibraryExecution }>;
 
 export type {
   AkumaHistoryResult,
@@ -142,11 +136,6 @@ class AkumasHandle {
   }
 }
 
-function executionFor(input?: AkumasOfInput): ExecutionContext {
-  const values = requireInput(input === undefined ? {} : input, "Akumas.of input", ["execution"]);
-  return values.execution === undefined ? localExecutionContext() : libraryExecution(values.execution);
-}
-
 /**
  * Upper World composition attaches the frozen Alias context to the lower
  * roster's native membership and semantic order without reopening its extent.
@@ -161,9 +150,17 @@ function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[])
   return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
 }
 
+/**
+ * The one Akumas composition. Public `of` fixes local execution; CLI and Body pass their captured
+ * internal channel through `akumasWithExecution` instead of a second constructor.
+ */
+export function akumasWithExecution(world: WorldRoot, execution: ExecutionContext): Akumas {
+  if (typeof world !== "string") throw new TypeError("Akumas.of world must be a WorldRoot");
+  return new AkumasHandle(world, execution);
+}
+
 export const Akumas = Object.freeze({
-  of(world: WorldRoot, input?: AkumasOfInput): Akumas {
-    if (typeof world !== "string") throw new TypeError("Akumas.of world must be a WorldRoot");
-    return new AkumasHandle(world, executionFor(input));
+  of(world: WorldRoot): Akumas {
+    return akumasWithExecution(world, localExecutionContext());
   },
 });

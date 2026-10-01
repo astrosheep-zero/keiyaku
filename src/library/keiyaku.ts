@@ -5,7 +5,15 @@ import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { regionWarnings } from "../body/region.js";
 import { renderContractGuidance } from "../contract-guidance.js";
-import { contractId, type ActorId, type ContractId, type ContractState, type Gate } from "../core/facts/types.js";
+import {
+  contractId,
+  gate,
+  gateWord,
+  type ActorId,
+  type ContractId,
+  type ContractState,
+  type Gate,
+} from "../core/facts/types.js";
 import { readDispatchesAt } from "../dispatch/index.js";
 import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
@@ -13,7 +21,6 @@ import { documentDiff } from "../markdown/diff.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import {
   executionChannel,
-  libraryExecution,
   localExecutionContext,
   type ExecutionContext,
   type LibraryExecution,
@@ -50,14 +57,13 @@ import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
 import { readManagedWorktreeAppointment, type ContractWorkspaceLocation } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
-import { worktreeHooksOption, type WorktreeHooks } from "./configuration.js";
+import { EMPTY_WORKTREE_HOOKS, worktreeHooksFrom, type WorktreeHooks } from "../git/hooks.js";
 import { continueDeliveredDependents } from "./continuation.js";
 import { Delivery, deliveryHandle, type DeliveryValue } from "./delivery.js";
 import {
   actorOption,
   contractTerms,
   documentDerivation,
-  normalizedGates,
   normalizedList,
   optionalBoolean,
   optionalNonblank,
@@ -81,6 +87,7 @@ import {
   type Review,
 } from "./outcome.js";
 import type { OperationRefusals } from "./refusal.js";
+import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, type Settings } from "../settings.js";
 import {
   completeReconcile,
   completeRepoReconcile,
@@ -144,13 +151,8 @@ export type {
   ActorId,
 } from "../core/facts/types.js";
 export type { JournalEntry as Fact } from "../core/facts/types.js";
-export type {
-  Gate,
-  WorktreeHooks,
-  GatesFromInput,
-  HookCommand,
-  RequireBranchesToBeUpToDateFromInput,
-} from "./configuration.js";
+export type { Gate } from "../settings.js";
+export type { HookCommand, WorktreeHooks } from "../git/hooks.js";
 export type { RepoAtInput } from "./repo.js";
 export type { ReconcileCompletion, RepoContractReconcileReport, RepoReconcileReport } from "./reconcile.js";
 
@@ -221,31 +223,104 @@ export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 
 export type AuditInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
 export type AuditOptions = Readonly<{ includeDirty: boolean; showDiff: boolean; signal?: AbortSignal }>;
-export type AuditComposition = Readonly<{
-  actor?: ActorId;
-  hooks?: WorktreeHooks;
-  requireBranchesToBeUpToDate?: boolean;
-}>;
 export type { ExecutionObserver };
 export { AuthorityCorruptionError } from "../core/facts/errors.js";
 export { actorId } from "../core/facts/types.js";
 export { NoGitWorldError, Repo } from "./repo.js";
-export { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError, worktreeHooksFrom } from "./configuration.js";
-export { bodyRequestExecution } from "../akuma/requests.js";
-export type { LibraryExecution } from "../akuma/requests.js";
 export { nukeKeiyaku as nuke } from "./nuke.js";
 
 // ---------------------------------------------------------------------------
 // Composition
 // ---------------------------------------------------------------------------
 
+/** The one immutable Contract-local composition captured at construction. */
 export type LocalContractCompositionCapture = Readonly<{
+  settings?: Settings;
   actor?: ActorId;
-  hooks: WorktreeHooks;
-  requireBranchesToBeUpToDate: boolean;
 }>;
 
-export type KeiyakuWithInput = LocalContractComposition & Readonly<{ execution?: LibraryExecution }>;
+/** The public construction input: one already-loaded Settings value and an operation actor. */
+export type KeiyakuWithInput = LocalContractComposition;
+
+/** One scoped Settings lookup: its native failure stays the cause of caller-invalid input. */
+function settingsScopedFailure(error: unknown): never {
+  if (error instanceof SettingsError) throw new KeiyakuError("invalid-input", error.message, { cause: error });
+  throw error;
+}
+
+/**
+ * Hooks, freshness, and gate bundles are read from the captured Settings only at the operation
+ * that consumes them. Bare core (omitted Settings) keeps empty hooks, false freshness, and
+ * literal gate words; a broken selected namespace fails before any admission.
+ */
+function derivedHooks(composition: LocalContractCompositionCapture): WorktreeHooks {
+  if (composition.settings === undefined) return EMPTY_WORKTREE_HOOKS;
+  try {
+    return worktreeHooksFrom({ settings: composition.settings });
+  } catch (error) {
+    return settingsScopedFailure(error);
+  }
+}
+
+function derivedFreshness(composition: LocalContractCompositionCapture): boolean {
+  if (composition.settings === undefined) return false;
+  try {
+    return requireBranchesToBeUpToDateFrom({ settings: composition.settings });
+  } catch (error) {
+    return settingsScopedFailure(error);
+  }
+}
+
+/** The two Settings-derived Contract policies one mutating operation may consume. */
+function derivedContractPolicy(composition: LocalContractCompositionCapture): Readonly<{
+  hooks: WorktreeHooks;
+  requireBranchesToBeUpToDate: boolean;
+}> {
+  return { hooks: derivedHooks(composition), requireBranchesToBeUpToDate: derivedFreshness(composition) };
+}
+
+function gateNames(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new TypeError("gates must be an array");
+  return value.map((item, index) => {
+    if (typeof item !== "string") throw new TypeError(`gates[${index}] must be a string`);
+    return item;
+  });
+}
+
+/** An explicit empty selection needs no bundle lookup; omitted names select the configured default. */
+function derivedGates(
+  composition: LocalContractCompositionCapture,
+  names: readonly string[] | undefined,
+): readonly Gate[] {
+  if (names !== undefined && names.length === 0) return Object.freeze([]);
+  if (composition.settings === undefined) return literalGates(names);
+  try {
+    return (
+      names === undefined
+        ? gatesFrom({ settings: composition.settings })
+        : gatesFrom({ settings: composition.settings, names })
+    ) as readonly Gate[];
+  } catch (error) {
+    return settingsScopedFailure(error);
+  }
+}
+
+function literalGates(names: readonly string[] | undefined): readonly Gate[] {
+  if (names === undefined) return Object.freeze([]);
+  const selected: Gate[] = [];
+  const seen = new Set<string>();
+  for (const [index, name] of names.entries()) {
+    if (!gateWord(name)) {
+      const message = `gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`;
+      throw new KeiyakuError("invalid-input", message, { cause: new TypeError(message) });
+    }
+    if (seen.has(name)) continue;
+    seen.add(name);
+    selected.push(gate(name));
+  }
+  return Object.freeze(selected);
+}
 
 export interface KeiyakuLibraryReconcile {
   (input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
@@ -262,35 +337,30 @@ export type KeiyakuLibrary = Readonly<{
 }>;
 
 export function captureLocalContractComposition(input?: LocalContractComposition): LocalContractCompositionCapture {
-  const values = requireInput(input ?? {}, "Keiyaku.with input", ["actor", "hooks", "requireBranchesToBeUpToDate"]);
+  const values = requireInput(input === undefined ? {} : input, "Keiyaku.with input", ["settings", "actor"]);
   const actor = actorOption(values.actor).actor;
+  const settings = values.settings;
+  if (settings !== undefined && (settings === null || typeof settings !== "object")) {
+    throw new TypeError("Keiyaku.with settings must be a Settings value");
+  }
   return Object.freeze({
     ...(actor === undefined ? {} : { actor }),
-    hooks: worktreeHooksOption(values.hooks),
-    requireBranchesToBeUpToDate:
-      optionalBoolean(values.requireBranchesToBeUpToDate, "Keiyaku.with requireBranchesToBeUpToDate") ?? false,
+    ...(settings === undefined ? {} : { settings: settings as Settings }),
   });
 }
 
+/**
+ * The one private Contract composition constructor. `Keiyaku.with` fixes local execution; CLI and
+ * Body pass their captured internal channel explicitly here instead of a second constructor. The
+ * carrier is a positional argument, never a field of the public construction input, so no runtime
+ * value reaching the public surface can select a private channel.
+ */
 export function composeContractLibrary(
-  input: KeiyakuWithInput | undefined,
-  createHandle: typeof createKeiyakuHandle,
+  execution: LibraryExecution,
+  input?: LocalContractComposition,
+  createHandle: typeof createKeiyakuHandle = createKeiyakuHandle,
 ): KeiyakuLibrary {
-  const values = requireInput(input === undefined ? {} : input, "Keiyaku.with input", [
-    "execution",
-    "actor",
-    "hooks",
-    "requireBranchesToBeUpToDate",
-  ]);
-  const execution: ExecutionContext =
-    values.execution === undefined ? localExecutionContext() : libraryExecution(values.execution);
-  const composition = captureLocalContractComposition({
-    ...(values.actor === undefined ? {} : { actor: values.actor as string }),
-    ...(values.hooks === undefined ? {} : { hooks: values.hooks as NonNullable<LocalContractComposition["hooks"]> }),
-    ...(values.requireBranchesToBeUpToDate === undefined
-      ? {}
-      : { requireBranchesToBeUpToDate: values.requireBranchesToBeUpToDate as boolean }),
-  });
+  const composition = captureLocalContractComposition(input);
   return Object.freeze({
     bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, execution, composition),
     select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, execution, composition),
@@ -314,8 +384,9 @@ export function selectKeiyaku(
 
 /**
  * The one public repair entry: an explicit Repo proves the Git world, the captured composition
- * supplies hooks, and the same operation-local retryHooks choice stays available. Omitted contract
- * reconciles the complete world; a supplied one reconciles that addressed Contract.
+ * supplies its Settings-derived hooks, and the same operation-local retryHooks choice stays
+ * available. Omitted contract reconciles the complete world; a supplied one reconciles that
+ * addressed Contract.
  */
 function reconcileOperation(composition: LocalContractCompositionCapture): KeiyakuLibraryReconcile {
   function run(input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
@@ -337,7 +408,7 @@ async function reconcileKeiyaku(
   if (contract !== undefined && typeof contract !== "string") throw new TypeError("contract must be a string");
   if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
     throw new TypeError("retryHooks must be a boolean");
-  const options = { scope, hooks: composition.hooks, retryHooks: values.retryHooks ?? false };
+  const options = { scope, hooks: derivedHooks(composition), retryHooks: values.retryHooks ?? false };
   if (contract === undefined) {
     return await withGitDecodeChannel(scope, (channel) => completeRepoReconcile({ ...options, channel }));
   }
@@ -395,7 +466,7 @@ const KEIYAKU_SEATS = new WeakMap<object, HandleSeat>();
 
 export class Keiyaku {
   static with(input?: KeiyakuWithInput): KeiyakuLibrary {
-    return composeContractLibrary(input, createKeiyakuHandle);
+    return composeContractLibrary(localExecutionContext(), input, createKeiyakuHandle);
   }
 
   private readonly id: ContractId;
@@ -501,16 +572,16 @@ export class Keiyaku {
   }
 
   async amend(input: AmendInput): Promise<AmendOutcome> {
-    const { hooks, markdown, gates, prerequisites, actor } = validated(() => {
-      const values = requireInput(input, "amend input", ["hooks", "actor", "markdown", "gates", "after"]);
+    const { markdown, gates, prerequisites, actor } = validated(() => {
+      const values = requireInput(input, "amend input", ["actor", "markdown", "gates", "after"]);
       return {
-        hooks: worktreeHooksOption(values.hooks),
         markdown: values.markdown === undefined ? undefined : requireMarkdown(values.markdown),
-        gates: values.gates === undefined ? undefined : normalizedGates(values.gates),
+        gates: values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates)),
         prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", contractId),
         actor: actorOption(values.actor).actor,
       };
     });
+    const hooks = derivedHooks(this.composition);
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
     validated(() => {
       if (markdown === undefined && gates === undefined && prerequisites === undefined)
@@ -601,6 +672,7 @@ export class Keiyaku {
           overwrite: values.overwrite,
         },
       });
+    const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
     return await this.local(
       "deliver",
       async (
@@ -623,7 +695,7 @@ export class Keiyaku {
             includeDirty: values.includeDirty,
             materializeConflict: values.materializeConflict,
             overwrite: values.overwrite,
-            requireBranchesToBeUpToDate: this.composition.requireBranchesToBeUpToDate,
+            requireBranchesToBeUpToDate,
             deriveDocument: derivedDocument,
           });
           if (outcome.kind === "integration-conflict-materialized")
@@ -645,15 +717,11 @@ export class Keiyaku {
           retainTrailingFailure(accumulator, this.id, error, values.signal, stage);
         }
         const base = admittedDeliveryValue(accumulator, this.id);
-        if (
-          leadingValue !== undefined &&
-          (leadingValue.leading.kind !== base.leading.kind || leadingValue.leading.fact !== base.leading.fact)
-        )
-          throw new Error("accepted delivery leading disagrees with its admitted fact");
+        requireMatchingDeliveryLeading(leadingValue, base);
         const retained = accumulator.conclusions(this.id) ?? {};
         const value: DeliveryValue = { ...base, ...leadingValue, ...retained } as DeliveryValue;
         accumulator.recordConclusions(this.id, value);
-        await this.reconcileContracts(accumulator, scope, localChannel, this.composition.hooks);
+        await this.reconcileContracts(accumulator, scope, localChannel, hooks);
         return acceptedOutcome("deliver", this.id, accumulator, this.deliveryAbility(value));
       },
       values.signal,
@@ -686,6 +754,7 @@ export class Keiyaku {
           ...(summary === undefined ? {} : { summary }),
         },
       });
+    const hooks = derivedHooks(this.composition);
     return await this.local(
       "review",
       async (
@@ -730,7 +799,7 @@ export class Keiyaku {
         }
         const retained: Review = { ...value, ...accumulator.conclusions(this.id) };
         accumulator.extendConclusions(this.id, retained);
-        await this.reconcileContracts(accumulator, scope, localChannel, this.composition.hooks);
+        await this.reconcileContracts(accumulator, scope, localChannel, hooks);
         return acceptedOutcome("review", this.id, accumulator, retained);
       },
       signal,
@@ -739,14 +808,14 @@ export class Keiyaku {
   }
 
   async abandon(input?: AbandonInput): Promise<AbandonOutcome> {
-    const { hooks, note, actor } = validated(() => {
-      const values = input === undefined ? undefined : requireInput(input, "abandon input", ["hooks", "note", "actor"]);
+    const { note, actor } = validated(() => {
+      const values = input === undefined ? undefined : requireInput(input, "abandon input", ["note", "actor"]);
       return {
-        hooks: worktreeHooksOption(values?.hooks),
         note: optionalNonblank(values?.note, "abandon note"),
         actor: actorOption(values?.actor),
       };
     });
+    const hooks = derivedHooks(this.composition);
     return await this.local(
       "abandon",
       async (
@@ -788,14 +857,14 @@ export class Keiyaku {
   }
 
   async arc(input: ArcInput): Promise<ArcOutcome> {
-    const { hooks, chapter, actor } = validated(() => {
-      const values = requireInput(input, "arc input", ["hooks", "markdown", "actor"]);
+    const { chapter, actor } = validated(() => {
+      const values = requireInput(input, "arc input", ["markdown", "actor"]);
       return {
-        hooks: worktreeHooksOption(values.hooks),
         chapter: decodeArcDocument(requireMarkdown(values.markdown)),
         actor: actorOption(values.actor),
       };
     });
+    const hooks = derivedHooks(this.composition);
     return await this.local(
       "arc",
       async (accumulator, channel, scope): Promise<OutcomeProjection<"arc", void, OperationRefusals["arc"]>> => {
@@ -846,6 +915,7 @@ export class Keiyaku {
           showDiff,
         },
       });
+    const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
     return await this.local(
       "audit",
       async (
@@ -862,7 +932,7 @@ export class Keiyaku {
             deriveDocument: derivedDocument,
             includeDirty,
             showDiff,
-            requireBranchesToBeUpToDate: this.composition.requireBranchesToBeUpToDate,
+            requireBranchesToBeUpToDate,
             ...(signal === undefined ? {} : { signal }),
             ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
           }),
@@ -872,7 +942,7 @@ export class Keiyaku {
           scope,
           channel: localChannel,
           leading: admission.accepted,
-          hooks: this.composition.hooks,
+          hooks,
           verificationResidueRecorded: false,
           value: (value: AuditReport) => value,
         });
@@ -1161,6 +1231,13 @@ async function advanceAndContinue(
   return { ...result.evidence, ...(continuation === undefined ? {} : { continuation }) };
 }
 
+/** An accepted delivery's leading act must be the fact this invocation admitted. */
+function requireMatchingDeliveryLeading(leading: DeliveryValue | undefined, base: DeliveryValue): void {
+  const mismatched =
+    leading !== undefined && (leading.leading.kind !== base.leading.kind || leading.leading.fact !== base.leading.fact);
+  if (mismatched) throw new Error("accepted delivery leading disagrees with its admitted fact");
+}
+
 function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: ContractId): DeliveryValue {
   const fact = accumulator.snapshot().facts.find((entry) => entry.contract === contractId && entry.kind === "deliver");
   if (fact?.kind === "deliver") return { ...fact.data, leading: { kind: "admitted-now", fact: fact.entry } };
@@ -1231,14 +1308,14 @@ function errorMessage(error: unknown): string {
 
 export type BindResult = BindOutcome;
 
-function bindInput(input: BindInput) {
+function bindInput(input: BindInput, composition: LocalContractCompositionCapture) {
   return validated(() => {
     const values = requireInput(input, "Keiyaku.bind input");
     const forkOf = values.forkOf;
     const allowed =
       forkOf === undefined
-        ? ["repo", "markdown", "task", "target", "workspace", "actor", "after", "gates", "hooks"]
-        : ["repo", "forkOf", "target", "workspace", "actor", "hooks"];
+        ? ["repo", "markdown", "task", "target", "workspace", "actor", "after", "gates"]
+        : ["repo", "forkOf", "target", "workspace", "actor"];
     requireInput(input, "Keiyaku.bind input", allowed);
     if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
     if (values.target !== undefined && typeof values.target !== "string")
@@ -1249,14 +1326,13 @@ function bindInput(input: BindInput) {
       if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
     }
     return {
-      hooks: worktreeHooksOption(values.hooks),
       forkOf: forkOf === undefined ? undefined : contractId(forkOf as string),
       scope: scopeForRepo(values.repo),
       document,
       actor,
       target: values.target as string | undefined,
       task: forkOf === undefined ? taskOption(values.task) : undefined,
-      gates: forkOf === undefined ? normalizedGates(values.gates) : undefined,
+      gates: forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined,
       after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
     };
   });
@@ -1268,8 +1344,9 @@ export async function bindKeiyaku(
   execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<BindOutcome> {
-  const prepared = bindInput(input);
-  const { hooks, forkOf, scope, document, target, actor } = prepared;
+  const prepared = bindInput(input, composition);
+  const hooks = derivedHooks(composition);
+  const { forkOf, scope, document, target, actor } = prepared;
   const handle = (id: ContractId) => createHandle(id, scope, execution, composition);
   const accumulator = new InvocationAccumulator();
   const projection = await (async (): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> => {
@@ -1441,16 +1518,6 @@ async function markdownBind(
 
 function parseMarkdown(markdown: string) {
   return decodeContractDocument(markdown, { requireTimeout: true });
-}
-
-/** Internal CLI composition; not exported from the package root. */
-export async function bindFromCli(
-  input: BindInput,
-  createHandle: typeof createKeiyakuHandle = createKeiyakuHandle,
-  execution: ExecutionContext = localExecutionContext(),
-  composition: LocalContractCompositionCapture = captureLocalContractComposition(),
-): Promise<BindOutcome> {
-  return await bindKeiyaku(input, createHandle, execution, composition);
 }
 
 /** Internal constructor capability; callers select a Contract through Keiyaku.with. */

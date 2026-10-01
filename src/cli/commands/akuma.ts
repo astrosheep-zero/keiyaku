@@ -9,13 +9,8 @@ import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import type { ExecutionContext } from "../../akuma/requests.js";
 import { executionChannel } from "../../akuma/requests.js";
 import { settings, type Settings } from "../../settings.js";
-import {
-  Akumas,
-  AkumaWorldScopeError,
-  type CallInput,
-  type Keiyaku as KeiyakuContract,
-  type Repo,
-} from "../../index.js";
+import { AkumaWorldScopeError, type CallInput, type Keiyaku as KeiyakuContract, type Repo } from "../../index.js";
+import { akumasWithExecution } from "../../library/akumas.js";
 import type { WorldRoot } from "../../world.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { contractFromInput } from "../selectors.js";
@@ -82,7 +77,7 @@ type InvokeInput = Readonly<{
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
 
 function akumas(input: InvokeInput) {
-  return Akumas.of(input.path, { execution: input.execution });
+  return akumasWithExecution(input.path, input.execution);
 }
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {

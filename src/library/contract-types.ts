@@ -1,8 +1,8 @@
 import type { AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { Settings } from "../settings.js";
 import type { ContractFileEffect, ContractFileLag } from "../contract-worktree.js";
 import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
 import type { Dispatch } from "../dispatch/index.js";
-import type { Gate, WorktreeHooks } from "./configuration.js";
 import type { Repo } from "./repo.js";
 import type { SettlementReport } from "../settlement/settle.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
@@ -35,8 +35,7 @@ export type MarkdownBindInput = Readonly<{
   workspace?: "worktree";
   actor?: string;
   after?: readonly ContractId[];
-  gates?: readonly Gate[];
-  hooks?: WorktreeHooks;
+  gates?: readonly string[];
 }>;
 export type ForkBindInput = Readonly<{
   repo: Repo;
@@ -44,21 +43,20 @@ export type ForkBindInput = Readonly<{
   target?: string;
   workspace?: "worktree";
   actor?: string;
-  hooks?: WorktreeHooks;
 }>;
 export type BindInput = MarkdownBindInput | ForkBindInput;
-type ActorOptions = Readonly<{ actor?: string; hooks?: WorktreeHooks }>;
+type ActorOptions = Readonly<{ actor?: string }>;
+/** Contract-local composition: one captured Settings selection and the operation actor. */
 export type LocalContractComposition = Readonly<{
+  settings?: Settings;
   actor?: string;
-  hooks?: WorktreeHooks;
-  requireBranchesToBeUpToDate?: boolean;
 }>;
 
 export type AmendInput = ActorOptions &
   Readonly<{
     markdown?: string;
     after?: readonly ContractId[];
-    gates?: readonly Gate[];
+    gates?: readonly string[];
   }>;
 export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
 export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;

@@ -1,14 +1,13 @@
 # Public API
 
-The ESM package root exposes Keiyaku as the Contract product and native
-Contract handle, Akuma as the standalone single-Akuma product, and Akumas as
-the World-bound plural Akuma composition. It also exposes Settings, Plugin
-types, Repo, World, and the named `nuke` operation. The `./akuma` and `./akumas`
-subpaths expose the same respective products as the root; Task and Kanshi
-retain their named product subpaths. Import choice changes neither product
-ownership nor execution semantics and exposes no private execution or storage
-mechanism. The package has no generic mixed orchestration facade or legacy
-compatibility export.
+The ESM package exposes exactly two entries: the package root and the plugin
+entry. The root exposes Keiyaku as the Contract product and native Contract
+handle, Akuma as the standalone single-Akuma product, Akumas as the World-bound
+plural Akuma composition, Task as its independent product, Kanshi as composite
+observation, Settings, Plugin types, Repo, World, and the named `nuke`
+operation. No other subpath, compatibility alias, or generic mixed
+orchestration facade exists, and no private execution, composition, or storage
+mechanism is reachable from either entry.
 
 ## Composition Boundary
 
@@ -45,13 +44,17 @@ native branded Contract handle created by binding or by selecting a complete
 Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
 amendment, delivery, review, abandonment, arc, and audit. `Keiyaku.with()`
-captures one immutable execution channel and Contract-local composition, then
-exposes the Contract collection operations bind, select, list, and observe, and
-the one public repair entry that reconciles either a world or one addressed
-Contract from an explicit Git-world coordinate. Neither the Git-world coordinate
+synchronously captures one already-loaded immutable Settings value and the
+Contract-local actor, then exposes the Contract collection operations bind,
+select, list, and observe, and the one public repair entry that reconciles
+either a world or one addressed Contract from an explicit Git-world
+coordinate. Construction performs no I/O and validates no product namespace.
+Public construction is always local; only the CLI and a detached Body supply
+their captured internal channel through private composition. Neither the Git-world coordinate
 nor a Contract handle exposes a second repair door. The composition's actor,
 worktree hooks, and branch-freshness policy stay within Contract operations and
-never configure Akumas. There is no Contract `of` alias or package-root Akuma
+never configure Akumas; hooks and freshness are read from the captured Settings
+by the operation that actually consumes them. There is no Contract `of` alias or package-root Akuma
 operation on Keiyaku.
 
 Binding accepts either caller Markdown or a fork of existing terms. It may
@@ -106,15 +109,21 @@ an ordinary refusal.
 
 ## Product Boundaries
 
-Settings are an explicit shared resource. Contract operations retain derived
-values, not a live Settings observation. Gate selection accepts literal opaque
-gates and named bundles together: a configured name expands its bundle, while
-an unconfigured name remains a literal gate. Expansion preserves first-seen
-order without duplicates and does not infer producer availability. A malformed
-selected bundle or unavailable configuration is a failure, not literal fallback.
-An explicit empty selection needs no bundle lookup and freezes no obligations;
-omission retains the operation's default or existing terms. Later configuration
-changes never rewrite admitted gates.
+Settings are an explicit shared resource captured once at Contract
+construction. Contract operations retain derived values, not a live Settings
+observation, and read a namespace only at the operation that consumes it.
+Omitted Settings is bare core: omitted bind gates select nothing, every
+supplied gate word stays literal, hooks are empty, and branch freshness is
+false. Supplied Settings selects product behavior: omitted bind gates use the
+configured default bundle, named bundles and literal words mix with first-seen
+deduplication, and an unconfigured name remains a literal gate. Expansion does
+not infer producer availability. An explicit empty selection needs no bundle
+lookup and freezes no obligations; omitted amendment retains the admitted gates
+without lookup, and a fork copies the source gates without expansion. A
+malformed selected bundle or unavailable selected namespace fails the consuming
+operation as caller-invalid input retaining the native Settings error, before
+any admission, rather than falling back or refusing partially. Later
+configuration changes never rewrite admitted gates.
 
 World construction and destructive world reset are owned by
 [world.md](world.md). The package root names the reset operation `nuke`; it

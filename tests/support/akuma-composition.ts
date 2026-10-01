@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { AkumaOwner, listAkumaArchetypes, readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
 import type { AkumaCallInput } from "../../src/akuma/akuma.js";
 import { Akumas } from "../../src/index.js";
+import { akumasWithExecution } from "../../src/library/akumas.js";
 import type {
   AkumaConfiguration,
   AkumaCompleteList,
@@ -69,7 +70,7 @@ export class AkumaComposition {
 
   async call(input: AkumaCallInput): Promise<AkumaOwner> {
     const execution = this.configuration.execution;
-    const caller = Akumas.of(this.root, execution === undefined ? {} : { execution });
+    const caller = execution === undefined ? Akumas.of(this.root) : akumasWithExecution(this.root, execution);
     const cwd = input.cwd ?? (execution?.channel.kind === "body-request" ? undefined : process.cwd());
     const result = await caller.call({
       ...input,

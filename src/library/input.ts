@@ -3,15 +3,7 @@ import { decodeContractDocument } from "../body/decode.js";
 import { validated } from "./outcome.js";
 import { verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
-import {
-  actorId,
-  gate,
-  gateWord,
-  type ActorId,
-  type ContractId,
-  type ContractTerms,
-  type Gate,
-} from "../core/facts/types.js";
+import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
 import { parseTaskId, type TaskId } from "../task/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { prepareVerificationDeclaration } from "../verification/declaration.js";
@@ -90,19 +82,6 @@ export function normalizedList<T>(values: unknown, label: string, brand: (value:
       throw new TypeError(error instanceof Error ? error.message : `${label}[${index}] is invalid`);
     }
   });
-}
-
-export function normalizedGates(values: unknown): readonly Gate[] {
-  if (values === undefined) return [];
-  if (!Array.isArray(values)) throw new TypeError("gates must be an array");
-  const normalized = values.map((value, index) => {
-    if (!gateWord(value)) {
-      throw new TypeError(`gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`);
-    }
-    return gate(value);
-  });
-  if (new Set(normalized).size !== normalized.length) throw new TypeError("gates must not contain duplicates");
-  return normalized;
 }
 
 export function contractTerms(

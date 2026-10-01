@@ -4,6 +4,7 @@ import type { ParsedTaskCommand } from "./task-grammar.js";
 import {
   Tasks,
   taskRowViewLimit,
+  tasksWithExecution,
   type TaskBatchResult,
   type TaskDetail,
   type TaskId,
@@ -598,7 +599,7 @@ export async function runTaskCommand(
     coordinates.world ??
     (planOnly ? coordinates.candidateWorld : establishesWorld(command) ? await coordinates.establishWorld() : null);
   if (world === null) return missingWorld(command);
-  const tasks = Tasks.of(world, { execution: runtime.execution });
+  const tasks = tasksWithExecution(world, runtime.execution);
   const contextSensitive =
     command.action === "context" ||
     (command.action === "add" && explicitNamespace === undefined) ||

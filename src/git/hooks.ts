@@ -124,10 +124,6 @@ export const EMPTY_WORKTREE_HOOKS: WorktreeHooks = Object.freeze({
   destroy: Object.freeze([]),
 });
 
-export function worktreeHooksOption(value: unknown): WorktreeHooks {
-  return value === undefined ? EMPTY_WORKTREE_HOOKS : normalizedWorktreeHooks(value);
-}
-
 function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>): HookFailure | null {
   if (outcome.kind === "terminal") {
     return outcome.code === 0

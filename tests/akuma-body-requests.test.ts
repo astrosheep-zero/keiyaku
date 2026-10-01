@@ -66,7 +66,9 @@ import {
   type DependencyKeySet,
 } from "../src/core/facts/types.js";
 import { World, type WorldRoot } from "../src/world.js";
-import { Keiyaku, Repo, bodyRequestExecution } from "../src/index.js";
+import { Keiyaku, Repo } from "../src/index.js";
+import { bodyRequestExecution } from "../src/akuma/requests.js";
+import { composeContractLibrary } from "../src/library/keiyaku.js";
 // File-scope: git fixture teardown binds to this file, and both repository tests share its template.
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 import { Tasks } from "../src/task/index.js";
@@ -2198,7 +2200,7 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
   });
   try {
     const observations: string[] = [];
-    const forwarded = Keiyaku.with({ execution: bodyRequestExecution({ directory: pump.directory }) }).select({
+    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory })).select({
       repo,
       id: bound.contract,
     });
@@ -2254,7 +2256,7 @@ test("forwarded native review preserves the owner outcome and stores the address
   });
   try {
     const observations: string[] = [];
-    const forwarded = Keiyaku.with({ execution: bodyRequestExecution({ directory: pump.directory }) }).select({
+    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory })).select({
       repo,
       id: bound.contract,
     });

@@ -1,19 +1,11 @@
 import type { ParsedContractCommand } from "./contract-grammar.js";
-import { CliUsageError, consumeSettings, isBlankInput } from "../usage.js";
+import { CliUsageError, isBlankInput } from "../usage.js";
 import { bindFromCommand } from "./bind.js";
 import { amendFromCommand } from "./amend.js";
 import { BindDraftError, preserveBindDraft } from "../draft.js";
-import { settings } from "../../settings.js";
-import {
-  Akumas,
-  Keiyaku,
-  KeiyakuError,
-  gatesFrom,
-  nuke,
-  requireBranchesToBeUpToDateFrom,
-  SettingsError,
-  worktreeHooksFrom,
-} from "../../index.js";
+import { SettingsError, settings } from "../../settings.js";
+import { Akumas, Keiyaku, KeiyakuError, nuke } from "../../index.js";
+import { composeContractLibrary } from "../../library/keiyaku.js";
 import { observeKeiyaku } from "../../library/keiyaku.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
 import { actorFromEdge } from "../actor.js";
@@ -65,7 +57,6 @@ import type {
   WorldRoot,
 } from "../../index.js";
 import type { Repo } from "../../library/repo.js";
-import type { WorktreeHooks } from "../../library/configuration.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
 import type { RegionRead, Section } from "../../kanshi/index.js";
 import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
@@ -102,14 +93,12 @@ type ExistingSeat = Readonly<{
   id: ContractId;
   contract: KeiyakuContract;
   actor?: ActorId;
-  hooks?: WorktreeHooks;
 }>;
 
 type ContractMutationInput = Readonly<{
   coordinates: CliCoordinates;
   runtime: CliRuntime;
   configuration?: Settings;
-  hooks?: WorktreeHooks;
   execution: ExecutionContext;
 }>;
 
@@ -125,29 +114,21 @@ async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<S
   });
 }
 
+/**
+ * The process edge loads one Settings value and hands it to the private composition.
+ * A forwarded audit/deliver/review is served by its parent, which loads its own.
+ */
 async function contractSettings(
   command: ParsedContractCommand,
   execution: ExecutionContext,
   world: WorldRoot | null,
   home?: string,
-): Promise<Readonly<{ configuration?: Settings; hooks?: WorktreeHooks }>> {
+): Promise<Settings | undefined> {
   const forwarded =
     executionChannel(execution).kind === "body-request" &&
     (command.command === "audit" || command.command === "deliver" || command.command === "review");
-  if (forwarded) return {};
-  const configuration = await settingsAt(world ?? undefined, home);
-  return { configuration, hooks: consumeSettings(() => worktreeHooksFrom({ settings: configuration }), SettingsError) };
-}
-
-async function selectedGates(value: Settings, names?: readonly string[]) {
-  return consumeSettings(
-    () => gatesFrom({ settings: value, ...(names === undefined ? {} : { names }) }),
-    SettingsError,
-  );
-}
-
-async function selectedGitPolicy(value: Settings): Promise<boolean> {
-  return consumeSettings(() => requireBranchesToBeUpToDateFrom({ settings: value }), SettingsError);
+  if (forwarded) return undefined;
+  return await settingsAt(world ?? undefined, home);
 }
 
 function draftWarning(error: unknown): Readonly<{ warning: string }> {
@@ -255,7 +236,6 @@ async function existingSeat(
   coordinates: CliCoordinates,
   runtime: CliRuntime,
   library: KeiyakuLibrary,
-  hooks: WorktreeHooks | undefined,
 ): Promise<ExistingSeat> {
   const repo = requiredRepo(coordinates);
   const id = await resolveContractId(repo, command.contract, coordinates.cwd);
@@ -264,48 +244,43 @@ async function existingSeat(
     id,
     contract: library.select({ repo, id }),
     ...(actor === undefined ? {} : { actor }),
-    ...(hooks === undefined ? {} : { hooks }),
   };
 }
 
+/** One composition for every mutation leaf; gates, hooks, and freshness derive lazily inside it. */
 async function contractLibrary(
   command: ParsedContractCommand,
   execution: ExecutionContext,
   configuration: Settings | undefined,
-  hooks: WorktreeHooks | undefined,
   runtime: CliRuntime,
 ): Promise<KeiyakuLibrary> {
-  if (executionChannel(execution).kind !== "local" || !["audit", "deliver", "review"].includes(command.command)) {
-    return Keiyaku.with({ execution });
-  }
-  const requireBranchesToBeUpToDate =
-    command.command !== "review" && configuration !== undefined ? await selectedGitPolicy(configuration) : false;
-  const actor = actorFromEdge(undefined, runtime.environment);
-  return Keiyaku.with({
-    execution,
+  const actor =
+    executionChannel(execution).kind === "local" && ["audit", "deliver", "review"].includes(command.command)
+      ? actorFromEdge(undefined, runtime.environment)
+      : undefined;
+  return composeContractLibrary(execution, {
+    ...(configuration === undefined ? {} : { settings: configuration }),
     ...(actor === undefined ? {} : { actor }),
-    ...(hooks === undefined ? {} : { hooks }),
-    requireBranchesToBeUpToDate,
   });
 }
 
 async function runBind(
   command: Extract<ContractMutation, { command: "bind" }>,
   input: ContractMutationInput,
+  library: KeiyakuLibrary,
 ): Promise<number> {
-  const { coordinates, runtime, configuration, hooks } = input;
+  const { coordinates, runtime } = input;
   const repo = requiredRepo(coordinates);
   const actor = actorFromEdge(command.actor, runtime.environment);
   if (command.forkOf !== undefined) {
     const answer = await bindFromCommand({
       command,
       repo,
+      library,
       ...(actor === undefined ? {} : { actor }),
-      ...(hooks === undefined ? {} : { hooks }),
     });
     return await finishContractAnswer(answer, command.output);
   }
-  if (configuration === undefined) throw new Error("bind invocation requires Settings");
   const markdown = await runtime.readStdin();
   if (isBlankInput(markdown)) throw new CliUsageError("bind requires a nonblank stdin document");
   try {
@@ -315,15 +290,13 @@ async function runBind(
       throw error;
     throw new BindDraftError(error, await bindDraftReceipt(coordinates.establishWorld, markdown));
   }
-  const gates = await selectedGates(configuration, command.gates);
   try {
     const answer = await bindFromCommand({
       command,
       repo,
+      library,
       markdown,
-      gates,
       ...(actor === undefined ? {} : { actor }),
-      ...(hooks === undefined ? {} : { hooks }),
     });
     if (answer.kind !== "refused") return await finishContractAnswer(answer, command.output);
     const draft = await bindDraftReceipt(coordinates.establishWorld, markdown);
@@ -332,6 +305,9 @@ async function runBind(
     return 1;
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
+    // A selected Settings namespace failure is the Contract owner's invalid input, not a bad draft.
+    if (error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof SettingsError)
+      throw error;
     if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
       throw error;
     throw new BindDraftError(error, await bindDraftReceipt(coordinates.establishWorld, markdown));
@@ -343,20 +319,17 @@ async function runAmend(
   input: ContractMutationInput,
   seat: ExistingSeat,
 ): Promise<number> {
-  const { coordinates, runtime, configuration, hooks } = input;
-  if (configuration === undefined) throw new Error("amend invocation requires Settings");
+  const { coordinates, runtime } = input;
   const markdown = command.stdin === true ? await runtime.readStdin() : undefined;
   if (markdown !== undefined && isBlankInput(markdown))
     throw new CliUsageError("amend requires a nonblank stdin document");
-  const gates = command.gates === undefined ? undefined : await selectedGates(configuration, command.gates);
   const answer = await amendFromCommand({
     command,
     repo: requiredRepo(coordinates),
     contract: seat.contract,
     ...(markdown === undefined ? {} : { markdown }),
-    gates,
+    ...(command.gates === undefined ? {} : { gates: command.gates }),
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-    ...(hooks === undefined ? {} : { hooks }),
   });
   return await finishContractAnswer(answer, command.output);
 }
@@ -429,7 +402,6 @@ async function runArc(
   const answer = await seat.contract.arc({
     markdown,
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-    ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
   });
   return await finishContractAnswer(answer, command.output);
 }
@@ -441,7 +413,6 @@ async function runAbandon(
   const answer = await seat.contract.abandon({
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
     ...(command.note === undefined ? {} : { note: command.note }),
-    ...(seat.hooks === undefined ? {} : { hooks: seat.hooks }),
   });
   return await finishContractAnswer(answer, command.output);
 }
@@ -469,9 +440,9 @@ async function runAudit(
 }
 
 async function runContractMutation(command: ContractMutation, input: ContractMutationInput): Promise<number> {
-  if (command.command === "bind") return await runBind(command, input);
-  const library = await contractLibrary(command, input.execution, input.configuration, input.hooks, input.runtime);
-  const seat = await existingSeat(command, input.coordinates, input.runtime, library, input.hooks);
+  const library = await contractLibrary(command, input.execution, input.configuration, input.runtime);
+  if (command.command === "bind") return await runBind(command, input, library);
+  const seat = await existingSeat(command, input.coordinates, input.runtime, library);
   switch (command.command) {
     case "amend":
       return await runAmend(command, input, seat);
@@ -796,8 +767,10 @@ async function runReconcile(
   home: string | undefined,
 ): Promise<number> {
   const repo = requiredRepo(coordinates);
-  const { hooks } = await contractSettings(command, execution, coordinates.world, home);
-  const library = Keiyaku.with({ execution, ...(hooks === undefined ? {} : { hooks }) });
+  const configuration = await contractSettings(command, execution, coordinates.world, home);
+  const library = composeContractLibrary(execution, {
+    ...(configuration === undefined ? {} : { settings: configuration }),
+  });
   let report: ReconcileCompletion | RepoReconcileReport;
   if (command.contract === undefined) {
     report = await library.reconcile({ repo, retryHooks: command.retryHooks });
@@ -837,13 +810,12 @@ export async function runContractCommand(
     case "reconcile":
       return await runReconcile(command, coordinates, execution, home);
     default: {
-      const { configuration, hooks } = await contractSettings(command, execution, coordinates.world, home);
+      const configuration = await contractSettings(command, execution, coordinates.world, home);
       return await runContractMutation(command, {
         coordinates,
         runtime,
         execution,
         ...(configuration === undefined ? {} : { configuration }),
-        ...(hooks === undefined ? {} : { hooks }),
       });
     }
   }

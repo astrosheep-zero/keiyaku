@@ -2,7 +2,6 @@ import {
   Keiyaku,
   Delivery,
   Repo,
-  bodyRequestExecution,
   KeiyakuError,
   type ContractId,
   type BindInput,
@@ -15,7 +14,6 @@ import {
   type PartialOutcomeEnvelope,
   type LocalContractComposition,
   type ContractObservation,
-
 } from "@astrosheep/keiyaku";
 
 declare const repo: Repo;
@@ -43,14 +41,10 @@ declare const delivered: DeliverOutcome;
 if (delivered.kind === "accepted") { delivered.value.leading.fact; delivered.value.diff(); }
 if (delivered.kind === "handoff") delivered.value.handoffBase;
 
-const local: LocalContractComposition = {
-  actor: "consumer",
-  hooks: { create: [], destroy: [] },
-  requireBranchesToBeUpToDate: true,
-};
+const local: LocalContractComposition = { actor: "consumer" };
 Keiyaku.with(local).select({ repo, id }).review(cancellable);
-const execution = bodyRequestExecution({ directory: "/tmp/keiyaku-requests" });
-Keiyaku.with({ execution }).select({ repo, id }).review(cancellable);
+// @ts-expect-error the execution carrier is no longer a public construction input
+Keiyaku.with({ execution: {} });
 
 const observed: ContractObservation = await Keiyaku.with().observe({ repo, id });
 if (observed.kind === "present") observed.row.gates.reports;
@@ -98,3 +92,5 @@ reviewed.cleanup;
 // @ts-expect-error forwarding-specific retries do not belong to local bind
 const bindRetry: BindResult = { kind: "retry", operation: "bind", reason: { kind: "owner-reason-unavailable", diagnostic: "gone" }, facts: [], effects: [], pending: [] };
 void bindRetry;
+// @ts-expect-error the retired execution helper is not a public root name
+type RemovedExecutionHelper = import("@astrosheep/keiyaku").bodyRequestExecution;

@@ -5,11 +5,11 @@ import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { World } from "./world.js";
 import { selectionRequestPort } from "./akuma/selection-owner-port.js";
 import { selectionRequestCommands } from "./akuma/selection-request.js";
-import { worktreeHooksFrom } from "./git/hooks.js";
 import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
-import { Keiyaku } from "./library/keiyaku.js";
+import { composeContractLibrary } from "./library/keiyaku.js";
+import { localExecutionContext } from "./akuma/requests.js";
 import { Repo } from "./library/repo.js";
-import { requireBranchesToBeUpToDateFrom, settings } from "./settings.js";
+import { settings } from "./settings.js";
 import { taskMutationRequestCommands, type TaskLifecycleVerb, type TaskMutationRequestPort } from "./task/mutation.js";
 import { Tasks, type Task, type TaskMutationResult } from "./task/index.js";
 import { composeRequestCommands } from "./akuma/request-wire.js";
@@ -36,26 +36,18 @@ function contractChannel(
   contractId: Parameters<ContractRequestPort["deliver"]>[0]["contractId"],
   requester: Parameters<ContractRequestPort["deliver"]>[0]["requester"],
   configuration: Awaited<ReturnType<typeof contractDependencies>>[1],
-  requireBranchesToBeUpToDate: boolean,
 ) {
-  return Keiyaku.with({
-    actor: requester,
-    requireBranchesToBeUpToDate,
-    hooks: worktreeHooksFrom({ settings: configuration }),
-  }).select({ repo, id: contractId });
+  return composeContractLibrary(localExecutionContext(), { settings: configuration, actor: requester }).select({
+    repo,
+    id: contractId,
+  });
 }
 
 function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
   return {
     audit: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await contractChannel(
-        repo,
-        input.contractId,
-        input.requester,
-        configuration,
-        requireBranchesToBeUpToDateFrom({ settings: configuration }),
-      ).audit(
+      return await contractChannel(repo, input.contractId, input.requester, configuration).audit(
         {
           includeDirty: input.includeDirty,
           showDiff: input.showDiff,
@@ -66,13 +58,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
     },
     deliver: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await contractChannel(
-        repo,
-        input.contractId,
-        input.requester,
-        configuration,
-        requireBranchesToBeUpToDateFrom({ settings: configuration }),
-      ).deliver(
+      return await contractChannel(repo, input.contractId, input.requester, configuration).deliver(
         {
           includeDirty: input.includeDirty,
           materializeConflict: input.materializeConflict,
@@ -85,13 +71,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
     },
     review: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await contractChannel(
-        repo,
-        input.contractId,
-        input.requester,
-        configuration,
-        requireBranchesToBeUpToDateFrom({ settings: configuration }),
-      ).review(
+      return await contractChannel(repo, input.contractId, input.requester, configuration).review(
         {
           verdict: input.verdict,
           ...(input.summary === undefined ? {} : { summary: input.summary }),

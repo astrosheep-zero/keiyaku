@@ -46,23 +46,6 @@ export function bodyRequestExecution(input: Readonly<{ directory: string }>): Li
   }
 }
 
-/** Normalizes the public carrier before a composition captures its immutable channel. */
-export function libraryExecution(value: unknown): LibraryExecution {
-  const context = valueRecord(value, "execution");
-  closed(context, ["channel"], "execution");
-  const channel = valueRecord(context.channel, "execution channel");
-  if (channel.kind === "local") {
-    closed(channel, ["kind"], "execution channel");
-    return localExecutionContext();
-  }
-  if (channel.kind === "body-request") {
-    closed(channel, ["directory", "kind"], "execution channel");
-    if (typeof channel.directory !== "string") throw new TypeError("execution channel directory must be a string");
-    return bodyRequestExecution({ directory: channel.directory });
-  }
-  throw new TypeError("execution channel must be local or body-request");
-}
-
 export function executionChannel(context?: ExecutionContext): ExecutionChannel {
   return context?.channel ?? LOCAL_CHANNEL;
 }

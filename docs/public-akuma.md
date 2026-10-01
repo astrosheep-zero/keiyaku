@@ -8,9 +8,9 @@ World-bound product.
 
 ## Composition
 
-`Akumas.of(world)` captures one World and execution channel at construction.
-Ordinary calls are local; a Body Request uses one explicit direct-parent
-channel. Public inputs do not select a route, forwarding never recurses, and
+`Akumas.of(world)` captures one World at construction and is always local. A
+detached Body's direct-parent route is private composition, never a public
+input; public inputs do not select a route, forwarding never recurses, and
 composition creates no cached resolution, parallel writer, or background
 integration queue. Callers do not repeat World on operations. Repo stays an
 explicit separate coordinate for Contract selector and Dispatch association;

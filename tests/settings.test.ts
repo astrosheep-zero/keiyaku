@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "../src/library/keiyaku.js";
+import { gatesFrom, requireBranchesToBeUpToDateFrom, SettingsError } from "../src/settings.js";
 import { ALLOWED_ACTIONS, DEFAULT_ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { loadArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
@@ -11,7 +11,12 @@ import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { settings } from "../src/settings.js";
+import { projectSettings, settings } from "../src/settings.js";
+import { Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { KeiyakuError } from "../src/library/outcome.js";
+import { accepted, present } from "./support/library-verbs.js";
+import { contractMarkdown } from "./support/markdown.js";
+import { makeGitRepository } from "./support/git.js";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-settings-"));
@@ -507,5 +512,192 @@ test("settings text preserves long paths and opaque provider values at the termi
     );
   } finally {
     value.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Captured Settings derivation
+// ---------------------------------------------------------------------------
+
+function contractDocument(title = "Settings derivation"): string {
+  return contractMarkdown(title, {
+    Context: "Exercise captured Settings derivation.",
+    Objective: "Derive gates, hooks, and freshness lazily at their consuming operation.",
+    Design: "One captured Settings value and one operation-local namespace lookup.",
+    Region: "```\nsrc/**\n```",
+    Criteria: "### Derivation\nThe selected obligations are retained exactly.\n",
+  });
+}
+
+function writeProjectSettings(root: string, value: unknown): void {
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "settings.json"), `${JSON.stringify(value)}\n`);
+}
+
+function invalidInputFromSettings(error: unknown): boolean {
+  return (
+    error instanceof KeiyakuError &&
+    error.category === "invalid-input" &&
+    error.cause instanceof SettingsError
+  );
+}
+
+test("omitted Settings binds literal gate words, empty hooks, and false freshness", async () => {
+  const repository = makeGitRepository();
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const repo = await Repo.at({ path: repository.path });
+    const selected = accepted(
+      await Keiyaku.with().bind({
+        repo,
+        markdown: contractDocument(),
+        gates: ["reviewed", "security-audited", "reviewed"],
+      }),
+    );
+    assert.deepEqual(present(await selected.value.keiyaku.state()).terms.gates, ["reviewed", "security-audited"]);
+    const bare = accepted(await Keiyaku.with().bind({ repo, markdown: contractDocument("Bare core") }));
+    assert.deepEqual(present(await bare.value.keiyaku.state()).terms.gates, []);
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
+});
+
+test("captured Settings selects the configured default while explicit [] skips the lookup", async () => {
+  const repository = makeGitRepository();
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    writeProjectSettings(repository.path, {
+      gates: {
+        default: { kind: "bundle", gates: ["reviewed"] },
+        strict: { kind: "bundle", gates: ["reviewed", "security-audited"] },
+      },
+    });
+    const captured = await projectSettings(repository.path);
+    const repo = await Repo.at({ path: repository.path });
+    const omitted = accepted(
+      await Keiyaku.with({ settings: captured }).bind({ repo, markdown: contractDocument("Omitted") }),
+    );
+    assert.deepEqual(present(await omitted.value.keiyaku.state()).terms.gates, ["reviewed"]);
+    const mixed = accepted(
+      await Keiyaku.with({ settings: captured }).bind({
+        repo,
+        markdown: contractDocument("Mixed"),
+        gates: ["security-audited", "strict", "security-audited"],
+      }),
+    );
+    assert.deepEqual(present(await mixed.value.keiyaku.state()).terms.gates, ["security-audited", "reviewed"]);
+    const explicit = accepted(
+      await Keiyaku.with({ settings: captured }).bind({ repo, markdown: contractDocument("Explicit"), gates: [] }),
+    );
+    assert.deepEqual(present(await explicit.value.keiyaku.state()).terms.gates, []);
+
+    // Later edits never rewrite an already admitted decision or the captured value.
+    writeProjectSettings(repository.path, {
+      gates: { default: { kind: "bundle", gates: ["security-audited"] } },
+    });
+    assert.deepEqual(present(await omitted.value.keiyaku.state()).terms.gates, ["reviewed"]);
+    const again = accepted(
+      await Keiyaku.with({ settings: captured }).bind({ repo, markdown: contractDocument("Again") }),
+    );
+    assert.deepEqual(present(await again.value.keiyaku.state()).terms.gates, ["reviewed"]);
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
+});
+
+test("a broken gates namespace is scoped to omitted and word-selected bind or amend", async () => {
+  const repository = makeGitRepository();
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const repo = await Repo.at({ path: repository.path });
+    writeProjectSettings(repository.path, { gates: { default: { kind: "bundle", gates: ["reviewed"] } } });
+    const good = await projectSettings(repository.path);
+    const admitted = accepted(
+      await Keiyaku.with({ settings: good }).bind({ repo, markdown: contractDocument("Admitted") }),
+    );
+    const id = present(await admitted.value.keiyaku.state()).id;
+
+    writeProjectSettings(repository.path, { gates: [] });
+    const broken = await projectSettings(repository.path);
+    const brokenHandle = Keiyaku.with({ settings: broken }).select({ repo, id });
+
+    // Explicit [] never looks up gates, so it still admits without any bundle read.
+    const explicit = accepted(
+      await Keiyaku.with({ settings: broken }).bind({
+        repo,
+        markdown: contractDocument("Explicit under broken gates"),
+        gates: [],
+      }),
+    );
+    assert.deepEqual(present(await explicit.value.keiyaku.state()).terms.gates, []);
+    // Omitted amend preserves admitted gates without lookup; fork copies the source gates.
+    const amended = accepted(await admitted.value.keiyaku.amend({ markdown: contractDocument("Admitted v2") }));
+    assert.deepEqual(amended.value.changes.gates, undefined);
+    const forked = accepted(await Keiyaku.with({ settings: broken }).bind({ repo, forkOf: id }));
+    assert.deepEqual(present(await forked.value.keiyaku.state()).terms.gates, ["reviewed"]);
+    // Reads and unrelated verbs never select the namespace.
+    assert.ok(Array.isArray((await Keiyaku.with({ settings: broken }).list({ repo })).rows));
+
+    await assert.rejects(
+      Keiyaku.with({ settings: broken }).bind({ repo, markdown: contractDocument("Omitted broken") }),
+      invalidInputFromSettings,
+    );
+    await assert.rejects(
+      Keiyaku.with({ settings: broken }).bind({
+        repo,
+        markdown: contractDocument("Word-selected broken"),
+        gates: ["reviewed"],
+      }),
+      invalidInputFromSettings,
+    );
+    await assert.rejects(brokenHandle.amend({ gates: ["reviewed"] }), invalidInputFromSettings);
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
+});
+
+test("hooks and freshness derive only at the operation that consumes them", async () => {
+  const repository = makeGitRepository();
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const repo = await Repo.at({ path: repository.path });
+    const missing = "kei/missing" as ContractId;
+
+    writeProjectSettings(repository.path, { worktree: { create: "not-an-array" } });
+    const brokenHooks = await projectSettings(repository.path);
+    assert.ok(Array.isArray((await Keiyaku.with({ settings: brokenHooks }).list({ repo })).rows));
+    await assert.rejects(
+      Keiyaku.with({ settings: brokenHooks }).bind({ repo, markdown: contractDocument("Broken hooks") }),
+      invalidInputFromSettings,
+    );
+
+    writeProjectSettings(repository.path, { git: { requireBranchesToBeUpToDate: "yes" } });
+    const brokenFreshness = await projectSettings(repository.path);
+    const selected = Keiyaku.with({ settings: brokenFreshness }).select({ repo, id: missing });
+    await assert.rejects(selected.audit(), invalidInputFromSettings);
+    await assert.rejects(selected.deliver(), invalidInputFromSettings);
+    // Review consumes neither namespace and reaches its own admission instead.
+    assert.equal((await selected.review({ verdict: "satisfied" })).kind, "refused");
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
+});
+
+test("the CLI keeps a broken selected namespace as invalid input, not a draft refusal", async () => {
+  const repository = makeGitRepository();
+  const home = mkdtempSync(join(tmpdir(), "keiyaku-settings-cli-home-"));
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    writeProjectSettings(repository.path, { gates: [] });
+    const environment = { KEIYAKU_HOME: home };
+    const readStdin = async () => contractDocument("CLI broken gates");
+    const refused = await runCli(["-C", repository.path, "bind", "-"], { environment, readStdin });
+    assert.equal(refused.exit, 3, refused.stdout + refused.stderr);
+    assert.doesNotMatch(refused.stdout, /draft/u);
+    const explicit = await runCli(["-C", repository.path, "bind", "--gates", "", "-"], { environment, readStdin });
+    assert.equal(explicit.exit, 0, explicit.stdout + explicit.stderr);
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 });

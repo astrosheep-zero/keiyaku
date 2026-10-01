@@ -1,6 +1,6 @@
 # Akuma Public Surface
 
-This chapter owns the small `./akuma` product surface and its lifecycle
+This chapter owns the small `Akuma` root product surface and its lifecycle
 evidence. Exact TypeScript shapes, field budgets, and rendering belong to
 declarations, help, and executable specifications.
 

@@ -16,7 +16,10 @@ ambiguous, or unused invocation input. A parse or acquisition refusal performs
 no product operation and does not create runtime state.
 
 The invocation World remains the scope for Task, Settings, and composite
-observation. A caller may separately nominate a Contract repository for a
+observation. The edge loads the shared Settings resource once and hands that
+immutable value to the private Contract composition; gate bundles, worktree
+hooks, and branch freshness are then derived by the Contract operation that
+consumes them, not by the edge. A caller may separately nominate a Contract repository for a
 Contract operation; that choice cannot silently retarget the invocation World
 or splice facts from two Worlds into one report. The edge supplies environment
 or current-directory facts only as explicit process inputs. Libraries do not

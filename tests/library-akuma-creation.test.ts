@@ -46,7 +46,9 @@ import { repositoryAt } from "../src/git/repository.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import type { CallResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, bodyRequestExecution, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { Akumas, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { bodyRequestExecution } from "../src/akuma/requests.js";
+import { akumasWithExecution } from "../src/library/akumas.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -465,7 +467,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const { pump, leash } = await requestPump(world, slow.spawn);
-  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -528,7 +530,7 @@ test("forwarded schema Akumas.call admits its initial Tell after held birth befo
   const { pump, leash } = await requestPump(world, slow.spawn, async ({ id, initialTell, signal }) =>
     await new AkumaOwner(id, world).admitInitialTell(initialTell, { signal, runtime: wake.runtime }),
   );
-  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   try {
     const pending = routedAkumas.call({
@@ -624,7 +626,7 @@ test("forwarded Akumas.call spends its wait budget from the child's Tell admissi
     }
     return admission;
   });
-  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
   try {
     const pending = routedAkumas.call({
       archetype: "worker",
@@ -803,7 +805,7 @@ test("forwarded call preserves the born child when its exact initial Tell receip
     kind: "birth-failed",
     diagnostic: "initial Tell admission failed after child birth",
   }));
-  const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
+  const routedAkumas = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
   try {
     const result = await routedAkumas.call({
       archetype: "worker",
@@ -855,7 +857,6 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         Criteria: "### Placement\nThe invocation directory stands without an explicit workdir.",
       }),
       workspace: "worktree",
-      hooks: { create: [], destroy: [] },
     });
     const managedId = (present(await accepted(bound).value.keiyaku.state())).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);
@@ -892,7 +893,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     operationFailed = false;
   } finally {
     try {
-      if (bound !== undefined) await accepted(bound).value.keiyaku.abandon({ hooks: { create: [], destroy: [] } }).catch(() => undefined);
+      if (bound !== undefined) await accepted(bound).value.keiyaku.abandon({}).catch(() => undefined);
       await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();

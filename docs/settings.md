@@ -44,6 +44,13 @@ later edits do not rewrite that decision. Settings itself has no write command,
 no mutation API, no secrets-redaction fiction for the local trusted-user
 boundary, and no execution role.
 
+A consumer captures one loaded Settings value and reads a namespace only when
+the operation that needs it runs. Reading no namespace validates none: an
+unselected or malformed namespace stays invisible until its own consumer selects
+it, and one consumer's scoped failure never contaminates unrelated construction,
+reads, or verbs. The consumer owns the failure it surfaces; Settings owns only
+the resource and scope observation, whose native error remains the cause.
+
 ## Presentation and boundary
 
 The CLI may present scope availability, selected entries, source, and shadowing
