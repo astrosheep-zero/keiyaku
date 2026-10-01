@@ -478,13 +478,116 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
     assert.match(text.stdout, /^settings\n  user  read(?:\n    )?/u);
     assert.match(
       text.stdout,
-      /    entry  default · user\n      "value\.kind"  bundle\n      "value\.gates\.0"  reviewed/u,
+      /    entry  default · user\n      value  object \(2\)\n        kind  "bundle"\n        gates  list \(1\)\n          "0"  "reviewed"/u,
     );
     const json = await cliJson<{ namespaces: readonly unknown[] }>(["-C", value.project, "settings"], {
       cwd: value.project,
       environment: { KEIYAKU_HOME: value.home },
     });
     assert.deepEqual(json.value.namespaces, [observed.namespace("gates")]);
+  } finally {
+    value.close();
+  }
+});
+
+test("settings CLI preserves opaque names, types, empty collections and provenance", async () => {
+  const value = fixture();
+  try {
+    const opaque = {
+      emptyArray: [],
+      emptyObject: {},
+      number: 1,
+      string: "1",
+      monkey: "banana",
+      token: "synthetic",
+      password: "fixture",
+      "dotted.key": "line\n\u001b",
+      dotted: { key: "nested" },
+      rows: [{ x: 1 }, { x: "1" }, null, false, ""],
+      "escaped\nkey": 'tab\tquote"slash\\\u200d',
+    };
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ future: { local: { lower: true } } }));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({ future: { local: opaque } }));
+    const runtime = { cwd: value.project, environment: { KEIYAKU_HOME: value.home } };
+    const text = await runCli(["-C", value.project, "settings"], runtime);
+    assert.equal(text.exit, 0, text.stderr);
+    assert.equal(text.stderr, "");
+    assert.equal(
+      text.stdout.slice(text.stdout.indexOf("    entry")),
+      [
+        "    entry  local · project · shadows user",
+        "      value  object (11)",
+        "        emptyArray  list (0)",
+        "        emptyObject  object (0)",
+        "        number  1",
+        '        string  "1"',
+        '        monkey  "banana"',
+        '        token  "synthetic"',
+        '        password  "fixture"',
+        '        "dotted.key"  "line\\n\\u001b"',
+        "        dotted  object (1)",
+        '          key  "nested"',
+        "        rows  list (5)",
+        '          "0"  object (1)',
+        "            x  1",
+        '          "1"  object (1)',
+        '            x  "1"',
+        '          "2"  null',
+        '          "3"  false',
+        '          "4"  ""',
+        '        "escaped\\nkey"  "tab\\tquote\\\"slash\\\\\\u200d"',
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(text.stdout, /redacted|lower|\u001b|\u200d/u);
+    const json = await cliJson<{ scopes: unknown; namespaces: readonly unknown[] }>(
+      ["-C", value.project, "settings"],
+      runtime,
+    );
+    assert.equal(json.exit, 0, json.stderr);
+    const observed = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(json.value.scopes, observed.scopes);
+    assert.deepEqual(json.value.namespaces, [
+      {
+        kind: "read",
+        name: "future",
+        entries: [{ name: "local", source: "project", shadows: true, value: opaque }],
+      },
+    ]);
+  } finally {
+    value.close();
+  }
+});
+
+test("settings CLI retains scoped failures and available opaque observations", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ future: { local: { token: "synthetic" } } }));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), "null");
+    const runtime = { cwd: value.project, environment: { KEIYAKU_HOME: value.home } };
+    const text = await runCli(["-C", value.project, "settings"], runtime);
+    assert.equal(text.exit, 0, text.stderr);
+    assert.equal(text.stderr, "");
+    assert.match(text.stdout, /  user  read/u);
+    assert.match(text.stdout, /  project  failed[\s\S]*settings root must be an object\n  namespace/u);
+    assert.match(text.stdout, /  namespace  future  failed\n    failure  project  settings root must be an object/u);
+    assert.match(text.stdout, /    entry  local · user\n      value  object \(1\)\n        token  "synthetic"/u);
+    assert.doesNotMatch(text.stdout, /shadows user|redacted/u);
+    const json = await cliJson<{ scopes: unknown; namespaces: readonly unknown[] }>(
+      ["-C", value.project, "settings"],
+      runtime,
+    );
+    assert.equal(json.exit, 0, json.stderr);
+    const observed = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(json.value.scopes, observed.scopes);
+    assert.deepEqual(json.value.namespaces, [
+      {
+        kind: "failed",
+        name: "future",
+        entries: [{ name: "local", source: "user", shadows: false, value: { token: "synthetic" } }],
+        failures: [{ scope: "project", diagnostic: "settings root must be an object" }],
+      },
+    ]);
   } finally {
     value.close();
   }
@@ -503,7 +606,7 @@ test("settings text preserves long paths and opaque provider values at the termi
     const observed = await settings({ root: value.project, home: longHome });
     const text = renderSettingsText(observed, 72);
     assert.match(text, new RegExp(realpathSync.native(longPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-    assert.match(text, /"value\.env\.LONG_VALUE"  x{100}/u);
+    assert.match(text, /LONG_VALUE  "x{100}"/u);
     assert.ok(
       text
         .split("\n")

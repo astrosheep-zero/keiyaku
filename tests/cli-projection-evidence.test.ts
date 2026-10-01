@@ -101,7 +101,9 @@ test("settings text retains shadow provenance and exact configuration names", ()
       "  project  read  /repo/settings.json",
       "  namespace  providers  read",
       "    entry  local · project · shadows user",
-      '      "value.env.LONG_VALUE"  false',
+      "      value  object (1)",
+      "        env  object (1)",
+      '          LONG_VALUE  "false"',
     ].join("\n"),
   );
 });
