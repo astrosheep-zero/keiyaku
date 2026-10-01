@@ -11,6 +11,7 @@ import {
   recordSession,
   recordTellDeliveries,
   recordTellReceipt,
+  type HeartSnapshot,
   type ResumeCoordinate,
   type Soul,
   type TellFact,
@@ -419,6 +420,79 @@ async function settleCompletion(
   }
 }
 
+type TurnWakeup =
+  | Readonly<{ kind: "event"; event: IteratorResult<AgentEvent> }>
+  | Readonly<{ kind: "heart"; observation: HeartSnapshot }>
+  | Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>
+  | Readonly<{ kind: "completion-failed"; error: unknown }>
+  | Readonly<{ kind: "failed"; error: unknown }>;
+
+/**
+ * One bounded wake slot per live Turn source.
+ *
+ * A stalled provider leaves its current event pull pending, so attaching a fresh reaction to that
+ * pull on every control observation retains a reaction and a derived promise per tick. Here each
+ * source registers exactly one reaction and is re-armed only after the wake it produced has been
+ * consumed; terminal sources settle once and are never re-armed. The queue therefore holds at most
+ * one wake per source. A new Heart observation is armed only after the prior observation is
+ * consumed, so the wait never falls back to an older snapshot. Stop clears the queue and its
+ * waiter; later notifications are ignored rather than written, though the one reaction already
+ * registered on a source that never settled stays attached until that source settles.
+ */
+function createTurnWakeups(observeHeart: (after: HeartSnapshot) => Promise<HeartSnapshot>) {
+  const queue: TurnWakeup[] = [];
+  let waiter: ((wakeup: TurnWakeup) => void) | undefined;
+  let stopped = false;
+  const publish = (wakeup: TurnWakeup): void => {
+    if (stopped) return;
+    const waiting = waiter;
+    waiter = undefined;
+    if (waiting === undefined) queue.push(wakeup);
+    else waiting(wakeup);
+  };
+  return {
+    event: (pull: Promise<IteratorResult<AgentEvent>>): void => {
+      void pull.then(
+        (event) => publish({ kind: "event", event }),
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
+    },
+    heart: (after: HeartSnapshot): void => {
+      void observeHeart(after).then(
+        (observation) => publish({ kind: "heart", observation }),
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
+    },
+    tell: (submission: Promise<"live" | "turn-ended">): void => {
+      void submission.then(
+        (result) => publish({ kind: "tell", result }),
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
+    },
+    failure: (source: Promise<unknown>): void => {
+      void source.then(
+        () => undefined,
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
+    },
+    completionFailed: (source: Promise<Readonly<{ kind: "completion-failed"; error: unknown }>>): void => {
+      void source.then((wakeup) => publish(wakeup));
+    },
+    next: (): Promise<TurnWakeup> => {
+      const ready = queue.shift();
+      if (ready !== undefined) return Promise.resolve(ready);
+      return new Promise<TurnWakeup>((resolve) => {
+        waiter = resolve;
+      });
+    },
+    stop: (): void => {
+      stopped = true;
+      waiter = undefined;
+      queue.length = 0;
+    },
+  };
+}
+
 async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Promise<TurnDriveResult> {
   const { turnSequence, drive, requests, resume } = active;
   let heart = input.supervisor.current();
@@ -431,10 +505,15 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const receiptFailure = observeReceiptFailure(pumpReceipts(writers));
   const completionFailure = observeCompletionFailure(drive);
   const iterator = drive.events[Symbol.asyncIterator]();
-  let pending = iterator.next();
   let liveTells = true;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
-  let tellObservation: Promise<Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>> | null = null;
+  const wakeups = createTurnWakeups((after) => input.supervisor.next(after));
+  wakeups.event(iterator.next());
+  wakeups.heart(heart);
+  wakeups.failure(receiptFailure);
+  wakeups.failure(requests.failure);
+  wakeups.failure(active.custodyFailure);
+  wakeups.completionFailed(completionFailure);
   try {
     for (;;) {
       if (input.supervisor.signal.aborted) {
@@ -449,35 +528,28 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
           return retirement.kind === "hung" ? retirement : { kind: "handoff" };
         }
         tellPump = submitPendingLiveTells(writers, heart.pending, attempted, drive.tell);
-        tellObservation = tellPump.then((result) => ({ kind: "tell" as const, result }));
+        wakeups.tell(tellPump);
       }
-      const next = await Promise.race([
-        pending.then((event) => ({ kind: "event" as const, event })),
-        input.supervisor.next(heart).then((observation) => ({ kind: "heart" as const, observation })),
-        ...(tellObservation === null ? [] : [tellObservation]),
-        receiptFailure,
-        requests.failure,
-        completionFailure,
-        active.custodyFailure,
-      ]);
+      const next = await wakeups.next();
       if (next.kind === "completion-failed") {
         requests.stopAdmission();
         throw next.error;
       }
+      if (next.kind === "failed") throw next.error;
       if (next.kind === "heart") {
         heart = next.observation;
+        wakeups.heart(heart);
         continue;
       }
       if (next.kind === "tell") {
         tellPump = null;
-        tellObservation = null;
         liveTells = next.result === "live";
         continue;
       }
       if (next.event.done) break;
       await writeProviderEvent(input, active, next.event.value);
       if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
-      pending = iterator.next();
+      wakeups.event(iterator.next());
     }
     const result = await drive.completion;
     await active.attempt.closed;
@@ -500,6 +572,8 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
     active.releaseDriveSignal();
     if (retirement.kind === "hung") return retirement;
     return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) };
+  } finally {
+    wakeups.stop();
   }
 }
 

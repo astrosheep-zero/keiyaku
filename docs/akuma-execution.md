@@ -22,6 +22,17 @@ A subsequent Turn takes its own opening input's identity, including explicit
 absence; it never inherits the birth caller or the Body environment.
 This attribution grants no permission and does not affect execution.
 
+An open Turn's wait retains observation work in bounded amount rather than in
+proportion to elapsed control observations. Waiting on provider narration, Tell
+submission, Heart observation, or a terminal or failure signal does not
+accumulate retained work as control observations pass, while current Heart
+snapshot semantics and responsiveness are preserved. Once the wait ends, later
+notifications neither write nor restart execution. Cancellation cannot physically
+detach a reaction already registered on a source that has not settled, so a
+bounded residue may remain past retirement; that residue never weakens the actual
+provider closure proof, and no stronger claim of physical removal is made. The
+wait owner creates no custody and manufactures no provider outcome.
+
 A Body begins with ordinary host configuration but establishes an isolated
 execution identity and request transport before provider or plugin setup.
 Native setup may then establish that Body's own session coordinate; a parent
