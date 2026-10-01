@@ -12,31 +12,39 @@ import type { GitRepository } from "../../src/git/process.js";
 import { repositoryAt as productionRepositoryAt } from "../../src/git/repository.js";
 import { contractIdFromSegment } from "../../src/core/facts/types.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../../src/identity/normalize.js";
-import { removeTempDirectory } from "./process.js";
+import {
+  ownFixtureRoot,
+  ownedFixtureRootPaths,
+  releaseOwnedFixtureRoot,
+  removeTempDirectory,
+  retainedFixtureRoot,
+} from "./process.js";
 
-const ownedFixtureRoots = new Set<string>();
-
-function ownFixtureRoot(path: string): string {
-  ownedFixtureRoots.add(path);
-  return path;
-}
-
-// Every helper-owned temporary root is registered the moment it is created and retired by
-// this test file's teardown hook, so a root stays usable across the tests that share it and
-// no individual test retires a directory another consumer still reads. The hook is created
-// while this module is evaluated, so helpers must be imported at file scope: a dynamic import
-// from inside a running test would bind any later teardown registration to that test instead.
-// Cleanup failures fail the file instead of passing silently.
+// Every helper-owned fixture root is registered with the process-local retention owner in
+// ./process.js where it is allocated, and this file's teardown is the last hook that retires
+// them, so a root stays usable across the tests that share it and no individual test retires a
+// directory another consumer still reads. The hook is created while this module is evaluated,
+// so helpers must be imported at file scope: a dynamic import from inside a running test would
+// bind any later teardown registration to that test instead. A root retained without a declared
+// expectation is left untouched and fails the file by name; declared evidence and unretained
+// roots keep the transient removal policy and their failures stay visible.
 after(async () => {
   const failures: string[] = [];
-  for (const path of ownedFixtureRoots) {
+  for (const path of ownedFixtureRootPaths()) {
+    const retention = retainedFixtureRoot(path);
+    if (retention !== undefined) {
+      // A declared retention is this test's own evidence; every other retention
+      // is unexpected and the file fails by name.
+      if (!retention.expected) failures.push(`unexpectedly retained ${path}: ${retention.reason}`);
+      continue;
+    }
     try {
       await removeTempDirectory(path);
+      releaseOwnedFixtureRoot(path);
     } catch (error) {
       failures.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  ownedFixtureRoots.clear();
   if (failures.length > 0) throw new Error(`fixture directory cleanup failed: ${failures.join("; ")}`);
 });
 

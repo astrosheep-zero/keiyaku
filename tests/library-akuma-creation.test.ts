@@ -229,18 +229,40 @@ function trackedWakeLaunches() {
   };
 }
 
-test("prompt-free Akumas.call reports born without admitting a Tell", async () => {
+test("prompt-free Akumas.call reports born without admitting a Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const result = await Akumas.of(world).call({
-    archetype: "worker",
-    cwd: world,
-    ...configured.placement,
-  });
-  assert.deepEqual(result.observation, { kind: "born" });
-  const history = await PublicAkuma.select(world, result.akuma).history();
-  assert.equal(history.rows.some((row) => row.kind === "tell"), false);
-  await PublicAkuma.select(world, result.akuma).kill().catch(() => undefined);
-  await rmSync(raw.path, { recursive: true, force: true });
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  // Existing Body receipt instrumentation is installed before the call and stays
+  // installed until the fixture owner has proven physical departure.
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  let operationFailed = true;
+  try {
+    const result = await Akumas.of(world).call({
+      archetype: "worker",
+      cwd: world,
+      ...configured.placement,
+    });
+    assert.deepEqual(result.observation, { kind: "born" });
+    const history = await PublicAkuma.select(world, result.akuma).history();
+    assert.equal(history.rows.some((row) => row.kind === "tell"), false);
+    // Managed retirement is awaited and never ignored, so a failed kill stays a
+    // truthful failure instead of a deletion racing a departing empty Body.
+    await PublicAkuma.select(world, result.akuma).kill();
+    operationFailed = false;
+  } finally {
+    try {
+      // The existing spawn-capable fixture owner proves the recorded Body left
+      // before anything removes the repository; an unproved departure retains the
+      // evidence and fails instead of deleting it.
+      await cleanupSpawnCapableFixtureForTest(t, {
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        operationFailed,
+      });
+    } finally {
+      restoreBodyPidReceipt();
+    }
+  }
 });
 
 test("prompt-free Akumas.call refuses schema and wait options", async () => {

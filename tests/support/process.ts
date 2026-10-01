@@ -1,6 +1,6 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { TestContext } from "node:test";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
@@ -157,45 +157,72 @@ export type SpawnCapableFixtureCleanup =
   | Readonly<{ kind: "removed" }>
   | Readonly<{ kind: "retained"; diagnostic: string }>;
 
+export type SpawnCapableFixtureCleanupInput = Readonly<{
+  fixturePath: string;
+  pidReceiptPath: string;
+  timeoutMs?: number;
+  operationFailed: boolean;
+  /**
+   * Declare that this test deliberately keeps the fixture's bytes as its own
+   * evidence. A returned `kind:"retained"` result is not closure proof, so
+   * without this declaration any retention is unexpected and fails its owning
+   * teardown by name.
+   */
+  expectRetainedEvidence?: boolean;
+}>;
+
 /** Run the spawn-capable fixture cleanup and report a retained tree through the test context. */
 export async function cleanupSpawnCapableFixtureForTest(
   test: TestContext,
-  input: Readonly<{
-    fixturePath: string;
-    pidReceiptPath: string;
-    timeoutMs?: number;
-    operationFailed: boolean;
-  }>,
+  input: SpawnCapableFixtureCleanupInput,
 ): Promise<void> {
   const cleanup = await cleanupSpawnCapableFixture(input);
   if (cleanup.kind === "retained") test.diagnostic(`retained fixture ${input.fixturePath}: ${cleanup.diagnostic}`);
 }
 
 export async function cleanupSpawnCapableFixture(
-  input: Readonly<{
-    fixturePath: string;
-    pidReceiptPath: string;
-    timeoutMs?: number;
-    operationFailed: boolean;
-  }>,
+  input: SpawnCapableFixtureCleanupInput,
 ): Promise<SpawnCapableFixtureCleanup> {
+  const expected = input.expectRetainedEvidence === true;
   try {
     if (input.operationFailed && readPidReceipt(input.pidReceiptPath).length === 0) {
-      return { kind: "retained", diagnostic: "spawn-capable operation failed before birth proof" };
+      return retainSpawnCapableFixture(
+        input.fixturePath,
+        "spawn-capable operation failed before birth proof",
+        expected,
+      );
     }
     await waitForPidReceiptExit(input.pidReceiptPath, input.timeoutMs, { requireBirth: !input.operationFailed });
   } catch (error) {
-    if (!input.operationFailed) throw error;
-    return { kind: "retained", diagnostic: error instanceof Error ? error.message : String(error) };
+    const diagnostic = error instanceof Error ? error.message : String(error);
+    if (!input.operationFailed) {
+      // Cleanup failed while the operation claimed success: no result proves the
+      // child closed, so record the retention before the throw and let the owning
+      // teardown fail rather than delete evidence a later hook would erase.
+      recordRetainedFixtureRoot(input.fixturePath, diagnostic, { expected });
+      throw error;
+    }
+    return retainSpawnCapableFixture(input.fixturePath, diagnostic, expected);
   }
   if (input.operationFailed) {
-    return {
-      kind: "retained",
-      diagnostic: "spawn-capable operation failed without proof that its launch set is closed",
-    };
+    return retainSpawnCapableFixture(
+      input.fixturePath,
+      "spawn-capable operation failed without proof that its launch set is closed",
+      expected,
+    );
   }
   await removeTempDirectory(input.fixturePath);
   return { kind: "removed" };
+}
+
+/** Record the retention decision before the existing retained result reaches its caller. */
+function retainSpawnCapableFixture(
+  fixturePath: string,
+  diagnostic: string,
+  expected: boolean,
+): SpawnCapableFixtureCleanup {
+  recordRetainedFixtureRoot(fixturePath, diagnostic, { expected });
+  return { kind: "retained", diagnostic };
 }
 
 export async function waitForPidReceiptExit(
@@ -253,10 +280,144 @@ export function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+/**
+ * One process-local owner for fixture-root retention. Roots register here where
+ * they are allocated; a cleanup helper records a bounded reason when it must
+ * leave evidence in place. Nested cleanup requests resolve to the containing
+ * registered root, so the single root-level teardown that owns the tree honors
+ * the decision and no later hook erases evidence by forgetting an earlier
+ * helper result. This is test bookkeeping for one runner process, not a durable
+ * marker, pid registry, or second authority store.
+ */
+const ownedFixtureRoots = new Map<string, FixtureRetention | undefined>();
+const reportedRetainedRoots = new Set<string>();
+
+/** A recorded decision to leave one owned fixture root physically untouched. */
+export type FixtureRetention = Readonly<{
+  /** Bounded reason the evidence was retained. */
+  reason: string;
+  /**
+   * True only when the owning test declared this retention as its own deliberate
+   * evidence. No helper result proves child closure, so any retention without
+   * that declaration is unexpected and fails its owning teardown by name.
+   */
+  expected: boolean;
+}>;
+
+/** A retained owned root as read back by a fixture that records evidence externally. */
+export type RetainedFixtureRoot = Readonly<{ path: string }> & FixtureRetention;
+
+/** The canonical form used for containment, so a resolved alias still matches its owning root. */
+function canonicalFixturePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+/**
+ * Register an owned fixture root at allocation and return its exact identity.
+ * The stored path is never rewritten; containment compares canonical forms only.
+ */
+export function ownFixtureRoot(path: string): string {
+  ownedFixtureRoots.set(path, undefined);
+  return path;
+}
+
+/** Owned fixture roots still registered, in allocation order. */
+export function ownedFixtureRootPaths(): readonly string[] {
+  return [...ownedFixtureRoots.keys()];
+}
+
+/** The registered owned root containing `path`, or undefined when no owned root contains it. */
+function ownedFixtureRootContaining(path: string): string | undefined {
+  const target = canonicalFixturePath(path);
+  let containing: string | undefined;
+  let containingCanonical: string | undefined;
+  for (const root of ownedFixtureRoots.keys()) {
+    const candidate = canonicalFixturePath(root);
+    if (target !== candidate && !target.startsWith(candidate.endsWith(sep) ? candidate : `${candidate}${sep}`)) {
+      continue;
+    }
+    if (containingCanonical === undefined || candidate.length > containingCanonical.length) {
+      containing = root;
+      containingCanonical = candidate;
+    }
+  }
+  return containing;
+}
+
+/** The retention recorded for one exact owned root, or undefined when it must be removed. */
+export function retainedFixtureRoot(path: string): FixtureRetention | undefined {
+  return ownedFixtureRoots.get(path);
+}
+
+/** Retained owned roots in allocation order, for a fixture recording evidence externally. */
+export function retainedFixtureRoots(): readonly RetainedFixtureRoot[] {
+  const retained: RetainedFixtureRoot[] = [];
+  for (const [path, retention] of ownedFixtureRoots) {
+    if (retention !== undefined) retained.push({ path, ...retention });
+  }
+  return retained;
+}
+
+/**
+ * Release bookkeeping for an owned root no later hook will consume. A retained
+ * root is never released here: another registered cleanup hook may still remove it.
+ */
+export function releaseOwnedFixtureRoot(path: string): void {
+  ownedFixtureRoots.delete(path);
+}
+
+/** Emit at most one bounded root-level diagnostic per retained root; retention is never silent. */
+function reportRetainedFixtureRoot(root: string, reason: string, expected: boolean): void {
+  if (reportedRetainedRoots.has(root)) return;
+  reportedRetainedRoots.add(root);
+  const disposition = expected ? " as declared evidence" : "";
+  process.stderr.write(`[fixture-retention] retained ${root}${disposition}: ${reason}\n`);
+}
+
+/**
+ * Record a cleanup's decision to retain evidence, attributed to the containing
+ * owned root. The first reason names the root's single diagnostic; a root stays
+ * expected only while every decision for it declared that expectation.
+ */
+export function recordRetainedFixtureRoot(
+  path: string,
+  reason: string,
+  options: Readonly<{ expected: boolean }>,
+): void {
+  const root = ownedFixtureRootContaining(path);
+  if (root === undefined) return;
+  const existing = ownedFixtureRoots.get(root);
+  if (existing !== undefined) {
+    // One decision per root, and an undeclared retention is never upgraded by a
+    // later declared one: the root is already evidence no hook may delete.
+    if (existing.expected && !options.expected) {
+      ownedFixtureRoots.set(root, { reason: existing.reason, expected: false });
+    }
+    return;
+  }
+  ownedFixtureRoots.set(root, { reason, expected: options.expected });
+  reportRetainedFixtureRoot(root, reason, options.expected);
+}
+
 /** Register cleanup before fixture setup, including setup failures. No directory is shared. */
 export function temporaryDirectory(context: TestContext, prefix: string): string {
-  const directory = mkdtempSync(join(tmpdir(), prefix));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = ownFixtureRoot(mkdtempSync(join(tmpdir(), prefix)));
+  context.after(() => {
+    const retention = retainedFixtureRoot(directory);
+    if (retention !== undefined) {
+      // Retained bytes are the evidence this decision preserved. Only a test
+      // that declared the retention as its own evidence may keep it silently;
+      // every other retention is unexpected and fails this owning teardown.
+      if (retention.expected) return;
+      throw new Error(`unexpectedly retained fixture ${directory}: ${retention.reason}`);
+    }
+    rmSync(directory, { recursive: true, force: true });
+    releaseOwnedFixtureRoot(directory);
+  });
   return directory;
 }
 

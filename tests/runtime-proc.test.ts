@@ -220,11 +220,14 @@ test("spawn-capable fixture cleanup retains an unproved launch without replacing
       try {
         throw original;
       } finally {
+        // This negative probe deliberately keeps the retained root as its own
+        // evidence of the retained decision, so its retention is declared.
         cleanup = await cleanupSpawnCapableFixture({
           fixturePath: root,
           pidReceiptPath: receipt,
           timeoutMs: 0,
           operationFailed: true,
+          expectRetainedEvidence: true,
         });
       }
     },
@@ -239,8 +242,14 @@ test("PID receipts reject malformed nonempty lines and retain failed fixtures", 
   const receipt = join(root, "body-pids");
   writeFileSync(receipt, "123garbage\n", "utf8");
   assert.throws(() => readPidReceipt(receipt), /malformed fixture child pid receipt/u);
+  // This negative probe deliberately keeps its malformed-receipt root as evidence.
   assert.deepEqual(
-    await cleanupSpawnCapableFixture({ fixturePath: root, pidReceiptPath: receipt, operationFailed: true }),
+    await cleanupSpawnCapableFixture({
+      fixturePath: root,
+      pidReceiptPath: receipt,
+      operationFailed: true,
+      expectRetainedEvidence: true,
+    }),
     { kind: "retained", diagnostic: "malformed fixture child pid receipt: 123garbage" },
   );
   assert.equal(existsSync(root), true);
