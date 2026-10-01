@@ -150,13 +150,27 @@ test("Verification uses direct fenced executors and reserved H2s are refused", (
 
 test("criteria bodies keep exact bytes through nested structure; duplicate titles are refused", () => {
   const body = decodeContractDocument(
-    withCriteria("### Keeps Bytes\nline one\r\n> quoted ## header\r\n- list body\r\n~~~\r\nfence body\r\n~~~\r\ntail"),
+    withCriteria(
+      "### Keeps Bytes\nline one\r\n> quoted ## header\r\n- list body\r\n#### Detail\r\n~~~\r\n### fenced heading\r\n~~~\r\ntail\n### Last\nlast",
+    ),
   );
   assert.deepEqual(body.criteria, [
-    { title: "Keeps Bytes", body: "line one\r\n> quoted ## header\r\n- list body\r\n~~~\r\nfence body\r\n~~~\r\ntail" },
+    {
+      title: "Keeps Bytes",
+      body: "line one\r\n> quoted ## header\r\n- list body\r\n#### Detail\r\n~~~\r\n### fenced heading\r\n~~~\r\ntail\n",
+    },
+    { title: "Last", body: "last" },
   ]);
-  assert.throws(
-    () => decodeContractDocument(withCriteria("### First\none\n\n###  FIRST \ntwo")),
-    (error: unknown) => error instanceof TypeError && error.message.includes("duplicate criterion 'FIRST'"),
-  );
+  assert.throws(() => decodeContractDocument(withCriteria("### First title\none\n\n###  FIRST   title \ntwo")), {
+    name: "TypeError",
+    message: "duplicate criterion 'FIRST   title'",
+  });
+  assert.throws(() => decodeContractDocument(withCriteria("stray\n### Entry\nbody")), {
+    name: "TypeError",
+    message: "Criteria may contain only H3 entries",
+  });
+  assert.throws(() => decodeContractDocument(withCriteria("### Empty\n  \r\n")), {
+    name: "TypeError",
+    message: "criterion 'Empty' is empty",
+  });
 });

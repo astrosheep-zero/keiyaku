@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applyAmendDocument } from "../src/body/amend.js";
+import { applyAmendDocument, prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
+import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 
 const body: ContractBodyValue = {
   title: "Current",
@@ -202,5 +205,79 @@ test("explicit Replace still refuses a missing extension", () => {
   assert.throws(
     () => applyAmendOperations("## Replace: Fresh notes\nnew extension\n", body),
     (error: unknown) => error instanceof TypeError && error.message === "unknown extension 'Fresh notes'",
+  );
+});
+
+test("Criteria amendments preserve H3 boundaries and caller-context diagnostics", () => {
+  const current = decodeContractDocument(renderContractBody(body));
+  const source =
+    "## Replace: Criteria\n### Nested bytes\nline\r\n> quote\r\n#### detail\r\n~~~\r\nfenced\r\n~~~\r\ntail\n\n### Last\nlast\n";
+  const result = decodeContractDocument(applyAmendDocument(source, current).document);
+  assert.deepEqual(result.criteria, [
+    { title: "Nested bytes", body: "\nline\r\n> quote\r\n#### detail\r\n~~~\r\nfenced\r\n~~~\r\ntail\n\n" },
+    { title: "Last", body: "\nlast\n\n" },
+  ]);
+  assert.throws(() => applyAmendDocument("## Criteria\nflat\n", current), {
+    name: "TypeError",
+    message: "Criteria operation must contain one or more H3 entries",
+  });
+  assert.throws(() => applyAmendDocument("## Criteria\nstray\n### Entry\nbody\n", current), {
+    name: "TypeError",
+    message: "Criteria operation may contain only H3 entries",
+  });
+  assert.throws(() => applyAmendDocument("## Criteria\n### Entry\nbody\n### ENTRY\nother\n", current), {
+    name: "TypeError",
+    message: "criteria operation contains duplicate or empty titles",
+  });
+  assert.throws(() => applyAmendDocument("## Criteria\n### Empty\n", current), {
+    name: "TypeError",
+    message: "criterion 'Empty' operation body is empty",
+  });
+  assert.throws(() => applyAmendDocument("## Add: Criteria\n### KEEP\nnew\n", current), {
+    name: "TypeError",
+    message: "Add Criteria targets an existing criterion",
+  });
+});
+
+test("prepared amendments refuse duplicates before application and preserve untouched bytes", () => {
+  assert.throws(() => prepareAmendDocument("## Append: Context\nfirst\n## Append: Context\nsecond\n"), {
+    name: "TypeError",
+    message: "duplicate amend operation 'Append:Context'",
+  });
+  const current = decodeContractDocument(renderContractBody(body).replace("current\n", "current  \r\n"));
+  assert.match(current.document.bytes, /current  \r\n/u);
+  const prepared = prepareAmendDocument("## Append: Criteria\n### Added\nadded\n");
+  const amended = prepared(current);
+  assert.deepEqual([...amended.changedSections], ["criteria"]);
+  const start = current.document.bytes.indexOf("## Criteria");
+  const end = current.document.bytes.indexOf("## Verification");
+  assert.equal(amended.document.slice(0, start), current.document.bytes.slice(0, start));
+  assert.equal(amended.document.slice(amended.document.indexOf("## Verification")), current.document.bytes.slice(end));
+  assert.deepEqual(prepared(current), amended);
+});
+
+test("duplicate amendments retain their native input cause before Git observation", async () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const log = `${repository.path}/git-observations`;
+  await withGitShim(
+    'echo observed >> "$KEIYAKU_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    { KEIYAKU_GIT_LOG: log },
+    async (gitPath) => {
+      const repo = await Repo.at({ path: repository.path, gitPath });
+      const before = readFileSync(log, "utf8");
+      const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
+      await assert.rejects(
+        () => contract.amend({ markdown: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
+        (error: unknown) => {
+          assert.ok(error instanceof KeiyakuError);
+          assert.equal(error.category, "invalid-input");
+          assert.ok(error.cause instanceof TypeError);
+          assert.equal(error.cause.message, "duplicate amend operation 'Append:Context'");
+          return true;
+        },
+      );
+      assert.equal(readFileSync(log, "utf8"), before);
+    },
   );
 });

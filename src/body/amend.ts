@@ -2,18 +2,12 @@ import type { ContractBody, ContractCriterion, ContractExtension, DecodedContrac
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
-import {
-  directChildren,
-  indexDocument,
-  indexedHeadings,
-  normalizeTitle,
-  rawSlice,
-  sectionContent,
-} from "../markdown/query.js";
+import { indexDocument, indexedHeadings, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
 import { decodeRegionOrRefusal } from "./region.js";
 import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
 import { renderAmendedContractBody } from "./render.js";
+import { decodeCriteria } from "./criteria.js";
 
 type Operation = Readonly<{
   kind: "Add" | "Update" | "Replace" | "Append" | "Remove" | "Set";
@@ -70,26 +64,6 @@ function prose(document: DocumentNode, section: SectionNode, label: string): str
   const value = sectionContent(document, section);
   if (value.trim().length === 0) refusal(`${label} operation body must be nonblank`);
   return value;
-}
-
-function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
-  const headings = directChildren(section, "heading").filter((heading) => heading.level === 3);
-  if (headings.length === 0) refusal("Criteria operation must contain one or more H3 entries");
-  const before = rawSlice(document, { start: section.contentStart, end: headings[0]!.span.start });
-  if (before.trim().length > 0) refusal("Criteria operation may contain only H3 entries");
-  const seen = new Set<string>();
-  return headings.map((heading, index) => {
-    const title = heading.text.trim();
-    const key = normalizeTitle(title);
-    if (title.length === 0 || seen.has(key)) refusal("criteria operation contains duplicate or empty titles");
-    seen.add(key);
-    const body = rawSlice(document, {
-      start: heading.span.end,
-      end: headings[index + 1]?.span.start ?? section.span.end,
-    });
-    if (body.trim().length === 0) refusal(`criterion '${title}' operation body is empty`);
-    return { title, body };
-  });
 }
 
 function verification(document: DocumentNode, section: SectionNode): readonly VerificationDeclaration[] {
@@ -179,7 +153,7 @@ function applyUpdate(body: MutableBody, operation: Operation, document: Document
 }
 
 function addedCriteria(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const added = criteria(document, operation.section);
+  const added = decodeCriteria(document, operation.section, "amend");
   if (added.some((candidate) => criterionIndex(body, candidate.title) >= 0)) {
     refusal(`${operation.kind} Criteria targets an existing criterion`);
   }
@@ -240,7 +214,7 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
     return;
   }
   if (target === "criteria") {
-    const replacement = criteria(document, operation.section);
+    const replacement = decodeCriteria(document, operation.section, "amend");
     body.criteria = [...replacement];
     body.criterionIndexes = new Map(replacement.map((criterion, index) => [normalizeTitle(criterion.title), index]));
     return;
@@ -292,13 +266,9 @@ function apply(
   operations: readonly Operation[],
   current: ContractBody,
 ): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
-  const seen = new Set<string>();
   const changed = new Set<string>();
   const body = cloneBody(current);
   for (const operation of operations) {
-    const key = operationKey(operation);
-    if (seen.has(key)) refusal(`duplicate amend operation '${key}'`);
-    seen.add(key);
     changed.add(normalizeTitle(operation.target));
     applyOperation(body, operation, document);
   }

@@ -1,7 +1,8 @@
 import { mintDocumentKey, mintDocumentSegmentKey } from "./keys.js";
-import type { ContractBody, ContractCriterion, DecodedContractDocument } from "./types.js";
+import type { ContractBody, DecodedContractDocument } from "./types.js";
 import { decodeDocumentEnvelope } from "./envelope.js";
-import { directChildren, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
+import { criteriaStructure, decodeCriteria } from "./criteria.js";
+import { directChildren, rawSlice, sectionContent } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
 import { decodeRegionOrRefusal, regionStructure } from "./region.js";
@@ -26,13 +27,6 @@ function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {
 
 function requiredSection(sections: ReadonlyMap<string, SectionNode>, name: RequiredSectionName): SectionNode {
   return sections.get(name)!;
-}
-
-function criteriaStructure(document: DocumentNode, section: SectionNode): string | null {
-  const headings = directChildren(section, "heading").filter((heading) => heading.level === 3);
-  if (headings.length === 0) return "Criteria must contain one or more H3 entries";
-  const before = rawSlice(document, { start: section.contentStart, end: headings[0]!.span.start });
-  return before.trim().length === 0 ? null : "Criteria may contain only H3 entries";
 }
 
 function verificationStructure(document: DocumentNode, section: SectionNode): string | null {
@@ -72,25 +66,6 @@ function prose(document: DocumentNode, section: SectionNode): string {
   return value;
 }
 
-function criteria(document: DocumentNode, section: SectionNode): readonly ContractCriterion[] {
-  const structural = criteriaStructure(document, section);
-  if (structural !== null) refusal(structural);
-  const headings = directChildren(section, "heading").filter((heading) => heading.level === 3);
-  const seen = new Set<string>();
-  return headings.map((heading, index) => {
-    const title = heading.text.trim();
-    const key = normalizeTitle(title);
-    if (seen.has(key)) refusal(`duplicate criterion '${title}'`);
-    seen.add(key);
-    const body = rawSlice(document, {
-      start: heading.span.end,
-      end: headings[index + 1]?.span.start ?? section.span.end,
-    });
-    if (body.trim().length === 0) refusal(`criterion '${title}' is empty`);
-    return { title, body };
-  });
-}
-
 function verification(document: DocumentNode, section: SectionNode, options: Readonly<{ requireTimeout?: boolean }>) {
   try {
     return decodeVerificationDeclarations(document, section, options);
@@ -127,7 +102,7 @@ export function decodeContractDocument(
     objective: prose(document, requiredSection(sections, "objective")),
     design: prose(document, requiredSection(sections, "design")),
     region: decodeRegionOrRefusal(document, requiredSection(sections, "region")),
-    criteria: criteria(document, requiredSection(sections, "criteria")),
+    criteria: decodeCriteria(document, requiredSection(sections, "criteria")),
     verification: verificationSection === undefined ? [] : verification(document, verificationSection, options),
     extensions,
   };
