@@ -72,6 +72,7 @@ import {
 } from "./input.js";
 import {
   normalizeTaskQuery,
+  taskQuerySelection,
   TASK_RELATION_PREDICATE_FIELDS,
   type TaskPage,
   type TaskQueryExpression,
@@ -429,16 +430,7 @@ class TasksHandle {
     closed(v, ["where", "scope", "namespace", "sort", "limit"], "query input");
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
-    const expression =
-      v.where === undefined
-        ? ({
-            kind: "and",
-            terms: [
-              { kind: "predicate", predicate: { field: "state", operator: "!=", value: "done" } },
-              { kind: "predicate", predicate: { field: "state", operator: "!=", value: "drop" } },
-            ],
-          } as const)
-        : normalizeTaskQuery(v.where);
+    const expression = v.where === undefined ? taskQuerySelection() : normalizeTaskQuery(v.where);
     const selected = namespace(v.namespace);
     const selectedLimit = taskRowViewLimit(v.limit);
     return queryTasks({

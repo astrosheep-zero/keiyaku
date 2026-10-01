@@ -39,7 +39,8 @@ import {
   withTaskLocks
 } from "../src/task/store.js";
 import { World, type WorldRoot } from "../src/world.js";
-import { runCli } from "./support/cli-fixtures.js";
+import { runCli, cliJson } from "./support/cli-fixtures.js";
+import { parseTaskQueryExpression } from "../src/cli/commands/task-query.js";
 
 type Assert<Condition extends true> = Condition;
 
@@ -512,6 +513,97 @@ test("Task query defaults to active Tasks", async () => {
       result.value.rows.map((row) => row.id),
       [active],
     );
+});
+
+test("CLI Task selection and parsed filters retain native query semantics", async (context) => {
+  const { root, tasks } = await world();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const active = acceptedId(await tasks.add({ title: "Selected active", priority: 3 }));
+  const done = acceptedId(await tasks.add({ title: "Selected done", state: "done", priority: 0 }));
+  const dropped = acceptedId(await tasks.add({ title: "Other dropped", state: "drop", priority: 1 }));
+  const rows = async (args: readonly string[]) => {
+    const result = await cliJson<{ kind: string; value: { rows: readonly { id: string }[] } }>(
+      ["-C", root, "task", "query", "--world", ...args],
+      { environment: {} },
+    );
+    assert.equal(result.exit, 0, result.stdout + result.stderr);
+    return result.value.value.rows.map((row) => row.id);
+  };
+  assert.deepEqual(await rows([]), [active]);
+  assert.equal((await tasks.task({ id: active }).start()).kind, "accepted");
+  assert.deepEqual(await rows([]), [active]);
+  assert.equal((await tasks.task({ id: active }).hold()).kind, "accepted");
+  assert.deepEqual(await rows([]), [active]);
+  assert.deepEqual(await rows(["--closed"]), [done, dropped]);
+  assert.deepEqual(await rows(["--all"]), [done, dropped, active]);
+  assert.deepEqual(await rows(["--where", 'title ~ "Selected"']), [active]);
+  assert.deepEqual(await rows(["--closed", "--where", 'title ~ "Selected"']), [done]);
+  assert.deepEqual(await rows(["--all", "--where", 'title ~ "Selected"']), [done, active]);
+  // Explicit native filters do not implicitly acquire the CLI's active default.
+  const native = await tasks.query({
+    where: parseTaskQueryExpression("state = done or priority = 3 and not state = done"),
+  });
+  assert.equal(native.kind, "accepted");
+  if (native.kind === "accepted")
+    assert.deepEqual(
+      native.value.rows.map((row) => row.id),
+      [done, active],
+    );
+  const relation = await rows([
+    "--all",
+    "--where",
+    `id = ${active} and parent = none and created >= "2000-01-01T00:00:00.000Z"`,
+  ]);
+  assert.deepEqual(relation, [active]);
+  const child = acceptedId(await tasks.add({ title: 'Child "quoted"', parent: active, needs: [active] }));
+  assert.deepEqual(
+    await rows(["--where", `under = ${active} and parent = ${active} and needs = ${active} and blocked`]),
+    [child],
+  );
+  assert.deepEqual(await rows(["--where", `blocks = ${child} and not (state = done or state = drop)`]), [active]);
+  assert.deepEqual(await rows(["--where", 'title = "Child \\"quoted\\""']), [child]);
+  assert.deepEqual(await rows(["--where", "ready"]), []);
+});
+
+test("Task query rejects direct JavaScript semantics and CLI reports the responsible source column", async (context) => {
+  const { root, tasks } = await world();
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  // Deliberately cross the JS boundary, rather than trusting TypeScript's public union.
+  const query = tasks.query.bind(tasks) as (input: { where: unknown }) => ReturnType<typeof tasks.query>;
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "priority", operator: "=", value: "1" } } }),
+    /priority value must be 0\.\.3/u,
+  );
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "state", operator: "~", value: "open" } } }),
+    /state supports only = and !=/u,
+  );
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "needs", operator: "=", value: "task/team//item" } } }),
+    /canonical TaskId/u,
+  );
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "updated", operator: "=", value: "2026-01-01" } } }),
+    /canonical UTC ISO timestamp/u,
+  );
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "unknown", operator: "=", value: true } } }),
+    TypeError,
+  );
+  await assert.rejects(query({ where: { kind: "and", terms: [] } }), /and query requires terms/u);
+  await assert.rejects(
+    query({ where: { kind: "predicate", predicate: { field: "ready", operator: "=", value: "true" } } }),
+    /ready value must be boolean/u,
+  );
+  assert.throws(() => parseTaskQueryExpression("unknown = 1"), /unknown query field: unknown at column 1/u);
+  assert.throws(() => parseTaskQueryExpression("state ~ open"), /state supports only = and != at column 7/u);
+  assert.throws(() => parseTaskQueryExpression("priority = 4"), /priority value must be 0\.\.3 at column 12/u);
+  assert.throws(() => parseTaskQueryExpression("title = unquoted"), /double quotes at column 9/u);
+  assert.throws(() => parseTaskQueryExpression("(ready"), /missing closing parenthesis at column 1/u);
+  assert.throws(() => parseTaskQueryExpression("needs = task/team//item"), /canonical TaskId at column 9/u);
+  assert.throws(() => parseTaskQueryExpression("ready = maybe"), /ready value must be boolean at column 9/u);
+  assert.throws(() => parseTaskQueryExpression("state = finished"), /state value is invalid at column 9/u);
+  assert.throws(() => parseTaskQueryExpression('updated = "2026-01-01"'), /canonical UTC ISO timestamp at column 11/u);
 });
 
 test("concurrent same-title creation allocates stable unique suffixes", async () => {

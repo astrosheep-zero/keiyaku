@@ -1,8 +1,6 @@
-import type { TaskPriority, TaskState } from "../../task/document.js";
-import type { TaskId } from "../../task/identity.js";
 import {
-  TASK_RELATION_PREDICATE_FIELDS,
-  normalizeTaskQuery,
+  normalizeTaskQueryPredicate,
+  TaskQueryPredicateError,
   type TaskQueryExpression,
   type TaskQueryPredicate,
 } from "../../task/query.js";
@@ -96,81 +94,27 @@ function lex(source: string): readonly Token[] {
   return tokens;
 }
 
-function canonicalTaskId(token: Token, field: string): TaskId {
-  if (!token.value.startsWith("task/")) return syntax(`${field} requires a canonical TaskId`, token.offset);
-  return token.value as TaskId;
-}
-function state(token: Token): TaskState {
-  if (
-    token.value !== "open" &&
-    token.value !== "in_progress" &&
-    token.value !== "on_hold" &&
-    token.value !== "done" &&
-    token.value !== "drop"
-  ) {
-    return syntax(`invalid state ${JSON.stringify(token.value)}`, token.offset);
+function parsedPredicate(field: Token, operator: Token, value: Token): TaskQueryPredicate {
+  if (field.value === "title" && value.kind !== "string") {
+    syntax("title values must use double quotes", value.offset);
   }
-  return token.value;
-}
-function priority(token: Token): TaskPriority {
-  const value = Number(token.value);
-  if (!Number.isInteger(value) || value < 0 || value > 3) return syntax("priority requires 0..3", token.offset);
-  return value as TaskPriority;
-}
-function boolean(token: Token): boolean {
-  if (token.value === "true") return true;
-  if (token.value === "false") return false;
-  return syntax("boolean predicate requires true or false", token.offset);
-}
-function timestamp(token: Token, field: string): string {
-  const milliseconds = Date.parse(token.value);
-  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== token.value)
-    return syntax(`${field} requires a canonical UTC ISO timestamp`, token.offset);
-  return token.value;
-}
-
-function equalityOperator(token: Token, field: string): "=" | "!=" {
-  if (token.value !== "=" && token.value !== "!=") syntax(`${field} supports only = and !=`, token.offset);
-  return token.value;
-}
-
-function orderedOperator(token: Token, field: string): "=" | "!=" | "<" | "<=" | ">" | ">=" {
-  if (token.value === "~") syntax(`${field} operator is invalid`, token.offset);
-  return token.value as "=" | "!=" | "<" | "<=" | ">" | ">=";
-}
-
-function textOperator(token: Token, field: string): "=" | "!=" | "~" {
-  if (token.value !== "=" && token.value !== "!=" && token.value !== "~") {
-    syntax(`${field} supports only =, !=, and ~`, token.offset);
+  // Acquire textual literals only; the Task owner judges fields, operators and values.
+  const literal: unknown =
+    field.value === "priority"
+      ? Number(value.value)
+      : field.value === "parent" && value.value === "none"
+        ? null
+        : (field.value === "ready" || field.value === "blocked") && (value.value === "true" || value.value === "false")
+          ? value.value === "true"
+          : value.value;
+  try {
+    return normalizeTaskQueryPredicate({ field: field.value, operator: operator.value, value: literal });
+  } catch (error) {
+    if (error instanceof TaskQueryPredicateError) {
+      return syntax(error.message, { field, operator, value }[error.part].offset);
+    }
+    throw error;
   }
-  return token.value;
-}
-
-function parseTextPredicate(field: "title" | "id", operator: Token, value: Token): TaskQueryPredicate {
-  const selected = textOperator(operator, field);
-  if (field === "title" && value.kind !== "string") syntax("title values must use double quotes", value.offset);
-  if (field === "id" && selected !== "~") canonicalTaskId(value, "id");
-  return { field, operator: selected, value: value.value };
-}
-
-function parseRelationPredicate(field: Token, operator: Token, value: Token): TaskQueryPredicate {
-  const relationField = TASK_RELATION_PREDICATE_FIELDS.find((candidate) => candidate === field.value);
-  if (relationField === undefined) {
-    syntax(`unknown query field ${JSON.stringify(field.value)}`, field.offset);
-  }
-  return {
-    field: relationField,
-    operator: equalityOperator(operator, relationField),
-    value: canonicalTaskId(value, relationField),
-  };
-}
-
-function parseBooleanPredicate(field: "ready" | "blocked", operator: Token, value: Token): TaskQueryPredicate {
-  return { field, operator: equalityOperator(operator, field), value: boolean(value) };
-}
-
-function parseTimestampPredicate(field: "created" | "updated", operator: Token, value: Token): TaskQueryPredicate {
-  return { field, operator: orderedOperator(operator, field), value: timestamp(value, field) };
 }
 
 class Parser {
@@ -230,47 +174,23 @@ class Parser {
     const field = this.take();
     if (field.kind !== "word") syntax("expected query field", field.offset);
     if ((field.value === "ready" || field.value === "blocked") && this.current().kind !== "operator") {
-      return { field: field.value, operator: "=", value: true };
+      return parsedPredicate(
+        field,
+        { kind: "operator", value: "=", offset: field.offset },
+        { kind: "word", value: "true", offset: field.offset },
+      );
     }
     const operator = this.take();
     if (operator.kind !== "operator") syntax(`expected operator after ${field.value}`, operator.offset);
     const value = this.take();
     if (value.kind !== "word" && value.kind !== "string") syntax(`expected value for ${field.value}`, value.offset);
-    return this.typedPredicate(field, operator, value);
-  }
-  private typedPredicate(field: Token, operator: Token, value: Token): TaskQueryPredicate {
-    switch (field.value) {
-      case "state":
-        return { field: "state", operator: equalityOperator(operator, "state"), value: state(value) };
-      case "priority":
-        return { field: "priority", operator: orderedOperator(operator, "priority"), value: priority(value) };
-      case "title":
-        return parseTextPredicate("title", operator, value);
-      case "id":
-        return parseTextPredicate("id", operator, value);
-      case "parent":
-        return {
-          field: "parent",
-          operator: equalityOperator(operator, "parent"),
-          value: value.value === "none" ? null : canonicalTaskId(value, "parent"),
-        };
-      case "ready":
-        return parseBooleanPredicate("ready", operator, value);
-      case "blocked":
-        return parseBooleanPredicate("blocked", operator, value);
-      case "created":
-        return parseTimestampPredicate("created", operator, value);
-      case "updated":
-        return parseTimestampPredicate("updated", operator, value);
-      default:
-        return parseRelationPredicate(field, operator, value);
-    }
+    return parsedPredicate(field, operator, value);
   }
 }
 
 export function parseTaskQueryExpression(source: string): TaskQueryExpression {
   if (source.trim().length === 0) return syntax("query expression must be nonblank", 0);
-  return normalizeTaskQuery(new Parser(lex(source)).parse());
+  return new Parser(lex(source)).parse();
 }
 
 export function validateTaskLimit(source: string): void {
@@ -280,7 +200,7 @@ export function validateTaskLimit(source: string): void {
 
 export function validateTaskParent(source: string): void {
   try {
-    normalizeTaskQuery({ kind: "predicate", predicate: { field: "under", operator: "=", value: source } });
+    normalizeTaskQueryPredicate({ field: "under", operator: "=", value: source });
   } catch {
     throw new Error("--parent requires a canonical TaskId");
   }

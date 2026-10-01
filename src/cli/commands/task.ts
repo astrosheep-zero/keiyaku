@@ -37,7 +37,7 @@ import {
   type TaskShowResult,
 } from "../render/task.js";
 import { actorFromEdge } from "../actor.js";
-import type { TaskQueryExpression } from "./task-query.js";
+import { taskQuerySelection } from "../../task/query.js";
 export { renderTaskHelp } from "./task-grammar.js";
 
 // ---------------------------------------------------------------------------
@@ -200,20 +200,6 @@ function readScope(
   return command.flags.world === true ? { scope: "world" } : { namespace: current ?? [] };
 }
 
-function querySelection(command: ParsedTaskCommand): TaskQueryExpression | undefined {
-  const state = (value: "done" | "drop", operator: "=" | "!="): TaskQueryExpression => ({
-    kind: "predicate",
-    predicate: { field: "state", operator, value },
-  });
-  const selection: TaskQueryExpression =
-    command.flags.all === true
-      ? { kind: "predicate", predicate: { field: "priority", operator: ">=", value: 0 } }
-      : command.flags.closed === true
-        ? { kind: "or", terms: [state("done", "="), state("drop", "=")] }
-        : { kind: "and", terms: [state("done", "!="), state("drop", "!=")] };
-  return command.where === undefined ? selection : { kind: "and", terms: [selection, command.where] };
-}
-
 /** One addressed read per caller-supplied id, in caller order; the native null survives to JSON. */
 async function runShow(command: ParsedTaskCommand, tasks: TaskProduct): Promise<number> {
   const handles = command.positionals.map((taskId) => tasks.task({ id: taskId }).id);
@@ -289,7 +275,10 @@ async function runRead(input: TaskInput): Promise<number> {
     }
     case "query": {
       const result = await tasks.query({
-        ...(querySelection(command) === undefined ? {} : { where: querySelection(command)! }),
+        where: taskQuerySelection(
+          command.flags.all === true ? "all" : command.flags.closed === true ? "closed" : "active",
+          command.where,
+        ),
         ...readScope(command, current),
         ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),

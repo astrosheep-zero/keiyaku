@@ -50,19 +50,33 @@ function object(value: unknown, label: string): Record<string, unknown> {
 function closed(value: Record<string, unknown>, fields: readonly string[], label: string): void {
   for (const key of Object.keys(value)) if (!fields.includes(key)) fail(`${label} has unknown field: ${key}`);
 }
+/** Semantic refusals identify the caller input part; textual offsets belong to the CLI. */
+export class TaskQueryPredicateError extends TypeError {
+  constructor(
+    message: string,
+    readonly part: "field" | "operator" | "value",
+  ) {
+    super(message);
+  }
+}
+
+function invalidPredicate(message: string, part: TaskQueryPredicateError["part"] = "value"): never {
+  throw new TaskQueryPredicateError(message, part);
+}
+
 function taskId(value: unknown, label: string): TaskId {
-  if (typeof value !== "string") fail(`${label} must be a TaskId`);
+  if (typeof value !== "string") invalidPredicate(`${label} must be a TaskId`);
   try {
     const coordinate = parseTaskId(value);
-    if (formatTaskId(coordinate) !== value) fail(`${label} must be a canonical TaskId`);
+    if (formatTaskId(coordinate) !== value) invalidPredicate(`${label} must be a canonical TaskId`);
   } catch {
-    fail(`${label} must be a canonical TaskId`);
+    invalidPredicate(`${label} must be a canonical TaskId`);
   }
   return value as TaskId;
 }
 function comparison(value: unknown): TaskQueryComparison {
   if (typeof value !== "string" || !comparisons.includes(value as TaskQueryComparison))
-    fail("query operator is invalid");
+    invalidPredicate("query operator is invalid", "operator");
   return value as TaskQueryComparison;
 }
 function timestamp(value: unknown, field: string): string {
@@ -71,29 +85,30 @@ function timestamp(value: unknown, field: string): string {
     !Number.isFinite(Date.parse(value)) ||
     new Date(Date.parse(value)).toISOString() !== value
   ) {
-    fail(`${field} must be a canonical UTC ISO timestamp`);
+    invalidPredicate(`${field} must be a canonical UTC ISO timestamp`);
   }
   return value;
 }
 
 function equalityOperator(operator: TaskQueryComparison, field: string): "=" | "!=" {
-  if (operator !== "=" && operator !== "!=") fail(`${field} supports only = and !=`);
+  if (operator !== "=" && operator !== "!=") invalidPredicate(`${field} supports only = and !=`, "operator");
   return operator;
 }
 
 function orderedOperator(operator: TaskQueryComparison, field: string): Exclude<TaskQueryComparison, "~"> {
-  if (operator === "~") fail(`${field} does not support ~`);
+  if (operator === "~") invalidPredicate(`${field} does not support ~`, "operator");
   return operator;
 }
 
 function normalizeStatePredicate(input: Record<string, unknown>, operator: TaskQueryComparison): TaskQueryPredicate {
-  if (typeof input.value !== "string" || !states.includes(input.value as TaskState)) fail("state value is invalid");
+  if (typeof input.value !== "string" || !states.includes(input.value as TaskState))
+    invalidPredicate("state value is invalid");
   return { field: "state", operator: equalityOperator(operator, "state"), value: input.value as TaskState };
 }
 
 function normalizePriorityPredicate(input: Record<string, unknown>, operator: TaskQueryComparison): TaskQueryPredicate {
   if (typeof input.value !== "number" || !Number.isInteger(input.value) || input.value < 0 || input.value > 3) {
-    fail("priority value must be 0..3");
+    invalidPredicate("priority value must be 0..3");
   }
   return { field: "priority", operator: orderedOperator(operator, "priority"), value: input.value as TaskPriority };
 }
@@ -103,8 +118,9 @@ function normalizeTextPredicate(
   field: "title" | "id",
   operator: TaskQueryComparison,
 ): TaskQueryPredicate {
-  if (typeof input.value !== "string" || input.value.length === 0) fail(`${field} value must be nonblank`);
-  if (operator !== "=" && operator !== "!=" && operator !== "~") fail(`${field} supports only =, !=, and ~`);
+  if (typeof input.value !== "string" || input.value.length === 0) invalidPredicate(`${field} value must be nonblank`);
+  if (operator !== "=" && operator !== "!=" && operator !== "~")
+    invalidPredicate(`${field} supports only =, !=, and ~`, "operator");
   if (field === "id" && operator !== "~") taskId(input.value, "id value");
   return { field, operator, value: input.value };
 }
@@ -127,7 +143,7 @@ function normalizeBooleanPredicate(
   field: "ready" | "blocked",
   operator: TaskQueryComparison,
 ): TaskQueryPredicate {
-  if (typeof input.value !== "boolean") fail(`${field} value must be boolean`);
+  if (typeof input.value !== "boolean") invalidPredicate(`${field} value must be boolean`);
   return { field, operator: equalityOperator(operator, field), value: input.value };
 }
 
@@ -139,11 +155,11 @@ function normalizeTimestampPredicate(
   return { field, operator: orderedOperator(operator, field), value: timestamp(input.value, `${field} value`) };
 }
 
-function predicate(value: unknown): TaskQueryPredicate {
+export function normalizeTaskQueryPredicate(value: unknown): TaskQueryPredicate {
   const input = object(value, "query predicate");
   closed(input, ["field", "operator", "value"], "query predicate");
   const field = input.field;
-  if (typeof field !== "string") fail("query predicate field is required");
+  if (typeof field !== "string") invalidPredicate("query predicate field is required", "field");
   const operator = comparison(input.operator);
   switch (field) {
     case "state":
@@ -166,7 +182,7 @@ function predicate(value: unknown): TaskQueryPredicate {
       return normalizeTimestampPredicate(input, "updated", operator);
     default:
       if (isTaskRelationPredicateField(field)) return normalizeRelationPredicate(input, field, operator);
-      return fail(`unknown query field: ${field}`);
+      return invalidPredicate(`unknown query field: ${field}`, "field");
   }
 }
 
@@ -174,7 +190,7 @@ export function normalizeTaskQuery(value: unknown): TaskQueryExpression {
   const input = object(value, "query expression");
   if (input.kind === "predicate") {
     closed(input, ["kind", "predicate"], "query expression");
-    return { kind: "predicate", predicate: predicate(input.predicate) };
+    return { kind: "predicate", predicate: normalizeTaskQueryPredicate(input.predicate) };
   }
   if (input.kind === "not") {
     closed(input, ["kind", "term"], "query expression");
@@ -186,6 +202,25 @@ export function normalizeTaskQuery(value: unknown): TaskQueryExpression {
     return { kind: input.kind, terms: input.terms.map((term) => normalizeTaskQuery(term)) };
   }
   fail("query expression kind is invalid");
+}
+
+/** CLI selection and native default share Task-owned terminal-state semantics. */
+export function taskQuerySelection(
+  selection: "active" | "closed" | "all" = "active",
+  where?: TaskQueryExpression,
+): TaskQueryExpression {
+  if (selection === "all" && where !== undefined) return where;
+  const state = (value: "done" | "drop", operator: "=" | "!="): TaskQueryExpression => ({
+    kind: "predicate",
+    predicate: { field: "state", operator, value },
+  });
+  const selected: TaskQueryExpression =
+    selection === "all"
+      ? { kind: "or", terms: [state("done", "="), state("done", "!=")] }
+      : selection === "closed"
+        ? { kind: "or", terms: [state("done", "="), state("drop", "=")] }
+        : { kind: "and", terms: [state("done", "!="), state("drop", "!=")] };
+  return where === undefined ? selected : { kind: "and", terms: [selected, where] };
 }
 
 function compare(left: string | number, operator: Exclude<TaskQueryComparison, "~">, right: string | number): boolean {
