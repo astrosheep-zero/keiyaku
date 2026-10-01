@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Akumas, Keiyaku, World } from "../src/index.js";
 import { bodyRequestExecution } from "../src/akuma/requests.js";
-import { composeContractLibrary } from "../src/library/keiyaku.js";
+import { composeContractLibrary } from "../src/library/contract-composition.js";
 
 test("Contract and Akumas capture only their own composition inputs", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-product-boundaries-"));
@@ -28,7 +28,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.throws(() => Akumas.of(null as never), TypeError);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
-  const contracts = composeContractLibrary(bodyRequestExecution({ directory: join(root, "contract-requests") }), {
+  const contracts = composeContractLibrary(bodyRequestExecution({ directory: join(root, "contract-requests") }), createKeiyakuHandle, {
     actor: "contract-actor",
   });
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "select"]);
@@ -50,3 +50,5 @@ test("Contract and Akumas capture only their own composition inputs", async (con
     /Contract Akuma selector requires repo/u,
   );
 });
+
+import { createKeiyakuHandle } from "../src/library/keiyaku.js";

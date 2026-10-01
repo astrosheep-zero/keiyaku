@@ -91,7 +91,7 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   }
 }
 
-export type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
+type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
 
 /**
  * The internal live-observation companion for one status frontier.  It is not

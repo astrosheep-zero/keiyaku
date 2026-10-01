@@ -7,8 +7,7 @@ import type { WorktreeHooks } from "../git/hooks.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { MutationOperationInput, RepositoryScope } from "./operations.js";
 
-export type ReconcileReport = ReconcileResult;
-type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileReport }>;
+type ReconcileObservation = Readonly<{ state: ContractState | null; report: ReconcileResult }>;
 type ReconcileOptions = Readonly<{
   hooks: WorktreeHooks;
   retryHooks: boolean;
@@ -42,7 +41,7 @@ export async function reconcileOperation(
   }
 }
 
-type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState | null; report: ReconcileReport }>;
+type RepoReconcileItem = Readonly<{ contractId: ContractId; state: ContractState | null; report: ReconcileResult }>;
 type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>;
 
 export async function worldContractStates(

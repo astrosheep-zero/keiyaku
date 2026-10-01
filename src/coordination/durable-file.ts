@@ -39,7 +39,7 @@ export async function replaceFileDurably(path: string, bytes: string | Uint8Arra
   }
 }
 
-export type DerivedFileAction = "created" | "updated" | "unchanged";
+type DerivedFileAction = "created" | "updated" | "unchanged";
 
 export async function repairDerivedFile(path: string, bytes: string | Uint8Array): Promise<DerivedFileAction> {
   const expected = Buffer.from(bytes);

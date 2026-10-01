@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AuditReport } from "../src/index.js";
-import { InvocationAccumulator, project, KeiyakuError } from "../src/library/outcome.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
+import { project, KeiyakuError } from "../src/library/outcome.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
 import { contractId, documentKey, snapshotId, type ContractHead, type ContractState } from "../src/core/facts/types.js";
 import { mergeAdmissions } from "../src/protocol/operations.js";

@@ -106,7 +106,7 @@ export function claimTaskHolder(taskId: TaskId, owner: ContractId): TreeUpdate {
 
 type AdmissionOutcome = Readonly<{ kind: string }>;
 
-export type TaskHolderAdmission<T extends AdmissionOutcome> =
+type TaskHolderAdmission<T extends AdmissionOutcome> =
   | Readonly<{ kind: "completed"; result: T }>
   | Readonly<{
       kind: "accepted-release-failed";

@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
-import { defaultWaitComplete } from "../src/akuma/akuma.js";
+import { defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -17,7 +17,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
-import { executeWaitAkuma } from "../src/akuma/akuma.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 

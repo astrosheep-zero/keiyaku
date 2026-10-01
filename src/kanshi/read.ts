@@ -1,35 +1,35 @@
-import { Repo } from "../library/repo.js";
-import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../protocol/read/status.js";
-import { scopeForRepo } from "../library/repo.js";
-import { observeTaskBoard } from "../task/operations.js";
-import { contractNamespace } from "../task/identity.js";
-import { readAkumaRoster, readAkumaTimeline, withoutReportedChanges } from "../akuma/akuma.js";
+import { withoutReportedChanges } from "../akuma/projection.js";
+import { readAkumaRoster, readAkumaTimeline } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
-import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
-import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
-import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
-import { readContractBoard, readContractCatalogue, readContractPhase } from "../protocol/read/status.js";
-import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { assertRegionPattern } from "../body/region.js";
-import { readDocuments, type ContractDocumentProjection } from "../protocol/read/documents.js";
 import { contractId } from "../core/facts/types.js";
-import { selectKanshi, selectRegion } from "./select.js";
-import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
+import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { Repo, scopeForRepo } from "../library/repo.js";
+import { readDocuments, type ContractDocumentProjection } from "../protocol/read/documents.js";
+import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
+import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../protocol/read/status.js";
+import { readContractBoard, readContractCatalogue, readContractPhase } from "../protocol/read/status.js";
+import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
+import { contractNamespace } from "../task/identity.js";
 import { observeRecentTaskStatus, TaskAuthorityCorruptionError, type TaskRow } from "../task/index.js";
+import { observeTaskBoard } from "../task/operations.js";
+import type { WorldRoot } from "../world.js";
 import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
   ContractKanshiBoard,
+  KanshiRegionSelection,
   KanshiReport,
+  RegionDeclaration,
+  RegionRead,
   Section,
   TaskKanshiRow,
   TaskKanshiWorld,
-  KanshiRegionSelection,
-  RegionDeclaration,
-  RegionRead,
 } from "./report.js";
-import type { WorldRoot } from "../world.js";
+import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
+import { selectKanshi, selectRegion } from "./select.js";
 
 export type KanshiInput = Readonly<{
   world: WorldRoot | null;

@@ -1,14 +1,15 @@
 /** @architectureCompositionRoot */
 import { rmdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { stopAkuma, AkumaResetStopError } from "../akuma/nuke.js";
-import { nukeGit, GitResetStopError } from "../git/nuke.js";
+import { AkumaResetStopError, stopAkuma } from "../akuma/nuke.js";
+import { GitResetStopError, nukeGit } from "../git/nuke.js";
 import type { GitRepository } from "../git/process.js";
+import { isOperationalFailure } from "../protocol/progress.js";
 import { nukeTask } from "../task/operations.js";
 import { World, type WorldRoot } from "../world.js";
-import { isOperationalFailure } from "../protocol/progress.js";
 import { requireInput, requireMarkdown } from "./input.js";
-import { InvocationAccumulator, project, validated, type ResetOutcome, type ResetOwner } from "./outcome.js";
+import { InvocationAccumulator } from "./invocation.js";
+import { project, validated, type ResetOutcome, type ResetOwner } from "./outcome.js";
 
 export type NukeInput = Readonly<{ world: WorldRoot; confirm?: string }>;
 export type NukeResult = ResetOutcome;

@@ -87,14 +87,14 @@ type ReconcileInput = Readonly<{
   onPhysical?: (report: ReconcileResult) => void;
 }>;
 type ReconcileEffectsInput = ReconcileInput;
-export const reconcileFailureSchema = z
+const reconcileFailureSchema = z
   .object({
     kind: z.literal("reconcile-failed"),
     stage: z.enum(["observation", "effect"]),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
   .strict();
-export type ReconcileFailure = z.infer<typeof reconcileFailureSchema>;
+type ReconcileFailure = z.infer<typeof reconcileFailureSchema>;
 export const gitReconcileLagSchema = z.union([
   z
     .object({

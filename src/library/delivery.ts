@@ -1,9 +1,9 @@
-import { deliverDataSchema } from "../protocol/operations.js";
-import type { SnapshotId } from "../core/facts/types.js";
-import { deliverLeadingSchema } from "../protocol/deliver.js";
-import { completionEvidenceSchema } from "../protocol/completion.js";
-import { continuationReportSchema } from "./continuation.js";
 import { z } from "zod";
+import type { SnapshotId } from "../core/facts/types.js";
+import { completionEvidenceSchema } from "../protocol/completion.js";
+import { deliverLeadingSchema } from "../protocol/deliver.js";
+import { deliverDataSchema, deliveryDiffOperation, type RepositoryScope } from "../protocol/operations.js";
+import { continuationReportSchema } from "./continuation.js";
 
 export const deliveryValueSchema = completionEvidenceSchema
   .extend({
@@ -96,4 +96,22 @@ export function deliveryHandle(
   readDiff: () => Promise<string | null>,
 ): Delivery {
   return new DeliveryHandle(delivery, readDiff, delivery);
+}
+
+export function deliveryForContract(scope: RepositoryScope, delivery: DeliveryValue): Delivery & DeliveryValue;
+export function deliveryForContract(
+  scope: RepositoryScope,
+  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
+): Delivery;
+export function deliveryForContract(
+  scope: RepositoryScope,
+  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
+): Delivery {
+  return deliveryHandle(delivery, () =>
+    deliveryDiffOperation({
+      scope,
+      integrationPredecessor: delivery.integration.predecessor,
+      integrationSnapshot: delivery.integration.snapshot,
+    }),
+  );
 }

@@ -25,7 +25,7 @@ import { VERIFIED } from "../verification/declaration.js";
 const MAX_REINTEGRATION_CYCLES = 3;
 
 const verdictProvenanceSchema = z.object({ mode: z.enum(["ran", "reused"]), verdict: verdictSchema }).strict();
-export const candidateCompletionSchema = z
+const candidateCompletionSchema = z
   .object({
     integration: snapshotIdSchema,
     predecessor: snapshotIdSchema.optional(),
@@ -38,8 +38,8 @@ export const candidateCompletionSchema = z
   })
   .strict();
 export type CandidateCompletion = z.infer<typeof candidateCompletionSchema>;
-export const verificationSubjectSchema = verdictProvenanceSchema.extend({ snapshot: snapshotIdSchema }).strict();
-export type VerificationSubject = z.infer<typeof verificationSubjectSchema>;
+const verificationSubjectSchema = verdictProvenanceSchema.extend({ snapshot: snapshotIdSchema }).strict();
+type VerificationSubject = z.infer<typeof verificationSubjectSchema>;
 export const completionEvidenceSchema = z
   .object({
     completion: candidateCompletionSchema.optional(),

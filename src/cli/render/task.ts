@@ -4,13 +4,13 @@ import type {
   TaskBatchResult,
   TaskCompositionDiagnostic,
   TaskCompositionResult,
+  TaskContextResult,
   TaskDecompositionTree,
   TaskDetail,
   TaskDoctorIssue,
   TaskDoctorReport,
   TaskList,
   TaskMutationResult,
-  TaskContextResult,
   TaskQueryResult,
   TaskQueryRow,
   TaskRef,
@@ -20,10 +20,11 @@ import type {
   TaskUpdateResult,
   TaskView,
 } from "../../task/index.js";
-import { outcomeLines, refusalLines, receiptPayload, receiptRow } from "./receipt.js";
 import { taskMark } from "./marks.js";
-export { taskMark } from "./marks.js";
+import { outcomeLines, receiptPayload, receiptRow, refusalLines } from "./receipt.js";
 import { DEFAULT_CLI_COLUMNS, displayColumns, emptyCatalogue, safeText, type TextRenderContext } from "./terminal.js";
+
+export { taskMark } from "./marks.js";
 
 type TaskListOutcome = TaskList | BlockedTaskList | TaskQueryResult;
 /** One addressed show selection: native details, or a refusal naming a missing addressed read. */
@@ -31,7 +32,7 @@ export type TaskShowResult = TaskDetail | TaskDetail[] | Extract<TaskMutationRes
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
 export type TaskListScope = "world" | "current" | Readonly<{ namespace: string }>;
 /** The union of native Task SDK answers one leaf renders directly; the CLI adds no result envelope. */
-export type TaskNativeResult =
+type TaskNativeResult =
   | TaskMutationResult
   | TaskUpdateResult
   | TaskBatchResult

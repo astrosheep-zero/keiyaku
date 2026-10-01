@@ -3,12 +3,21 @@ import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
 import { listArchetypeDefinitions } from "../src/akuma/archetype.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { constants, copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  constants,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma.js";
+import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";

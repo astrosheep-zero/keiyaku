@@ -1,14 +1,4 @@
-import type {
-  ActiveToolRow,
-  ActivitySnapshot,
-  ActivitySnapshotEntry,
-  CompletedToolRow,
-  IdleSnapshotRow,
-  OpenSnapshotRow,
-  OutcomeRow,
-  ReportedFileChange,
-  SnapshotRow,
-} from "../../src/akuma/akuma.js";
+import type { ActiveToolRow, ActivitySnapshot, ActivitySnapshotEntry, CompletedToolRow, IdleSnapshotRow, OpenSnapshotRow, OutcomeRow, ReportedFileChange, SnapshotRow } from "../../src/akuma/projection.js";
 import { parseAkuId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
 

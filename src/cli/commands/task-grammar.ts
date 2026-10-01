@@ -272,7 +272,7 @@ export function renderTaskHelp(action?: TaskAction): string {
   ].join("\n");
 }
 
-export function renderTaskUsage(action: TaskAction): string {
+function renderTaskUsage(action: TaskAction): string {
   return TASK_COMMAND_SPECS[action].usage
     .split("\n")
     .map((line, index) => {

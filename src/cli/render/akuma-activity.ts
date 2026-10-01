@@ -1,19 +1,25 @@
-import type { ActivityRow, AkumaStatus, KillEvidence } from "../../akuma/akuma.js";
-import type { CallObservation } from "../../library/akuma-creation.js";
-import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
-import type { AkumaAskObservation } from "../../akuma/selection-observation.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
+import type { AkumaStatus } from "../../akuma/akuma.js";
+import type { KillEvidence } from "../../akuma/heart/index.js";
+import type { ActivityRow } from "../../akuma/projection.js";
+import type {
+  AkumaAskObservation,
+  AkumaAskResult,
+  AkumaTellResult,
+  AkumaWaitResult,
+} from "../../akuma/selection-observation.js";
+import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
+import type { CallObservation, CallResult } from "../../library/akuma-creation.js";
 import type { WaitObservedAkuma } from "../../library/akumas.js";
-import type { AkumaAskResult, AkumaTellResult, AkumaWaitResult } from "../../akuma/selection-observation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
-import type { CallResult } from "../../library/akuma-creation.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
+import { taskDispositionMark } from "./marks.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
-  renderBoundedTextBlock,
-  renderBoundedPayload,
   padToDisplay,
+  renderBoundedPayload,
+  renderBoundedTextBlock,
   safeText,
   takeDisplayColumns,
   takeDisplayColumnsFromEnd,
@@ -21,7 +27,6 @@ import {
   truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
-import { taskDispositionMark } from "./marks.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 const TIME_WIDTH = 5;
@@ -1499,7 +1504,7 @@ function answerBytes(answer: unknown, structured: boolean): string | undefined {
 }
 
 /** Presentation-only state for one akuma invocation; it never reaches JSON. */
-export type AkumaPresentation = Readonly<{
+type AkumaPresentation = Readonly<{
   alias?: string;
   streamed?: boolean;
   structured?: boolean;

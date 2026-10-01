@@ -57,8 +57,8 @@ export type VerificationReuse = CurrentVerifiedAttestation;
 export const deliverLeadingSchema = z
   .object({ kind: z.enum(["admitted-now", "already-admitted"]), fact: entryUlidSchema })
   .strict();
-export type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
-export type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
+type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
+type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
 export type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
 export const materializedConflictSchema = z
   .object({
@@ -85,7 +85,7 @@ type DeliverOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
-export type DeliverOperationRefusal =
+type DeliverOperationRefusal =
   | import("../core/verbs/deliver.js").DeliverRefusal
   | DeliveryPreparationRefusal
   | import("./operations.js").DeliverConflictRefusal

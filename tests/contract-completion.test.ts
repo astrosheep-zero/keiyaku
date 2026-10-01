@@ -4,7 +4,14 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, captureWorktreeFiles, restoreWorktreeFiles, snapshotGitRepository } from "./support/git.js";
+import {
+  appointedWorktreePath,
+  cachedRepoAt,
+  cachedRepositoryAt,
+  captureWorktreeFiles,
+  restoreWorktreeFiles,
+  snapshotGitRepository,
+} from "./support/git.js";
 import { bind, commitCandidate, document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 
 // Bind once for setup, then give every scenario independent refs, files and worktree.
@@ -36,7 +43,8 @@ async function fixture() {
 
 
 // These tests exercise the real admission boundary, not a synthetic accepted object.
-import { createKeiyakuHandle, captureLocalContractComposition } from "../src/library/keiyaku.js";
+import { createKeiyakuHandle } from "../src/library/keiyaku.js";
+import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { localExecutionContext } from "../src/akuma/requests.js";
 import { KeiyakuError } from "../src/library/outcome.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";

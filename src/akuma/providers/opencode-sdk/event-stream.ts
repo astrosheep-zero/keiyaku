@@ -24,7 +24,7 @@ export type OwnedEventStream = Readonly<{
  * its timer. Cancellation before the sleep starts completes immediately, and a
  * simultaneous timeout and abort still settles once and drops the listener.
  */
-export function cancellableSleep(signal: AbortSignal): (milliseconds: number) => Promise<void> {
+function cancellableSleep(signal: AbortSignal): (milliseconds: number) => Promise<void> {
   return (milliseconds) =>
     new Promise<void>((resolve) => {
       if (signal.aborted) {

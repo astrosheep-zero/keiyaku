@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Akuma } from "../../src/akuma/index.js";
 import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
-import { AkumaOwner } from "../../src/akuma/akuma.js";
+import { AkumaOwner } from "../../src/akuma/akuma-owner.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";

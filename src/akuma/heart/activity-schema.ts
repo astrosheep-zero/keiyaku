@@ -7,7 +7,7 @@ const positiveInteger = z.number().int().safe().positive();
 const text = z.string();
 const truncated = z.literal(true).optional();
 
-export const searchScopeSchema = z.enum(["content", "files", "web"]);
+const searchScopeSchema = z.enum(["content", "files", "web"]);
 
 export const toolInputSchema = z.object({ json: text, truncated: z.boolean() });
 export const diffstatSchema = z.object({ added: nonnegativeInteger, removed: nonnegativeInteger });

@@ -14,7 +14,7 @@ export const unsealedBytesSchema = z
     head: mintedSnapshotInputSchema.optional(),
   })
   .strict();
-export type UnsealedBytes = z.infer<typeof unsealedBytesSchema>;
+type UnsealedBytes = z.infer<typeof unsealedBytesSchema>;
 export type TerminalSealExpectations = Readonly<{
   heads: readonly SnapshotId[];
   trees: readonly GitObjectId[];

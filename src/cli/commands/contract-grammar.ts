@@ -3,7 +3,7 @@ import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
-export type CatalogQuery =
+type CatalogQuery =
   | Readonly<{ kind: "tasks"; namespace?: readonly string[]; limit?: number }>
   | Readonly<{ kind: "contracts"; limit?: number }>
   | Readonly<{ kind: "archetypes"; limit?: number }>

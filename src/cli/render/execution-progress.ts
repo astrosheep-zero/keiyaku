@@ -1,6 +1,6 @@
-import type { ExecutionObservation } from "../../library/keiyaku.js";
-import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
+import type { ExecutionObservation } from "../../protocol/execution-observation.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
+import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 const LIVE_OUTPUT_BYTES = 4 * 1024;
 

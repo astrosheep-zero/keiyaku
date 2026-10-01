@@ -1,23 +1,17 @@
-import {
-  AkumaOwner,
-  admitAkumaCall,
-  decodeAskObservation,
-  executeAskAkuma,
-  executeTellAkuma,
-  defaultWaitComplete,
-  type InterruptReceipt,
-  type KillEvidence,
-  type AkumaStatus,
-  type AkumaTellResult,
-  type AkumaAskResult,
-} from "./akuma.js";
-import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
-import { abortable } from "./abort.js";
-import { parseAkuId, type AkuId } from "./identity.js";
-import type { AllowedAction } from "./allowed.js";
-import type { ActivityHistory } from "./projection.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import { abortable } from "./abort.js";
+import { admitAkumaCall } from "./akuma-call.js";
+import { defaultWaitComplete } from "./akuma-observe.js";
+import { AkumaOwner, type InterruptReceipt } from "./akuma-owner.js";
+import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
+import { type AkumaStatus } from "./akuma.js";
+import type { AllowedAction } from "./allowed.js";
+import { type KillEvidence } from "./heart/index.js";
+import { parseAkuId, type AkuId } from "./identity.js";
+import type { ActivityHistory } from "./projection.js";
+import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
+import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
 export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; status: AkumaStatus }>;
@@ -36,8 +30,7 @@ export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boole
 export type AkumaAskOptions<T> = AkumaTellOptions &
   Readonly<{ timeoutMs?: number; schema?: Schema<T> | StandardSchemaV1<T> }>;
 
-export type { InterruptReceipt, KillEvidence };
-export type { AkumaTellResult, AkumaAskResult };
+export type { AkumaAskResult, AkumaTellResult, InterruptReceipt, KillEvidence };
 
 function signalOption(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;

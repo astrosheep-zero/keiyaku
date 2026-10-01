@@ -1,50 +1,11 @@
-import type { ParsedContractCommand } from "./contract-grammar.js";
-import { CliUsageError, isBlankInput } from "../usage.js";
-import { bindFromCommand } from "./bind.js";
-import { amendFromCommand } from "./amend.js";
-import { BindDraftError, preserveBindDraft } from "../draft.js";
-import { SettingsError, settings } from "../../settings.js";
-import { Akumas, Keiyaku, KeiyakuError, nuke } from "../../index.js";
-import { composeContractLibrary } from "../../library/keiyaku.js";
-import { observeKeiyaku } from "../../library/keiyaku.js";
-import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
-import { actorFromEdge } from "../actor.js";
-import type { CliCoordinates } from "../coordinates.js";
-import { displayContext, writeJson, writeStdout } from "../streams.js";
-import type { CliRuntime } from "../runtime.js";
-import { renderAccepted, renderRetry, renderContractHistory, type ContractOutcome } from "../render/contract.js";
-import { renderConflictMaterialized, renderRefusal, type RenderableRefusal } from "../render/refusal.js";
-import {
-  renderAkumaCatalogue,
-  renderArchetypeCatalogue,
-  renderContractCatalogue,
-  renderTaskCatalogue,
-} from "../render/catalog.js";
-import { reconcileHasFailure, renderReconcile } from "../render/reconcile.js";
-import { nukeExitCode, renderNukeText } from "../render/nuke.js";
-import { renderRegionText } from "../render/region.js";
-import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
-import { renderKanshiText } from "../render/kanshi.js";
-import { snapshotText } from "../render/akuma-activity.js";
-import { type TextRenderContext } from "../render/terminal.js";
-import {
-  canonicalContractSelector,
-  contractFromInput,
-  resolveContractId,
-  resolveKanshiContract,
-} from "../selectors.js";
-import { resolveInvocationCwd } from "../coordinates.js";
-import { kanshi, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
-import { resolveNamedAddress } from "../../library/address.js";
-import { Tasks } from "../../task/index.js";
 import { listArchetypeDefinitions } from "../../akuma/archetype.js";
-import type { KanshiReport } from "../../kanshi/index.js";
+import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
 import type {
   ActorId,
   AkumaObservation,
   AuditOutcome,
-  ContractId,
   ContractHistory,
+  ContractId,
   DeliverOutcome,
   Keiyaku as KeiyakuContract,
   KeiyakuLibrary,
@@ -52,10 +13,48 @@ import type {
   Settings,
   WorldRoot,
 } from "../../index.js";
-import type { Repo } from "../../library/repo.js";
+import { Akumas, Keiyaku, KeiyakuError, nuke } from "../../index.js";
+import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
+import { kanshi, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
+import { resolveNamedAddress } from "../../library/address.js";
+import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
+import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
+import { createKeiyakuHandle } from "../../library/keiyaku.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
-import type { RegionRead, Section } from "../../kanshi/index.js";
-import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
+import type { Repo } from "../../library/repo.js";
+import { SettingsError, settings } from "../../settings.js";
+import { Tasks } from "../../task/index.js";
+import { actorFromEdge } from "../actor.js";
+import type { CliCoordinates } from "../coordinates.js";
+import { resolveInvocationCwd } from "../coordinates.js";
+import { BindDraftError, preserveBindDraft } from "../draft.js";
+import { snapshotText } from "../render/akuma-activity.js";
+import {
+  renderAkumaCatalogue,
+  renderArchetypeCatalogue,
+  renderContractCatalogue,
+  renderTaskCatalogue,
+} from "../render/catalog.js";
+import { renderAccepted, renderContractHistory, renderRetry, type ContractOutcome } from "../render/contract.js";
+import { renderKanshiText } from "../render/kanshi.js";
+import { nukeExitCode, renderNukeText } from "../render/nuke.js";
+import { reconcileHasFailure, renderReconcile } from "../render/reconcile.js";
+import { renderConflictMaterialized, renderRefusal, type RenderableRefusal } from "../render/refusal.js";
+import { renderRegionText } from "../render/region.js";
+import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
+import type { TextRenderContext } from "../render/terminal.js";
+import type { CliRuntime } from "../runtime.js";
+import {
+  canonicalContractSelector,
+  contractFromInput,
+  resolveContractId,
+  resolveKanshiContract,
+} from "../selectors.js";
+import { displayContext, writeJson, writeStdout } from "../streams.js";
+import { CliUsageError, isBlankInput } from "../usage.js";
+import { amendFromCommand } from "./amend.js";
+import { bindFromCommand } from "./bind.js";
+import type { ParsedContractCommand } from "./contract-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
@@ -236,7 +235,7 @@ async function contractLibrary(
     executionChannel(execution).kind === "local" && ["audit", "deliver", "review"].includes(command.command)
       ? actorFromEdge(undefined, runtime.environment)
       : undefined;
-  return composeContractLibrary(execution, {
+  return composeContractLibrary(execution, createKeiyakuHandle, {
     ...(configuration === undefined ? {} : { settings: configuration }),
     ...(actor === undefined ? {} : { actor }),
   });
@@ -712,7 +711,7 @@ async function runRegion(
   });
 }
 
-export type ParsedContractHistory = Readonly<{
+type ParsedContractHistory = Readonly<{
   command: "history";
   contract: string;
   full: boolean;
@@ -746,7 +745,7 @@ async function runReconcile(
 ): Promise<number> {
   const repo = requiredRepo(coordinates);
   const configuration = await contractSettings(command, execution, coordinates.world, home);
-  const library = composeContractLibrary(execution, {
+  const library = composeContractLibrary(execution, createKeiyakuHandle, {
     ...(configuration === undefined ? {} : { settings: configuration }),
   });
   let report: ReconcileCompletion | RepoReconcileReport;

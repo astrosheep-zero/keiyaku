@@ -408,7 +408,7 @@ export const deliveryDiffScopeSchema = z
     paths: z.array(z.string()).readonly().optional(),
   })
   .strict();
-export type DeliveryDiffScope = z.infer<typeof deliveryDiffScopeSchema>;
+type DeliveryDiffScope = z.infer<typeof deliveryDiffScopeSchema>;
 
 export async function readDeliveryScope(
   repository: GitRepository,

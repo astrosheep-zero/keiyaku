@@ -1,18 +1,19 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LEASH_HELD_EXIT, runAkumaBody, bodyLaunchSchema, type BodyLaunch } from "./akuma/body.js";
+import { bodyLaunchSchema, LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
-import { World } from "./world.js";
+import { composeRequestCommands } from "./akuma/request-wire.js";
+import { localExecutionContext } from "./akuma/requests.js";
 import { selectionRequestPort } from "./akuma/selection-owner-port.js";
 import { selectionRequestCommands } from "./akuma/selection-request.js";
+import { composeContractLibrary } from "./library/contract-composition.js";
 import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
-import { composeContractLibrary } from "./library/keiyaku.js";
-import { localExecutionContext } from "./akuma/requests.js";
+import { createKeiyakuHandle } from "./library/keiyaku.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
-import { taskMutationRequestCommands, type TaskLifecycleVerb, type TaskMutationRequestPort } from "./task/mutation.js";
 import { Tasks, type Task, type TaskMutationResult } from "./task/index.js";
-import { composeRequestCommands } from "./akuma/request-wire.js";
+import { taskMutationRequestCommands, type TaskLifecycleVerb, type TaskMutationRequestPort } from "./task/mutation.js";
+import { World } from "./world.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
@@ -37,7 +38,10 @@ function contractChannel(
   requester: Parameters<ContractRequestPort["deliver"]>[0]["requester"],
   configuration: Awaited<ReturnType<typeof contractDependencies>>[1],
 ) {
-  return composeContractLibrary(localExecutionContext(), { settings: configuration, actor: requester }).select({
+  return composeContractLibrary(localExecutionContext(), createKeiyakuHandle, {
+    settings: configuration,
+    actor: requester,
+  }).select({
     repo,
     id: contractId,
   });

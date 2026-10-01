@@ -50,7 +50,7 @@ type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> &
   }>;
 
 /** One loaded archetype whose provider owner has decoded its execution but not yet admitted its options. */
-export type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
+type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
   Readonly<{
     provider: ProviderExecution;
   }>;

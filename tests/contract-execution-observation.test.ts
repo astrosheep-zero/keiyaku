@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InvocationAccumulator } from "../src/library/outcome.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
 import { bind, commitCandidate, acceptedDelivery, repositoryWithMain } from "./support/library-verbs.js";
 import { deferred } from "./support/process.js";
 import type { ExecutionObservation } from "../src/index.js";

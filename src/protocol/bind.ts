@@ -1,33 +1,33 @@
-import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
+import type { ActorId, BindData, ContractId } from "../core/facts/types.js";
+import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
+import { contractIdSchema, gitObjectIdForSnapshot } from "../git/identity.js";
 import {
   normalizeTargetBranch,
   observeBindCoordinates,
   type BindCoordinatesObservation,
   type BindTargetSelection,
 } from "../git/observe.js";
-export type { BindTargetSelection };
-import { gitObjectIdForSnapshot } from "../git/identity.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { type BindData, type ActorId, type ContractId } from "../core/facts/types.js";
-import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
-export type { BindRefusal } from "../core/verbs/bind.js";
 import type {
   VerificationDeclarationPreparation,
   VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitPreparedIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
-import type { ExternalProtocolPreparation, InCustodyProtocolPreparation, CompanionDecorator } from "./run.js";
+import type { CompanionDecorator, ExternalProtocolPreparation, InCustodyProtocolPreparation } from "./run.js";
+
+export type { BindRefusal } from "../core/verbs/bind.js";
+export type { BindTargetSelection };
 export const targetInputRefusalSchema = z
   .object({ kind: z.enum(["invalid-target", "target-missing", "unborn-head"]) })
   .strict();
-export type TargetInputRefusal = z.infer<typeof targetInputRefusalSchema>;
+type TargetInputRefusal = z.infer<typeof targetInputRefusalSchema>;
 export const forkSourceMovedRefusalSchema = z
   .object({ kind: z.literal("fork-source-moved"), contractId: contractIdSchema })
   .strict();
-export type ForkSourceMovedRefusal = z.infer<typeof forkSourceMovedRefusalSchema>;
+type ForkSourceMovedRefusal = z.infer<typeof forkSourceMovedRefusalSchema>;
 
 type BindOperationInput = Readonly<{
   scope: GitRepository;

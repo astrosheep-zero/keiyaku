@@ -261,7 +261,7 @@ export const conflictRecoverySchema = z
     staging: z.literal("not-required"),
   })
   .strict();
-export type ConflictRecovery = z.infer<typeof conflictRecoverySchema>;
+type ConflictRecovery = z.infer<typeof conflictRecoverySchema>;
 
 export const conflictRecovery: ConflictRecovery = Object.freeze({
   materialize: "deliver --materialize-conflict --include-dirty",

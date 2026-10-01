@@ -1,5 +1,5 @@
 import type { AkumaLife } from "../../akuma/heart/index.js";
-import type { ContractRow } from "../../library/keiyaku.js";
+import type { ContractRow } from "../../protocol/read/status.js";
 import type { TaskDisposition } from "../../task/board.js";
 import type { TaskState } from "../../task/document.js";
 

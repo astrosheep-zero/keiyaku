@@ -18,7 +18,7 @@ export type LeadingOutcome<Value, Refusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "retry"; reason: ProtocolTerminal }>;
 
-export type AcceptedObligations = Readonly<{
+type AcceptedObligations = Readonly<{
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
   seatClose?: readonly PrivateStateSeatCloseLag[];

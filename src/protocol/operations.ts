@@ -1,19 +1,52 @@
-import { contractIdSchema, snapshotIdSchema, changeIdSchema } from "../git/identity.js";
-export { contractIdSchema, snapshotIdSchema, changeIdSchema } from "../git/identity.js";
-export { entryUlidSchema } from "./attempt.js";
-import { targetInputRefusalSchema, forkSourceMovedRefusalSchema } from "./bind.js";
 import { z } from "zod";
+import { boundedListLimit } from "../bounded-list.js";
+import type { ActiveContractRefusal } from "../core/facts/observation.js";
+import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
+import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import type { IntegrationPreparationRefusal } from "../git/integration.js";
+import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
+import { currentBranch, observeContractAt } from "../git/observe.js";
 import {
-  worktreeMissingRefusalSchema,
-  unmergedPathsRefusalSchema,
-  dirtyWorkspaceRefusalSchema,
-} from "../git/tender.js";
-import { integrationPreparationRefusalSchema } from "../git/integration.js";
+  appendPrivateStateSeatClose,
+  concatenatePrivateStateSeatClose,
+  mergePrivateStateSeatClose,
+  type PrivateStateSeatCloseLag,
+  type PrivateStateSeatOutcome,
+} from "../git/private-state-seat.js";
+import type { GitRepository } from "../git/process.js";
+import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
+import { repositoryAt } from "../git/repository.js";
+import type { WorktreeLeak } from "../git/scratch.js";
 import { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
+import {
+  dirtyWorkspaceRefusalSchema,
+  unmergedPathsRefusalSchema,
+  worktreeMissingRefusalSchema,
+} from "../git/tender.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
-import { protocolTerminalSchema } from "./run.js";
+import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
+import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
+import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
+import type { VerificationCleanupFailure, VerificationResult } from "./intent.js";
 import { verificationRuntimeStopSchema } from "./intent.js";
+import type { AcceptedProtocolStep, IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import type { PlacementProtocolResult } from "./placement.js";
+import type { ProtocolProgress } from "./progress.js";
+import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
+import {
+  readContractBoard,
+  readContractCatalogue,
+  readContractObservationAt,
+  type ContractBoard,
+  type ContractCatalogue,
+  type ContractObservation,
+} from "./read/status.js";
+import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import { protocolTerminalSchema } from "./run.js";
+
+export { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+export { entryUlidSchema } from "./attempt.js";
 export const gateSchema = z.string().transform((value, context) => {
   try {
     return gate(value);
@@ -95,41 +128,8 @@ export const placementRefusalSchema = z.union([
     })
     .strict(),
 ]);
-import type { ProtocolProgress } from "./progress.js";
-import { readDeliveryDiff } from "../git/integration.js";
-import { currentBranch, observeContractAt } from "../git/observe.js";
-import type { GitRepository } from "../git/process.js";
-import { repositoryAt } from "../git/repository.js";
-import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
-import type { WorktreeLeak } from "../git/scratch.js";
-import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
-import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import type { IntegrationPreparationRefusal } from "../git/integration.js";
-import type { VerificationCleanupFailure, VerificationResult } from "./intent.js";
-import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
-import {
-  appendPrivateStateSeatClose,
-  concatenatePrivateStateSeatClose,
-  mergePrivateStateSeatClose,
-  type PrivateStateSeatCloseLag,
-  type PrivateStateSeatOutcome,
-} from "../git/private-state-seat.js";
-import type { PlacementProtocolResult } from "./placement.js";
-import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
-import type { AcceptedProtocolStep, IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
-import type { ProtocolResult, ProtocolTerminal } from "./run.js";
-import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
-import {
-  readContractBoard,
-  readContractCatalogue,
-  readContractObservationAt,
-  type ContractBoard,
-  type ContractCatalogue,
-  type ContractObservation,
-} from "./read/status.js";
-import { boundedListLimit } from "../bounded-list.js";
 
-export const mergeStatePresentRefusalSchema = z
+const mergeStatePresentRefusalSchema = z
   .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: worktreeWorkspaceSchema })
   .strict();
 export const deliverConflictRefusalSchema = z
@@ -143,7 +143,7 @@ export const deliverConflictRefusalSchema = z
   })
   .strict();
 export type DeliverConflictRefusal = z.infer<typeof deliverConflictRefusalSchema>;
-export const targetMissingRefusalSchema = z
+const targetMissingRefusalSchema = z
   .object({ kind: z.literal("target-missing"), contractId: contractIdSchema })
   .strict();
 export const deliveryPreparationRefusalSchema = z.union([
@@ -168,7 +168,7 @@ export const intentRefusalSchema = z.union([
   targetInputRefusalSchema,
   verificationDeclarationRefusalSchema,
 ]);
-export type IntentRefusal = z.infer<typeof intentRefusalSchema>;
+type IntentRefusal = z.infer<typeof intentRefusalSchema>;
 
 export type IntentRetry = ProtocolTerminal;
 export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcome<Value, Refusal>;

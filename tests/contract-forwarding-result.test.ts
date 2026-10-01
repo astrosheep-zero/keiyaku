@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  outcomeSchema,
-  auditReportSchema,
-  reviewSchema,
-  KeiyakuError,
-  encodeFailureWire,
-  decodeFailureWire,
-  withOutcomeReceipt,
-} from "../src/library/outcome.js";
+import { changeId,contractHead,contractId,entryUlid,snapshotId } from "../src/core/facts/types.js";
 import { deliveryValueSchema } from "../src/library/delivery.js";
+import {
+KeiyakuError,
+decodeFailureWire,
+encodeFailureWire,
+outcomeSchema,
+reviewSchema,
+withOutcomeReceipt,
+} from "../src/library/outcome.js";
+import { keiyakuRetryReasonSchema,operationRetrySchemas,type OperationRetries } from "../src/library/refusal.js";
 import { materializedConflictSchema } from "../src/protocol/deliver.js";
+import { verificationRuntimeStopSchema } from "../src/protocol/intent.js";
+import { deliverConflictRefusalSchema } from "../src/protocol/operations.js";
+import { settlementLagSchema } from "../src/settlement/settle.js";
 const deliveryResultSchema = outcomeSchema(
   "deliver",
   deliveryValueSchema,
@@ -18,11 +22,6 @@ const deliveryResultSchema = outcomeSchema(
 );
 const reviewResultSchema = outcomeSchema("review", reviewSchema);
 const auditResultSchema = outcomeSchema("audit", auditReportSchema);
-import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
-import { deliverConflictRefusalSchema } from "../src/protocol/operations.js";
-import { verificationRuntimeStopSchema } from "../src/protocol/intent.js";
-import { settlementLagSchema } from "../src/settlement/settle.js";
-import { keiyakuRetryReasonSchema, operationRetrySchemas, type OperationRetries } from "../src/library/refusal.js";
 
 const contract = contractId("kei/forwarding-codec");
 const head = contractHead("head");
@@ -704,3 +703,5 @@ test("forwarding retry is canonical only for deliver, review and audit, with unc
     assert.equal(schema.safeParse({ ...retry, reason: { kind: "publication-failed", diagnostic: "" } }).success, true);
   }
 });
+
+import { auditReportSchema } from "../src/protocol/audit.js";

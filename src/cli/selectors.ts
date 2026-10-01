@@ -1,9 +1,10 @@
 import { resolve } from "node:path";
-import { identitySegments } from "../identity/coordinates.js";
-import { Keiyaku, type ContractBoard, type ContractId, type ContractRow, type Repo } from "../index.js";
-import { composeContractLibrary } from "../library/keiyaku.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import { identitySegments } from "../identity/coordinates.js";
+import type { ContractBoard, ContractId, ContractRow, Keiyaku, Repo } from "../index.js";
 import type { KanshiReport } from "../kanshi/index.js";
+import { composeContractLibrary } from "../library/contract-composition.js";
+import { createKeiyakuHandle } from "../library/keiyaku.js";
 import { CliUsageError } from "./parse.js";
 
 type SelectorCandidate = Readonly<{
@@ -23,7 +24,7 @@ function activeManagedCandidates(rows: readonly ContractRow[]): readonly Selecto
   });
 }
 
-export type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
+type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
 
 export function contractFromInput(
   repo: Repo,
@@ -32,7 +33,7 @@ export function contractFromInput(
 ): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: composeContractLibrary(execution).select({ repo, id }) };
+    return { id, contract: composeContractLibrary(execution, createKeiyakuHandle).select({ repo, id }) };
   } catch (error) {
     selectorError(error instanceof Error ? error.message : String(error));
   }
@@ -71,7 +72,7 @@ export function resolveContextualContract(
 /** Resolve one explicit, short, or worktree-contextual selector to its Contract id. */
 export async function resolveContractId(repo: Repo, selector: string | undefined, scope: string): Promise<ContractId> {
   if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector).id;
-  const { listKeiyaku } = await import("../library/keiyaku.js");
+  const { listKeiyaku } = await import("../library/contract-composition.js");
   return resolveContextualContract(await listKeiyaku({ repo }), selector, scope);
 }
 

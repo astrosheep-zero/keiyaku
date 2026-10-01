@@ -46,7 +46,7 @@ export type ContractTargetLag =
   | Readonly<{ kind: "unknown"; subject: Readonly<{ kind: "worktree"; path: string }> }>;
 export type { ContractWorkspaceObservation };
 
-export type AfterEndpointObservation =
+type AfterEndpointObservation =
   | Readonly<{ kind: "claimed" }>
   | Readonly<{ kind: "active"; phase: ContractPhase }>
   | Readonly<{ kind: "abandoned" }>

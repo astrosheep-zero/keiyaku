@@ -1,11 +1,19 @@
 /** @architectureCompositionRoot */
-import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { moveAlias, type AliasBinding } from "../alias/index.js";
-import { type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
-import { AkumaOwner, admitAkumaCall, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma.js";
-import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
+import { appendFile } from "node:fs/promises";
+import { admitAkumaCall, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
+import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
+import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
+import type { AkumaStatus } from "../akuma/akuma.js";
+import type { AllowedAction } from "../akuma/allowed.js";
+import type { TellResult } from "../akuma/body.js";
+import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { readSoul } from "../akuma/heart/index.js";
+import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
+import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import { schemaJsonText, type Schema } from "../akuma/schema.js";
+import type { AkumaAskResult } from "../akuma/selection-observation.js";
+import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
@@ -14,15 +22,8 @@ import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { emitCalledPluginSignal } from "../plugin/akuma-signals.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
-import type { AllowedAction } from "../akuma/allowed.js";
-import { schemaJsonText, type Schema } from "../akuma/schema.js";
-import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma.js";
-import type { AkumaAskResult } from "../akuma/selection-observation.js";
-import type { TellResult } from "../akuma/body.js";
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-import { canonicalBirthCwd } from "../akuma/call-input.js";
-import { requireInput } from "./input.js";
 import { addressAkuma } from "./address.js";
+import { requireInput } from "./input.js";
 import type { Keiyaku } from "./keiyaku.js";
 import { seatForKeiyaku } from "./keiyaku.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -56,7 +57,6 @@ export type CallWaitObserver = Readonly<{
 }>;
 
 export type CallInput = Readonly<{
-  path: WorldRoot;
   archetype: string;
   body?: string;
   cwd?: string;
@@ -100,7 +100,6 @@ export type CallResult = Readonly<{
 type CallExecution = CallResult["execution"];
 
 export type ForkInput = Readonly<{
-  path: WorldRoot;
   akuma: string;
   at: string;
   repo?: Repo;
@@ -350,7 +349,7 @@ type ParsedCallInput = Readonly<{
   observe?: CallWaitObserver;
 }>;
 
-async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
+async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
   const values = requireInput(input, "Akumas.call input");
   onlyKeys(values, CALL_INPUT_KEYS, "Akumas.call input");
   const path = await World.prove(nonblank(values.path, "path"));
@@ -520,7 +519,7 @@ function asError(failure: unknown): Error {
 }
 
 export async function callAkumas(
-  input: CallInput,
+  input: CallInput & Readonly<{ path: WorldRoot }>,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<CallResult> {
   const parsed = await parseCallInput(input);
@@ -588,7 +587,7 @@ export async function callAkumas(
       });
 }
 
-export async function forkAkumas(input: ForkInput): Promise<ForkResult> {
+export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }>): Promise<ForkResult> {
   const values = requireInput(input, "Akumas.fork input");
   onlyKeys(values, ["path", "akuma", "at", "repo"], "Akumas.fork input");
   const at = nonblank(values.at, "at");

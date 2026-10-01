@@ -24,7 +24,7 @@ export const checkoutNotFollowableRefusalSchema = z
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
   })
   .strict();
-export type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
+type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
 export type TargetPlacementRefusal = CheckoutNotFollowableRefusal;
 export const targetCheckoutEffectSchema = z
   .object({
@@ -34,7 +34,7 @@ export const targetCheckoutEffectSchema = z
     action: z.enum(["followed", "recovered"]),
   })
   .strict();
-export type TargetCheckoutEffect = z.infer<typeof targetCheckoutEffectSchema>;
+type TargetCheckoutEffect = z.infer<typeof targetCheckoutEffectSchema>;
 export const targetCheckoutLagSchema = z
   .object({
     kind: z.literal("target-checkout-retained"),
@@ -43,7 +43,7 @@ export const targetCheckoutLagSchema = z
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
   .strict();
-export type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
+type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
 export type TargetPlacementPhysicalResult = Readonly<{
   effects: readonly TargetCheckoutEffect[];
   lag: readonly TargetCheckoutLag[];
@@ -395,7 +395,7 @@ export const auditTargetAnswerSchema = z.union([
   z.object({ kind: z.literal("refused"), refusal: checkoutNotFollowableRefusalSchema }).strict(),
   z.object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
 ]);
-export type AuditTargetAnswer = z.infer<typeof auditTargetAnswerSchema>;
+type AuditTargetAnswer = z.infer<typeof auditTargetAnswerSchema>;
 /** Adjudicate the complete post-Verification audit target answer without placing. */
 export async function adjudicateAuditTarget(
   repository: GitRepository,

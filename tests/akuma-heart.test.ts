@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { killAkumaWithRecovery } from "../src/akuma/akuma.js";
-import { AkumaOwner } from "../src/akuma/akuma.js";
+import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
@@ -30,14 +30,20 @@ import {
   probeLeash,
   pauseRequested,
   readHeart,
-  readForkPoint, readLatestTurnForBody, readTell, readRequest, readTurnParticipants,
+  readForkPoint,
+  readLatestTurnForBody,
+  readTell,
+  readRequest,
+  readTurnParticipants,
   recordSession,
   recordTell as heartRecordTell,
   recordTellDeliveries,
   recordTellReceipt,
   readTurn,
   requestPause,
-  requestStop, stopRequested, type Soul
+  requestStop,
+  stopRequested,
+  type Soul,
 } from "../src/akuma/heart/index.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";

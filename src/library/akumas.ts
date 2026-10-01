@@ -1,78 +1,67 @@
 /** @architectureCompositionRoot */
-import { readAkumaRoster } from "../akuma/akuma.js";
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
-import { readAliases, type AliasBinding } from "../alias/index.js";
-import type { AkumaAlias } from "../identity/selector.js";
+import { readAkumaRoster } from "../akuma/akuma.js";
+import type { TellResult, TellWake } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-import type {
-  CallInput as LibraryCallInput,
-  CallResult,
-  CallWaitHead,
-  DispatchStage,
-  ForkInput as LibraryForkInput,
-  ForkResult,
-} from "./akuma-creation.js";
+import { readAliases, type AliasBinding } from "../alias/index.js";
+import type { DispatchAssociation } from "../dispatch/association.js";
+import type { AkumaAlias } from "../identity/selector.js";
+import type { CreatedTaskObservation } from "../task/created-observation.js";
+import { World, type WorldRoot } from "../world.js";
+import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
+import type { CallInput, CallResult, CallWaitHead, DispatchStage, ForkInput, ForkResult } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
+import { requireInput } from "./input.js";
 import {
+  askAkumaOn,
   historyAkuma,
   killAkumaOn,
   selectionSeam,
   statusAkuma,
   tellAkumaOn,
-  askAkumaOn,
   waitAkumaOn,
-  type SelectionSeam,
-  type AkumaHistoryInput as LibraryAkumaHistoryInput,
+  type AkumaAskInput,
+  type AkumaAskResult,
+  type AkumaHistoryInput,
   type AkumaHistoryResult,
-  type AkumaKillInput as LibraryAkumaKillInput,
+  type AkumaKillInput,
   type AkumaKillResult,
   type AkumaObservation,
   type AkumaObservationStage,
-  type AkumaTellInput as LibraryAkumaTellInput,
+  type AkumaTellInput,
   type AkumaTellResult,
-  type AkumaAskInput as LibraryAkumaAskInput,
-  type AkumaAskResult,
-  type AkumaWaitInput as LibraryAkumaWaitInput,
+  type AkumaWaitInput,
   type AkumaWaitResult,
+  type SelectionSeam,
 } from "./selection.js";
-import { requireInput } from "./input.js";
-import type { AkumaAddressInput as LibraryAkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
-export { AkumaWorldScopeError, AkumaAddressError } from "./address.js";
-import type { TellResult, TellWake } from "../akuma/akuma.js";
-import type { DispatchAssociation } from "../dispatch/association.js";
-import type { CreatedTaskObservation } from "../task/created-observation.js";
-import { World, type WorldRoot } from "../world.js";
 
-export type AkumaAddressInput = Omit<LibraryAkumaAddressInput, "path">;
-export type AkumaWaitInput = Omit<LibraryAkumaWaitInput, "path">;
-export type AkumaKillInput = Omit<LibraryAkumaKillInput, "path">;
-export type AkumaTellInput = Omit<LibraryAkumaTellInput, "path">;
-export type AkumaAskInput<T = string> = Omit<LibraryAkumaAskInput<T>, "path">;
-export type AkumaHistoryInput = Omit<LibraryAkumaHistoryInput, "path">;
-export type CallInput = Omit<LibraryCallInput, "path">;
-export type ForkInput = Omit<LibraryForkInput, "path">;
+export { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 
+export type { AkumaAddressInput } from "./address.js";
+export type { CallInput, ForkInput } from "./akuma-creation.js";
+export type { AkumaAskInput, AkumaHistoryInput, AkumaKillInput, AkumaTellInput, AkumaWaitInput } from "./selection.js";
 export type {
+  AkumaAskResult,
   AkumaHistoryResult,
   AkumaKillResult,
+  AkumaList,
+  AkumaListInput,
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
-  AkumaAskResult,
   AkumaWaitResult,
+  AkumaWorldScopeRefusal,
   CallResult,
   CallWaitHead,
   CreatedTaskObservation,
-  DispatchStage,
   DispatchAssociation,
+  DispatchStage,
   ForkResult,
   TellResult,
   TellWake,
 };
-export type { AkumaWorldScopeRefusal };
-export type { AkumaList, AkumaListInput };
 /** The existing native wait-observation seam, exposed type-only for CLI composition. */
-export type { WaitObserver, WaitObservedAkuma, WaitSelectedAkuma } from "../akuma/akuma.js";
+export type { WaitObservedAkuma, WaitObserver, WaitSelectedAkuma } from "../akuma/akuma-wait.js";
 
 export type Akumas = AkumasHandle;
 
@@ -97,42 +86,42 @@ class AkumasHandle {
   }
 
   call(input: CallInput): Promise<CallResult> {
-    return callAkumas(this.withWorld(input, "Akumas.call input") as LibraryCallInput, this.#execution);
+    return callAkumas(this.withWorld(input, "Akumas.call input"), this.#execution);
   }
 
   fork(input: ForkInput): Promise<ForkResult> {
-    return forkAkumas(this.withWorld(input, "Akumas.fork input") as LibraryForkInput);
+    return forkAkumas(this.withWorld(input, "Akumas.fork input"));
   }
 
   status(input: AkumaAddressInput): Promise<AkumaObservation> {
-    return statusAkuma(this.withWorld(input, "Akumas.status input") as LibraryAkumaAddressInput);
+    return statusAkuma(this.withWorld(input, "Akumas.status input"));
   }
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
-    return tellAkumaOn(this.#selection, this.withWorld(input, "Akumas.tell input") as LibraryAkumaTellInput);
+    return tellAkumaOn(this.#selection, this.withWorld(input, "Akumas.tell input"));
   }
 
   ask<T = string>(input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
-    return askAkumaOn(this.#selection, this.withWorld(input, "Akumas.ask input") as LibraryAkumaAskInput<T>);
+    return askAkumaOn(this.#selection, this.withWorld(input, "Akumas.ask input"));
   }
 
   wait(input: AkumaWaitInput): Promise<AkumaWaitResult> {
-    return waitAkumaOn(this.#selection, this.withWorld(input, "Akumas.wait input") as LibraryAkumaWaitInput);
+    return waitAkumaOn(this.#selection, this.withWorld(input, "Akumas.wait input"));
   }
 
   kill(input: AkumaKillInput): Promise<AkumaKillResult> {
-    return killAkumaOn(this.#selection, this.withWorld(input, "Akumas.kill input") as LibraryAkumaKillInput);
+    return killAkumaOn(this.#selection, this.withWorld(input, "Akumas.kill input"));
   }
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
-    return historyAkuma(this.withWorld(input, "Akumas.history input") as LibraryAkumaHistoryInput);
+    return historyAkuma(this.withWorld(input, "Akumas.history input"));
   }
 
-  private withWorld(input: unknown, label: string): Record<string, unknown> {
+  private withWorld<Input>(input: Input, label: string): Input & Readonly<{ path: WorldRoot }> {
     const values = requireInput(input, label);
     if (Object.hasOwn(values, "path"))
       throw new TypeError(`${label} does not accept path; select World with Akumas.of`);
-    return { ...values, path: this.#world };
+    return { ...values, path: this.#world } as Input & Readonly<{ path: WorldRoot }>;
   }
 }
 

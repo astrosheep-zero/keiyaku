@@ -1,4 +1,4 @@
-import type { ReconcileReport } from "../../library/contract-types.js";
+import type { ReconcileReport } from "../../library/reconcile.js";
 import { reconcileLagIsFailure, type RepoReconcileReport } from "../../library/reconcile.js";
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { receiptPayload, receiptRow } from "./receipt.js";

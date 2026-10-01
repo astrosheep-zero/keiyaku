@@ -1,5 +1,6 @@
-import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
-import type { CallResult } from "../../library/akuma-creation.js";
+import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
+import type { TellResult } from "../../akuma/body.js";
+import type { AkuId } from "../../akuma/identity.js";
 import type {
   AkumaAskResult,
   AkumaKillResult,
@@ -7,12 +8,14 @@ import type {
   AkumaTellResult,
   AkumaWaitResult,
 } from "../../akuma/selection-observation.js";
+import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
+import type { CallResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
   DEFAULT_CONTEXT,
   associatedIdentity,
-  inputWaitStream,
   historyText,
+  inputWaitStream,
   killResultText,
   snapshotHeading,
   snapshotText,
@@ -20,9 +23,6 @@ import {
   waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
-import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
-import type { TellResult } from "../../akuma/akuma.js";
-import type { AkuId } from "../../akuma/identity.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
 export type AskProgress = Readonly<{

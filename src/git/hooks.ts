@@ -39,7 +39,7 @@ export const worktreeHookLagSchema = z
   .strict();
 export type WorktreeHookLag = z.infer<typeof worktreeHookLagSchema>;
 export type HookPhase = "create" | "destroy";
-export type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
+type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

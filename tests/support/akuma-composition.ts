@@ -1,21 +1,18 @@
 import { join } from "node:path";
-import { AkumaOwner, listAkumaArchetypes, readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
-import type { AkumaCallInput } from "../../src/akuma/akuma.js";
+import { AkumaOwner } from "../../src/akuma/akuma-owner.js";
+import { listAkumaArchetypes, readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
+import type { AkumaCallInput } from "../../src/akuma/akuma-call.js";
 import { Akumas } from "../../src/index.js";
 import { akumasWithExecution } from "../../src/library/akumas.js";
-import type {
-  AkumaConfiguration,
-  AkumaCompleteList,
-  AkumaList,
-  AkumaListInput,
-} from "../../src/akuma/akuma.js";
+import type { AkumaConfiguration } from "../../src/akuma/akuma-call.js";
+import type { AkumaCompleteList, AkumaList, AkumaListInput } from "../../src/akuma/akuma.js";
 import { admitCallInitialTell } from "../../src/akuma/call-initial-tell.js";
 import { parseAkuId } from "../../src/akuma/identity.js";
 import { projectTell } from "../../src/akuma/heart/index.js";
 import { readAliases, type AliasBinding } from "../../src/alias/index.js";
 import type { AkumaAlias } from "../../src/identity/selector.js";
 import type { WorldRoot } from "../../src/world.js";
-import type { LastAnswer } from "../../src/akuma/akuma.js";
+import type { LastAnswer } from "../../src/akuma/akuma-owner.js";
 export function recordCallInitialTell(world: WorldRoot, now: () => string = () => new Date().toISOString()) {
   return async (input: Omit<Parameters<typeof admitCallInitialTell>[0], "world" | "now" | "wake">) =>
     await admitCallInitialTell({

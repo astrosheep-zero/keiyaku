@@ -1,8 +1,10 @@
-import { executeAskAkuma, executeKillAkuma, executeTellAkuma, executeWaitAkuma, type AkumaStatus } from "./akuma.js";
+import type { WorldRoot } from "../world.js";
 import { requireBornAkuma } from "./akuma-probe.js";
+import { executeAskAkuma, executeKillAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
+import { executeWaitAkuma } from "./akuma-wait.js";
+import type { AkumaStatus } from "./akuma.js";
 import { akumaObservationOf } from "./selection-observation.js";
 import type { SelectionRequestPort } from "./selection-request.js";
-import type { WorldRoot } from "../world.js";
 
 /**
  * The parent's Selection owner boundary: one forwarded request arrives as complete

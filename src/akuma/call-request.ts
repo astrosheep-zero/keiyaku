@@ -86,9 +86,9 @@ const liveResultSchema = z
   .strict();
 const referenceSchema = z.object({ kind: z.literal("reference"), id: akumaIdSchema }).strict();
 
-export type AkumaCallLive = z.infer<typeof liveResultSchema>;
-export type AkumaCallReference = z.infer<typeof referenceSchema>;
-export type AkumaCallOutput = AkumaCallLive | AkumaCallReference;
+type AkumaCallLive = z.infer<typeof liveResultSchema>;
+type AkumaCallReference = z.infer<typeof referenceSchema>;
+type AkumaCallOutput = AkumaCallLive | AkumaCallReference;
 
 export function decodeAkumaCallRequest(value: unknown): AkumaCallRequest | null {
   const parsed = akumaCallPayloadSchema.safeParse(value);

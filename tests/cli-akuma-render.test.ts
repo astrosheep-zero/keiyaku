@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  parseAkumaStatus,
-  type ActivityRow,
-  type AkumaStatus,
-  type IdleSnapshotRow,
-  type OpenSnapshotRow,
-} from "../src/akuma/akuma.js";
+import { parseAkumaStatus, type AkumaStatus } from "../src/akuma/akuma.js";
+import { type ActivityRow, type IdleSnapshotRow, type OpenSnapshotRow } from "../src/akuma/projection.js";
 import {
   activityStream,
   callObservationStream,

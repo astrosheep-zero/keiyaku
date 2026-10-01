@@ -1,6 +1,6 @@
 import { usageLine } from "../usage.js";
 
-export type ContractFlagKind = "boolean" | "value" | "raw-value" | "repeat-value";
+type ContractFlagKind = "boolean" | "value" | "raw-value" | "repeat-value";
 
 export type ContractCommandSpec = Readonly<{
   positional: "none" | "optional";
@@ -252,8 +252,4 @@ export function renderContractHelp(command: ContractCommand): string {
   }
   const help = `${spec.purpose}\n\n${usageLine(spec.usage)}`;
   return spec.details === undefined ? help : `${help}\n\n${spec.details}`;
-}
-
-export function renderContractUsage(command: ContractCommand): string {
-  return usageLine(CONTRACT_COMMAND_SPECS[command].usage);
 }

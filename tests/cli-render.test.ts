@@ -17,7 +17,7 @@ import {
 } from "../src/core/facts/types.js";
 import type { GateReport } from "../src/core/facts/gate.js";
 import type { CandidateCompletion } from "../src/protocol/completion.js";
-import type { ReconcileReport } from "../src/library/contract-types.js";
+import type { ReconcileReport } from "../src/library/reconcile.js";
 import {
   renderAkumaCatalogue,
   renderArchetypeCatalogue,
@@ -35,14 +35,8 @@ import {
   waitRawAnswer,
   waitText as nativeWaitText,
 } from "../src/cli/render/akuma-activity.js";
-import {
-  parseAkumaStatus,
-  type AkumaList,
-  type ActivityRow,
-  type AkumaStatus,
-  type CompletedToolRow,
-  type OutcomeRow,
-} from "../src/akuma/akuma.js";
+import { parseAkumaStatus, type AkumaList, type AkumaStatus } from "../src/akuma/akuma.js";
+import { type ActivityRow, type CompletedToolRow, type OutcomeRow } from "../src/akuma/projection.js";
 import type { WaitObservedAkuma } from "../src/library/akumas.js";
 import type {
   DispatchAssociation,

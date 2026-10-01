@@ -1,9 +1,10 @@
-import { akumaIdSchema, akumaStatusSchema, type AkumaStatus } from "./akuma.js";
-import { tellResultSchema } from "./call-initial-tell.js";
-import type { KillEvidence } from "./heart/index.js";
-import { NO_DISPATCH_ASSOCIATION, dispatchAssociationSchema } from "./dispatch-association.js";
-import { EMPTY_CREATED_TASK_OBSERVATION, createdTaskObservationSchema } from "../task/created-observation.js";
 import { z } from "zod";
+import { EMPTY_CREATED_TASK_OBSERVATION, createdTaskObservationSchema } from "../task/created-observation.js";
+import { akumaStatusSchema, type AkumaStatus } from "./akuma.js";
+import { tellResultSchema } from "./call-initial-tell.js";
+import { NO_DISPATCH_ASSOCIATION, dispatchAssociationSchema } from "./dispatch-association.js";
+import type { KillEvidence } from "./heart/index.js";
+import { akumaIdSchema } from "./identity.js";
 
 const killEvidenceSchema = z.enum([
   "killed",

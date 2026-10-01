@@ -1,10 +1,5 @@
-import { materializedConflictSchema } from "../protocol/deliver.js";
-import {
-  decodeExecutionObservation,
-  observeExecution,
-  type ExecutionObserver,
-} from "../protocol/execution-observation.js";
-import { contractIdSchema } from "../protocol/operations.js";
+import { isAbsolute, resolve } from "node:path";
+import { z } from "zod";
 import { AkumaBodyRequestError, requestBodyCommand } from "../akuma/request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -13,24 +8,22 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
-import {
-  auditReportSchema,
-  outcomeSchema,
-  reviewSchema,
-  decodeFailureWire,
-  encodeFailureWire,
-  KeiyakuError,
-  InvocationAccumulator,
-  project,
-} from "./outcome.js";
-import { deliveryValueSchema } from "./delivery.js";
 import type { ActorId } from "../core/facts/types.js";
-import { isAbsolute, resolve } from "node:path";
-import { z } from "zod";
+import { auditReportSchema } from "../protocol/audit.js";
+import { materializedConflictSchema } from "../protocol/deliver.js";
+import {
+  decodeExecutionObservation,
+  observeExecution,
+  type ExecutionObserver,
+} from "../protocol/execution-observation.js";
+import { contractIdSchema } from "../protocol/operations.js";
+import { deliveryValueSchema } from "./delivery.js";
+import { InvocationAccumulator } from "./invocation.js";
+import { decodeFailureWire, encodeFailureWire, KeiyakuError, outcomeSchema, project, reviewSchema } from "./outcome.js";
 
-type DeliveryResult = import("./keiyaku.js").DeliverOutcome;
-type ReviewResult = import("./keiyaku.js").ReviewOutcome;
-type AuditResult = import("./keiyaku.js").AuditOutcome;
+type DeliveryResult = import("./contract-outcomes.js").DeliverOutcome;
+type ReviewResult = import("./contract-outcomes.js").ReviewOutcome;
+type AuditResult = import("./contract-outcomes.js").AuditOutcome;
 type ContractResult = DeliveryResult | ReviewResult | AuditResult;
 type ContractRequester = ActorId;
 

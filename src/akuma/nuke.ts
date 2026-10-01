@@ -2,9 +2,9 @@ import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
-import { HeldAkumaLeash, classifyHeartSchema, readHeart } from "./heart/index.js";
+import { settleAkumaKill } from "./akuma-owner.js";
 import { acquireLeash } from "./control.js";
-import { settleAkumaKill } from "./akuma.js";
+import { classifyHeartSchema, readHeart, type HeldAkumaLeash } from "./heart/index.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
 
 export class AkumaResetStopError extends Error {

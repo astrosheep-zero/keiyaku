@@ -1,12 +1,13 @@
-import type { ContractBoard, ContractDisposition, ContractPhase } from "../protocol/read/status.js";
-import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
-import type { AkumaList, AkumaListRow, UnbornAkumaListRow, ActivitySnapshot } from "../akuma/akuma.js";
+import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/akuma.js";
+import type { ActivitySnapshot } from "../akuma/projection.js";
+import type { BoundedList } from "../bounded-list.js";
 import type { AkumaAlias } from "../identity/selector.js";
-import type { WorldRoot } from "../world.js";
 import type { ContractId } from "../index.js";
 import type { RegionOverlap } from "../library/region.js";
 import type { CurrentPhysicalIssue } from "../protocol/read/observation.js";
-import type { BoundedList } from "../bounded-list.js";
+import type { ContractBoard, ContractDisposition, ContractPhase } from "../protocol/read/status.js";
+import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
+import type { WorldRoot } from "../world.js";
 
 export type { RegionOverlap };
 

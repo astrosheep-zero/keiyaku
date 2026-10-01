@@ -22,9 +22,8 @@ function graph(owner: string, edges: readonly Edge[], prefix = ""): readonly Dia
   const files: Record<string, string> = {};
   const source = [prefix];
   for (const [index, [target, symbol, typeOnly]] of edges.entries()) {
-    files[target] = (files[target] ?? "") + (typeOnly
-      ? `export type ${symbol} = {};\n`
-      : `export function ${symbol}(): void {}\n`);
+    files[target] =
+      (files[target] ?? "") + (typeOnly ? `export type ${symbol} = {};\n` : `export function ${symbol}(): void {}\n`);
     let relative = path.posix.relative(path.posix.dirname(owner), target).replace(/\.ts$/u, ".js");
     if (!relative.startsWith(".")) relative = `./${relative}`;
     source.push(`import ${typeOnly ? "type " : ""}{ ${symbol} as edge${index} } from ${JSON.stringify(relative)};`);
@@ -56,6 +55,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract-operations.ts", ["protocol/attempt.ts", "admitDecidedOffer"], false],
   ["library/contract-operations.ts", ["protocol/placement.ts", "place"], false],
   ["library/contract-operations.ts", ["protocol/audit.ts", "decodeAuditReport"], false],
+  ["library/contract-operations.ts", ["protocol/audit.ts", "auditReportSchema"], true],
   ["library/contract/moved-owner.ts", ["library/akuma-creation.ts", "createAkuma"], false],
   ["library/contract/moved-owner.ts", ["library/bind.ts", "bind"], false],
   ["library/contract/moved-owner.ts", ["protocol/audit.ts", "auditOperation"], false],
@@ -71,6 +71,15 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["protocol/run.ts", ["git/target-placement.ts", "prepareTargetPlacement"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "contract"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "Contract", true], false],
+  ["library/keiyaku.ts", ["protocol/completion.ts", "completeCandidate"], false],
+  ["library/contract-execution.ts", ["protocol/completion.ts", "completeCandidate"], true],
+  ["library/contract-creation.ts", ["library/bind.ts", "prepareMarkdownBind"], true],
+  ["library/invocation.ts", ["protocol/completion.ts", "completeCandidate"], false],
+  ["library/invocation.ts", ["protocol/progress.ts", "ProtocolProgress", true], true],
+  ["akuma/akuma-owner.ts", ["dispatch/index.ts", "readDispatch"], false],
+  ["akuma/akuma-wait.ts", ["alias/index.ts", "readAliases"], false],
+  ["akuma/akuma-call.ts", ["library/akuma-creation.ts", "callAkumas"], false],
+  ["akuma/akuma-selection-execution.ts", ["task/index.ts", "Tasks"], false],
   ["protocol/intent.ts", ["core/facts/gate.ts", "latestCurrentAttestations"], true],
   ["protocol/intent.ts", ["verification/declaration.ts", "VERIFIED"], true],
   ["protocol/intent.ts", ["core/facts/gate.ts", "gateReports"], false],
@@ -85,15 +94,19 @@ for (const verb of ["review", "deliver"]) {
   test(`${verb} admits completion types, never completion effects`, () => {
     assert.deepEqual(graph(`protocol/${verb}.ts`, [["protocol/completion.ts", "CompletionEvidence", true]]), []);
     for (const node of ["completion", "placement", "reintegrate"]) {
-      assert.deepEqual(rules(graph(`protocol/${verb}.ts`, [[`protocol/${node}.ts`, "advance"]])), ["architecture/dependency-direction"]);
+      assert.deepEqual(rules(graph(`protocol/${verb}.ts`, [[`protocol/${node}.ts`, "advance"]])), [
+        "architecture/dependency-direction",
+      ]);
     }
   });
 }
-for (const owner of ["keiyaku", "continuation"]) {
+for (const owner of ["contract-execution", "continuation"]) {
   test(`${owner} calls completion, never raw admission`, () => {
     assert.deepEqual(graph(`library/${owner}.ts`, [["protocol/completion.ts", "completeCandidate"]]), []);
     for (const low of ["attempt", "placement", "run"]) {
-      assert.deepEqual(rules(graph(`library/${owner}.ts`, [[`protocol/${low}.ts`, "raw"]])), ["architecture/dependency-direction"]);
+      assert.deepEqual(rules(graph(`library/${owner}.ts`, [[`protocol/${low}.ts`, "raw"]])), [
+        "architecture/dependency-direction",
+      ]);
     }
   });
 }
@@ -103,16 +116,34 @@ const akuma: Edge = ["akuma/akuma.ts", "runtime"];
 const tasks: Edge = ["task/index.ts", "tasks"];
 const catalog: Edge = ["task/catalog.ts", "catalog"];
 const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
-  ["library/keiyaku.ts", [["akuma/requests.ts", "executionChannel"], ["library/contract.ts", "contract"]], marker, true],
+  [
+    "library/keiyaku.ts",
+    [
+      ["akuma/requests.ts", "executionChannel"],
+      ["library/contract.ts", "contract"],
+    ],
+    marker,
+    true,
+  ],
   ["library/akumas.ts", [akuma, tasks], marker, true],
   ["library/akumas/index.ts", [akuma, catalog], marker, true],
-  ["library/selection.js", [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]], marker, true],
+  [
+    "library/selection.js",
+    [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]],
+    marker,
+    true,
+  ],
   ["library/moved-root.ts", [akuma, tasks], marker, true],
   ["library/akumas.ts", [akuma, tasks], "", false],
   ["library/rogue-composition.ts", [akuma, tasks], "", false],
   ["library/rogue.ts", [akuma, tasks, ["workspace-place.ts", "appoint"]], "", false],
   ["library/selection-extra.ts", [akuma, tasks], "", false],
-  ["library/nested-marker.ts", [akuma, tasks], `export const architectureCompositionRoot = true;\n${marker}\nexport function nested(): void {}`, false],
+  [
+    "library/nested-marker.ts",
+    [akuma, tasks],
+    `export const architectureCompositionRoot = true;\n${marker}\nexport function nested(): void {}`,
+    false,
+  ],
 ];
 for (const [owner, edges, prefix, allowed] of compositionCases) {
   test(`composition boundary ${owner} (${allowed ? "marked" : "unmarked"})`, () => {
@@ -131,16 +162,24 @@ for (const [owner, module, symbol, rule] of [
   ["protocol/attempt.ts", "@opencode-ai/sdk", "client", "provider-sdk-boundary"],
 ]) {
   test(`capability ${owner} imports ${module}`, () => {
-    const found = check({ [owner!]: `import { ${symbol} } from ${JSON.stringify(module)}; ${owner === "core/verbs/bind.ts" ? `export function decideBind(): void { void ${symbol}; }` : `export const value = ${symbol};`}` });
+    const found = check({
+      [owner!]: `import { ${symbol} } from ${JSON.stringify(module)}; ${owner === "core/verbs/bind.ts" ? `export function decideBind(): void { void ${symbol}; }` : `export const value = ${symbol};`}`,
+    });
     assert.deepEqual(rules(found), rule ? [`architecture/${rule}`] : []);
   });
 }
-for (const [owner, allowed] of [["protocol/intent.ts", false], ["verification/execution.ts", true], ["core/facts/state.ts", false]] as const) {
+for (const [owner, allowed] of [
+  ["protocol/intent.ts", false],
+  ["verification/execution.ts", true],
+  ["core/facts/state.ts", false],
+] as const) {
   test(`ambient environment in ${owner}`, () => {
-    assert.deepEqual(rules(check({ [owner]: "export const environment = process.env;" })), allowed ? [] : ["architecture/capability-use"]);
+    assert.deepEqual(
+      rules(check({ [owner]: "export const environment = process.env;" })),
+      allowed ? [] : ["architecture/capability-use"],
+    );
   });
 }
-
 
 test("architecture policy keeps runtime cycles and undeclared source visible", () => {
   const diagnostics = check({

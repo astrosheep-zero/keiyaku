@@ -47,8 +47,8 @@ export class SettingsError extends Error {
 }
 
 export type Gate = string;
-export type GatesFromInput = Readonly<{ settings: Settings; names?: readonly string[] }>;
-export type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
+type GatesFromInput = Readonly<{ settings: Settings; names?: readonly string[] }>;
+type RequireBranchesToBeUpToDateFromInput = Readonly<{ settings: Settings }>;
 
 type LoadedScope = Readonly<{
   state: SettingsScopeState;

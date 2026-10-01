@@ -15,7 +15,7 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { akumaFailureProjection } from "../src/cli/runtime.js";
 import { reconcileHasFailure } from "../src/cli/render/reconcile.js";
-import type { ReconcileReport } from "../src/library/contract-types.js";
+import type { ReconcileReport } from "../src/library/reconcile.js";
 import { contractId } from "../src/core/facts/types.js";
 import type { WorldRoot } from "../src/world.js";
 

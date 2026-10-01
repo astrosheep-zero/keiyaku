@@ -154,7 +154,7 @@ export const verificationRuntimeStopSchema = z.union([
     })
     .strict(),
 ]);
-export type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
+type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
 export const verificationCleanupFailureSchema = z
   .object({
     phase: z.literal("destroy"),

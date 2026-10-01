@@ -34,7 +34,7 @@ export type ProtocolResult<Refusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | ProtocolTerminal;
 
-export type BoundedAttemptResult<Accepted extends Readonly<{ kind: "accepted" }>, Refusal> =
+type BoundedAttemptResult<Accepted extends Readonly<{ kind: "accepted" }>, Refusal> =
   | Accepted
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{ kind: "stale" }>

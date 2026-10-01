@@ -1,6 +1,7 @@
 import { taskIdSchema as taskMutationIdSchema, taskIdsSchema, taskNamespaceSchema, parseTaskId } from "./identity.js";
 import { taskNonblankTextSchema, taskStateSchema, taskPrioritySchema } from "./document.js";
 import { z } from "zod";
+
 export { taskIdSchema as taskMutationIdSchema } from "./identity.js";
 
 type WithoutUndefined<Value> = {
@@ -24,13 +25,13 @@ const timestampSchema = z.string().refine((value) => {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
 }, "expected canonical UTC timestamp");
-export const taskRetrySchema = z
+const taskRetrySchema = z
   .object({ kind: z.literal("retry"), reason: z.enum(["busy", "concurrent-modification"]) })
   .strict();
-export const taskCleanupFailureSchema = z
+const taskCleanupFailureSchema = z
   .object({ kind: z.literal("lock-release-failed"), diagnostics: z.array(z.string()).readonly() })
   .strict();
-export const taskViewSchema = z
+const taskViewSchema = z
   .object({
     id: taskMutationIdSchema,
     namespace: taskNamespaceSchema,
@@ -53,7 +54,7 @@ export const taskViewSchema = z
       context.addIssue({ code: "custom", path: ["namespace"], message: "namespace must agree with task ID" });
   })
   .transform(({ createdBy, ...task }) => withoutUndefined({ ...task, createdBy }, ["createdBy"]));
-export const compositionDiagnosticSchema = z
+const compositionDiagnosticSchema = z
   .object({ line: z.number().int().positive(), reason: z.string(), token: z.string() })
   .strict();
 const invalidCompositionRefusalSchema = z

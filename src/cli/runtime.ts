@@ -1,3 +1,11 @@
+import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
+import { AkumaArchetypeError } from "../akuma/archetype.js";
+import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
+import { bodyRequestExecution, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
+import type { ActorId } from "../index.js";
+import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
+import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
+import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
 import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
 import {
@@ -8,6 +16,7 @@ import {
 } from "./commands/install.js";
 import { runTaskCommand } from "./commands/task.js";
 import { resolveInvocationCoordinates } from "./coordinates.js";
+import { BindDraftError } from "./draft.js";
 import {
   assertExplicitRepoUse,
   CliUsageError,
@@ -15,24 +24,15 @@ import {
   type ParsedCommand,
   type ParsedInvocation,
 } from "./parse.js";
-import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
 import { executionFailureLines } from "./render/receipt.js";
+import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
 import { displayContext, writeJson, writeStderr, writeStdout } from "./streams.js";
-import { BindDraftError } from "./draft.js";
-import { AkumaArchetypeError } from "../akuma/archetype.js";
-import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
-import { KeiyakuError, encodeFailureWire } from "../library/outcome.js";
-import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
-import { bodyRequestExecution, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
-import type { ExecutionObserver } from "../library/keiyaku.js";
-import type { ActorId } from "../index.js";
 
 export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
 
-export type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>;
+type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: () => Promise<void> }>;
 
 /** Everything one invocation's leaves need at the process edge; Product JSON never sees this. */
 export type CliRuntime = Readonly<{
@@ -135,7 +135,7 @@ async function runInstall(
   return installExitCode(result);
 }
 
-export type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
+type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
 
 /** Projection of one native Akuma addressing/observation failure into its stated refusal body. */
 export async function akumaFailureProjection(

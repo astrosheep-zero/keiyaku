@@ -6,24 +6,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
-import {
-  Akuma,
-  AkumaProviderError,
-  Schema,
-  type AkumaIdleResult,
-} from "../src/akuma/index.js";
-import { AkumaOwner } from "../src/akuma/akuma.js";
+import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/akuma/index.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
-import {
-  readHeart,
-  readTell,
-  readTurn,
-  recordTell,
-  recordTellReceipt,
-} from "../src/akuma/heart/index.js";
+import { readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
-import { executeAskAkuma } from "../src/akuma/akuma.js";
-import { deferred, installAkumaBodyPidReceipt, settlementProbe, waitForCondition, waitForPidReceiptExit } from "./support/process.js";
+import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
+import {
+  deferred,
+  installAkumaBodyPidReceipt,
+  settlementProbe,
+  waitForCondition,
+  waitForPidReceiptExit,
+} from "./support/process.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";

@@ -20,7 +20,7 @@ import { contractIdSchema, placementStopSchema, verificationStopSchema } from ".
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
-export const continuationStopSchema = z.union([
+const continuationStopSchema = z.union([
   placementStopSchema,
   verificationStopSchema,
   executionStopSchema,
@@ -57,7 +57,7 @@ function reverseDependents(world: Awaited<ReturnType<typeof observeActiveContrac
  * The narrow Library-side sink a continuation offers. It reuses the accumulator's own progress
  * methods, so each attempt is retained before the next sibling is awaited.
  */
-export type ContinuationProgress = Readonly<{
+type ContinuationProgress = Readonly<{
   recordPhysical(contractId: ContractId, physical: ReconcileResult): void;
   recordStop(stop: ExecutionStop): void;
   recordContinuation(contractId: ContractId, report: ContinuationReport): void;

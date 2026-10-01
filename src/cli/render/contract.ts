@@ -53,7 +53,7 @@ export type ContractOutcome =
   | ArcOutcome
   | AbandonOutcome;
 export type AcceptedContractOutcome = Extract<ContractOutcome, { kind: "accepted" }>;
-export type RetryContractOutcome = Extract<ContractOutcome, { kind: "retry" }>;
+type RetryContractOutcome = Extract<ContractOutcome, { kind: "retry" }>;
 
 function attestationVerdict(facts: readonly Fact[]): "satisfied" | "unsatisfied" {
   const attestation = facts.findLast(

@@ -6,7 +6,7 @@ const modelText = z
 const effortText = z
   .string({ error: "provider option effort must be a nonblank string" })
   .refine((value) => value.trim() !== "", "provider option effort must be a nonblank string");
-export const systemPromptModeSchema = z.enum(["append", "replace"], {
+const systemPromptModeSchema = z.enum(["append", "replace"], {
   error: "provider option systemPromptMode must be append, replace",
 });
 export type SystemPromptMode = z.infer<typeof systemPromptModeSchema>;

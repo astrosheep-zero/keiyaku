@@ -1,17 +1,12 @@
 import type { AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
-import type { Settings } from "../settings.js";
-import type { ContractFileEffect, ContractFileLag } from "../contract-worktree.js";
-import type { ReconcileReport as ProtocolReconcileReport } from "../protocol/reconcile.js";
 import type { Dispatch } from "../dispatch/index.js";
-import type { Repo } from "./repo.js";
-import type { SettlementReport } from "../settlement/settle.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
+import type { Settings } from "../settings.js";
 import type { TaskId } from "../task/identity.js";
+import type { Repo } from "./repo.js";
 
-export type AttestationVerdict = AttestationData["verdict"];
-export type Fact = JournalEntry;
 export type ContractHistoryEvent =
-  | Readonly<{ source: "journal"; fact: Fact }>
+  | Readonly<{ source: "journal"; fact: JournalEntry }>
   | Readonly<{ source: "dispatch"; dispatch: Dispatch }>;
 export type ContractHistory = Readonly<{
   id: ContractId;
@@ -19,15 +14,8 @@ export type ContractHistory = Readonly<{
   workspace?: Readonly<{ kind: "worktree"; path: string }>;
   events: readonly ContractHistoryEvent[];
 }>;
-export type TopologyEffect = ProtocolReconcileReport["effects"][number] | ContractFileEffect;
-export type Lag = ProtocolReconcileReport["lag"][number] | ContractFileLag;
-export type ReconcileReport = Readonly<{
-  effects: readonly (ProtocolReconcileReport["effects"][number] | ContractFileEffect)[];
-  lag: readonly (ProtocolReconcileReport["lag"][number] | ContractFileLag)[];
-  settlement: SettlementReport;
-}>;
 
-export type MarkdownBindInput = Readonly<{
+type MarkdownBindInput = Readonly<{
   repo: Repo;
   markdown: string;
   task?: TaskId;
@@ -37,7 +25,7 @@ export type MarkdownBindInput = Readonly<{
   after?: readonly ContractId[];
   gates?: readonly string[];
 }>;
-export type ForkBindInput = Readonly<{
+type ForkBindInput = Readonly<{
   repo: Repo;
   forkOf: ContractId;
   target?: string;
@@ -63,7 +51,7 @@ export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;
 export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuSelectInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ReviewInput = Readonly<{ verdict: AttestationVerdict; summary?: string; signal?: AbortSignal }>;
+export type ReviewInput = Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = Readonly<{
   message?: string;

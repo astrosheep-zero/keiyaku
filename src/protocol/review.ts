@@ -33,16 +33,16 @@ type ReviewPreparationRefusal =
       contractId: import("../core/facts/types.js").ContractId;
     }>
   | import("../git/tender.js").DirtyWorkspaceRefusal;
-export type ReviewRefusal = ActiveContractRefusal | ReviewPreparationRefusal;
+type ReviewRefusal = ActiveContractRefusal | ReviewPreparationRefusal;
 type ReviewOperationInput = MutationOperationInput &
   Readonly<{
     verdict: AttestationData["verdict"];
     summary?: string;
   }>;
-export const reviewWorkspaceEvidenceSchema = workspaceDirtyDeltaSchema
+const reviewWorkspaceEvidenceSchema = workspaceDirtyDeltaSchema
   .extend({ unmergedPaths: z.array(z.string().refine((value) => value.trim() !== "")).readonly() })
   .strict();
-export type ReviewWorkspaceEvidence = z.infer<typeof reviewWorkspaceEvidenceSchema>;
+type ReviewWorkspaceEvidence = z.infer<typeof reviewWorkspaceEvidenceSchema>;
 export const reviewAdmissionValueSchema = z.object({ workspace: reviewWorkspaceEvidenceSchema.optional() }).strict();
 export type ReviewAdmissionValue = z.infer<typeof reviewAdmissionValueSchema>;
 

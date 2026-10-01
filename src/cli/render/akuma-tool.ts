@@ -1,7 +1,7 @@
-import type { ActivityRow, SnapshotRow } from "../../akuma/akuma.js";
+import type { ActivityRow, SnapshotRow } from "../../akuma/projection.js";
 import type { AkumaObservation } from "../../index.js";
-import { displayColumns, truncateDisplayText } from "./terminal.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
+import { displayColumns, truncateDisplayText } from "./terminal.js";
 
 type StatusTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
 type ToolRow = Extract<ActivityRow | SnapshotRow | StatusTimelineRow, { kind: "tool" }>;

@@ -21,7 +21,7 @@ import {
   snapshotId,
 } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
-import type { ContractHistory, Fact } from "../src/library/contract-types.js";
+import type { ContractHistory } from "../src/library/contract-types.js";
 import type { ContractKanshiRow } from "../src/kanshi/index.js";
 import type { Settings } from "../src/settings.js";
 import {
@@ -413,3 +413,5 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))
     assert.ok(displayColumns(line) <= 60, line);
 });
+
+import type { JournalEntry as Fact } from "../src/core/facts/types.js";

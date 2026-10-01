@@ -30,6 +30,49 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
   for (const example of examples) {
     copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
   }
+  const removedPublicTypes = [
+    "BindValue",
+    "AmendValue",
+    "AuditInput",
+    "AuditOptions",
+    "DeliveryObservation",
+    "MutationObservation",
+    "KeiyakuWithInput",
+  ];
+  writeFileSync(
+    join(directory, "removed-contract-types.ts"),
+    removedPublicTypes
+      .map(
+        (name) =>
+          `// @ts-expect-error internal operation declarations are not package API\ntype Removed${name} = import("@astrosheep/keiyaku").${name};`,
+      )
+      .join("\n"),
+  );
+  examples.push("removed-contract-types.ts");
+  writeFileSync(
+    join(directory, "native-owner-types.ts"),
+    `
+import type { Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
+  ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
+  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "@astrosheep/keiyaku";
+declare const fact: Fact;
+declare const error: KeiyakuError;
+declare const row: ContractRow;
+declare const repair: ReconcileCompletion;
+declare const reset: NukeResult;
+const kind: FactKind = fact.kind;
+const category: KeiyakuErrorCategory = error.category;
+const gates: readonly ContractGateCurrent[] = row.gates.reports.map(report => report.current);
+const dependents: readonly ContractDependent[] = row.dependents;
+const actions: readonly SettlementAction[] = repair.settlement.actions;
+if (reset.kind === "refused") {
+  const refused: NukeConfirmationRefusal | NukeConfirmationRequiredRefusal = reset.refusal;
+  void refused.world;
+}
+void [kind, category, gates, dependents, actions];
+`,
+  );
+  examples.push("native-owner-types.ts");
   const checked = spawnSync(
     process.execPath,
     [
@@ -61,11 +104,11 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
         'import * as root from "@astrosheep/keiyaku";',
         'import { Akuma, Akumas, Delivery, Keiyaku, Tasks, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
-        'assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);',
+        "assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);",
         'assert.equal(typeof Keiyaku.with, "function");',
         'assert.throws(() => Keiyaku.with({ execution: { channel: { kind: "body-request", directory: "/tmp/keiyaku-p6-carrier-witness" } } }), /unknown field: execution/u);',
-        'assert.equal(Keiyaku.call, Function.prototype.call);',
-        'assert.equal(Keiyaku.bind, Function.prototype.bind);',
+        "assert.equal(Keiyaku.call, Function.prototype.call);",
+        "assert.equal(Keiyaku.bind, Function.prototype.bind);",
         'assert.equal("fork" in Keiyaku, false);',
         'assert.equal("history" in Keiyaku, false);',
         'assert.equal("interrupt" in Keiyaku, false);',
@@ -78,7 +121,7 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
         'assert.equal("status" in Keiyaku, false);',
         'assert.equal("tell" in Keiyaku, false);',
         'assert.equal("wait" in Keiyaku, false);',
-        'assert.equal(Object.hasOwn(Keiyaku, Symbol.hasInstance), false);',
+        "assert.equal(Object.hasOwn(Keiyaku, Symbol.hasInstance), false);",
         'assert.equal(typeof Akuma.birth, "function");',
         'assert.equal(typeof Akuma.select, "function");',
         'assert.equal(typeof Akumas.of, "function");',
@@ -86,18 +129,18 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
         'assert.equal(typeof kanshi, "function");',
         'assert.equal(typeof settings, "function");',
         'assert.equal(typeof nuke, "function");',
-        'assert.throws(() => Reflect.construct(Delivery, []), TypeError);',
+        "assert.throws(() => Reflect.construct(Delivery, []), TypeError);",
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',
         // Only root and plugin are package entries; every retired subpath promise is gone.
-        'const require = createRequire(import.meta.url);',
+        "const require = createRequire(import.meta.url);",
         'for (const specifier of ["@astrosheep/keiyaku/task", "@astrosheep/keiyaku/kanshi", "@astrosheep/keiyaku/akuma", "@astrosheep/keiyaku/akumas"]) {',
-        '  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);',
-        '}',
+        "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
+        "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
         'for (const name of ["bodyRequestExecution", "gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle", "akumasWithExecution", "tasksWithExecution"]) {',
-        '  assert.equal(name in root, false, name);',
-        '}',
+        "  assert.equal(name in root, false, name);",
+        "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',
       ].join("\n"),
     ],

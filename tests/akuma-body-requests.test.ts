@@ -34,7 +34,7 @@ import {
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
-import { executeTellAkuma } from "../src/akuma/akuma.js";
+import { executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { AKUMA_REQUESTS_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 import { waitAkuma, tellAkuma } from "../src/library/selection.js";
@@ -68,7 +68,7 @@ import {
 import { World, type WorldRoot } from "../src/world.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { bodyRequestExecution } from "../src/akuma/requests.js";
-import { composeContractLibrary } from "../src/library/keiyaku.js";
+import { composeContractLibrary } from "../src/library/contract-composition.js";
 // File-scope: git fixture teardown binds to this file, and both repository tests share its template.
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
 import { Tasks } from "../src/task/index.js";
@@ -2200,7 +2200,7 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
   });
   try {
     const observations: string[] = [];
-    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory })).select({
+    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory }), createKeiyakuHandle).select({
       repo,
       id: bound.contract,
     });
@@ -2256,7 +2256,7 @@ test("forwarded native review preserves the owner outcome and stores the address
   });
   try {
     const observations: string[] = [];
-    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory })).select({
+    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory }), createKeiyakuHandle).select({
       repo,
       id: bound.contract,
     });
@@ -2291,3 +2291,5 @@ test("forwarded native review preserves the owner outcome and stores the address
     await pump.close();
   }
 });
+
+import { createKeiyakuHandle } from "../src/library/keiyaku.js";

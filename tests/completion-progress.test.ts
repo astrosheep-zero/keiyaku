@@ -9,13 +9,10 @@ import {
   type JournalEntry,
 } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
-import { InvocationAccumulator, physicalOf, project } from "../src/library/outcome.js";
+import { InvocationAccumulator, physicalOf } from "../src/library/invocation.js";
+import { project } from "../src/library/outcome.js";
 import type { AcceptedProtocolStep } from "../src/protocol/outcome.js";
-import {
-  contractCheckpoint,
-  executionStop,
-  type ContractCheckpoint,
-} from "../src/protocol/progress.js";
+import { contractCheckpoint, executionStop, type ContractCheckpoint } from "../src/protocol/progress.js";
 
 function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
   const state: ContractState = {

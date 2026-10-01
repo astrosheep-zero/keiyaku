@@ -1,19 +1,5 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import type { ContractId, ContractState } from "../core/facts/types.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
-import {
-  reconcileAllOperation,
-  reconcileOperation,
-  worldContractStates,
-  type ReconcileReport,
-} from "../protocol/reconcile.js";
-import { reconcileObservationFailure } from "../git/reconcile.js";
-import { worktreePath } from "../git/workspace.js";
-import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
-import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
-import type { WorktreeHooks } from "../git/hooks.js";
-import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
 import {
   contractFileLagSchema,
   projectContractWorktree,
@@ -21,7 +7,16 @@ import {
   type ContractFileLag,
   type ContractWorktreeResult,
 } from "../contract-worktree.js";
-import { gitReconcileLagSchema } from "../git/reconcile.js";
+import type { ContractId, ContractState } from "../core/facts/types.js";
+import type { WorktreeHooks } from "../git/hooks.js";
+import type { GitDecodeChannel } from "../git/read-observation.js";
+import type { ReconcileResult } from "../git/reconcile.js";
+import { gitReconcileLagSchema, reconcileObservationFailure } from "../git/reconcile.js";
+import { worktreePath } from "../git/workspace.js";
+import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
+import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
+import { reconcileAllOperation, reconcileOperation, worldContractStates } from "../protocol/reconcile.js";
+import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -29,16 +24,22 @@ import {
   type PlaceRegister,
 } from "../workspace-place.js";
 
-export type ReconcileCompletion = Readonly<{
-  effects: readonly (ReconcileReport["effects"][number] | ContractFileEffect)[];
-  lag: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
+export type ReconcileReport = Readonly<{
+  effects: readonly (ReconcileResult["effects"][number] | ContractFileEffect)[];
+  lag: readonly (ReconcileResult["lag"][number] | ContractFileLag)[];
   settlement: SettlementReport;
-  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
-  /** The appointed worktree's short name when this invocation physically removed it. */
-  retiredWorktree?: string;
-  /** The appointed worktree's path when this invocation's own removal of it was retained. */
-  retainedWorktree?: string;
 }>;
+
+export type TopologyEffect = ReconcileReport["effects"][number];
+
+export type ReconcileCompletion = ReconcileReport &
+  Readonly<{
+    hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
+    /** The appointed worktree's short name when this invocation physically removed it. */
+    retiredWorktree?: string;
+    /** The appointed worktree's path when this invocation's own removal of it was retained. */
+    retainedWorktree?: string;
+  }>;
 
 export type ReconcileLagScope = "none" | "reconciliation" | "placement" | "continuation";
 
@@ -100,8 +101,8 @@ type ReconcileProgress = ProtocolProgress &
     recordReconciliation(
       contractId: ContractId,
       report: Readonly<{
-        effects?: readonly (ReconcileReport["effects"][number] | ContractFileEffect)[];
-        lag?: readonly (ReconcileReport["lag"][number] | ContractFileLag)[];
+        effects?: readonly (ReconcileResult["effects"][number] | ContractFileEffect)[];
+        lag?: readonly (ReconcileResult["lag"][number] | ContractFileLag)[];
         retiredWorktree?: string;
         retainedWorktree?: string;
       }>,
@@ -144,7 +145,7 @@ function isManagedTerminal(state: ContractState | null): boolean {
  */
 function terminalWorktreeOutcome(
   scope: RepositoryScope,
-  cleanup: ReconcileReport | undefined,
+  cleanup: ReconcileResult | undefined,
   place: string | undefined,
 ): Readonly<{ kind: "retired"; place: string } | { kind: "retained"; path: string }> | undefined {
   if (cleanup === undefined || place === undefined) return undefined;
@@ -168,7 +169,7 @@ async function appointPlaces(scope: RepositoryScope, states: readonly ContractSt
 
 function realizedOrRetainedManagedWorktree(
   scope: RepositoryScope,
-  report: ReconcileReport,
+  report: ReconcileResult,
   place: string | undefined,
 ): boolean {
   if (place === undefined) return false;
@@ -183,7 +184,7 @@ function realizedOrRetainedManagedWorktree(
 
 function releaseEligible(
   state: ContractState | null,
-  cleanup: ReconcileReport | undefined,
+  cleanup: ReconcileResult | undefined,
   appointed: boolean,
 ): boolean {
   return cleanup !== undefined && cleanup.lag.length === 0 && isManagedTerminal(state) && appointed;
@@ -206,7 +207,7 @@ async function observeState(
   scope: RepositoryScope,
   channel: GitDecodeChannel,
   contractId: ContractId,
-): Promise<Readonly<{ state: ContractState | null } | { failed: ReconcileReport }>> {
+): Promise<Readonly<{ state: ContractState | null } | { failed: ReconcileResult }>> {
   try {
     return { state: await stateOperation({ scope, channel, contractId }) };
   } catch (error) {
@@ -235,14 +236,14 @@ async function appointForContract(
 }
 
 type TerminalReconcilePhase = Readonly<{
-  cleanup: ReconcileReport | null;
+  cleanup: ReconcileResult | null;
   worktree: ReturnType<typeof terminalWorktreeOutcome>;
   release: ContractFileLag | undefined;
 }>;
 
 function recordTerminalWorktree(
   input: ReconcileOptions & Readonly<{ contractId: ContractId }>,
-  cleanup: ReconcileReport | undefined,
+  cleanup: ReconcileResult | undefined,
   place: string | undefined,
 ): ReturnType<typeof terminalWorktreeOutcome> {
   const worktree = terminalWorktreeOutcome(input.scope, cleanup, place);
@@ -275,7 +276,7 @@ async function finishTerminalReconcile(
 }
 
 function assembleReconcile(
-  retained: ReconcileReport,
+  retained: ReconcileResult,
   projection: ContractWorktreeResult,
   settlement: SettlementReport,
   terminal: TerminalReconcilePhase,

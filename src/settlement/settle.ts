@@ -23,6 +23,7 @@ import {
 } from "./holder.js";
 import { acquireTaskSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
+
 export const settlementActionSchema = z
   .object({ kind: z.literal("task"), taskId: taskIdSchema, action: z.literal("done") })
   .strict();
@@ -47,7 +48,7 @@ export type SettlementReport = Readonly<{
   seatClose?: readonly PrivateStateSeatCloseLag[];
 }>;
 
-export type SettlementProgress = Readonly<{
+type SettlementProgress = Readonly<{
   recordSettlement(contractId: ContractId, report: SettlementReport): void;
 }>;
 

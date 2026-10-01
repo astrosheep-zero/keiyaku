@@ -247,7 +247,7 @@ async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Prom
   }
 }
 
-export async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
+async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
   input.signal?.throwIfAborted();
   const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
   try {
@@ -260,7 +260,7 @@ export async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
   }
 }
 
-export async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
+async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
   const { allocated } = input;
   let owned: OwnedProcess | void = undefined;
   try {
@@ -341,7 +341,7 @@ type PreparedCallPorts = Readonly<{
  * request identity, the reservation edge, and the parent scope its allowed
  * actions are clipped against. Both kinds carry the same raw recipe.
  */
-export type PreparedCallCustody =
+type PreparedCallCustody =
   | (PreparedCallPorts & Readonly<{ kind: "local"; world: WorldRoot; recipe: PreparedCallRecipe }>)
   | (PreparedCallPorts &
       Readonly<{
@@ -356,7 +356,7 @@ export type PreparedCallCustody =
         refuse(diagnostic: string): Promise<void>;
       }>);
 
-export type PreparedCallResult = Readonly<{
+type PreparedCallResult = Readonly<{
   child: AllocatedAkuma;
   /** The exact initial TellResult, present only when its admission completed. */
   tell?: TellResult;
@@ -364,7 +364,7 @@ export type PreparedCallResult = Readonly<{
   failure?: unknown;
 }>;
 
-export type PreparedCallInput = Readonly<{
+type PreparedCallInput = Readonly<{
   archetype: string;
   cwd: string;
   initialTell?: CallInitialTell;

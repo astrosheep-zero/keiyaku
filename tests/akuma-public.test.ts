@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
-import { AkumaNotBornError, killAkumaWithRecovery } from "../src/akuma/akuma.js";
+import { AkumaNotBornError } from "../src/akuma/akuma-errors.js";
+import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import {
   projectTurns,
@@ -49,7 +50,7 @@ import { settings } from "../src/settings.js";
 import { Akumas } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
-import type { AkumaOwner } from "../src/akuma/akuma.js";
+import type { AkumaOwner } from "../src/akuma/akuma-owner.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 

@@ -18,7 +18,7 @@ export type VerificationTerminalOutcome = Readonly<{
   summary?: string;
 }>;
 
-export type CapturedOutput = Readonly<{ stdout?: string; stderr?: string; truncated?: boolean }>;
+type CapturedOutput = Readonly<{ stdout?: string; stderr?: string; truncated?: boolean }>;
 export type VerificationNonterminalOutcome = CapturedOutput &
   (
     | Readonly<{ kind: "unknown-exit" }>

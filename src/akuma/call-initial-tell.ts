@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { tellRowSchema } from "./projection.js";
-const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
-import { defaultWaitComplete, bornStatus, readWaitComplete, waitForObservation } from "./akuma-observe.js";
+import type { WorldRoot } from "../world.js";
+import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkuId, type AkuId } from "./identity.js";
+import { tellRowSchema } from "./projection.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
-import type { WorldRoot } from "../world.js";
+
+const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 
 export type CallInitialTell = Readonly<{
   tellId: string;
@@ -28,7 +29,7 @@ const failedTellWakeSchema = z
   })
   .strict()
   .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
-export const tellWakeSchema = z.union([
+const tellWakeSchema = z.union([
   z.object({ kind: z.literal("told") }).strict(),
   z.object({ kind: z.literal("held") }).strict(),
   z.object({ kind: z.literal("pursuing"), bodySequence: z.number().int().nonnegative() }).strict(),

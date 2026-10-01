@@ -1,30 +1,38 @@
 /** @architectureCompositionRoot */
+import { withoutReportedChanges } from "../akuma/projection.js";
+import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
+import { AkumaOwner } from "../akuma/akuma-owner.js";
 import {
-  AkumaNotBornError,
-  AkumaOwner,
   decodeAskObservation,
   executeAskAkuma,
   executeKillAkuma,
   executeTellAkuma,
-  executeWaitAkuma,
-  withoutReportedChanges,
-  type ActivityHistory,
   type AskObserver,
+} from "../akuma/akuma-selection-execution.js";
+import {
+  executeWaitAkuma,
   type NativeWaitResult,
-  type OutcomeRow,
   type WaitIdentityFacts,
   type WaitObservedAkuma,
   type WaitObserver,
   type WaitSelectedAkuma,
-  type AkumaStatus,
-} from "../akuma/akuma.js";
-import { AkumaObservationError } from "../akuma/akuma-errors.js";
+} from "../akuma/akuma-wait.js";
+import { type AkumaStatus } from "../akuma/akuma.js";
+import { parsePublicHistoryId } from "../akuma/identity.js";
+import { type ActivityHistory, type OutcomeRow } from "../akuma/projection.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-
+import { schemaJsonText, type Schema } from "../akuma/schema.js";
+import type {
+  AkumaAskResult,
+  AkumaKillResult,
+  AkumaObservation,
+  AkumaTellResult,
+  AkumaWaitResult,
+} from "../akuma/selection-observation.js";
 import {
+  requestForwardedSelectionAsk,
   requestForwardedSelectionKill,
   requestForwardedSelectionTell,
-  requestForwardedSelectionAsk,
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
 import { readAliases } from "../alias/index.js";
@@ -33,7 +41,6 @@ import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
-import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { WorldRoot } from "../world.js";
 import {
   addressAkuma,
@@ -44,15 +51,7 @@ import {
   type AkumaSetAddressInput,
 } from "./address.js";
 import { requireInput } from "./input.js";
-import {
-  type AkumaKillResult,
-  type AkumaObservation,
-  type AkumaTellResult,
-  type AkumaAskResult,
-  type AkumaWaitResult,
-} from "../akuma/selection-observation.js";
 import { scopeForRepo, type Repo } from "./repo.js";
-import { parsePublicHistoryId } from "../akuma/identity.js";
 
 type AddressedAkuma = Awaited<ReturnType<typeof addressAkuma>>;
 type AddressedAkumaSet = Awaited<ReturnType<typeof addressAkumaSet>>;
@@ -189,18 +188,18 @@ export type AkumaAskInput<T = string> = AkumaAddressInput &
     signal?: AbortSignal;
     observe?: AskObserver;
   }>;
-export type { TellResult, TellWake } from "../akuma/akuma.js";
-export type { CreatedTaskObservation } from "../task/created-observation.js";
-export type { DispatchAssociation } from "../dispatch/association.js";
+export type { TellResult, TellWake } from "../akuma/body.js";
 export type {
+  AkumaAskResult,
   AkumaKillResult,
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
-  AkumaAskResult,
   AkumaUnobserved,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
+export type { DispatchAssociation } from "../dispatch/association.js";
+export type { CreatedTaskObservation } from "../task/created-observation.js";
 export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
@@ -400,7 +399,7 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
   };
 }
 
-export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObservation> {
+export async function statusAkuma(input: AkumaAddressInput & Readonly<{ path: WorldRoot }>): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
   try {
     return await observeAkuma(await new AkumaOwner(addressed.id, addressed.path).status(), addressed.path, input.repo);
@@ -472,7 +471,7 @@ async function localWait(
 }
 
 export async function waitAkuma(
-  input: AkumaWaitInput,
+  input: AkumaWaitInput & Readonly<{ path: WorldRoot }>,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaWaitResult> {
   return await waitAkumaOn(selectionSeam(execution), input);
@@ -498,7 +497,10 @@ function waitObserver(value: unknown): WaitObserver | undefined {
   };
 }
 
-export async function waitAkumaOn(seam: SelectionSeam, input: AkumaWaitInput): Promise<AkumaWaitResult> {
+export async function waitAkumaOn(
+  seam: SelectionSeam,
+  input: AkumaWaitInput & Readonly<{ path: WorldRoot }>,
+): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal", "observe"].includes(key)) {
@@ -523,7 +525,10 @@ export async function waitAkumaOn(seam: SelectionSeam, input: AkumaWaitInput): P
   );
 }
 
-export async function killAkumaOn(seam: SelectionSeam, input: AkumaKillInput): Promise<AkumaKillResult> {
+export async function killAkumaOn(
+  seam: SelectionSeam,
+  input: AkumaKillInput & Readonly<{ path: WorldRoot }>,
+): Promise<AkumaKillResult> {
   const values = requireInput(input, "Akumas.kill input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "signal"].includes(key)) {
@@ -534,13 +539,16 @@ export async function killAkumaOn(seam: SelectionSeam, input: AkumaKillInput): P
 }
 
 export async function tellAkuma(
-  input: AkumaTellInput,
+  input: AkumaTellInput & Readonly<{ path: WorldRoot }>,
   execution: ExecutionContext = localExecutionContext(),
 ): Promise<AkumaTellResult> {
   return await tellAkumaOn(selectionSeam(execution), input);
 }
 
-export async function tellAkumaOn(seam: SelectionSeam, input: AkumaTellInput): Promise<AkumaTellResult> {
+export async function tellAkumaOn(
+  seam: SelectionSeam,
+  input: AkumaTellInput & Readonly<{ path: WorldRoot }>,
+): Promise<AkumaTellResult> {
   const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
     if (key === "schema") throw new TypeError("Akumas.tell does not accept schema; use Akumas.ask");
@@ -580,7 +588,10 @@ function validateAskInput(
     throw new TypeError("interrupt must be a boolean");
 }
 
-export async function askAkumaOn<T = string>(seam: SelectionSeam, input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
+export async function askAkumaOn<T = string>(
+  seam: SelectionSeam,
+  input: AkumaAskInput<T> & Readonly<{ path: WorldRoot }>,
+): Promise<AkumaAskResult<T>> {
   const values = requireInput(input, "Akumas.ask input");
   validateAskInput(values);
   return await seam.ask(await seam.addressOne(directAddress(values)), input, signal(values.signal));
@@ -603,7 +614,9 @@ function validateHistoryInput(values: Record<string, unknown>): void {
     throw new TypeError("id cannot be combined with last, before, since, or limit");
 }
 
-export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
+export async function historyAkuma(
+  input: AkumaHistoryInput & Readonly<{ path: WorldRoot }>,
+): Promise<AkumaHistoryResult> {
   const values = requireInput(input, "Akumas.history input");
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));

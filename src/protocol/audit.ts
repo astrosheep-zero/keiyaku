@@ -27,6 +27,7 @@ import type {
   RepositoryScope,
 } from "./operations.js";
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
+
 export const auditReportSchema = z
   .object({
     candidate: z.union([
@@ -213,7 +214,7 @@ function completedAudit(
     : { ...admitted(verified.admission, value), ...obligations };
 }
 
-export type AuditRefusal =
+type AuditRefusal =
   | import("../core/verbs/deliver.js").DeliverRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal;
 

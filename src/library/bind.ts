@@ -78,7 +78,7 @@ export async function admitBindWithAppointment(input: BindAttemptInput) {
   return await attemptCandidates(input);
 }
 
-export type ForkBindAdmission = Readonly<{
+type ForkBindAdmission = Readonly<{
   kind: "document";
   document: ReturnType<typeof decodeContractDocument>;
   admission: IntentOutcome<Readonly<{ contractId: ContractId }>, OperationRefusals["bind"]>;

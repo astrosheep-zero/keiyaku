@@ -17,7 +17,7 @@ import { worktreeMissingRefusalSchema, dirtyWorkspaceRefusalSchema } from "../gi
 const forkSourceUnavailableSchema = z
   .object({ kind: z.enum(["fork-source-missing", "fork-source-unavailable"]), contractId: contractIdSchema })
   .strict();
-export const forkSourceRefusalSchema = z.union([forkSourceUnavailableSchema, forkSourceMovedRefusalSchema]);
+const forkSourceRefusalSchema = z.union([forkSourceUnavailableSchema, forkSourceMovedRefusalSchema]);
 export type ForkSourceRefusal = z.infer<typeof forkSourceRefusalSchema>;
 export const nukeConfirmationRefusalSchema = z
   .object({
@@ -38,7 +38,7 @@ export const keiyakuRefusalSchema = z.union([
   nukeConfirmationRequiredRefusalSchema,
 ]);
 export type KeiyakuRefusal = z.infer<typeof keiyakuRefusalSchema>;
-export const forwardingRetrySchema = z
+const forwardingRetrySchema = z
   .object({ kind: z.literal("owner-reason-unavailable"), diagnostic: z.string() })
   .strict();
 export const keiyakuRetryReasonSchema = z.union([protocolTerminalSchema, forwardingRetrySchema]);

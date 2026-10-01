@@ -16,7 +16,7 @@ type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
   option?: Readonly<{ flag: string; available: boolean }>;
 };
 /** Edge acquisition refusals the CLI owns; they never come from the SDK. */
-export type CliEdgeRefusal = Readonly<{ kind: "invalid-document"; diagnostic: string }>;
+type CliEdgeRefusal = Readonly<{ kind: "invalid-document"; diagnostic: string }>;
 export type RenderableRefusal = KeiyakuRefusal | DirtyWithOption | CliEdgeRefusal;
 
 function wrap(lines: string[], text: string, indent: string, columns: number): void {
@@ -170,7 +170,7 @@ export function renderStructuredRefusal(
 }
 
 /** One native refusal plus the CLI's own presentation identity; the draft belongs only to edge bind. */
-export type RefusedInvocation = Readonly<{
+type RefusedInvocation = Readonly<{
   operation: string;
   contract?: ContractId;
   refusal: RenderableRefusal;

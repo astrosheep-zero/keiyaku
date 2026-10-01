@@ -127,14 +127,14 @@ export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<
 }
 
 /** One explicit Git executable override from the process edge; a blank value is usage, not absence. */
-export function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
+function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
   const value = environment.KEIYAKU_GIT_PATH;
   if (value === undefined) return undefined;
   if (value.trim().length === 0) throw new CliUsageError("KEIYAKU_GIT_PATH requires a nonblank value");
   return value;
 }
 
-export type InvocationCoordinatesInput = Readonly<{
+type InvocationCoordinatesInput = Readonly<{
   processCwd?: string;
   cwd?: string;
   repo?: string;

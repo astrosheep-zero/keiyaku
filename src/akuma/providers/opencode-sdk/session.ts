@@ -23,7 +23,7 @@ export type OpencodeEventSubscriptionRequest = Readonly<{
   /** Resolves without rejecting when `signal` aborts, and always clears its timer. */
   sleep(milliseconds: number): Promise<void>;
 }>;
-export type OpencodeEventSubscription = Readonly<{ stream: AsyncIterable<unknown> }>;
+type OpencodeEventSubscription = Readonly<{ stream: AsyncIterable<unknown> }>;
 export type OpencodeSdkEvent = Readonly<{
   subscribe(request: OpencodeEventSubscriptionRequest): Promise<OpencodeEventSubscription>;
 }>;

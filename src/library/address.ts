@@ -18,13 +18,11 @@ import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type AkumaAddressInput = Readonly<{
-  path: WorldRoot;
   akuma: string;
   repo?: Repo;
 }>;
 
 export type AkumaSetAddressInput = Readonly<{
-  path: WorldRoot;
   akuma: readonly string[];
   repo?: Repo;
 }>;

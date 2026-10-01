@@ -1,5 +1,8 @@
-import { akumaIdSchema } from "./akuma.js";
+import { z } from "zod";
+import { AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
+import type { AkumaStatus } from "./akuma.js";
 import type { KillEvidence } from "./heart/index.js";
+import { akumaIdSchema } from "./identity.js";
 import { requestBodyCommand } from "./request-rendezvous.js";
 import {
   eraseRequestCommand,
@@ -7,18 +10,15 @@ import {
   type RequestProtocol,
   type ServiceRequestCommand,
 } from "./request-wire.js";
-import type { AkumaStatus } from "./akuma.js";
-import {
-  selectionResultSchemas,
-  type AkumaKillResult,
-  type AkumaTellResult,
-  type AkumaAskResult,
-  type AkumaWaitResult,
-} from "./selection-observation.js";
-import { z } from "zod";
 import type { Schema } from "./schema.js";
 import { schemaJsonText } from "./schema.js";
-import { AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
+import {
+  selectionResultSchemas,
+  type AkumaAskResult,
+  type AkumaKillResult,
+  type AkumaTellResult,
+  type AkumaWaitResult,
+} from "./selection-observation.js";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const selectionTargetsSchema = z
