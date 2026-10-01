@@ -39,10 +39,26 @@ Record every design decision the implementation must follow. Add other Design
 subsections when needed. Do not bind while the architecture, design, approach,
 or acceptance conditions are open.
 
-### Contract Shape
+### Contract Shape: Mandatory Acceptance Boundary Check
 
-- Bind separate `kei`s for outcomes that can be accepted independently.
-- Use an Arc for a chapter inside one `kei`; an Arc is not separately accepted.
+Before every bind, identify the independently acceptable outcomes. For each
+proposed part, ask whether it can be reviewed and accepted while another part
+remains unfinished. If it can, you MUST bind it as a separate `kei`. Do not bind
+an aggregate Contract containing independently acceptable outcomes.
+
+A shared request, audit, theme, product name, worker, verification command, or
+overlapping Region does NOT justify combining acceptance boundaries. Worker
+assignment and Contract boundaries are separate decisions: one worker may
+serve several Contracts, and several workers may contribute to one outcome.
+A request to "open a kei" does not by itself instruct you to combine outcomes.
+
+Keep parts together only when they jointly establish one outcome that cannot
+be meaningfully accepted in parts. State that inseparability in Context and
+make Criteria judge the same outcome. Do not manufacture inseparability by
+writing one broad Objective around unrelated fixes.
+
+- Use an Arc only for a chapter inside that one acceptance boundary; an Arc is
+  not separately accepted and MUST NOT substitute for an independent `kei`.
 - Use a Task for decomposition or dependency memory that must outlive the
   current conversation.
 
