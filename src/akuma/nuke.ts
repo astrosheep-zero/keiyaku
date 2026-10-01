@@ -4,7 +4,7 @@ import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
 import { HeldAkumaLeash, classifyHeartSchema, readHeart } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
-import { settleAkumaKill } from "./akuma-handle.js";
+import { settleAkumaKill } from "./akuma.js";
 import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
 
 export class AkumaResetStopError extends Error {

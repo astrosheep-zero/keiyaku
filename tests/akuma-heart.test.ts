@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma.js";
-import { AkumaHandle } from "../src/akuma/akuma-handle.js";
+import { AkumaOwner } from "../src/akuma/akuma.js";
 import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
@@ -53,10 +53,10 @@ async function tellFixture(
     body: string;
     tellId: string;
     recordedAt?: string;
-    runtime?: Parameters<AkumaHandle["tell"]>[3];
+    runtime?: Parameters<AkumaOwner["tell"]>[3];
   }>,
 ) {
-  return await new AkumaHandle(value.allocated.id, value.root).tell(
+  return await new AkumaOwner(value.allocated.id, value.root).tell(
     input.body,
     input.tellId,
     input.recordedAt,
@@ -136,7 +136,7 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
     blocker.exec("BEGIN IMMEDIATE");
     const controller = new AbortController();
     const reason = new Error("caller stopped waiting");
-    const handle = new AkumaHandle(value.allocated.id, value.root);
+    const handle = new AkumaOwner(value.allocated.id, value.root);
     const results = Promise.allSettled([
       handle.interrupt("not admitted", { signal: controller.signal }),
       handle.kill({ signal: controller.signal }),

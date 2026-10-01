@@ -1,13 +1,24 @@
 /** @architectureCompositionRoot */
 import {
   AkumaNotBornError,
-  type ActivityHistory,
-  type OutcomeRow,
-  type AkumaStatus,
+  AkumaOwner,
+  decodeAskObservation,
+  executeAskAkuma,
+  executeKillAkuma,
+  executeTellAkuma,
+  executeWaitAkuma,
   withoutReportedChanges,
+  type ActivityHistory,
+  type AskObserver,
+  type NativeWaitResult,
+  type OutcomeRow,
+  type WaitIdentityFacts,
+  type WaitObservedAkuma,
+  type WaitObserver,
+  type WaitSelectedAkuma,
+  type AkumaStatus,
 } from "../akuma/akuma.js";
 import { AkumaObservationError } from "../akuma/akuma-errors.js";
-import { createAkumaProduct } from "../akuma/akuma-product.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 
 import {
@@ -16,20 +27,6 @@ import {
   requestForwardedSelectionAsk,
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
-import {
-  executeKillAkuma,
-  executeTellAkuma,
-  executeAskAkuma,
-  decodeAskObservation,
-  executeWaitAkuma,
-} from "../akuma/selection-execution.js";
-import type {
-  AskObserver,
-  WaitIdentityFacts,
-  WaitObservedAkuma,
-  WaitObserver,
-  WaitSelectedAkuma,
-} from "../akuma/selection-execution.js";
 import { readAliases } from "../alias/index.js";
 import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -225,10 +222,6 @@ export type AkumaHistoryResult =
   | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
   | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contract: DispatchAssociation }>;
 
-function source(path: WorldRoot): ReturnType<typeof createAkumaProduct> {
-  return createAkumaProduct(path);
-}
-
 function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -351,29 +344,46 @@ function signal(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-async function attachWaitAssociations(
+/**
+ * The one upper composition of a wait's association-free native evidence into
+ * its public observation shape. It reads Alias-independent Dispatch and Task
+ * associations after the lower values, never before or inside them.
+ */
+async function composeWaitResult(
   path: WorldRoot,
   repo: Repo | undefined,
-  result: AkumaWaitResult,
+  result: NativeWaitResult,
 ): Promise<AkumaWaitResult> {
-  const created = await createdTasksFor(
-    path,
-    result.observations.map((observation) => observation.status),
-  );
+  const created = await createdTasksFor(path, result.observations);
   const discharged = placementDischarged(repo);
   return {
-    ...result,
+    mode: result.mode,
+    reason: result.reason,
     observations: await Promise.all(
-      result.observations.map(async (observation, index) => {
-        const contract = await dispatchAssociation(repo, observation.status.id);
+      result.observations.map(async (status, index) => {
+        const contract = await dispatchAssociation(repo, status.id);
         return {
-          status: await composeObservation(observation.status, contract, discharged),
+          status: await composeObservation(status, contract, discharged),
           contract,
           createdTasks: created[index]!,
         };
       }),
     ),
+    unobserved: result.unobserved,
   };
+}
+
+async function attachWaitAssociations(
+  path: WorldRoot,
+  repo: Repo | undefined,
+  result: AkumaWaitResult,
+): Promise<AkumaWaitResult> {
+  return await composeWaitResult(path, repo, {
+    mode: result.mode,
+    reason: result.reason,
+    observations: result.observations.map((observation) => observation.status),
+    unobserved: result.unobserved,
+  });
 }
 
 function directAddress(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {
@@ -395,11 +405,7 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
 export async function statusAkuma(input: AkumaAddressInput): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
   try {
-    return await observeAkuma(
-      await source(addressed.path).selectHandle({ id: addressed.id }).status(),
-      addressed.path,
-      input.repo,
-    );
+    return await observeAkuma(await new AkumaOwner(addressed.id, addressed.path).status(), addressed.path, input.repo);
   } catch (error) {
     throw observationError(addressed.id, error);
   }
@@ -446,7 +452,7 @@ async function localWait(
   }>,
 ): Promise<AkumaWaitResult> {
   try {
-    return await attachWaitAssociations(
+    return await composeWaitResult(
       addressed.path,
       input.repo,
       await executeWaitAkuma({
@@ -618,7 +624,7 @@ export async function historyAkuma(input: AkumaHistoryInput): Promise<AkumaHisto
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
   try {
-    const handle = source(addressed.path).selectHandle({ id: addressed.id });
+    const handle = new AkumaOwner(addressed.id, addressed.path);
     const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
     if (values.last === true) {
       const answer = await handle.lastAnswer();

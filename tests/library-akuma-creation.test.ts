@@ -55,7 +55,7 @@ import {
 } from "./support/process.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
-import { AkumaComposition as Akuma, AkumaHandle, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { AkumaComposition as Akuma, AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -333,11 +333,11 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let wake: Promise<unknown> | undefined;
-  const admitInitialTell = AkumaHandle.prototype.admitInitialTell;
+  const admitInitialTell = AkumaOwner.prototype.admitInitialTell;
   t.mock.method(
-    AkumaHandle.prototype,
+    AkumaOwner.prototype,
     "admitInitialTell",
-    async function (this: AkumaHandle, ...args: Parameters<typeof admitInitialTell>) {
+    async function (this: AkumaOwner, ...args: Parameters<typeof admitInitialTell>) {
       const admitted = await admitInitialTell.apply(this, args);
       if (admitted.kind === "admitted") wake = admitted.wake;
       return admitted;
@@ -400,7 +400,7 @@ test("schema Akumas.call preserves its child when initial Tell admission fails",
   let akumaId: string | undefined;
   let admissionCalls = 0;
   let operationFailed = true;
-  t.mock.method(AkumaHandle.prototype, "admitInitialTell", async function (this: AkumaHandle) {
+  t.mock.method(AkumaOwner.prototype, "admitInitialTell", async function (this: AkumaOwner) {
     admissionCalls += 1;
     return {
       kind: "birth-failed" as const,
@@ -504,7 +504,7 @@ test("forwarded schema Akumas.call admits its initial Tell after held birth befo
   const slow = slowEmptyPublicationBody();
   const wake = trackedWakeLaunches();
   const { pump, leash } = await requestPump(world, slow.spawn, async ({ id, initialTell, signal }) =>
-    await new AkumaHandle(id, world).admitInitialTell(initialTell, { signal, runtime: wake.runtime }),
+    await new AkumaOwner(id, world).admitInitialTell(initialTell, { signal, runtime: wake.runtime }),
   );
   const routedAkumas = Akumas.of(world, { execution: bodyRequestExecution({ directory: pump.directory }) });
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -575,11 +575,11 @@ test("forwarded Akumas.call spends its wait budget from the child's Tell admissi
   const slow = slowEmptyPublicationBody();
   let admittedAtPerf = Number.NaN;
   let remainingBudget: number | undefined;
-  const tellOutcome = AkumaHandle.prototype.tellOutcome;
+  const tellOutcome = AkumaOwner.prototype.tellOutcome;
   t.mock.method(
-    AkumaHandle.prototype,
+    AkumaOwner.prototype,
     "tellOutcome",
-    async function (this: AkumaHandle, tellId: string, options?: Parameters<AkumaHandle["tellOutcome"]>[1]) {
+    async function (this: AkumaOwner, tellId: string, options?: Parameters<AkumaOwner["tellOutcome"]>[1]) {
       remainingBudget = options?.timeoutMs;
       return await tellOutcome.call(this, tellId, options);
     },
@@ -753,7 +753,7 @@ async function requestPump(
         admitInitialTell:
           admitInitialTell ??
           (async ({ id, initialTell, signal }) =>
-            await new AkumaHandle(id, root).admitInitialTell(initialTell, { signal })),
+            await new AkumaOwner(id, root).admitInitialTell(initialTell, { signal })),
       }),
       selectionRequestCommands({
         wait: async () => {

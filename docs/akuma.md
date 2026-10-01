@@ -97,6 +97,17 @@ complete deletion retains custody for retry.
 
 ## Dependency Direction
 
+One lower Akuma owner implements creation, admission, observation, and
+lifecycle. The standalone identity handle, plural selection, and the Body
+Request service are thin faces over those same algorithms rather than parallel
+orchestrators. That owner reads only Heart, leash, provider, Archetype,
+Settings, and filesystem state; optional Alias, Dispatch, Task, and Contract
+associations are composed after its values by the World composition that owns
+them, so a standalone operation still works when those optional authorities are
+corrupt or unavailable. Its roster supplies native membership, semantic
+activity order, and observed extent, and the upper composition attaches Alias
+context without counting or reopening the board.
+
 The public surface composes identity, Archetype, Heart, Body, provider,
 Requests, publication, and Settings. Body drives providers and writes typed
 Heart facts. Request service composes Heart, identity, provider recipe, and

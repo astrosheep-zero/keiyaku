@@ -17,7 +17,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
-import { executeWaitAkuma } from "../src/akuma/selection-execution.js";
+import { executeWaitAkuma } from "../src/akuma/akuma.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 
@@ -151,9 +151,9 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
     });
     const result = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs: 250 });
     assert.ok(probes > 4, "returned without another probe after the final status invalidated completion");
-    assert.equal(defaultWaitComplete(result.observations[0]!.status), false);
+    assert.equal(defaultWaitComplete(result.observations[0]!), false);
     assert.ok(
-      result.observations[0]!.status.timeline.entries.some(
+      result.observations[0]!.timeline.entries.some(
         (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
       ),
     );

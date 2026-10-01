@@ -1,6 +1,8 @@
 /** @architectureCompositionRoot */
-import { readAkumaCatalog } from "../akuma/akuma.js";
+import { readAkumaRoster } from "../akuma/akuma.js";
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
+import { readAliases, type AliasBinding } from "../alias/index.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import {
   libraryExecution,
   localExecutionContext,
@@ -75,9 +77,8 @@ export type {
 };
 export type { AkumaWorldScopeRefusal };
 export type { AkumaList, AkumaListInput };
-
 /** The existing native wait-observation seam, exposed type-only for CLI composition. */
-export type { WaitObserver, WaitObservedAkuma, WaitSelectedAkuma } from "../akuma/selection-execution.js";
+export type { WaitObserver, WaitObservedAkuma, WaitSelectedAkuma } from "../akuma/akuma.js";
 
 export type Akumas = AkumasHandle;
 
@@ -95,7 +96,10 @@ class AkumasHandle {
   }
 
   async list(input?: AkumaListInput): Promise<AkumaList> {
-    return readAkumaCatalog(await World.prove(this.#world), input);
+    const path = await World.prove(this.#world);
+    const roster = await readAkumaRoster(path, input);
+    if (roster.rows.length === 0) return roster;
+    return withRosterAliases(roster, await readAliases(path));
   }
 
   call(input: CallInput): Promise<CallResult> {
@@ -141,6 +145,20 @@ class AkumasHandle {
 function executionFor(input?: AkumasOfInput): ExecutionContext {
   const values = requireInput(input === undefined ? {} : input, "Akumas.of input", ["execution"]);
   return values.execution === undefined ? localExecutionContext() : libraryExecution(values.execution);
+}
+
+/**
+ * Upper World composition attaches the frozen Alias context to the lower
+ * roster's native membership and semantic order without reopening its extent.
+ */
+function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[]): AkumaList {
+  const byId = new Map<string, AkumaAlias[]>();
+  for (const binding of bindings) {
+    const aliases = byId.get(binding.akuId) ?? [];
+    aliases.push(binding.alias);
+    byId.set(binding.akuId, aliases);
+  }
+  return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
 }
 
 export const Akumas = Object.freeze({

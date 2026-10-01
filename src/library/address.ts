@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import { readAliases, type AliasBinding } from "../alias/index.js";
-import { createAkumaProduct } from "../akuma/akuma-product.js";
+import { readAkumaCompleteRoster } from "../akuma/akuma.js";
 import { akumaAddressability, requireBornAkuma } from "../akuma/akuma-probe.js";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
@@ -279,7 +279,7 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
     throw new TypeError("Contract Akuma selector requires repo");
   }
   const rosterIds = hasSelectorKind(selectors, "glob")
-    ? (await createAkumaProduct(path).listComplete()).rows.map((row) => row.id)
+    ? (await readAkumaCompleteRoster(path)).rows.map((row) => row.id)
     : [];
   const aliases = hasSelectorKind(selectors, "alias")
     ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))

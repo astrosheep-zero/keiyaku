@@ -1,28 +1,26 @@
-import { canonicalBirthCwd } from "./call-input.js";
-import { spawnAkumaBody } from "./body.js";
-import { decodeAllowedActions, unionAllowedActions } from "./allowed.js";
-import type { AllowedAction } from "./allowed.js";
-import { AkumaHandle } from "./akuma-handle.js";
-import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./selection-execution.js";
-import type { AkumaAskResult, AkumaTellResult } from "./selection-observation.js";
-import type { AkumaStatus } from "./akuma.js";
-import type { KillEvidence } from "./akuma.js";
-import { bornStatus, defaultWaitComplete, waitForObservation, type WaitReason } from "./akuma-observe.js";
-import { loadArchetype } from "./archetype.js";
-import { activitySlice } from "./heart/index.js";
-import { parseAkuId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
-import { birthAkuma, launchAkuma } from "./publication.js";
-import { projectTurns, selectHistory, type ActivityHistory } from "./projection.js";
-import { settings as readSettings } from "../settings.js";
-import type { Settings } from "../settings.js";
-import type { WorldRoot } from "../world.js";
+import {
+  AkumaOwner,
+  admitAkumaCall,
+  decodeAskObservation,
+  executeAskAkuma,
+  executeTellAkuma,
+  defaultWaitComplete,
+  type InterruptReceipt,
+  type KillEvidence,
+  type AkumaStatus,
+  type AkumaTellResult,
+  type AkumaAskResult,
+} from "./akuma.js";
 import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
 import { abortable } from "./abort.js";
-
-const HISTORY_LIMIT = 12;
+import { parseAkuId, type AkuId } from "./identity.js";
+import type { AllowedAction } from "./allowed.js";
+import type { ActivityHistory } from "./projection.js";
+import type { Settings } from "../settings.js";
+import type { WorldRoot } from "../world.js";
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
-export type AkumaIdleResult = Readonly<{ reason: WaitReason; status: AkumaStatus }>;
+export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; status: AkumaStatus }>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
@@ -38,6 +36,9 @@ export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boole
 export type AkumaAskOptions<T> = AkumaTellOptions &
   Readonly<{ timeoutMs?: number; schema?: Schema<T> | StandardSchemaV1<T> }>;
 
+export type { InterruptReceipt, KillEvidence };
+export type { AkumaTellResult, AkumaAskResult };
+
 function signalOption(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
   if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
@@ -52,8 +53,8 @@ export class Akuma {
     Object.freeze(this);
   }
 
-  private get paths(): AkumaPaths {
-    return pathsForAkuId(this.root, this.id);
+  private owner(): AkumaOwner {
+    return new AkumaOwner(this.id, this.root);
   }
 
   static async birth(archetype: string, input: AkumaBirthInput): Promise<Akuma> {
@@ -61,34 +62,21 @@ export class Akuma {
       throw new TypeError("Akuma birth input must be an object");
     }
     if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
-    const name = archetype;
-    const home = input.home === undefined ? {} : { home: input.home };
-    const settings = input.settings ?? (await readSettings({ root: input.root, ...home }));
-    const loaded = await loadArchetype({ name, project: input.root, ...home, settings });
-    const allowed =
-      input.allowed === undefined
-        ? loaded.allowed
-        : unionAllowedActions(loaded.allowed, decodeAllowedActions(input.allowed, "Akuma birth allowed"));
-    const cwd = input.cwd === undefined ? input.root : await canonicalBirthCwd(input.cwd);
-    const allocated = await birthAkuma({ worldPath: input.root, archetype: loaded.name });
-    await launchAkuma({
-      allocated,
-      launch: async (born) =>
-        await spawnAkumaBody({
-          paths: born.paths,
-          seed: {
-            id: born.id,
-            archetype: born.archetype,
-            ...(loaded.description === undefined ? {} : { description: loaded.description }),
-            provider: loaded.provider,
-            options: loaded.options,
-            allowed,
-            cwd,
-            origin: { kind: "direct" },
-          },
-        }),
-    });
-    return new Akuma(allocated.id, input.root);
+    const admitted = await admitAkumaCall(
+      input.root,
+      {
+        ...(input.home === undefined ? {} : { home: input.home }),
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
+      },
+      {
+        archetype,
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+      },
+      {},
+    );
+    if (admitted.failure !== undefined) throw admitted.failure;
+    return new Akuma(admitted.id, input.root);
   }
 
   static select(root: WorldRoot, selector: string): Akuma {
@@ -105,7 +93,7 @@ export class Akuma {
     if (unknown !== undefined) throw new TypeError(`Akuma tell options has unknown field: ${unknown}`);
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
-    return executeTellAkuma({
+    return await executeTellAkuma({
       path: this.root,
       id: this.id,
       body: text,
@@ -152,7 +140,7 @@ export class Akuma {
   }
 
   async status(): Promise<AkumaStatus> {
-    return (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status;
+    return await this.owner().status();
   }
 
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
@@ -165,13 +153,11 @@ export class Akuma {
       throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
     }
     const signal = signalOption(options.signal);
-    const waited = await waitForObservation({
+    const waited = await this.owner().waitReceipt(defaultWaitComplete, {
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(signal === undefined ? {} : { signal }),
-      observe: async () => (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status,
-      complete: defaultWaitComplete,
     });
-    return { reason: waited.reason, status: waited.value };
+    return { reason: waited.reason, status: waited.status };
   }
 
   async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {
@@ -183,24 +169,11 @@ export class Akuma {
     if (options.before !== undefined && options.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }
-    for (const [name, value] of [
-      ["before", options.before],
-      ["since", options.since],
-    ] as const) {
-      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
-        throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
-      }
-    }
-    const limit = options.limit ?? HISTORY_LIMIT;
-    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
-      throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
-    }
-    const slice = await activitySlice(this.paths);
-    return selectHistory(projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest }), {
+    return (await this.owner().history({
       ...(options.before === undefined ? {} : { before: options.before }),
       ...(options.since === undefined ? {} : { since: options.since }),
-      limit,
-    });
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+    })) as ActivityHistory;
   }
 
   async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
@@ -210,7 +183,7 @@ export class Akuma {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     return await abortable(
-      new AkumaHandle(this.id, this.root).kill(signal === undefined ? {} : { signal }),
+      this.owner().kill(signal === undefined ? {} : { signal }),
       signal ?? new AbortController().signal,
     );
   }

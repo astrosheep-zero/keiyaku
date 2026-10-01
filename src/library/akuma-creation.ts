@@ -3,7 +3,7 @@ import { appendFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { type AkumaStatus, type ForkReceipt } from "../akuma/akuma.js";
-import { createAkumaProduct, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma-product.js";
+import { AkumaOwner, admitAkumaCall, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma.js";
 import { pathsForAkuId, type AkumaPaths, type AkuId } from "../akuma/identity.js";
 import { readSoul } from "../akuma/heart/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -16,7 +16,7 @@ import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
-import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/selection-execution.js";
+import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import type { TellResult } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
@@ -137,14 +137,6 @@ function settingsOption(value: unknown): Settings | undefined {
 function homeOption(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   return nonblank(value, "home");
-}
-
-function akumaWorld(path: WorldRoot, home?: string, settings?: Settings, execution?: ExecutionContext) {
-  return createAkumaProduct(path, {
-    ...(home === undefined ? {} : { home }),
-    ...(settings === undefined ? {} : { settings }),
-    ...(execution === undefined ? {} : { execution }),
-  });
 }
 
 function onlyKeys(values: Record<string, unknown>, allowed: readonly string[], label: string): void {
@@ -405,6 +397,14 @@ async function parseCallInput(input: CallInput): Promise<ParsedCallInput> {
   };
 }
 
+function callConfiguration(input: ParsedCallInput, execution: ExecutionContext) {
+  return {
+    ...(input.home === undefined ? {} : { home: input.home }),
+    ...(input.settings === undefined ? {} : { settings: input.settings }),
+    execution,
+  };
+}
+
 function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
   return {
     archetype: input.archetype,
@@ -526,8 +526,9 @@ export async function callAkumas(
   const parsed = await parseCallInput(input);
   const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
   const seat = parsed.seat;
-  const world = akumaWorld(parsed.path, parsed.home, parsed.settings, execution);
-  const admitted = await world.admit(
+  const admitted = await admitAkumaCall(
+    parsed.path,
+    callConfiguration(parsed, execution),
     {
       ...callAdmissionInput(parsed, selectedExecution),
       ...(seat === undefined ? {} : { contractId: seat.id }),
@@ -595,7 +596,7 @@ export async function forkAkumas(input: ForkInput): Promise<ForkResult> {
   const { path, id: akuma } = addressed;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await createAkumaProduct(path).selectHandle({ id: akuma }).fork({ at });
+  const receipt = await new AkumaOwner(akuma, path).fork({ at });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch =
     repository === undefined

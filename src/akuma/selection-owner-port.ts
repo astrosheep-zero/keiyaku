@@ -1,6 +1,6 @@
-import type { AkumaStatus } from "./akuma.js";
+import { executeAskAkuma, executeKillAkuma, executeTellAkuma, executeWaitAkuma, type AkumaStatus } from "./akuma.js";
 import { requireBornAkuma } from "./akuma-probe.js";
-import { executeKillAkuma, executeTellAkuma, executeAskAkuma, executeWaitAkuma } from "./selection-execution.js";
+import { akumaObservationOf } from "./selection-observation.js";
 import type { SelectionRequestPort } from "./selection-request.js";
 import type { WorldRoot } from "../world.js";
 
@@ -20,7 +20,10 @@ export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
   return {
     wait: async ({ targets, ...request }) => {
       await prove(targets);
-      return await executeWaitAkuma({ path: world, ids: targets, ...request });
+      // The lower wait owner returns association-free native evidence; the
+      // actual request crossing composes its canonical transport shape.
+      const native = await executeWaitAkuma({ path: world, ids: targets, ...request });
+      return { ...native, observations: native.observations.map(akumaObservationOf) };
     },
     tell: async ({ target, ...request }) => {
       await prove([target]);

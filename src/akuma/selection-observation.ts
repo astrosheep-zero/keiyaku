@@ -1,8 +1,8 @@
-import { akumaIdSchema, akumaStatusSchema } from "./akuma.js";
+import { akumaIdSchema, akumaStatusSchema, type AkumaStatus } from "./akuma.js";
 import { tellResultSchema } from "./call-initial-tell.js";
 import type { KillEvidence } from "./heart/index.js";
-import { dispatchAssociationSchema } from "./dispatch-association.js";
-import { createdTaskObservationSchema } from "../task/created-observation.js";
+import { NO_DISPATCH_ASSOCIATION, dispatchAssociationSchema } from "./dispatch-association.js";
+import { EMPTY_CREATED_TASK_OBSERVATION, createdTaskObservationSchema } from "../task/created-observation.js";
 import { z } from "zod";
 
 const killEvidenceSchema = z.enum([
@@ -64,6 +64,11 @@ export type AkumaAskResult<T = unknown> = Omit<z.infer<typeof akumaAskResultSche
 
 export function parseAkumaObservation(value: unknown): AkumaObservation {
   return akumaObservationSchema.parse(value);
+}
+
+/** Compose one native status into the canonical observation its crossing transports. */
+export function akumaObservationOf(status: AkumaStatus): AkumaObservation {
+  return { status, contract: NO_DISPATCH_ASSOCIATION, createdTasks: EMPTY_CREATED_TASK_OBSERVATION };
 }
 
 export function isWaitResult(value: unknown): value is AkumaWaitResult {

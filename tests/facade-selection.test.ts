@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
-import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma-product.js";
+import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/akuma.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";

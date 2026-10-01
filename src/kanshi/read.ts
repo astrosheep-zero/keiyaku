@@ -3,7 +3,7 @@ import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../p
 import { scopeForRepo } from "../library/repo.js";
 import { observeTaskBoard } from "../task/operations.js";
 import { contractNamespace } from "../task/identity.js";
-import { readAkumaCatalog, readAkumaTimeline, withoutReportedChanges } from "../akuma/akuma.js";
+import { readAkumaRoster, readAkumaTimeline, withoutReportedChanges } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
@@ -357,7 +357,7 @@ async function joinAkuma(
 ): Promise<Section<AkumaKanshiWorld>> {
   if (aliases.kind !== "present") return aliases;
   try {
-    const source = await readAkumaCatalog(path, { limit: ROSTER_VISIBLE_ROWS });
+    const source = await readAkumaRoster(path, { limit: ROSTER_VISIBLE_ROWS });
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value)
       aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);

@@ -16,7 +16,10 @@ execution carries only request-service facts and never transports product capabi
 Forwarded verbs carry their flags verbatim; a flag dropped in transport is a product bug, not
 transport discretion.
 
-Completion kind is a static descriptor fact: a command completes either with a child reference or with opaque service evidence,
+A forwarded selection operation composes its canonical result shape at the
+actual transport crossing, after the lower owner returns association-free
+native evidence; the requesting side then composes the World associations it
+owns. Completion kind is a static descriptor fact: a command completes either with a child reference or with opaque service evidence,
 and its descriptor exposes only that kind's projection.
 
 Transport claims and receipts are ephemeral bytes, not facts. Heart request facts

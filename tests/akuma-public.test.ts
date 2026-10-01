@@ -49,7 +49,7 @@ import { settings } from "../src/settings.js";
 import { Akumas } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
-import type { AkumaHandle } from "../src/akuma/akuma-handle.js";
+import type { AkumaOwner } from "../src/akuma/akuma.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
@@ -148,7 +148,7 @@ async function akumaAt(root: string, input?: { home?: string; settings?: Awaited
   return Akuma.of(await World.at(root), input);
 }
 
-function historyPage(page: Awaited<ReturnType<AkumaHandle["history"]>>): ActivityHistory {
+function historyPage(page: Awaited<ReturnType<AkumaOwner["history"]>>): ActivityHistory {
   if ("rows" in page) return page;
   throw new Error(`expected history page, received ${page.kind}`);
 }
@@ -1488,7 +1488,7 @@ test("interrupt records a tell only after taking an idle leash", async (context)
 test("interrupt waits for leash release after a durable Body end beyond the default retry window", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-ended-held-"));
   let releaseHolder: (() => void) | undefined;
-  let operation: ReturnType<AkumaHandle["interrupt"]> | undefined;
+  let operation: ReturnType<AkumaOwner["interrupt"]> | undefined;
   let restoreTry: (() => void) | undefined;
   try {
     const value = await bornHistoryHandle(root, "1d1e0009");

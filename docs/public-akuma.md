@@ -67,9 +67,11 @@ in the separate association context rather than concealing the core Akuma.
 Address may use the explicit advanced complete library observation for this
 frozen expansion; it never becomes a second public catalogue.
 
-Selection composes public Akuma handles after address expansion. It preserves the
-raw Akuma status and mutation evidence, adding separate read-only Dispatch and
-Task associations where available; it never intersects them into Akuma state or
+Selection composes public Akuma handles after address expansion. Plural
+selection resolves and freezes identities once, then fans out the same lower
+owner operations or one shared set-observation algorithm. It preserves the raw
+Akuma status and mutation evidence, adding separate read-only Dispatch and Task
+associations where available; it never intersects them into Akuma state or
 re-evaluates lifecycle. Selection uses one verb per meaning on both faces: `tell` admits a Tell and returns its receipt; `ask` admits a Tell and observes the answer bound to that admission; `wait` observes existing Akuma-wide work. An ask returns one shared result with answered, failed, invalid-output, unanswered, and deadline observations. Bounds are optional and limit observation only, never admission. Schema belongs to ask, not tell. Interrupt is a flag on tell or ask that puts down the current Body before admitting the new Tell; kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
 Akuma-owned completion judgment in their respective caller contexts. Wait and
 kill freeze their subject set at entry in the caller's deduplicated selection
@@ -92,7 +94,9 @@ returns its input-bound observation.
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
-or reopen the whole roster. Archetype definitions are listed by the archetype
+or reopen the whole roster. The lower roster supplies that native membership,
+order, and extent, and World composition attaches the current Alias bindings
+afterward without replacing the semantic order or counting the board. Archetype definitions are listed by the archetype
 owner. An archetype definition may declare `hidden: true`: a hidden definition
 never appears in the archetype catalogue, but it resolves and answers calls by
 name exactly as a visible one, and hiddenness is the definition's own

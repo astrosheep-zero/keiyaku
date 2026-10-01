@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Akuma } from "../../src/akuma/index.js";
 import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
-import { AkumaHandle } from "../../src/akuma/akuma-handle.js";
+import { AkumaOwner } from "../../src/akuma/akuma.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
@@ -97,27 +97,27 @@ export function fixtureRuntime(
 }
 
 export function installTellRuntime(runtime: TellWakeRuntime): () => void {
-  const originalTell = AkumaHandle.prototype.tell;
-  const originalAdmitTell = AkumaHandle.prototype.admitTell;
-  const originalInterrupt = AkumaHandle.prototype.interrupt;
-  const originalAdmitInterrupt = AkumaHandle.prototype.admitInterrupt;
-  AkumaHandle.prototype.tell = function (body, tellId, recordedAt, existingRuntime, options) {
+  const originalTell = AkumaOwner.prototype.tell;
+  const originalAdmitTell = AkumaOwner.prototype.admitTell;
+  const originalInterrupt = AkumaOwner.prototype.interrupt;
+  const originalAdmitInterrupt = AkumaOwner.prototype.admitInterrupt;
+  AkumaOwner.prototype.tell = function (body, tellId, recordedAt, existingRuntime, options) {
     return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
   };
-  AkumaHandle.prototype.admitTell = function (body, tellId, recordedAt, existingRuntime, options) {
+  AkumaOwner.prototype.admitTell = function (body, tellId, recordedAt, existingRuntime, options) {
     return originalAdmitTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
   };
-  AkumaHandle.prototype.interrupt = function (body, options) {
+  AkumaOwner.prototype.interrupt = function (body, options) {
     return originalInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
   };
-  AkumaHandle.prototype.admitInterrupt = function (body, options) {
+  AkumaOwner.prototype.admitInterrupt = function (body, options) {
     return originalAdmitInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
   };
   return () => {
-    AkumaHandle.prototype.tell = originalTell;
-    AkumaHandle.prototype.admitTell = originalAdmitTell;
-    AkumaHandle.prototype.interrupt = originalInterrupt;
-    AkumaHandle.prototype.admitInterrupt = originalAdmitInterrupt;
+    AkumaOwner.prototype.tell = originalTell;
+    AkumaOwner.prototype.admitTell = originalAdmitTell;
+    AkumaOwner.prototype.interrupt = originalInterrupt;
+    AkumaOwner.prototype.admitInterrupt = originalAdmitInterrupt;
   };
 }
 

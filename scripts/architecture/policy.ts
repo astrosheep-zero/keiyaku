@@ -449,6 +449,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "akuma/dispatch-association.ts", allow: [runtime("git/identity.ts", ["contractIdSchema"])] },
     {
+      // The one lower native Akuma owner reads no optional Alias, Dispatch,
+      // Task or Contract authority; World composition attaches those above it.
+      source: "akuma/akuma.ts",
+      allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+    },
+    {
       source: "akuma/**",
       allow: [
         any("akuma/**"),

@@ -90,10 +90,18 @@ provider-event, or process-signaling handle.
 A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask, preempting current work before new Tell admission; kill is the pure stop. These forms retain the same busy, routing, and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment — a non-running
 life with no pending Tell — or a caller deadline. Standalone `idle` and plural
-or CLI `wait` name this same judgment for their respective caller contexts.
-Every return carries its final status and says whether it completed or reached
-the deadline; completion wins when the final deadline-edge observation satisfies
-the judgment. A deadline
+or CLI `wait` name this same judgment for their respective caller contexts, and
+one set-observation owner serves both: frozen caller order, any/all completion,
+a shared ordinary-detail budget, transient unreadable peers, and honest final
+observed/unobserved evidence. The standalone face is the same algorithm
+projected to one association-free identity, not an unrelated loop or an upper
+facade call. An observation with no live row callbacks may use the owner's
+lightweight completion probe to skip expensive running snapshots, and an
+internal custom completion judge always observes fully and never uses that
+probe; a live observer always observes rounds, so it cannot skip activity.
+Every return still carries its final status and says whether it completed or
+reached the deadline; completion wins when the final deadline-edge observation
+satisfies the judgment. A deadline
 remains a current observation rather than manufacturing a lifecycle arm.
 The interrupt flag and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve

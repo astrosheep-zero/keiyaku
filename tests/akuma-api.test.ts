@@ -12,7 +12,7 @@ import {
   Schema,
   type AkumaIdleResult,
 } from "../src/akuma/index.js";
-import { AkumaHandle } from "../src/akuma/akuma-handle.js";
+import { AkumaOwner } from "../src/akuma/akuma.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
   readHeart,
@@ -22,12 +22,13 @@ import {
   recordTellReceipt,
 } from "../src/akuma/heart/index.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
-import { executeAskAkuma } from "../src/akuma/selection-execution.js";
-import { deferred, settlementProbe, waitForCondition } from "./support/process.js";
+import { executeAskAkuma } from "../src/akuma/akuma.js";
+import { deferred, installAkumaBodyPidReceipt, settlementProbe, waitForCondition, waitForPidReceiptExit } from "./support/process.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
+import { authorityPath } from "../src/task/store.js";
 
 function freezeWalk(value: unknown): void {
   if (typeof value !== "object" || value === null) return;
@@ -99,7 +100,7 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "Schema",
     ].sort(),
   );
-  assert.equal("AkumaHandle" in exported, false);
+  assert.equal("AkumaOwner" in exported, false);
   assert.equal("TellResult" in exported, false);
 });
 
@@ -109,7 +110,7 @@ test("package root exposes the same public Akuma values without private mechanis
   for (const name of Object.keys(subpath) as Array<keyof typeof subpath>) {
     assert.strictEqual(root[name], subpath[name], name);
   }
-  for (const name of ["AkumaHandle", "HeldAkumaLeash", "driveAkumaBody", "readHeart"]) {
+  for (const name of ["AkumaOwner", "HeldAkumaLeash", "driveAkumaBody", "readHeart"]) {
     assert.equal(name in root, false, name);
   }
   const schema: import("../src/index.js").Schema<{ ok: boolean }> = root.Schema.zod(z.object({ ok: z.boolean() }));
@@ -120,18 +121,47 @@ test("package root exposes the same public Akuma values without private mechanis
 
 test("Akuma.birth has no prompt and select is synchronous", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-api-birth-");
-  const home = join(root, "home");
-  mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  const world = await World.at(root);
-  const born = await Akuma.birth("worker", { root: world, home, cwd: root });
-  const selected = Akuma.select(world, born.id);
-  assert.equal(selected.id, born.id);
-  assert.equal((await selected.status()).id, born.id);
-  await born.idle();
-  const page = await born.history();
-  assert.equal(Array.isArray(page.rows), true);
-  await born.kill();
+  const bodyPidReceipt = join(root, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  try {
+    const home = join(root, "home");
+    mkdirSync(join(home, "akuma"), { recursive: true });
+    writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+    const world = await World.at(root);
+    const born = await Akuma.birth("worker", { root: world, home, cwd: root });
+    const selected = Akuma.select(world, born.id);
+    assert.equal(selected.id, born.id);
+    assert.equal((await selected.status()).id, born.id);
+    await born.idle();
+    const page = await born.history();
+    assert.equal(Array.isArray(page.rows), true);
+    await born.kill();
+    // The cooperative stop settles Heart and releases the leash before the real
+    // provider Body process finishes departing; the temp tree must outlive that
+    // retirement, so wait for the recorded Body pid to exit before teardown.
+    await waitForPidReceiptExit(bodyPidReceipt, 15_000, { requireBirth: true });
+  } finally {
+    restoreBodyPidReceipt();
+  }
+});
+
+test("standalone Akuma operations never read optional Alias or Task authority", async () => {
+  await withWaitedTellFixture(async ({ born }) => {
+    const value = await born("51a1e001", answering("standalone answer"));
+    // Corrupt every optional cross-product authority a standalone operation must never touch.
+    mkdirSync(join(value.world, ".keiyaku", "akuma"), { recursive: true });
+    writeFileSync(join(value.world, ".keiyaku", "akuma", "alias.json"), "not json\n");
+    const brokenTask = authorityPath(value.world, "task/corrupt-authority");
+    mkdirSync(join(value.world, ".keiyaku", "tasks"), { recursive: true });
+    writeFileSync(brokenTask, "not a task document\n");
+    const selected = Akuma.select(value.world, value.allocated.id);
+    assert.equal((await selected.status()).id, value.allocated.id);
+    assert.equal(Array.isArray((await selected.history()).rows), true);
+    assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
+    const asked = await selected.ask("standalone", { timeoutMs: 5_000 });
+    assert.deepEqual(asked.observation, { reason: "answered", answer: "standalone answer" });
+    assert.ok(["killed", "already-stopped", "already-killed"].includes(await selected.kill()));
+  });
 });
 
 import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
@@ -273,7 +303,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     assert.equal(invalidResult.exit, 2, "invalid schema output fails like an invalid call answer");
 
     const interrupt = await born("a1000012", answering("unused"));
-    context.mock.method(AkumaHandle.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
+    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
     await assert.rejects(
       executeAskAkuma({ path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
       (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
@@ -284,7 +314,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
 test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
   await withWaitedTellFixture(async ({ born, withRuntime, settle }) => {
     const terminal = await born("a1000016", answering("edge answer"));
-    const handle = new AkumaHandle(terminal.allocated.id, terminal.world);
+    const handle = new AkumaOwner(terminal.allocated.id, terminal.world);
     const recordedAt = "2026-08-10T00:00:02.000Z";
     const recorded = await handle.tell("edge", undefined, recordedAt);
     await settle();

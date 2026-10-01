@@ -34,7 +34,7 @@ import {
   type ServiceRequestCommand,
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
-import { executeTellAkuma } from "../src/akuma/selection-execution.js";
+import { executeTellAkuma } from "../src/akuma/akuma.js";
 import { AKUMA_REQUESTS_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 import { waitAkuma, tellAkuma } from "../src/library/selection.js";
