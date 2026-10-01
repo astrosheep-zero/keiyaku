@@ -439,14 +439,24 @@ function opencodeBodyLaunch(allocated: Awaited<ReturnType<typeof allocatedHeart>
 }
 
 /**
+ * The native iterator's one-shot return-phase barrier. `returned` becomes true
+ * only when the adapter actually invokes the fixture iterator's `return`; that
+ * invocation is the moment whole closure has entered unproven retirement. A
+ * Body recorded in Heart, a submitted prompt, and elapsed time all happen
+ * earlier and cannot substitute for this evidence.
+ */
+type UnprovenRetirementPhase = { returned: boolean };
+
+/**
  * A native event stream that answers once and then cannot prove retirement:
  * `next` settles only on abort, while `return` never settles. Whole closure
  * therefore stays pending, which is exactly the unproven case the Body must
- * survive without parking.
+ * survive without parking. Invoking `return` publishes `phase`.
  */
 function terminalThenUnclosable(
   session: Readonly<{ prompts: string[] }>,
   request: OpencodeEventSubscriptionRequest,
+  phase: UnprovenRetirementPhase,
 ): AsyncIterable<unknown> {
   const queued: unknown[] = [];
   let index = 0;
@@ -473,13 +483,19 @@ function terminalThenUnclosable(
         }
         return { done: false, value: queued[index++] };
       },
-      return: () => new Promise<IteratorResult<unknown>>(() => undefined),
+      return: () => {
+        phase.returned = true;
+        return new Promise<IteratorResult<unknown>>(() => undefined);
+      },
     }),
   };
 }
 
-async function waitUntilLatestBody(paths: Parameters<typeof readHeart>[0]): Promise<void> {
-  await waitForCondition("the first Body recorded in Heart", async () => (await readHeart(paths)).latestBody !== null);
+/** Bounded wait for the fixture proof that native retirement was actually entered. */
+async function awaitUnprovenRetirement(phase: UnprovenRetirementPhase): Promise<void> {
+  await waitForCondition("the native iterator return phase (unproven retirement)", () => phase.returned, {
+    budgetMs: 5_000,
+  });
 }
 
 /** Distinguishes a bounded Body settlement from a park, without forcing either. */
@@ -520,13 +536,14 @@ test("OpenCode Body supervises control stop while stream closure is unproven", a
   try {
     const allocated = await allocatedHeart(root, "claude", "feed0001");
     const { session, prompts } = fixtureSession();
+    const phase: UnprovenRetirementPhase = { returned: false };
     const provider = createOpencodeProvider({
       loader: async () => ({
         client: {
           session,
           event: {
             subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-              stream: terminalThenUnclosable({ prompts }, request),
+              stream: terminalThenUnclosable({ prompts }, request, phase),
             }),
           },
         },
@@ -536,7 +553,9 @@ test("OpenCode Body supervises control stop while stream closure is unproven", a
     const body = runAkumaBody(opencodeBodyLaunch(allocated, root), provider, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    await waitUntilLatestBody(allocated.paths);
+    // Control stop acts only after the native iterator's own `return` proves the
+    // attempt entered real unproven retirement; the recorded Body precedes it.
+    await awaitUnprovenRetirement(phase);
     const requested = await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
     assert.equal(requested.kind, "requested");
     await expectBodySettles(body, "the Body did not reach bounded hung handling", 6_000);
@@ -557,13 +576,14 @@ test("OpenCode Body supervises Heart loss while stream closure is unproven", asy
   try {
     const allocated = await allocatedHeart(root, "claude", "feed0002");
     const { session, prompts } = fixtureSession();
+    const phase: UnprovenRetirementPhase = { returned: false };
     const provider = createOpencodeProvider({
       loader: async () => ({
         client: {
           session,
           event: {
             subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-              stream: terminalThenUnclosable({ prompts }, request),
+              stream: terminalThenUnclosable({ prompts }, request, phase),
             }),
           },
         },
@@ -573,9 +593,9 @@ test("OpenCode Body supervises Heart loss while stream closure is unproven", asy
     const body = runAkumaBody(opencodeBodyLaunch(allocated, root), provider, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    await waitUntilLatestBody(allocated.paths);
-    // Heart loss must land mid-turn, while closure is still unproven.
-    await waitForCondition("the launched native prompt", () => prompts.length > 0, { budgetMs: 5_000 });
+    // Heart loss must land mid-turn, while closure is still unproven: the native
+    // iterator's own `return` proves that phase; a submitted prompt does not.
+    await awaitUnprovenRetirement(phase);
     rmSync(allocated.paths.heart, { force: true });
     // Before the whole-close ordering fix the driver was parked at a pending
     // completion here and never woke. It must now leave the Heart/control race
