@@ -41,7 +41,6 @@ export type KeiyakuRefusal = z.infer<typeof keiyakuRefusalSchema>;
 export const forwardingRetrySchema = z
   .object({ kind: z.literal("owner-reason-unavailable"), diagnostic: z.string() })
   .strict();
-export type ForwardingRetry = z.infer<typeof forwardingRetrySchema>;
 export const keiyakuRetryReasonSchema = z.union([protocolTerminalSchema, forwardingRetrySchema]);
 export type KeiyakuRetryReason = z.infer<typeof keiyakuRetryReasonSchema>;
 export const operationRetrySchemas = {

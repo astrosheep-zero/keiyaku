@@ -38,7 +38,7 @@ import {
 } from "../render/task.js";
 import { actorFromEdge } from "../actor.js";
 import type { TaskQueryExpression } from "./task-query.js";
-export { isTaskAction, parseTaskCommand, renderTaskHelp, taskUsageGuide } from "./task-grammar.js";
+export { renderTaskHelp } from "./task-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering

@@ -1,8 +1,12 @@
 # Design Draft: Akuma API And Structured Answers
 
-> Status: design for Faye review. This is not authority until the reviewed
-> decisions are promoted to the owning `docs/` chapters in the same accepted
-> change.
+> Status: historical design draft, superseded and not authority. This document
+> records the exploration behind structured answers. It is retained as design
+> history only; the accepted implementation landed through the later
+> implementation phases, so the package subpaths, file ownership, and CLI
+> composition sketched below no longer describe the accepted tree. The owning
+> `docs/` chapters and the executable declarations are the authoritative
+> account; nothing here is current product law.
 
 ## Goal
 
@@ -17,12 +21,12 @@ imitate CLI command shape.
 
 ## Public Akuma API
 
-The `keiyaku/akuma` export contains one public class and supporting value/type
+The package-root Akuma export contains one public class and supporting value/type
 exports. Construction over an existing identity is synchronous and read-free;
 birth and all Heart/provider operations are asynchronous.
 
 ```ts
-import { Akuma, Schema } from "keiyaku/akuma";
+import { Akuma, Schema } from "@astrosheep/keiyaku";
 
 const aku = await Akuma.birth("reviewer", { root, alias: "reviewer" });
 const existing = Akuma.select(root, "aku/reviewer/0123abcd");
@@ -187,7 +191,8 @@ or fabricate an answer.
 
 ## Ownership By Layer
 
-**Owner (`src/akuma/akuma-product.ts` and the internal Akuma owner):** owns the
+**Owner (the internal Akuma owner; the `akuma-product.ts` module named in this
+phase was removed by the later consolidation):** owns the
 public object, Tell Promise lifetime, selector validation, and the exact
 TellId-to-terminal-outcome wait. It translates durable facts into the typed
 public errors and values. It never reads latest status to answer a Tell.
@@ -220,7 +225,9 @@ lifecycle state.
 
 ## CLI Composition
 
-No command is added. Existing commands are projections of the library:
+Historical sketch, superseded: the accepted standalone and plural Akuma faces
+fan out one shared owner instead of composing `birth` plus `tell` per call. No
+command is added, and existing commands remain projections of the library.
 
 ```text
 call <archetype> <prompt> [--schema file] [--wait duration|--detach]
@@ -260,7 +267,9 @@ JSON Schema; the CLI decoder is identity after JSON parsing, so output is JSON.
 
 ## Package And Compatibility Cut
 
-`package.json` keeps the `./akuma` export. Its barrel changes to export only
+Historical: the `./akuma` subpath was later removed; the accepted package
+exposes only the root and plugin entries. During this design phase the plan was
+for that subpath barrel to export only
 `Akuma`, `AkuId`, `Schema`, `JsonSchema`, `ActivityHistory` and row types,
 `AllowedAction(s)`, `WorldRoot`, and typed public error classes. Existing
 internal projections, receipts, Turn ledgers, and handles move behind internal

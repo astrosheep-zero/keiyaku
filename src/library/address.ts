@@ -17,9 +17,6 @@ import type { KanshiReport, Section } from "../kanshi/index.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
-export type DirectAkumaSelector = AkuId | AkumaAlias;
-export type SetAkumaSelector = DirectAkumaSelector | AkumaGlob | `kei/${string}`;
-
 export type AkumaAddressInput = Readonly<{
   path: WorldRoot;
   akuma: string;

@@ -41,14 +41,7 @@ import {
   tellExitCode,
   waitedTellProgress,
 } from "../render/akuma.js";
-export {
-  akumaUsageGuide,
-  isAkumaAction,
-  isParsedAkumaCommand,
-  parseAkumaCommand,
-  renderAkumaHelp,
-  renderAkumaRootRows,
-} from "./akuma-grammar.js";
+export { isParsedAkumaCommand, renderAkumaHelp } from "./akuma-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering

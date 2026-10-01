@@ -1,7 +1,7 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import { allocatedHeart, claudeBodyLaunch, recordTell } from "./support/akuma-fixtures.js";
-import { settlementProbe, waitForCondition } from "./support/process.js";
+import { expectBodySettles, settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -385,18 +385,6 @@ async function waitUntilLatestBody(
       ? {}
       : { terminalState: settlementProbe(settlement, () => "the driving Body pump settled without a recorded Body") },
   );
-}
-
-async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 5_000): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeoutMs); }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {

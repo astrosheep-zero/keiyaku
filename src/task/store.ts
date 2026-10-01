@@ -7,6 +7,7 @@ import {
   SqliteTransactionLockError,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
+import { syncDirectory } from "../coordination/durable-file.js";
 import type { WorldRoot } from "../world.js";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 import { parseTaskDocument, type TaskDocument } from "./document.js";
@@ -23,16 +24,6 @@ import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
 export const DEFAULT_TASK_LOCK_TIMEOUT_MS = 3_000;
-
-function syncTaskDirectory(path: string): void {
-  if (process.platform === "win32") return;
-  const directory = openSync(path, "r");
-  try {
-    fsyncSync(directory);
-  } finally {
-    closeSync(directory);
-  }
-}
 
 function tasksDirectory(world: WorldRoot): string {
   return resolve(world, ".keiyaku", "tasks");
@@ -55,7 +46,7 @@ async function requireDirectory(path: string, mode: "read" | "write"): Promise<b
     if (mode === "read") return false;
     try {
       await mkdir(path);
-      syncTaskDirectory(dirname(path));
+      syncDirectory(dirname(path));
     } catch (mkdirError) {
       if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") throw mkdirError;
     }
@@ -219,7 +210,7 @@ export async function replaceAuthority(
     descriptor = undefined;
     if (!equal(await currentBytes(input.world, input.id), input.expected)) return "concurrent-modification";
     renameSync(temporary, resolved.path);
-    syncTaskDirectory(parent);
+    syncDirectory(parent);
     return "replaced";
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);

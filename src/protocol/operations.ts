@@ -102,8 +102,8 @@ import type { GitRepository } from "../git/process.js";
 import { repositoryAt } from "../git/repository.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import type { WorktreeLeak } from "../git/scratch.js";
-import type { AttestationRefusal } from "../core/verbs/attestation.js";
 import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type { ActiveContractRefusal } from "../core/facts/observation.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import type { VerificationCleanupFailure, VerificationResult } from "./intent.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
@@ -132,8 +132,6 @@ import { boundedListLimit } from "../bounded-list.js";
 export const mergeStatePresentRefusalSchema = z
   .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: worktreeWorkspaceSchema })
   .strict();
-export type MergeStatePresentRefusal = z.infer<typeof mergeStatePresentRefusalSchema>;
-export type UnmergedPathsRefusal = z.infer<typeof unmergedPathsRefusalSchema>;
 export const deliverConflictRefusalSchema = z
   .object({
     kind: z.literal("integration-failed"),
@@ -292,7 +290,7 @@ export function unpackVerificationOutcome(verification: VerificationResult): Rea
         ? undefined
         : "kind" in step && step.kind === "reused"
           ? undefined
-          : stepStop(step as ProtocolResult<AttestationRefusal>);
+          : stepStop(step as ProtocolResult<ActiveContractRefusal>);
   const admission = !("failure" in step) && step.kind === "accepted" ? step : undefined;
   return {
     ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),

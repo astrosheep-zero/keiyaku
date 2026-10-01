@@ -62,21 +62,9 @@ export type AkumaAskObservation<T = unknown> =
 export type AkumaAskResult<T = unknown> = Omit<z.infer<typeof akumaAskResultSchema>, "observation"> &
   Readonly<{ observation: AkumaAskObservation<T> }>;
 
-export function parseAkumaObservation(value: unknown): AkumaObservation {
-  return akumaObservationSchema.parse(value);
-}
-
 /** Compose one native status into the canonical observation its crossing transports. */
 export function akumaObservationOf(status: AkumaStatus): AkumaObservation {
   return { status, contract: NO_DISPATCH_ASSOCIATION, createdTasks: EMPTY_CREATED_TASK_OBSERVATION };
-}
-
-export function isWaitResult(value: unknown): value is AkumaWaitResult {
-  return akumaWaitResultSchema.safeParse(value).success;
-}
-
-export function isKillResult(value: unknown): value is AkumaKillResult {
-  return akumaKillResultSchema.safeParse(value).success;
 }
 
 export function isTellResult(value: unknown): value is AkumaTellResult {

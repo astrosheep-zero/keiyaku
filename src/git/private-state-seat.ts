@@ -67,12 +67,6 @@ export function appendPrivateStateSeatClose(
   return current === undefined ? [closeLag] : [...current, closeLag];
 }
 
-/** Unwrap a seat outcome that has no typed lag surface; confirmed close lag throws. */
-export function requireClosedPrivateStateSeat<T>(outcome: PrivateStateSeatOutcome<T>): T {
-  if (outcome.closeLag !== undefined) throw new Error(outcome.closeLag.diagnostic);
-  return outcome.value;
-}
-
 /** Unwrap a seat outcome through an owner-typed merge of confirmed close lag. */
 export function mergePrivateStateSeatClose<T>(
   outcome: PrivateStateSeatOutcome<T>,

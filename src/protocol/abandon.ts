@@ -1,4 +1,5 @@
-import { decideAbandon, type AbandonRefusal } from "../core/verbs/abandon.js";
+import { decideAbandon } from "../core/verbs/abandon.js";
+import type { ActiveContractRefusal } from "../core/facts/observation.js";
 import type { GitTreeSelection } from "../git/read-observation.js";
 import { admitIntent } from "./intent.js";
 import { complete } from "./outcome.js";
@@ -13,7 +14,7 @@ export async function abandonOperation(
       decorateOffer?: CompanionDecorator;
       observationSelection?: GitTreeSelection;
     }>,
-): Promise<IntentOutcome<void, AbandonRefusal>> {
+): Promise<IntentOutcome<void, ActiveContractRefusal>> {
   return complete(
     await admitIntent(
       input.channel,

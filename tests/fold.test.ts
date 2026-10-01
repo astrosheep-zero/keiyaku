@@ -5,21 +5,11 @@ import { foldJournal } from "../src/core/facts/fold.js";
 import {
   contractId,
   documentKey,
-  entryUlid, snapshotId, type JournalEntry
+  snapshotId, type JournalEntry
 } from "../src/core/facts/types.js";
+import { uniqueEntryUlid } from "./support/journal.js";
 
 const id = contractId("kei/fold-history");
-const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-function uniqueEntryUlid(index: number) {
-  let value = index;
-  let suffix = "";
-  do {
-    suffix = `${ulidAlphabet[value % ulidAlphabet.length]}${suffix}`;
-    value = Math.floor(value / ulidAlphabet.length);
-  } while (value > 0);
-  return entryUlid(`01ARZ3NDEKTSV4RRFFQ69G5${suffix.padStart(3, "0")}`);
-}
 
 function entry<K extends JournalEntry["kind"]>(
   kind: K,

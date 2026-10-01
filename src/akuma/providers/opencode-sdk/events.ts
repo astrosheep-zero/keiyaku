@@ -320,7 +320,6 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   events.emit({ type: "unknown", kind: typeof event.type === "string" ? event.type : "unknown" });
 }
 
-export type EventState = State;
 export function createEventState(sessionId?: string): State {
   return {
     ...(sessionId === undefined ? {} : { sessionId }),

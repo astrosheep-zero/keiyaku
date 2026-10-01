@@ -12,10 +12,6 @@ export type CreatedTaskObservation = z.infer<typeof createdTaskObservationSchema
 
 export const EMPTY_CREATED_TASK_OBSERVATION: CreatedTaskObservation = { kind: "present", rows: [] };
 
-export function parseCreatedTaskObservation(value: unknown): CreatedTaskObservation {
-  return createdTaskObservationSchema.parse(value);
-}
-
 function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

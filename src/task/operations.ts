@@ -8,6 +8,7 @@ import {
   projectBlocked,
   projectRows,
   type BlockedTaskRow,
+  occupiedLocalIds,
   type TaskBoard,
   type TaskBoardObservation,
   type TaskDetailFacts,
@@ -19,7 +20,7 @@ import {
   type TaskCreationDocument,
   type TaskDocument,
 } from "./document.js";
-import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
+import { allocateLocalId, deriveLocalStem, formatTaskId, type TaskId } from "./identity.js";
 import { nukeTaskAuthority, readBoard, readTaskDocument, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { projectBoundedList } from "../bounded-list.js";
@@ -82,14 +83,6 @@ function refused(refusal: TaskRefusal): TaskMutationResult {
 function retry(reason: TaskRetry): TaskMutationResult {
   return { kind: "retry", reason };
 }
-function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
-  return new Set(
-    [...board.tasks.values()].flatMap((task) => {
-      const coordinate = parseTaskId(task.id);
-      return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
-    }),
-  );
-}
 function currentTimestamp(): string {
   return new Date().toISOString();
 }
@@ -102,7 +95,7 @@ function addDocument(
   at: string,
   actor?: string,
 ): TaskDocument {
-  const localId = allocateLocalId(deriveLocalStem(base.title), occupied(board, namespace));
+  const localId = allocateLocalId(deriveLocalStem(base.title), occupiedLocalIds(board, namespace));
   return {
     ...base,
     id: formatTaskId({ namespace, localId }),

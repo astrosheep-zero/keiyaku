@@ -1,7 +1,12 @@
 import { documentDiff } from "../markdown/diff.js";
 import type { WorldRoot } from "../world.js";
 import type { TaskCompositionResult } from "./mutation-result.js";
-import { planTaskComposition, type PlannedTask, type TaskCompositionPlan } from "./compose-language.js";
+import {
+  planTaskComposition,
+  type AcceptedComposition,
+  type PlannedTask,
+  type TaskCompositionPlan,
+} from "./compose-language.js";
 import { serializeTaskDocument } from "./document.js";
 import { parseTaskId, taskAuthorityPath, type TaskId } from "./identity.js";
 import type { TaskCompositionDiagnostic } from "./operations.js";
@@ -16,7 +21,6 @@ export type {
 export type { TaskCompositionAlias } from "./compose-language.js";
 export { taskCompositionNamespaceHeader } from "./compose-language.js";
 
-type AcceptedComposition = Extract<TaskCompositionResult, { kind: "accepted" }>;
 export type TaskDocumentChange = Readonly<AcceptedComposition["documentChanges"][number]>;
 export type TaskCompositionFacts = Readonly<Pick<AcceptedComposition, "aliases" | "admissionOrder" | "admissions">>;
 export type { TaskCompositionResult } from "./mutation-result.js";

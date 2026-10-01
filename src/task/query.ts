@@ -1,6 +1,6 @@
 import type { TaskDocument, TaskPriority, TaskState } from "./document.js";
 import { formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
-import type { BlockedTaskRow, TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
+import type { TaskBoard, TaskRef, TaskRelationProjection, TaskRow } from "./board.js";
 import { projectTaskRow, taskBlocked, taskDisposition, taskRef } from "./board.js";
 import { projectBoundedList, type BoundedList } from "../bounded-list.js";
 
@@ -350,6 +350,3 @@ export function queryUnderTargets(expression: TaskQueryExpression): readonly Tas
   collect(expression);
   return [...targets];
 }
-
-export type TaskQueryPage = TaskPage<TaskQueryRow>;
-export type TaskBlockedPage = TaskPage<BlockedTaskRow>;

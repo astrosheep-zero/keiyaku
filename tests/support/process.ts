@@ -100,6 +100,24 @@ export function settlementProbe<T>(settlement: Promise<T>, describe: (settled: T
   return () => terminalState;
 }
 
+/**
+ * Fail with `message` when a Body-driven promise does not settle within the
+ * bounded timeout; a settled promise resolves or rejects as itself.
+ */
+export async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs = 5_000): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      body,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function akumaBodyPidReceiptImport(): string {
   return pathToFileURL(resolve("tests/support/akuma-body-pid-receipt.mjs")).href;
 }

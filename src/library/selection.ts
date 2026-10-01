@@ -308,10 +308,15 @@ function waitIdentityFacts(
 }
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
-  return (await observeAkumaSet([status], path, repo))[0]!;
+  return (await composeAkumaAssociations([status], path, repo))[0]!;
 }
 
-async function observeAkumaSet(
+/**
+ * The one upper composition of association-free native status evidence into its
+ * public observation shape. It reads Alias-independent Dispatch and Task
+ * associations after the lower values, never before or inside them.
+ */
+async function composeAkumaAssociations(
   statuses: readonly AkumaStatus[],
   path: WorldRoot,
   repo?: Repo,
@@ -345,34 +350,27 @@ function signal(value: unknown): AbortSignal | undefined {
 }
 
 /**
- * The one upper composition of a wait's association-free native evidence into
- * its public observation shape. It reads Alias-independent Dispatch and Task
- * associations after the lower values, never before or inside them.
+ * Compose one wait's association-free native evidence into its public
+ * observation shape, attaching the same upper associations as a single-status
+ * observation.
  */
 async function composeWaitResult(
   path: WorldRoot,
   repo: Repo | undefined,
   result: NativeWaitResult,
 ): Promise<AkumaWaitResult> {
-  const created = await createdTasksFor(path, result.observations);
-  const discharged = placementDischarged(repo);
   return {
     mode: result.mode,
     reason: result.reason,
-    observations: await Promise.all(
-      result.observations.map(async (status, index) => {
-        const contract = await dispatchAssociation(repo, status.id);
-        return {
-          status: await composeObservation(status, contract, discharged),
-          contract,
-          createdTasks: created[index]!,
-        };
-      }),
-    ),
+    observations: await composeAkumaAssociations(result.observations, path, repo),
     unobserved: result.unobserved,
   };
 }
 
+/**
+ * Re-attach upper associations after a wait result crosses a forwarded
+ * boundary; the serving side must observe its own Dispatch and Task state.
+ */
 async function attachWaitAssociations(
   path: WorldRoot,
   repo: Repo | undefined,
@@ -525,13 +523,6 @@ export async function waitAkumaOn(seam: SelectionSeam, input: AkumaWaitInput): P
   );
 }
 
-export async function killAkuma(
-  input: AkumaKillInput,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaKillResult> {
-  return await killAkumaOn(selectionSeam(execution), input);
-}
-
 export async function killAkumaOn(seam: SelectionSeam, input: AkumaKillInput): Promise<AkumaKillResult> {
   const values = requireInput(input, "Akumas.kill input");
   for (const key of Object.keys(values)) {
@@ -587,13 +578,6 @@ function validateAskInput(
   }
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
-}
-
-export async function askAkuma<T = string>(
-  input: AkumaAskInput<T>,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaAskResult<T>> {
-  return await askAkumaOn(selectionSeam(execution), input);
 }
 
 export async function askAkumaOn<T = string>(seam: SelectionSeam, input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {

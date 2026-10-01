@@ -216,10 +216,6 @@ export const taskMutationExecutionResultSchema = z.union([
   taskCompositionResultSchema,
 ]);
 
-export function isTaskMutationExecutionResult(value: unknown): value is TaskMutationExecutionResult {
-  return taskMutationExecutionResultSchema.safeParse(value).success;
-}
-
 export type TaskView = z.infer<typeof taskViewSchema>;
 export type TaskCleanupFailure = z.infer<typeof taskCleanupFailureSchema>;
 export type TaskCompositionDiagnostic = z.infer<typeof compositionDiagnosticSchema>;

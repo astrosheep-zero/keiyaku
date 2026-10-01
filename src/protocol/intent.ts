@@ -8,7 +8,7 @@ import type { GitRepository } from "../git/process.js";
 import { materializeScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import { activeContract } from "../core/facts/observation.js";
+import { activeContract, type ActiveContractRefusal } from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
 import type {
   ActorId,
@@ -19,7 +19,7 @@ import type {
   SnapshotId,
 } from "../core/facts/types.js";
 import { latestCurrentAttestations } from "../core/facts/gate.js";
-import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
+import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import {
   executeVerification,
   capturedOutput,
@@ -173,7 +173,7 @@ export type VerificationReuseStep = Readonly<{
   reuse: CurrentVerifiedAttestation;
 }>;
 export type VerificationStep =
-  | ProtocolResult<AttestationRefusal | VerificationReuseRefusal>
+  | ProtocolResult<ActiveContractRefusal | VerificationReuseRefusal>
   | VerificationRuntimeStop
   | VerificationReuseStep;
 export type VerificationResult = Readonly<{
@@ -255,7 +255,7 @@ async function verificationStep(
 ): Promise<VerificationStep> {
   if (execution.outcome.kind === "terminal") {
     const verdict = execution.outcome.verdict;
-    const admission = await admitIntent<AttestationInput<never>, AttestationRefusal | VerificationReuseRefusal>(
+    const admission = await admitIntent<AttestationInput<never>, ActiveContractRefusal | VerificationReuseRefusal>(
       input.channel,
       input.repository,
       verificationInput(execution.outcome, input, subject),

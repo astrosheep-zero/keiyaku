@@ -1,4 +1,5 @@
 import type { WorldRoot } from "../world.js";
+import type { NamespaceContextSource, ResolvedNamespaceContext } from "./context.js";
 import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import {
   requestForwardedTask,
@@ -84,11 +85,8 @@ export type TaskDetail = Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskVi
 export type TaskList = TaskOutcome<TaskPage<TaskRow>>;
 export type BlockedTaskList = TaskOutcome<TaskPage<BlockedTaskRow>>;
 export type TaskQueryResult = TaskOutcome<TaskPage<TaskQueryRow>>;
-export type TaskContextSource = "default-root" | "contract-installed" | "local-override";
-export type ResolvedNamespaceContext = Readonly<{
-  namespace: readonly string[];
-  source: TaskContextSource;
-}>;
+export type TaskContextSource = NamespaceContextSource;
+export type { ResolvedNamespaceContext };
 export type TaskContextResult = TaskOutcome<ResolvedNamespaceContext>;
 export type TaskDoctorReport = Readonly<{ issues: readonly TaskDoctorIssue[] }>;
 export type TaskDecompositionTree = TaskOutcome<TaskTreeNode>;

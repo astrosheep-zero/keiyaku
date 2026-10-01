@@ -1,5 +1,5 @@
 import type { DecideInput, OfferDecision } from "../decide.js";
-import { activeContract } from "../facts/observation.js";
+import { activeContract, type ActiveContractRefusal } from "../facts/observation.js";
 import { type ActorId, type ContractId, type JournalEntry } from "../facts/types.js";
 
 export type AbandonInput = Readonly<{
@@ -9,13 +9,11 @@ export type AbandonInput = Readonly<{
   note?: string;
 }>;
 
-export type AbandonRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
-
 export function decideAbandon({
   input,
   attempt,
   observation,
-}: DecideInput<AbandonInput>): OfferDecision<AbandonRefusal> {
+}: DecideInput<AbandonInput>): OfferDecision<ActiveContractRefusal> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };

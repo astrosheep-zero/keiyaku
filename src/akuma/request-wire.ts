@@ -205,8 +205,6 @@ export function composeRequestCommands(
   }
   return commands;
 }
-export type UpstreamRequestFailure = z.infer<typeof upstreamRequestFailureSchema>;
-export type ReturnedEnvelope = z.infer<typeof returnedEnvelopeSchema>;
 export type ReceiptEnvelope = z.infer<typeof receiptEnvelopeSchema>;
 
 export function decodeEnvelope(bytes: string, fileId: string): RequestEnvelope | null {

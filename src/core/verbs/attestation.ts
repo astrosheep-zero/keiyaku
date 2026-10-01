@@ -1,5 +1,5 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
-import { activeContract } from "../facts/observation.js";
+import { activeContract, type ActiveContractRefusal } from "../facts/observation.js";
 import { type ActorId, type AttestationData, type ContractId, type JournalEntry } from "../facts/types.js";
 
 export type AttestationInput<Failure = never> = Readonly<{
@@ -9,13 +9,11 @@ export type AttestationInput<Failure = never> = Readonly<{
   preparation?: Preparation<AttestationData, Failure>;
 }>;
 
-export type AttestationRefusal = Readonly<{ kind: "contract-missing" | "terminal"; contractId: ContractId }>;
-
 export function decideAttestation<Failure>({
   input,
   attempt,
   observation,
-}: DecideInput<AttestationInput<Failure>>): OfferDecision<AttestationRefusal | Failure> {
+}: DecideInput<AttestationInput<Failure>>): OfferDecision<ActiveContractRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
   if (input.preparation === undefined) {

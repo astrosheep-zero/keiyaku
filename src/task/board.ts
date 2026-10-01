@@ -48,6 +48,17 @@ export type TaskTreeNode = Readonly<{
   children: readonly TaskTreeNode[];
 }>;
 export type TaskBoard = Readonly<{ tasks: ReadonlyMap<TaskId, TaskDocument> }>;
+
+/** The local ids occupied across one namespace of the current board. */
+export function occupiedLocalIds(board: TaskBoard, namespace: readonly string[]): Set<string> {
+  return new Set(
+    [...board.tasks.values()].flatMap((task) => {
+      const coordinate = parseTaskId(task.id);
+      return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
+    }),
+  );
+}
+
 type TaskRelation = "needs" | "parent" | "supersedes" | "relates";
 export type TaskDoctorIssue =
   | Readonly<{ kind: "missing-target"; taskId: TaskId; relation: TaskRelation; target: TaskId }>

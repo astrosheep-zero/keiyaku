@@ -17,7 +17,7 @@ import {
   type OpencodeSdkSession,
 } from "../src/akuma/providers/opencode-sdk/session.js";
 import { allocatedHeart } from "./support/akuma-fixtures.js";
-import { waitForCondition, waitForProcessExit } from "./support/process.js";
+import { expectBodySettles, waitForCondition, waitForProcessExit } from "./support/process.js";
 
 const SESSION_ID = "session-1";
 const RETRY_DELAY_MS = 3_000;
@@ -509,21 +509,6 @@ async function boundedOutcome(body: Promise<unknown>, timeoutMs: number): Promis
       ),
       new Promise<string>((resolve) => {
         timer = setTimeout(() => resolve("parked"), timeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** A failed bounded supervision wait must not be mistaken for a hung Body. */
-async function expectBodySettles(body: Promise<unknown>, message: string, timeoutMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      body,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
       }),
     ]);
   } finally {

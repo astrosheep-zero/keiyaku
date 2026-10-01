@@ -7,11 +7,11 @@ import {
   changeId,
   contractId,
   documentKey,
-  entryUlid,
   gate,
   snapshotId,
   type ContractId, type JournalEntry
 } from "../src/core/facts/types.js";
+import { uniqueEntryUlid } from "./support/journal.js";
 import { applyAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
@@ -19,17 +19,6 @@ import type { ContractBody } from "../src/body/types.js";
 
 const id = contractId("kei/lifecycle-cycle");
 const prerequisite = contractId("kei/lifecycle-prerequisite");
-const ulidAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-function uniqueEntryUlid(index: number) {
-  let value = index;
-  let suffix = "";
-  do {
-    suffix = `${ulidAlphabet[value % ulidAlphabet.length]}${suffix}`;
-    value = Math.floor(value / ulidAlphabet.length);
-  } while (value > 0);
-  return entryUlid(`01ARZ3NDEKTSV4RRFFQ69G5${suffix.padStart(3, "0")}`);
-}
 
 function terms(after: readonly ContractId[] = [], gates: readonly ReturnType<typeof gate>[] = []) {
   return {

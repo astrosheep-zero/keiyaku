@@ -12,7 +12,7 @@ import { actorFromEdge } from "../actor.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { displayContext, writeJson, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
-import { renderAccepted, renderRetry, renderContractHistory } from "../render/contract.js";
+import { renderAccepted, renderRetry, renderContractHistory, type ContractOutcome } from "../render/contract.js";
 import { renderConflictMaterialized, renderRefusal, type RenderableRefusal } from "../render/refusal.js";
 import {
   renderAkumaCatalogue,
@@ -40,13 +40,9 @@ import { Tasks } from "../../task/index.js";
 import { listArchetypeDefinitions } from "../../akuma/archetype.js";
 import type { KanshiReport } from "../../kanshi/index.js";
 import type {
-  AbandonOutcome,
   ActorId,
   AkumaObservation,
-  AmendOutcome,
-  ArcOutcome,
   AuditOutcome,
-  BindOutcome,
   ContractId,
   ContractHistory,
   DeliverOutcome,
@@ -61,15 +57,6 @@ import type { ReconcileCompletion, RepoReconcileReport } from "../../library/rec
 import type { RegionRead, Section } from "../../kanshi/index.js";
 import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
 
-export {
-  CONTRACT_COMMAND_SPECS,
-  renderContractHelp,
-  renderContractUsage,
-  type ContractCommand,
-  type ContractCommandSpec,
-  type ContractFlagKind,
-} from "./contract-help.js";
-
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
 // ---------------------------------------------------------------------------
@@ -79,15 +66,6 @@ type ContractMutation = Extract<
   { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" | "audit" }
 >;
 type ExistingContractCommand = Exclude<ContractMutation, { command: "bind" }>;
-
-type ContractAnswer =
-  | BindOutcome
-  | AmendOutcome
-  | DeliverOutcome
-  | ReviewOutcome
-  | AuditOutcome
-  | ArcOutcome
-  | AbandonOutcome;
 
 type ExistingSeat = Readonly<{
   id: ContractId;
@@ -173,7 +151,7 @@ async function bindDraftReceipt(world: () => Promise<WorldRoot>, markdown: strin
 }
 
 function refusedInvocation(
-  answer: Extract<ContractAnswer, { kind: "refused" }>,
+  answer: Extract<ContractOutcome, { kind: "refused" }>,
   project?: (refusal: RenderableRefusal) => RenderableRefusal,
 ): Readonly<{ operation: string; contract?: ContractId; refusal: RenderableRefusal }> {
   const refusal: RenderableRefusal = project === undefined ? answer.refusal : project(answer.refusal);
@@ -191,12 +169,12 @@ function deliverRefusalProjection(refusal: RenderableRefusal): RenderableRefusal
   return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
 }
 
-function contractExitCode(answer: ContractAnswer): number {
+function contractExitCode(answer: ContractOutcome): number {
   return answer.kind === "refused" ? 1 : answer.kind === "retry" ? 2 : 0;
 }
 
 function renderContractAnswer(
-  answer: ContractAnswer,
+  answer: ContractOutcome,
   project: ((refusal: RenderableRefusal) => RenderableRefusal) | undefined,
   context: TextRenderContext,
 ): string {
@@ -213,7 +191,7 @@ function renderContractAnswer(
 }
 
 async function finishContractAnswer(
-  answer: ContractAnswer,
+  answer: ContractOutcome,
   output: "text" | "json",
   project?: (refusal: RenderableRefusal) => RenderableRefusal,
 ): Promise<number> {

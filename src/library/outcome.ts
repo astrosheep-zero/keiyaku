@@ -491,7 +491,6 @@ export type ProjectedOutcome<Operation extends ContractVerb, Value, Refusal> =
   | OperationOutcome<Operation, Value, Refusal>
   | (Operation extends "deliver" ? HandoffOutcome : never);
 export type ResetCounts = z.infer<typeof resetCountsSchema>;
-export type ResetValue = z.infer<typeof resetValueSchema>;
 export type ResetRefusal =
   | z.infer<typeof nukeConfirmationRefusalSchema>
   | z.infer<typeof nukeConfirmationRequiredRefusalSchema>;
@@ -504,16 +503,6 @@ type ResetProjection = Readonly<{ world: WorldRoot }> &
     | Readonly<{ kind: "refused"; refusal: ResetRefusal }>
     | Readonly<{ kind: "failed"; error: unknown }>
   );
-
-export type OperationEvidenceValues = Readonly<{
-  bind: z.infer<typeof bindEvidenceSchema>;
-  amend: z.infer<typeof amendEvidenceSchema>;
-  deliver: import("./delivery.js").DeliveryValue;
-  review: Review;
-  audit: AuditReport;
-  arc: Readonly<Record<string, never>>;
-  abandon: Readonly<Record<string, never>>;
-}>;
 
 type PartialContractEnvelope = z.infer<typeof partialContractEnvelopeSchema>;
 export type PartialOutcomeEnvelope = z.infer<typeof partialOutcomeEnvelopeSchema>;

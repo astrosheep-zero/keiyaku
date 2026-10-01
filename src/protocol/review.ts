@@ -15,13 +15,12 @@ import {
   type WorktreeWitness,
 } from "./run.js";
 import { dependencyKeySet } from "../core/subject.js";
-import { contractState } from "../core/facts/observation.js";
+import { contractState, type ActiveContractRefusal } from "../core/facts/observation.js";
 import type { AttestationData, ContractState, DeliverData } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
-import { decideAttestation, type AttestationInput, type AttestationRefusal } from "../core/verbs/attestation.js";
+import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
-import type { CompletionEvidence } from "./completion.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
 import type { AttemptDecision, MutationOperationInput, RepositoryScope } from "./operations.js";
@@ -34,7 +33,7 @@ type ReviewPreparationRefusal =
       contractId: import("../core/facts/types.js").ContractId;
     }>
   | import("../git/tender.js").DirtyWorkspaceRefusal;
-export type ReviewRefusal = AttestationRefusal | ReviewPreparationRefusal;
+export type ReviewRefusal = ActiveContractRefusal | ReviewPreparationRefusal;
 type ReviewOperationInput = MutationOperationInput &
   Readonly<{
     verdict: AttestationData["verdict"];
@@ -46,7 +45,6 @@ export const reviewWorkspaceEvidenceSchema = workspaceDirtyDeltaSchema
 export type ReviewWorkspaceEvidence = z.infer<typeof reviewWorkspaceEvidenceSchema>;
 export const reviewAdmissionValueSchema = z.object({ workspace: reviewWorkspaceEvidenceSchema.optional() }).strict();
 export type ReviewAdmissionValue = z.infer<typeof reviewAdmissionValueSchema>;
-export type ReviewValue = CompletionEvidence & ReviewAdmissionValue;
 
 type PreparedReview = Readonly<{
   workspace?: ReviewWorkspaceEvidence;

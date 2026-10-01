@@ -1,7 +1,7 @@
-import type { TaskBoard } from "./board.js";
+import { occupiedLocalIds, type TaskBoard } from "./board.js";
 import type { TaskCompositionResult } from "./mutation-result.js";
 import { serializeTaskDocument, type TaskDocument, type TaskPriority, type TaskState } from "./document.js";
-import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, sameNamespace, type TaskId } from "./identity.js";
+import { allocateLocalId, deriveLocalStem, formatTaskId, parseTaskId, type TaskId } from "./identity.js";
 import { parseTaskComposition, type Assignment, type ParsedComposition, type ParsedNode } from "./compose-parser.js";
 import { advanceTaskTimestamp, type TaskCompositionDiagnostic } from "./operations.js";
 
@@ -17,7 +17,7 @@ export function taskCompositionNamespaceHeader(markdown: string): Readonly<{
 }
 
 type PlannedComposition = Extract<TaskCompositionResult, { kind: "planned" }>;
-type AcceptedComposition = Extract<TaskCompositionResult, { kind: "accepted" }>;
+export type AcceptedComposition = Extract<TaskCompositionResult, { kind: "accepted" }>;
 export type TaskCompositionAlias = Readonly<AcceptedComposition["aliases"][number]>;
 export type TaskCompositionPlanAlias = Readonly<PlannedComposition["aliases"][number]>;
 export type TaskCompositionPlanOrder = Readonly<PlannedComposition["admissionOrder"][number]>;
@@ -53,15 +53,6 @@ function diagnostic(line: number, reason: string, token: string): TaskCompositio
   return { line, reason, token };
 }
 
-function occupied(board: TaskBoard, namespace: readonly string[]): Set<string> {
-  return new Set(
-    [...board.tasks.values()].flatMap((task) => {
-      const coordinate = parseTaskId(task.id);
-      return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
-    }),
-  );
-}
-
 function createdTask(id: TaskId, title: string, at: string, actor?: string): TaskDocument {
   return {
     id,
@@ -94,7 +85,7 @@ function allocateNodes(
   }>,
   diagnostics: TaskCompositionDiagnostic[],
 ): ReadonlyMap<number, TaskDocument> {
-  const ids = occupied(input.board, input.namespace);
+  const ids = occupiedLocalIds(input.board, input.namespace);
   const allocations = new Map<number, TaskDocument>();
   for (const node of input.parsed.nodes) {
     if (node.kind !== "new") continue;

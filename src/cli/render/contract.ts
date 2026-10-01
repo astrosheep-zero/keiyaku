@@ -44,7 +44,7 @@ const HANG = "  ";
 
 type Accepted<O> = Extract<O, { kind: "accepted" }>;
 
-type ContractOutcome =
+export type ContractOutcome =
   | BindOutcome
   | AmendOutcome
   | DeliverOutcome
