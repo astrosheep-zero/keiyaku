@@ -51,14 +51,19 @@ function fixture() {
     client: {
       session,
       event: {
-        async subscribe() {
+        // The adapter's port carries a cancellation signal; a native event
+        // stream honors it, so this fixture models an abortable pending read.
+        async subscribe(request: { signal: AbortSignal }) {
+          const cancelled = () =>
+            new Promise<void>((resolve) => {
+              if (request.signal.aborted) resolve();
+              else request.signal.addEventListener("abort", () => resolve(), { once: true });
+            });
           return {
             stream: (async function* () {
               for (;;) {
-                if (queued.length === 0)
-                  await new Promise<void>((resolve) => {
-                    wake = resolve;
-                  });
+                if (queued.length === 0) await Promise.race([cancelled(), new Promise<void>((r) => (wake = r))]);
+                if (request.signal.aborted) return;
                 while (queued.length > 0) yield queued.shift();
               }
             })(),

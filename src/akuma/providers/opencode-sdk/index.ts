@@ -8,6 +8,7 @@ import {
 } from "../../provider.js";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { ownEventStream, type OwnedEventStream } from "./event-stream.js";
 import { createEventState, mapEvent } from "./events.js";
 import {
   coordinate,
@@ -150,10 +151,6 @@ function scopedProperties(value: unknown, sessionId: string): Record<string, unk
   const properties = object(object(value)?.properties);
   return nativeSessionId(value) === sessionId ? properties : undefined;
 }
-function stopIterator(iterator: AsyncIterator<unknown> | undefined): void {
-  const stopped = iterator?.return?.(undefined);
-  void stopped?.catch(() => undefined);
-}
 type NativeProgress = Readonly<{ busy: boolean; terminal: boolean }>;
 function nativeProgress(type: unknown, properties: Record<string, unknown>, busy: boolean): NativeProgress {
   if (type === "session.idle") return { busy, terminal: busy };
@@ -229,7 +226,7 @@ function observeEvent(
 
 async function observeTurn(
   input: Readonly<{
-    iterator: AsyncIterator<unknown>;
+    stream: OwnedEventStream;
     session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
     sessionId: string;
     cwd: string;
@@ -244,7 +241,7 @@ async function observeTurn(
   let busy = false;
   try {
     for (;;) {
-      const next = await input.iterator.next();
+      const next = await input.stream.next();
       if (next.done) return { kind: "failed", diagnostic: "OpenCode event stream ended before Turn completion" };
       const observed = observeEvent({
         value: eventValue(next.value),
@@ -318,14 +315,33 @@ function terminalSettlement(
     let settlement: Promise<void> | undefined;
     finish = (result): Promise<void> => {
       settlement ??= (async () => {
-        events.end();
+        // Whole closure is proved before narration ends. The driver therefore
+        // stays inside its Heart/control observation race while retirement is
+        // outstanding, so a rejected or unprovable closure still reaches attempt
+        // custody's bounded hung handling instead of parking on a pending
+        // completion. Ending narration first would move that await outside the
+        // driver's race and make the Body unresponsive to stop or Heart loss.
         await close();
+        events.end();
         resolve(result);
       })();
       return settlement;
     };
   });
   return { completion, finish };
+}
+
+/**
+ * One memoized whole-close: stream retirement and existing server retirement
+ * start together on every terminal path, so a live socket can never outwait the
+ * server's death.
+ */
+function wholeClosure(retireStream: () => Promise<void>, closeServer: () => Promise<void>): () => Promise<void> {
+  let closing: Promise<void> | undefined;
+  return () => {
+    closing ??= Promise.all([retireStream(), closeServer()]).then(() => undefined);
+    return closing;
+  };
 }
 
 async function forceDisposeOpencode(
@@ -472,7 +488,16 @@ async function drive(
   const runtime = await loadDriveRuntime(execution, input, abortController.signal, loader, (ready) => {
     closeOnce = ownRuntime(custody, ready);
   });
-  let iterator: AsyncIterator<unknown> | undefined;
+  const stream = ownEventStream({
+    directory: input.cwd,
+    signal: abortController.signal,
+    ...(custody === undefined ? {} : { custody }),
+    subscribe: (request) => runtime.client.event.subscribe(request),
+  });
+  const wholeClose = wholeClosure(
+    () => stream.retire(),
+    () => closeOnce(),
+  );
   try {
     const { session, sessionId } = await openDriveSession(runtime, input, resumeSessionId, abortController.signal);
 
@@ -484,15 +509,11 @@ async function drive(
     const admission = liveAdmission(messageID);
     const submissionState = { started: false };
     events.emit({ type: "session", coordinate: coordinate(sessionId) });
-    const streamResult = await runtime.client.event.subscribe({ query: { directory: input.cwd } });
-    if (abortController.signal.aborted) {
-      await streamResult.stream[Symbol.asyncIterator]().return?.(undefined);
-      abortController.signal.throwIfAborted();
-    }
-    iterator = streamResult.stream[Symbol.asyncIterator]();
-    const { completion, finish } = terminalSettlement(events, closeOnce);
+    await stream.ready;
+    if (abortController.signal.aborted) abortController.signal.throwIfAborted();
+    const { completion, finish } = terminalSettlement(events, wholeClose);
     const observation = observeTurn({
-      iterator,
+      stream,
       session,
       sessionId,
       cwd: input.cwd,
@@ -510,7 +531,10 @@ async function drive(
       throwOnError: true,
     });
     abortController.signal.throwIfAborted();
-    void observation.then(finish);
+    // The observer never awaits its own completion: finishing retires the whole
+    // stream, but the observer that invoked finish stays outside that wait. Its
+    // rejection is owned by attempt custody, not by an unobserved promise.
+    void observation.then(finish).catch(() => undefined);
     return createLiveSession({
       session,
       sessionId,
@@ -521,13 +545,12 @@ async function drive(
       events,
       completion,
       abortController,
-      close: closeOnce,
+      close: wholeClose,
       finish,
     });
   } catch (error) {
     signal.removeEventListener("abort", abortSetup);
-    stopIterator(iterator);
-    await closeOnce();
+    await wholeClose();
     throw error;
   }
 }

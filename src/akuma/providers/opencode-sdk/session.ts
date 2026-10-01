@@ -11,7 +11,22 @@ export type OpencodeSdkSession = Pick<
   OpencodeClient["session"],
   "create" | "get" | "fork" | "abort" | "promptAsync" | "messages"
 >;
-export type OpencodeSdkEvent = Pick<OpencodeClient["event"], "subscribe">;
+/**
+ * The adapter's own event subscription port. It carries the cancellation signal
+ * and the cancellable retry backoff the installed client honors at runtime,
+ * without naming the SDK's generated request type at the call site.
+ */
+export type OpencodeEventSubscriptionRequest = Readonly<{
+  directory: string;
+  /** Cancels the subscription's fetch, reader, and retry waiting. */
+  signal: AbortSignal;
+  /** Resolves without rejecting when `signal` aborts, and always clears its timer. */
+  sleep(milliseconds: number): Promise<void>;
+}>;
+export type OpencodeEventSubscription = Readonly<{ stream: AsyncIterable<unknown> }>;
+export type OpencodeSdkEvent = Readonly<{
+  subscribe(request: OpencodeEventSubscriptionRequest): Promise<OpencodeEventSubscription>;
+}>;
 export type OpencodeSdkLoader = (
   cwd: string,
   execution: ProviderExecution,
@@ -25,6 +40,35 @@ export type OpencodeSdkLoader = (
 >;
 
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
+
+type OpencodeEventSubscribeOptions = NonNullable<Parameters<OpencodeClient["event"]["subscribe"]>[0]>;
+
+/**
+ * Adapt the installed client's generated event endpoint to the adapter's
+ * subscription port.
+ *
+ * The generated per-endpoint `Options` type omits the SDK's runtime
+ * `sseSleepFn` option even though the client forwards every per-request key
+ * into `createSseClient`, so a caller cannot express a cancellable backoff
+ * through the published type. Declaring the port here keeps that one typing gap
+ * and its single adaptation at the SDK seam: no other module repeats a cast,
+ * the SDK's own parser and retry policy stay untouched, and an injected loader
+ * supplies the same port shape.
+ */
+export function opencodeEventPort(event: OpencodeClient["event"]): OpencodeSdkEvent {
+  return {
+    subscribe: (request) => {
+      const adapted: OpencodeEventSubscribeOptions = {
+        query: { directory: request.directory },
+        signal: request.signal,
+      };
+      // Runtime-only key omitted from the generated Options type; the installed
+      // client forwards it to createSseClient unchanged.
+      (adapted as { sseSleepFn?: (milliseconds: number) => Promise<void> }).sseSleepFn = request.sleep;
+      return event.subscribe(adapted);
+    },
+  };
+}
 
 export function messageId(sequence = 0): string {
   const timestamp = BigInt(new Date().getTime()) * 0x1000n + BigInt(sequence);
@@ -161,7 +205,7 @@ export async function loadOpencode(
   const client = createOpencodeClient({ baseUrl: `http://127.0.0.1:${port}`, directory: cwd });
   let closing: Promise<void> | undefined;
   const runtime = {
-    client,
+    client: { session: client.session, event: opencodeEventPort(client.event) },
     close: async () => {
       closing ??= owned.terminate();
       await closing;

@@ -31,6 +31,7 @@ export const LOCAL_TEST_FILES = [
   "tests/normalized-identity.test.ts",
   "tests/observation.test.ts",
   "tests/opencode-live-tell.test.ts",
+  "tests/opencode-sse-custody.test.ts",
   "tests/pi-extension.test.ts",
   "tests/product-boundaries.test.ts",
   "tests/region.test.ts",
