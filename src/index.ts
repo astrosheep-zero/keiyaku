@@ -213,8 +213,8 @@ export type {
   ContractWorkspaceObservation,
 } from "./protocol/read/status.js";
 export { SettingsError, settings } from "./settings.js";
+export type { Gate } from "./library/contract-types.js";
 export type {
-  Gate,
   Settings,
   SettingsEntry,
   SettingsInput,

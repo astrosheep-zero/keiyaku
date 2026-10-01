@@ -5,6 +5,9 @@ import type { Settings } from "../settings.js";
 import type { TaskId } from "../task/identity.js";
 import type { Repo } from "./repo.js";
 
+/** Public gate words remain ordinary strings; private policy interprets them. */
+export type Gate = string;
+
 export type ContractHistoryEvent =
   | Readonly<{ source: "journal"; fact: JournalEntry }>
   | Readonly<{ source: "dispatch"; dispatch: Dispatch }>;

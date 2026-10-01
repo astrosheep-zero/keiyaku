@@ -52,7 +52,7 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
   writeFileSync(
     join(directory, "native-owner-types.ts"),
     `
-import type { Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
+import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
   ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
   NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "@astrosheep/keiyaku";
 declare const fact: Fact;
@@ -60,6 +60,10 @@ declare const error: KeiyakuError;
 declare const row: ContractRow;
 declare const repair: ReconcileCompletion;
 declare const reset: NukeResult;
+// Gate remains an ordinary string, not a brand or a closed vocabulary.
+const customGate: Gate = "security-audited";
+const arbitraryGate: Gate = "validated only when consumed";
+const word: string = customGate;
 const kind: FactKind = fact.kind;
 const category: KeiyakuErrorCategory = error.category;
 const gates: readonly ContractGateCurrent[] = row.gates.reports.map(report => report.current);
@@ -69,7 +73,7 @@ if (reset.kind === "refused") {
   const refused: NukeConfirmationRefusal | NukeConfirmationRequiredRefusal = reset.refusal;
   void refused.world;
 }
-void [kind, category, gates, dependents, actions];
+void [word, arbitraryGate, kind, category, gates, dependents, actions];
 `,
   );
   examples.push("native-owner-types.ts");

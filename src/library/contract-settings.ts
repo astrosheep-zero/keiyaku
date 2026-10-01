@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { gate, gateWord, type ActorId, type Gate } from "../core/facts/types.js";
 import { EMPTY_WORKTREE_HOOKS, worktreeHooksFrom, type WorktreeHooks } from "../git/hooks.js";
-import { SettingsError, gatesFrom, requireBranchesToBeUpToDateFrom, type Settings } from "../settings.js";
+import { SettingsError, type Settings } from "../settings.js";
 import type { LocalContractComposition } from "./contract-types.js";
 import { actorOption, requireInput } from "./input.js";
 import { KeiyakuError } from "./outcome.js";
@@ -35,7 +35,19 @@ export function derivedHooks(composition: LocalContractCompositionCapture): Work
 function derivedFreshness(composition: LocalContractCompositionCapture): boolean {
   if (composition.settings === undefined) return false;
   try {
-    return requireBranchesToBeUpToDateFrom({ settings: composition.settings });
+    const view = composition.settings.namespace("git");
+    if (view.kind === "failed") namespaceFailure(view);
+    for (const entry of view.entries) {
+      if (entry.name !== "requireBranchesToBeUpToDate") {
+        throw new SettingsError(`git has unknown entry: ${entry.name}`);
+      }
+    }
+    const selected = view.entries.find((entry) => entry.name === "requireBranchesToBeUpToDate");
+    if (selected === undefined) return false;
+    if (typeof selected.value !== "boolean") {
+      throw new SettingsError("git.requireBranchesToBeUpToDate must be a boolean");
+    }
+    return selected.value;
   } catch (error) {
     return settingsScopedFailure(error);
   }
@@ -58,38 +70,69 @@ export function gateNames(value: unknown): readonly string[] | undefined {
   });
 }
 
-/** An explicit empty selection needs no bundle lookup; omitted names select the configured default. */
+function namespaceFailure(view: Extract<ReturnType<Settings["namespace"]>, { kind: "failed" }>): never {
+  throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+}
+
+function gateValue(value: unknown, message: string, configured: boolean): Gate {
+  if (!gateWord(value)) {
+    if (configured) throw new SettingsError(message);
+    throw new KeiyakuError("invalid-input", message, { cause: new TypeError(message) });
+  }
+  return gate(value);
+}
+
+function bundleGates(name: string, value: unknown): readonly Gate[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new SettingsError(`gate bundle '${name}' must be an object`);
+  }
+  const bundle = value as Record<string, unknown>;
+  if (bundle.kind !== "bundle") {
+    throw new SettingsError(`gate bundle '${name}' has unsupported kind: ${String(bundle.kind)}`);
+  }
+  for (const field of Object.keys(bundle)) {
+    if (field !== "kind" && field !== "gates") {
+      throw new SettingsError(`gate bundle '${name}' has unknown field: ${field}`);
+    }
+  }
+  if (!Array.isArray(bundle.gates)) throw new SettingsError(`gate bundle '${name}'.gates must be an array`);
+  return bundle.gates.map((value) => gateValue(value, `gate bundle '${name}' contains an invalid gate word`, true));
+}
+
+/** Bare words and configured bundles share validation, first-seen accumulation, and freezing. */
 export function derivedGates(
   composition: LocalContractCompositionCapture,
   names: readonly string[] | undefined,
 ): readonly Gate[] {
-  if (names !== undefined && names.length === 0) return Object.freeze([]);
-  if (composition.settings === undefined) return literalGates(names);
+  const settings = composition.settings;
+  const configured = settings !== undefined;
   try {
-    return (
-      names === undefined
-        ? gatesFrom({ settings: composition.settings })
-        : gatesFrom({ settings: composition.settings, names })
-    ) as readonly Gate[];
+    const selected = (names ?? (configured ? ["default"] : [])).map((name, index) =>
+      gateValue(
+        name,
+        configured
+          ? "gate or bundle name must match ^[a-z][a-z0-9-]{0,63}$"
+          : `gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`,
+        configured,
+      ),
+    );
+    // Explicit empty selection never looks up a namespace.
+    if (selected.length === 0) return Object.freeze([]);
+    const view = settings?.namespace("gates");
+    if (view?.kind === "failed") namespaceFailure(view);
+    const expanded = new Set<Gate>();
+    for (const name of selected) {
+      const entry = view?.entries.find((entry) => entry.name === name);
+      const gates =
+        entry === undefined
+          ? [configured && names === undefined ? gate("reviewed") : name]
+          : bundleGates(name, entry.value);
+      for (const value of gates) expanded.add(value);
+    }
+    return Object.freeze([...expanded]);
   } catch (error) {
     return settingsScopedFailure(error);
   }
-}
-
-function literalGates(names: readonly string[] | undefined): readonly Gate[] {
-  if (names === undefined) return Object.freeze([]);
-  const selected: Gate[] = [];
-  const seen = new Set<string>();
-  for (const [index, name] of names.entries()) {
-    if (!gateWord(name)) {
-      const message = `gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`;
-      throw new KeiyakuError("invalid-input", message, { cause: new TypeError(message) });
-    }
-    if (seen.has(name)) continue;
-    seen.add(name);
-    selected.push(gate(name));
-  }
-  return Object.freeze(selected);
 }
 
 export function captureLocalContractComposition(input?: LocalContractComposition): LocalContractCompositionCapture {
