@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, basename } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -89,6 +90,7 @@ test("delivery prepares clean candidate scratch without importing worktree symli
       assert.ok(scratch);
       assert.notEqual(scratch, source);
       assert.equal(existsSync(scratch), false);
+      assert.equal(existsSync(join(tmpdir(), `.${basename(scratch)}.owner.sqlite`)), false);
       assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), false);
       assert.equal(readFileSync(cleanupLog, "utf8"), `${scratch}\n`);
       assert.deepEqual(

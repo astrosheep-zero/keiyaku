@@ -53,7 +53,8 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   const cache = mkdtempSync(join(tmpdir(), "keiyaku-npm-cache-"));
   const repository = mkdtempSync(join(tmpdir(), "keiyaku-e2e-repo-"));
 
-  npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], root);
+  try {
+    npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], root);
   const archives = readdirSync(packed).filter((name) => name.endsWith(".tgz"));
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
   const packageArchive = join(packed, archives[0]!);
@@ -204,6 +205,12 @@ test("published package installs one keiyaku CLI and runs against a real reposit
       ]),
     /Cannot find package/u,
   );
+  } finally {
+    rmSync(packed, { recursive: true, force: true });
+    rmSync(installed, { recursive: true, force: true });
+    rmSync(cache, { recursive: true, force: true });
+    rmSync(repository, { recursive: true, force: true });
+  }
 });
 
 test("packaging refuses a missing or corrupt Windows launcher artifact", () => {

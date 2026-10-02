@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 
@@ -38,16 +38,20 @@ function runLauncher(zig: string, platform = "darwin"): { status: number | null;
       pathToFileURL(script).href,
     )});`,
   ];
-  const result = spawnSync(process.execPath, args, {
-    cwd: root,
-    encoding: "utf8",
-    env: environment,
-  });
-  return {
-    status: result.status,
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
+  try {
+    const result = spawnSync(process.execPath, args, {
+      cwd: root,
+      encoding: "utf8",
+      env: environment,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } finally {
+    rmSync(dirname(zig), { recursive: true, force: true });
+  }
 }
 
 test("missing Zig skips only the Windows launcher on non-Windows hosts", () => {

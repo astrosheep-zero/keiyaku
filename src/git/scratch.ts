@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { access, realpath } from "node:fs/promises";
+import { access, realpath, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -22,6 +22,7 @@ export type MaterializedScratchCandidate = Readonly<{
 
 type CollectableScratchWorktree = Readonly<{
   path: string;
+  lockPath: string;
   release(): void;
 }>;
 
@@ -44,13 +45,19 @@ function ownershipLockPath(path: string): string | null {
   return match === null ? null : join(SCRATCH_ROOT, `.${SCRATCH_PREFIX}${match[1]}.owner.sqlite`);
 }
 
+async function removeOwnershipLock(lockPath: string): Promise<void> {
+  await unlink(lockPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+}
+
 async function collectableScratchWorktrees(paths: Iterable<string>): Promise<readonly CollectableScratchWorktree[]> {
   const collectable: CollectableScratchWorktree[] = [];
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);
     if (lockPath === null) continue;
     const lock = await tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
-    if (lock !== null) collectable.push({ path, release: () => lock.close() });
+    if (lock !== null) collectable.push({ path, lockPath, release: () => lock.close() });
   }
   return collectable;
 }
@@ -68,16 +75,19 @@ export async function removeCollectableScratchWorktrees(
 ): Promise<readonly CollectableScratchRemoval[]> {
   const removals: CollectableScratchRemoval[] = [];
   for (const scratch of await collectableScratchWorktrees(paths)) {
+    let removed = false;
     try {
       if (!(await pathExists(scratch.path))) {
         await runGit(repository, ["worktree", "remove", scratch.path]);
         paths.delete(scratch.path);
+        removed = true;
         removals.push({ path: scratch.path, action: "removed", retained: false });
         continue;
       }
       try {
         await runGit(repository, ["worktree", "remove", "--force", scratch.path]);
         paths.delete(scratch.path);
+        removed = true;
         removals.push({ path: scratch.path, action: "removed", retained: false });
       } catch (error) {
         removals.push({
@@ -89,6 +99,7 @@ export async function removeCollectableScratchWorktrees(
       }
     } finally {
       scratch.release();
+      if (removed) await removeOwnershipLock(scratch.lockPath);
     }
   }
   return removals;
@@ -111,6 +122,7 @@ export async function materializeScratchCandidate(
     await runGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
   } catch (error) {
     ownership.close();
+    await removeOwnershipLock(lockPath);
     throw error;
   }
   let disposed = false;
@@ -119,17 +131,19 @@ export async function materializeScratchCandidate(
     dispose: async () => {
       if (disposed) return null;
       disposed = true;
+      let leak: WorktreeLeak | null = null;
       try {
         await runGit({ ...repository, signal: AbortSignal.timeout(5_000) }, ["worktree", "remove", "--force", cwd]);
-        return null;
       } catch (error) {
-        return {
+        leak = {
           path: cwd,
           diagnostic: error instanceof Error ? error.message : String(error),
         };
       } finally {
         ownership.close();
+        if (leak === null) await removeOwnershipLock(lockPath);
       }
+      return leak;
     },
   };
 }

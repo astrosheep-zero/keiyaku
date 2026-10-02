@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { resolveCliCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
@@ -15,8 +15,16 @@ function parseArgv(argv: readonly string[]): ParsedCommandInvocation {
   return parsed;
 }
 
+const temporaryRoots: string[] = [];
+
+after(() => {
+  for (const root of temporaryRoots) rmSync(root, { recursive: true, force: true });
+});
+
 function temporary(): string {
-  return mkdtempSync(join(tmpdir(), "keiyaku-world-"));
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-world-"));
+  temporaryRoots.push(root);
+  return root;
 }
 
 test("CLI coordinates retain explicit versus ambient cwd statedness", async () => {
