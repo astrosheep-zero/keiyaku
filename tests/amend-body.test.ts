@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { applyAmendDocument, prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
 import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
-import { makeGitRepository, withGitShim } from "./support/git.js";
+import { makeGitRepository } from "./support/git.js";
 
 const body: ContractBodyValue = {
   title: "Current",
@@ -259,25 +260,28 @@ test("prepared amendments refuse duplicates before application and preserve unto
 test("duplicate amendments retain their native input cause before Git observation", async () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const log = `${repository.path}/git-observations`;
-  await withGitShim(
-    'echo observed >> "$KEIYAKU_GIT_LOG"\nexec "$KEIYAKU_REAL_GIT" "$@"',
-    { KEIYAKU_GIT_LOG: log },
-    async (gitPath) => {
-      const repo = await Repo.at({ path: repository.path, gitPath });
-      const before = readFileSync(log, "utf8");
-      const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
-      await assert.rejects(
-        () => contract.amend({ markdown: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
-        (error: unknown) => {
-          assert.ok(error instanceof KeiyakuError);
-          assert.equal(error.category, "invalid-input");
-          assert.ok(error.cause instanceof TypeError);
-          assert.equal(error.cause.message, "duplicate amend operation 'Append:Context'");
-          return true;
-        },
-      );
-      assert.equal(readFileSync(log, "utf8"), before);
-    },
-  );
+  const log = join(repository.path, "git-observations");
+  const previousTrace = process.env.GIT_TRACE;
+  // Git's own trace works with the native executable on every platform, unlike a POSIX shell shim.
+  process.env.GIT_TRACE = log;
+  try {
+    const repo = await Repo.at({ path: repository.path });
+    const before = readFileSync(log, "utf8");
+    assert.match(before, /worktree list/u, "repository discovery proves Git observation tracing is active");
+    const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
+    await assert.rejects(
+      () => contract.amend({ markdown: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
+      (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "invalid-input");
+        assert.ok(error.cause instanceof TypeError);
+        assert.equal(error.cause.message, "duplicate amend operation 'Append:Context'");
+        return true;
+      },
+    );
+    assert.equal(readFileSync(log, "utf8"), before, "invalid amendment input performs no Git observation");
+  } finally {
+    if (previousTrace === undefined) delete process.env.GIT_TRACE;
+    else process.env.GIT_TRACE = previousTrace;
+  }
 });

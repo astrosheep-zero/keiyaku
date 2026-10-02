@@ -68,7 +68,7 @@ async function repositoryFixture() {
   return { raw, repo: await Repo.at({ path: raw.path }), git: await repositoryAt(raw.path) };
 }
 
-async function directArchetypeSettings(root: string) {
+async function directArchetypeSettings(root: string, answerReleasePath?: string) {
   const home = join(root, ".direct-settings");
   const executable = join(root, "fake-codex");
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
@@ -87,6 +87,8 @@ async function directArchetypeSettings(root: string) {
     [
       "#!/usr/bin/env node",
       "const readline = require('node:readline');",
+      "const { existsSync } = require('node:fs');",
+      `const answerReleasePath = ${JSON.stringify(answerReleasePath ?? null)};`,
       "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
       "const reply = (message, result) => send({ id: message.id, result });",
       "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
@@ -97,8 +99,16 @@ async function directArchetypeSettings(root: string) {
       "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
       "  if (message.method !== 'turn/start') return;",
       "  reply(message, { turn: { id: 'turn-1' } });",
-      "  send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: '{\"ok\":true}' } } });",
-      "  send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
+      "  const answer = () => {",
+      "    send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: '{\"ok\":true}' } } });",
+      "    send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
+      "  };",
+      "  if (answerReleasePath === null || existsSync(answerReleasePath)) return answer();",
+      "  const timer = setInterval(() => {",
+      "    if (!existsSync(answerReleasePath)) return;",
+      "    clearInterval(timer);",
+      "    answer();",
+      "  }, 5);",
       "});",
     ].join("\n"),
   );
@@ -107,10 +117,18 @@ async function directArchetypeSettings(root: string) {
   return { home, value, placement: { home, settings: value } };
 }
 
-async function directCallFixture() {
+async function directCallFixture(options: Readonly<{ holdAnswer?: boolean }> = {}) {
   const { raw } = await repositoryFixture();
   const world = await World.at(raw.path);
-  return { raw, world, configured: await directArchetypeSettings(world) };
+  const answerReleasePath = options.holdAnswer === true ? join(raw.path, "answer-release") : undefined;
+  return {
+    raw,
+    world,
+    configured: await directArchetypeSettings(world, answerReleasePath),
+    releaseAnswer() {
+      if (answerReleasePath !== undefined) writeFileSync(answerReleasePath, "release\n");
+    },
+  };
 }
 
 function okSchema() {
@@ -347,7 +365,10 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
 });
 
 test("local schema Akumas.call starts its zero observation budget after birth", async (t) => {
-  const { raw, world, configured } = await directCallFixture();
+  // An already-answered Tell legitimately wins at the deadline edge. Hold the
+  // provider answer until the zero-budget observation has returned instead of
+  // racing a real child process against the first observation.
+  const { raw, world, configured, releaseAnswer } = await directCallFixture({ holdAnswer: true });
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
@@ -392,13 +413,19 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
       assert.deepEqual(result.observation.observation, { reason: "deadline" });
       assert.equal(result.observation.tell.row.text, "zero-budget-after-birth");
     }
+    releaseAnswer();
+    assert.equal((await PublicAkuma.select(world, result.akuma).idle({ timeoutMs: 15_000 })).reason, "completed");
     const history = await PublicAkuma.select(world, result.akuma).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
     assert.equal(tells[0]?.kind === "tell" ? tells[0].text : undefined, "zero-budget-after-birth");
+    const outcome = history.rows.find((row) => row.kind === "outcome")?.outcome;
+    assert.equal(outcome?.kind, "answered");
+    if (outcome?.kind === "answered") assert.equal(outcome.answer, '{"ok":true}');
     operationFailed = false;
   } finally {
     try {
+      releaseAnswer();
       if (akumaId !== undefined)
         await PublicAkuma.select(world, akumaId)
           .kill()
@@ -523,7 +550,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
 });
 
 test("forwarded schema Akumas.call admits its initial Tell after held birth before a zero-budget deadline", async () => {
-  const { raw, world, configured } = await directCallFixture();
+  const { raw, world, configured, releaseAnswer } = await directCallFixture({ holdAnswer: true });
   const schema = okSchema();
   const slow = slowEmptyPublicationBody();
   const wake = trackedWakeLaunches();
@@ -551,9 +578,15 @@ test("forwarded schema Akumas.call admits its initial Tell after held birth befo
       assert.deepEqual(result.observation.observation, { reason: "deadline" });
       assert.equal(result.observation.tell.row.text, "forwarded-deadline-after-birth");
     }
+    releaseAnswer();
+    assert.equal((await PublicAkuma.select(world, result.akuma).idle({ timeoutMs: 15_000 })).reason, "completed");
     const history = await PublicAkuma.select(world, result.akuma).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 1);
+    const outcome = history.rows.find((row) => row.kind === "outcome")?.outcome;
+    assert.equal(outcome?.kind, "answered");
+    if (outcome?.kind === "answered") assert.equal(outcome.answer, '{"ok":true}');
   } finally {
+    releaseAnswer();
     const failures: unknown[] = [];
     let closure: Readonly<{ launched: number; closed: number }> | undefined;
     try {

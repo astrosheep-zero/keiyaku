@@ -146,7 +146,7 @@ async function answered(root: string, archetype: string, suffix: string) {
 }
 
 
-test("facade ask admits, decodes, and addresses an alias through the World-bound face", async (t) => {
+test("facade ask admits, decodes, and addresses an alias through the World-bound face", { timeout: 15_000 }, async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-ask-");
   const source = await bornWorld(root, "00000009");
   await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akuId: source.allocated.id });
@@ -159,7 +159,9 @@ test("facade ask admits, decodes, and addresses an alias through the World-bound
     ),
   );
   try {
-    const result = await Akumas.of(root).ask({ akuma: "@worker", body: "continue", timeoutMs: 1_000, schema });
+    // This is an answer/admission test, not a deadline test. Let the test runner
+    // bound and cancel a hang without racing loaded CI against a one-second observation.
+    const result = await Akumas.of(root).ask({ akuma: "@worker", body: "continue", signal: t.signal, schema });
     assert.equal(result.akuma, source.allocated.id);
     assert.equal(result.tell.row.text, "continue");
     assert.deepEqual(result.observation, { reason: "answered", answer: { ok: true } });

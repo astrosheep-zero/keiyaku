@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { captureOutput, runCli as runCliInProcess } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
@@ -72,7 +72,9 @@ test("task query defaults to active rows and opts into terminal rows", () => {
 test("a closed stdout pipe during a blocked large write exits silently", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-pipe-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
-  const added = runCli(root, ["task", "add", "Title", "--body", "x".repeat(500_000), "--json"]);
+  // Keep the output large enough to block the pipe without exceeding the OS's
+  // per-argument limit while creating the fixture.
+  const added = runCli(root, ["task", "add", "-", "--json"], `---\ntitle: Title\n---\n\n${"x".repeat(500_000)}`);
   assert.equal(added.status, 0, added.stderr ?? added.error?.message);
   const id = JSON.parse(added.stdout).value.id as string;
   const child = spawn(process.execPath, [builtCli(), "task", "show", id, "--json"], {
@@ -380,8 +382,11 @@ test("arc help gives the complete chapter grammar and the shipped source avoids 
   assert.match(help.stdout, /one nonblank H1|nonblank H1/u);
   assert.match(help.stdout, /freeform body, optional/u);
   const source = fileURLToPath(new URL("../src", import.meta.url));
-  const scan = spawnSync("rg", ["-ni", "arc admitted", source], { encoding: "utf8" });
-  assert.equal(scan.status, 1, scan.stdout || scan.stderr);
+  const matches = readdirSync(source, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .filter((path) => /arc admitted/iu.test(readFileSync(path, "utf8")));
+  assert.deepEqual(matches, []);
 });
 
 test("malformed arc document is a substantive refusal with the full grammar", () => {
