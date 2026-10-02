@@ -359,12 +359,14 @@ describe("dirty target checkout placement", () => {
     const reviewed = (await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])).value;
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
     if (reviewed.kind !== "accepted") throw new Error("review was refused");
-    const text = renderAccepted(reviewed, { columns: 100, color: false });
+    const text = renderAccepted(reviewed, { columns: repository.path.length + 100, color: false });
     assert.match(text, /^✓ review satisfied  /mu);
     assert.match(text, /^✓ accepted$/mu);
     assert.match(text, /^  worktree  .+ retired$/mu);
     assert.doesNotMatch(text, /target-checkout-retained/u);
-    const lines = text.split("\n");
+    assert.ok(text.split("\n").includes(`! lag  checkout behind  ${repository.path}  · refs/heads/main`), text);
+    // Force wrapping independently of the host's temporary-directory length.
+    const lines = renderAccepted(reviewed, { columns: 25, color: false }).split("\n");
     const lagStart = lines.indexOf("! lag  checkout behind");
     assert.notEqual(lagStart, -1, text);
     assert.deepEqual(lines.slice(lagStart, lagStart + 3), [
@@ -377,7 +379,7 @@ describe("dirty target checkout placement", () => {
 
     repository.run(["-C", repository.path, "checkout", "--", "target.txt"]);
     const reconciled = (await cliJsonAt<ReconcileCompletion | RepoReconcileReport>(repository.path, ["reconcile"])).value;
-    const reconcileLines = renderReconcile(reconciled).split("\n");
+    const reconcileLines = renderReconcile(reconciled, { columns: 40, color: false }).split("\n");
     const recoveredStart = reconcileLines.indexOf("  effect  target-checkout  recovered");
     assert.notEqual(recoveredStart, -1, renderReconcile(reconciled));
     assert.equal(reconcileLines[recoveredStart + 1], `  ${repository.path}`);

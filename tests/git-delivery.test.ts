@@ -532,7 +532,13 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["worktree", "remove", path]);
     mkdirSync(path, { recursive: true });
     repository.run(["-C", path, "init", "--quiet"]);
-    repository.run(["-C", path, "commit", "--allow-empty", "--quiet", "-m", "foreign"]);
+    // This foreign repository does not inherit the parent fixture's local identity.
+    repository.run([
+      "-C", path,
+      "-c", "user.name=Keiyaku Test",
+      "-c", "user.email=keiyaku-test@example.invalid",
+      "commit", "--allow-empty", "--quiet", "-m", "foreign",
+    ]);
 
     assert.deepEqual(await prepareReview(git, preparationCoordinates(state)), {
       kind: "refused",
