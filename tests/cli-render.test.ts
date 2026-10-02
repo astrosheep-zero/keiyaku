@@ -3640,7 +3640,7 @@ test("an unfinished wait concludes with the running mark and waited duration, ne
   };
   assert.equal(
     stream.conclude(conclusion),
-    `18:00 ? say    “still working”\n${clockAt(46_000)} ● running — waited 45s`,
+    `${clockAt(Date.parse(AKUMA_ACTIVITY_AT))} ? say    “still working”\n${clockAt(46_000)} ● running — waited 45s`,
   );
 });
 
@@ -3785,7 +3785,7 @@ test("conclusion durations assert real waiting", () => {
   now = 46_000;
   assert.equal(
     unfinished.conclude({ reason: "deadline", observations: [observation(open)], unobserved: [] }),
-    `18:00 ? say    “working”\n${clockAt(46_000)} ● running — waited 45s`,
+    `${clockAt(settledAtMs)} ? say    “working”\n${clockAt(46_000)} ● running — waited 45s`,
   );
 
   // The observing call shares the rule: a call already answered at its first look names no duration.

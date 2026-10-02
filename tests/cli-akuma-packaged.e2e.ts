@@ -2,6 +2,7 @@ import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -237,7 +238,10 @@ test("packaged prompt-free call births without admitting a Tell", { timeout: 120
     const born = await runPackagedCli(["-C", world, "call", "worker"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
     assert.match(born.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu, "the final receipt exposes the born identity");
-    assert.ok(born.stdout.split("\n").includes(`└─ ${world}`), "the identity tree branch carries the execution cwd");
+    assert.ok(
+      born.stdout.split("\n").includes(`└─ ${await realpath(world)}`),
+      `the identity tree branch carries the canonical execution cwd:\n${born.stdout}`,
+    );
     assert.equal(born.stderr, "", "prompt-free birth has no progress or Tell output");
     assert.doesNotMatch(born.stdout, /tell/u, "prompt-free birth admits no Tell");
   } finally {
@@ -296,7 +300,17 @@ test("packaged observing calls stream one framed session and one conclusion per 
     assert.equal(answered.code, 0, answered.stderr);
     assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
     assert.match(answered.stderr, /✓ answered — \d+s/u);
-    assert.doesNotMatch(answered.stderr, /the answer/u, "the stream never replays the settled answer");
+    // The final narration may be observed while its Turn is still open. Closing must account for
+    // that in-flight row with `?`, even when the later Heart projection folds it into the answer.
+    const answerNarration = answered.stderr.split("\n").filter((line) => line.includes("the answer"));
+    assert.ok(answerNarration.length <= 1, `the stream never repeats answer narration:\n${answered.stderr}`);
+    for (const row of answerNarration)
+      assert.match(
+        row,
+        /^(?:\d{2}:\d{2}| {5}) \? say +“the answer”$/u,
+        "only unresolved narration may contain answer text",
+      );
+    assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");
     const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
     assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
     const tell = await runPackagedCli(["-C", world, "ask", finisherId!, "--wait", "20s", "continue"], {
@@ -452,7 +466,7 @@ test("packaged plural waits attribute activity and close every target", { timeou
  * tool never streams during observation, so its unresolved `? run $ hold` row can only appear through
  * the close flush.
  */
-test("packaged wait interrupted mid-observation closes unresolved and fabricates nothing", { timeout: 120_000 }, async () => {
+test(`packaged wait interrupted mid-observation closes unresolved and fabricates nothing (${process.platform === "win32" ? "IPC signal event" : "native SIGINT"})`, { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
@@ -498,11 +512,31 @@ function runPackagedCliInterrupted(
   ready: (stderr: string) => boolean,
   interrupt: NodeJS.Signals,
 ): Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null; stdout: string; stderr: string }>> {
-  const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", packagedCli, ...args], {
-    cwd: input.cwd,
-    env: input.env ?? process.env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  // On Windows child.kill("SIGINT") terminates unconditionally; it never delivers a console
+  // interrupt to Node's listener. Relay the event over IPC so the real packaged cancellation
+  // handler is exercised there, retaining native OS signal delivery on POSIX.
+  const relayInterrupt = process.platform === "win32";
+  const signalRelay = `data:text/javascript,${encodeURIComponent(
+    [
+      'process.once("message", (signal) => { process.emit(signal); process.disconnect(); });',
+      "process.channel.unref();",
+    ].join("\n"),
+  )}`;
+  const child = spawn(
+    process.execPath,
+    [
+      "--disable-warning=ExperimentalWarning",
+      ...(relayInterrupt ? ["--import", signalRelay] : []),
+      packagedCli,
+      ...args,
+    ],
+    {
+      cwd: input.cwd,
+      env: input.env ?? process.env,
+      stdio: relayInterrupt ? ["pipe", "pipe", "pipe", "ipc"] : ["pipe", "pipe", "pipe"],
+    },
+  );
+  assert.ok(child.stdin && child.stdout && child.stderr, "the observing CLI has three piped streams");
   let stdout = "";
   let stderr = "";
   child.stdout.on("data", (chunk: Buffer | string) => {
@@ -555,7 +589,11 @@ function runPackagedCliInterrupted(
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    child.kill(interrupt);
+    if (relayInterrupt) {
+      await new Promise<void>((resolve, reject) => {
+        child.send(interrupt, (error) => (error === null ? resolve() : reject(error)));
+      });
+    } else child.kill(interrupt);
     const { code, signalCode } = await closeWithin(30_000);
     return { code, signalCode, stdout, stderr };
   })();
