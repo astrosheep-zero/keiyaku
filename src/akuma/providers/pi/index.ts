@@ -1,11 +1,12 @@
 import type {
-  createAgentSession,
+  createAgentSessionFromServices,
+  createAgentSessionServices,
   createBashToolDefinition,
-  DefaultResourceLoader,
   getAgentDir,
-  ModelRuntime,
   SessionManager,
   CreateAgentSessionOptions,
+  CreateAgentSessionFromServicesOptions,
+  AgentSessionServices,
 } from "@earendil-works/pi-coding-agent";
 
 /* eslint-disable max-lines-per-function -- Native Pi setup and disposal share one custody boundary. */
@@ -25,11 +26,10 @@ import {
 import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
 export type PiSdk = Readonly<{
-  createAgentSession(options?: CreateAgentSessionOptions): ReturnType<typeof createAgentSession>;
+  createAgentSessionFromServices: typeof createAgentSessionFromServices;
+  createAgentSessionServices: typeof createAgentSessionServices;
   createBashToolDefinition: typeof createBashToolDefinition;
-  DefaultResourceLoader: typeof DefaultResourceLoader;
   getAgentDir: typeof getAgentDir;
-  ModelRuntime: typeof ModelRuntime;
   SessionManager: typeof SessionManager;
 }>;
 
@@ -56,26 +56,17 @@ function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["a
   };
 }
 
-async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateAgentSessionOptions> {
+function piCreateOptions(
+  sdk: PiSdk,
+  input: PiDriveInput,
+  services: AgentSessionServices,
+): CreateAgentSessionFromServicesOptions {
   let model: CreateAgentSessionOptions["model"];
-  let modelRuntime: Awaited<ReturnType<typeof ModelRuntime.create>> | undefined;
   if (input.options.model !== undefined) {
     const slash = input.options.model.indexOf("/");
-    modelRuntime = await sdk.ModelRuntime.create();
-    model = modelRuntime.getModel(input.options.model.slice(0, slash), input.options.model.slice(slash + 1));
+    model = services.modelRuntime.getModel(input.options.model.slice(0, slash), input.options.model.slice(slash + 1));
     if (model === undefined) throw new Error(`Pi model '${input.options.model}' is unavailable`);
   }
-  const resourceLoader =
-    input.options.systemPrompt === undefined
-      ? undefined
-      : new sdk.DefaultResourceLoader({
-          cwd: input.cwd,
-          agentDir: sdk.getAgentDir(),
-          ...(input.options.systemPromptMode === "append"
-            ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
-            : { systemPromptOverride: () => input.options.systemPrompt }),
-        });
-  await resourceLoader?.reload();
   const sessionManager =
     input.session.kind === "fresh"
       ? sdk.SessionManager.create(input.cwd)
@@ -96,10 +87,9 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
           }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
         ];
   return {
-    cwd: input.cwd,
+    services,
     sessionManager,
-    ...(model === undefined || modelRuntime === undefined ? {} : { model, modelRuntime }),
-    ...(resourceLoader === undefined ? {} : { resourceLoader }),
+    ...(model === undefined ? {} : { model }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
     ...(customTools === undefined ? {} : { customTools }),
   };
@@ -107,7 +97,7 @@ async function piCreateOptions(sdk: PiSdk, input: PiDriveInput): Promise<CreateA
 
 type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
-type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSession"]>>;
+type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSessionFromServices"]>>;
 type PiNativeSession = PiCreatedSession["session"];
 type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
 type PiDriveState = {
@@ -122,13 +112,31 @@ async function createPiSession(
   execution: ProviderExecution,
   input: PiDriveInput,
 ): Promise<PiCreatedSession> {
-  const setup = piCreateOptions(sdk, input).then(async (options) => {
-    if (execution.config !== undefined) {
-      throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
-    }
-    return await sdk.createAgentSession(options);
+  if (execution.config !== undefined) {
+    throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
+  }
+  const services = await sdk.createAgentSessionServices({
+    cwd: input.cwd,
+    agentDir: sdk.getAgentDir(),
+    modelRuntimeSignal: input.signal,
+    ...(input.options.systemPrompt === undefined
+      ? {}
+      : {
+          resourceLoaderOptions:
+            input.options.systemPromptMode === "append"
+              ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
+              : { systemPromptOverride: () => input.options.systemPrompt },
+        }),
   });
-  return await setup;
+  try {
+    input.signal?.throwIfAborted();
+    return await sdk.createAgentSessionFromServices(piCreateOptions(sdk, input, services));
+  } catch (error) {
+    // Before a session owns the extension runtime, failed selection/setup must
+    // retire registrations and event-bus subscriptions loaded by the services.
+    services.resourceLoader.getExtensions().runtime.invalidate();
+    throw error;
+  }
 }
 
 async function runPiPrompt(
@@ -328,11 +336,10 @@ async function forkPi(sdk: PiSdk, input: Parameters<NonNullable<ProviderAdapter[
 async function loadPiSdk(): Promise<PiSdk> {
   const sdk = await import("@earendil-works/pi-coding-agent");
   return {
-    createAgentSession: sdk.createAgentSession,
+    createAgentSessionFromServices: sdk.createAgentSessionFromServices,
+    createAgentSessionServices: sdk.createAgentSessionServices,
     createBashToolDefinition: sdk.createBashToolDefinition,
-    DefaultResourceLoader: sdk.DefaultResourceLoader,
     getAgentDir: sdk.getAgentDir,
-    ModelRuntime: sdk.ModelRuntime,
     SessionManager: sdk.SessionManager,
   };
 }
