@@ -1224,6 +1224,11 @@ type FakePiObservation = {
   branched?: string;
   aborted: number;
   disposed: number;
+  servicesCreated: number;
+  sessionsCreated: number;
+  invalidated: number;
+  modelLookups: string[];
+  services?: Record<string, unknown>;
   prompt?: string;
   steered: Record<string, unknown>[];
   emitNative(event: Record<string, unknown>): void;
@@ -1246,6 +1251,8 @@ function fakePiSdk(
     abortNeverSettles?: boolean;
     waitForRelease?: boolean;
     subscriptionFailure?: boolean;
+    missingModel?: boolean;
+    sessionCreationFailure?: boolean;
   } = {},
 ): { sdk: PiSdk; seen: FakePiObservation } {
   const nativeListeners = new Set<(event: Record<string, unknown>) => void>();
@@ -1257,6 +1264,10 @@ function fakePiSdk(
   const seen: FakePiObservation = {
     aborted: 0,
     disposed: 0,
+    servicesCreated: 0,
+    sessionsCreated: 0,
+    invalidated: 0,
+    modelLookups: [],
     steered: [],
     emitNative: (event) => {
       if (event.type === "agent_end") emitSession({ ...event, messages: [], willRetry: event.willRetry === true });
@@ -1319,12 +1330,6 @@ function fakePiSdk(
     },
   };
   emitSession = (event) => session.listener?.(event);
-  class ResourceLoader {
-    constructor(options?: Record<string, unknown>) {
-      if (options !== undefined) seen.loader = options;
-    }
-    async reload() {}
-  }
   return {
     seen,
     sdk: {
@@ -1334,13 +1339,28 @@ function fakePiSdk(
         seen.bash = { cwd, options, tool };
         return tool;
       },
-      createAgentSession: async (options) => {
-        seen.options = options as Record<string, unknown>;
+      createAgentSessionFromServices: async (options) => {
+        seen.sessionsCreated += 1;
+        if (input.sessionCreationFailure) throw new Error("Pi session creation failed");
+        seen.options = options as unknown as Record<string, unknown>;
         return { session } as never;
       },
-      DefaultResourceLoader: ResourceLoader as never,
+      createAgentSessionServices: async (options) => {
+        seen.servicesCreated += 1;
+        if (options.resourceLoaderOptions !== undefined) seen.loader = options.resourceLoaderOptions;
+        const services = {
+          modelRuntime: {
+            getModel: (provider: string, id: string) => {
+              seen.modelLookups.push(`${provider}/${id}`);
+              return input.missingModel ? undefined : { provider, id };
+            },
+          },
+          resourceLoader: { getExtensions: () => ({ runtime: { invalidate: () => { seen.invalidated += 1; } } }) },
+        };
+        seen.services = services;
+        return services as never;
+      },
       getAgentDir: () => "/agent",
-      ModelRuntime: { create: async () => ({ getModel: () => ({ id: "model" }) }) } as never,
       SessionManager: {
         create: () => manager,
         open: (path: string) => {
@@ -1755,6 +1775,66 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   });
   assert.equal(fake.seen.disposed, 1);
   await attempt.closed;
+});
+
+test("Pi resolves explicit virtual and physical models from one extension-aware service runtime", async () => {
+  for (const model of ["dot-router/dots-dot", "openrouter/vendor/model"]) {
+    const fake = fakePiSdk({
+      events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }],
+    });
+    const provider = createPiProvider(undefined, async () => fake.sdk);
+    const attempt = provider.start(freshInput("work", { options: { model, effort: "high" } }));
+    const drive = await attempt.result;
+    assert.equal((await drive.completion).kind, "answered");
+    await attempt.closed;
+    assert.equal(fake.seen.servicesCreated, 1);
+    assert.equal(fake.seen.sessionsCreated, 1);
+    assert.equal(fake.seen.options?.services, fake.seen.services);
+    assert.deepEqual(fake.seen.modelLookups, [model]);
+    assert.deepEqual(fake.seen.options?.model, {
+      provider: model.slice(0, model.indexOf("/")), id: model.slice(model.indexOf("/") + 1),
+    });
+    assert.equal(fake.seen.options?.thinkingLevel, "high");
+    assert.equal(fake.seen.disposed, 1);
+    assert.equal(fake.seen.invalidated, 0);
+  }
+});
+
+test("Pi leaves default model selection to its services and preserves prompt overrides", async () => {
+  for (const mode of ["append", "replace"] as const) {
+    const fake = fakePiSdk();
+    const provider = createPiProvider(undefined, async () => fake.sdk);
+    const attempt = provider.start(freshInput("work", {
+      options: { systemPrompt: "instructions", systemPromptMode: mode },
+    }));
+    await (await attempt.result).completion;
+    await attempt.closed;
+    assert.equal(fake.seen.options?.model, undefined);
+    assert.deepEqual(fake.seen.modelLookups, []);
+    assert.equal(fake.seen.servicesCreated, 1);
+    if (mode === "append") {
+      const append = fake.seen.loader?.appendSystemPromptOverride as (base: string[]) => string[];
+      assert.deepEqual(append(["base"]), ["base", "instructions"]);
+    } else {
+      const replace = fake.seen.loader?.systemPromptOverride as () => string;
+      assert.equal(replace(), "instructions");
+    }
+  }
+});
+
+test("Pi retires loaded services when selection or session construction fails before native ownership", async () => {
+  for (const missingModel of [true, false]) {
+    const fake = fakePiSdk({ missingModel, sessionCreationFailure: !missingModel });
+    const provider = createPiProvider(undefined, async () => fake.sdk);
+    const attempt = provider.start(freshInput("work", { options: { model: "dot-router/dots-dot" } }));
+    await assert.rejects(attempt.result, missingModel ? /Pi model .* is unavailable/u : /Pi session creation failed/u);
+    await attempt.closed;
+    assert.equal(fake.seen.servicesCreated, 1);
+    assert.equal(fake.seen.sessionsCreated, missingModel ? 0 : 1);
+    assert.equal(fake.seen.invalidated, 1);
+    assert.equal(fake.seen.prompt, undefined);
+    assert.equal(fake.seen.disposed, 0);
+  }
 });
 
 test("Pi live tells require exact native message evidence, not queue acknowledgement", async () => {

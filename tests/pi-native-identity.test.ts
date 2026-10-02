@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type { CreateAgentSessionOptions, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { CreateAgentSessionOptions, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { squareAssignedParticipantName } from "@astrosheep/square";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
@@ -45,15 +45,12 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
     options: () => captured,
     sdk: {
       createBashToolDefinition: (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition,
-      createAgentSession: async (options) => {
+      createAgentSessionFromServices: async (options) => {
         captured = options as unknown as Record<string, unknown>;
         return { session } as never;
       },
-      DefaultResourceLoader: class {
-        async reload() {}
-      } as never,
+      createAgentSessionServices: async () => ({}) as never,
       getAgentDir: () => "/agent",
-      ModelRuntime: { create: async () => ({ getModel: () => ({ id: "model" }) }) } as never,
       SessionManager: { create: () => manager, open: () => manager } as never,
     },
   };
@@ -93,7 +90,7 @@ async function withNativeRequestTool<T>(
   }
 }
 
-function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sessionId}.jsonl`): ExtensionContext {
+function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sessionId}.jsonl`): ExtensionToolContext {
   return {
     sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile },
   } as never;

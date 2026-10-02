@@ -867,11 +867,10 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       dispose() {},
     };
     const sdk = {
-      createAgentSession: async () => ({ session }),
+      createAgentSessionFromServices: async () => ({ session }),
+      createAgentSessionServices: async () => ({}),
       createBashToolDefinition: () => ({}),
-      DefaultResourceLoader: class { async reload() {} },
       getAgentDir: () => "/agent",
-      ModelRuntime: { create: async () => ({ getModel: () => undefined }) },
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
     const body = runAkumaBody(normalizeLaunch({
@@ -913,7 +912,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     let sessions = 0;
     const manager = { getLeafId: () => `pi-answer-${sessions}` };
     const sdk = {
-      createAgentSession: async () => {
+      createAgentSessionFromServices: async () => {
         sessions += 1;
         const first = sessions === 1;
         const session = {
@@ -941,9 +940,8 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
         return { session };
       },
       createBashToolDefinition: () => ({}),
-      DefaultResourceLoader: class { async reload() {} },
+      createAgentSessionServices: async () => ({}),
       getAgentDir: () => "/agent",
-      ModelRuntime: { create: async () => ({ getModel: () => undefined }) },
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
     const body = runAkumaBody(normalizeLaunch({
