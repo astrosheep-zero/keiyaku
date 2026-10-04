@@ -32,7 +32,6 @@ import {
   outcomeLines,
   receiptPayload,
   receiptRow,
-  reuseLines,
   stopLines,
   titleLines,
 } from "./receipt.js";
@@ -254,9 +253,6 @@ function acceptedRecord(
   const recoverySnapshot = effectRecoverySnapshot(result.effects);
   if (recoverySnapshot !== undefined)
     receiptRow(record, " ", "recovery snapshot", [{ text: recoverySnapshot, opaque: true }], columns);
-  if (result.operation === "deliver") {
-    pushBlock(record, reuseLines(result.value.verificationReuse, columns));
-  }
   return record;
 }
 
@@ -544,6 +540,7 @@ function deliverIdentityLines(
   result: Accepted<DeliverOutcome>,
   abbreviations: ReadonlyMap<string, string>,
   columns: number,
+  kept: boolean,
 ): readonly string[] {
   const lines: string[] = [];
   if (result.value.leading !== undefined && result.value.leading.kind === "already-admitted")
@@ -553,7 +550,7 @@ function deliverIdentityLines(
       lines,
       " ",
       "candidate",
-      [{ text: displayGitId(result.value.tenderSnapshot, abbreviations), opaque: true }],
+      [{ text: `${displayGitId(result.value.tenderSnapshot, abbreviations)}${kept ? " · kept" : ""}`, opaque: true }],
       columns,
     );
   if (result.value.integration !== undefined && !/^0{40}$/u.test(result.value.integration.changeId))
@@ -577,7 +574,7 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
     result.value.completion?.predecessor ?? "",
     result.value.completion?.integration ?? "",
   ]);
-  lines.push(...deliverIdentityLines(result, abbreviations, columns));
+  lines.push(...deliverIdentityLines(result, abbreviations, columns, !complete));
   if (complete) lines.push(...completedPlacementLines(result, columns));
   else {
     const subject = result.value.verificationSubject;
@@ -601,7 +598,6 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
     lines.push(...stopLines(result.value.verification, columns, result.contract));
   if (!complete && result.value.placement !== undefined)
     lines.push(...stopLines(result.value.placement, columns, result.contract));
-  if (!complete) receiptRow(lines, " ", "candidate", [{ text: "kept" }], columns);
   lines.push(
     ...continuationLines(result, columns),
     ...(complete ? obligationLines(result, columns) : recordBlock(result, columns)),

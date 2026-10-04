@@ -387,8 +387,7 @@ test("audit separates its observation outcome from complete candidate coordinate
     output,
     [
       "✓ audit  kei/audit",
-      "  candidate  ready",
-      `  candidate  ${"a".repeat(7)}`,
+      `  candidate  ready  ${"a".repeat(7)}`,
       `  integration result  ${"c".repeat(7)}`,
       `  content identity (not commit)  ${"d".repeat(7)}`,
       "  worktree  /worktree",

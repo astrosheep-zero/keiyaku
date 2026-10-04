@@ -275,7 +275,7 @@ function renderWorldContractRow(
 
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.contracts;
-  if (section.kind === "absent") return ["CONTRACTS // absent", "", "  contracts absent"];
+  if (section.kind === "absent") return ["CONTRACTS // absent"];
   if (section.kind === "failed")
     return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   if (section.value.rows.length === 0) return [];
@@ -303,7 +303,7 @@ function taskFailureFact(failure: Readonly<{ message: string; coordinate?: strin
 
 function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.tasks;
-  if (section.kind === "absent") return ["TASKS // absent", "", "  tasks absent"];
+  if (section.kind === "absent") return ["TASKS // absent"];
   if (section.kind === "failed")
     return [
       "TASKS // unavailable",

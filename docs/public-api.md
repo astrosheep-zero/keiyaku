@@ -82,6 +82,8 @@ Contract listing preserves the complete board when no limit is selected. An
 explicit bound reports whether that same observation contains additional
 rows. Selector resolution that requires the complete board uses a private
 complete read and never resolves identity through a bounded public list.
+The listing is the live board: terminal Contracts leave it, and their record
+stays in the journal and Git.
 Listing remains a read-time projection, not a lifecycle judgment.
 
 `Delivery` exposes the captured candidate identity and a presentation diff.

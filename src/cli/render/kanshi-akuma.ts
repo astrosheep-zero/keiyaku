@@ -59,7 +59,7 @@ function endpointFact(id: string, observed: string | undefined): string {
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
   const section = report.akuma;
-  if (section.kind === "absent") return ["AKUMA // absent", "", "  akuma absent"];
+  if (section.kind === "absent") return ["AKUMA // absent"];
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;

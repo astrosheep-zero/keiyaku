@@ -87,7 +87,6 @@ import {
   renderTaskUpdate,
 } from "../src/cli/render/task.js";
 import type { TaskId, TaskPage, TaskRow } from "../src/task/index.js";
-import { reuseLines } from "../src/cli/render/receipt.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
 import { reconcileLagScope } from "../src/library/reconcile.js";
@@ -333,9 +332,6 @@ function taskRow(overrides: Partial<TaskRow> = {}): TaskRow {
 }
 
 test("receipt and history rendering keeps journal ids and zero counts out of text", () => {
-  assert.deepEqual(reuseLines({ entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBG"), verdict: "satisfied" }, 120), [
-    "  reuse  verified · satisfied",
-  ]);
   assert.equal(
     renderContractHistory({ id: "kei/empty-history" as never, state: "snapshot" as never, events: [] }),
     "history  kei/empty-history · bound\n",
@@ -1550,7 +1546,7 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
   const effects = [lagEffect(contract, lag)];
   assert.equal(
     renderAccepted(acceptedDeliver({ contract, head: contractHead("record"), effects }, deliveryIdentity())),
-    ["✓ delivered  kei/followed", "  candidate  tender", "  candidate  kept"].join("\n"),
+    ["✓ delivered  kei/followed", "  candidate  tender · kept"].join("\n"),
   );
   assert.deepEqual(effects[0], {
     kind: "reconciliation-lag",
@@ -1684,12 +1680,11 @@ test("direct placement stops render the public unmet prerequisites in order", ()
     renderAccepted(acceptedDeliver({ contract }, { ...deliveryIdentity(), placement })),
     [
       "✓ delivered  kei/waiting-on-prerequisites",
-      "  candidate  tender",
+      "  candidate  tender · kept",
       "! prerequisites unsatisfied",
       "  prerequisite  kei/active-prerequisite  ·  active",
       "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
       "  prerequisite  kei/missing-prerequisite  ·  missing",
-      "  candidate  kept",
     ].join("\n"),
   );
 
@@ -1790,13 +1785,12 @@ test("a gates-refused placement names the target's non-movement and lets recorde
     text,
     [
       "✓ delivered  kei/blocked-review",
-      "  candidate  tender",
+      "  candidate  tender · kept",
       "  target  refs/heads/main  · unchanged",
       "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
       "  summary verified",
       "  [1 bash exit 1]",
       "",
-      "  candidate  kept",
       "⧗ awaiting review, manual",
     ].join("\n"),
   );
@@ -1830,10 +1824,9 @@ test("a gates-refused placement whose unmet requirements all hold verdicts omits
     text,
     [
       "✓ delivered  kei/recorded-only",
-      "  candidate  tender",
+      "  candidate  tender · kept",
       "  target  refs/heads/main  · unchanged",
       "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
-      "  candidate  kept",
     ].join("\n"),
   );
   assert.doesNotMatch(text, /awaiting/u, "nothing is pending when every unmet requirement holds a verdict");
@@ -1962,12 +1955,11 @@ test("a retry placement stop renders through the delivered receipt without the f
     ),
     [
       "✓ delivered  kei/retry-stops-receipt",
-      "  candidate  tender",
+      "  candidate  tender · kept",
       "? retry  publication failed",
       "  reason",
       "  fatal: unable to create lock",
       "",
-      "  candidate  kept",
     ].join("\n"),
   );
 });
@@ -2043,10 +2035,9 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
     }),
     [
       "✓ delivered  kei/standalone-subject",
-      "  candidate  bbbbbbb",
+      "  candidate  bbbbbbb · kept",
       "  content identity (not commit)  ccccccc",
       "  integration result  aaaaaaa · verification reused satisfied",
-      "  candidate  kept",
     ].join("\n"),
   );
   const fresh = deliverText(contract, {
@@ -2317,10 +2308,9 @@ test("movement projects its deviation and reintegration coordinates", () => {
     ),
     [
       "✓ delivered  kei/reintegrated",
-      "  candidate  tender",
+      "  candidate  tender · kept",
       "! target  moved · re-integrated x2",
       "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
-      "  candidate  kept",
     ].join("\n"),
   );
 });

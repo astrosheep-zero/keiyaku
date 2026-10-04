@@ -52,7 +52,7 @@ The CLI parses a predicate; the evaluator never sees a raw shell string.
 Query reads only Task facts. No Contract. No Akuma.
 
 ## Verification
-```bash
+```bash timeout=2m
 npm test
 ```
 ```
@@ -60,60 +60,60 @@ npm test
 ## What a deal looks like
 
 ```bash
-keiyaku bind - < keiyaku.md     # terms written; an isolated worktree appears
-keiyaku call worker -           # a worker goes in
-keiyaku deliver                 # tendered; Verification runs; gates judge
-keiyaku review --satisfied      # attested; main moves with a commit receipt
+keiyaku bind - < contract.md                        # terms written; an isolated worktree appears
+keiyaku call worker -                               # a worker goes in
+keiyaku deliver <contract>                          # delivered; Verification runs; gates judge
+keiyaku review <contract> --satisfied --summary -   # attested; main moves with a commit receipt
 ```
 
 ## What the journal records
 
-One real deal, pulled from this repo's own journal:
+One real deal, read back with `keiyaku history`:
 
 ```text
-$ keiyaku audit kei/add-acp-provider-and-grok-build-profile
+history  kei/ship-typed-task-query-b186 · accepted · 9 entries
 
-accepted audit kei/add-acp-provider-and-grok-build-profile head=0508f7eb9cb738bcab06060b13ff1a96d36e3754
-report {"reworks":1,"reviews":2,"timeline":[
-  {"kind":"bind","at":"2026-08-14T08:18:36.224Z"},
-  {"kind":"deliver","at":"2026-08-14T13:02:08.339Z"},
-  {"kind":"attestation","gate":"reviewed","verdict":"unsatisfied","summary":
-   "Implementation review found no blocking code issues; authenticated official
-    Grok smoke remains unavailable because this host has no grok binary."},
-  {"kind":"attestation","gate":"verified","verdict":"satisfied","summary":"[1 bash exit 0] …"}]}
+2026-10-04
+
+16:53 bound to targetless @ 3c5d8c0 · gate review
+16:53 delivered 210eeed · ✓ verification · 10 lines
+16:53 × review · 6 lines
+16:53 delivered aebef87 · ✓ verification · 10 lines
+16:53 ✓ review · 6 lines
+16:53 accepted
 ```
 
-The review said no — with a reason, in bytes, on the journal. The deal
-did not land until the gates had current evidence.
+The review said no, and the deal did not land. The verdict and its reason
+stay on the journal as bytes — `keiyaku history --json` reads them:
+
+```json
+{
+  "kind": "attestation",
+  "contract": "kei/ship-typed-task-query-b186",
+  "data": {
+    "gate": "reviewed",
+    "verdict": "unsatisfied",
+    "summary": "Query evaluator still reaches for Contract facts; reads are not Task-owned."
+  }
+}
+```
 
 ## The board
 
-`keiyaku status` is the one screen. A slice of this repository, right now:
+`keiyaku status` is the one screen. Two Contracts and two Tasks in flight:
 
 ```text
-kanshi ─ 7 keiyaku · 18 akuma · 286 task ─ /Users/astrosheep/Developer/keiyaku-v4 main 9cfdca6017633e51827b9b2eba3c76a7fe08e05f
+CONTRACTS // recent
 
-keiyaku 7
-! kei/add-acp-provider-and-grok-build-profile tendered
-  worktree · integration c5cafef6 · -> refs/heads/main
-  × reviewed
-⧗ kei/align-task-cli-truth-promises waiting
-  ! reviewed
-  held by task/align-task-cli-truth-promises-for-ready-compose
+⧗ kei/ship-typed-task-query-c898 · 1s · Ship typed Task query
+  [✓] delivery  [ ] review
+⧗ kei/tighten-receipt-vocabulary-4a70 · 18s · Tighten receipt vocabulary
+  [ ] delivery  [ ] review
 
-akuma 18
-● aku/expert-akuma/a7aafc9e running
-  alias @process-custody-lead
-  keiyaku kei/make-process-custody-capability-honest (active)
-○ aku/design-akuma/cc53ef08 asleep
-  alias @timeline-design
-! aku/grok/95d90b7d stranded
-  alias @acp-provider-impl
+TASKS // recent
 
-task 8 · 5 ready · 2 held
-● task/align-task-cli-truth-promises-for-ready-compose in_progress
-  Align Task CLI truth promises for ready compose and world absence
-  P0 · keiyaku kei/align-task-cli-truth-promises (active)
+○ task/regenerate-readme-from-real-010b · ready · P1 · Regenerate README from real output
+○ task/align-task-cli-truth-promises-3af5 · ready · P0 · Align Task CLI truth promises
 ```
 
 Marks accelerate scanning; the words carry the state.
@@ -122,9 +122,8 @@ Marks accelerate scanning; the words carry the state.
 
 ```markdown
 ---
-provider: claude-agent-sdk
-model: claude-sonnet-4-5
-access: write
+provider: pi
+model: kimi-coding/k3-256k
 description: Repository implementation agent
 ---
 Make scoped changes and run relevant tests.

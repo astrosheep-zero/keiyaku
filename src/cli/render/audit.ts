@@ -5,7 +5,6 @@ import {
   executionStopLines,
   receiptPayload,
   receiptRow,
-  reuseLines,
   stopLines,
   titleLines,
 } from "./receipt.js";
@@ -35,8 +34,13 @@ function candidateLines(
     return lines;
   }
   const identity = candidate.identity;
-  receiptRow(lines, " ", "candidate", [{ text: "ready" }], columns);
-  lines.push(`${CHILD}candidate  ${displayGitId(identity.tenderSnapshot, abbreviations)}`);
+  receiptRow(
+    lines,
+    " ",
+    "candidate",
+    [{ text: "ready" }, { text: displayGitId(identity.tenderSnapshot, abbreviations), opaque: true }],
+    columns,
+  );
   lines.push(`${CHILD}integration result  ${displayGitId(identity.integration.snapshot, abbreviations)}`);
   if (!/^0{40}$/u.test(identity.integration.changeId))
     lines.push(`${CHILD}content identity (not commit)  ${displayGitId(identity.integration.changeId, abbreviations)}`);
@@ -70,7 +74,6 @@ function verificationLines(
   }
   if (verification.kind === "reused") {
     receiptRow(lines, " ", "verification", [{ text: "reused" }, { text: verification.verdict }], columns);
-    lines.push(...reuseLines(verification, columns));
     if (verification.summary !== undefined) receiptPayload(lines, "summary", auditSummary(verification.summary));
     return lines;
   }

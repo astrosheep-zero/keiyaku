@@ -1,5 +1,5 @@
 import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
-import type { PlacementStop, VerificationReuse, VerificationStop } from "../../index.js";
+import type { PlacementStop, VerificationStop } from "../../index.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -91,11 +91,6 @@ export function appendHookPayload(lines: string[], failure: HookFailure): void {
   if (!("stdout" in failure)) return;
   if (failure.stdout !== undefined && failure.stdout.length > 0) receiptPayload(lines, "stdout", failure.stdout);
   if (failure.stderr !== undefined && failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
-}
-
-export function reuseLines(reuse: VerificationReuse | undefined, columns: number): readonly string[] {
-  if (reuse === undefined) return [];
-  return renderOpaqueBlock(`reuse  verified · ${reuse.verdict}`, "  ", columns);
 }
 
 function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {

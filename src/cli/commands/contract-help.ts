@@ -163,8 +163,9 @@ export const CONTRACT_COMMAND_SPECS = {
     flags: { limit: "value", json: "boolean" },
     usage:
       'ls task[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]',
-    purpose: "List Tasks, Contracts, or Akumas.",
+    purpose: "List tasks (ls task), contracts (ls kei), or akumas (ls aku).",
     details: [
+      "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
       "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists the living Akumas under one name.",
       'ls "aku/<name>/*" is the same living set in glob form; ls "aku/*/*" lists every living Akuma.',
     ].join("\n"),
