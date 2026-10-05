@@ -43,7 +43,7 @@ function candidateLines(
   );
   lines.push(`${CHILD}integration result  ${displayGitId(identity.integration.snapshot, abbreviations)}`);
   if (!/^0{40}$/u.test(identity.integration.changeId))
-    lines.push(`${CHILD}content identity (not commit)  ${displayGitId(identity.integration.changeId, abbreviations)}`);
+    lines.push(`${CHILD}content identity  ${displayGitId(identity.integration.changeId, abbreviations)}`);
   lines.push(...workspaceEvidence(candidate.workspace));
   lines.push(...renderTextBlock(gitShortStat(candidate.scope), CHILD, columns));
   if (candidate.scope.paths !== undefined) {
@@ -124,7 +124,7 @@ function targetLines(
   const target = report.target;
   const lines: string[] = [];
   if (target.kind === "not-observed") {
-    receiptRow(lines, " ", "target", [{ text: "not-observed" }], columns);
+    receiptRow(lines, " ", "target", [{ text: "none" }], columns);
     return lines;
   }
   if (target.kind === "placeable") {

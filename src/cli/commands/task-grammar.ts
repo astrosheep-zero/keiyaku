@@ -259,16 +259,12 @@ export function renderTaskHelp(action?: TaskAction): string {
     const spec = TASK_COMMAND_SPECS[action];
     return `${spec.purpose}\n\n${renderTaskUsage(action)}${spec.details === undefined ? "" : `\n\n${spec.details}`}`;
   }
+  const nameWidth = Math.max(...Object.keys(TASK_COMMAND_SPECS).map((name) => name.length));
   return [
     "usage  keiyaku task <command> ...",
+    "      keiyaku task <command> --help   shows that command's complete usage",
     "",
-    "commands:",
-    ...Object.values(TASK_COMMAND_SPECS).flatMap((spec) =>
-      spec.usage
-        .split("\n")
-        .map((line) => `  ${line}`)
-        .concat(`    ${spec.purpose}`),
-    ),
+    ...Object.entries(TASK_COMMAND_SPECS).map(([name, spec]) => `  ${name.padEnd(nameWidth)}  ${spec.purpose}`),
   ].join("\n");
 }
 
@@ -474,8 +470,14 @@ function validateListSelector(selector: string, fail: (message: string) => never
 function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (message: string) => never): void {
   const spec = TASK_COMMAND_SPECS[action],
     { positionals, flags, stdin } = scanned;
-  if (positionals.length < spec.arity[0] || positionals.length > spec.arity[1])
-    fail(`task ${action} has invalid positional arguments`);
+  if (positionals.length < spec.arity[0])
+    fail(spec.arity[1] === 1 ? `task ${action} requires a TaskId` : `task ${action} requires at least one TaskId`);
+  if (positionals.length > spec.arity[1])
+    fail(
+      spec.arity[1] === 0
+        ? `task ${action} accepts no positional arguments`
+        : `task ${action} accepts at most ${spec.arity[1]} positional argument${spec.arity[1] === 1 ? "" : "s"}`,
+    );
   if (action === "add" && (stdin === "document") === (positionals.length === 1))
     fail("task add requires either TITLE or '-' input");
   if (

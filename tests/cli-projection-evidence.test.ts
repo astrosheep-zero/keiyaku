@@ -242,7 +242,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
       "  candidate  tender",
       "  predecessor commit  predecessor",
       "  integration result  integration",
-      "  content identity (not commit)  content-id",
+      "  content identity  content-id",
       "  method  squash",
       "  require branches up to date  false",
       `${at} attestation · ${entries[3]} · reviewer`,
@@ -389,12 +389,12 @@ test("audit separates its observation outcome from complete candidate coordinate
       "✓ audit  kei/audit",
       `  candidate  ready  ${"a".repeat(7)}`,
       `  integration result  ${"c".repeat(7)}`,
-      `  content identity (not commit)  ${"d".repeat(7)}`,
+      `  content identity  ${"d".repeat(7)}`,
       "  worktree  /worktree",
       "  1 file changed, 2 insertions(+), 3 deletions(-)",
       `  ${path}`,
       "  verification  not run",
-      "  target  not-observed",
+      "  target  none",
     ].join("\n"),
   );
   assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);

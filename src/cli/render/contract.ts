@@ -557,7 +557,7 @@ function deliverIdentityLines(
     receiptRow(
       lines,
       " ",
-      "content identity (not commit)",
+      "content identity",
       [{ text: displayGitId(result.value.integration.changeId, abbreviations), opaque: true }],
       columns,
     );

@@ -103,6 +103,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "Delivery requests integration. If prerequisites and gates pass, it integrates now and accepts the Contract; otherwise the candidate remains waiting.",
       "Only changed candidate work invalidates earlier review. If Verification did not finish, repeating delivery resumes that candidate; --overwrite replaces it.",
       "Delivery never counts as an independent review verdict.",
+      "Content identity names the change's content hash, never a commit; it survives rebase and Git cannot look it up.",
       "",
       "  --materialize-conflict  Write the observed integration conflict into the worktree as an uncommitted merge.",
       "                          With --include-dirty, current non-ignored changes are preserved first.",
@@ -179,6 +180,7 @@ export const CONTRACT_COMMAND_SPECS = {
     details: [
       "--include-dirty checks all non-ignored worktree changes, staged or not.",
       "--show-diff includes the proposed candidate diff when one can be prepared.",
+      "Content identity names the change's content hash, never a commit; it survives rebase and Git cannot look it up.",
       "Progress appears on stderr; stdout contains one final result.",
     ].join("\n"),
   },

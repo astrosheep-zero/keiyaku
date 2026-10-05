@@ -990,7 +990,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     );
   const bound = show(base);
   assert.match(bound, /⧗ bound · 5s/u);
-  assert.match(bound, /○ review/u);
+  assert.doesNotMatch(bound, /○ review/u, "a gate without evidence stays off the card; the requirement strip names it");
   assert.match(bound, /\[ \] delivery  \[ \] review/u);
   assert.doesNotMatch(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
@@ -1617,7 +1617,7 @@ test("accepted receipts omit execution telemetry and retain recovery snapshots",
   );
 
   const text = renderAccepted(result);
-  assert.match(text, /candidate  tender-commit[\s\S]*content identity \(not commit\)  content-id/u);
+  assert.match(text, /candidate  tender-commit[\s\S]*content identity  content-id/u);
   assert.match(text, /leading\s+already admitted/u);
   assert.doesNotMatch(text, /01K4AJ8F6K7JH8Y6Q5NEPRT41V/u);
   assert.doesNotMatch(text, /journal-blob-oid/u);
@@ -2036,7 +2036,7 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
     [
       "✓ delivered  kei/standalone-subject",
       "  candidate  bbbbbbb · kept",
-      "  content identity (not commit)  ccccccc",
+      "  content identity  ccccccc",
       "  integration result  aaaaaaa · verification reused satisfied",
     ].join("\n"),
   );

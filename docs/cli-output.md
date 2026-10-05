@@ -29,8 +29,10 @@ Text is the primary readable projection and JSON is the complete typed
 projection of the same result. Rendering retains the meaningful distinctions
 between success, substantive refusal, retryable conflict, absent authority,
 and operational failure. Text labels name a candidate and its integration result,
-distinguish content identity from commit identity, and keep
-journal blobs, entry ids, and record-field enumeration out of ordinary text —
+and a content identity is distinguished from a commit by its kind name alone —
+the teaching that a content identity is never Git-addressable lives in leaf
+help, not on receipt rows. Journal blobs, entry ids, and record-field
+enumeration stay out of ordinary text —
 evidence handles live in JSON and `history` alone. Recorded verification folds
 into a delivery row only when its snapshot matches; otherwise it remains an
 independent verdict fact. A row without a delivery association states no

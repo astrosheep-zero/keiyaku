@@ -58,7 +58,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
         `  candidate  ${shortGitId(tenderSnapshot)}`,
         `  predecessor commit  ${shortGitId(integration.predecessor)}`,
         `  integration result  ${shortGitId(integration.snapshot)}`,
-        `  content identity (not commit)  ${integration.changeId}`,
+        `  content identity  ${integration.changeId}`,
         `  method  ${method}`,
         `  require branches up to date  ${String(policy.requireBranchesToBeUpToDate)}`,
       ];

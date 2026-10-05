@@ -396,7 +396,10 @@ function parsePrompted(
   stdin: boolean,
   fail: (message: string) => never,
 ): Readonly<{ subject: string; prompt?: AkumaPromptSource }> {
-  if (positionals.length < 1 || positionals.length > 2) fail(`${action} has invalid positional arguments`);
+  if (positionals.length === 0)
+    fail(action === "call" ? "call requires an Akuma name" : `${action} requires an Akuma selector`);
+  if (positionals.length > 2)
+    fail(`${action} accepts at most ${action === "call" ? "a name" : "a selector"} and one prompt`);
   const argument = positionals[1];
   if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
   if (action !== "call" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
@@ -513,7 +516,18 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
         : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
-    fail(`${action} has invalid positional arguments`);
+    if (positionals.length === 0)
+      fail(
+        spec.arity === "one-or-more"
+          ? `${action} requires at least one Akuma selector`
+          : `${action} requires an Akuma selector`,
+      );
+    else
+      fail(
+        spec.arity === 1
+          ? `${action} accepts one Akuma selector`
+          : `${action} accepts exactly ${spec.arity} Akuma selectors`,
+      );
   }
   if (stdin) fail(`${action} reads no stdin`);
   return parseAddressed(action, positionals, flags, output, fail);

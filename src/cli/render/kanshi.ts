@@ -165,6 +165,10 @@ function staleVerificationFacts(row: ContractKanshiRow): readonly string[] {
   return fact === undefined ? [] : [fact];
 }
 
+function gateEvidenceFacts(row: ContractKanshiRow): readonly string[] {
+  return row.gates.reports.filter((gate) => gate.current.kind !== "missing").map(gateFact);
+}
+
 function renderSelectedContractRow(
   row: ContractKanshiRow,
   report: KanshiReport,
@@ -189,7 +193,7 @@ function renderSelectedContractRow(
     return lines;
   }
   if (row.phase === "bound") {
-    lines.push(...semanticBlock("gates", row.gates.reports.map(gateFact), context));
+    lines.push(...semanticBlock("gates", gateEvidenceFacts(row), context));
     lines.push(
       ...semanticBlock(
         "prerequisites",
