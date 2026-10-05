@@ -740,7 +740,7 @@ export async function admitDeliveryOperation(
   const result = await runBoundedAttempts<
     Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }>,
     DeliverOperationRefusal
-  >(mintAttempts({ entryCount: 2 }), (attempt) => deliverAttempt(input, attempt));
+  >(mintAttempts({ entryCount: 1 }), (attempt) => deliverAttempt(input, attempt));
   if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
   if (result.kind !== "accepted") return { kind: "retry", reason: result };
   input.progress?.recordResidue(input.contractId, result);

@@ -58,14 +58,6 @@ function deliveredState(contract: ReturnType<typeof contractId>, after: readonly
     },
     {
       v: 1,
-      kind: "bound",
-      contract,
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
-      at: "2026-08-07T00:00:01Z",
-      data: {},
-    },
-    {
-      v: 1,
       kind: "deliver",
       contract,
       entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),

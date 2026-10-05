@@ -68,7 +68,7 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   if (result.kind !== "accepted") throw new Error("deliver was not accepted");
   assert.deepEqual(
     result.facts.map((fact) => fact.kind),
-    ["bound", "deliver", "attestation", "claimed"],
+    ["deliver", "attestation", "claimed"],
   );
   const repository = await repositoryAt(raw.path);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");

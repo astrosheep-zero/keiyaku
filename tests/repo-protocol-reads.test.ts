@@ -90,7 +90,6 @@ test("public Contract rows select the source entry for every phase", async () =>
   };
   const times = {
     fresh: firstJournalAt(repository, ids.fresh),
-    bound: "2026-08-12T00:01:00.000Z",
     delivered: "2026-08-12T00:02:00.000Z",
     claimed: "2026-08-12T00:03:00.000Z",
     abandoned: "2026-08-12T00:04:00.000Z",
@@ -99,14 +98,6 @@ test("public Contract rows select the source entry for every phase", async () =>
   const before = await readGit(git);
   if (before.commit === null) throw new Error("Keiyaku state was not published");
   const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
-  const boundEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
-    v: 1,
-    kind: "bound",
-    contract: id,
-    entry: entryUlid(entry),
-    at,
-    data: {},
-  });
   const deliverEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
     v: 1,
     kind: "deliver",
@@ -123,15 +114,10 @@ test("public Contract rows select the source entry for every phase", async () =>
   const deliveredDelivery = deliverEntry(ids.delivered, times.delivered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
   const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
   const additions = new Map<ContractId, readonly JournalEntry[]>([
-    [ids.bound, [boundEntry(ids.bound, times.bound, "01ARZ3NDEKTSV4RRFFQ69G5FBB")]],
-    [
-      ids.delivered,
-      [boundEntry(ids.delivered, "2026-08-12T00:01:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBE"), deliveredDelivery],
-    ],
+    [ids.delivered, [deliveredDelivery]],
     [
       ids.claimed,
       [
-        boundEntry(ids.claimed, "2026-08-12T00:01:45.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBF"),
         claimedDelivery,
         {
           v: 1,
@@ -179,7 +165,7 @@ test("public Contract rows select the source entry for every phase", async () =>
   const expected = [
     [ids.fresh, "bound", times.fresh],
     [ids.bound, "bound", firstJournalAt(repository, ids.bound)],
-    [ids.delivered, "delivered", times.delivered],
+    [ids.delivered, "bound", times.delivered],
     [ids.claimed, "claimed", times.claimed],
     [ids.abandoned, "abandoned", times.abandoned],
   ] as const;
@@ -204,8 +190,8 @@ test("public Contract rows select the source entry for every phase", async () =>
     }),
   );
   const delivered = board.rows.find((row) => row.id === ids.delivered);
-  assert.equal(delivered?.phase, "delivered");
-  assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "delivered");
+  assert.equal(delivered?.phase, "bound");
+  assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "bound");
   const catalog = renderContractCatalogue({ ...board, hasMore: false });
   assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
 });
@@ -240,14 +226,6 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
     [
       claimed,
       [
-        {
-          v: 1,
-          kind: "bound",
-          contract: claimed,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBJ"),
-          at: "2026-08-12T00:00:30.000Z",
-          data: {},
-        },
         claimDelivery,
         {
           v: 1,

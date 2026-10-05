@@ -28,26 +28,14 @@ export function decideDeliver<Failure>({
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
-  const entries: JournalEntry[] = [];
-  if (state.bound === null)
-    entries.push({
-      v: 1,
-      kind: "bound",
-      contract: input.contractId,
-      entry: attempt.entryUlids[0]!,
-      at: input.at,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
-      data: {},
-    });
   const deliver: JournalEntry = {
     v: 1,
     kind: "deliver",
     contract: input.contractId,
-    entry: attempt.entryUlids[state.bound === null ? 1 : 0]!,
+    entry: attempt.entryUlids[0]!,
     at: input.at,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     data: input.preparation.data,
   };
-  entries.push(deliver);
-  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, entries }] } };
+  return { kind: "offer", offer: { facts: [{ contractId: input.contractId, entries: [deliver] }] } };
 }

@@ -290,7 +290,7 @@ test("selected delivered Kanshi folds matching verification into the integration
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedRow(),
-    phase: "delivered",
+    phase: "bound",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
       integration: {
@@ -320,7 +320,7 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedRow(),
-    phase: "delivered",
+    phase: "bound",
     delivery: {
       tenderSnapshot: snapshotId("3".repeat(40)),
       integration: {

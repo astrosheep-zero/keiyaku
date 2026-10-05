@@ -23,7 +23,6 @@ function state(currentArc: ContractState["currentArc"]): ContractState {
       gates: [],
       after: [],
     },
-    bound: null,
     delivery: null,
     currentIntegration: null,
     attestations: [],

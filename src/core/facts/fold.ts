@@ -39,7 +39,6 @@ function stateFromBind(
     head,
     coordinates: cloneCoordinates(bind.data.coordinates),
     terms: cloneTerms(bind.data.terms),
-    bound: null,
     delivery: null,
     currentIntegration: null,
     attestations,
@@ -68,11 +67,7 @@ function foldEntry(state: ContractState, entry: JournalEntry, attestations: Atte
       foldError("bind may appear only once");
     case "amend":
       return { ...state, terms: cloneTerms(entry.data) };
-    case "bound":
-      if (state.bound !== null) foldError("bound may appear only once");
-      return { ...state, bound: entry };
     case "deliver":
-      if (state.bound === null) foldError("deliver requires bound");
       return { ...state, delivery: entry, currentIntegration: { ...entry.data.integration } };
     case "reintegrated":
       if (state.delivery === null) foldError("reintegrated requires a deliver");

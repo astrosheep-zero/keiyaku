@@ -169,16 +169,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         Buffer.from(
           encodeEntry({
             v: 1,
-            kind: "bound",
-            contract: state.id,
-            entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBW"),
-            at: "2026-08-17T00:00:00.000Z",
-            data: {},
-          }),
-        ),
-        Buffer.from(
-          encodeEntry({
-            v: 1,
             kind: "deliver",
             contract: state.id,
             entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBX"),

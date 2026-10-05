@@ -77,7 +77,7 @@ export function admitIntent<Input extends Readonly<{ contractId: ContractId }>, 
     channel,
     repository,
     contracts,
-    attempts: mintAttempts({ entryCount: 2 }),
+    attempts: mintAttempts({ entryCount: 1 }),
     decide,
   });
 }
@@ -106,7 +106,7 @@ export function admitPreparedIntent<
     channel,
     repository,
     contracts,
-    attempts: mintAttempts({ entryCount: 2 }),
+    attempts: mintAttempts({ entryCount: 1 }),
     decide,
   });
 }

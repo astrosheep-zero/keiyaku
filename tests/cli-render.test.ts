@@ -7,6 +7,7 @@ import {
   changeId,
   contractHead,
   contractId,
+  documentKey,
   type JournalEntry,
   type SnapshotId,
   type DependencyKeySet,
@@ -96,8 +97,18 @@ import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 
 const fixtureEntry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
-function boundFact(contract: ContractId): Extract<JournalEntry, { kind: "bound" }> {
-  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "bound", data: {} };
+function bindFact(contract: ContractId): Extract<JournalEntry, { kind: "bind" }> {
+  return {
+    v: 1,
+    at: "2026-01-01T00:00:00Z",
+    contract,
+    entry: fixtureEntry,
+    kind: "bind",
+    data: {
+      coordinates: { start: snapshotId("start"), workspace: "worktree" },
+      terms: { document: { bytes: "# Bound\n", key: documentKey("bound") }, segments: [], gates: [], after: [] },
+    },
+  };
 }
 function claimedFact(contract: ContractId): Extract<JournalEntry, { kind: "claimed" }> {
   return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "claimed", data: { delivery: fixtureEntry } };
@@ -414,7 +425,6 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
         dispatchedAt: "2026-09-28T15:20:00.000Z",
       },
     },
-    journal("bound", "2026-09-28T15:21:00.000Z", {}),
     journal("deliver", "2026-09-28T16:00:00.000Z", deliverData(candidateA, start, integrationA)),
     journal("attestation", "2026-09-28T16:01:00.000Z", verification(integrationA, "unsatisfied")),
     journal("amend", "2026-09-28T16:11:00.000Z", { gates: ["reviewed", "verified"], after: [] }),
@@ -892,7 +902,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     rows: [
       {
         ...row,
-        phase: "delivered",
+        phase: "bound",
         verification: { kind: "unrecorded" },
         delivery: {
           tenderSnapshot: snap,
@@ -917,7 +927,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
         target: "refs/heads/main",
         targetLag: { kind: "counted", behind: 0, subject: { kind: "worktree", path: "/repo/.keiyaku/wt/catalog" } },
         targetObservation: { head: observed, drift: true },
-        phase: "delivered",
+        phase: "bound",
         delivery: {
           tenderSnapshot: expected,
           integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-moved") },
@@ -938,7 +948,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
         target: "refs/heads/main",
         targetLag: { kind: "unknown" },
         targetObservation: { head: null, drift: true },
-        phase: "delivered",
+        phase: "bound",
         delivery: {
           tenderSnapshot: expected,
           integration: { predecessor: expected, snapshot: expected, changeId: changeId("chg-target-null") },
@@ -994,7 +1004,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(bound, /\[ \] delivery  \[ \] review/u);
   assert.doesNotMatch(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
-  const delivered = show({ ...base, phase: "delivered", delivery });
+  const delivered = show({ ...base, phase: "bound", delivery });
   assert.match(delivered, /\[✓\] delivery  \[ \] review/u);
   assert.doesNotMatch(delivered, /awaiting gates/u);
   assert.match(delivered, /candidate  bbbbbbb/u);
@@ -1002,7 +1012,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.doesNotMatch(delivered, /predecessor|method|content identity|behind/u);
   const denied = show({
     ...base,
-    phase: "delivered",
+    phase: "bound",
     delivery,
     gates: {
       satisfied: false,
@@ -1025,7 +1035,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
   const stale = show({
     ...base,
-    phase: "delivered",
+    phase: "bound",
     delivery,
     gates: {
       satisfied: false,
@@ -1036,7 +1046,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(stale, /! review · stale/u, "the card body keeps the stale review detail");
   const blocked = show({
     ...base,
-    phase: "delivered",
+    phase: "bound",
     delivery,
     gates: { satisfied: true, reports: [] },
     after: [{ contractId: contractId("kei/other"), endpoint: { kind: "active", phase: "bound" } }],
@@ -1045,7 +1055,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(blocked, /^  blocked by  kei\/other · bound$/mu);
   const moved = show({
     ...base,
-    phase: "delivered",
+    phase: "bound",
     delivery,
     gates: { satisfied: true, reports: [] },
     target: "refs/heads/main",
@@ -1090,7 +1100,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(abandoned, /…”/u);
   assert.doesNotMatch(abandoned, /worktree|candidate|when  /u);
   assert.equal((abandoned.match(/× abandoned/gu) ?? []).length, 1);
-  const world = show({ ...base, phase: "delivered", delivery }, "world");
+  const world = show({ ...base, phase: "bound", delivery }, "world");
   assert.match(world, /\[✓\] delivery  \[ \] review/u);
   assert.doesNotMatch(world, /awaiting gates/u);
   assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
@@ -1118,7 +1128,7 @@ test("recorded verification names the snapshot the verdict covers", () => {
 test("every verb receipt states facts without journal rows or entry ids", () => {
   const contract = contractId("kei/receipt-vocabulary");
   const entry = "01K4AJ8F6K7JH8Y6Q5NEPRT41V";
-  const facts = [boundFact(contract)];
+  const facts = [bindFact(contract)];
   const receipts = [
     acceptedBind({ contract, facts }, {}),
     acceptedAmend({ contract, facts }, { documentDiff: "", changes: {} }),
@@ -1561,7 +1571,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
   const result = acceptedBind(
     {
       contract,
-      facts: [boundFact(contract)],
+      facts: [bindFact(contract)],
       effects: [
         cleanupEffect(contract, {
           kind: "private-state-seat-close",
@@ -1589,7 +1599,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
 test("accepted bind receipts surface Region lint warnings", () => {
   const contract = contractId("kei/warned");
   const result = acceptedBind(
-    { contract, facts: [boundFact(contract)] },
+    { contract, facts: [bindFact(contract)] },
     { warnings: ["Region pattern 'src/a b' contains whitespace and will never match a path"] },
   );
   assert.match(renderAccepted(result), /! region warning[\s\S]*src\/a b[\s\S]*contains whitespace/u);

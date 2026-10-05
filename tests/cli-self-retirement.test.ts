@@ -275,7 +275,7 @@ test("a known-admission failure after retirement keeps its receipt and classific
   assert.equal(body.outcome.contract, fixture.contract);
   assert.deepEqual(
     body.outcome.facts.map((fact) => fact.kind),
-    ["bound", "deliver"],
+    ["deliver"],
     "the confirmed receipt keeps the facts admitted before the failure",
   );
   assert.equal(existsSync(fixture.worktree), false);

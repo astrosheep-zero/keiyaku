@@ -25,7 +25,6 @@ function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
       gates: [],
       after: [],
     },
-    bound: null,
     delivery: null,
     currentIntegration: null,
     attestations: [],

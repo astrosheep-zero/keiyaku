@@ -50,8 +50,6 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
     }
     case "amend":
       return [...listFact("gates", fact.data.gates), ...listFact("after", fact.data.after)];
-    case "bound":
-      return [];
     case "deliver": {
       const { tenderSnapshot, integration, method, policy } = fact.data;
       return [
@@ -194,8 +192,6 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
       const dispatch = beat.events.find((event) => event.source === "dispatch");
       return [`${clock(first)} ${bindLine(fact, dispatch)}`];
     }
-    case "bound":
-      return [`${clock(first)} bound`];
     case "deliver": {
       const verdict = latestVerification(beat)?.data.verdict;
       return [
@@ -245,7 +241,6 @@ function skeletonState(history: ContractHistory): string {
   );
   if (journal.some((event) => event.fact.kind === "claimed")) return lifecycleWord("claimed");
   if (journal.some((event) => event.fact.kind === "abandoned")) return "abandoned";
-  if (journal.some((event) => event.fact.kind === "deliver" || event.fact.kind === "reintegrated")) return "delivered";
   return "bound";
 }
 
@@ -261,15 +256,9 @@ function skeletonBeats(history: ContractHistory): readonly Beat[] {
     if (event.source === "journal" && event.fact.kind === "bind") {
       for (let next = index + 1; next < events.length; next += 1) {
         const candidate = events[next]!;
-        if (candidate.source === "journal" && candidate.fact.kind === "bound") {
-          grouped.push(candidate);
-          consumed.add(next);
-          break;
-        }
-        if (candidate.source === "dispatch") {
-          grouped.push(candidate);
-          consumed.add(next);
-        }
+        if (candidate.source !== "dispatch") break;
+        grouped.push(candidate);
+        consumed.add(next);
       }
     }
     if (event.source === "journal" && (event.fact.kind === "deliver" || event.fact.kind === "reintegrated")) {

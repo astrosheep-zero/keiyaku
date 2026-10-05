@@ -48,8 +48,10 @@ function contractHasError(row: ContractKanshiRow): boolean {
 function contractStatusTone(row: ContractKanshiRow, observedAt: string): SemanticTone | null {
   if (contractHasError(row)) return "alert";
   const phaseAge = elapsedMilliseconds(row.phaseAt, observedAt);
-  if (row.phase === "delivered" && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS) return "attention";
-  if (row.phase === "bound" && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS) return "attention";
+  if (row.phase === "bound" && row.delivery !== null && phaseAge !== null && phaseAge >= REVIEW_ATTENTION_MS)
+    return "attention";
+  if (row.phase === "bound" && row.delivery === null && phaseAge !== null && phaseAge >= PENDING_ATTENTION_MS)
+    return "attention";
   const journalAge = elapsedMilliseconds(row.lastJournalAt, observedAt);
   return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;
 }
@@ -165,10 +167,6 @@ function staleVerificationFacts(row: ContractKanshiRow): readonly string[] {
   return fact === undefined ? [] : [fact];
 }
 
-function gateEvidenceFacts(row: ContractKanshiRow): readonly string[] {
-  return row.gates.reports.filter((gate) => gate.current.kind !== "missing").map(gateFact);
-}
-
 function renderSelectedContractRow(
   row: ContractKanshiRow,
   report: KanshiReport,
@@ -192,59 +190,48 @@ function renderSelectedContractRow(
     lines.push(...outcome.map((fact) => (fact.startsWith("  ") ? fact : `  ${safeText(fact)}`)));
     return lines;
   }
-  if (row.phase === "bound") {
-    lines.push(...semanticBlock("gates", gateEvidenceFacts(row), context));
+  const deniedReview = row.gates.reports.find(
+    (gate) => gate.gate === "reviewed" && gate.current.kind === "attested" && gate.current.verdict === "unsatisfied",
+  );
+  lines.push(...semanticBlock("ball", [progressStrip(row)], context));
+  lines.push(
+    ...semanticBlock(
+      "gates",
+      row.gates.reports
+        .filter((gate) => gate.current.kind !== "missing")
+        .filter(
+          (gate) => gate !== deniedReview || gate.current.kind !== "attested" || gate.current.summary === undefined,
+        )
+        .map(gateFact),
+      context,
+    ),
+  );
+  lines.push(
+    ...semanticBlock(
+      "prerequisites",
+      row.after.filter((edge) => edge.endpoint.kind !== "claimed").map(afterWording),
+      context,
+    ),
+  );
+  if (row.delivery !== null) {
     lines.push(
       ...semanticBlock(
-        "prerequisites",
-        row.after.filter((edge) => edge.endpoint.kind !== "claimed").map(afterWording),
+        "candidate",
+        [
+          `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
+          `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
+          ...(row.targetObservation?.drift === true ? targetMovementFacts(row, abbreviations) : []),
+        ],
         context,
       ),
     );
-    lines.push(...semanticBlock("ball", [progressStrip(row)], context));
-    const akuma = linkedAkumaSummary(row, report);
-    if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
-    if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
-  } else {
-    lines.push(...semanticBlock("ball", [progressStrip(row)], context));
-    lines.push(
-      ...semanticBlock(
-        "prerequisites",
-        row.after.filter((edge) => edge.endpoint.kind !== "claimed").map(afterWording),
-        context,
-      ),
-    );
-    if (row.delivery !== null) {
-      lines.push(
-        ...semanticBlock(
-          "candidate",
-          [
-            `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
-            `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
-            ...(row.targetObservation?.drift === true ? targetMovementFacts(row, abbreviations) : []),
-          ],
-          context,
-        ),
-      );
-    }
     lines.push(...semanticBlock("verification", staleVerificationFacts(row), context));
-    const deniedReview = row.gates.reports.find(
-      (gate) => gate.gate === "reviewed" && gate.current.kind === "attested" && gate.current.verdict === "unsatisfied",
-    );
-    lines.push(
-      ...semanticBlock(
-        "gates",
-        row.gates.reports
-          .filter(
-            (gate) => gate !== deniedReview || gate.current.kind !== "attested" || gate.current.summary === undefined,
-          )
-          .map(gateFact),
-        context,
-      ),
-    );
-    if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
-      lines.push(...payload("review  ×", deniedReview.current.summary, context));
   }
+  if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
+    lines.push(...payload("review  ×", deniedReview.current.summary, context));
+  const akuma = linkedAkumaSummary(row, report);
+  if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
+  if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
   lines.push(...semanticBlock("alarms", liveAlarms(row, report), context));
   return lines;
 }

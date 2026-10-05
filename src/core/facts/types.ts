@@ -119,8 +119,6 @@ export type BindData = Readonly<{
 
 export type AmendData = ContractTerms;
 
-export type BoundData = Readonly<Record<string, never>>;
-
 export type DeliverData = Readonly<{
   tenderSnapshot: SnapshotId;
   integration: Readonly<{
@@ -170,7 +168,6 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 
 export type BindEntry = JournalEnvelope<"bind", BindData>;
 type AmendEntry = JournalEnvelope<"amend", AmendData>;
-type BoundEntry = JournalEnvelope<"bound", BoundData>;
 type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
 export type ReintegratedEntry = JournalEnvelope<"reintegrated", ReintegratedData>;
 export type AttestationEntry = JournalEnvelope<"attestation", AttestationData>;
@@ -181,7 +178,6 @@ type AbandonedEntry = JournalEnvelope<"abandoned", AbandonedData>;
 export type JournalEntry =
   | BindEntry
   | AmendEntry
-  | BoundEntry
   | DeliverEntry
   | ReintegratedEntry
   | AttestationEntry
@@ -198,7 +194,6 @@ export type ContractState = Readonly<{
   head: ContractHead | null;
   coordinates: ContractCoordinates;
   terms: ContractTerms;
-  bound: BoundEntry | null;
   delivery: DeliverEntry | null;
   currentIntegration: CurrentIntegration | null;
   attestations: readonly AttestationEntry[];

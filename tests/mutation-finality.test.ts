@@ -60,7 +60,6 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
     head: "head" as ContractHead,
     coordinates: { start: snapshotId("base"), workspace: "worktree" },
     terms: { document: { bytes: "# Test", key: documentKey("document") }, segments: [], gates: [], after: [] },
-    bound: null,
     delivery: null,
     currentIntegration: null,
     attestations: [],

@@ -68,7 +68,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.equal(delivered.value.completion, undefined);
     assert.deepEqual(
       delivered.facts.map((fact) => fact.kind),
-      ["bound", "deliver"],
+      ["deliver"],
     );
     const review = accepted(await contract.review({ verdict: "satisfied" }));
     assert.deepEqual(

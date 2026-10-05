@@ -75,14 +75,19 @@ function deliveryData(snapshot: string) {
 
 test("malformed inherited refusals, journals, and folds refuse without inventing status", () => {
   const bind = bindEntry(0);
-  const bound = entry("bound", {}, 1);
   const deliver = entry("deliver", deliveryData("candidate"), 2);
   const claimed = entry("claimed", { delivery: deliver.entry }, 3);
   const abandoned = entry("abandoned", {}, 4);
 
   assert.throws(() => foldJournal(id, [bind, claimed]), /claimed requires a deliver/);
-  assert.throws(() => foldJournal(id, [bind, bound, { ...bound, entry: uniqueEntryUlid(20) }]), /bound may appear only once/);
-  assert.throws(() => foldJournal(id, [bind, abandoned, bound]), /terminal contract cannot accept bound/);
+  assert.throws(
+    () =>
+      decodeJournal(
+        '{"v":1,"kind":"bound","contract":"kei/lifecycle-cycle","entry":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-08-07T00:00:00Z","data":{}}\n',
+      ),
+    /unknown journal entry kind: bound/,
+  );
+  assert.throws(() => foldJournal(id, [bind, abandoned, deliver]), /terminal contract cannot accept deliver/);
   assert.throws(() => decodeJournal("not a journal\n"), /journal entry is not valid JSON/);
   assert.throws(
     () => decodeJournal(encodeEntry(deliver).replace('"snapshot":"candidate"', '"snapshot":""')),

@@ -42,7 +42,6 @@ function state(candidate: string, document = "document-1"): ContractState {
       gates: [gate("reviewed"), gate("verified")],
       after: [],
     },
-    bound: null,
     delivery,
     currentIntegration: null,
     attestations: [

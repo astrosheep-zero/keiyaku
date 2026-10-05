@@ -4,7 +4,6 @@ import type {
   AttestationData,
   ArcData,
   BindData,
-  BoundData,
   ContractTerms,
   ContractCoordinates,
   DeliverData,
@@ -31,7 +30,6 @@ type RecordValue = Record<string, unknown>;
 const VERSION_BY_KIND = {
   bind: 1,
   amend: 1,
-  bound: 1,
   deliver: 1,
   reintegrated: 1,
   attestation: 1,
@@ -199,11 +197,6 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
     }
     case "amend":
       return termsValue(value, path) satisfies AmendData;
-    case "bound": {
-      const object = requireRecord(value, path);
-      requireKeys(object, [], path);
-      return {} satisfies BoundData;
-    }
     case "deliver": {
       const object = requireRecord(value, path);
       requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path);
