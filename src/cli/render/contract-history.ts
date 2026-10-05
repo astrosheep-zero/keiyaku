@@ -175,16 +175,18 @@ function latestVerification(beat: Beat): Extract<Fact, { kind: "attestation" }> 
   return latest;
 }
 
+const lineCount = (count: number): string => `${count} line${count === 1 ? "" : "s"}`;
+
 function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly string[] {
   const first = beat.events[0];
   if (first === undefined) return [];
   const full = beat.events.flatMap((event) => fullEventLines(event, history.workspace));
   const evidenceSuffix = (): string => {
     const count = foldedPayloadLines(full);
-    return count > 0 ? ` · ${count} lines` : "";
+    return count > 0 ? ` · ${lineCount(count)}` : "";
   };
   const payloadSuffix = (rendered: readonly string[]): string =>
-    rendered.length > 0 ? ` · ${rendered.length} lines` : "";
+    rendered.length > 0 ? ` · ${lineCount(rendered.length)}` : "";
   if (first.source === "dispatch") return [`${clock(first)} dispatch · ${first.dispatch.akuId}`];
   const fact = first.fact;
   switch (fact.kind) {
@@ -227,7 +229,7 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
       ];
     default: {
       const folded = foldedPayloadLines(full);
-      return [`${clock(first)} ${eventKind(first)}${folded > 0 ? ` · ${folded} lines` : ""}`];
+      return [`${clock(first)} ${eventKind(first)}${folded > 0 ? ` · ${lineCount(folded)}` : ""}`];
     }
   }
 }

@@ -323,9 +323,8 @@ function renderBatchItem(verb: string, item: TaskBatchResult["items"][number], c
   if (item.outcome.kind === "accepted") return `✓ ${PAST_VERBS[verb] ?? verb}  ${item.id}`;
   if (item.outcome.kind === "retry") return `? ${verb}  ${item.id}  ${item.outcome.reason}`;
   const facts = projectRefusal(item.outcome.refusal);
-  return refusalLines(verb, [`task  ${item.id}`, `reason  ${facts.diagnostic}`, ...(facts.facts ?? [])], columns).join(
-    "\n",
-  );
+  const rest = (facts.facts ?? []).filter((fact) => fact !== `task  ${item.id}`);
+  return refusalLines(verb, [`task  ${item.id}`, `reason  ${facts.diagnostic}`, ...rest], columns).join("\n");
 }
 
 function renderBatch(verb: string, batch: TaskBatchResult, columns: number): string {

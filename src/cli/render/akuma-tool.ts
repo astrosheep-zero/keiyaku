@@ -111,7 +111,7 @@ function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolCore {
       : call.offset !== undefined
         ? ` · from L${call.offset}`
         : call.limit !== undefined
-          ? ` · ${call.limit} lines`
+          ? ` · ${call.limit} ${call.limit === 1 ? "line" : "lines"}`
           : "";
   return { label: "read", text: `${path}${detail}`, pathPreview: { before: "", path, detail } };
 }
