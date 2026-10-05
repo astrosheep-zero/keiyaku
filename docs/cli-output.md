@@ -95,9 +95,10 @@ gates against the current candidate. Event surfaces such as history, timelines,
 and receipts use bare marks instead; in a causal history skeleton the mark
 itself carries the verdict, without a satisfied/unsatisfied word. `✓` marks a
 successfully completed action row (a tool settlement or an answered outcome);
-`│` is the neutral rail for voice rows and told Tells; `●` asserts liveness and
-belongs only to a redrawable live frame; `!` is failure; `?` is unresolved
-activity. History and status never contain `●`.
+`│` is the neutral rail for voice rows and told Tells; `●` reports an observed
+in-motion state such as an in-progress Task or a running Akuma, and asserts
+continuing liveness only inside a redrawable live frame; `!` is failure; `?` is
+unresolved activity. History never contains `●`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
