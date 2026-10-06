@@ -135,7 +135,7 @@ function refusalFacts(
   const lines = [`${indent}reason  ${refusalWords(refusal.kind)}`];
   if (identity !== undefined) lines.push(`${indent}contract  ${safeText(identity)}`);
   if ("diagnostic" in refusal && typeof refusal.diagnostic === "string")
-    lines.push(`${indent}detail  ${safeText(refusal.diagnostic)}`);
+    for (const detail of refusal.diagnostic.split("\n")) lines.push(`${indent}detail  ${safeText(detail)}`);
   return lines;
 }
 

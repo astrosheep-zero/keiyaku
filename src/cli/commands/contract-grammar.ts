@@ -138,6 +138,10 @@ function refuse(command: ContractCommand, message: string): never {
   throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
+// The CLI restates the literal gate-word grammar its help prints; the corpus
+// pin in cli-parse.test.ts keeps this shape honest against the owner's gateWord.
+const GATE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
+
 function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): readonly string[] | undefined {
   const value = optionalFlag(parts.flags, "gates");
   if (value === undefined) return undefined;
@@ -145,6 +149,10 @@ function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): 
   const names = value.split(",");
   if (names.some((name) => name.length === 0)) {
     refuse(command, '--gates requires comma-separated names or "" to clear gates');
+  }
+  const invalid = names.find((name) => !GATE_NAME_PATTERN.test(name));
+  if (invalid !== undefined) {
+    refuse(command, `--gates name must match ^[a-z][a-z0-9-]{0,63}$: ${invalid}`);
   }
   return names;
 }

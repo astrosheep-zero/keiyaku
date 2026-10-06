@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
-import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import { contractId, documentKey, entryUlid, gateWord, snapshotId } from "../src/core/facts/types.js";
 import { CliUsageError, parseArgv, renderContractHelp, type ParsedCommand } from "../src/cli/parse.js";
 
 function command(argv: readonly string[]): ParsedCommand {
@@ -264,9 +264,9 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
   for (const value of [",", "strict,", ",strict", "strict,,default"]) {
     assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /comma-separated names/u);
   }
-  assert.deepEqual(parseArgv(["bind", "--gates", " ,--strict", "-"]), {
-    command: { command: "bind", gates: [" ", "--strict"], output: "text" },
-  });
+  for (const value of [" ,--strict", "BAD GATE!!", "Strict"]) {
+    assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /--gates name must match/u);
+  }
   assert.throws(
     () => parseArgv(["amend", "kei/example"]),
     /amend requires stdin or --after, --clear-after, or --gates/,
@@ -280,6 +280,29 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
     /mutually exclusive/,
   );
   assert.throws(() => parseArgv(["bind", "--clear-after", "-"]), /not valid for bind/);
+});
+
+test("--gates word grammar restates the Contract owner's gateWord", () => {
+  const corpus = [
+    "reviewed",
+    "strict",
+    "a",
+    "x9-z",
+    "a".repeat(64),
+    "Strict",
+    "BAD GATE!!",
+    "9lives",
+    "-lead",
+    " ",
+    "a_b",
+    "café",
+    "a".repeat(65),
+  ];
+  for (const word of corpus) {
+    const parse = (): unknown => parseArgv(["bind", "--gates", word, "-"]);
+    if (gateWord(word)) assert.doesNotThrow(parse, `--gates ${JSON.stringify(word)}`);
+    else assert.throws(parse, /--gates name must match/u, `--gates ${JSON.stringify(word)}`);
+  }
 });
 
 test("abandon accepts a note but no caller-selected reason", () => {

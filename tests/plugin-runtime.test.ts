@@ -4,9 +4,11 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
+import { runCli } from "./support/cli-fixtures.js";
 
 const SQUARE_SESSION_ENVIRONMENT = [
   "CLAUDE_CODE_SESSION_ID",
@@ -79,6 +81,71 @@ function deadlineClock(context: TestContext): (milliseconds: number) => void {
     context.mock.timers.tick(milliseconds);
   };
 }
+
+function writeInitiatingPlugin(root: string): void {
+  writePlugin(
+    root,
+    "alpha",
+    [
+      'import { appendFileSync } from "node:fs";',
+      "export default {",
+      '  manifest: { id: "alpha", apiVersion: 1 },',
+      '  activate(context) { appendFileSync(context.config.trace, "activate\\n"); return { signals: { "akuma.initiating": (signal) => appendFileSync(context.config.trace, `signal:${signal.initiator}\\n`) } }; },',
+      "};",
+    ].join("\n"),
+  );
+}
+
+function writeHomePlugins(home: string, output: string): void {
+  writeFileSync(
+    join(home, "settings.json"),
+    JSON.stringify({ plugins: { alpha: { package: "./plugins/alpha.mjs", config: { trace: output } } } }),
+  );
+}
+
+function callEnvironment(home: string): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_HOME: home, SQUARE_PARTICIPANT_NAME: "tester" };
+  // A caller inside an Akuma Body would forward the operation to its parent;
+  // this suite asserts the local plugin boundary.
+  delete environment[AKUMA_REQUESTS_ENV];
+  return environment;
+}
+
+test("call in an unestablished world skips the initiating plugin signal", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writeInitiatingPlugin(value.root);
+    writeHomePlugins(value.home, output);
+    const result = await runCli(["call", "ghost", "hi"], {
+      cwd: value.root,
+      environment: callEnvironment(value.home),
+    });
+    assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stdout} ${result.stderr}`);
+    assert.deepEqual(trace(output), []);
+    assert.ok(!result.stderr.includes("plugin"), `no plugin noise: ${result.stderr}`);
+  } finally {
+    value.close();
+  }
+});
+
+test("call in an established world emits the initiating plugin signal", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writeInitiatingPlugin(value.root);
+    writeHomePlugins(value.home, output);
+    await World.at(value.root);
+    const result = await runCli(["call", "ghost", "hi"], {
+      cwd: value.root,
+      environment: callEnvironment(value.home),
+    });
+    assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stdout} ${result.stderr}`);
+    assert.deepEqual(trace(output), ["activate", "signal:tester"]);
+  } finally {
+    value.close();
+  }
+});
 
 test("plugin runtime selects project-shadowed enabled plugins in manifest-id order", async () => {
   const value = fixture();

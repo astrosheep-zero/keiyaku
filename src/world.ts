@@ -98,6 +98,16 @@ async function locateMarker(input: string): Promise<WorldRoot | null> {
   }
 }
 
+/** An established World owns its management marker; a candidate World root does not yet. */
+async function established(input: WorldRoot): Promise<boolean> {
+  try {
+    return (await lstat(marker(input))).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 async function exact(input: string): Promise<WorldRoot> {
   const root = await directory(input, "world");
   await ensureMarker(root);
@@ -137,6 +147,9 @@ export const World = Object.freeze({
   },
   at(input: string): Promise<WorldRoot> {
     return exact(input);
+  },
+  established(input: WorldRoot): Promise<boolean> {
+    return established(input);
   },
   prove(input: string): Promise<WorldRoot> {
     return proved(input);

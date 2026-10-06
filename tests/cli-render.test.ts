@@ -1798,7 +1798,7 @@ test("a gates-refused placement names the target's non-movement and lets recorde
       "  candidate  tender · kept",
       "  target  refs/heads/main  · unchanged",
       "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
-      "  summary verified",
+      "  summary",
       "  [1 bash exit 1]",
       "",
       "⧗ awaiting review, manual",
@@ -2321,6 +2321,25 @@ test("movement projects its deviation and reintegration coordinates", () => {
       "  candidate  tender · kept",
       "! target  moved · re-integrated x2",
       "! target moved  refs/heads/main  integration-2 -> null  attempts 3",
+    ].join("\n"),
+  );
+});
+
+test("a multi-line invalid-document diagnostic keeps one detail row per diagnostic", () => {
+  const text = renderRefusal({
+    operation: "bind",
+    refusal: {
+      kind: "invalid-document",
+      diagnostic: "contract document is missing ## Design\ncontract document is missing ## Region",
+    },
+  });
+  assert.equal(
+    text,
+    [
+      "× bind refused",
+      "  reason  invalid document",
+      "  detail  contract document is missing ## Design",
+      "  detail  contract document is missing ## Region",
     ].join("\n"),
   );
 });

@@ -391,6 +391,9 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   const invocation = invocationOptions(argv);
   const help = helpCoordinate(invocation.commandArgv);
   if (help !== null) return { help };
+  // A bare invocation asks for orientation: the root help index, not a refusal.
+  if (invocation.commandArgv.length === 0) return { help: { kind: "root" } };
+  if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "task") return { help: { kind: "task" } };
   if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "--version") return { version: true };
   const task = invocation.commandArgv[0] === "task" ? parseTaskCommand(invocation.commandArgv.slice(1)) : undefined;
   const install =

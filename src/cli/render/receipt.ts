@@ -129,7 +129,7 @@ function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number):
       [{ text: `· ${current.verdict}` }, { text: `· at ${current.at}` }],
       columns,
     );
-    if (current.summary !== undefined) receiptPayload(lines, `  summary ${gate}`, current.summary);
+    if (current.summary !== undefined) receiptPayload(lines, "  summary", current.summary);
   }
   return lines;
 }

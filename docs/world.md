@@ -21,7 +21,10 @@ raw coordinates: it accepts only the canonical physical directory supplied by
 the caller, never substitutes an ancestor, follows an alias, or creates a
 marker. Outer operations prove raw process, transport, and JavaScript values
 once before any product effect; product constructors consume the minted World
-coordinate and do not resolve paths or inspect the current directory.
+coordinate and do not resolve paths or inspect the current directory. A minted
+coordinate also answers whether its World marker currently exists; that
+observation is read-only and never establishes, climbs, or substitutes a
+directory.
 
 The invocation directory is edge input, never persisted identity. Home and the
 filesystem root are ordinary coordinates, not special World kinds. Linked and

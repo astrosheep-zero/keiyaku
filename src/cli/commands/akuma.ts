@@ -11,7 +11,7 @@ import { executionChannel } from "../../akuma/requests.js";
 import { settings, type Settings } from "../../settings.js";
 import { AkumaWorldScopeError, type CallInput, type Keiyaku as KeiyakuContract, type Repo } from "../../index.js";
 import { akumasWithExecution } from "../../library/akumas.js";
-import type { WorldRoot } from "../../world.js";
+import { World, type WorldRoot } from "../../world.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
@@ -119,6 +119,10 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
     initiator = squareAssignedParticipantName(input.environment);
   } catch {}
   if (initiator === undefined) return {};
+  // Plugins coordinate within an established World; a `call` may run where the
+  // marker does not exist yet, and activating there would only fail noisily.
+  // The initiator still travels with the request either way.
+  if (!(await World.established(input.path))) return { initiator };
   try {
     await emitInitiatingPluginSignal({
       world: input.path,
