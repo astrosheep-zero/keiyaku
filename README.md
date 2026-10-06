@@ -131,6 +131,48 @@ Make scoped changes and run relevant tests.
 
 One Markdown file, one worker. `keiyaku call worker` summons it.
 
+## Configuration
+
+Settings are JSON at two addresses: `~/.keiyaku/settings.json` for the user,
+`.keiyaku/settings.json` in the project. A project record
+wholly shadows the same-name user record. There is no write command; edit the
+files directly and inspect the merged, provenance-annotated view with
+`keiyaku settings`.
+
+Gate bundles name reusable gate sets. Bind and amend select them with
+`--gates`, and a `default` bundle applies when `--gates` is omitted:
+
+```json
+{
+  "gates": {
+    "default": { "kind": "bundle", "gates": ["reviewed"] },
+    "strict": { "kind": "bundle", "gates": ["reviewed", "verified"] }
+  }
+}
+```
+
+A word matching no bundle becomes a literal custom gate: it stays unsatisfied
+until an outside producer attests it, and the receipt warns when a word is
+neither a bundle nor a built-in gate.
+
+Worktree hooks run commands when a Contract's managed worktree is created or
+destroyed — dependency installs are the usual suspect:
+
+```json
+{
+  "worktree": {
+    "create": [
+      { "name": "install", "argv": ["npm", "ci", "--ignore-scripts", "--prefer-offline"], "timeoutMs": 300000 }
+    ]
+  }
+}
+```
+
+Hooks run as one ordered phase inside the worktree and must be replay-safe: a
+retry reruns the phase from its beginning. A failing hook retains the worktree
+and reports lag; it never abandons the Contract. `keiyaku settings --help`
+lists every recognized namespace.
+
 ## Install
 
 ```bash
