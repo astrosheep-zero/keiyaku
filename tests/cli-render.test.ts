@@ -148,6 +148,7 @@ function acceptedBind(
   value: Readonly<{
     workspace?: AcceptedOf<"bind">["value"]["workspace"];
     warnings?: readonly string[];
+    gateWarnings?: readonly string[];
     overlaps?: readonly RegionOverlap[];
   }>,
 ): AcceptedOf<"bind"> {
@@ -1603,6 +1604,18 @@ test("accepted bind receipts surface Region lint warnings", () => {
     { warnings: ["Region pattern 'src/a b' contains whitespace and will never match a path"] },
   );
   assert.match(renderAccepted(result), /! region warning[\s\S]*src\/a b[\s\S]*contains whitespace/u);
+});
+
+test("accepted bind and amend receipts surface gate warnings", () => {
+  const contract = contractId("kei/warned");
+  const message = "Gate 'reveiw' has no known producer and stays unsatisfied until a producer attests it";
+  const bound = acceptedBind({ contract, facts: [bindFact(contract)] }, { gateWarnings: [message] });
+  assert.match(renderAccepted(bound), /! gate warning[\s\S]*reveiw[\s\S]*no known producer/u);
+  const amended = acceptedAmend(
+    { contract, facts: [bindFact(contract)] },
+    { documentDiff: "", changes: {}, gateWarnings: [message] },
+  );
+  assert.match(renderAccepted(amended), /! gate warning[\s\S]*reveiw[\s\S]*no known producer/u);
 });
 
 test("accepted receipts omit execution telemetry and retain recovery snapshots", () => {

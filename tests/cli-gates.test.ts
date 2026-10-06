@@ -84,3 +84,54 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
   assert.deepEqual(await gates(await bind("")), []);
   assert.deepEqual(await gates(await bind(undefined)), ["verified"]);
 });
+
+test("bind and amend warn about a gate word with no known producer", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const markdown = async () =>
+    contractMarkdown("Gate warning", {
+      Context: "Exercise the custom-gate warning.",
+      Objective: "Warn on producerless gate words.",
+      Design: "Keep the producer outside this World.",
+      Region: "src/**",
+      Criteria: "### Warning\nThe receipt names the producerless word.",
+    });
+  type Warned = Readonly<{ kind: string; contract?: string; value?: { gateWarnings?: readonly string[] } }>;
+  const bound = await cliJson<Warned>(["-C", raw.path, "bind", "--gates", "reveiw", "-"], {
+    environment: {},
+    readStdin: markdown,
+  });
+  assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
+  assert.deepEqual(bound.value.value?.gateWarnings, [
+    "Gate 'reveiw' has no known producer and stays unsatisfied until a producer attests it",
+  ]);
+
+  const quiet = await runCli(["-C", raw.path, "bind", "--gates", "reviewed", "-"], {
+    environment: {},
+    readStdin: markdown,
+  });
+  assert.equal(quiet.exit, 0);
+  assert.doesNotMatch(quiet.stdout, /gate warning/u);
+
+  const warned = await runCli(["-C", raw.path, "bind", "--gates", "reveiw", "-"], {
+    environment: {},
+    readStdin: markdown,
+  });
+  assert.equal(warned.exit, 0);
+  assert.match(warned.stdout, /! gate warning[\s\S]*reveiw/u);
+
+  if (bound.value.contract === undefined) return;
+  const amended = await cliJson<Warned>(
+    ["-C", raw.path, "amend", bound.value.contract, "--gates", "reviewed,reveiw"],
+    {
+      environment: {},
+      readStdin: async () => {
+        throw new Error("gate-only amend must not read stdin");
+      },
+    },
+  );
+  assert.equal(amended.value.kind, "accepted", JSON.stringify(amended.value));
+  assert.deepEqual(amended.value.value?.gateWarnings, [
+    "Gate 'reveiw' has no known producer and stays unsatisfied until a producer attests it",
+  ]);
+});

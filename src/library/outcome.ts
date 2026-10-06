@@ -416,6 +416,7 @@ const bindEvidenceSchema = z
     keiyaku: z.object({ contract: contractIdSchema }).strict().optional(),
     workspace: worktreeWorkspaceSchema.optional(),
     warnings: z.array(z.string()).readonly().optional(),
+    gateWarnings: z.array(z.string()).readonly().optional(),
     overlaps: z.array(regionOverlapSchema).readonly().optional(),
     overlapFailure: z.string().optional(),
   })
@@ -424,6 +425,7 @@ const bindEvidenceSchema = z
 const amendEvidenceSchema = z
   .object({
     documentDiff: z.string().optional(),
+    gateWarnings: z.array(z.string()).readonly().optional(),
     changes: z
       .object({
         gates: z.array(gateSchema).readonly().optional(),

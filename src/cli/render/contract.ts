@@ -513,6 +513,8 @@ function renderAcceptedBind(result: Accepted<BindOutcome>, columns: number, colo
   else receiptRow(lines, " ", "target", [{ text: target, opaque: true }], columns);
   for (const warning of result.value.warnings ?? [])
     receiptRow(lines, "!", "region warning", [{ text: warning }], columns);
+  for (const warning of result.value.gateWarnings ?? [])
+    receiptRow(lines, "!", "gate warning", [{ text: warning }], columns);
   lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
   return lines.join("\n");
 }
@@ -532,6 +534,8 @@ function renderAcceptedAmend(result: Accepted<AmendOutcome>, columns: number, co
   if (result.value.changes.after !== undefined)
     receiptRow(lines, " ", "after", [{ text: result.value.changes.after.join(" · ") || "none" }], columns);
   if (documentChanged) receiptPayload(lines, "terms diff", termsDiffText(result.value.documentDiff));
+  for (const warning of result.value.gateWarnings ?? [])
+    receiptRow(lines, "!", "gate warning", [{ text: warning }], columns);
   lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
   return lines.join("\n");
 }

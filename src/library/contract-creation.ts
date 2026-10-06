@@ -46,6 +46,7 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
     if (forkOf !== undefined) {
       if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
     }
+    const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;
     return {
       forkOf: forkOf === undefined ? undefined : contractId(forkOf as string),
       scope: scopeForRepo(values.repo),
@@ -53,7 +54,8 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
       actor,
       target: values.target as string | undefined,
       task: forkOf === undefined ? taskOption(values.task) : undefined,
-      gates: forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined,
+      gates: derived === undefined ? undefined : derived.gates,
+      gateWarnings: derived === undefined ? undefined : derived.warnings,
       after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
     };
   });
@@ -94,7 +96,7 @@ export async function bindKeiyaku(
               accumulator.extendConclusions(id, { keiyaku: handle(id) });
               const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
                 observeRegion(scope, channel, id, fork.document.region).then((region) =>
-                  bindValue(handle(id), region, []),
+                  bindValue(handle(id), region, { warnings: [], gateWarnings: [] }),
                 ),
               );
               return acceptedOutcome("bind", id, accumulator, value);
@@ -130,14 +132,15 @@ export async function bindKeiyaku(
 function bindValue(
   keiyaku: Keiyaku,
   region: RegionObservation,
-  warnings: readonly string[],
+  evidence: Readonly<{ warnings: readonly string[]; gateWarnings: readonly string[] }>,
   workspace?: ContractWorkspaceLocation,
   appointmentLag?: readonly { path: string; diagnostic: string }[],
 ): BindValue {
   const base = {
     keiyaku,
     ...(workspace === undefined ? {} : { workspace }),
-    ...(warnings.length === 0 ? {} : { warnings }),
+    ...(evidence.warnings.length === 0 ? {} : { warnings: evidence.warnings }),
+    ...(evidence.gateWarnings.length === 0 ? {} : { gateWarnings: evidence.gateWarnings }),
     ...region,
   };
   void appointmentLag;
@@ -213,8 +216,9 @@ async function markdownBind(
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Keiyaku,
 ): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
-  const { task, target, actor, gates, after } = prepared;
-  if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
+  const { task, target, actor, gates, after, gateWarnings } = prepared;
+  if (gates === undefined || after === undefined || gateWarnings === undefined)
+    throw new Error("Markdown bind requires prepared terms");
   const targetSelection =
     target !== undefined ? { kind: "explicit" as const, target } : { kind: "targetless" as const };
   const admission = await prepareMarkdownBind({
@@ -232,9 +236,14 @@ async function markdownBind(
   const leading = admission.admission === null ? admission.result : admission.admission.result;
   if (leading.kind !== "accepted") return expected(undefined, leading);
   const id = leading.value.contractId;
-  accumulator.extendConclusions(id, { keiyaku: handle(id), warnings: regionWarnings(document.region) });
+  const warnings = regionWarnings(document.region);
+  accumulator.extendConclusions(id, {
+    keiyaku: handle(id),
+    warnings,
+    ...(gateWarnings.length === 0 ? {} : { gateWarnings }),
+  });
   const value = await bindComplete(accumulator, id, scope, channel, leading, hooks, async () =>
-    bindValue(handle(id), await observeRegion(scope, channel, id, document.region), regionWarnings(document.region)),
+    bindValue(handle(id), await observeRegion(scope, channel, id, document.region), { warnings, gateWarnings }),
   );
   return acceptedOutcome("bind", id, accumulator, value);
 }

@@ -99,11 +99,11 @@ function bundleGates(name: string, value: unknown): readonly Gate[] {
   return bundle.gates.map((value) => gateValue(value, `gate bundle '${name}' contains an invalid gate word`, true));
 }
 
-/** Bare words and configured bundles share validation, first-seen accumulation, and freezing. */
+/** Bare words and configured bundles share validation, first-seen accumulation, and freezing. A caller-given literal word with no configured bundle and no built-in producer earns a receipt warning. */
 export function derivedGates(
   composition: LocalContractCompositionCapture,
   names: readonly string[] | undefined,
-): readonly Gate[] {
+): Readonly<{ gates: readonly Gate[]; warnings: readonly string[] }> {
   const settings = composition.settings;
   const configured = settings !== undefined;
   try {
@@ -117,19 +117,27 @@ export function derivedGates(
       ),
     );
     // Explicit empty selection never looks up a namespace.
-    if (selected.length === 0) return Object.freeze([]);
+    if (selected.length === 0) return { gates: Object.freeze([]), warnings: Object.freeze([]) };
     const view = settings?.namespace("gates");
     if (view?.kind === "failed") namespaceFailure(view);
     const expanded = new Set<Gate>();
+    const warned = new Set<string>();
     for (const name of selected) {
       const entry = view?.entries.find((entry) => entry.name === name);
-      const gates =
-        entry === undefined
-          ? [configured && names === undefined ? gate("reviewed") : name]
-          : bundleGates(name, entry.value);
-      for (const value of gates) expanded.add(value);
+      if (entry === undefined) {
+        // The implicit default bundle falls back to the built-in review gate.
+        const implicit = configured && names === undefined;
+        const word = implicit ? gate("reviewed") : name;
+        // A custom gate is first-class, but nothing in this World will attest a
+        // word that is neither reviewed nor verified; say so on the receipt.
+        if (!implicit && word !== "reviewed" && word !== "verified")
+          warned.add(`Gate '${word}' has no known producer and stays unsatisfied until a producer attests it`);
+        expanded.add(word);
+        continue;
+      }
+      for (const value of bundleGates(name, entry.value)) expanded.add(value);
     }
-    return Object.freeze([...expanded]);
+    return { gates: Object.freeze([...expanded]), warnings: Object.freeze([...warned]) };
   } catch (error) {
     return settingsScopedFailure(error);
   }
