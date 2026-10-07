@@ -621,7 +621,7 @@ test("plural wait attributes omitted spans and the scoreboard by identity tag", 
     ],
     unobserved: [],
   });
-  assert.match(conclusion, /^      dead ⋮ 4 omitted$/mu);
+  assert.match(conclusion, /^      dead ⋮ 6 omitted$/mu);
   assert.match(conclusion, /^\d{2}:\d{2} dead ● running/mu);
   assert.match(conclusion, /^\d{2}:\d{2} face ● running/mu);
 });

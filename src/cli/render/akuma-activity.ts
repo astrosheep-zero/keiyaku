@@ -41,9 +41,8 @@ export function frameRule(headLines: readonly string[]): string {
   return "─".repeat(width);
 }
 
-/** Tool rows one focused activity view keeps at its opening and final end; the surplus folds in place. */
-const OPENING_TOOL_BUDGET = 3;
-const RECENT_TOOL_BUDGET = 2;
+/** Tool rows an activity view prints after each say or Tell checkpoint; the surplus folds in place. */
+const TOOL_BUDGET = 3;
 
 type StatusTimeline = AkumaObservation["status"]["timeline"];
 type StatusTimelineEntry = StatusTimeline["entries"][number];
@@ -524,13 +523,21 @@ export type ActivityStream = ((activity: RenderedActivity) => readonly string[])
     seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly string[];
     /** Current live rows for the redrawable frame; never part of append-only output. */
     frame: () => readonly string[];
-    /** Emit the deferred tail exactly once before the command's conclusion. */
+    /** Emit the pending omission count and unsettled rows once before the command's conclusion. */
     flush: () => readonly string[];
+    /** The same decisions undrawn, so concurrent streams can merge before rendering. */
+    emissions: Readonly<{
+      observe: (activity: RenderedActivity) => readonly StreamEmission[];
+      seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly StreamEmission[];
+      flush: () => readonly StreamEmission[];
+    }>;
+    render: (emissions: readonly StreamEmission[]) => readonly string[];
   }>;
 
-type DeferredActivityEntry =
+/** One decided piece of append-only output: a settled row, or an untimed omission count. */
+export type StreamEmission =
   | Readonly<{ kind: "gap"; count: number }>
-  | Readonly<{ kind: "row"; row: RenderRow; inFlightSay: boolean }>;
+  | Readonly<{ kind: "row"; row: RenderRow; inFlightSay?: boolean; unsettled?: boolean }>;
 
 type ActivityStreamState = {
   newestSettledSequence: number | undefined;
@@ -539,8 +546,8 @@ type ActivityStreamState = {
   previousClock: string | undefined;
   renderedBoundaries: Set<number>;
   admittedTellSequences: Set<number>;
-  openingTools: number;
-  deferred: DeferredActivityEntry[];
+  checkpointTools: number;
+  omitted: number;
   liveRows: Map<number, RenderRow>;
 };
 
@@ -625,70 +632,6 @@ function inFlightSay(activity: RenderedActivity, row: RenderRow): boolean {
   return newest !== undefined && newest.sequence === row.sequence;
 }
 
-function coalesceDeferredGaps(state: ActivityStreamState): void {
-  state.deferred = state.deferred.reduce<DeferredActivityEntry[]>((entries, entry) => {
-    const previous = entries.at(-1);
-    if (entry.kind === "gap" && previous?.kind === "gap") {
-      entries[entries.length - 1] = { kind: "gap", count: previous.count + entry.count };
-    } else {
-      entries.push(entry);
-    }
-    return entries;
-  }, []);
-}
-
-function omitOldestDeferredTool(state: ActivityStreamState): void {
-  const index = state.deferred.findIndex((entry) => entry.kind === "row" && isBoundedStreamTool(entry.row));
-  if (index === -1) throw new Error("activity tail lost its pending tool");
-  state.deferred[index] = { kind: "gap", count: 1 };
-  coalesceDeferredGaps(state);
-}
-
-/** A say is a checkpoint: only tools after the last say may occupy the recent tail. */
-function omitPreSayTools(state: ActivityStreamState): void {
-  state.deferred = state.deferred.map((entry) =>
-    entry.kind === "row" && isBoundedStreamTool(entry.row) ? { kind: "gap", count: 1 } : entry,
-  );
-  coalesceDeferredGaps(state);
-}
-
-/** Emit only a prefix whose omission runs can no longer join an unresolved tail tool. */
-function flushSafeActivityPrefix(
-  state: ActivityStreamState,
-  lines: string[],
-  context: TextRenderContext,
-  layout: RowLayout,
-): void {
-  for (;;) {
-    const first = state.deferred[0];
-    if (first === undefined || (first.kind === "row" && isBoundedStreamTool(first.row))) return;
-    if (first.kind === "row") {
-      state.deferred.shift();
-      renderStreamRow(state, first.row, lines, { context, layout, inFlightSay: first.inFlightSay });
-      continue;
-    }
-    const next = state.deferred[1];
-    if (next === undefined || (next.kind === "row" && isBoundedStreamTool(next.row))) return;
-    state.deferred.shift();
-    lines.push(layout.marker(first.count));
-  }
-}
-
-function renderCurrentTurnBoundary(
-  state: ActivityStreamState,
-  activity: RenderedActivity,
-  lines: string[],
-  context: TextRenderContext,
-  layout: RowLayout,
-): CurrentTurnBoundary | undefined {
-  const boundary = currentTurnBoundary(activity);
-  if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
-    state.renderedBoundaries.add(boundary.turnSequence);
-    if (boundary.row.kind !== "thought") renderStreamRow(state, boundary.row, lines, { context, layout });
-  }
-  return boundary;
-}
-
 function rememberLiveRows(state: ActivityStreamState, activity: RenderedActivity): void {
   for (const row of activity.rows) {
     if (row.kind === "tool" && row.state === "active") state.liveRows.set(row.sequence, row);
@@ -704,13 +647,32 @@ function rememberLiveRows(state: ActivityStreamState, activity: RenderedActivity
   }
 }
 
-function observeActivitySnapshot(
+/** A visible row first releases the untimed omission count accumulated before it. */
+function emitRow(state: ActivityStreamState, emissions: StreamEmission[], emission: StreamEmission): void {
+  if (state.omitted > 0) emissions.push({ kind: "gap", count: state.omitted });
+  state.omitted = 0;
+  emissions.push(emission);
+}
+
+function emitCurrentTurnBoundary(
   state: ActivityStreamState,
   activity: RenderedActivity,
-  context: TextRenderContext,
-  layout: RowLayout,
-): readonly string[] {
-  const lines: string[] = [];
+  emissions: StreamEmission[],
+): void {
+  const boundary = currentTurnBoundary(activity);
+  if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
+    state.renderedBoundaries.add(boundary.turnSequence);
+    if (boundary.row.kind !== "thought") emitRow(state, emissions, { kind: "row", row: boundary.row });
+  }
+}
+
+/**
+ * Decide each newly settled row once, when first observed: it prints now or
+ * becomes part of an untimed omission count. No timestamped row is held for a
+ * later observation, so concurrent streams merge without moving backward.
+ */
+function observeActivitySnapshot(state: ActivityStreamState, activity: RenderedActivity): readonly StreamEmission[] {
+  const emissions: StreamEmission[] = [];
   const boundary = currentTurnBoundary(activity);
   rememberPendingTells(state, activity);
   // A row newly selected as this Turn's typed opening must still respect the
@@ -732,61 +694,53 @@ function observeActivitySnapshot(
         row.sequence > state.newestSettledSequence,
     );
   rememberLiveRows(state, activity);
-  if (observedRows.length === 0) return lines;
+  if (observedRows.length === 0) return emissions;
   for (const row of observedRows) state.pendingTellSequences.delete(row.sequence);
   state.newestSettledSequence = observedRows.reduce(
     (newest, row) => Math.max(newest, row.sequence),
     state.newestSettledSequence ?? observedRows[0]!.sequence,
   );
-  const rows = observedRows.filter((row) => row.kind !== "thought");
-  for (const row of rows) {
-    if (row.kind === "said") {
-      omitPreSayTools(state);
-      lines.push(...flushActivityTail(state, context, layout));
-      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
-      continue;
-    }
-    if (isBoundedStreamTool(row) && state.openingTools < OPENING_TOOL_BUDGET) {
-      state.openingTools += 1;
-      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
-      continue;
-    }
-    if (!isBoundedStreamTool(row) && state.deferred.length === 0) {
-      renderStreamRow(state, row, lines, { context, layout, inFlightSay: inFlightSay(activity, row) });
-      continue;
-    }
-    state.deferred.push({ kind: "row", row, inFlightSay: inFlightSay(activity, row) });
-    if (isBoundedStreamTool(row)) {
-      const pendingTools = state.deferred.filter(
-        (entry) => entry.kind === "row" && isBoundedStreamTool(entry.row),
-      ).length;
-      if (pendingTools > RECENT_TOOL_BUDGET) omitOldestDeferredTool(state);
-    }
-    flushSafeActivityPrefix(state, lines, context, layout);
+  for (const row of observedRows) {
+    if (row.kind === "thought") continue;
+    // A failed tool is evidence, not routine progress, so it always prints and spends no budget.
+    const failed = row.kind === "tool" && typeof row.state === "object" && row.state.status === "error";
+    if (isBoundedStreamTool(row) && !failed) {
+      if (state.checkpointTools >= TOOL_BUDGET) {
+        state.omitted += 1;
+        continue;
+      }
+      state.checkpointTools += 1;
+    } else if (row.kind === "said" || row.kind === "tell") state.checkpointTools = 0;
+    emitRow(state, emissions, { kind: "row", row, inFlightSay: inFlightSay(activity, row) });
   }
-  return lines;
+  return emissions;
 }
 
-function flushActivityTail(
+function renderEmissions(
   state: ActivityStreamState,
+  emissions: readonly StreamEmission[],
   context: TextRenderContext,
   layout: RowLayout,
 ): readonly string[] {
   const lines: string[] = [];
-  for (const entry of state.deferred) {
-    if (entry.kind === "gap") lines.push(layout.marker(entry.count));
-    else renderStreamRow(state, entry.row, lines, { context, layout, inFlightSay: entry.inFlightSay });
+  for (const emission of emissions) {
+    if (emission.kind === "gap") lines.push(layout.marker(emission.count));
+    else
+      renderStreamRow(state, emission.row, lines, {
+        context,
+        layout,
+        ...(emission.inFlightSay === undefined ? {} : { inFlightSay: emission.inFlightSay }),
+        ...(emission.unsettled === undefined ? {} : { unsettled: emission.unsettled }),
+      });
   }
-  state.deferred = [];
   return lines;
 }
 
 /**
- * Append-only live view over one command's successive settled snapshots. The
- * first three tools stream immediately; later tools wait in a two-row tail.
- * A say omits the earlier tail, so only the last two extra tools after the
- * final say can print at closing. Newer tools displace older tail candidates
- * in place. Other narrative rows wait behind undecided tail tools.
+ * Append-only live view over one command's successive settled snapshots.
+ * After each say or Tell, the first three tools print as they settle; later
+ * tools until the next checkpoint fold into one omission marker. Failed tools
+ * always print.
  */
 export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
   const state: ActivityStreamState = {
@@ -796,12 +750,12 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     previousClock: undefined,
     renderedBoundaries: new Set(),
     admittedTellSequences: new Set(),
-    openingTools: 0,
-    deferred: [],
+    checkpointTools: 0,
+    omitted: 0,
     liveRows: new Map(),
   };
-  const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly string[] => {
-    const lines: string[] = [];
+  const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly StreamEmission[] => {
+    const emissions: StreamEmission[] = [];
     if (alreadyRenderedSequence !== undefined) {
       state.admissionSequence = alreadyRenderedSequence;
       state.admittedTellSequences.add(alreadyRenderedSequence);
@@ -811,11 +765,11 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     if (unseenBoundary) {
       if (alreadyRenderedSequence !== undefined && boundary.row.sequence > alreadyRenderedSequence) {
         const beforeBoundary = baselineOmissionCount(activity, alreadyRenderedSequence, boundary.row.sequence);
-        if (beforeBoundary > 0) lines.push(layout.marker(beforeBoundary));
+        if (beforeBoundary > 0) emissions.push({ kind: "gap", count: beforeBoundary });
       }
       if (alreadyRenderedSequence !== undefined && boundary.row.sequence <= alreadyRenderedSequence)
         state.renderedBoundaries.add(boundary.turnSequence);
-      else renderCurrentTurnBoundary(state, activity, lines, context, layout);
+      else emitCurrentTurnBoundary(state, activity, emissions);
       rememberLiveRows(state, activity);
       const omitted = baselineOmissionCount(
         activity,
@@ -823,17 +777,28 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
           ? boundary.row.sequence
           : Math.max(boundary.row.sequence, alreadyRenderedSequence),
       );
-      if (omitted > 0) lines.push(layout.marker(omitted));
+      if (omitted > 0) emissions.push({ kind: "gap", count: omitted });
     }
     rememberPendingTells(state, activity);
     rememberLiveRows(state, activity);
     const rows = settledRows(activity);
     if (rows.length > 0)
       state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
-    return lines;
+    return emissions;
   };
-  const observe = (activity: RenderedActivity): readonly string[] =>
-    observeActivitySnapshot(state, activity, context, layout);
+  const flush = (): readonly StreamEmission[] => {
+    const emissions: StreamEmission[] = [];
+    if (state.omitted > 0) emissions.push({ kind: "gap", count: state.omitted });
+    state.omitted = 0;
+    for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
+      const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;
+      emissions.push({ kind: "row", row: unresolved, unsettled: true });
+    }
+    state.liveRows.clear();
+    return emissions;
+  };
+  const render = (emissions: readonly StreamEmission[]): readonly string[] =>
+    renderEmissions(state, emissions, context, layout);
   const frame = (): readonly string[] =>
     groupedEntries(
       [...state.liveRows.values()]
@@ -843,21 +808,19 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       layout,
       { live: true, inFlightSay: (row) => row.kind === "said" },
     );
-  const flush = (): readonly string[] => {
-    if ([...state.liveRows.values()].some((row) => row.kind === "said")) omitPreSayTools(state);
-    const lines = [...flushActivityTail(state, context, layout)];
-    for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
-      const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;
-      renderStreamRow(state, unresolved, lines, {
-        context,
-        layout,
-        unsettled: true,
-      });
-    }
-    state.liveRows.clear();
-    return lines;
-  };
-  return Object.assign(observe, { seed, frame, flush });
+  const observe = (activity: RenderedActivity): readonly string[] => render(observeActivitySnapshot(state, activity));
+  return Object.assign(observe, {
+    seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) =>
+      render(seed(activity, alreadyRenderedSequence)),
+    frame,
+    flush: () => render(flush()),
+    emissions: {
+      observe: (activity: RenderedActivity) => observeActivitySnapshot(state, activity),
+      seed,
+      flush,
+    },
+    render,
+  });
 }
 
 /** What a wait conclusion renders over: its observed and unobserved members. */
@@ -1051,10 +1014,11 @@ function observeWaitRound(
       lines.push(...snapshotHeading(sole.status.id, sole.alias, sole.contract));
     }
   }
+  const parts: { stream: ActivityStream; emissions: readonly StreamEmission[] }[] = [];
   for (const { status, rows } of round) {
     const known = state.streams.get(status.id);
     if (known !== undefined) {
-      lines.push(...known({ snapshot: status.timeline, rows }));
+      parts.push({ stream: known, emissions: known.emissions.observe({ snapshot: status.timeline, rows }) });
     } else {
       // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
       const stream = activityStream(
@@ -1065,12 +1029,49 @@ function observeWaitRound(
       );
       state.streams.set(status.id, stream);
       // Seed marks skipped retained evidence without spending this command's live tool budget.
-      lines.push(...stream.seed({ snapshot: status.timeline, rows }));
+      parts.push({ stream, emissions: stream.emissions.seed({ snapshot: status.timeline, rows }) });
     }
     if (!state.settledAt.has(status.id) && defaultWaitComplete(status))
       state.settledAt.set(status.id, settleMoment(status) ?? now());
   }
+  lines.push(...mergeStreamEmissions(parts));
   return lines;
+}
+
+/**
+ * Merge one observation's decided output across sources by row time. Each
+ * source keeps its own order; an omission count travels with the row after it,
+ * or with the row before it when it trails. Ties keep selection order.
+ */
+function mergeStreamEmissions(
+  parts: readonly Readonly<{ stream: ActivityStream; emissions: readonly StreamEmission[] }>[],
+): readonly string[] {
+  type Unit = { at: number; emissions: StreamEmission[] };
+  const queues = parts.map(({ stream, emissions }) => {
+    const units: Unit[] = [];
+    let pending: StreamEmission[] = [];
+    for (const emission of emissions) {
+      pending.push(emission);
+      if (emission.kind !== "row") continue;
+      const at = Date.parse(emission.row.at);
+      units.push({ at: Number.isFinite(at) ? at : (units.at(-1)?.at ?? Number.NEGATIVE_INFINITY), emissions: pending });
+      pending = [];
+    }
+    if (pending.length > 0) {
+      const last = units.at(-1);
+      if (last === undefined) units.push({ at: Number.NEGATIVE_INFINITY, emissions: pending });
+      else last.emissions.push(...pending);
+    }
+    return { stream, units };
+  });
+  const lines: string[] = [];
+  for (;;) {
+    let next: (typeof queues)[number] | undefined;
+    for (const queue of queues)
+      if (queue.units.length > 0 && (next === undefined || queue.units[0]!.at < next.units[0]!.at)) next = queue;
+    if (next === undefined) return lines;
+    lines.push(...next.stream.render(next.units.shift()!.emissions));
+  }
 }
 
 /**
@@ -1151,14 +1152,19 @@ function orderedWaitIds(state: WaitObservationStreamState, result: WaitConclusio
   return ids;
 }
 
+function flushWaitStreams(state: WaitObservationStreamState): readonly string[] {
+  return mergeStreamEmissions(
+    [...state.streams.values()].map((stream) => ({ stream, emissions: stream.emissions.flush() })),
+  );
+}
+
 function concludeWaitStream(
   state: WaitObservationStreamState,
   result: WaitConclusionResult,
   startedAt: number,
   now: () => number,
 ): string {
-  const tail: string[] = [];
-  for (const stream of state.streams.values()) tail.push(...stream.flush());
+  const tail = flushWaitStreams(state);
 
   const end = now();
   for (const observation of result.observations)
@@ -1224,7 +1230,7 @@ export function waitObservationStream(
   const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
     observeWaitRound(state, round, context, now);
   const frame = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.frame());
-  const flush = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.flush());
+  const flush = (): readonly string[] => flushWaitStreams(state);
   const conclude = (result: WaitConclusionResult): string => concludeWaitStream(state, result, startedAt, now);
   return { select, observe, frame, flush, conclude, streamed: () => state.observed };
 }

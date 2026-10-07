@@ -222,11 +222,14 @@ exact terminal Turn — Akuma-wide idle never stands in for it — and stdout
 carries that answer once, byte-exact, and nothing else on deadline or failure.
 The stream restates the timeline's own rows rather than inventing a private
 vocabulary and never replays a settled row; omissions between evidence spans
-are marked opaquely rather than rewritten. The first three observed tools
-retain their opening allowance, even across speech. A spoken update remains
-visible without releasing earlier deferred
-tools, which become omissions. The recent allowance admits only the last two
-additional tools after the final spoken update. A plural observation attributes
+are marked opaquely rather than rewritten. Each settled row is decided once,
+when first observed: it prints or joins an omission count, and no timestamped
+row is held for a later observation. After each spoken update or Tell, the
+first three settled tools print; later tools until the next such checkpoint
+fold into one untimed omission marker, released before that source's next
+visible row or at closing. A failed tool always prints. One observation across
+several sources merges by row time while each source keeps its own order, so a
+held row never resurfaces behind newer output. A plural observation attributes
 every semantic row to a stable compact source tag resolved from the
 observation seam. Its say rows retain the bounded two-line payload budget
 while other attributed rows stay compact. The observation closes with an

@@ -3463,13 +3463,13 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
   ];
   const stream = activityStream({ columns: 120, color: false });
   const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
-  for (const sequence of [1, 3, 4, 11, 12]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  for (const sequence of [6, 7, 8, 10]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 1, "only four eligible tools are omitted");
+  for (const sequence of [1, 3, 4]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  for (const sequence of [6, 7, 8, 10, 11, 12]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
+  assert.equal((text.match(/⋮ 6 omitted/gu) ?? []).length, 1, "only six eligible tools are omitted");
   assert.doesNotMatch(text, /hidden-[123]/u);
 });
 
-test("a say omits earlier tail tools and only keeps the last two after the final say", () => {
+test("each say or Tell reopens the tool budget and failed tools always print", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
   const fileChange = (sequence: number, path: string, state: CompletedToolRow["state"] = { status: "ok" }) =>
@@ -3504,15 +3504,17 @@ test("a say omits earlier tail tools and only keeps the last two after the final
   const text = [observed, ...stream.flush()].filter(Boolean).join("\n");
 
   assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
-  for (const sequence of [2, 3, 4, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.doesNotMatch(text, /src\/(middle|selected)\.ts/u, "only deferred pre-say tools are omitted");
+  for (const sequence of [2, 3, 4, 11, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.doesNotMatch(text, /src\/middle\.ts/u);
+  assert.match(text, /! edit   src\/selected\.ts — \+4 -2 — error · refused/u);
   assert.match(text, /! edit   src\/last\.ts — \+4 -2 — error · refused/u);
-  for (const sequence of [6, 7, 8, 11, 12]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /⋮ 5 omitted[\s\S]*flush-now[\s\S]*⋮ 2 omitted/u);
+  for (const sequence of [6, 7, 8]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.match(text, /⋮ 4 omitted[\s\S]*selected[\s\S]*flush-now[\s\S]*last\.ts/u);
+  assert.doesNotMatch(observed.split("flush-now")[1] ?? "", /omitted/u);
   assert.equal(text.split("flush-now").length - 1, 1);
 });
 
-test("multiple says preserve three opening tools and only the final say's two newest tools", () => {
+test("multiple says each print their first three tools as they settle", () => {
   const tool = (sequence: number) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
   const say = (sequence: number, text: string) =>
@@ -3537,13 +3539,13 @@ test("multiple says preserve three opening tools and only the final say's two ne
   const after = stream(liveActivity(idleAkumaSnapshot(rows)));
   const text = [...before, ...after, ...stream.flush()].join("\n");
 
-  for (const sequence of [1, 2, 3, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  for (const sequence of [5, 6, 7, 8, 10, 11])
-    assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /first[\s\S]*⋮ 4 omitted[\s\S]*last[\s\S]*⋮ 2 omitted/u);
+  for (const sequence of [1, 2, 3, 5, 6, 7, 10, 11, 12])
+    assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  for (const sequence of [8, 13]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
+  assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*⋮ 1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*⋮ 1 omitted/u);
 });
 
-test("a plural wait gives each target its own whole-command tool budget", () => {
+test("a plural wait gives each target its own tool budget", () => {
   const first = "aku/worker/abcd0034";
   const second = "aku/worker/abcd0035";
   const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
@@ -3577,9 +3579,9 @@ test("a plural wait gives each target its own whole-command tool budget", () => 
   });
   const text = [...later, conclusion].join("\n");
   for (const prefix of ["a", "b"])
-    for (const sequence of [1, 2, 3, 8, 9]) assert.match(text, new RegExp(`\\$ ${prefix}${sequence}`, "u"));
-  assert.doesNotMatch(text, /\$ [ab][4-7]/u);
-  assert.equal((text.match(/⋮ 4 omitted/gu) ?? []).length, 2);
+    for (const sequence of [1, 2, 3]) assert.match(text, new RegExp(`\\$ ${prefix}${sequence}`, "u"));
+  assert.doesNotMatch(text, /\$ [ab][4-9]/u);
+  assert.equal((text.match(/⋮ 6 omitted/gu) ?? []).length, 2);
 });
 
 test("a wait flushes a known target when its final result becomes unobserved", () => {
@@ -3609,7 +3611,43 @@ test("a wait flushes a known target when its final result becomes unobserved", (
     observations: [],
     unobserved: [{ id, diagnostic: "window lost" }],
   });
-  assert.match(text, /⋮ 4 omitted[\s\S]*\$ c8[\s\S]*\$ c9/u);
+  assert.match(text, /⋮ 6 omitted/u);
+});
+
+test("a plural wait merges one observation across targets by row time", () => {
+  const first = "aku/worker/abcd0037";
+  const second = "aku/worker/abcd0038";
+  const stream = waitObservationStream({ columns: 120, color: false }, { now: () => 0 });
+  stream.select([
+    { id: first, alias: "@first" },
+    { id: second, alias: "@second" },
+  ]);
+  const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  const status = (id: string, tools: readonly (readonly [number, string, number])[]) =>
+    parseAkumaStatus({
+      id,
+      life: "running",
+      allowed: [],
+      timeline: openAkumaSnapshot([
+        ...tools.map(([sequence, command, minute]) =>
+          snapshotRow({ ...completedTool(sequence, "bash", { kind: "run", command }), at: at(minute) }),
+        ),
+        snapshotRow(activeTool(9, "bash", { kind: "run", command: "open" })),
+      ]),
+    });
+  stream.observe([observed(status(first, [])), observed(status(second, []))]);
+  const text = stream
+    .observe([
+      observed(status(first, [[1, "first-late", 20]])),
+      observed(
+        status(second, [
+          [1, "second-early", 15],
+          [2, "second-later", 21],
+        ]),
+      ),
+    ])
+    .join("\n");
+  assert.match(text, /second-early[\s\S]*first-late[\s\S]*second-later/u);
 });
 
 test("a single answered wait concludes at its durable settle moment, not the poll that noticed it", () => {
