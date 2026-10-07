@@ -1,6 +1,7 @@
 import type { ArcData } from "../core/facts/types.js";
 import { formatDuration } from "../duration.js";
-import type { ContractBody } from "./types.js";
+import { decodeContractDocument } from "./decode.js";
+import type { ContractBody, DecodedContractDocument } from "./types.js";
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, normalizeTitle, rawSlice } from "../markdown/query.js";
@@ -69,6 +70,20 @@ export function renderContractBody(body: ContractBody, currentArc?: ArcData): st
   ]
     .join("\n\n")
     .concat("\n");
+}
+
+/**
+ * Binding persists the canonical rendering of decoded terms, never the caller's
+ * literal byte stream: layout-only authorship is normalized at admission so it
+ * never reappears as phantom changes in later amendment diffs.
+ */
+export function decodeCanonicalContractDocument(
+  source: string,
+  options: Readonly<{ requireTimeout?: boolean }> = {},
+): DecodedContractDocument {
+  const decoded = decodeContractDocument(source, options);
+  const rendered = renderContractBody(decoded);
+  return rendered === decoded.document.bytes ? decoded : decodeContractDocument(rendered, options);
 }
 
 function sections(document: DocumentNode): readonly SectionNode[] {

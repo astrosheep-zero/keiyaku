@@ -5,38 +5,39 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
+import { decodeContractDocument } from "../src/body/decode.js";
+import { renderContractBody } from "../src/body/render.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { GIT_REF, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import {
-  appointedWorktreePath,
-  cachedRepoAt,
-  cachedRepositoryAt,
-  snapshotGitRepository,
-} from "./support/git.js";
-import {
-  document,
-  repositoryWithMain,
-} from "./support/library-verbs.js";
+import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, snapshotGitRepository } from "./support/git.js";
+import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 type ContractHandle = Pick<Keiyaku, "state">;
 
+test("bind persists the canonical rendering, so amending one section leaves other bytes untouched", async () => {
+  const repository = repositoryWithMain();
+  const repo = await cachedRepoAt(repository.path);
+  const raw = document().replace(/\n## Objective/u, "\n\n\n## Objective");
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: raw, workspace: "worktree" }));
+  const before = present(await bound.value.keiyaku.state()).terms.document.bytes;
+  assert.equal(before, renderContractBody(decodeContractDocument(document())));
+  const amended = accepted(
+    await bound.value.keiyaku.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
+  );
+  assert.match(amended.value.documentDiff, /sharpened objective/u);
+  const after = present(await bound.value.keiyaku.state()).terms.document.bytes;
+  const start = before.indexOf("## Objective");
+  const end = before.indexOf("## Design");
+  assert.equal(after.slice(0, start), before.slice(0, start));
+  assert.equal(after.slice(after.indexOf("## Design")), before.slice(end));
+});
+
 async function publicContractId(handle: ContractHandle): Promise<ContractId> {
-  return (present(await handle.state())).id;
+  return present(await handle.state()).id;
 }
-
-
-
-
-
-
-
-
-
-
-
 
 function changeIdFromSubject(subject: string | undefined): string | undefined {
   return (JSON.parse(subject ?? "[]") as readonly (readonly [string, string])[]).find(
@@ -60,13 +61,15 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   writeFileSync(join(repository.path, "z.txt"), "base\n");
   repository.run(["add", "a.txt", "z.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
-  const bound = accepted(await Keiyaku.with().bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: document(),
-    workspace: "worktree",
-    target: "refs/heads/main",
-    gates: ["reviewed"],
-  }));
+  const bound = accepted(
+    await Keiyaku.with().bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: document(),
+      workspace: "worktree",
+      target: "refs/heads/main",
+      gates: ["reviewed"],
+    }),
+  );
   const boundId = await publicContractId(bound.value.keiyaku);
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "a.txt"), "target\n");
@@ -116,22 +119,20 @@ function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: 
   }
 }
 
-
 // Each case owns a separate repository and scoped fault injection, never a process-wide mock.
 describe("library-contract-operations isolated repositories", { concurrency: 4 }, () => {
-
   test("plain deliver conflict is an executable handoff and does not mutate", async () => {
     const { repository, contract, targetHead, worktree } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
     const journal = await readRef(git, GIT_REF);
     await assertRefused(() => contract.deliver(), {
-        kind: "integration-failed",
-        contractId: await publicContractId(contract),
-        reason: "conflict",
-        targetHead,
-        conflictPaths: ["a.txt", "z.txt"],
-        recovery: DELIVER_CONFLICT_RECOVERY,
-      });
+      kind: "integration-failed",
+      contractId: await publicContractId(contract),
+      reason: "conflict",
+      targetHead,
+      conflictPaths: ["a.txt", "z.txt"],
+      recovery: DELIVER_CONFLICT_RECOVERY,
+    });
     const state = present(await contract.state());
     assert.equal(state.delivery, null);
     assert.equal(state.terminal, null);
@@ -215,12 +216,14 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
   test("declared failing Verification with no gate does not block a library delivery claim", async () => {
     const repository = repositoryWithMain();
-    const bound = accepted(await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
-      markdown: document("exit 1"),
-      workspace: "worktree",
-      gates: [],
-    }));
+    const bound = accepted(
+      await Keiyaku.with().bind({
+        repo: await cachedRepoAt(repository.path),
+        markdown: document("exit 1"),
+        workspace: "worktree",
+        gates: [],
+      }),
+    );
     const state = present(await bound.value.keiyaku.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
@@ -231,6 +234,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.deepEqual(delivered.value.completion?.verification, { mode: "ran", verdict: "unsatisfied" });
     assert.equal(delivered.value.placement, undefined);
-    assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "claimed");
+    assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "claimed");
   });
 });

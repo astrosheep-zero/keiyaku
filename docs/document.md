@@ -13,7 +13,10 @@ Those required terms must be structurally valid and nonempty where meaningful;
 invalid documents are rejected before a lifecycle attempt. Independent
 structural failures are refused together in one attempt, while validation whose
 input depends on a well-formed structure keeps its order after them. Extensions
-may carry additional author terms without becoming core vocabulary.
+may carry additional author terms without becoming core vocabulary. Binding
+persists the canonical rendering of the decoded terms rather than the caller's
+literal byte stream: layout-only authorship is normalized at admission and
+never reappears as phantom changes in later amendment diffs.
 
 `Region` is planning evidence. It lets callers see likely interaction among
 active Contracts, but grants no filesystem authority, predicts no eventual

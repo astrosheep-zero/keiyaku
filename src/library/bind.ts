@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { decodeContractDocument } from "../body/decode.js";
+import { decodeCanonicalContractDocument } from "../body/render.js";
 import { contractIdFromSegment, type ActorId, type ContractId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -138,7 +139,7 @@ export async function admitForkBindWithAppointment(
     /^\s*#\s*[^\r\n]*(?:\r?\n|$)/u,
     `# Fork · ${sourceDocument.title}${sourceDocument.document.bytes.includes("\r\n") ? "\r\n" : "\n"}`,
   );
-  const document = decodeContractDocument(markdown, { requireTimeout: true });
+  const document = decodeCanonicalContractDocument(markdown, { requireTimeout: true });
   const terms = contractTerms(document, source.terms.gates, source.terms.after);
   const admission = await attemptCandidates({
     scope: input.scope,

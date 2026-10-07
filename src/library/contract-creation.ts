@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-import { decodeContractDocument } from "../body/decode.js";
+import { decodeCanonicalContractDocument } from "../body/render.js";
 import { regionWarnings } from "../body/region.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
