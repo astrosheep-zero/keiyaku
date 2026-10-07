@@ -587,7 +587,7 @@ test("catalog text renders only the selected identity layer", () => {
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
       hasMore: false,
     }),
-    ["AKUMA NAMES // available", "", "reviewer  codex-5", "  Read the complete change without truncation."].join("\n"),
+    ["AKUMA NAMES // available", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
   );
   assert.equal(
     renderAkumaCatalogue(

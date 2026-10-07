@@ -92,10 +92,13 @@ export function renderArchetypeCatalogue(
       ? []
       : [
           "",
-          ...list.rows.flatMap((row) => [
-            `${safeText(row.name)}${row.model === undefined ? "" : `  ${safeText(row.model)}`}`,
-            ...(row.description === undefined ? [] : [`  ${safeText(row.description)}`]),
-          ]),
+          ...list.rows.flatMap((row) => {
+            const facts = [
+              ...(row.model === undefined ? [] : [safeText(row.model)]),
+              ...(row.description === undefined ? [] : [safeText(row.description)]),
+            ];
+            return [safeText(row.name), ...(facts.length === 0 ? [] : [`  ${facts.join(" — ")}`])];
+          }),
           ...(list.hasMore ? ["…"] : []),
         ]),
   ].join("\n");
