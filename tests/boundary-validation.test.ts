@@ -119,7 +119,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
       "",
     ].join("\n"),
     workspace: "worktree",
-    gates: ["security-audited"],
+    gates: ["reviewed"],
   }));
   assert.ok(bound.value.keiyaku instanceof Keiyaku);
   await assert.rejects(

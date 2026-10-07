@@ -92,6 +92,7 @@ test("Contract bind expands mixed gates and bundles, deduplicates stably, and de
           empty: { kind: "bundle", gates: [] },
           first: { kind: "bundle", gates: ["reviewed", "verified", "reviewed"] },
           second: { kind: "bundle", gates: ["verified"] },
+          custom: { kind: "bundle", gates: ["security-audited"] },
           future: { kind: "external", gate: "security-audited" },
         },
       }),
@@ -101,18 +102,18 @@ test("Contract bind expands mixed gates and bundles, deduplicates stably, and de
     assert.deepEqual(await gates(loaded, []), []);
     assert.deepEqual(await gates(loaded, ["empty"]), []);
     assert.deepEqual(await gates(loaded, ["first", "second", "first"]), ["reviewed", "verified"]);
-    assert.deepEqual(await gates(loaded, ["verified", "first", "security-audited", "verified"]), [
+    assert.deepEqual(await gates(loaded, ["verified", "first", "custom", "verified"]), [
       "verified",
       "reviewed",
       "security-audited",
     ]);
     assert.deepEqual(await gates(loaded, ["reviewed"]), ["reviewed"]);
-    assert.deepEqual(await gates(loaded, ["default"]), ["default"]);
+    await assert.rejects(() => gates(loaded, ["default"]), /Unknown gate 'default'\. Known gate names: reviewed, verified, custom, empty, first, future, second/u);
     for (const name of ["", " ", "Security", "reviewed,verified"]) {
       await assert.rejects(
         () => gates(loaded, [name]),
         (error: unknown) =>
-          invalidInputFromSettings(error) && error instanceof Error && /gate or bundle name/u.test(error.message),
+          invalidInputFromSettings(error) && error instanceof Error && /gate name/u.test(error.message),
       );
     }
 
@@ -152,7 +153,7 @@ test("Contract bind validates only selected bundle records and hard-rejects the 
     );
     const loaded = await settings({ home: value.home });
     assert.deepEqual(await gates(loaded, ["good"]), ["reviewed"]);
-    assert.deepEqual(await gates(loaded, ["missing"]), ["missing"]);
+    await assert.rejects(() => gates(loaded, ["missing"]), /Unknown gate 'missing'/u);
     await assert.rejects(() => gates(loaded, ["future"]), /unsupported kind/u);
     await assert.rejects(() => gates(loaded, ["legacy"]), /must be an object/u);
     await assert.rejects(() => gates(loaded, ["extra"]), /unknown field/u);
@@ -707,7 +708,7 @@ function invalidInputFromSettings(error: unknown): boolean {
   return error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof SettingsError;
 }
 
-test("omitted Settings binds literal gate words, empty hooks, and false freshness", async () => {
+test("omitted Settings accepts built-in gates only, empty hooks, and false freshness", async () => {
   const repository = makeGitRepository();
   try {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -716,10 +717,15 @@ test("omitted Settings binds literal gate words, empty hooks, and false freshnes
       await Keiyaku.with().bind({
         repo,
         markdown: contractDocument(),
-        gates: ["reviewed", "security-audited", "reviewed"],
+        gates: ["reviewed", "reviewed"],
       }),
     );
-    assert.deepEqual(present(await selected.value.keiyaku.state()).terms.gates, ["reviewed", "security-audited"]);
+    assert.deepEqual(present(await selected.value.keiyaku.state()).terms.gates, ["reviewed"]);
+    await assert.rejects(
+      Keiyaku.with().bind({ repo, markdown: contractDocument(), gates: ["security-audited"] }),
+      (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input"
+        && /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
+    );
     const bare = accepted(await Keiyaku.with().bind({ repo, markdown: contractDocument("Bare core") }));
     assert.deepEqual(present(await bare.value.keiyaku.state()).terms.gates, []);
     const empty = accepted(
@@ -759,10 +765,10 @@ test("captured Settings selects the configured default while explicit [] skips t
       await Keiyaku.with({ settings: captured }).bind({
         repo,
         markdown: contractDocument("Mixed"),
-        gates: ["security-audited", "strict", "security-audited"],
+        gates: ["reviewed", "strict", "reviewed"],
       }),
     );
-    assert.deepEqual(present(await mixed.value.keiyaku.state()).terms.gates, ["security-audited", "reviewed"]);
+    assert.deepEqual(present(await mixed.value.keiyaku.state()).terms.gates, ["reviewed", "security-audited"]);
     const explicit = accepted(
       await Keiyaku.with({ settings: captured }).bind({ repo, markdown: contractDocument("Explicit"), gates: [] }),
     );

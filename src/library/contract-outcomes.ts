@@ -15,14 +15,12 @@ export type BindValue = Readonly<{
   keiyaku: Keiyaku;
   workspace?: ContractWorkspaceLocation;
   warnings?: readonly string[];
-  gateWarnings?: readonly string[];
 }> &
   RegionObservation;
 
 export type AmendValue = Readonly<{
   documentDiff: string;
   changes: Readonly<{ gates?: readonly Gate[]; after?: readonly ContractId[] }>;
-  gateWarnings?: readonly string[];
 }> &
   AmendRegionObservation;
 

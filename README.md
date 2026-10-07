@@ -139,8 +139,9 @@ wholly shadows the same-name user record. There is no write command; edit the
 files directly and inspect the merged, provenance-annotated view with
 `keiyaku settings`.
 
-Gate bundles name reusable gate sets. Bind and amend select them with
-`--gates`, and a `default` bundle applies when `--gates` is omitted:
+Named gate groups provide reusable gate sets. Bind and amend select them with
+`--gates`; the `default` group applies when binding with `--gates` omitted.
+Amending without `--gates` keeps the existing gates:
 
 ```json
 {
@@ -151,9 +152,10 @@ Gate bundles name reusable gate sets. Bind and amend select them with
 }
 ```
 
-A word matching no bundle becomes a literal custom gate: it stays unsatisfied
-until an outside producer attests it, and the receipt warns when a word is
-neither a bundle nor a built-in gate.
+Selections accept the built-in names `reviewed` and `verified`, or configured
+group names. Unknown names are rejected with the known names listed. Custom gates
+must be declared inside a configured group; they stay unsatisfied until a producer
+attests them.
 
 Worktree hooks run commands when a Contract's managed worktree is created or
 destroyed — dependency installs are the usual suspect:
@@ -163,13 +165,18 @@ destroyed — dependency installs are the usual suspect:
   "worktree": {
     "create": [
       { "name": "install", "argv": ["npm", "ci", "--ignore-scripts", "--prefer-offline"], "timeoutMs": 300000 }
+    ],
+    "destroy": [
+      { "name": "teardown", "argv": ["docker", "compose", "down", "-v"], "timeoutMs": 60000 }
     ]
   }
 }
 ```
 
 Hooks run as one ordered phase inside the worktree and must be replay-safe: a
-retry reruns the phase from its beginning. A failing hook retains the worktree
+retry reruns the phase from its beginning. Create hooks prepare the worktree;
+destroy hooks release external resources the worktree deletion alone cannot.
+A failing hook retains the worktree
 and reports lag; it never abandons the Contract. `keiyaku settings --help`
 lists every recognized namespace.
 

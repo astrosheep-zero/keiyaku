@@ -108,15 +108,14 @@ export class ContractExecution {
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
         markdown: values.markdown === undefined ? undefined : requireMarkdown(values.markdown),
-        gates: derived === undefined ? undefined : derived.gates,
-        gateWarnings: derived === undefined ? [] : derived.warnings,
+        gates: derived,
         prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", contractId),
         actor: actorOption(values.actor).actor,
       };
     });
   }
   async amend(input: AmendInput): Promise<AmendOutcome> {
-    const { markdown, gates, gateWarnings, prerequisites, actor } = this.amendInput(input);
+    const { markdown, gates, prerequisites, actor } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
     validated(() => {
@@ -182,7 +181,6 @@ export class ContractExecution {
           value: (): AmendValue => ({
             documentDiff: diff,
             changes,
-            ...(gateWarnings.length === 0 ? {} : { gateWarnings }),
             ...region,
           }),
         });

@@ -58,10 +58,7 @@ user-facing vocabulary. Receipt
 Git identities are abbreviated in text by the shared collision-aware display
 rule and remain full in JSON; absent content identity has no row. Amend receipts
 use a verb-past title, name gate and prerequisite changes independently, and
-reserve an unchanged-terms fact for a genuinely unchanged amendment. A
-caller-given gate word matching neither a configured bundle nor a built-in
-gate remains a literal custom gate; the bind or amend receipt warns once per
-such word that no known producer will satisfy it. Their
+reserve an unchanged-terms fact for a genuinely unchanged amendment. Their
 bounded terms comparison keeps only the comparison headers, without decorative
 banners or trailing header whitespace. Task mutation receipts use verb-past
 titles and field-level changes or admitted plan rows, never projection-file

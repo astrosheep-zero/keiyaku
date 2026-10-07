@@ -46,6 +46,7 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
       gates: {
         default: { kind: "bundle", gates: ["verified"] },
         strict: { kind: "bundle", gates: ["reviewed", "verified"] },
+        custom: { kind: "bundle", gates: ["security-audited"] },
       },
     }),
   );
@@ -71,7 +72,7 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
     return result.value.contract as ContractId;
   };
   const gates = async (id: ContractId) => (await observeContract(repository, id)).state?.terms.gates;
-  const mixed = await bind("reviewed,strict,security-audited,reviewed");
+  const mixed = await bind("reviewed,strict,custom,reviewed");
   assert.deepEqual(await gates(mixed), ["reviewed", "verified", "security-audited"]);
 
   const amendText = await runCli(["-C", raw.path, "amend", mixed, "--gates", ""], {
@@ -85,53 +86,47 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
   assert.deepEqual(await gates(await bind(undefined)), ["verified"]);
 });
 
-test("bind and amend warn about a gate word with no known producer", async () => {
+test("bind and amend reject unknown gate names without changing Contract authority", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const markdown = async () =>
-    contractMarkdown("Gate warning", {
-      Context: "Exercise the custom-gate warning.",
-      Objective: "Warn on producerless gate words.",
-      Design: "Keep the producer outside this World.",
+    contractMarkdown("Gate selection", {
+      Context: "Exercise unknown gate rejection.",
+      Objective: "Reject unknown names before admission.",
+      Design: "Validate gate selections at the public boundary.",
       Region: "src/**",
-      Criteria: "### Warning\nThe receipt names the producerless word.",
+      Criteria: "### Gates\nUnknown names do not change authority.",
     });
-  type Warned = Readonly<{ kind: string; contract?: string; value?: { gateWarnings?: readonly string[] } }>;
-  const bound = await cliJson<Warned>(["-C", raw.path, "bind", "--gates", "reveiw", "-"], {
-    environment: {},
+  const environment = { KEIYAKU_HOME: resolve(raw.path, "empty-home") };
+  const refs = () => raw.run(["for-each-ref", "--format=%(refname) %(objectname)"]);
+  const before = refs();
+  const rejected = await runCli(["-C", raw.path, "bind", "--gates", "reveiw", "-"], {
+    environment,
     readStdin: markdown,
   });
+  assert.notEqual(rejected.exit, 0);
+  assert.match(rejected.stdout, /Unknown gate 'reveiw'\. Known gate names: reviewed, verified/u);
+  assert.equal(refs(), before);
+
+  const bound = await cliJson<Readonly<{ kind: string; contract?: ContractId }>>(
+    ["-C", raw.path, "bind", "--gates", "reviewed", "-"],
+    { environment, readStdin: markdown },
+  );
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.deepEqual(bound.value.value?.gateWarnings, [
-    "Gate 'reveiw' has no known producer and stays unsatisfied until a producer attests it",
-  ]);
-
-  const quiet = await runCli(["-C", raw.path, "bind", "--gates", "reviewed", "-"], {
-    environment: {},
-    readStdin: markdown,
-  });
-  assert.equal(quiet.exit, 0);
-  assert.doesNotMatch(quiet.stdout, /gate warning/u);
-
-  const warned = await runCli(["-C", raw.path, "bind", "--gates", "reveiw", "-"], {
-    environment: {},
-    readStdin: markdown,
-  });
-  assert.equal(warned.exit, 0);
-  assert.match(warned.stdout, /! gate warning[\s\S]*reveiw/u);
-
-  if (bound.value.contract === undefined) return;
-  const amended = await cliJson<Warned>(
+  assert.ok(bound.value.contract);
+  const repository = await repositoryAt(raw.path);
+  const beforeAmend = await observeContract(repository, bound.value.contract);
+  writeFileSync(resolve(raw.path, ".keiyaku", "settings.json"), JSON.stringify({
+    gates: { strict: { kind: "bundle", gates: ["reviewed"] } },
+  }));
+  const amended = await runCli(
     ["-C", raw.path, "amend", bound.value.contract, "--gates", "reviewed,reveiw"],
     {
-      environment: {},
-      readStdin: async () => {
-        throw new Error("gate-only amend must not read stdin");
-      },
+      environment,
+      readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
     },
   );
-  assert.equal(amended.value.kind, "accepted", JSON.stringify(amended.value));
-  assert.deepEqual(amended.value.value?.gateWarnings, [
-    "Gate 'reveiw' has no known producer and stays unsatisfied until a producer attests it",
-  ]);
+  assert.notEqual(amended.exit, 0);
+  assert.match(amended.stderr, /Unknown gate 'reveiw'\. Known gate names: reviewed, verified, strict/u);
+  assert.deepEqual(await observeContract(repository, bound.value.contract), beforeAmend);
 });

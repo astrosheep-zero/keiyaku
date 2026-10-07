@@ -114,12 +114,16 @@ an ordinary refusal.
 Settings are an explicit shared resource captured once at Contract
 construction. Contract operations retain derived values, not a live Settings
 observation, and read a namespace only at the operation that consumes it.
-Omitted Settings is bare core: omitted bind gates select nothing, every
-supplied gate word stays literal, hooks are empty, and branch freshness is
-false. Supplied Settings selects product behavior: omitted bind gates use the
-configured default bundle, named bundles and literal words mix with first-seen
-deduplication, and an unconfigured name remains a literal gate. Expansion does
-not infer producer availability. An explicit empty selection needs no bundle
+Omitted Settings selects no bind gates by default, accepts only built-in gate
+names, keeps hooks empty, and leaves branch freshness false. Supplied Settings
+selects product behavior: omitted bind gates use the configured default bundle
+or the built-in review obligation when no default exists. Explicit selections
+accept built-in names and configured bundles with first-seen deduplication;
+unknown names fail as caller-invalid input before admission, with the built-in
+and configured selection names exposed in the diagnostic. This discovery does
+not validate unselected configuration. Custom obligations
+must come from an explicitly configured bundle. Expansion does not infer
+producer availability. An explicit empty selection needs no bundle
 lookup and freezes no obligations; omitted amendment retains the admitted gates
 without lookup, and a fork copies the source gates without expansion. A
 malformed selected bundle or unavailable selected namespace fails the consuming

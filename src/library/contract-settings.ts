@@ -21,7 +21,7 @@ function settingsScopedFailure(error: unknown): never {
 /**
  * Hooks, freshness, and gate bundles are read from the captured Settings only at the operation
  * that consumes them. Bare core (omitted Settings) keeps empty hooks, false freshness, and
- * literal gate words; a broken selected namespace fails before any admission.
+ * built-in gate words; a broken selected namespace fails before any admission.
  */
 export function derivedHooks(composition: LocalContractCompositionCapture): WorktreeHooks {
   if (composition.settings === undefined) return EMPTY_WORKTREE_HOOKS;
@@ -84,26 +84,26 @@ function gateValue(value: unknown, message: string, configured: boolean): Gate {
 
 function bundleGates(name: string, value: unknown): readonly Gate[] {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new SettingsError(`gate bundle '${name}' must be an object`);
+    throw new SettingsError(`gate group '${name}' must be an object`);
   }
   const bundle = value as Record<string, unknown>;
   if (bundle.kind !== "bundle") {
-    throw new SettingsError(`gate bundle '${name}' has unsupported kind: ${String(bundle.kind)}`);
+    throw new SettingsError(`gate group '${name}' has unsupported kind: ${String(bundle.kind)}`);
   }
   for (const field of Object.keys(bundle)) {
     if (field !== "kind" && field !== "gates") {
-      throw new SettingsError(`gate bundle '${name}' has unknown field: ${field}`);
+      throw new SettingsError(`gate group '${name}' has unknown field: ${field}`);
     }
   }
-  if (!Array.isArray(bundle.gates)) throw new SettingsError(`gate bundle '${name}'.gates must be an array`);
-  return bundle.gates.map((value) => gateValue(value, `gate bundle '${name}' contains an invalid gate word`, true));
+  if (!Array.isArray(bundle.gates)) throw new SettingsError(`gate group '${name}'.gates must be an array`);
+  return bundle.gates.map((value) => gateValue(value, `gate group '${name}' contains an invalid gate word`, true));
 }
 
-/** Bare words and configured bundles share validation, first-seen accumulation, and freezing. A caller-given literal word with no configured bundle and no built-in producer earns a receipt warning. */
+/** Built-in words and configured bundles share validation, first-seen accumulation, and freezing. */
 export function derivedGates(
   composition: LocalContractCompositionCapture,
   names: readonly string[] | undefined,
-): Readonly<{ gates: readonly Gate[]; warnings: readonly string[] }> {
+): readonly Gate[] {
   const settings = composition.settings;
   const configured = settings !== undefined;
   try {
@@ -111,33 +111,33 @@ export function derivedGates(
       gateValue(
         name,
         configured
-          ? "gate or bundle name must match ^[a-z][a-z0-9-]{0,63}$"
+          ? "gate name must match ^[a-z][a-z0-9-]{0,63}$"
           : `gates[${index}] must match ^[a-z][a-z0-9-]{0,63}$`,
         configured,
       ),
     );
     // Explicit empty selection never looks up a namespace.
-    if (selected.length === 0) return { gates: Object.freeze([]), warnings: Object.freeze([]) };
+    if (selected.length === 0) return Object.freeze([]);
     const view = settings?.namespace("gates");
     if (view?.kind === "failed") namespaceFailure(view);
+    const known = [
+      ...new Set(["reviewed", "verified", ...(view?.entries.map((entry) => entry.name).filter(gateWord) ?? [])]),
+    ];
     const expanded = new Set<Gate>();
-    const warned = new Set<string>();
     for (const name of selected) {
       const entry = view?.entries.find((entry) => entry.name === name);
       if (entry === undefined) {
         // The implicit default bundle falls back to the built-in review gate.
         const implicit = configured && names === undefined;
         const word = implicit ? gate("reviewed") : name;
-        // A custom gate is first-class, but nothing in this World will attest a
-        // word that is neither reviewed nor verified; say so on the receipt.
-        if (!implicit && word !== "reviewed" && word !== "verified")
-          warned.add(`Gate '${word}' has no known producer and stays unsatisfied until a producer attests it`);
+        if (word !== "reviewed" && word !== "verified")
+          throw new KeiyakuError("invalid-input", `Unknown gate '${word}'. Known gate names: ${known.join(", ")}`);
         expanded.add(word);
         continue;
       }
       for (const value of bundleGates(name, entry.value)) expanded.add(value);
     }
-    return { gates: Object.freeze([...expanded]), warnings: Object.freeze([...warned]) };
+    return Object.freeze([...expanded]);
   } catch (error) {
     return settingsScopedFailure(error);
   }

@@ -183,9 +183,10 @@ keiyaku -C <repo> bind --gates "" - < CONTRACT.md
 keiyaku -C <repo> bind --gates reviewed - < CONTRACT.md
 ```
 
-Omitting `--gates` uses `gates.default`, or `reviewed` when no default bundle
+Omitting `--gates` uses `gates.default`, or `reviewed` when no default group
 exists. `--gates ""` selects no gates. Gates are named acceptance obligations,
-not work assignments.
+not work assignments. Named gate groups and worktree hooks live in Settings;
+see the README Configuration section or `keiyaku settings --help`.
 
 ## 3. After Binding
 
