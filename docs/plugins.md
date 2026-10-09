@@ -44,8 +44,11 @@ Plugin-owned paths are outside Keiyaku management custody unless an owner later
 adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
-The Square observer keeps its execution-directory-local runtime data local;
-worktree disposal does not relocate it to the primary World. Before a submitting
+The Square observer shares Square's host-wide session registry with native
+harness integrations. Caller registration and outcome observation use that same
+registry across execution directories; a worktree-local registry cannot stand in
+for it. Square activity remains World-local, and worktree disposal does not
+relocate it to the primary World. Before a submitting
 process sends an attributed Akuma input, the optional initiation observation
 lets Square establish that initiator's callable route
 in the submitting session. This is identity preparation, not evidence of

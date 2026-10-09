@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Square } from "@astrosheep/square";
+import { createHostLedgerPort, Square, squareAssignedParticipantName } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
@@ -137,13 +137,11 @@ async function withSquareNotificationFixture<T>(
   const root = mkdtempSync(join(tmpdir(), `keiyaku-square-${name}-`));
   const prior = {
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
   };
   try {
     mkdirSync(join(root, ".square"), { recursive: true });
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
     const instance = await activateSquare(root);
     const turn = instance.signals?.["akuma.turn-outcome"];
     const bodyEnd = instance.signals?.["akuma.body-ended"];
@@ -222,8 +220,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     PI_SESSION_ID: process.env.PI_SESSION_ID,
     PASEO_AGENT_ID: process.env.PASEO_AGENT_ID,
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
     SQUARE_CODEX_BOUNDARIES: process.env.SQUARE_CODEX_BOUNDARIES,
     SQUARE_CODEX_BIN: process.env.SQUARE_CODEX_BIN,
     SQUARE_CODEX_QUEUE_LOG: process.env.SQUARE_CODEX_QUEUE_LOG,
@@ -240,8 +237,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     process.env.PI_SESSION_ID = "fixture-pi-session";
     process.env.PASEO_AGENT_ID = "";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
-    process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
     process.env.SQUARE_CODEX_BOUNDARIES = join(root, "codex-boundaries.json");
     const codexQueueLog = join(root, "codex-queue.log");
     if (process.platform !== "win32") {
@@ -322,7 +318,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
       assert.match(queued[0]?.at(-1) ?? "", /attention: act\/\d+ for Alice from aku\/answered/u);
-      const evidence = readFileSync(join(root, "user-ledger", "evidence.ndjsonl"), "utf8")
+      const evidence = readFileSync(join(root, "square-ledger", "evidence.ndjsonl"), "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { kind: string; outcome: string; participant: string });
@@ -500,8 +496,12 @@ test("Square notification authority survives rejection and cancellation boundari
 
 test("Turn mentions follow the signal initiator, never the Body environment", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-square-initiator-"));
-  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME };
+  const prior = {
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
+  };
   try {
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
     mkdirSync(join(root, ".square"), { recursive: true });
     for (const initiator of ["Alice", "Bob"]) {
       process.env.SQUARE_PARTICIPANT_NAME = initiator;
@@ -548,54 +548,63 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
   }
 });
 
-test("the Square plugin uses the submitting cwd without PWD and honors a local-ledger override", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-pwd-"));
+test("Pi caller registration and outcomes share the harness ledger across execution directories", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-pi-inbox-"));
   const world = join(root, "world");
   const cwd = join(root, "execution");
   const priorCwd = process.cwd();
+  const ambient = ambientSessionIdentity();
   const prior = {
+    ...ambient,
     PWD: process.env.PWD,
-    SQUARE_REGISTRY: process.env.SQUARE_REGISTRY,
-    SQUARE_HOST_LEDGER_LOCAL: process.env.SQUARE_HOST_LEDGER_LOCAL,
-    SQUARE_HOST_LEDGER_USER: process.env.SQUARE_HOST_LEDGER_USER,
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
   };
+  for (const name of Object.keys(ambient)) delete process.env[name];
   try {
     mkdirSync(join(world, ".square"), { recursive: true });
     mkdirSync(cwd);
     process.chdir(cwd);
     delete process.env.PWD;
-    delete process.env.SQUARE_REGISTRY;
-    delete process.env.SQUARE_HOST_LEDGER_LOCAL;
-    process.env.SQUARE_PARTICIPANT_NAME = "fixture-no-pwd";
-    process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
-    const instance = await activateSquare(world);
-    const handler = instance.signals?.["akuma.called"];
-    assert.ok(handler);
-    await handler({
-      kind: "akuma.called",
-      akumaId: "aku/pwd-local",
-    });
-    const presence = join(cwd, ".square", "host-ledger", "presence.ndjsonl");
-    assert.equal(existsSync(presence), true);
-    assert.match(readFileSync(presence, "utf8"), /fixture-no-pwd/u);
-    assert.equal(existsSync(join(world, ".square", ".square", "host-ledger")), false);
-    assert.equal(existsSync(squarePath(world)), true);
-    assert.equal(existsSync(squarePath(cwd)), false);
+    process.env.PI_SESSION_ID = "fixture-pi-caller";
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "shared-ledger");
+    const callerEnv = { ...process.env };
+    const initiator = squareAssignedParticipantName(callerEnv)!;
+    const submitter = await activateSquare(world);
+    const initiating = submitter.signals?.["akuma.initiating"];
+    assert.ok(initiating);
+    await initiating({ kind: "akuma.initiating", initiator });
 
-    const override = join(root, "override-ledger");
-    process.env.SQUARE_HOST_LEDGER_LOCAL = override;
-    process.env.SQUARE_PARTICIPANT_NAME = "fixture-override";
-    const overridden = await activateSquare(world);
-    const overrideHandler = overridden.signals?.["akuma.called"];
-    assert.ok(overrideHandler);
-    await overrideHandler({
-      kind: "akuma.called",
-      akumaId: "aku/override-local",
+    // A native harness creates its own ledger port, not the plugin's captured port.
+    const ledger = createHostLedgerPort();
+    const bindings = await ledger.listPresence({ session: callerEnv.PI_SESSION_ID! });
+    assert.equal(bindings.length, 1);
+    assert.equal(bindings[0]?.location, realpathSync(squarePath(world)));
+    assert.equal(bindings[0]?.participant, initiator);
+    assert.equal(existsSync(join(cwd, ".square", "host-ledger")), false);
+
+    process.chdir(world);
+    process.env.PI_SESSION_ID = "fixture-pi-body";
+    const body = await activateSquare(world);
+    await body.signals?.["akuma.turn-outcome"]?.({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/pi-inbox",
+      bodySequence: 1,
+      turnSequence: 1,
+      initiator,
+      participants: [initiator],
+      outcome: { kind: "answered", text: "done" },
     });
-    const overridePresence = join(override, "presence.ndjsonl");
-    assert.equal(existsSync(overridePresence), true);
-    assert.match(readFileSync(overridePresence, "utf8"), /fixture-override/u);
+
+    const square = await Square.at({ path: bindings[0]!.location, env: callerEnv, hostLedger: ledger });
+    try {
+      const joined = await square.implicitJoin(initiator);
+      assert.ok(joined.participant);
+      const caught = await joined.participant.catch();
+      assert.ok(caught.activities.some((item) => item.body?.includes("✓ came back")));
+    } finally {
+      await square.close();
+    }
+    assert.equal(existsSync(squarePath(cwd)), false);
   } finally {
     process.chdir(priorCwd);
     restoreEnvironmentValues(prior);

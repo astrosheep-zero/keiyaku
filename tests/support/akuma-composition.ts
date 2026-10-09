@@ -28,15 +28,11 @@ export function recordCallInitialTell(world: WorldRoot, now: () => string = () =
 }
 
 export function isolateSquareFixtureLedger(root: string): () => void {
-  const previousLocal = process.env.SQUARE_HOST_LEDGER_LOCAL;
-  const previousUser = process.env.SQUARE_HOST_LEDGER_USER;
-  process.env.SQUARE_HOST_LEDGER_LOCAL = join(root, "local-ledger");
-  process.env.SQUARE_HOST_LEDGER_USER = join(root, "user-ledger");
+  const previous = process.env.SQUARE_HOST_LEDGER_ROOT;
+  process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
   return () => {
-    if (previousLocal === undefined) delete process.env.SQUARE_HOST_LEDGER_LOCAL;
-    else process.env.SQUARE_HOST_LEDGER_LOCAL = previousLocal;
-    if (previousUser === undefined) delete process.env.SQUARE_HOST_LEDGER_USER;
-    else process.env.SQUARE_HOST_LEDGER_USER = previousUser;
+    if (previous === undefined) delete process.env.SQUARE_HOST_LEDGER_ROOT;
+    else process.env.SQUARE_HOST_LEDGER_ROOT = previous;
   };
 }
 

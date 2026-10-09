@@ -1,23 +1,6 @@
 import { createDefaultWakeTransport, createHostLedgerPort, Square, squareAssignedParticipantName, } from "@astrosheep/square";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
-function squareEnvironment(environment) {
-    const ledgerRoot = environment.SQUARE_REGISTRY === undefined ? undefined : dirname(environment.SQUARE_REGISTRY);
-    return {
-        ...environment,
-        SQUARE_HOST_LEDGER_USER: environment.SQUARE_HOST_LEDGER_USER ?? ledgerRoot ?? join(homedir(), ".square", "host-ledger"),
-        SQUARE_HOST_LEDGER_LOCAL: environment.SQUARE_HOST_LEDGER_LOCAL ??
-            ledgerRoot ??
-            join(environment.PWD ?? process.cwd(), ".square", "host-ledger"),
-    };
-}
-function hostLedger(environment) {
-    return createHostLedgerPort({
-        userPath: environment.SQUARE_HOST_LEDGER_USER,
-        localPath: environment.SQUARE_HOST_LEDGER_LOCAL,
-    });
-}
 function errorCode(error) {
     return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
@@ -91,8 +74,8 @@ const plugin = {
     },
     async activate(context) {
         const path = join(context.writablePath("square"), "KEIYAKU.square");
-        const environment = squareEnvironment(process.env);
-        const ledger = hostLedger(environment);
+        const environment = { ...process.env };
+        const ledger = createHostLedgerPort();
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         const bodyNotifications = new Map();
         const expressAsAkuma = async (akumaId, expression, participants, cancellation) => {
@@ -104,7 +87,10 @@ const plugin = {
                 if (joined.state === "done" || joined.participant === undefined)
                     return false;
                 cancellation?.throwIfAborted();
-                await joined.participant.express(expression, participants?.length ? { mentions: [...participants] } : {});
+                await joined.participant.express(expression, {
+                    noMention: true,
+                    ...(participants?.length ? { mentions: [...participants] } : {}),
+                });
                 return true;
             }
             finally {
