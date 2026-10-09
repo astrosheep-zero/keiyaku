@@ -5,6 +5,7 @@ import { regionWarnings } from "../body/region.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
+import type { BindTargetSelection } from "../protocol/bind.js";
 import type { IntentOutcome, RepositoryScope } from "../protocol/operations.js";
 import { executionStop, isOperationalFailure, isOperationalStop } from "../protocol/progress.js";
 import { readManagedWorktreeAppointment, type ContractWorkspaceLocation } from "../workspace-place.js";
@@ -60,11 +61,17 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
   });
 }
 
+/**
+ * One Contract bind. `omittedMarkdownTarget` is the internal composition input an edge
+ * supplies for a Markdown bind whose caller omitted the target: the public package-root
+ * composition leaves it targetless, while the CLI names the invocation branch.
+ */
 export async function bindKeiyaku(
   input: BindInput,
   createHandle: typeof createKeiyakuHandle,
   execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
+  omittedMarkdownTarget: BindTargetSelection = { kind: "targetless" },
 ): Promise<BindOutcome> {
   const prepared = bindInput(input, composition);
   const hooks = derivedHooks(composition);
@@ -101,7 +108,16 @@ export async function bindKeiyaku(
               return acceptedOutcome("bind", id, accumulator, value);
             }
             if (document === undefined) throw new Error("Markdown bind requires its prepared document");
-            return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
+            return await markdownBind(
+              prepared,
+              document,
+              hooks,
+              scope,
+              channel,
+              accumulator,
+              handle,
+              omittedMarkdownTarget,
+            );
           })();
           return completed;
         },
@@ -213,11 +229,12 @@ async function markdownBind(
   channel: GitDecodeChannel,
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Keiyaku,
+  omittedMarkdownTarget: BindTargetSelection,
 ): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
   const { task, target, actor, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
-  const targetSelection =
-    target !== undefined ? { kind: "explicit" as const, target } : { kind: "targetless" as const };
+  const targetSelection: BindTargetSelection =
+    target !== undefined ? { kind: "explicit", target } : omittedMarkdownTarget;
   const admission = await prepareMarkdownBind({
     scope,
     channel,

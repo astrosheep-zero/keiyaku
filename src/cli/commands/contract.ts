@@ -235,10 +235,16 @@ async function contractLibrary(
     executionChannel(execution).kind === "local" && ["audit", "deliver", "review"].includes(command.command)
       ? actorFromEdge(undefined, runtime.environment)
       : undefined;
-  return composeContractLibrary(execution, createKeiyakuHandle, {
-    ...(configuration === undefined ? {} : { settings: configuration }),
-    ...(actor === undefined ? {} : { actor }),
-  });
+  return composeContractLibrary(
+    execution,
+    createKeiyakuHandle,
+    {
+      ...(configuration === undefined ? {} : { settings: configuration }),
+      ...(actor === undefined ? {} : { actor }),
+    },
+    // The CLI owns this default: an omitted Markdown --target names the invocation branch.
+    { kind: "current-branch" },
+  );
 }
 
 async function runBind(
