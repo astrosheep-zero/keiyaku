@@ -2121,7 +2121,7 @@ test("Pi keeps abort pending when native cleanup refuses to settle", async () =>
   assert.equal(fake.seen.disposed, 0);
 });
 
-test("Pi omits Gemini's empty tool-use text placeholder from narration", async () => {
+test("Pi omits blank tool-use text placeholders from narration", async () => {
   const fake = fakePiSdk({
     events: [
       {
@@ -2131,7 +2131,18 @@ test("Pi omits Gemini's empty tool-use text placeholder from narration", async (
           content: [
             { type: "thinking", thinking: "inspect" },
             { type: "toolCall", id: "call-1", name: "read", arguments: { path: "SOUL.md" } },
-            { type: "text", text: "" },
+            { type: "text", text: " " },
+          ],
+          stopReason: "toolUse",
+        },
+      },
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call-2", name: "read", arguments: { path: "docs/akuma-provider.md" } },
+            { type: "text", text: "  " },
           ],
           stopReason: "toolUse",
         },
@@ -2149,6 +2160,26 @@ test("Pi omits Gemini's empty tool-use text placeholder from narration", async (
     { type: "assistant", text: "done" },
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+});
+
+test("Pi keeps a terminal whitespace answer as public evidence", async () => {
+  const fake = fakePiSdk({
+    events: [
+      {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: " " }], stopReason: "stop" },
+      },
+    ],
+  });
+  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+    freshInput("wait", { cwd: "/work" }),
+  ).result;
+  const events = await collectEvents(drive.events);
+  assert.deepEqual(events, [
+    { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
+    { type: "assistant", text: " " },
+  ]);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: " ", historyId: "entry-final" });
 });
 
 test("Pi does not treat a tool-use message as the final answer", async () => {

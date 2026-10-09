@@ -197,10 +197,11 @@ function translateMessage(
     state.assistantSeen = true;
     state.answer = text;
   }
-  // Gemini emits an empty text block alongside every tool-use message. It is
+  // Some providers emit a blank text block alongside every tool-use message:
+  // empty from Gemini, whitespace from openai-responses-style proxies. It is
   // transport scaffolding, not narration; an ordinary terminal empty answer
   // remains public evidence.
-  if (hasTextContent(message.content) && !(message.stopReason === "toolUse" && text.length === 0)) {
+  if (hasTextContent(message.content) && !(message.stopReason === "toolUse" && text.trim().length === 0)) {
     translated.push({ type: "assistant", text });
   }
   return translated;
