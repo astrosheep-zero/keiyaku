@@ -36,7 +36,7 @@ import {
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
 import { readAliases } from "../alias/index.js";
-import { observeDispatchAssociation, type DispatchAssociation } from "../dispatch/index.js";
+import { observeDispatchAssociations, type DispatchAssociation } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
@@ -230,8 +230,11 @@ function observationError(id: AkumaStatus["id"], error: unknown): Error {
   return new AkumaObservationError(id, observationDiagnostic(error));
 }
 
-async function dispatchAssociation(repo: Repo | undefined, id: AkumaStatus["id"]): Promise<DispatchAssociation> {
-  return await observeDispatchAssociation(repo === undefined ? undefined : scopeForRepo(repo), id);
+async function dispatchAssociations(
+  repo: Repo | undefined,
+  ids: readonly AkumaStatus["id"][],
+): Promise<ReadonlyMap<AkumaStatus["id"], DispatchAssociation>> {
+  return await observeDispatchAssociations(repo === undefined ? undefined : scopeForRepo(repo), ids);
 }
 
 /**
@@ -287,12 +290,16 @@ async function createdTasksFor(
  * One wait's identity-fact resolver: the alias bound to an Akuma in its world and
  * its Dispatch association. The alias index is read once, on the first observed
  * Akuma, and each Akuma's alias is the first binding the canonical order offers.
+ * Alias bindings and selected Dispatch associations are read once for this live
+ * stage. Final result composition owns a separate, fresh Dispatch observation.
  */
 function waitIdentityFacts(
   path: WorldRoot,
   repo: Repo | undefined,
+  selected: readonly AkumaStatus["id"][],
 ): (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts> {
   let aliases: ReadonlyMap<AkumaStatus["id"], AkumaAlias> | undefined;
+  let contracts: ReadonlyMap<AkumaStatus["id"], DispatchAssociation> | undefined;
   return async (id) => {
     if (aliases === undefined) {
       const bound = new Map<AkumaStatus["id"], AkumaAlias>();
@@ -301,8 +308,9 @@ function waitIdentityFacts(
       }
       aliases = bound;
     }
+    contracts ??= await dispatchAssociations(repo, selected);
     const alias = aliases.get(id);
-    return { ...(alias === undefined ? {} : { alias }), contract: await dispatchAssociation(repo, id) };
+    return { ...(alias === undefined ? {} : { alias }), contract: contracts.get(id)! };
   };
 }
 
@@ -322,9 +330,13 @@ async function composeAkumaAssociations(
 ): Promise<readonly AkumaObservation[]> {
   const created = await createdTasksFor(path, statuses);
   const discharged = placementDischarged(repo);
+  const contracts = await dispatchAssociations(
+    repo,
+    statuses.map((status) => status.id),
+  );
   return await Promise.all(
     statuses.map(async (status, index) => {
-      const contract = await dispatchAssociation(repo, status.id);
+      const contract = contracts.get(status.id)!;
       return {
         status: await composeObservation(status, contract, discharged),
         contract,
@@ -458,7 +470,7 @@ async function localWait(
         completion: input.completion,
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
-        identity: waitIdentityFacts(addressed.path, input.repo),
+        identity: waitIdentityFacts(addressed.path, input.repo, addressed.orderedIds),
         selectionOrder: addressed.orderedIds,
         ...(input.observer?.selected === undefined ? {} : { onSelected: input.observer.selected }),
         ...(input.observer?.observe === undefined ? {} : { observe: input.observer.observe }),
@@ -622,7 +634,7 @@ export async function historyAkuma(
   const addressed = await addressAkuma(directAddress(values));
   try {
     const handle = new AkumaOwner(addressed.id, addressed.path);
-    const contract = await dispatchAssociation(values.repo as Repo | undefined, addressed.id);
+    const contract = (await dispatchAssociations(values.repo as Repo | undefined, [addressed.id])).get(addressed.id)!;
     if (values.last === true) {
       const answer = await handle.lastAnswer();
       return answer.kind === "answer"

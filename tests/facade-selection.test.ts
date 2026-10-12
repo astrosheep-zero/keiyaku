@@ -8,6 +8,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   utimesSync,
@@ -21,7 +22,7 @@ import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
-import { akuId, allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
 import { contractId, contractSegment } from "../src/core/facts/types.js";
@@ -38,9 +39,16 @@ import { Tasks, type TaskId } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
-import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import {
+  answering,
+  bornWorld,
+  fixtureAdapter,
+  fixtureRuntime,
+  installTellRuntime,
+  settleFixtureBodies,
+} from "./support/akuma-tell.js";
 import { Schema } from "../src/akuma/index.js";
-import { makeGitRepository } from "./support/git.js";
+import { makeGitRepository, withGitShim } from "./support/git.js";
 import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
 
 let fixtureHistory = 0;
@@ -257,6 +265,160 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
   assert.equal("rows" in result.observations[0]!, false, "the final public wait result discards the live companion");
 });
+
+test("one and ten selected identities use one Dispatch batch per live and final wait stage", async (t) => {
+  const repository = fixtureRepository(t);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const ids: AkuId[] = [];
+  for (let index = 0; index < 10; index += 1) {
+    ids.push((await answered(world, "worker", index.toString(16).padStart(8, "0"))).id);
+  }
+  await publishDispatch({
+    repository: await repositoryAt(world),
+    akuId: akuId({ archetype: "worker", suffix: "ffffffff" }),
+    contractId: contractId("kei/unrelated"),
+  });
+  const log = join(repository.path, "wait-git-spawns.log");
+  await withGitShim(
+    'printf "%s\\n" "$1" >> "$KEIYAKU_WAIT_SPAWNS"\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    { KEIYAKU_WAIT_SPAWNS: log },
+    async (gitPath) => {
+      const repo = await Repo.at({ path: world, gitPath });
+      for (const selected of [ids.slice(0, 1), ids]) {
+        writeFileSync(log, "");
+        const result = await Akumas.of(world).wait({
+          akuma: [...selected, selected[0]!],
+          repo,
+          completion: "all",
+          timeoutMs: 0,
+          observe: {
+            selected(members) {
+              assert.deepEqual(
+                members.map((member) => member.id),
+                selected,
+              );
+              assert.ok(members.every((member) => member.contract.kind === "none"));
+              assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\n");
+            },
+          },
+        });
+        assert.deepEqual(
+          result.observations.map((observation) => observation.status.id),
+          selected,
+        );
+        assert.ok(result.observations.every((observation) => observation.contract.kind === "none"));
+        assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\nrev-parse\ncat-file\n");
+        t.diagnostic(`${selected.length} IDs: live attachment 2 Git spawns; final attachment 2 Git spawns`);
+      }
+    },
+  );
+});
+
+test(
+  "wait closes live Dispatch reads before waiting and observes a later publication at final attachment",
+  { timeout: 15_000 },
+  async (t) => {
+    const repository = fixtureRepository(t);
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const { world, allocated } = await bornWorld(repository.path, "dddddd01");
+    const peer = await answered(world, "worker", "dddddd02");
+    const owner = contractId("kei/published-during-wait");
+    const git = await repositoryAt(world);
+    // Seed private authority so selection opens a decode channel even though both selected associations are absent.
+    await publishDispatch({
+      repository: git,
+      akuId: akuId({ archetype: "worker", suffix: "dddddd03" }),
+      contractId: owner,
+    });
+    const started = promiseBarrier<void>();
+    const finish = promiseBarrier<void>();
+    const adapter = fixtureAdapter(async () => {
+      started.resolve();
+      return {
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "waiting" } };
+          },
+        },
+        completion: finish.promise.then(() => ({
+          kind: "answered" as const,
+          answer: "done",
+          historyId: "waiting-history",
+        })),
+        async abort() {
+          finish.resolve();
+        },
+      };
+    });
+    const bodies: Promise<unknown>[] = [];
+    const restore = installTellRuntime(
+      fixtureRuntime(bodies, new Map([[allocated.paths.directory, { adapter, now: "2026-08-11T00:00:00.000Z" }]])),
+    );
+    const log = join(repository.path, "dispatch-channels.log");
+    writeFileSync(log, "");
+    try {
+      await Akumas.of(world).tell({ akuma: allocated.id, body: "wait for Dispatch" });
+      await started.promise;
+      await withGitShim(
+        [
+          'if [ "$1 $2" = "cat-file --batch" ]; then',
+          '  printf "opened\\n" >> "$KEIYAKU_CHANNEL_LOG"',
+          '  "$KEIYAKU_REAL_GIT" "$@"',
+          '  printf "closed\\n" >> "$KEIYAKU_CHANNEL_LOG"',
+          "  exit 0",
+          "fi",
+          'exec "$KEIYAKU_REAL_GIT" "$@"',
+        ].join("\n"),
+        { KEIYAKU_CHANNEL_LOG: log },
+        async (gitPath) => {
+          let publication: ReturnType<typeof publishDispatch> | undefined;
+          const selected: (readonly WaitSelectedAkuma[])[] = [];
+          const result = await Akumas.of(world).wait({
+            akuma: [allocated.id, peer.id, allocated.id],
+            repo: await Repo.at({ path: world, gitPath }),
+            completion: "all",
+            signal: t.signal,
+            observe: {
+              selected(members) {
+                selected.push(members);
+                assert.equal(
+                  readFileSync(log, "utf8"),
+                  "opened\nclosed\n",
+                  "the one live batch has retired before the viewer can wait",
+                );
+                publication = publishDispatch({ repository: git, akuId: allocated.id, contractId: owner });
+                void publication.finally(() => finish.resolve());
+              },
+            },
+          });
+          assert.equal((await publication)?.kind, "dispatched");
+          assert.deepEqual(selected, [
+            [
+              { id: allocated.id, contract: { kind: "none" } },
+              { id: peer.id, contract: { kind: "none" } },
+            ],
+          ]);
+          assert.equal(result.reason, "completed");
+          assert.deepEqual(
+            result.observations.map((observation) => [observation.status.id, observation.contract]),
+            [
+              [allocated.id, { kind: "associated", contractId: owner }],
+              [peer.id, { kind: "none" }],
+            ],
+          );
+          const channels = readFileSync(log, "utf8").trim().split("\n");
+          assert.ok(channels.length >= 4, "final attachment opens a fresh channel");
+          assert.deepEqual(channels, Array.from({ length: channels.length / 2 }, () => ["opened", "closed"]).flat());
+        },
+      );
+    } finally {
+      finish.resolve();
+      restore();
+      await settleFixtureBodies(bodies);
+    }
+  },
+);
 
 test("facade ls reads exactly one selected identity directory", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-catalog-");

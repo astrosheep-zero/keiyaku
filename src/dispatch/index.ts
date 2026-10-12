@@ -24,7 +24,12 @@ import {
   type TreeChange,
 } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
-import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import {
+  withGitDecodeChannel,
+  withGitReadObservation,
+  withGitTargetedReadObservation,
+  type GitReadObservation,
+} from "../git/read-observation.js";
 import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./association.js";
 
 const DISPATCH_ROOT = "dispatch";
@@ -249,20 +254,40 @@ export {
   type DispatchAssociation,
 } from "./association.js";
 
-function associationDiagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** Read-only Dispatch association projection for one Akuma identity. */
-export async function observeDispatchAssociation(
+/** Read selected associations in one targeted observation, isolating per-identity decoding failures. */
+export async function observeDispatchAssociations(
   repository: GitRepository | undefined,
-  akuId: AkuId,
-): Promise<DispatchAssociation> {
-  if (repository === undefined) return NO_DISPATCH_ASSOCIATION;
+  akuIds: readonly AkuId[],
+): Promise<ReadonlyMap<AkuId, DispatchAssociation>> {
+  const requested = [...new Set(akuIds.map((akuId) => parseAkuId(akuId).id))];
+  const associations = new Map<AkuId, DispatchAssociation>(requested.map((akuId) => [akuId, NO_DISPATCH_ASSOCIATION]));
+  if (repository === undefined || requested.length === 0) return associations;
   try {
-    const dispatch = await readDispatch(repository, akuId);
-    return dispatch === null ? NO_DISPATCH_ASSOCIATION : { kind: "associated", contractId: dispatch.contractId };
+    await withGitDecodeChannel(repository, (channel) =>
+      withGitTargetedReadObservation(repository, channel, { paths: requested.map(pathFor) }, async (observation) => {
+        const entries = requested.map((akuId) => {
+          const path = pathFor(akuId);
+          return [akuId, path, observation.snapshot.paths.get(path)] as const;
+        });
+        const blobs = await observation.readBlobs(
+          entries.flatMap(([, , entry]) => (entry?.type === "blob" ? [entry.oid] : [])),
+        );
+        for (const [akuId, path, entry] of entries) {
+          if (entry === undefined) continue;
+          try {
+            if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
+            const result = blobs.get(entry.oid);
+            if (result?.kind !== "present") corruption(`missing Dispatch Git object: ${path}`);
+            associations.set(akuId, { kind: "associated", contractId: decode(path, result.bytes).contractId });
+          } catch (error) {
+            associations.set(akuId, { kind: "failed", diagnostic: diagnostic(error) });
+          }
+        }
+      }),
+    );
   } catch (error) {
-    return { kind: "failed", diagnostic: associationDiagnostic(error) };
+    const message = diagnostic(error);
+    for (const akuId of requested) associations.set(akuId, { kind: "failed", diagnostic: message });
   }
+  return associations;
 }
