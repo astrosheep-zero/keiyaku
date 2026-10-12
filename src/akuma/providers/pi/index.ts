@@ -180,6 +180,32 @@ async function runPiPrompt(
   }
 }
 
+async function retirePiSession(native: PiNativeSession): Promise<void> {
+  let failure: unknown;
+  let unsubscribe: (() => void) | undefined;
+  try {
+    const runner = native.extensionRunner;
+    unsubscribe = runner?.onError((error) => {
+      if (error.event === "session_shutdown") failure ??= new Error(error.error);
+    });
+    await runner?.emit({ type: "session_shutdown", reason: "quit" });
+  } catch (error) {
+    failure ??= error;
+  } finally {
+    try {
+      unsubscribe?.();
+    } catch (error) {
+      failure ??= error;
+    }
+    try {
+      native.dispose();
+    } catch (error) {
+      failure ??= error;
+    }
+  }
+  if (failure !== undefined) throw failure;
+}
+
 async function drivePi(
   sdk: PiSdk,
   execution: ProviderExecution,
@@ -213,7 +239,43 @@ async function drivePi(
   });
   const agent = native.agent;
   let unsubscribeAgent: (() => void) | undefined;
-  let unsubscribe!: () => void;
+  let unsubscribe: (() => void) | undefined;
+  let binding: Promise<void> | undefined;
+  const settle = (result: TurnResult): Promise<void> => {
+    if (state.settled) return closed;
+    state.settled = true;
+    endPendingTells();
+    let failure: unknown;
+    try {
+      unsubscribe?.();
+    } catch (error) {
+      failure = error;
+    }
+    try {
+      unsubscribeAgent?.();
+    } catch (error) {
+      failure ??= error;
+    }
+    events.end();
+    settleCompletion(result);
+    void (async () => {
+      // Binding can create extension resources after cancellation. Shutdown must
+      // run after that work, while its contexts are still valid.
+      await binding?.catch(() => undefined);
+      try {
+        await retirePiSession(native);
+      } catch (error) {
+        failure ??= error;
+      }
+      if (failure !== undefined) throw failure;
+    })().then(settleRetired, failRetired);
+    return closed;
+  };
+  const forceDispose = async (): Promise<void> => {
+    if (!state.settled) state.aborting = true;
+    await settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
+  };
+  custody?.own({ closed, abort: forceDispose, forceDispose });
   try {
     unsubscribeAgent = agent.subscribe((event) => {
       if (event.type === "message_end") {
@@ -231,44 +293,9 @@ async function drivePi(
       for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
     });
   } catch (error) {
-    try {
-      unsubscribeAgent?.();
-    } finally {
-      native.dispose();
-    }
+    await settle({ kind: "failed", diagnostic: diagnostic(error) });
     throw error;
   }
-  const settle = (result: TurnResult): Promise<void> => {
-    if (state.settled) return closed;
-    state.settled = true;
-    endPendingTells();
-    let failure: unknown;
-    try {
-      unsubscribe();
-    } catch (error) {
-      failure = error;
-    }
-    try {
-      unsubscribeAgent?.();
-    } catch (error) {
-      failure ??= error;
-    }
-    events.end();
-    settleCompletion(result);
-    try {
-      native.dispose();
-    } catch (error) {
-      failure ??= error;
-    }
-    if (failure === undefined) settleRetired();
-    else failRetired(failure);
-    return closed;
-  };
-  const forceDispose = async (): Promise<void> => {
-    if (!state.settled) state.aborting = true;
-    await settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
-  };
-  custody?.own({ closed, abort: forceDispose, forceDispose });
   if (signal.aborted) {
     await settle({ kind: "failed", diagnostic: "Pi session aborted" });
     signal.throwIfAborted();
@@ -277,14 +304,12 @@ async function drivePi(
     await settle({ kind: "failed", diagnostic: "Pi session admitted without sessionFile" });
     throw new Error("Pi session admitted without sessionFile");
   }
-  await abortable(
-    Promise.resolve().then(() => native.bindExtensions({})),
-    signal,
-  );
+  binding = Promise.resolve().then(() => native.bindExtensions({}));
+  await abortable(binding, signal);
   signal.throwIfAborted();
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
   void runPiPrompt(native, input, eventState, state, (result) => {
-    void settle(result);
+    void settle(result).catch(() => undefined);
   });
   return {
     admission: { fence: native.sessionId },

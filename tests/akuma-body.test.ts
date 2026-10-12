@@ -882,6 +882,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
         this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "steered answer" }] } });
       },
       async abort() { release(); },
+      extensionRunner: { emit: async () => {}, onError: () => () => {} },
       dispose() {},
     };
     const sdk = {
@@ -954,6 +955,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
             this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
           },
           async abort() { release(); },
+          extensionRunner: { emit: async () => {}, onError: () => () => {} },
           dispose() {},
         };
         return { session };

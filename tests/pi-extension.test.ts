@@ -84,6 +84,9 @@ test("Pi native extensions finish session start and discover resources before fr
     const calls: string[] = [];
     const started = promiseBarrier<void>();
     const binding = promiseBarrier<void>();
+    const shuttingDown = promiseBarrier<void>();
+    const cleanup = promiseBarrier<void>();
+    let timer: ReturnType<typeof setInterval> | undefined;
     let context: ExtensionContext | undefined;
     let probe = 0;
     const eventBus = sdk.createEventBus();
@@ -100,6 +103,14 @@ test("Pi native extensions finish session start and discover resources before fr
           started.resolve();
           await binding.promise;
           calls.push("session_start_done");
+          timer = setInterval(() => {}, 1_000);
+        });
+        pi.on("session_shutdown", async () => {
+          calls.push("session_shutdown");
+          shuttingDown.resolve();
+          await cleanup.promise;
+          clearInterval(timer);
+          timer = undefined;
         });
         pi.on("resources_discover", () => {
           calls.push("resources_discover");
@@ -151,8 +162,16 @@ test("Pi native extensions finish session start and discover resources before fr
         kind: "failed",
         diagnostic: "Pi completed without a native assistant answer",
       });
+      await shuttingDown.promise;
+      let closed = false;
+      void attempt.closed.then(() => { closed = true; });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(closed, false);
+      assert.ok(timer);
+      cleanup.resolve();
       await attempt.closed;
-      assert.deepEqual(calls, ["session_start", "session_start_done", "resources_discover", "work\n\nalso check"]);
+      assert.equal(timer, undefined);
+      assert.deepEqual(calls, ["session_start", "session_start_done", "resources_discover", "work\n\nalso check", "session_shutdown"]);
       assert.ok(native.systemPrompt.includes("bind-fixture"));
       assert.throws(() => context!.cwd, /stale/u);
       assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
@@ -160,6 +179,8 @@ test("Pi native extensions finish session start and discover resources before fr
       assert.equal(probe, 1);
     } finally {
       binding.resolve();
+      cleanup.resolve();
+      clearInterval(timer);
       await attempt.forceDispose();
       await attempt.closed;
     }
@@ -176,6 +197,8 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
     let context: ExtensionContext | undefined;
     let native: sdk.AgentSession | undefined;
     let bindingOperation: Promise<void> | undefined;
+    let retired = 0;
+    let lateResource = false;
     let inputs = 0;
     let probe = 0;
     const nativeSdk = await extensionSdk(
@@ -191,7 +214,13 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
         pi.on("resources_discover", async () => {
           started.resolve();
           if (phase === "resources_discover") await binding.promise;
+          lateResource = true;
           return {};
+        });
+        pi.on("session_shutdown", () => {
+          assert.equal(lateResource, true);
+          lateResource = false;
+          retired++;
         });
         pi.on("input", () => {
           inputs += 1;
@@ -227,20 +256,26 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
     try {
       if (phase === "resources_discover") {
         await started.promise;
-        await attempt.abort();
+        void attempt.abort().catch(() => undefined);
       }
       await rejected;
+      if (phase === "resources_discover") {
+        let closed = false;
+        void attempt.closed.then(() => { closed = true; });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        assert.equal(closed, false);
+      }
+      binding.resolve();
       await attempt.closed;
+      assert.equal(retired, 1);
+      assert.equal(lateResource, false);
       assert.equal(inputs, 0);
       assert.ok(native);
       assert.throws(() => context!.cwd, /stale/u);
       assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
       eventBus.emit("binding-probe", undefined);
       assert.equal(probe, 0);
-      binding.resolve();
-      // The SDK can finish or reject its in-flight bind after disposal; either
-      // result must already have a rejection handler and cannot start a prompt.
-      await bindingOperation?.catch(() => undefined);
+      await bindingOperation;
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(inputs, 0);
     } finally {
@@ -249,6 +284,39 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
       await attempt.closed;
     }
   }
+});
+
+test("Pi closure reports extension shutdown failure but still disposes native state", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-pi-shutdown-failure-");
+  let shutdowns = 0;
+  let native: sdk.AgentSession | undefined;
+  const nativeSdk = await extensionSdk(root, (pi) => {
+    pi.on("input", () => ({ action: "handled" }));
+    pi.on("session_shutdown", () => {
+      shutdowns++;
+      throw new Error("shutdown fixture failure");
+    });
+  }, sdk.createEventBus());
+  const createSession = nativeSdk.createAgentSessionFromServices;
+  const provider = createPiProvider(undefined, async () => ({
+    ...nativeSdk,
+    createAgentSessionFromServices: async (options) => {
+      const created = await createSession(options);
+      native = created.session;
+      return created;
+    },
+  }));
+  const attempt = provider.start({
+    body: "work", launchTells: [], cwd: root, options: {},
+    requests: { dir: join(root, "requests") },
+    signal: new AbortController().signal, session: { kind: "fresh" },
+  });
+  const drive = await attempt.result;
+  await drive.completion;
+  await assert.rejects(attempt.closed, /shutdown fixture failure/u);
+  assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
+  await assert.rejects(attempt.forceDispose(), /shutdown fixture failure/u);
+  assert.equal(shutdowns, 1);
 });
 
 test("npm root package declares its Pi resources", () => {

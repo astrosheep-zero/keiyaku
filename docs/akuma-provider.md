@@ -11,7 +11,10 @@ Start, resume, and fork create one synchronous attempt owner before native setup
 begins. The attempt owns every resource it creates, including resources arriving
 after cancellation, and exposes one eventual result, graceful abort, forced
 disposal, and mandatory closure proof. Closure succeeds only after all owned
-children or native sessions retire; cleanup failure remains visible. The Body
+children or native sessions retire, including resources owned by their loaded
+extensions. Native shutdown hooks finish before the session is disposed, and
+in-flight extension setup must finish before that retirement can prove closure.
+Turn completion does not substitute for this proof; cleanup failure remains visible. The Body
 signal is notification, never a custody key or proof. No pid, host, registry,
 or reconstructed OS identity crosses this boundary.
 

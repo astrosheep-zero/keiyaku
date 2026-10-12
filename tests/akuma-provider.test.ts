@@ -1344,6 +1344,7 @@ function fakePiSdk(
       if (input.abortNeverSettles === true) await new Promise<void>(() => undefined);
       this.resolveAbort?.();
     },
+    extensionRunner: { emit: async () => {}, onError: () => () => {} },
     dispose() {
       seen.disposed += 1;
     },
@@ -1899,14 +1900,14 @@ test("Pi retires a session whose host extension binding is cancelled before the 
   const provider = createPiProvider(undefined, async () => fake.sdk);
   const attempt = provider.start(freshInput("work"));
   await waitForCondition("Pi host extension binding to begin", () => fake.seen.binds === 1);
-  await attempt.abort();
+  const abort = attempt.abort();
   await assert.rejects(attempt.result, /provider attempt retired/u);
-  await attempt.closed;
-  assert.equal(fake.seen.prompt, undefined);
-  assert.equal(fake.seen.disposed, 1);
-  assert.equal(fake.seen.agentListeners, 0);
-  // A binding that settles after cancellation cannot prompt a retired session.
+  assert.equal(fake.seen.disposed, 0);
+  // The late binding must retire before closure, without starting a prompt.
   finishBinding();
+  await abort;
+  await attempt.closed;
+  assert.equal(fake.seen.agentListeners, 0);
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(fake.seen.prompt, undefined);
   assert.equal(fake.seen.disposed, 1);
