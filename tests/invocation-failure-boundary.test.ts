@@ -383,7 +383,7 @@ test("fork source object missing from the requested map is a broken observation,
 test("native Contract reads use null for lawful absence while corrupt fork terms remain exceptional", async () => {
   const { decodeJournal, encodeEntry } = await import("../src/core/facts/codec.js");
   const { contractJournalPath } = await import("../src/git/identity.js");
-  const { readGit, updateGitTree, writeBlob, writeCommit, updateRefsAtomically, GIT_REF } = await import(
+  const { readGitPaths, updateGitTree, writeBlob, writeCommit, updateRefsAtomically, GIT_REF } = await import(
     "../src/git/repository.js"
   );
   const repository = repositoryWithMain();
@@ -396,8 +396,8 @@ test("native Contract reads use null for lawful absence while corrupt fork terms
   const source = await bind(repository);
   const id = present(await source.state()).id;
   const scope = scopeForRepo(repo);
-  const snapshot = await readGit(scope);
   const journalPath = contractJournalPath(id, "active");
+  const snapshot = await readGitPaths(scope, [journalPath]);
   const entries = decodeJournal(repository.run(["show", `${GIT_REF}:${journalPath}`]));
   const first = entries[0];
   assert.ok(first?.kind === "bind");

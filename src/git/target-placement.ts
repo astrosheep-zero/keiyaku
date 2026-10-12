@@ -11,7 +11,7 @@ import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.
 import type { RefOperation } from "../core/facts/offer.js";
 import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
-import { consumeGitStdout, GitPlumbingError, runGit, type GitRepository } from "./process.js";
+import { consumeGitStdout, GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export const checkoutNotFollowableRefusalSchema = z
@@ -44,7 +44,7 @@ export const targetCheckoutLagSchema = z
   })
   .strict();
 type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
-export type TargetPlacementPhysicalResult = Readonly<{
+type TargetPlacementPhysicalResult = Readonly<{
   effects: readonly TargetCheckoutEffect[];
   lag: readonly TargetCheckoutLag[];
 }>;
@@ -56,7 +56,7 @@ export type PreparedTargetPlacement = Readonly<{
   arms: readonly FollowArm[];
 }>;
 
-export type TargetPlacementPreparation =
+type TargetPlacementPreparation =
   | Readonly<{ kind: "prepared"; placement: PreparedTargetPlacement }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
 
@@ -70,7 +70,7 @@ function diagnostic(error: unknown): string {
 }
 
 async function gitPaths(repository: GitRepository, path: string, args: readonly string[]): Promise<readonly string[]> {
-  return [...new Set(decodeGitNameOnly(await runGit(repository, ["-C", path, ...args])))].sort();
+  return [...new Set(decodeGitNameOnly(await executeGit(repository, ["-C", path, ...args])))].sort();
 }
 
 function literalPath(path: string): string {
@@ -79,7 +79,9 @@ function literalPath(path: string): string {
 
 async function commitTree(repository: GitRepository, snapshot: SnapshotId): Promise<GitObjectId> {
   return gitObjectId(
-    (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)])).toString("utf8").trim(),
+    (await executeGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
+      .toString("utf8")
+      .trim(),
     "commit tree",
   );
 }
@@ -126,7 +128,7 @@ export async function prepareTargetPlacementChanges(
   target: RefOperation,
 ): Promise<TargetPlacementChanges> {
   const records = (
-    await runGit(repository, [
+    await executeGit(repository, [
       "diff",
       "--raw",
       "--no-renames",
@@ -256,47 +258,16 @@ async function untrackedRefusalWithinScopes(
   return first === undefined ? null : checkoutRefusal(contractId, target, path, "untracked", [first.path]);
 }
 
-async function indexMatchesTreeOnPaths(
+/** Compare the index or a workspace tree against another tree over the given paths. */
+async function matchesTreeOnPaths(
   repository: GitRepository,
   path: string,
-  tree: GitObjectId,
+  command: readonly string[],
+  trees: readonly GitObjectId[],
   paths: readonly string[],
 ): Promise<boolean> {
-  return (
-    (
-      await gitPaths(repository, path, [
-        "diff-index",
-        "--cached",
-        "--name-only",
-        "-z",
-        tree,
-        "--",
-        ...paths.map(literalPath),
-      ])
-    ).length === 0
-  );
-}
-
-async function workspaceMatchesTreeOnPaths(
-  repository: GitRepository,
-  path: string,
-  tree: GitObjectId,
-  workspaceTree: GitObjectId,
-  paths: readonly string[],
-): Promise<boolean> {
-  return (
-    (
-      await gitPaths(repository, path, [
-        "diff",
-        "--name-only",
-        "-z",
-        tree,
-        workspaceTree,
-        "--",
-        ...paths.map(literalPath),
-      ])
-    ).length === 0
-  );
+  const args = [...command, "--name-only", "-z", ...trees, "--", ...paths.map(literalPath)];
+  return (await gitPaths(repository, path, args)).length === 0;
 }
 
 /**
@@ -315,7 +286,7 @@ async function ordinaryPrecheck(
   const candidate = gitObjectIdForSnapshot(target.newOid);
   const observation = { repository, contractId, target, path, predecessor, candidate, changes };
   try {
-    await runGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
+    await executeGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
     return null;
@@ -337,16 +308,16 @@ export async function acquireTargetPlacementFence(
   });
 }
 
-export type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: string }>;
+type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: string }>;
 
-export type TargetPlacementObservationInput = Readonly<{
+type TargetPlacementObservationInput = Readonly<{
   contractId: ContractId;
   coordinates: TargetedContractCoordinates;
   predecessor: SnapshotId;
   candidate: SnapshotId;
 }>;
 
-export type TargetPlacementObservation =
+type TargetPlacementObservation =
   | Readonly<{ kind: "ready"; arms: readonly FollowArm[] }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
 
@@ -455,7 +426,7 @@ export async function followTargetPlacement(
     const beforeEffects = effects.length,
       beforeLag = lag.length;
     try {
-      await runGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
+      await executeGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
       effects.push({ kind: "target-checkout", path: arm.path, target: prepared.target.target, action: "followed" });
     } catch (error) {
       if (!(error instanceof GitPlumbingError)) throw error;
@@ -493,19 +464,31 @@ async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassific
   const changedPaths = await gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
   if (changedPaths.length === 0) return { kind: "complete" };
   const workspaceTree = (await captureWorkspaceTree(repository, path)).tree;
-  const candidateIndex = await indexMatchesTreeOnPaths(repository, path, candidateTree, changedPaths);
-  const candidateWorkspace = await workspaceMatchesTreeOnPaths(
+  const candidateIndex = await matchesTreeOnPaths(
     repository,
     path,
-    candidateTree,
-    workspaceTree,
+    ["diff-index", "--cached"],
+    [candidateTree],
+    changedPaths,
+  );
+  const candidateWorkspace = await matchesTreeOnPaths(
+    repository,
+    path,
+    ["diff"],
+    [candidateTree, workspaceTree],
     changedPaths,
   );
   if (candidateIndex && candidateWorkspace) return { kind: "complete" };
-  const predecessorIndex = await indexMatchesTreeOnPaths(repository, path, predecessorTree, changedPaths);
+  const predecessorIndex = await matchesTreeOnPaths(
+    repository,
+    path,
+    ["diff-index", "--cached"],
+    [predecessorTree],
+    changedPaths,
+  );
   if (predecessorIndex && candidateWorkspace) return { kind: "recoverable", action: "index-merge" };
   return !predecessorIndex ||
-    !(await workspaceMatchesTreeOnPaths(repository, path, predecessorTree, workspaceTree, changedPaths))
+    !(await matchesTreeOnPaths(repository, path, ["diff"], [predecessorTree, workspaceTree], changedPaths))
     ? { kind: "retained" }
     : { kind: "recoverable", action: "worktree-merge" };
 }
@@ -528,7 +511,7 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
   if (classified.kind === "retained") return "retained";
   const { repository, path, predecessor, candidate } = input;
   if (classified.action === "index-merge") {
-    await runGit(repository, [
+    await executeGit(repository, [
       "-C",
       path,
       "read-tree",
@@ -539,7 +522,7 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
     ]);
     return "recovered";
   }
-  await runGit(repository, [
+  await executeGit(repository, [
     "-C",
     path,
     "read-tree",

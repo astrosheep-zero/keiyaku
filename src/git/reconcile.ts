@@ -17,7 +17,7 @@ import {
   DELIVERY_REF_NAMESPACE,
   registeredWorktreePaths,
 } from "./repository.js";
-import { runGit, GitPlumbingError, type GitRepository } from "./process.js";
+import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContractAt } from "./observe.js";
@@ -135,7 +135,7 @@ type ReconcileBatchItem = Readonly<{
   state: ContractState | null;
   result: ReconcileResult;
 }>;
-export type GitReconcileObservation = Readonly<{
+type GitReconcileObservation = Readonly<{
   state: ContractState | null;
   result: ReconcileResult;
 }>;
@@ -240,12 +240,12 @@ async function worktree(
   const registered = topology.paths.has(path);
   if (registered && (await pathExists(path))) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
-    await runGit(repository, ["worktree", "remove", path]);
+    await executeGit(repository, ["worktree", "remove", path]);
     topology.paths.delete(path);
   }
   if (await pathExists(path)) throw new WorktreeCustodyError(`delivery worktree path is occupied: ${path}`);
   await mkdir(dirname(path), { recursive: true });
-  await runGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
+  await executeGit(repository, ["worktree", "add", "--detach", path, gitObjectIdForSnapshot(desired)]);
   topology.paths.add(path);
   return { kind: "worktree", path, action: "created" };
 }

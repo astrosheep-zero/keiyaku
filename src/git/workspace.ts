@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import {
   HANDOFF_RECEIPT_REF_NAMESPACE,
   readBlob,
@@ -19,7 +19,7 @@ import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
 
-export type WorkspaceChanges = Readonly<{
+type WorkspaceChanges = Readonly<{
   staged: readonly string[];
   unstaged: readonly string[];
   untracked: readonly string[];
@@ -44,10 +44,10 @@ export async function checkoutDetachedSnapshot(
   workspace: string,
   snapshot: SnapshotId,
 ): Promise<void> {
-  await runGit(repository, ["-C", workspace, "checkout", "--quiet", "--force", "--detach", gitObjectId(snapshot)]);
+  await executeGit(repository, ["-C", workspace, "checkout", "--quiet", "--force", "--detach", gitObjectId(snapshot)]);
 }
 
-export type DependentWorktreeFollow =
+type DependentWorktreeFollow =
   | Readonly<{ kind: "followed"; before: SnapshotId; after: SnapshotId }>
   | Readonly<{ kind: "unchanged" }>
   | Readonly<{
@@ -63,7 +63,7 @@ async function workspaceRevision(
   revision: string,
 ): Promise<SnapshotId | null> {
   try {
-    const value = (await runGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision]))
+    const value = (await executeGit(repository, ["-C", workspace, "rev-parse", "--verify", "--quiet", revision]))
       .toString("utf8")
       .trim();
     return value.length === 0 ? null : mintSnapshotId(value);
@@ -89,7 +89,7 @@ async function workspaceOperationState(
       }
     }),
   );
-  const unmerged = (await runGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
+  const unmerged = (await executeGit(repository, ["-C", workspace, "ls-files", "--unmerged", "-z"])).length > 0;
   return { other: other.some(Boolean), unmerged };
 }
 
@@ -114,7 +114,7 @@ export async function followDependentManagedWorktree(
       ...status.unmergedPaths,
     ]),
   ].sort();
-  const attached = await runGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
+  const attached = await executeGit(repository, ["-C", workspace, "symbolic-ref", "--quiet", "HEAD"]).then(
     () => true,
     (error: unknown) => {
       if (error instanceof GitPlumbingError && error.status === 1) return false;
@@ -128,13 +128,13 @@ export async function followDependentManagedWorktree(
   if (head === target) return { kind: "unchanged" };
   let ancestor = false;
   try {
-    await runGit(repository, ["merge-base", "--is-ancestor", gitObjectId(head), gitObjectId(target)]);
+    await executeGit(repository, ["merge-base", "--is-ancestor", gitObjectId(head), gitObjectId(target)]);
     ancestor = true;
   } catch (error) {
     if (!(error instanceof GitPlumbingError) || error.status !== 1) throw error;
   }
   if (!ancestor) return { kind: "retained", head, reason: "head-moved", paths };
-  await runGit(repository, ["-C", workspace, "checkout", "--quiet", "--detach", gitObjectId(target)]);
+  await executeGit(repository, ["-C", workspace, "checkout", "--quiet", "--detach", gitObjectId(target)]);
   return { kind: "followed", before: head, after: target };
 }
 
@@ -174,7 +174,7 @@ type WorkspaceStatus = WorkspaceChanges & Readonly<{ unmergedPaths: readonly str
 
 async function workspaceStatus(repository: GitRepository, workspace: string): Promise<WorkspaceStatus> {
   const records = (
-    await runGitWithEnvironment(
+    await executeGit(
       repository,
       ["-C", workspace, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"],
       undefined,
@@ -238,7 +238,7 @@ export async function workspaceMergeHead(
 ): Promise<SnapshotId | undefined> {
   try {
     return mintSnapshotId(
-      (await runGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
+      (await executeGit(repository, ["-C", workspace, "rev-parse", "-q", "--verify", "MERGE_HEAD"]))
         .toString("utf8")
         .trim(),
     );
@@ -261,7 +261,7 @@ export async function unmergedWorkspacePaths(repository: GitRepository, workspac
   return (await workspaceStatus(repository, workspace)).unmergedPaths;
 }
 
-export type WorkspaceChangeCounts = Readonly<{
+type WorkspaceChangeCounts = Readonly<{
   staged: number;
   unstaged: number;
   untracked: number;
@@ -283,7 +283,7 @@ export const conflictRecovery: ConflictRecovery = Object.freeze({
   staging: "not-required",
 });
 
-export type ContractWorkspaceMerge = Readonly<{
+type ContractWorkspaceMerge = Readonly<{
   head: SnapshotId;
   unmergedPaths: readonly string[];
   handoffBase?: SnapshotId;
@@ -353,7 +353,7 @@ export async function observeTargetLag(
   const subject = { kind: "worktree" as const, path: resolve(workspace) };
   if (head === null) return { kind: "unknown", subject };
   try {
-    const text = (await runGit(repository, ["-C", workspace, "rev-list", "--count", `HEAD..${head}`]))
+    const text = (await executeGit(repository, ["-C", workspace, "rev-list", "--count", `HEAD..${head}`]))
       .toString("utf8")
       .trim();
     if (!/^[0-9]+$/u.test(text)) return { kind: "unknown", subject };
@@ -366,7 +366,7 @@ export async function observeTargetLag(
 
 /** Capture tracked and untracked workspace bytes without changing its real index. */
 export async function captureWorkspaceTree(repository: GitRepository, workspace: string): Promise<WorkspaceTree> {
-  const identities = (await runGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T%n%cI", "HEAD"]))
+  const identities = (await executeGit(repository, ["-C", workspace, "show", "-s", "--format=%H%n%T%n%cI", "HEAD"]))
     .toString("utf8")
     .split("\n");
   if (
@@ -387,13 +387,13 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
   if (!dirty) return { tree, head, at, dirty, changes };
 
   return await withPrivateGitIndex(async (environment) => {
-    await runGitWithEnvironment(
+    await executeGit(
       repository,
       ["-C", workspace, "-c", "core.splitIndex=false", "read-tree", gitObjectId(head)],
       undefined,
       environment,
     );
-    await runGitWithEnvironment(
+    await executeGit(
       repository,
       ["-C", workspace, "-c", "core.splitIndex=false", "add", "--all"],
       undefined,
@@ -402,7 +402,7 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
     return {
       tree: gitObjectId(
         (
-          await runGitWithEnvironment(
+          await executeGit(
             repository,
             ["-C", workspace, "-c", "core.splitIndex=false", "write-tree"],
             undefined,
@@ -442,7 +442,7 @@ export type HandoffReceiptCoordinate = Readonly<{
 
 export type ConflictHandoff = Readonly<{ base: SnapshotId; mergeHead: SnapshotId }>;
 
-export type HandoffRetirement =
+type HandoffRetirement =
   | Readonly<{ kind: "absent" | "active" | "orphan-retired" | "retired" }>
   | Readonly<{ kind: "retained"; reason: "receipt-mismatch" | "operation-in-progress" }>;
 
@@ -491,7 +491,7 @@ async function storedHandoffReceipt(
 }
 
 async function removeHandoffReceipt(repository: GitRepository, stored: StoredHandoffReceipt): Promise<void> {
-  await runGit(repository, ["update-ref", "--no-deref", "-d", stored.ref, stored.oid]);
+  await executeGit(repository, ["update-ref", "--no-deref", "-d", stored.ref, stored.oid]);
 }
 
 export async function recordConflictHandoff(
@@ -516,7 +516,7 @@ export async function recordConflictHandoff(
     mergeHead: input.mergeHead,
   };
   const oid = await writeBlob(repository, `${JSON.stringify(receipt)}\n`);
-  await runGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
+  await executeGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
 }
 
 /** Read selected handoff refs once and decode their receipts through the call's blob channel. */
@@ -570,7 +570,7 @@ export async function retireConflictHandoff(
     return { kind: "retained", reason: "receipt-mismatch" };
   }
   if (!input.consume) return { kind: "active" };
-  await runGit(repository, ["-C", input.workspace, "merge", "--quit"]);
+  await executeGit(repository, ["-C", input.workspace, "merge", "--quit"]);
   await removeHandoffReceipt(repository, stored);
   return { kind: "retired" };
 }

@@ -8,7 +8,7 @@ import {
   withPlaceAuthorityFence,
 } from "../workspace-place.js";
 import type { WorldRoot } from "../world.js";
-import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
+import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import {
   confirmPrivateStatePublication,
   withPrivateStatePublicationSeat,
@@ -103,7 +103,7 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   const registered = (await registeredWorktrees(repository)).find((candidate) => candidate.path === entry.path);
   if (registered === undefined) return await removeUnregisteredResidue(repository, entry);
   if (registered.branch !== null) return false;
-  await runGit(repository, ["worktree", "remove", "--force", entry.path]);
+  await executeGit(repository, ["worktree", "remove", "--force", entry.path]);
   if ((await registeredWorktrees(repository)).some((candidate) => candidate.path === entry.path)) {
     throw new GitResetStopError(`managed Place worktree remains registered: ${entry.path}`);
   }
@@ -117,7 +117,7 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
 }
 
 async function deleteRefAt(repository: GitRepository, ref: string, expectedOid: string): Promise<void> {
-  await runGit(repository, ["update-ref", "--no-deref", "-d", ref, expectedOid]);
+  await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, expectedOid]);
 }
 
 async function deleteObservedStateRef(
@@ -144,7 +144,7 @@ async function removeOwnedRefs(repository: GitRepository, onRemoved?: (count: nu
   let removed = 0;
   const roots = [DELIVERY_REF_NAMESPACE, CANDIDATE_PIN_REF_NAMESPACE] as const;
   for (const root of roots) {
-    const refs = (await runGit(repository, ["for-each-ref", "--format=%(refname)", root]))
+    const refs = (await executeGit(repository, ["for-each-ref", "--format=%(refname)", root]))
       .toString("utf8")
       .split("\n")
       .filter((ref) => ref.length > root.length && ref.startsWith(`${root}/`));

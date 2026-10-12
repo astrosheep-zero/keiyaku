@@ -9,7 +9,7 @@ import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   GIT_REF,
   readBlob,
-  readGit,
+  readGitPaths,
   repositoryAt,
   updateGitTree,
   writeBlob,
@@ -18,7 +18,7 @@ import {
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
-import { contractJournalPath } from "../src/git/identity.js";
+import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
@@ -95,7 +95,7 @@ test("public Contract rows select the source entry for every phase", async () =>
     abandoned: "2026-08-12T00:04:00.000Z",
   };
   const git = await repositoryAt(repository.path);
-  const before = await readGit(git);
+  const before = await readGitPaths(git, Object.values(ids).flatMap(contractJournalPaths));
   if (before.commit === null) throw new Error("Keiyaku state was not published");
   const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
   const deliverEntry = (id: ContractId, at: string, entry: string): JournalEntry => ({
@@ -206,7 +206,7 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
   const alpha = await bind(repository, "Alpha dependent", "worktree", [active]);
   const zulu = await bind(repository, "Zulu dependent", "worktree", [active]);
   const git = await repositoryAt(repository.path);
-  const before = await readGit(git);
+  const before = await readGitPaths(git, [claimed, abandoned, dependent].flatMap(contractJournalPaths));
   if (before.commit === null) throw new Error("Keiyaku state was not published");
   const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
   const claimDelivery: JournalEntry = {

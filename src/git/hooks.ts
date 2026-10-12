@@ -38,7 +38,7 @@ export const worktreeHookLagSchema = z
   })
   .strict();
 export type WorktreeHookLag = z.infer<typeof worktreeHookLagSchema>;
-export type HookPhase = "create" | "destroy";
+type HookPhase = "create" | "destroy";
 type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;
 
 function record(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -108,17 +108,6 @@ export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks 
   return Object.freeze({ create: selected("create"), destroy: selected("destroy") });
 }
 
-export function normalizedWorktreeHooks(value: unknown): WorktreeHooks {
-  if (!record(value)) throw new TypeError("hooks must be an object");
-  for (const key of Object.keys(value)) {
-    if (key !== "create" && key !== "destroy") throw new TypeError(`hooks has unknown field: ${key}`);
-  }
-  return Object.freeze({
-    create: commands(value.create, "hooks.create", TypeError),
-    destroy: commands(value.destroy, "hooks.destroy", TypeError),
-  });
-}
-
 export const EMPTY_WORKTREE_HOOKS: WorktreeHooks = Object.freeze({
   create: Object.freeze([]),
   destroy: Object.freeze([]),
@@ -139,7 +128,7 @@ function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>):
   return outcome;
 }
 
-export type HookCommandRun =
+type HookCommandRun =
   | Readonly<{ kind: "ok" }>
   | Readonly<{ kind: "cancelled"; stdout?: string; stderr?: string; truncated?: boolean }>
   | Readonly<{
@@ -172,7 +161,7 @@ export async function runHookCommands(
   return { kind: "ok" };
 }
 
-export type HookPhaseRun = Readonly<{ lag: WorktreeHookLag | null; runs: readonly string[] }>;
+type HookPhaseRun = Readonly<{ lag: WorktreeHookLag | null; runs: readonly string[] }>;
 
 async function runPhase(worktree: string, hooks: readonly HookCommand[], phase: HookPhase): Promise<HookPhaseRun> {
   const runs: string[] = [];

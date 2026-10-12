@@ -9,7 +9,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
-import { normalizedWorktreeHooks, runCreateHooks, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
+import { runCreateHooks, worktreeHooksFrom, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
 import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
@@ -109,16 +109,13 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   held.close();
 });
 
-test("hook action names must be unique within each phase", () => {
+test("hook action names must be unique within each phase", async () => {
+  const repository = repositoryWithMain();
+  const duplicate: HookCommand = { name: "prepare", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 };
+  settingsHooks(repository.path, { create: [duplicate, duplicate], destroy: [] });
+  const settings = await projectSettings(repository.path);
   assert.throws(
-    () =>
-      normalizedWorktreeHooks({
-        create: [
-          { name: "prepare", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 },
-          { name: "prepare", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 },
-        ],
-        destroy: [],
-      }),
+    () => worktreeHooksFrom({ settings }),
     /name must be unique within its phase/u,
   );
 });

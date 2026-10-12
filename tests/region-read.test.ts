@@ -11,7 +11,7 @@ import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import type { JournalEntry } from "../src/core/facts/types.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import {
-  readGit,
+  readGitPaths,
   repositoryAt,
   updateGitTree,
   updateRefsAtomically,
@@ -174,8 +174,8 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithMain();
     const { id } = await bind(repository, "Isolated failure", ["src/**"]);
     const git = await repositoryAt(repository.path);
-    const snapshot = await readGit(git);
     const journalPath = contractJournalPath(id);
+    const snapshot = await readGitPaths(git, [journalPath]);
     const journalOid = snapshot.paths.get(journalPath)?.oid;
     assert.ok(journalOid);
     const entries = decodeJournal(repository.run(["cat-file", "-p", journalOid]));

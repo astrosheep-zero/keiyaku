@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import type { GitOid } from "./repository.js";
-import { runGit, type GitRepository } from "./process.js";
+import { executeGit, type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export const unsealedBytesSchema = z
@@ -20,9 +20,7 @@ export type TerminalSealExpectations = Readonly<{
   trees: readonly GitObjectId[];
   treeBySnapshot: ReadonlyMap<SnapshotId, GitObjectId>;
 }>;
-export type TerminalSealObject =
-  | Readonly<{ kind: "present"; type: string; bytes: Buffer }>
-  | Readonly<{ kind: "missing" }>;
+type TerminalSealObject = Readonly<{ kind: "present"; type: string; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 type CommitMetadata = Readonly<{ tree: GitObjectId; parents: readonly SnapshotId[] }>;
 type WorkspaceTree = Awaited<ReturnType<typeof captureWorkspaceTree>>;
 export type TerminalWorkspace = Readonly<{
@@ -30,7 +28,7 @@ export type TerminalWorkspace = Readonly<{
   head: SnapshotId;
   submodules: readonly string[];
 }>;
-export type TerminalWorkspaceObservation = Readonly<{
+type TerminalWorkspaceObservation = Readonly<{
   workspace: TerminalWorkspace;
   unsealed: UnsealedBytes | null;
 }>;
@@ -100,12 +98,14 @@ export function terminalSealExpectations(
 }
 
 async function changedPaths(repository: GitRepository, left: string, right: string): Promise<readonly string[]> {
-  const fields = (await runGit(repository, ["diff", "--name-only", "-z", left, right])).toString("utf8").split("\0");
+  const fields = (await executeGit(repository, ["diff", "--name-only", "-z", left, right]))
+    .toString("utf8")
+    .split("\0");
   if (fields.at(-1) !== "") throw new Error("Git tree diff paths are not NUL terminated");
   return fields.slice(0, -1).sort();
 }
 
-export async function unsealedWorkspaceBytes(
+async function unsealedWorkspaceBytes(
   repository: GitRepository,
   path: string,
   expected: TerminalSealExpectations,

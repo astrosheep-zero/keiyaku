@@ -11,7 +11,7 @@ import {
   type ContractJournalClass,
 } from "./identity.js";
 import { isKeiyakuOwnedRef, type GitSnapshot, type GitOid } from "./repository.js";
-import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
+import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import {
   readBlobResults,
   readGitTreeSelection,
@@ -21,7 +21,7 @@ import {
   type GitTreeSelection,
 } from "./read-observation.js";
 
-export type TargetObservation = Readonly<{ head: SnapshotId | null; drift: boolean }>;
+type TargetObservation = Readonly<{ head: SnapshotId | null; drift: boolean }>;
 
 export async function observeDeliveryTargetAt(
   observation: GitReadObservation,
@@ -42,12 +42,12 @@ type GitJournalRecord = Readonly<{
   state: ContractState | null;
 }>;
 
-export type ContractWorldObservation = Readonly<{
+type ContractWorldObservation = Readonly<{
   snapshot: SnapshotId | null;
   contracts: ReadonlyMap<ContractId, GitJournalRecord>;
 }>;
 
-export type ActiveContractWorldObservation = ContractWorldObservation &
+type ActiveContractWorldObservation = ContractWorldObservation &
   Readonly<{
     eligibility: ContractsObservation;
   }>;
@@ -75,7 +75,7 @@ export type BindCoordinatesObservation = Readonly<{
   branch: string | null;
 }>;
 
-export type UnbornHeadObservation = Readonly<{
+type UnbornHeadObservation = Readonly<{
   kind: "unborn-head";
   branch: string | null;
 }>;
@@ -95,7 +95,7 @@ export async function normalizeTargetBranch(repository: GitRepository, input: st
   const target = `${prefix}${branch}`;
   if (branch.length === 0 || branch.startsWith("-") || isKeiyakuOwnedRef(target)) return null;
   try {
-    const checked = (await runGit(repository, ["check-ref-format", "--branch", branch])).toString("utf8").trim();
+    const checked = (await executeGit(repository, ["check-ref-format", "--branch", branch])).toString("utf8").trim();
     return checked === branch ? target : null;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status !== null) return null;
@@ -107,7 +107,7 @@ export async function normalizeTargetBranch(repository: GitRepository, input: st
 export async function currentBranch(repository: GitRepository, path?: string): Promise<string | null> {
   try {
     const ref = (
-      await runGit(repository, [...(path === undefined ? [] : ["-C", path]), "symbolic-ref", "--quiet", "HEAD"])
+      await executeGit(repository, [...(path === undefined ? [] : ["-C", path]), "symbolic-ref", "--quiet", "HEAD"])
     )
       .toString("utf8")
       .trim();
@@ -133,7 +133,7 @@ async function observeHeadCoordinates(
 ): Promise<BindCoordinatesObservation | UnbornHeadObservation> {
   try {
     return {
-      start: mintSnapshotId((await runGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
+      start: mintSnapshotId((await executeGit(repository, ["rev-parse", "--verify", "HEAD"])).toString("utf8").trim()),
       branch: await currentBranch(repository),
     };
   } catch (error) {
@@ -159,7 +159,7 @@ export async function observeBindCoordinates(
       throw new Error(`bind target names a Keiyaku-owned ref: ${requestedTarget}`);
     }
 
-    const output = await runGit(repository, [
+    const output = await executeGit(repository, [
       "for-each-ref",
       `--format=${TARGET_COORDINATES_FORMAT}`,
       "--",

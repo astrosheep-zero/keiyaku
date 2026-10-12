@@ -9,11 +9,7 @@ import {
   repositoryAt, writeCommit,
   writeStateCommit
 } from "../src/git/repository.js";
-import {
-  GitPlumbingError,
-  consumeGitStdout, runGitWithEnvironment,
-  withGitAbortSignal
-} from "../src/git/process.js";
+import { GitPlumbingError, consumeGitStdout, executeGit } from "../src/git/process.js";
 import { repositoryWithCommit, waitForFile, withGitShim } from "./support/git.js";
 
 test("state commit construction warns while ordinary commit messages stay unchanged", async () => {
@@ -70,7 +66,7 @@ test("cancelling streamed Git execution uses its capability signal", async () =>
     async (gitPath) => {
       const controller = new AbortController();
       const pending = consumeGitStdout(
-        withGitAbortSignal(await repositoryAt(repository.path, gitPath), controller.signal),
+        { ...(await repositoryAt(repository.path, gitPath)), signal: controller.signal },
         ["--version"],
         () => undefined,
       );
@@ -91,7 +87,7 @@ test("a missing Git executable reports one normalized command prefix", async () 
   const git = { ...pinned, gitPath: "/missing/keiyaku-git" };
 
   await assert.rejects(
-    runGitWithEnvironment(git, ["--version"], undefined, { PATH: "" }),
+    executeGit(git, ["--version"], undefined, { PATH: "" }),
     (error: unknown) =>
       error instanceof GitPlumbingError &&
       error.status === null &&

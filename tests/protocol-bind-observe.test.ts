@@ -12,7 +12,7 @@ import {
   GIT_REF,
   DELIVERY_REF_NAMESPACE,
   readBlob,
-  readGit,
+  readGitPaths,
   repositoryAt as productionRepositoryAt,
   updateGitTree,
   updateRefsAtomically,
@@ -21,7 +21,7 @@ import {
 } from "../src/git/repository.js";
 import { observeBindCoordinates, observeContractWorld, observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { runGit } from "../src/git/process.js";
+import { executeGit } from "../src/git/process.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { decideAbandon } from "../src/core/verbs/abandon.js";
 import { bindOperation as rawBindOperation } from "../src/protocol/bind.js";
@@ -116,7 +116,7 @@ async function preparationCoordinates(
   const appointment = await readManagedWorktreeAppointment(repository, state.id);
   if (appointment.kind !== "appointed") throw new Error(`managed worktree appointment missing for ${state.id}`);
   if (!existsSync(appointment.path))
-    await runGit(repository, ["worktree", "add", "--detach", appointment.path, "HEAD"]);
+    await executeGit(repository, ["worktree", "add", "--detach", appointment.path, "HEAD"]);
   return { contractId: state.id, coordinates: state.coordinates };
 }
 
@@ -304,7 +304,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
 
     assert.equal(result.kind, "accepted");
-    const after = await readGit(git);
+    const after = await readGitPaths(git, ["test/companion.txt", contractJournalPath(id)]);
     assert.equal(after.paths.has("test/companion.txt"), true);
     assert.notEqual(after.paths.get(contractJournalPath(id))?.oid, before.oid);
   });
@@ -360,7 +360,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     );
 
     assert.equal(result.kind, "publication-failed");
-    const after = await readGit(git);
+    const after = await readGitPaths(git, ["test/winner.txt", "test/loser.txt", contractJournalPath(id)]);
     assert.equal(after.paths.has("test/winner.txt"), true);
     assert.equal(after.paths.has("test/loser.txt"), false);
     assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.oid);
@@ -379,7 +379,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.ok(decision.kind === "offer", "expected decision.kind = \"offer\"");
     const append = decision.offer.facts[0]!;
     const foreignEntry = { ...append.entries[0]!, contract: foreign };
-    const before = await readGit(git);
+    const before = await readGitPaths(git, [contractJournalPath(id), contractJournalPath(id, "terminal")]);
 
     await assert.rejects(
       () =>
@@ -393,7 +393,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         error.message === `candidate journal entry belongs to ${foreign}, not ${id}`,
     );
 
-    const after = await readGit(git);
+    const after = await readGitPaths(git, [contractJournalPath(id), contractJournalPath(id, "terminal")]);
     assert.equal(after.commit, before.commit);
     assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.paths.get(contractJournalPath(id))?.oid);
     assert.equal(after.paths.has(contractJournalPath(id, "terminal")), false);
@@ -417,7 +417,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
     assert.ok(activeDecision.kind === "offer", "expected activeDecision.kind = \"offer\"");
     assert.equal((await admit(git, activeDecision.offer, activeObservation.admission)).kind, "accepted");
-    const afterActive = await readGit(git);
+    const afterActive = await readGitPaths(git, [contractJournalPath(id, "active"), contractJournalPath(id, "terminal")]);
     assert.equal(afterActive.paths.has(contractJournalPath(id, "active")), true);
     assert.equal(afterActive.paths.has(contractJournalPath(id, "terminal")), false);
 
@@ -431,7 +431,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
     assert.ok(terminalDecision.kind === "offer", "expected terminalDecision.kind = \"offer\"");
     assert.equal((await admit(git, terminalDecision.offer, terminalObservation.admission)).kind, "accepted");
-    const afterTerminal = await readGit(git);
+    const afterTerminal = await readGitPaths(git, [contractJournalPath(id, "active"), contractJournalPath(id, "terminal")]);
     assert.equal(afterTerminal.paths.has(contractJournalPath(id, "active")), false);
     assert.equal(afterTerminal.paths.has(contractJournalPath(id, "terminal")), true);
   });
@@ -534,7 +534,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithHead();
     const repo = await Repo.at({ path: repository.path });
     const { id, git } = await boundObservedContract(repository);
-    const snapshot = await readGit(git);
+    const snapshot = await readGitPaths(git, [contractJournalPath(id)]);
     const path = contractJournalPath(id);
     const journal = snapshot.paths.get(path);
     if (journal === undefined) throw new Error("bound journal was not observed");

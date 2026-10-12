@@ -11,7 +11,7 @@ import {
   type TerminalSealExpectations,
   type TerminalWorkspace,
 } from "./terminal-seal.js";
-import { GitPlumbingError, runGit, type GitRepository } from "./process.js";
+import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import { worktreePath } from "./workspace.js";
 import type { Effect, ReconcileAccumulation, ReconcileLag, ReconcileResult, WorktreeTopology } from "./reconcile.js";
 
@@ -65,7 +65,7 @@ async function removeTerminalWorktree(
   }
   const present = await pathExists(path);
   try {
-    await runGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
+    await executeGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
@@ -78,7 +78,7 @@ async function removeTerminalWorktree(
 export async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
   const before = await readRef(repository, ref);
   if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
-  await runGit(repository, [
+  await executeGit(repository, [
     "update-ref",
     "--no-deref",
     ref,
@@ -91,7 +91,7 @@ export async function updateRef(repository: GitRepository, ref: string, desired:
 export async function removeRef(repository: GitRepository, ref: string): Promise<Effect> {
   const before = await readRef(repository, ref);
   if (before === null) return { kind: "ref", name: ref, action: "unchanged", before: null, after: null };
-  await runGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
+  await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
   return { kind: "ref", name: ref, action: "removed", before, after: null };
 }
 
@@ -106,7 +106,7 @@ async function removeRefWithCustody(
   if ((await readRef(repository, custodian)) !== expectedCustodian) {
     return { kind: "ref", name: ref, action: "unchanged", before, after: before };
   }
-  await runGit(
+  await executeGit(
     repository,
     ["update-ref", "--stdin", "--no-deref"],
     [
@@ -126,7 +126,9 @@ function retainedRefEffect(ref: string, snapshot: GitOid): Effect {
 }
 
 async function refRows(repository: GitRepository): Promise<readonly Readonly<{ ref: string; oid: string }>[]> {
-  const output = (await runGit(repository, ["for-each-ref", "--format=%(refname)%00%(objectname)"])).toString("utf8");
+  const output = (await executeGit(repository, ["for-each-ref", "--format=%(refname)%00%(objectname)"])).toString(
+    "utf8",
+  );
   if (output.length === 0) return [];
   return output
     .trimEnd()
@@ -140,7 +142,7 @@ async function refRows(repository: GitRepository): Promise<readonly Readonly<{ r
 
 async function commitIsAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: string): Promise<boolean> {
   try {
-    await runGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(ancestor), descendant]);
+    await executeGit(repository, ["merge-base", "--is-ancestor", gitObjectIdForSnapshot(ancestor), descendant]);
     return true;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return false;

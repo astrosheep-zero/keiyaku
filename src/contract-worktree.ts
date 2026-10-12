@@ -9,7 +9,7 @@ import {
   CONTRACT_ONBOARDING_SKILL,
   renderContractGuidance,
 } from "./contract-guidance.js";
-import { runGit, type GitRepository } from "./git/process.js";
+import { executeGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
 import { repairNamespaceContext } from "./task/context.js";
@@ -57,7 +57,7 @@ async function readTrackedPaths(
   worktree: string,
   paths: readonly string[],
 ): Promise<ReadonlySet<string>> {
-  const output = await runGit({ ...repository, effectiveCwd: worktree }, [
+  const output = await executeGit({ ...repository, effectiveCwd: worktree }, [
     "ls-files",
     "-z",
     "--",

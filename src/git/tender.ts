@@ -5,10 +5,10 @@ import type { Preparation } from "../core/decide.js";
 import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { decodeGitNumstat, registeredWorktreePaths } from "./repository.js";
-import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
+import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import { captureWorkspaceTree, unmergedWorkspacePaths, workspaceMergeHead, worktreePath } from "./workspace.js";
 
-export type TenderCaptureCoordinates = Readonly<{
+type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
   place?: string;
@@ -29,7 +29,7 @@ export const unmergedPathsRefusalSchema = z
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
   })
   .strict();
-export type TenderCaptureRefusal = WorktreeMissingRefusal | z.infer<typeof unmergedPathsRefusalSchema>;
+type TenderCaptureRefusal = WorktreeMissingRefusal | z.infer<typeof unmergedPathsRefusalSchema>;
 export const workspaceDirtyDeltaSchema = z
   .object({
     staged: z.array(z.string()).readonly(),
@@ -116,7 +116,7 @@ async function dirtyShortStat(
   tender: TenderCapture,
 ): Promise<WorkspaceDirtyDelta["shortStat"]> {
   return decodeGitNumstat(
-    await runGit(repository, ["diff", "--numstat", "-z", gitObjectIdForSnapshot(tender.head), tender.tree]),
+    await executeGit(repository, ["diff", "--numstat", "-z", gitObjectIdForSnapshot(tender.head), tender.tree]),
   );
 }
 
@@ -155,7 +155,7 @@ async function effectiveConfig(
   key: "user.name" | "user.email",
 ): Promise<string | undefined> {
   try {
-    const value = (await runGit(repository, ["config", "--get", key])).toString("utf8").trim();
+    const value = (await executeGit(repository, ["config", "--get", key])).toString("utf8").trim();
     return value.length === 0 ? undefined : value;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status === 1) return undefined;
@@ -197,6 +197,33 @@ export async function prepareDeliveryCommitMetadata(
   };
 }
 
+/** The Git identity environment for one delivery snapshot commit. */
+export function deliveryEnvironment(commit: DeliveryCommitMetadata): NodeJS.ProcessEnv {
+  return {
+    GIT_AUTHOR_NAME: commit.identity.name,
+    GIT_AUTHOR_EMAIL: commit.identity.email,
+    GIT_COMMITTER_NAME: commit.identity.name,
+    GIT_COMMITTER_EMAIL: commit.identity.email,
+    GIT_AUTHOR_DATE: commit.at,
+    GIT_COMMITTER_DATE: commit.at,
+  };
+}
+
+/** Materialize one delivery snapshot commit over the given parents. */
+export async function materializeSnapshotCommit(
+  repository: GitRepository,
+  tree: GitObjectId,
+  parents: readonly SnapshotId[],
+  message: string | Uint8Array,
+  environment: NodeJS.ProcessEnv,
+): Promise<SnapshotId> {
+  const args = parents.flatMap((parent) => ["-p", gitObjectIdForSnapshot(parent)]);
+  const oid = (await executeGit(repository, ["commit-tree", tree, ...args], message, environment))
+    .toString("utf8")
+    .trim();
+  return mintSnapshotId(oid);
+}
+
 /** Materialize the tender tree when it contains admitted dirty workspace bytes. */
 export async function materializeTenderSnapshot(
   repository: GitRepository,
@@ -204,19 +231,6 @@ export async function materializeTenderSnapshot(
   commit: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
   if (!tender.dirty && tender.mergeHead === undefined) return tender.head;
-  const parents = ["-p", gitObjectIdForSnapshot(tender.head)];
-  if (tender.mergeHead !== undefined) parents.push("-p", gitObjectIdForSnapshot(tender.mergeHead));
-  const oid = (
-    await runGitWithEnvironment(repository, ["commit-tree", tender.tree, ...parents], commit.message, {
-      GIT_AUTHOR_NAME: commit.identity.name,
-      GIT_AUTHOR_EMAIL: commit.identity.email,
-      GIT_COMMITTER_NAME: commit.identity.name,
-      GIT_COMMITTER_EMAIL: commit.identity.email,
-      GIT_AUTHOR_DATE: commit.at,
-      GIT_COMMITTER_DATE: commit.at,
-    })
-  )
-    .toString("utf8")
-    .trim();
-  return mintSnapshotId(oid);
+  const parents = tender.mergeHead === undefined ? [tender.head] : [tender.head, tender.mergeHead];
+  return await materializeSnapshotCommit(repository, tender.tree, parents, commit.message, deliveryEnvironment(commit));
 }

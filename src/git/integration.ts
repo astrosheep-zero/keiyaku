@@ -5,8 +5,13 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { decodeGitNameOnly, decodeGitNumstat, readRef } from "./repository.js";
-import { GitPlumbingError, runGit, runGitPipe, runGitWithEnvironment, type GitRepository } from "./process.js";
-import type { DeliveryCommitMetadata, TenderCapture } from "./tender.js";
+import { executeGit, GitPlumbingError, runGitPipe, type GitRepository } from "./process.js";
+import {
+  deliveryEnvironment,
+  materializeSnapshotCommit,
+  type DeliveryCommitMetadata,
+  type TenderCapture,
+} from "./tender.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
 
 export { workspaceMergeStatePresent };
@@ -21,7 +26,7 @@ async function runAllowingNonzero(
   input?: string,
 ): Promise<Readonly<{ stdout: Buffer; stderr: Buffer; status: number | null }>> {
   try {
-    return { stdout: await runGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 };
+    return { stdout: await executeGit(repository, args, input), stderr: Buffer.alloc(0), status: 0 };
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     return { stdout: error.stdout, stderr: error.stderr, status: error.status };
@@ -56,12 +61,12 @@ export const integrationPreparationRefusalSchema = z.union([
     .strict(),
 ]);
 export type IntegrationPreparationRefusal = z.infer<typeof integrationPreparationRefusalSchema>;
-export type IntegrationCoordinates = Readonly<{
+type IntegrationCoordinates = Readonly<{
   contractId: ContractId;
   coordinates: ContractCoordinates;
 }>;
 
-export type IntegrationPlan = Readonly<{
+type IntegrationPlan = Readonly<{
   predecessor: SnapshotId;
   tree: GitObjectId;
 }>;
@@ -119,28 +124,11 @@ export async function materializeIntegrationSnapshot(
   parent: SnapshotId,
   metadata: DeliveryCommitMetadata,
 ): Promise<SnapshotId> {
-  const commit = (
-    await runGitWithEnvironment(
-      repository,
-      ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)],
-      metadata.message,
-      {
-        GIT_AUTHOR_NAME: metadata.identity.name,
-        GIT_AUTHOR_EMAIL: metadata.identity.email,
-        GIT_COMMITTER_NAME: metadata.identity.name,
-        GIT_COMMITTER_EMAIL: metadata.identity.email,
-        GIT_AUTHOR_DATE: metadata.at,
-        GIT_COMMITTER_DATE: metadata.at,
-      },
-    )
-  )
-    .toString("utf8")
-    .trim();
-  return mintSnapshotId(commit);
+  return await materializeSnapshotCommit(repository, tree, [parent], metadata.message, deliveryEnvironment(metadata));
 }
 
 export async function persistedTender(repository: GitRepository, snapshot: SnapshotId): Promise<IntegrationTender> {
-  const tree = (await runGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
+  const tree = (await executeGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
     .toString("ascii")
     .trim();
   return { head: snapshot, tree: gitObjectId(tree, "persisted tender tree") };
@@ -155,7 +143,7 @@ export async function materializeReintegrationSnapshot(
   const templateObject = gitObjectIdForSnapshot(template);
   let raw: Buffer;
   try {
-    raw = await runGit(repository, ["cat-file", "commit", templateObject]);
+    raw = await executeGit(repository, ["cat-file", "commit", templateObject]);
   } catch (error) {
     if (error instanceof GitPlumbingError) {
       throw new AuthorityCorruptionError(`recorded delivery snapshot cannot be read: ${template}`);
@@ -169,7 +157,7 @@ export async function materializeReintegrationSnapshot(
   let fields: readonly string[];
   try {
     const formatted = (
-      await runGit(repository, ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", templateObject])
+      await executeGit(repository, ["show", "-s", "--format=%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI", templateObject])
     )
       .toString("utf8")
       .replace(/\n$/u, "");
@@ -184,19 +172,14 @@ export async function materializeReintegrationSnapshot(
     throw new AuthorityCorruptionError(`recorded delivery snapshot metadata is malformed: ${template}`);
   }
   const [authorName, authorEmail, authorDate, committerName, committerEmail, committerDate] = fields;
-  const commit = (
-    await runGitWithEnvironment(repository, ["commit-tree", tree, "-p", gitObjectIdForSnapshot(parent)], message!, {
-      GIT_AUTHOR_NAME: authorName!,
-      GIT_AUTHOR_EMAIL: authorEmail!,
-      GIT_AUTHOR_DATE: authorDate!,
-      GIT_COMMITTER_NAME: committerName!,
-      GIT_COMMITTER_EMAIL: committerEmail!,
-      GIT_COMMITTER_DATE: committerDate!,
-    })
-  )
-    .toString("utf8")
-    .trim();
-  return mintSnapshotId(commit);
+  return await materializeSnapshotCommit(repository, tree, [parent], message!, {
+    GIT_AUTHOR_NAME: authorName!,
+    GIT_AUTHOR_EMAIL: authorEmail!,
+    GIT_AUTHOR_DATE: authorDate!,
+    GIT_COMMITTER_NAME: committerName!,
+    GIT_COMMITTER_EMAIL: committerEmail!,
+    GIT_COMMITTER_DATE: committerDate!,
+  });
 }
 
 async function isAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: SnapshotId): Promise<boolean> {
@@ -387,7 +370,7 @@ async function deliverySnapshotAvailability(
 ): Promise<"available" | "unavailable"> {
   const objects = [gitObjectIdForSnapshot(predecessor), gitObjectIdForSnapshot(candidate)] as const;
   const types = (
-    await runGit(repository, ["cat-file", "--batch-check=%(objectname) %(objecttype)"], `${objects.join("\n")}\n`)
+    await executeGit(repository, ["cat-file", "--batch-check=%(objectname) %(objecttype)"], `${objects.join("\n")}\n`)
   )
     .toString("ascii")
     .trimEnd()
@@ -417,7 +400,7 @@ export async function readDeliveryScope(
   includePaths: boolean,
 ): Promise<DeliveryDiffScope> {
   const scope = decodeGitNumstat(
-    await runGit(repository, [
+    await executeGit(repository, [
       "diff",
       "--numstat",
       "-z",
@@ -429,7 +412,7 @@ export async function readDeliveryScope(
   return {
     ...scope,
     paths: decodeGitNameOnly(
-      await runGit(repository, [
+      await executeGit(repository, [
         "diff",
         "--name-only",
         "--no-renames",
@@ -450,7 +433,7 @@ export async function readDeliveryDiff(
   if ((await deliverySnapshotAvailability(repository, predecessor, candidate)) === "unavailable") return null;
   try {
     return (
-      await runGit(repository, [
+      await executeGit(repository, [
         "diff",
         "--no-ext-diff",
         "--no-color",

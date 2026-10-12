@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { withGitAbortSignal } from "../src/git/process.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { contractId } from "../src/core/facts/types.js";
 import { mintSnapshotId } from "../src/git/identity.js";
@@ -104,7 +103,7 @@ test("Git read observation reports cancellation instead of the interrupted batch
     ].join("\n"),
     { KEIYAKU_BATCH_CANCEL_MARKER: marker },
     async (gitPath) => {
-      const git = withGitAbortSignal(await repositoryAt(repository.path, gitPath), controller.signal);
+      const git = { ...(await repositoryAt(repository.path, gitPath)), signal: controller.signal };
       await assert.rejects(
         withGitDecodeChannel(git, (channel) =>
           withGitReadObservation(git, channel, async (observation) => {
@@ -174,7 +173,7 @@ test("batch requests are pipelined, deduplicated across concurrent calls and rea
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const git = withGitAbortSignal(await repositoryAt(repository.path, gitPath), controller.signal);
+        const git = { ...(await repositoryAt(repository.path, gitPath)), signal: controller.signal };
         await withGitDecodeChannel(git, async (channel) => {
           const [first, second] = await Promise.all([
             channel.readObjects([...oids, oids[0]!]),

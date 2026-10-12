@@ -9,7 +9,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath, contractPhysicalName } from "../src/git/identity.js";
-import { GIT_REF, HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readGit, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
+import { GIT_REF, HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readGitPaths, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { Keiyaku, Repo, type ContractRow } from "../src/index.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, snapshotGitRepository, withGitShim } from "./support/git.js";
@@ -330,8 +330,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal(state.delivery, null);
     const reviewedChangeId = changeIdFromSubject(state.attestations.at(-1)?.data.subject);
     if (reviewedChangeId === undefined) throw new Error("reviewed subject is missing its ChangeId");
-    const before = await readGit(git);
     const journalPath = contractJournalPath(state.id);
+    const before = await readGitPaths(git, [journalPath]);
     const active = before.paths.get(journalPath);
     if (active?.type !== "blob") throw new Error("missing active journal");
     const oid = await writeBlob(

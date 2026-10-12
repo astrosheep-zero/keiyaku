@@ -9,7 +9,7 @@ import {
 } from "../coordination/sqlite-transaction-lock.js";
 import type { SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot } from "./identity.js";
-import { runGit, type GitRepository } from "./process.js";
+import { executeGit, type GitRepository } from "./process.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
@@ -78,14 +78,14 @@ export async function removeCollectableScratchWorktrees(
     let removed = false;
     try {
       if (!(await pathExists(scratch.path))) {
-        await runGit(repository, ["worktree", "remove", scratch.path]);
+        await executeGit(repository, ["worktree", "remove", scratch.path]);
         paths.delete(scratch.path);
         removed = true;
         removals.push({ path: scratch.path, action: "removed", retained: false });
         continue;
       }
       try {
-        await runGit(repository, ["worktree", "remove", "--force", scratch.path]);
+        await executeGit(repository, ["worktree", "remove", "--force", scratch.path]);
         paths.delete(scratch.path);
         removed = true;
         removals.push({ path: scratch.path, action: "removed", retained: false });
@@ -119,7 +119,7 @@ export async function materializeScratchCandidate(
   });
   if (ownership === null) throw new Error("new scratch ownership lock is unexpectedly held");
   try {
-    await runGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
+    await executeGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
   } catch (error) {
     ownership.close();
     await removeOwnershipLock(lockPath);
@@ -133,7 +133,7 @@ export async function materializeScratchCandidate(
       disposed = true;
       let leak: WorktreeLeak | null = null;
       try {
-        await runGit({ ...repository, signal: AbortSignal.timeout(5_000) }, ["worktree", "remove", "--force", cwd]);
+        await executeGit({ ...repository, signal: AbortSignal.timeout(5_000) }, ["worktree", "remove", "--force", cwd]);
       } catch (error) {
         leak = {
           path: cwd,

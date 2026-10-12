@@ -20,11 +20,6 @@ export type GitRepository = Readonly<{
   readonly onPrivateStateSeatClose?: () => void;
 }>;
 
-/** Give one caller's Git capability view its cancellation boundary. */
-export function withGitAbortSignal(repository: GitRepository, signal: AbortSignal | undefined): GitRepository {
-  return signal === undefined ? repository : { ...repository, signal };
-}
-
 export class GitPlumbingError extends Error {
   readonly stdout: Buffer;
   readonly stderr: Buffer;
@@ -71,10 +66,10 @@ function commandError(command: readonly string[], error: unknown): GitPlumbingEr
   });
 }
 
-async function executeGit(
+export async function executeGit(
   repository: GitRepository,
   args: readonly string[],
-  input: string | Uint8Array | undefined,
+  input?: string | Uint8Array,
   environment?: NodeJS.ProcessEnv,
 ): Promise<Buffer> {
   if (repository.signal?.aborted === true) {
@@ -123,14 +118,6 @@ async function executeGit(
     status: terminal.code,
     pid: child.pid,
   });
-}
-
-export async function runGit(
-  repository: GitRepository,
-  args: readonly string[],
-  input?: string | Uint8Array,
-): Promise<Buffer> {
-  return await executeGit(repository, args, input);
 }
 
 function boundedPipeOutput(
@@ -270,13 +257,4 @@ export async function consumeGitStdout(
     status,
     pid: result.pid ?? undefined,
   });
-}
-
-export async function runGitWithEnvironment(
-  repository: GitRepository,
-  args: readonly string[],
-  input: string | Uint8Array | undefined,
-  environment: NodeJS.ProcessEnv,
-): Promise<Buffer> {
-  return await executeGit(repository, args, input, environment);
 }
