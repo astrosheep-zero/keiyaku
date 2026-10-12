@@ -9,7 +9,7 @@ import {
   CONTRACT_ONBOARDING_SKILL,
   renderContractGuidance,
 } from "./contract-guidance.js";
-import { GitPlumbingError, runGit, type GitRepository } from "./git/process.js";
+import { runGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
 import { repairNamespaceContext } from "./task/context.js";
@@ -23,6 +23,12 @@ const SEAT_SKILLS = [
   ["keiyaku-deliver", CONTRACT_DELIVERER_SKILL],
   ["keiyaku-review", CONTRACT_REVIEWER_SKILL],
 ] as const;
+const PRIMARY_GENERATED_PATHS = [".keiyaku/.gitignore"] as const;
+const GENERATED_PATHS = [
+  ...PRIMARY_GENERATED_PATHS,
+  ".keiyaku/KEIYAKU.md",
+  ...SEAT_SKILLS.flatMap(([seat]) => [`.agents/skills/${seat}/.gitignore`, `.agents/skills/${seat}/SKILL.md`]),
+];
 export const contractFileEffectSchema = z
   .object({
     kind: z.literal("contract-file"),
@@ -46,14 +52,23 @@ export type ContractWorktreeResult = Readonly<{
   lag: readonly ContractFileLag[];
 }>;
 
-async function isTracked(repository: GitRepository, relativePath: string): Promise<boolean> {
-  try {
-    await runGit(repository, ["ls-files", "--error-unmatch", "--", relativePath]);
-    return true;
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status === 1) return false;
-    throw error;
-  }
+async function readTrackedPaths(
+  repository: GitRepository,
+  worktree: string,
+  paths: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const output = await runGit({ ...repository, effectiveCwd: worktree }, [
+    "ls-files",
+    "-z",
+    "--",
+    ...paths.map((path) => `:(literal)${path}`),
+  ]);
+  return new Set(
+    output
+      .toString("utf8")
+      .split("\0")
+      .filter((path) => path !== ""),
+  );
 }
 
 function generatedPath(worktree: string, name: string): string {
@@ -61,13 +76,13 @@ function generatedPath(worktree: string, name: string): string {
 }
 
 async function repair(
-  repository: GitRepository,
   worktree: string,
   relativePath: string,
   bytes: string,
+  tracked: ReadonlySet<string>,
 ): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);
-  if (await isTracked(repository, relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
+  if (tracked.has(relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
   const action = await repairDerivedFile(path, bytes);
   if (relativePath === ".keiyaku/KEIYAKU.md") {
     try {
@@ -88,10 +103,10 @@ async function isKeiyakuSeatLeaf(worktree: string, seat: string): Promise<boolea
 }
 
 async function materializeSeatSkill(
-  repository: GitRepository,
   worktree: string,
   seat: string,
   bytes: string,
+  tracked: ReadonlySet<string>,
 ): Promise<readonly ContractFileEffect[]> {
   const leaf = `.agents/skills/${seat}`;
   const skill = `${leaf}/SKILL.md`;
@@ -101,8 +116,8 @@ async function materializeSeatSkill(
   );
   if (!(await isKeiyakuSeatLeaf(worktree, seat)) && skillExists) return [];
   return [
-    await repair(repository, worktree, `${leaf}/.gitignore`, SEAT_IGNORE_BYTES),
-    await repair(repository, worktree, skill, bytes),
+    await repair(worktree, `${leaf}/.gitignore`, SEAT_IGNORE_BYTES, tracked),
+    await repair(worktree, skill, bytes, tracked),
   ];
 }
 
@@ -124,17 +139,17 @@ async function materialize(
       },
     ],
   });
+  const primaryWorktree = repository.primaryWorktree;
+  let tracked: ReadonlySet<string>;
   try {
-    effects.push(
-      await repair(
-        { ...repository, effectiveCwd: repository.primaryWorktree },
-        repository.primaryWorktree,
-        ".keiyaku/.gitignore",
-        PRIMARY_IGNORE_BYTES,
-      ),
+    tracked = await readTrackedPaths(
+      repository,
+      primaryWorktree,
+      worktree === primaryWorktree ? GENERATED_PATHS : PRIMARY_GENERATED_PATHS,
     );
+    effects.push(await repair(primaryWorktree, ".keiyaku/.gitignore", PRIMARY_IGNORE_BYTES, tracked));
   } catch (error) {
-    return failed(repository.primaryWorktree, join(repository.primaryWorktree, ".keiyaku", ".gitignore"), error);
+    return failed(primaryWorktree, join(primaryWorktree, ".keiyaku", ".gitignore"), error);
   }
   const stat = await lstat(worktree).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
@@ -153,25 +168,31 @@ async function materialize(
       ],
     };
   }
-  const scoped = { ...repository, effectiveCwd: worktree };
   try {
     await repairNamespaceContext(worktree, namespace);
   } catch (error) {
     return failed(worktree, join(worktree, ".keiyaku", "namespace", "current"), error);
+  }
+  if (worktree !== primaryWorktree) {
+    try {
+      tracked = await readTrackedPaths(repository, worktree, GENERATED_PATHS);
+    } catch (error) {
+      return failed(worktree, join(worktree, ".keiyaku", ".gitignore"), error);
+    }
   }
   for (const [relativePath, bytes] of [
     [".keiyaku/.gitignore", IGNORE_BYTES],
     [".keiyaku/KEIYAKU.md", guidance],
   ] as const) {
     try {
-      effects.push(await repair(scoped, worktree, relativePath, bytes));
+      effects.push(await repair(worktree, relativePath, bytes, tracked));
     } catch (error) {
       return failed(worktree, join(worktree, relativePath), error);
     }
   }
   for (const [seat, bytes] of SEAT_SKILLS) {
     try {
-      effects.push(...(await materializeSeatSkill(scoped, worktree, seat, bytes)));
+      effects.push(...(await materializeSeatSkill(worktree, seat, bytes, tracked)));
     } catch (error) {
       return failed(worktree, join(worktree, ".agents", "skills", seat), error);
     }

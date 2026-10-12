@@ -89,8 +89,114 @@ async function restoreOwnedRefs(
   repository.run(["update-ref", candidatePinRefFor(id), integration]);
 }
 
+async function projectionFixture() {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), workspace: "worktree" }));
+  const id = present(await bound.value.keiyaku.state()).id;
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
+  return { repository, repo, id, worktree };
+}
+
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
+  for (const [index, relativePath, completed] of [
+    ["primary", ".keiyaku/.gitignore", []],
+    ["managed", ".keiyaku/.gitignore", ["primary:.keiyaku/.gitignore"]],
+    [
+      "managed",
+      ".agents/skills/keiyaku-deliver/SKILL.md",
+      [
+        "primary:.keiyaku/.gitignore",
+        "managed:.keiyaku/.gitignore",
+        "managed:.keiyaku/KEIYAKU.md",
+        "managed:.agents/skills/keiyaku-onboarding/.gitignore",
+        "managed:.agents/skills/keiyaku-onboarding/SKILL.md",
+      ],
+    ],
+  ] as const) {
+    test(`projection refuses ${relativePath} tracked only in the ${index} index before overwrite`, async () => {
+      const { repository, repo, id, worktree } = await projectionFixture();
+      const root = index === "primary" ? repository.path : worktree;
+      const other = index === "primary" ? worktree : repository.path;
+      const path = join(root, relativePath);
+      writeFileSync(path, "authored generated location\n");
+      repository.run(["-C", root, "add", "--force", relativePath]);
+      assert.equal(repository.run(["-C", root, "ls-tree", "HEAD", "--", relativePath]), "");
+      assert.equal(repository.run(["-C", other, "ls-files", "--", relativePath]), "");
+      const beforeIndex = repository.run(["-C", root, "ls-files", "--stage"]);
+      const override = join(worktree, ".keiyaku", "namespace", "current");
+      writeFileSync(override, "custom\n");
+
+      const report = await Keiyaku.with().reconcile({ repo, contract: id });
+
+      const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
+      assert.ok(lag);
+      assert.equal(report.lag.length, 1);
+      assert.equal(lag.worktree, root);
+      assert.equal(
+        lag.path,
+        relativePath.endsWith("SKILL.md") ? join(root, ".agents", "skills", "keiyaku-deliver") : path,
+      );
+      assert.equal(lag.diagnostic, `generated path is tracked by Git: ${path}`);
+      assert.equal(readFileSync(path, "utf8"), "authored generated location\n");
+      assert.equal(readFileSync(override, "utf8"), "custom\n");
+      assert.equal(repository.run(["-C", root, "ls-files", "--stage"]), beforeIndex);
+      assert.deepEqual(
+        report.effects
+          .filter((effect) => effect.kind === "contract-file")
+          .map((effect) => {
+            const prefix = effect.path.startsWith(`${worktree}/`) ? "managed" : "primary";
+            return `${prefix}:${effect.path.slice((prefix === "managed" ? worktree : repository.path).length + 1)}`;
+          }),
+        completed,
+      );
+
+      repository.run(["-C", root, "reset", "--quiet", "HEAD", "--", relativePath]);
+      const retried = await Keiyaku.with().reconcile({ repo, contract: id });
+      assert.deepEqual(retried.lag, []);
+      assert.notEqual(readFileSync(path, "utf8"), "authored generated location\n");
+      assert.equal(readFileSync(override, "utf8"), "custom\n");
+    });
+  }
+
+  for (const index of ["primary", "managed"] as const) {
+    test(`tracking query failure in the ${index} index is lag and preserves prior effects`, async () => {
+      const { repository, repo, id, worktree } = await projectionFixture();
+      const root = index === "primary" ? repository.path : worktree;
+      const guidance = readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8");
+      const context = join(worktree, ".keiyaku", "namespace", "current");
+      unlinkSync(context);
+      const report = await withGitShim(
+        [
+          'if [ "$1" = "ls-files" ] && [ "$PWD" = "$KEIYAKU_FAILED_INDEX" ]; then',
+          '  printf ".keiyaku/KEIYAKU.md\\0"',
+          '  echo "tracking read failed" >&2',
+          "  exit 1",
+          "fi",
+          'exec "$KEIYAKU_REAL_GIT" "$@"',
+        ].join("\n"),
+        { KEIYAKU_FAILED_INDEX: root },
+        async (gitPath) =>
+          Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path, gitPath }), contract: id }),
+      );
+
+      const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
+      assert.ok(lag);
+      assert.equal(report.lag.length, 1);
+      assert.equal(lag.worktree, root);
+      assert.equal(lag.path, join(root, ".keiyaku", ".gitignore"));
+      assert.match(lag.diagnostic, /ls-files -z -- .*tracking read failed/);
+      assert.equal(readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
+      assert.deepEqual(
+        report.effects.filter((effect) => effect.kind === "contract-file").map((effect) => effect.path),
+        index === "primary" ? [] : [join(repository.path, ".keiyaku", ".gitignore")],
+      );
+      if (index === "managed") assert.equal(readFileSync(context, "utf8"), `${id}\n`);
+      else assert.equal(statSync(context, { throwIfNoEntry: false }), undefined);
+      assert.deepEqual((await Keiyaku.with().reconcile({ repo, contract: id })).lag, []);
+    });
+  }
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
