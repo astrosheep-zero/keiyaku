@@ -53,6 +53,7 @@ export type ParsedDeliver = Output &
     overwrite: boolean;
   }>;
 export type ParsedReview = Output &
+  Actor &
   Readonly<{
     command: "review";
     contract?: string;
@@ -241,6 +242,7 @@ function parseReview(parts: ParsedContractParts): ParsedReview {
     verdict: parts.flags.satisfied === true ? "satisfied" : "unsatisfied",
     ...(summary === undefined ? {} : { summary }),
     ...(parts.stdin ? { summaryFromStdin: true as const } : {}),
+    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     output: parts.output,
   };
 }

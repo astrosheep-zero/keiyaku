@@ -410,12 +410,31 @@ test("tell admits; ask parses optional observation windows and schema", () => {
   assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);
 });
 
+test("review accepts actor with either summary source", () => {
+  assert.deepEqual(command(["review", "kei/example", "--satisfied", "--summary", "ok", "--actor", "operator"]), {
+    command: "review",
+    contract: "kei/example",
+    verdict: "satisfied",
+    summary: "ok",
+    actor: "operator",
+    output: "text",
+  });
+  assert.deepEqual(command(["review", "--unsatisfied", "--actor", "operator", "-"]), {
+    command: "review",
+    verdict: "unsatisfied",
+    summaryFromStdin: true,
+    actor: "operator",
+    output: "text",
+  });
+});
+
 test("exact-one source selection and nonblank argv fail at parse", () => {
   const cases: ReadonlyArray<readonly [argv: readonly string[], pattern: RegExp]> = [
     [["review", "--satisfied"], /review requires exactly one of --summary <text> or stdin '-'/],
     [["review", "--satisfied", "--summary", "ok", "-"], /review requires exactly one of --summary <text> or stdin '-'/],
     [["review", "--satisfied", "--summary", ""], /--summary requires a nonblank value/],
     [["review", "--satisfied", "--summary", " \t"], /--summary requires a nonblank value/],
+    [["review", "--satisfied", "--summary", "ok", "--actor", " "], /--actor requires a nonblank value/],
     [["bind", "--target", "", "-"], /--target requires a nonblank value/],
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],

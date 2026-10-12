@@ -45,7 +45,11 @@ const deliverRequestSchema = contractRequestBaseSchema
   })
   .transform((request) => ({ action: "contract.deliver" as const, ...request }));
 const reviewRequestSchema = contractRequestBaseSchema
-  .extend({ verdict: z.enum(["satisfied", "unsatisfied"]), summary: nonblankStringSchema.optional() })
+  .extend({
+    verdict: z.enum(["satisfied", "unsatisfied"]),
+    summary: nonblankStringSchema.optional(),
+    actor: z.string().optional(),
+  })
   .transform((request) => ({ action: "contract.review" as const, ...request }));
 
 export type ContractRequest =

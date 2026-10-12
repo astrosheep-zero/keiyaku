@@ -6,6 +6,10 @@ import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import type { ReviewOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
+import { renderContractHistory } from "../src/cli/render/contract-history.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
+import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { renderReconcile } from "../src/cli/render/reconcile.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
@@ -100,6 +104,72 @@ function acceptedDeliveryValue(result: unknown): Record<string, unknown> {
   assert.ok(record.value !== null && typeof record.value === "object");
   return record.value as Record<string, unknown>;
 }
+
+describe("review actor testimony", () => {
+  test("local CLI review records explicit actor and preserves omitted actor behavior", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    for (const { flags, environment, actor } of [
+      { flags: ["--actor", "operator"], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "operator" },
+      { flags: [], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "default-actor" },
+      { flags: [], environment: {}, actor: undefined },
+    ]) {
+      const reviewed = await cliJson<ReviewOutcome>(
+        ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ok", ...flags],
+        { environment },
+      );
+      assert.equal(reviewed.exit, 0, reviewed.stderr);
+      const result = accepted(reviewed.value);
+      const attestation = result.facts.find((fact) => fact.kind === "attestation" && fact.data.gate === "reviewed");
+      assert.ok(attestation);
+      assert.equal(attestation.actor, actor);
+      assert.equal(Object.hasOwn(attestation, "actor"), actor !== undefined);
+      assert.deepEqual(present(await keiyaku.state()).attestations.at(-1), attestation);
+    }
+    const history = present(await keiyaku.history());
+    assert.match(renderContractHistory(history, { full: true }), / · operator/u);
+    assert.match(renderContractHistory(history, { full: true }), / · default-actor/u);
+  });
+
+  test("forwarded CLI review preserves explicit actor and omitted requester attribution", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const parent = await bornDirectAkuma({
+      root: await World.at(repository.path),
+      archetype: "worker",
+      draw: "f0d0a002",
+      allowed: ["contract.review"],
+      createdAt: "2026-09-28T10:00:00.000Z",
+    });
+    const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {});
+    const pump = await BodyRequestPump.open({
+      paths: parent.paths,
+      allowed: parent.soul.allowed,
+      bodySequence: 1,
+      now: () => "2026-09-28T10:00:01.000Z",
+      commands,
+      signal: new AbortController().signal,
+    });
+    try {
+      for (const { flags, actor } of [
+        { flags: ["--actor", "operator"], actor: "operator" },
+        { flags: [], actor: parent.id },
+      ]) {
+        const reviewed = await cliJson<ReviewOutcome>(
+          ["-C", repository.path, "review", state.id, "--unsatisfied", "--summary", "not ready", ...flags],
+          { environment: { [AKUMA_REQUESTS_ENV]: pump.directory } },
+        );
+        assert.equal(reviewed.exit, 0, reviewed.stderr);
+        const result = accepted(reviewed.value);
+        const attestation = result.facts.find((fact) => fact.kind === "attestation" && fact.data.gate === "reviewed");
+        assert.ok(attestation);
+        assert.equal(attestation.actor, actor);
+        assert.deepEqual(present(await keiyaku.state()).attestations.at(-1), attestation);
+      }
+    } finally {
+      await pump.close();
+      parent.leash.release();
+    }
+  });
+});
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
   test("no gate does not make a failing Verification an implicit blocker", async () => {

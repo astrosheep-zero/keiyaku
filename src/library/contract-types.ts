@@ -54,7 +54,8 @@ export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;
 export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuSelectInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ReviewInput = Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
+export type ReviewInput = ActorOptions &
+  Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type DeliverInput = Readonly<{
   message?: string;

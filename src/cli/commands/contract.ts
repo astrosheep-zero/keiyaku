@@ -356,6 +356,7 @@ async function runReview(
       {
         verdict: command.verdict,
         ...(summary === undefined ? {} : { summary }),
+        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
         ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
       },
       { ...(driver === undefined ? {} : { observe: driver.observe }) },

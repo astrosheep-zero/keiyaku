@@ -79,6 +79,7 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
         {
           verdict: input.verdict,
           ...(input.summary === undefined ? {} : { summary: input.summary }),
+          ...(input.actor === undefined ? {} : { actor: input.actor }),
           signal: input.signal,
         },
         input.observe === undefined ? undefined : { observe: input.observe },

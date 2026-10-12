@@ -122,8 +122,8 @@ export const CONTRACT_COMMAND_SPECS = {
   review: {
     positional: "optional",
     stdin: "optional",
-    flags: { satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -)",
+    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
+    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>]",
     purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",

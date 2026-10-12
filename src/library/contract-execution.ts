@@ -269,7 +269,8 @@ export class ContractExecution {
   }
 
   async review(input: ReviewInput, options?: MutationObservation): Promise<ReviewOutcome> {
-    const values = validated(() => requireInput(input, "review input", ["verdict", "summary", "signal"]));
+    const values = validated(() => requireInput(input, "review input", ["verdict", "summary", "actor", "signal"]));
+    const actor = validated(() => actorOption(values.actor));
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied")
       throw new KeiyakuError("invalid-input", "verdict must be satisfied or unsatisfied", {
@@ -291,6 +292,7 @@ export class ContractExecution {
           contractId: this.id,
           verdict,
           ...(summary === undefined ? {} : { summary }),
+          ...actor,
         },
       });
     const hooks = derivedHooks(this.composition);
@@ -311,6 +313,7 @@ export class ContractExecution {
             contractId: this.id,
             progress: accumulator,
             ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
+            ...actor,
             ...(signal === undefined ? {} : { signal }),
             verdict,
             ...(summary === undefined ? {} : { summary }),
