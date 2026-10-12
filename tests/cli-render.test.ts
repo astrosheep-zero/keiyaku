@@ -2233,49 +2233,9 @@ test("deliver renders accepted and stopped continuations from the accepted resul
   );
 });
 
-const reviewWorkspace = {
-  staged: ["src/staged.ts"],
-  unstaged: ["src/unstaged.ts"],
-  untracked: ["untracked.txt"],
-  unmergedPaths: [],
-  shortStat: { filesChanged: 3, insertions: 4, deletions: 1 },
-} as const;
-
 function assertModeWordingAbsent(text: string): void {
   assert.doesNotMatch(text, /verified now|verification reused from delivery/u);
 }
-
-test("review projects a reused unsatisfied Verification as non-gating completion", () => {
-  const contract = contractId("kei/review-completion-unsatisfied");
-  const predecessor = snapshotId("7".repeat(40));
-  const integration = snapshotId("8".repeat(40));
-  assert.equal(
-    renderAccepted(
-      acceptedReview(
-        { contract, facts: [claimedFact(contract), reviewAttestationFact(contract, "satisfied")] },
-        {
-          completion: {
-            integration,
-            predecessor,
-            target: "refs/heads/main",
-            verification: { mode: "reused", verdict: "unsatisfied" },
-          },
-          verificationSummary: "[reused bash exit 1]",
-          workspace: reviewWorkspace,
-        },
-      ),
-    ),
-    [
-      "✓ review satisfied  kei/review-completion-unsatisfied",
-      "  target  7777777..8888888  refs/heads/main",
-      "! verification  reused  unsatisfied  · not required by Contract gates",
-      "  summary",
-      "  [reused bash exit 1]",
-      "",
-      "✓ accepted",
-    ].join("\n"),
-  );
-});
 
 test("movement projects its deviation and reintegration coordinates", () => {
   const contract = contractId("kei/reintegrated");

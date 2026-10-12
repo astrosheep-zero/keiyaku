@@ -15,6 +15,10 @@ executable specifications. The declaration set, its preparation, and its
 dependency selection remain attempt-local and are never core terms, cache,
 producer registry, or durable execution authority.
 
+Verification runs only as the obligation of a selected `verified` gate. Without
+that selection, no verb runs the producer and a Verification section is inert
+document text. Selecting the gate requires a declaration.
+
 Verification runs the selected declarations against the exact integration
 snapshot in a clean disposable worktree for each attempt. Project-configured
 setup prepares that worktree before declarations, and configured cleanup runs
@@ -41,10 +45,11 @@ spawn failure, unknown exit, and caller cancellation admit no attestation.
 The producer captures its subject before execution, and admission never
 retargets it. A completed older observation remains truthful history even when
 it is no longer current. Generic lifecycle currentness alone decides whether
-that evidence satisfies a declared gate. Audit may create evidence for a
-prospective candidate; it becomes current only if delivery later names the same
-candidate. Deliver reuses matching current satisfied evidence. A current unsatisfied
-verdict remains evidence, but does not suppress execution on a later delivery:
+that evidence satisfies a declared gate. With `verified` selected, audit may
+create evidence for a prospective candidate; it becomes current only if delivery
+later names the same candidate. Deliver reuses matching current satisfied evidence.
+A current unsatisfied verdict remains evidence, but does not suppress execution
+on a later delivery:
 that invocation runs Verification once against its candidate and may supersede
 the failure with satisfaction. Repeated failure may deduplicate its testimony;
 there is no automatic retry loop, cache, or another evidence source. `verified`

@@ -320,30 +320,6 @@ function recordBlock(
   return rows;
 }
 
-function nonGatingVerificationLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome>,
-  columns: number,
-): readonly string[] {
-  const lines: string[] = [];
-  const verification = result.value.completion?.verification;
-  if (verification === undefined || verification.verdict !== "unsatisfied") return lines;
-  receiptRow(
-    lines,
-    "!",
-    "verification",
-    [
-      ...(verification.mode === "reused" ? [{ text: "reused" }] : []),
-      { text: "unsatisfied" },
-      { text: "· not required by Contract gates" },
-    ],
-    columns,
-  );
-  if (result.value.verificationSummary !== undefined) {
-    receiptPayload(lines, "  summary", result.value.verificationSummary);
-  }
-  return lines;
-}
-
 /** A terminal command names the worktree it retired, or the retained worktree it failed to remove. */
 function worktreeRetirementLines(result: AcceptedContractOutcome, columns: number): readonly string[] {
   const lines: string[] = [];
@@ -450,7 +426,6 @@ function completedPlacementLines(
     );
   }
   lines.push(...landedChangesLines(completion.scope, columns));
-  lines.push(...nonGatingVerificationLines(result, columns));
   // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
   receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
   return lines;

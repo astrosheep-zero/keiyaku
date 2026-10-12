@@ -1,6 +1,5 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -117,36 +116,30 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     reacquired.close();
   });
 
-  test("completion retains a stopped Verification without letting it block an unverified Contract", async () => {
-    const repository = repositoryWithMain();
+  test("dependent continuation skips ungated Verification", async () => {
+    const { repository, contract: primary, state: prerequisite } = await fixture();
     const bound = accepted(await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
-      markdown: document("exit 0"),
+      markdown: document("exit 1"),
       workspace: "worktree",
       gates: [],
+      after: [prerequisite.id],
     }));
     const state = present(await bound.value.keiyaku.state());
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
-    writeFileSync(
-      join(worktree, ".keiyaku", "settings.json"),
-      JSON.stringify({
-        worktree: {
-          create: [{ name: "reject-candidate", argv: [process.execPath, "-e", "process.exit(7)"], timeoutMs: 5_000 }],
-        },
-      }),
-    );
-    repository.run(["-C", worktree, "add", "candidate.txt", ".keiyaku/settings.json"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-
     const delivered = accepted(await bound.value.keiyaku.deliver());
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    const verification = delivered.value.verification;
-    assert.ok(verification !== undefined && "failure" in verification);
-    assert.equal(verification.failure, "environment-failure");
-    assert.ok(delivered.value.completion);
-    assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "claimed");
+    assert.equal(delivered.value.verification, undefined);
+    assert.equal(delivered.value.verificationReuse, undefined);
+    assert.equal(delivered.value.verificationSubject, undefined);
+    assert.equal(delivered.value.verificationSummary, undefined);
+    assert.equal(present(await bound.value.keiyaku.state()).terminal, null);
+    await primary.deliver();
+    const reviewed = accepted(await primary.review({ verdict: "satisfied" }));
+    assert.deepEqual(reviewed.value.continuation?.claimed, [state.id], JSON.stringify(reviewed.value.continuation));
+    assert.deepEqual(reviewed.value.continuation?.stopped, []);
+    const final = present(await bound.value.keiyaku.state());
+    assert.deepEqual(final.attestations, []);
+    assert.equal(final.terminal?.kind, "claimed");
   });
 
   test("fatal post-admission errors retain their identity and real journal receipts", async () => {

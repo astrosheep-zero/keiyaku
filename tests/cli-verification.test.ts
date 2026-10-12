@@ -89,7 +89,7 @@ test("text deliver streams its Verification activity on stderr and keeps the rec
 });
 
 test("a blocked deliver names the verified snapshot and the accepting review lands it", async () => {
-  const { raw, id, worktree } = await bindCandidate("printf 'verified-output\\n'", ["reviewed"]);
+  const { raw, id, worktree } = await bindCandidate("printf 'verified-output\\n'", ["reviewed", "verified"]);
 
   const blocked = (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value;
   assert.equal(blocked.kind, "accepted");
@@ -260,7 +260,7 @@ test("closing or failing CLI progress output does not cancel the operation", asy
   for (const failure of [undefined, new Error("output failed")]) {
     await t.test(failure === undefined ? "closed" : "failed", async () => {
       const { promise: completion, resolve: complete } = promiseBarrier<string>();
-      const { raw, id } = await bindCandidate("printf 'callback output\n'", ["reviewed"]);
+      const { raw, id } = await bindCandidate("printf 'callback output\n'", ["reviewed", "verified"]);
       const native = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
       const stream = new Writable({
         highWaterMark: 1,

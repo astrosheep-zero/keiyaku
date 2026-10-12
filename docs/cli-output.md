@@ -181,8 +181,8 @@ wrapping. Selected Contract status foregrounds the phase's outcome or current
 work judgment; terminal status does not repeat delivery mechanics, workspace
 observation, its phase, or its age as bare rows beneath the header. When the
 target has moved, a delivered card labels its recorded integration as predating
-that movement. Audit states undeclared Verification once in human words and
-names observed target lag as counted or unknown when the target is placeable.
+that movement. Audit states absent Verification obligations once in human words
+and names observed target lag as counted or unknown when the target is placeable.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual

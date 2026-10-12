@@ -4,7 +4,7 @@ import {
   observeDeliveryTargetAt,
   withContractReadObservationAt,
 } from "../../git/observe.js";
-import { decodeContractDocument, verificationDefinition } from "../../body/decode.js";
+import { decodeContractDocument } from "../../body/decode.js";
 import { dependencyKeys } from "../../core/subject.js";
 import {
   observeTargetLag,
@@ -128,13 +128,9 @@ function phaseFor(state: ContractState): ContractPhase {
   return "bound";
 }
 
-function verificationFor(
-  state: ContractState,
-  document: ReturnType<typeof decodeContractDocument> | undefined,
-): ContractVerificationStatus | undefined {
-  if (document === undefined) return undefined;
-  if (verificationDefinition(document) === null) return { kind: "undeclared" };
+function verificationFor(state: ContractState): ContractVerificationStatus | undefined {
   const verifiedGate = gate("verified");
+  if (!state.terms.gates.includes(verifiedGate)) return { kind: "undeclared" };
   const current = latestCurrentAttestations(state, new Set([verifiedGate])).get(verifiedGate);
   if (current !== undefined) {
     const snapshot = dependencyKeys(current.data.subject).find((key) => key.kind === "snapshot")?.value;
@@ -267,7 +263,7 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
   const { repository, state, bindAt, lastJournalAt, targetObservation, workspace, handoff, after, dependents } = input;
   const gates = gateReports(state);
   const document = documentFor(state);
-  const verification = verificationFor(state, document);
+  const verification = verificationFor(state);
   const facts = await managedWorkspaceFacts(repository, state, workspace, targetObservation, handoff);
   return {
     id: state.id,

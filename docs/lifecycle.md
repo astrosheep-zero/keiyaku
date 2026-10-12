@@ -64,10 +64,9 @@ testimony for a declared gate and its current subject must be satisfied. A later
 unsatisfied testimony for the same subject supersedes earlier satisfaction.
 No renderer, protocol adapter, or board recomputes this judgment. Producer
 methodology for `verified` belongs to [verification.md](verification.md);
-selecting `verified` is the only bridge that makes that producer's current
-result a placement obligation. Without it, Verification may still run and
-record truthfully, but its result neither satisfies nor blocks a declared gate
-and its typed stops stay evidence rather than a hidden obligation.
+selecting `verified` makes the producer's current result a placement obligation.
+Without it, no verb runs Verification; a Verification section is inert document
+text, and older testimony remains truthful history.
 
 Placement claims only a delivered Contract whose current prerequisites and gates
 pass. Missing delivery, terminal state, unmet prerequisites, and unmet gates are
@@ -79,13 +78,11 @@ retry ledger, or new lifecycle authority.
 Leading testimony and completion have different ownership. Review admits its
 captured testimony; delivery admits its captured candidate. Their shared
 completion node judges one Contract at a time. Satisfied review enters at
-placement, while delivery and delivered-dependent continuation first obtain
-current Verification evidence. Verification is not an implicit gate: a declared
-Verification still runs when delivery needs current evidence, and its result
-remains observable, but an unsatisfied verdict, declaration refusal, or runtime
-stop blocks placement only when the Contract selected `verified`. Without that
-selection, placement proceeds under the declared gates and the result stays
-observable evidence. `reviewed` is independent and neither enables nor replaces
+placement, while delivery and delivered-dependent continuation obtain current
+Verification evidence only as the selected `verified` gate's obligation. Without
+that selection, no verb runs the producer. Every Verification refusal or runtime
+stop blocks placement; an unsatisfied verdict leaves the selected gate unmet.
+`reviewed` is independent and neither enables nor replaces
 Verification. Unsatisfied review and audit do not trigger placement. The trigger
 changes the entry point, never the placement rules. Completion observes target
 movement before judging the old integration's gates: an old failed verdict

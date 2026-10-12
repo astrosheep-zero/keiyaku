@@ -72,9 +72,9 @@ Each act changes a different part of the world:
   audit; when it matters, merge the target branch (main when selected) in the
   worktree and resolve conflicts there before auditing.
 - **Audit:** Previews the candidate and target without tendering or claiming.
-  Declared Verification can record a `verified` attestation for the captured
-  subject; current evidence is reused. No declaration or a stopped run records
-  no new verdict.
+  With `verified` selected, Verification runs for the captured subject and can
+  record an attestation. Without that gate, the section is inert text and no
+  verb runs Verification. A stopped run records no new verdict.
 - **Deliver:** Captures a tender and integration against the observed target;
   journal gains a delivered candidate. Ready prerequisites and gates trigger
   placement and claim in this invocation; otherwise the candidate waits.

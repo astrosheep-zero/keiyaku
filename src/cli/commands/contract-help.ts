@@ -59,6 +59,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "A pattern containing whitespace binds with a warning. A fence carries no",
       "info string or exactly 'txt'.",
       "",
+      "Verification runs only with the verified gate; without it the section is inert text.",
       "Verification uses one or more closed bash, zsh, or pwsh fences. Its fence",
       "may add timeout=<integer><ms|s|m|h>; the section contains no other prose.",
       "Unknown ## sections are retained as extensions; reserved section names are refused.",
@@ -105,6 +106,7 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "Submit work for a Contract and integrate it when its requirements are met.",
     details: [
       "The Contract, not the current Arc, sets what delivery must satisfy. An Arc records progress; it does not narrow acceptance.",
+      "With the verified gate, delivery runs Verification or reuses current satisfied evidence.",
       "Verification, integration, and cleanup progress appears on stderr; stdout contains one final result.",
       "By default, delivery uses HEAD. --include-dirty includes all non-ignored worktree changes, staged or not; it leaves your branch and index unchanged, so staging or committing is unnecessary.",
       "Repeating delivery with unchanged work resumes unfinished verification or integration. Changed work replaces the candidate.",
@@ -193,6 +195,7 @@ export const CONTRACT_COMMAND_SPECS = {
     details: [
       "--include-dirty checks all non-ignored worktree changes, staged or not.",
       "--show-diff includes the proposed candidate diff when one can be prepared.",
+      "Verification runs only with the verified gate; without it the section is inert text.",
       "Content identity names the change's content hash, never a commit; it survives rebase and Git cannot look it up.",
       "Progress appears on stderr; stdout contains one final result.",
     ].join("\n"),

@@ -103,19 +103,20 @@ async function auditWorkspace(
 function auditDeliveryRelation(
   state: ContractState,
   candidate: DeliverData,
-  verificationDeclared: boolean,
+  declaration: DocumentDerivation["verification"]["data"],
 ): AuditReport["delivery"] {
   const recorded = state.delivery?.data.integration.changeId;
   if (recorded === undefined) return undefined;
-  const verification = currentVerifiedAttestation(state);
+  const verification = declaration == null ? undefined : currentVerifiedAttestation(state);
   return {
     changeId: recorded,
     relation: recorded === candidate.integration.changeId ? "identical" : "differs",
-    verification: !verificationDeclared
-      ? { kind: "undeclared" }
-      : verification === undefined
-        ? { kind: "unrecorded" }
-        : { kind: "recorded", verdict: verification.verdict, fact: verification.entry },
+    verification:
+      declaration == null
+        ? { kind: "undeclared" }
+        : verification === undefined
+          ? { kind: "unrecorded" }
+          : { kind: "recorded", verdict: verification.verdict, fact: verification.entry },
   };
 }
 
@@ -143,10 +144,10 @@ async function auditCandidateVerification(
 
 function auditVerificationAnswer(
   verified: ReturnType<typeof unpackVerificationOutcome> | undefined,
-  declared: boolean,
+  declaration: DocumentDerivation["verification"]["data"],
 ): AuditReport["verification"] {
-  if (!declared) return { kind: "undeclared" };
-  if (verified === undefined) return { kind: "not-run" };
+  if (declaration === null) return { kind: "undeclared" };
+  if (verified === undefined) throw new Error("declared audit Verification produced no attempt");
   if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
   if (verified.counts === undefined) throw new Error("terminal Verification is missing producer counts");
   return {
@@ -258,11 +259,11 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
           prepared.data.integration.snapshot,
           derivation.verification.data,
         );
-  const verification = auditVerificationAnswer(verified, derivation.verification.data !== null);
+  const verification = auditVerificationAnswer(verified, derivation.verification.data);
   const delivery = auditDeliveryRelation(
     verified?.admission?.state ?? state,
     prepared.data,
-    derivation.verification.data !== null,
+    derivation.verification.data,
   );
   input.progress?.recordAudit(state.id, { verification, ...(delivery === undefined ? {} : { delivery }) });
   const target = await auditTargetAnswer(input.scope, state, prepared.data);

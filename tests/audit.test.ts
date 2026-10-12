@@ -1,7 +1,7 @@
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
@@ -147,6 +147,23 @@ test("audit without Verification still returns an accepted ready candidate", asy
   assert.equal("diff" in result.value.candidate, false);
   assert.equal(result.value.verification.kind, "undeclared");
   assert.equal(result.value.target.kind, "not-observed");
+});
+
+test("ungated audit reports undeclared without executing declarations or admitting testimony", async () => {
+  const repository = repositoryWithMain();
+  const marker = `${repository.path}/verification-ran`;
+  const contract = accepted(await Keiyaku.with().bind({
+    repo: await Repo.at({ path: repository.path }),
+    markdown: verificationBody(`touch '${marker}'\nexit 1`),
+    workspace: "worktree",
+    gates: ["reviewed"],
+  })).value.keiyaku;
+  const audited = accepted(await contract.audit());
+  assert.equal(audited.value.candidate.kind, "ready");
+  assert.deepEqual(audited.value.verification, { kind: "undeclared" });
+  assert.deepEqual(audited.facts, []);
+  assert.equal(existsSync(marker), false);
+  assert.deepEqual(present(await contract.state()).attestations, []);
 });
 
 test("Verification reuse reads the durable current testimony, not a caller's state copy", async () => {

@@ -385,7 +385,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
   });
 
-  test("declared failing Verification with no gate does not block a library delivery claim", async () => {
+  test("ungated Verification is absent from a library delivery claim", async () => {
     const repository = repositoryWithMain();
     const bound = accepted(
       await Keiyaku.with().bind({
@@ -403,7 +403,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
     const delivered = await bound.value.keiyaku.deliver();
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.deepEqual(delivered.value.completion?.verification, { mode: "ran", verdict: "unsatisfied" });
+    assert.equal(delivered.value.completion?.verification, undefined);
+    assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
     assert.equal(delivered.value.placement, undefined);
     assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "claimed");
   });

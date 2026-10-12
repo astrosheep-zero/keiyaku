@@ -56,6 +56,19 @@ async function bindAndCommit(options: {
   return { repository, keiyaku: bound.value.keiyaku, state };
 }
 
+function assertNoVerification(value: {
+  completion?: { verification?: unknown } | undefined;
+  verification?: unknown;
+  verificationReuse?: unknown;
+  verificationSubject?: unknown;
+  verificationSummary?: unknown;
+}): void {
+  for (const key of ["verification", "verificationReuse", "verificationSubject", "verificationSummary"] as const) {
+    assert.equal(Object.hasOwn(value, key), false, key);
+  }
+  assert.equal(Object.hasOwn(value.completion ?? {}, "verification"), false);
+}
+
 function assertRuntimeStop(value: unknown): void {
   assert.ok(value !== null && typeof value === "object" && "failure" in value);
   assert.equal((value as { failure: unknown }).failure, "environment-failure");
@@ -172,21 +185,24 @@ describe("review actor testimony", () => {
 });
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
-  test("no gate does not make a failing Verification an implicit blocker", async () => {
+  test("ungated failing Verification never runs and claim proceeds", async () => {
     const { keiyaku } = await bindAndCommit({ gates: [], verification: "exit 1" });
     const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.deepEqual(delivered.value.completion?.verification, { mode: "ran", verdict: "unsatisfied" });
-    assert.equal((present(await keiyaku.state())).terminal?.kind, "claimed");
+    assertNoVerification(delivered.value);
+    assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
+    const state = present(await keiyaku.state());
+    assert.deepEqual(state.attestations, []);
+    assert.equal(state.terminal?.kind, "claimed");
   });
 
-  test("no gate does not make a stopped Verification an implicit blocker and retains its typed stop", async () => {
+  test("ungated Verification never attempts scratch setup that would stop execution", async () => {
     const { keiyaku } = await bindAndCommit({ gates: [], verification: "exit 0", runtimeStop: true });
     const delivered = accepted(await keiyaku.deliver());
-    assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assertRuntimeStop(delivered.value.verification);
-    assert.equal(delivered.value.completion?.verification, undefined);
-    assert.equal((present(await keiyaku.state())).terminal?.kind, "claimed");
+    assertNoVerification(delivered.value);
+    assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
+    const state = present(await keiyaku.state());
+    assert.deepEqual(state.attestations, []);
+    assert.equal(state.terminal?.kind, "claimed");
   });
 
   test("reviewed is independent of a failing Verification", async () => {
@@ -247,7 +263,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
   });
 
   test("an unaffected deliver names the verified snapshot the later placement lands", async () => {
-    const { keiyaku } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const { keiyaku } = await bindAndCommit({ gates: ["reviewed", "verified"], verification: "exit 0" });
     const delivered = accepted(await keiyaku.deliver());
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.equal(delivered.value.completion, undefined);
@@ -301,18 +317,27 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     });
   });
 
-  test("a reused unsatisfied Verification blocks only when verified is selected", async () => {
-    const reviewed = await bindAndCommit({ gates: ["reviewed"], verification: "exit 1" });
-    await reviewed.keiyaku.deliver();
-    const reused = accepted(await reviewed.keiyaku.deliver());
-    assert.ok(reused.kind === "accepted", JSON.stringify(reused));
-    assert.equal(reused.value.verificationReuse?.verdict, "unsatisfied");
-    assert.equal((present(await reviewed.keiyaku.state())).terminal, null);
+  test("removing verified leaves old testimony in history without exposing it on completion", async () => {
+    const { repository, keiyaku } = await bindAndCommit({ gates: ["reviewed", "verified"], verification: "exit 0" });
+    await keiyaku.deliver();
+    const before = present(await keiyaku.state()).attestations;
+    assert.equal(before.length, 1);
+    await keiyaku.amend({ gates: ["reviewed"] });
+    const delivered = accepted(await keiyaku.deliver());
+    assertNoVerification(delivered.value);
+    assert.deepEqual(present(await keiyaku.state()).attestations, before);
+    const observed = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: keiyaku.toJSON().contract });
+    assert.ok(observed.kind === "present");
+    assert.deepEqual(observed.row.verification, { kind: "undeclared" });
+    const audited = accepted(await keiyaku.audit());
+    assert.deepEqual(audited.value.verification, { kind: "undeclared" });
+    assert.deepEqual(audited.value.delivery?.verification, { kind: "undeclared" });
+    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
+    assertNoVerification(reviewed.value);
+    assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
+  });
 
-    const satisfiedReview = accepted(await reviewed.keiyaku.review({ verdict: "satisfied" }));
-    assert.equal(satisfiedReview.kind, "accepted");
-    assert.equal((present(await reviewed.keiyaku.state())).terminal?.kind, "claimed");
-
+  test("repeated unsatisfied Verification under verified keeps placement blocked", async () => {
     const verified = await bindAndCommit({ gates: ["verified"], verification: "exit 1" });
     await verified.keiyaku.deliver();
     const blocked = accepted(await verified.keiyaku.deliver());

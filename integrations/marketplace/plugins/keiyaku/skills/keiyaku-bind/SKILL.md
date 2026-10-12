@@ -154,14 +154,13 @@ fence containing commands runnable as written. Use separate fences when checks
 need different timeouts or results. Use an explicit timeout for bounded
 commands; `5m` is the normal baseline.
 
-Verification runs against the exact integration snapshot in a clean disposable
-worktree for that attempt. It does not run in the author's worktree or the
-target checkout. If the Contract declares Verification, `deliver` runs it when
-no current `verified` attestation exists and otherwise reuses the current
-attestation. A newly run unsatisfied result stops that delivery. `audit` runs
-Verification for a prospective candidate. `--gates reviewed` requires review
-evidence; it does not select or suppress Verification. Selected gates are
-checked at placement.
+Verification runs only when the Contract selects the `verified` gate, against
+the exact integration snapshot in a clean disposable worktree for that attempt.
+`deliver` reuses current satisfied evidence or runs the declarations; unsatisfied
+results and runtime stops prevent placement. `audit` runs declarations for a
+prospective candidate. Without `verified`, no verb runs Verification and the
+section is inert document text. `reviewed` independently requires review
+evidence. Selected gates are checked at placement.
 
 For an existing Task with real scheduling or dependency value:
 

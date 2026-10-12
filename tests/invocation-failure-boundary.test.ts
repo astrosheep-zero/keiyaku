@@ -434,7 +434,7 @@ test("native audit propagates an unexpected target-lag failure after verified pu
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with().bind({ repo, markdown: document("true"), target: "main", gates: ["reviewed"] }),
+    await Keiyaku.with().bind({ repo, markdown: document("true"), target: "main", gates: ["reviewed", "verified"] }),
   );
   const base = scopeForRepo(repo);
   const original = new TypeError("unexpected native target lag observation failure");

@@ -20,7 +20,6 @@ import {
 } from "./progress.js";
 import type { DocumentDerivation, PlacementStop, VerificationStop } from "./operations.js";
 import { placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
-import { VERIFIED } from "../verification/declaration.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
@@ -102,18 +101,19 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   cursor.evidence = {};
   cursor.ran = undefined;
   input.progress.recordCandidate(state.id, cursor.evidence);
+  const declaration = input.deriveDocument(state).verification;
+  if (declaration.kind === "refused") {
+    cursor.evidence = { verification: { refusal: declaration.refusal } };
+    input.progress.recordCandidate(state.id, cursor.evidence);
+    return;
+  }
+  if (declaration.data === null) return;
   const current = currentVerifiedAttestation(state);
   if (current?.verdict === "satisfied") {
     cursor.evidence = {
       verificationReuse: current,
       verificationSubject: { snapshot, mode: "reused", verdict: current.verdict },
     };
-    input.progress.recordCandidate(state.id, cursor.evidence);
-    return;
-  }
-  const declaration = input.deriveDocument(state).verification;
-  if (declaration.kind === "refused") {
-    cursor.evidence = { verification: { refusal: declaration.refusal } };
     input.progress.recordCandidate(state.id, cursor.evidence);
     return;
   }
@@ -127,7 +127,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
     snapshot,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     progress: input.progress,
-    ...(declaration.data === null ? {} : { verification: declaration.data }),
+    verification: declaration.data,
   });
   if (result === null) return;
   const verified = unpackVerificationOutcome(result);
@@ -188,8 +188,8 @@ async function completedResult(
     ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
   };
   input.progress.recordCompletion(state.id, cursor.completion);
-  // Never attach a superseded run's verdict to the final integration.
-  const current = currentVerifiedAttestation(state);
+  const declaration = input.deriveDocument(state).verification;
+  const current = declaration.data == null ? undefined : currentVerifiedAttestation(state);
   const verification =
     current === undefined
       ? undefined
@@ -223,7 +223,7 @@ async function completedResult(
     evidence: {
       ...evidence,
       completion,
-      ...(current === undefined || verification?.mode !== "reused" ? {} : { verificationReuse: current }),
+      ...(verification?.mode !== "reused" ? {} : { verificationReuse: current }),
       ...(current?.verdict !== "unsatisfied" || current.summary === undefined
         ? {}
         : { verificationSummary: current.summary }),
@@ -288,25 +288,19 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
   return result;
 }
 
-/** Verification blocks completion only when the Contract selected the verified gate; placement owns gate eligibility. */
-function verificationBlocks(state: ContractCheckpoint["state"]): boolean {
-  return state.terms.gates.includes(VERIFIED);
-}
-
 async function verifyCandidateReadiness(
   input: CompletionInput,
   cursor: CompletionCursor,
 ): Promise<CompletionResult | undefined> {
   const observedPlacement = await observeCandidateTarget(input, cursor);
   await verifyCurrentCandidate(input, cursor);
-  const verification = cursor.evidence.verification;
-  const blocking = verification !== undefined && verificationBlocks(cursor.checkpoint.state);
-  if (blocking || observedPlacement !== undefined) {
+  const stop = cursor.evidence.verification ?? observedPlacement;
+  if (stop !== undefined) {
     return {
       kind: "stopped",
       checkpoint: cursor.checkpoint,
       evidence: { ...cursor.evidence, ...(observedPlacement === undefined ? {} : { placement: observedPlacement }) },
-      stop: blocking ? verification! : observedPlacement!,
+      stop,
     };
   }
   return undefined;

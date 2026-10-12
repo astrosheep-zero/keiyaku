@@ -33,9 +33,8 @@ export function prepareVerificationDeclaration(
     contractId?: ContractId;
   }>,
 ): VerificationDeclarationPreparation {
-  if (input.definition !== null || !input.gates.includes(VERIFIED)) {
-    return { kind: "prepared", data: input.definition };
-  }
+  if (!input.gates.includes(VERIFIED)) return { kind: "prepared", data: null };
+  if (input.definition !== null) return { kind: "prepared", data: input.definition };
   return {
     kind: "refused",
     refusal: {

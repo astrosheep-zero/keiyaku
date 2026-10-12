@@ -66,11 +66,11 @@ Delivery and review may admit their leading fact while verification, placement,
 or dependent continuation reports a distinct typed stop. Those trailing channels
 are independent: a satisfied review can still find no delivery to place, and a
 verification or placement stop cannot undo an accepted delivery or review.
-Verification blocks placement only when the Contract selected `verified`;
-otherwise an unsatisfied or stopped Verification remains observable evidence,
-keeps its typed shape, and does not prevent a claim. A typed trailing stop after
-a confirmed admission keeps the witnessed provenance alongside that stop.
-Recovery names an existing
+Verification runs only for a selected `verified` gate, and its unsatisfied
+verdict or typed stop prevents placement. Without that gate, the Verification
+section is inert text and operation answers carry no Verification evidence.
+A typed trailing stop after a confirmed admission keeps the witnessed provenance
+alongside that stop. Recovery names an existing
 delivery fact as already admitted, reports only this invocation's facts, and does
 not disguise later workspace bytes as a candidate. Successful placement is
 represented once as completion; callers do not rebuild it from facts or folded
@@ -78,13 +78,12 @@ state. A completed placement also carries the movement it made — the reference
 advanced and the head it advanced from — so a receipt states the target's
 movement instead of deriving it from journal facts or folded state. Reused
 Verification evidence is identified as reuse, not a cache or a new evidence
-source. A completed placement that retained a non-blocking Verification stop
-reports that stop beside its movement.
+source.
 
 Known completion and movement precede optional presentation observation. Failure
 to observe that presentation never reruns completion or erases witnessed movement.
 
-An admitted current candidate with declared Verification but no terminal fact
+An admitted current candidate with selected `verified` but no terminal fact
 is `unrecorded`, distinct from undeclared or terminal Verification and implying
 no timeout, liveness, or retry state.
 
