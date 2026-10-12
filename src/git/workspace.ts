@@ -2,10 +2,19 @@ import { z } from "zod";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { GitPlumbingError, runGit, runGitWithEnvironment, type GitRepository } from "./process.js";
-import { HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readRef, worktreeGitDirectory, writeBlob } from "./repository.js";
+import {
+  HANDOFF_RECEIPT_REF_NAMESPACE,
+  readBlob,
+  readRef,
+  readRefs,
+  worktreeGitDirectory,
+  writeBlob,
+} from "./repository.js";
+import type { GitReadObservation } from "./read-observation.js";
 import type { ContractWorkspaceLocation } from "../workspace-place.js";
 
 const WORKTREE_DIRECTORY = [".keiyaku", "wt"] as const;
@@ -425,6 +434,14 @@ type HandoffReceipt = Readonly<{
 }>;
 type StoredHandoffReceipt = Readonly<{ receipt: HandoffReceipt; ref: string; oid: string }>;
 
+export type HandoffReceiptCoordinate = Readonly<{
+  contractId: ContractId;
+  place: string;
+  workspace: string;
+}>;
+
+export type ConflictHandoff = Readonly<{ base: SnapshotId; mergeHead: SnapshotId }>;
+
 export type HandoffRetirement =
   | Readonly<{ kind: "absent" | "active" | "orphan-retired" | "retired" }>
   | Readonly<{ kind: "retained"; reason: "receipt-mismatch" | "operation-in-progress" }>;
@@ -451,6 +468,14 @@ function receiptFor(value: unknown): HandoffReceipt {
     head: mintSnapshotId(record.head),
     mergeHead: mintSnapshotId(record.mergeHead),
   };
+}
+
+function receiptMatches(receipt: HandoffReceipt, coordinate: HandoffReceiptCoordinate): boolean {
+  return (
+    receipt.contractId === coordinate.contractId &&
+    receipt.place === coordinate.place &&
+    receipt.workspace === resolve(coordinate.workspace)
+  );
 }
 
 async function storedHandoffReceipt(
@@ -494,20 +519,28 @@ export async function recordConflictHandoff(
   await runGit(repository, ["update-ref", "--no-deref", ref, oid, "0".repeat(oid.length)]);
 }
 
-export async function conflictHandoffFor(
+/** Read selected handoff refs once and decode their receipts through the call's blob channel. */
+export async function readConflictHandoffs(
   repository: GitRepository,
-  input: Readonly<{ contractId: ContractId; place: string; workspace: string }>,
-): Promise<Readonly<{ base: SnapshotId; mergeHead: SnapshotId }> | undefined> {
-  const stored = await storedHandoffReceipt(repository, input.contractId, input.place);
-  if (stored === null) return undefined;
-  if (
-    stored.receipt.contractId !== input.contractId ||
-    stored.receipt.place !== input.place ||
-    stored.receipt.workspace !== resolve(input.workspace)
-  ) {
-    return undefined;
+  readBlobs: GitReadObservation["readBlobs"],
+  coordinates: readonly HandoffReceiptCoordinate[],
+): Promise<ReadonlyMap<ContractId, ConflictHandoff>> {
+  const byRef = new Map<string, HandoffReceiptCoordinate>();
+  for (const coordinate of coordinates) byRef.set(handoffRefFor(coordinate.contractId, coordinate.place), coordinate);
+  if (byRef.size === 0) return new Map();
+  const resolved = await readRefs(repository, [...byRef.keys()]);
+  const present = [...resolved].flatMap(([ref, oid]) => (oid === null ? [] : [{ ref, oid }]));
+  const blobs = await readBlobs(present.map(({ oid }) => oid));
+  const handoffs = new Map<ContractId, ConflictHandoff>();
+  for (const { ref, oid } of present) {
+    const result = blobs.get(oid);
+    if (result?.kind !== "present") throw new AuthorityCorruptionError(`Git handoff receipt is missing: ${ref}`);
+    const receipt = receiptFor(JSON.parse(result.bytes.toString("utf8")));
+    const coordinate = byRef.get(ref)!;
+    if (!receiptMatches(receipt, coordinate)) continue;
+    handoffs.set(coordinate.contractId, { base: receipt.head, mergeHead: receipt.mergeHead });
   }
-  return { base: stored.receipt.head, mergeHead: stored.receipt.mergeHead };
+  return handoffs;
 }
 
 export async function retireConflictHandoff(
@@ -517,11 +550,7 @@ export async function retireConflictHandoff(
   const stored = await storedHandoffReceipt(repository, input.contractId, input.place);
   if (stored === null) return { kind: "absent" };
   const { receipt } = stored;
-  if (
-    receipt.contractId !== input.contractId ||
-    receipt.place !== input.place ||
-    receipt.workspace !== resolve(input.workspace)
-  ) {
+  if (!receiptMatches(receipt, input)) {
     return { kind: "retained", reason: "receipt-mismatch" };
   }
   const gitDirectory = await worktreeGitDirectory(repository, input.workspace);

@@ -4,6 +4,10 @@ import { join } from "node:path";
 import test from "node:test";
 import { withGitAbortSignal } from "../src/git/process.js";
 import { repositoryAt } from "../src/git/repository.js";
+import { contractId } from "../src/core/facts/types.js";
+import { mintSnapshotId } from "../src/git/identity.js";
+import { readConflictHandoffs, recordConflictHandoff } from "../src/git/workspace.js";
+import { readBlobResults } from "../src/git/read-observation.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../src/git/read-observation.js";
 import { makeGitRepository, waitForFile, withGitShim } from "./support/git.js";
 
@@ -26,6 +30,36 @@ test("Git read observation returns typed missing objects and closes its batch", 
   assert.notEqual(retained, null);
   await assert.rejects(retained!.readBlobs([]), /Git read observation is closed/u);
   await assert.rejects(retained!.resolveRef("refs/heads/main"), /Git read observation is closed/u);
+});
+
+test("handoff batching exposes ref, missing-object and decode transport failures", async () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const git = await repositoryAt(repository.path);
+  const coordinate = { contractId: contractId("kei/handoff-test"), place: "test", workspace: repository.path };
+  const head = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
+  await recordConflictHandoff(git, { ...coordinate, head, mergeHead: head });
+  const cases = [
+    {
+      body: 'if [ "$1 $2" = "cat-file --batch-check=%(objectname)" ]; then echo "ref read failed" >&2; exit 74; fi',
+      expected: /ref read failed/u,
+    },
+    {
+      body: 'if [ "$1 $2" = "cat-file --batch" ]; then while IFS= read -r oid; do printf "%s missing\\n" "$oid"; done; exit 0; fi',
+      expected: /Git handoff receipt is missing/u,
+    },
+    {
+      body: 'if [ "$1 $2" = "cat-file --batch" ]; then echo "blob read failed" >&2; exit 75; fi',
+      expected: /git cat-file --batch/u,
+    },
+  ];
+  for (const { body, expected } of cases) {
+    await withGitShim(`${body}\nexec "$KEIYAKU_REAL_GIT" "$@"`, {}, async (gitPath) => {
+      const scoped = { ...git, gitPath };
+      await assert.rejects(withGitDecodeChannel(scoped, (channel) =>
+        readConflictHandoffs(scoped, (oids) => readBlobResults(channel, oids), [coordinate])), expected);
+    });
+  }
 });
 
 test("Git read observation returns a close-only batch failure", async () => {
