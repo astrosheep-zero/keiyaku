@@ -55,7 +55,11 @@
     "test:compile": "node scripts/compile-tests.mjs",
     "test:e2e:built": "node scripts/run-tests.mjs tests/packaged-cli.e2e.ts tests/cli-akuma-packaged.e2e.ts"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^25.0.0",
     "@typescript-eslint/parser": "^8.66.0",
@@ -70,7 +74,6 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.226",
     "@astrosheep/keiyaku-plugin-square": "0.1.7",
     "@astrosheep/square": "^0.3.63",
-    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@opencode-ai/sdk": "1.18.3",
     "cross-spawn": "^7.0.6",
     "diff": "^8.0.4",

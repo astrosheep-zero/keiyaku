@@ -13,6 +13,9 @@ import { temporaryDirectory } from "./support/process.js";
 type PackageJson = {
   keywords?: unknown;
   pi?: { extensions?: unknown; skills?: unknown };
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 
 const rootUrl = new URL(import.meta.url.endsWith(".js") ? "../../" : "../", import.meta.url);
@@ -254,6 +257,30 @@ test("npm root package declares its Pi resources", () => {
     extensions: ["./build/integrations/pi/keiyaku.ts"],
     skills: ["./build/integrations/marketplace/plugins/keiyaku/skills"],
   });
+});
+
+test("Pi loads the root package without host-provided dependency warnings", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-pi-peer-");
+  const loader = new sdk.DefaultResourceLoader({
+    cwd: root,
+    agentDir: root,
+    settingsManager: sdk.SettingsManager.inMemory({ packages: [fileURLToPath(rootUrl)] }),
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+  });
+  await loader.reload();
+  const result = loader.getExtensions();
+  t.after(() => result.runtime.invalidate());
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.extensions.length, 1);
+  assert.equal(result.extensions[0]?.resolvedPath, builtExtension);
+  assert.ok(result.extensions[0]?.commands.has("keiyaku"));
+  assert.deepEqual(result.warnings, []);
+  assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
+  assert.equal(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"], "*");
+  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.0.0");
 });
 
 type Handler = (event: unknown, context: ExtensionContext) => unknown;
