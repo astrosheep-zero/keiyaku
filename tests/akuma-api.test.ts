@@ -32,7 +32,7 @@ import { cliJson } from "./support/cli-fixtures.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
-import { authorityPath } from "../src/task/store.js";
+import { taskAuthorityFile } from "./support/task.js";
 
 function freezeWalk(value: unknown): void {
   if (typeof value !== "object" || value === null) return;
@@ -155,7 +155,7 @@ test("standalone Akuma operations never read optional Alias or Task authority", 
     // Corrupt every optional cross-product authority a standalone operation must never touch.
     mkdirSync(join(value.world, ".keiyaku", "akuma"), { recursive: true });
     writeFileSync(join(value.world, ".keiyaku", "akuma", "alias.json"), "not json\n");
-    const brokenTask = authorityPath(value.world, "task/corrupt-authority");
+    const brokenTask = taskAuthorityFile(value.world, "task/corrupt-authority");
     mkdirSync(join(value.world, ".keiyaku", "tasks"), { recursive: true });
     writeFileSync(brokenTask, "not a task document\n");
     const selected = Akuma.select(value.world, value.allocated.id);

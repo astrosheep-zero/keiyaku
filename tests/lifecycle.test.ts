@@ -12,7 +12,7 @@ import {
   type ContractId, type JournalEntry
 } from "../src/core/facts/types.js";
 import { uniqueEntryUlid } from "./support/journal.js";
-import { applyAmendDocument } from "../src/body/amend.js";
+import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody } from "../src/body/types.js";
@@ -146,7 +146,7 @@ test("an amendment still refuses every byte outside its H2 operations", () => {
 
   for (const [source, diagnostic] of refusals) {
     assert.throws(
-      () => applyAmendDocument(source, currentAmendmentDocument()),
+      () => prepareAmendDocument(source)(currentAmendmentDocument()),
       (error: unknown) => error instanceof TypeError && error.message === diagnostic,
       source,
     );

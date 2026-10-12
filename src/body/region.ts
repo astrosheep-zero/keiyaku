@@ -274,7 +274,3 @@ export function regionsOverlapWithRelation(
   }
   return overlaps;
 }
-
-export function regionsOverlap(mine: readonly string[], theirs: readonly string[]): readonly [string, string][] {
-  return regionsOverlapWithRelation(mine, theirs).map(([minePattern, theirsPattern]) => [minePattern, theirsPattern]);
-}

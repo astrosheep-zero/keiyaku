@@ -20,7 +20,6 @@ import {
   CONTRACT_PLACES,
   decodePlaceRegister,
   emptyPlaceRegister,
-  nextPlace,
   nukeEmptyPlaceAuthority,
   place,
   placeRegisterPath,
@@ -41,8 +40,6 @@ const repositoryAt = cachedRepositoryAt;
 
 const EXAMPLE = contractId("kei/example");
 const OTHER = contractId("kei/other");
-const ATLANTIS = place("atlantis");
-const HOGWARTS = place("hogwarts");
 const EMPTY = '{"version":1,"appointments":{}}\n';
 const EXAMPLE_START_INDEX = 15;
 const OTHER_START_INDEX = 86;
@@ -95,13 +92,6 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(CONTRACT_PLACES[0], "atlantis");
     assert.equal(CONTRACT_PLACES[1], "hogwarts");
     assert.equal(CONTRACT_PLACES[172], "clawmachine");
-    assert.equal(nextPlace(), ATLANTIS);
-    assert.equal(nextPlace(ATLANTIS), HOGWARTS);
-    assert.equal(nextPlace(place("clawmachine")), place("atlantis2"));
-    assert.equal(nextPlace(place("clawmachine2")), place("atlantis3"));
-    assert.equal(nextPlace(place("atlantis21")), place("hogwarts21"));
-    const huge = BigInt(Number.MAX_SAFE_INTEGER) + 2n;
-    assert.equal(nextPlace(place(`clawmachine${huge.toString()}`)), place(`atlantis${(huge + 1n).toString()}`));
     assert.throws(() => place("a"), TypeError);
     assert.throws(() => place("Atlantis"), TypeError);
     assert.throws(() => place("atlantis1"), TypeError);

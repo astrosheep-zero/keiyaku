@@ -3,8 +3,6 @@ import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import { parseDuration } from "../duration.js";
 import type { VerificationDeclaration } from "../verification/declaration.js";
 
-export type { VerificationDeclaration, VerificationExecutor } from "../verification/declaration.js";
-
 export class VerificationDocumentError extends Error {
   constructor(message: string) {
     super(message);

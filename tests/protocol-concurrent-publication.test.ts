@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import { applyAmendDocument } from "../src/body/amend.js";
+import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { entryUlid, type ContractTerms } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
@@ -178,7 +178,7 @@ test("conflicting concurrent amends keep their typed business refusals", async (
   const derive =
     (markdown: string) =>
     (observed: ContractTerms): Readonly<{ terms: ContractTerms; verification: { kind: "prepared"; data: null } }> => {
-      const amended = applyAmendDocument(markdown, decodeContractDocument(observed.document.bytes));
+      const amended = prepareAmendDocument(markdown)(decodeContractDocument(observed.document.bytes));
       const decoded = decodeContractDocument(amended.document);
       const terms = contractTerms(decoded, observed.gates, observed.after);
       return { terms, verification: { kind: "prepared", data: null } };

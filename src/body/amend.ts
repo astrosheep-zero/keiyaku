@@ -275,13 +275,6 @@ function apply(
   return { body: completeBody(body), changed };
 }
 
-export function applyAmendDocument(
-  source: string,
-  current: DecodedContractDocument,
-): Readonly<{ document: string; changedSections: ReadonlySet<string> }> {
-  return prepareAmendDocument(source)(current);
-}
-
 /** Caller syntax is decoded before any repository observation; current-dependent application stays pure. */
 export function prepareAmendDocument(source: string): (current: DecodedContractDocument) => Readonly<{
   document: string;

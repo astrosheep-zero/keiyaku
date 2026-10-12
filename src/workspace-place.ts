@@ -245,16 +245,6 @@ export function place(value: string): Place {
   return value as Place;
 }
 
-export function nextPlace(current?: Place): Place {
-  if (current === undefined) return place(CONTRACT_PLACES[0]!);
-  const parsed = parsedPlace(current);
-  if (parsed === undefined) throw new TypeError(`Place is not canonical: ${current}`);
-  const index = PLACE_INDEX.get(parsed.base)!;
-  return index + 1 < CONTRACT_PLACES.length
-    ? composePlace(CONTRACT_PLACES[index + 1]!, parsed.generation)
-    : composePlace(CONTRACT_PLACES[0]!, parsed.generation + 1n);
-}
-
 export function canonicalPlaceRegister(register: PlaceRegister): string {
   const appointments = Object.fromEntries(
     register.appointments

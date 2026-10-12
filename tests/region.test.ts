@@ -1,9 +1,9 @@
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyAmendDocument } from "../src/body/amend.js";
+import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { decodeRegion, RegionDocumentError, regionsOverlap } from "../src/body/region.js";
+import { decodeRegion, RegionDocumentError } from "../src/body/region.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";
 
@@ -111,7 +111,7 @@ test("Region refuses foreign block kinds by name", () => {
 test("contract decoding and amendment share Region validation", () => {
   const current = decodeContractDocument(contract("src/**"));
   assert.deepEqual(decodeContractDocument(contract("src/**", "txt")).region, ["src/**"]);
-  const amendment = applyAmendDocument("## Replace: Region\n~~~txt\ntests/**\n~~~", current);
+  const amendment = prepareAmendDocument("## Replace: Region\n~~~txt\ntests/**\n~~~")(current);
   assert.deepEqual(decodeContractDocument(amendment.document).region, ["tests/**"]);
   assert.deepEqual([...amendment.changedSections], ["region"]);
   assert.throws(
@@ -121,28 +121,9 @@ test("contract decoding and amendment share Region validation", () => {
       error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
   assert.throws(
-    () => applyAmendDocument("## Replace: Region\n~~~\nsrc/**file\n~~~", current),
+    () => prepareAmendDocument("## Replace: Region\n~~~\nsrc/**file\n~~~")(current),
     (error: unknown) =>
       error instanceof TypeError &&
       error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
-});
-
-test("Region intersection is exact across segment and character wildcards", () => {
-  const cases = [
-    { mine: ["src/file.ts"], theirs: ["src/file.ts"], expected: [["src/file.ts", "src/file.ts"]] },
-    { mine: ["src/file.ts"], theirs: ["src/other.ts"], expected: [] },
-    { mine: ["src/*"], theirs: ["src/?.ts"], expected: [["src/*", "src/?.ts"]] },
-    { mine: ["src/a?c"], theirs: ["src/a*c"], expected: [["src/a?c", "src/a*c"]] },
-    { mine: ["src/?.ts"], theirs: ["src/long.ts"], expected: [] },
-    { mine: ["src/**"], theirs: ["src/nested/file.ts"], expected: [["src/**", "src/nested/file.ts"]] },
-    { mine: ["src/*"], theirs: ["src/nested/file.ts"], expected: [] },
-    { mine: ["**/file.ts"], theirs: ["src/nested/file.ts"], expected: [["**/file.ts", "src/nested/file.ts"]] },
-    { mine: ["src/**"], theirs: ["tests/**"], expected: [] },
-    { mine: ["src/a"], theirs: ["src/a/**"], expected: [["src/a", "src/a/**"]] },
-  ] as const;
-
-  for (const { mine, theirs, expected } of cases) {
-    assert.deepEqual(regionsOverlap(mine, theirs), expected);
-  }
 });

@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
-import { moveAlias, readAliases, resolveAlias } from "../src/alias/index.js";
+import { moveAlias, readAliases } from "../src/alias/index.js";
 import { parseAkuId, type AkuId } from "../src/akuma/identity.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
@@ -218,7 +218,10 @@ test("Alias moves are serialized, canonical, and expose the previous target", as
     alias: { alias: alpha, akuId: second },
     previous: first,
   });
-  assert.equal(await resolveAlias(world, alpha), second);
+  assert.deepEqual(await readAliases(world), [
+    { alias: alpha, akuId: second },
+    { alias: beta, akuId: second },
+  ]);
 });
 
 test("existing noncanonical alias spelling stays readable but cannot be newly assigned", async (context) => {
@@ -227,7 +230,6 @@ test("existing noncanonical alias spelling stays readable but cannot be newly as
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "alias.json"), '{"version":1,"aliases":{"@old--":"aku/worker/11111111"}}\n');
   assert.deepEqual(await readAliases(world), [{ alias: "@old--", akuId: parseAkuId("aku/worker/11111111").id }]);
-  assert.equal(await resolveAlias(world, "@old--" as ReturnType<typeof parseAkumaAlias>), "aku/worker/11111111");
   await assert.rejects(
     moveAlias({
       world,

@@ -23,8 +23,7 @@ import {
 import { allocateLocalId, deriveLocalStem, formatTaskId, type TaskId } from "./identity.js";
 import { nukeTaskAuthority, readBoard, readTaskDocument, replaceAuthority, withTaskLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
-import { projectBoundedList } from "../bounded-list.js";
-import { taskRowViewLimit } from "./input.js";
+import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
 import {
   projectQuery,
   projectQueryRows,
@@ -41,11 +40,9 @@ export type {
   AddTaskDocumentInput,
   AddTaskInput,
   TaskCleanupFailure,
-  SettledTaskAction,
   SettledTaskResult,
   TaskBatchResult,
   TaskCompositionDiagnostic,
-  TaskLifecycleVerb,
   TaskMutationResult,
   TaskOutcome,
   TaskRefusal,
@@ -62,7 +59,6 @@ import type {
   TaskRefusal,
   TaskRetry,
   TaskUpdateResult,
-  TaskView,
   UpdateTaskInput,
 } from "./operation-types.js";
 
@@ -74,8 +70,6 @@ export async function nukeTask(
   if (result === "busy") throw new SqliteTransactionLockError("Task reset lock contention", "timeout");
   return result;
 }
-
-export type { TaskState } from "./document.js";
 
 function refused(refusal: TaskRefusal): TaskMutationResult {
   return { kind: "refused", refusal };
@@ -297,7 +291,7 @@ export async function listTasks(
   scope?: "namespace" | "world",
   limit?: number,
 ): Promise<TaskOutcome<TaskPage<TaskRow>>> {
-  const selectedLimit = taskRowViewLimit(limit);
+  const selectedLimit = boundedListLimit(limit);
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
   return {
@@ -322,26 +316,40 @@ export async function readTaskDetail(world: WorldRoot, id: TaskId): Promise<Task
   }
   return projectOwnedDetailFacts({ tasks: selected }, id);
 }
-
-export async function readTaskDetails(
-  world: WorldRoot,
-  ids: readonly TaskId[],
-): Promise<TaskOutcome<readonly TaskDetailFacts[]>> {
-  const details: TaskDetailFacts[] = [];
-  for (const id of ids) {
-    const detail = await readTaskDetail(world, id);
-    if (detail === null) return { kind: "refused", refusal: { kind: "task-missing", taskId: id } };
-    details.push(detail);
-  }
-  return { kind: "accepted", value: details };
-}
-export async function observeTaskDetails(
-  world: WorldRoot,
-  ids: readonly TaskId[],
-): Promise<TaskOutcome<readonly (Omit<TaskDetailFacts, "task"> & Readonly<{ task: TaskView }>)[]>> {
-  const observed = await readTaskDetails(world, ids);
-  if (observed.kind !== "accepted") return observed;
-  return { kind: "accepted", value: observed.value.map((facts) => ({ ...facts, task: taskView(facts.task) })) };
+/** One board observation and predicate projection shared by the ready and blocked views. */
+async function readTaskQueryContext(
+  input: Readonly<{
+    world: WorldRoot;
+    field: "ready" | "blocked";
+    namespace?: readonly string[] | undefined;
+    scope?: "namespace" | "world" | undefined;
+    parent?: TaskId | undefined;
+    limit?: number | undefined;
+  }>,
+) {
+  const board = (await readBoard(input.world)).board;
+  if (input.parent !== undefined && !board.tasks.has(input.parent))
+    return { kind: "refused", refusal: { kind: "task-missing", taskId: input.parent } } as const;
+  const relations = createTaskRelations(board);
+  const scope = readScope(input.namespace, input.scope);
+  const predicate: TaskQueryExpression = {
+    kind: "predicate",
+    predicate: { field: input.field, operator: "=", value: true },
+  };
+  return {
+    kind: "accepted",
+    value: {
+      limit: boundedListLimit(input.limit),
+      board,
+      scope,
+      relations,
+      rows: projectQueryRows(board, relations, {
+        scope,
+        expression:
+          input.parent === undefined ? predicate : { kind: "and", terms: [predicate, underExpression(input.parent)] },
+      }),
+    },
+  } as const;
 }
 export async function readyTasks(
   world: WorldRoot,
@@ -350,23 +358,12 @@ export async function readyTasks(
   parent?: TaskId,
   limit?: number,
 ): Promise<TaskOutcome<TaskPage<TaskRow>>> {
-  const selectedLimit = taskRowViewLimit(limit);
-  const selected = readScope(namespace, scope);
-  const board = (await readBoard(world)).board;
-  if (parent !== undefined && !board.tasks.has(parent))
-    return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
-  const relations = createTaskRelations(board);
-  const ready: TaskQueryExpression = { kind: "predicate", predicate: { field: "ready", operator: "=", value: true } };
-  const expression: TaskQueryExpression =
-    parent === undefined ? ready : { kind: "and", terms: [ready, underExpression(parent)] };
-  const selectedRows = projectQueryRows(board, relations, {
-    scope: selected as readonly string[] | null,
-    expression,
-  });
-  const rows = selectedRows.map(
+  const queried = await readTaskQueryContext({ world, field: "ready", namespace, scope, parent, limit });
+  if (queried.kind !== "accepted") return queried;
+  const rows = queried.value.rows.map(
     ({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, ...row }) => row,
   );
-  return { kind: "accepted", value: projectBoundedList(rows, selectedLimit) };
+  return { kind: "accepted", value: projectBoundedList(rows, queried.value.limit) };
 }
 export async function blockedTasks(
   world: WorldRoot,
@@ -375,27 +372,14 @@ export async function blockedTasks(
   parent?: TaskId,
   limit?: number,
 ): Promise<TaskOutcome<TaskPage<BlockedTaskRow>>> {
-  const selectedLimit = taskRowViewLimit(limit);
-  const selected = readScope(namespace, scope);
-  const board = (await readBoard(world)).board;
-  if (parent !== undefined && !board.tasks.has(parent))
-    return { kind: "refused", refusal: { kind: "task-missing", taskId: parent } };
-  const relations = createTaskRelations(board);
-  const blocked: TaskQueryExpression = {
-    kind: "predicate",
-    predicate: { field: "blocked", operator: "=", value: true },
-  };
-  const expression: TaskQueryExpression =
-    parent === undefined ? blocked : { kind: "and", terms: [blocked, underExpression(parent)] };
-  const selectedRows = projectQueryRows(board, relations, {
-    scope: selected as readonly string[] | null,
-    expression,
-  });
-  const ids = new Set(selectedRows.map((row) => row.id));
+  const queried = await readTaskQueryContext({ world, field: "blocked", namespace, scope, parent, limit });
+  if (queried.kind !== "accepted") return queried;
+  const { board, scope: selected, relations, limit: selectedLimit, rows } = queried.value;
+  const ids = new Set(rows.map((row) => row.id));
   return {
     kind: "accepted",
     value: projectBoundedList(
-      projectBlocked(board, selected as readonly string[] | null, relations).filter((row) => ids.has(row.id)),
+      projectBlocked(board, selected, relations).filter((row) => ids.has(row.id)),
       selectedLimit,
     ),
   };
@@ -410,7 +394,7 @@ export async function queryTasks(
     limit?: number;
   }>,
 ): Promise<TaskOutcome<TaskPage<TaskQueryRow>>> {
-  const selectedLimit = taskRowViewLimit(input.limit);
+  const selectedLimit = boundedListLimit(input.limit);
   const selected = readScope(input.namespace, input.scope);
   const board = (await readBoard(input.world)).board;
   const relations = createTaskRelations(board);

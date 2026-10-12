@@ -56,9 +56,9 @@ async function catalogRow(
   };
 }
 
-async function recentTaskStatus(
+export async function observeRecentTaskStatus(
   world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; limit?: number }>,
+  input: Readonly<{ namespace?: readonly string[]; limit?: number }> = {},
 ): Promise<BoundedList<RecentTaskStatusRow>> {
   const { namespace } = input;
   if (namespace !== undefined && !namespace.every(isTaskSegment)) {
@@ -74,11 +74,4 @@ async function recentTaskStatus(
     rows: await Promise.all(documents.rows.map((document) => catalogRow(world, document, known))),
     hasMore: documents.hasMore,
   };
-}
-
-export async function observeRecentTaskStatus(
-  world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; limit?: number }> = {},
-): Promise<BoundedList<RecentTaskStatusRow>> {
-  return recentTaskStatus(world, input);
 }

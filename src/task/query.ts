@@ -6,11 +6,8 @@ import { projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export const TASK_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
 export type TaskRelationPredicateField = (typeof TASK_RELATION_PREDICATE_FIELDS)[number];
-function isTaskRelationPredicateField(value: string): value is TaskRelationPredicateField {
-  return (TASK_RELATION_PREDICATE_FIELDS as readonly string[]).includes(value);
-}
 
-export type TaskQueryComparison = "=" | "!=" | "<" | "<=" | ">" | ">=" | "~";
+type TaskQueryComparison = "=" | "!=" | "<" | "<=" | ">" | ">=" | "~";
 
 export type TaskQueryPredicate =
   | Readonly<{ field: "state"; operator: "=" | "!="; value: TaskState }>
@@ -181,7 +178,8 @@ export function normalizeTaskQueryPredicate(value: unknown): TaskQueryPredicate 
     case "updated":
       return normalizeTimestampPredicate(input, "updated", operator);
     default:
-      if (isTaskRelationPredicateField(field)) return normalizeRelationPredicate(input, field, operator);
+      if (field === "under" || field === "needs" || field === "blocks")
+        return normalizeRelationPredicate(input, field, operator);
       return invalidPredicate(`unknown query field: ${field}`, "field");
   }
 }

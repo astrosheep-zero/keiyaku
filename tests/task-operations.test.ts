@@ -23,7 +23,6 @@ import {
   type TaskTreeNode,
 } from "../src/task/index.js";
 import {
-  decodeTaskMutationRequest,
   taskMutationRequestCommand,
   type TaskMutationBodyRequest,
   type TaskMutationRequestPort,
@@ -31,16 +30,16 @@ import {
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
-import { observeTaskDetails, settleTask } from "../src/task/operations.js";
+import { settleTask } from "../src/task/operations.js";
 import { observeCreatedTaskObservations } from "../src/task/created-observation.js";
 import { createTaskRelations, projectCreatedByRows, projectTaskBoardObservation } from "../src/task/board.js";
 import {
-  authorityPath,
   readBoard,
   nukeTaskAuthority,
   replaceAuthority,
   withTaskLocks
 } from "../src/task/store.js";
+import { taskAuthorityFile } from "./support/task.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { runCli, cliJson } from "./support/cli-fixtures.js";
 import { parseTaskQueryExpression } from "../src/cli/commands/task-query.js";
@@ -105,7 +104,7 @@ test("created Task association rows match complete board views and re-read manua
 
   const before = await tasks.task({ id: need }).read();
   assert.ok(before !== null);
-  writeFileSync(authorityPath(root, need), serializeTaskDocument({ ...before.task, state: "done", createdBy: "one", title: "Manual edit" }));
+  writeFileSync(taskAuthorityFile(root, need), serializeTaskDocument({ ...before.task, state: "done", createdBy: "one", title: "Manual edit" }));
   const fresh = await observeCreatedTaskObservations(root, ids);
   const freshExpected = projectTaskBoardObservation((await readBoard(root)).board);
   assert.deepEqual(fresh, ids.map((id) => ({ kind: "present", rows: freshExpected.selectCreatedBy(id) })));
@@ -170,7 +169,7 @@ test("ordinary mutations advance a non-later timestamp by one millisecond", asyn
   const before = await tasks.task({ id }).read();
   if (before === null) return;
   const future = "2099-01-01T00:00:00.000Z";
-  writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...before.task, updatedAt: future }));
+  writeFileSync(taskAuthorityFile(root, id), serializeTaskDocument({ ...before.task, updatedAt: future }));
 
   const updated = await tasks.task({ id }).update({ note: "changed" });
   assert.equal(updated.kind, "accepted");
@@ -260,7 +259,7 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
   const pending = tasks.batch({ verb: "start", ids: [first, second] });
   try {
     await lockAttempt;
-    writeFileSync(authorityPath(root, second), "changed after batch observation\n");
+    writeFileSync(taskAuthorityFile(root, second), "changed after batch observation\n");
   } finally {
     firstLock.close();
   }
@@ -288,7 +287,7 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
     const current = await tasks.task({ id }).read();
     assert.notEqual(current, null);
     if (current === null) return;
-    writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...current.task, state: "open" }));
+    writeFileSync(taskAuthorityFile(root, id), serializeTaskDocument({ ...current.task, state: "open" }));
   } finally {
     lock.close();
   }
@@ -311,9 +310,9 @@ test("batch missing refusal retries when the Task is created before its lock", a
     await lockAttempt;
     const created = await tasks.add({ title: "Batch stale missing" });
     assert.ok(created.kind === "accepted", "expected created.kind = \"accepted\"");
-    const source = authorityPath(root, created.value.id);
+    const source = taskAuthorityFile(root, created.value.id);
     const document = parseTaskDocument(readFileSync(source), parseTaskId(created.value.id));
-    writeFileSync(authorityPath(root, id), serializeTaskDocument({ ...document, id }));
+    writeFileSync(taskAuthorityFile(root, id), serializeTaskDocument({ ...document, id }));
     unlinkSync(source);
   } finally {
     lock.close();
@@ -431,9 +430,9 @@ test("Task row views share the bounded-list contract and complete their graph ju
   for (let index = 0; index < 51; index += 1) {
     const ready = `task/ready-${String(index).padStart(2, "0")}` as TaskId;
     const blocked = `task/blocked-${String(index).padStart(2, "0")}` as TaskId;
-    writeFileSync(authorityPath(root as WorldRoot, ready), serializeTaskDocument(document(ready)));
+    writeFileSync(taskAuthorityFile(root as WorldRoot, ready), serializeTaskDocument(document(ready)));
     writeFileSync(
-      authorityPath(root as WorldRoot, blocked),
+      taskAuthorityFile(root as WorldRoot, blocked),
       serializeTaskDocument(document(blocked, ["task/missing" as TaskId])),
     );
   }
@@ -498,27 +497,6 @@ test("targeted reads expose outbound relations only; board projections derive re
     shownRelatedFrom?.related.map((item) => item.id),
     [blocker],
   );
-
-  const detailed = await observeTaskDetails(tasks.root, [blocker, blocked]);
-  assert.equal(detailed.kind, "accepted");
-  if (detailed.kind === "accepted") {
-    assert.deepEqual(
-      detailed.value[0]?.blocks.map((item) => item.id),
-      [],
-    );
-    assert.deepEqual(
-      detailed.value[0]?.related.map((item) => item.id),
-      [],
-    );
-    assert.deepEqual(
-      detailed.value[1]?.needs.map((item) => item.id),
-      [blocker],
-    );
-    assert.deepEqual(
-      detailed.value[1]?.blocks.map((item) => item.id),
-      [],
-    );
-  }
 
   const selectsBlocker = await tasks.query({
     scope: "world",
@@ -690,7 +668,7 @@ test("existing graph disease does not adjudicate an unrelated relation addition"
   const { root, tasks } = await world();
   const subject = acceptedId(await tasks.add({ title: "Subject" }));
   const valid = acceptedId(await tasks.add({ title: "Valid target" }));
-  const path = authorityPath(root, subject);
+  const path = taskAuthorityFile(root, subject);
   const document = parseTaskDocument(readFileSync(path), parseTaskId(subject));
   writeFileSync(path, serializeTaskDocument({ ...document, needs: ["task/missing"] }));
 
@@ -814,7 +792,7 @@ test("partial task composition retains committed changes when lock cleanup fails
   const controller = new AbortController();
   controller.signal.throwIfAborted = (): void => {
     signalCalls += 1;
-    if (signalCalls === 4) writeFileSync(authorityPath(root, second.value.id), "changed\n");
+    if (signalCalls === 4) writeFileSync(taskAuthorityFile(root, second.value.id), "changed\n");
   };
   DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
     try {
@@ -845,7 +823,7 @@ test("partial task composition retains committed changes when lock cleanup fails
 test("manual predecessor movement is best-effort detected and idle lock deletion never changes authority", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Manual" }));
-  const path = authorityPath(tasks.root, id),
+  const path = taskAuthorityFile(tasks.root, id),
     original = readFileSync(path),
     manual = Buffer.concat([original, Buffer.from("manual edit\n")]);
   writeFileSync(path, manual);
@@ -974,7 +952,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     const added = await tasks.add({ title: "Authored", actor: "flagship" });
     assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
     assert.equal(added.value.createdBy, "flagship");
-    const addedPath = authorityPath(root, added.value.id);
+    const addedPath = taskAuthorityFile(root, added.value.id);
     assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
 
     const fromDocument = await tasks.addDocument({
@@ -1145,15 +1123,6 @@ test("forced-local Task descriptor preserves owner validation and authenticated 
     )?.task.body,
     "exact\nbody",
   );
-  assert.throws(
-    () => decodeTaskMutationRequest("task.add", { input: { title: "Invalid", actor: "forged" } }),
-    /invalid task\.add request/u,
-  );
-  assert.deepEqual(decodeTaskMutationRequest("task.start", { ids: ["task/one", "task/two"] }), {
-    action: "task.start",
-    ids: ["task/one", "task/two"],
-  });
-  assert.throws(() => decodeTaskMutationRequest("task.start", { ids: [] }), /invalid task\.start request/u);
 });
 
 test("task show keeps the native addressed read and null with or without an established World", async (context) => {

@@ -55,6 +55,7 @@ import {
   type TaskView,
   type UpdateTaskInput,
 } from "./operations.js";
+import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
 import {
   actor,
@@ -64,7 +65,6 @@ import {
   record,
   signal,
   sort,
-  taskRowViewLimit,
   taskId as id,
   taskIds,
   text,
@@ -128,7 +128,7 @@ export type {
 export type { LibraryExecution } from "../akuma/requests.js";
 export { TaskAuthorityCorruptionError, TASK_RELATION_PREDICATE_FIELDS };
 export { observeRecentTaskStatus, type RecentTaskStatusRow } from "./catalog.js";
-export { taskRowViewLimit } from "./input.js";
+export { boundedListLimit as taskRowViewLimit } from "../bounded-list.js";
 
 /**
  * The one captured execution route per Tasks handle. Local execution calls the
@@ -364,7 +364,7 @@ class TasksHandle {
       throw new TypeError("selection must be active, closed, or all");
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
-    const selectedLimit = taskRowViewLimit(v.limit);
+    const selectedLimit = boundedListLimit(v.limit);
     return listTasks(
       this.world,
       namespace(v.namespace),
@@ -386,7 +386,7 @@ class TasksHandle {
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
     const parent = v.parent === undefined ? undefined : id(v.parent);
-    const selectedLimit = taskRowViewLimit(v.limit);
+    const selectedLimit = boundedListLimit(v.limit);
     return readyTasks(
       this.world,
       namespace(v.namespace),
@@ -408,7 +408,7 @@ class TasksHandle {
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
       throw new TypeError("scope must be namespace or world");
     const parent = v.parent === undefined ? undefined : id(v.parent);
-    const selectedLimit = taskRowViewLimit(v.limit);
+    const selectedLimit = boundedListLimit(v.limit);
     return blockedTasks(
       this.world,
       namespace(v.namespace),
@@ -432,7 +432,7 @@ class TasksHandle {
       throw new TypeError("scope must be namespace or world");
     const expression = v.where === undefined ? taskQuerySelection() : normalizeTaskQuery(v.where);
     const selected = namespace(v.namespace);
-    const selectedLimit = taskRowViewLimit(v.limit);
+    const selectedLimit = boundedListLimit(v.limit);
     return queryTasks({
       world: this.world,
       ...(selected === undefined ? {} : { namespace: selected }),

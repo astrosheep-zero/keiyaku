@@ -26,7 +26,6 @@ import {
   type TaskMutationExecutionResult,
 } from "./mutation-result.js";
 import { z } from "zod";
-export type { TaskMutationExecutionResult } from "./mutation-result.js";
 
 export const TASK_MUTATION_ACTIONS = Object.freeze([
   "task.add",
@@ -145,8 +144,8 @@ const taskBodyRequestSchema = z
   .strict();
 export type TaskMutationBodyRequest = z.infer<typeof taskBodyRequestSchema>;
 
-export const taskMutationServiceSchema = z.object({ action: taskMutationActionSchema }).strict();
-export type TaskMutationService = z.infer<typeof taskMutationServiceSchema>;
+const taskMutationServiceSchema = z.object({ action: taskMutationActionSchema }).strict();
+type TaskMutationService = z.infer<typeof taskMutationServiceSchema>;
 
 export const forwardedTaskReferenceSchema = z
   .object({ kind: z.literal("served-reference"), action: taskMutationActionSchema })
@@ -379,63 +378,22 @@ export async function requestForwardedTask<Request extends TaskMutationRequest>(
   return response.result as TaskMutationResultForRequest<Request>;
 }
 
-export function decodeTaskMutationRequest(action: TaskMutationAction, value: unknown): TaskMutationRequest {
-  const parsed = taskRequestSchemas[action].safeParse(value);
-  if (!parsed.success) throw new TypeError(`invalid ${action} request`);
-  return parsed.data;
+/** Absent optional fields are omitted, never republished as an explicit undefined. */
+function definedFields<Input extends object>(
+  fields: Readonly<Record<string, unknown>>,
+  additions: Readonly<Record<string, unknown>> = {},
+): Input {
+  const selected: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries({ ...fields, ...additions })) {
+    if (value !== undefined) selected[key] = value;
+  }
+  return selected as Input;
 }
 
 function addTaskOptions(input: z.output<typeof addInputSchema>, actor: string, signal?: AbortSignal): AddTaskInput {
-  const { body, note, state, priority, needs, parent, supersedes, relates, ...required } = input;
-  return {
-    ...required,
-    actor,
-    ...(body === undefined ? {} : { body }),
-    ...(note === undefined ? {} : { note }),
-    ...(state === undefined ? {} : { state }),
-    ...(priority === undefined ? {} : { priority }),
-    ...(needs === undefined ? {} : { needs }),
-    ...(parent === undefined ? {} : { parent }),
-    ...(supersedes === undefined ? {} : { supersedes }),
-    ...(relates === undefined ? {} : { relates }),
-    ...(signal === undefined ? {} : { signal }),
-  };
+  return definedFields<AddTaskInput>(input, { actor, signal });
 }
 
 function updateTaskOptions(input: z.output<typeof updateInputSchema>, signal?: AbortSignal): UpdateTaskInput {
-  const {
-    title,
-    body,
-    appendBody,
-    note,
-    priority,
-    needs,
-    addNeeds,
-    dropNeeds,
-    parent,
-    supersedes,
-    addSupersedes,
-    dropSupersedes,
-    relates,
-    addRelates,
-    dropRelates,
-  } = input;
-  return {
-    ...(title === undefined ? {} : { title }),
-    ...(body === undefined ? {} : { body }),
-    ...(appendBody === undefined ? {} : { appendBody }),
-    ...(note === undefined ? {} : { note }),
-    ...(priority === undefined ? {} : { priority }),
-    ...(needs === undefined ? {} : { needs }),
-    ...(addNeeds === undefined ? {} : { addNeeds }),
-    ...(dropNeeds === undefined ? {} : { dropNeeds }),
-    ...(parent === undefined ? {} : { parent }),
-    ...(supersedes === undefined ? {} : { supersedes }),
-    ...(addSupersedes === undefined ? {} : { addSupersedes }),
-    ...(dropSupersedes === undefined ? {} : { dropSupersedes }),
-    ...(relates === undefined ? {} : { relates }),
-    ...(addRelates === undefined ? {} : { addRelates }),
-    ...(dropRelates === undefined ? {} : { dropRelates }),
-    ...(signal === undefined ? {} : { signal }),
-  };
+  return definedFields<UpdateTaskInput>(input, { signal });
 }

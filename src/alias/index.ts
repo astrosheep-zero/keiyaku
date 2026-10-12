@@ -122,11 +122,6 @@ export async function readAliases(world: WorldRoot): Promise<readonly AliasBindi
   return await read(paths(world).authority);
 }
 
-export async function resolveAlias(world: WorldRoot, value: AkumaAlias): Promise<AkuId | null> {
-  const alias = parseReadableAkumaAlias(value);
-  return (await readAliases(world)).find((binding) => binding.alias === alias)?.akuId ?? null;
-}
-
 export async function moveAlias(
   input: Readonly<{
     world: WorldRoot;

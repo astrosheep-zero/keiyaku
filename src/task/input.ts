@@ -2,7 +2,6 @@ import { type TaskPriority, type TaskState } from "./document.js";
 import { isTaskSegment, parseTaskId, type TaskId } from "./identity.js";
 import type { AddTaskInput, UpdateTaskInput } from "./operations.js";
 import type { TaskQuerySort } from "./query.js";
-import { boundedListLimit } from "../bounded-list.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -66,23 +65,12 @@ export function actor(value: unknown): string | undefined {
   return value;
 }
 
-export function priority(value: unknown): TaskPriority | undefined {
+function priority(value: unknown): TaskPriority | undefined {
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) {
     throw new TypeError("priority must be 0..3");
   }
   return value as TaskPriority;
-}
-
-export function limit(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number") throw new TypeError("limit must be a number");
-  return value;
-}
-
-/** Validates and supplies the shared bounded-list limit for Task row views. */
-export function taskRowViewLimit(value: unknown): number {
-  return boundedListLimit(value);
 }
 
 export function sort(value: unknown): TaskQuerySort | undefined {
@@ -93,7 +81,7 @@ export function sort(value: unknown): TaskQuerySort | undefined {
   return value;
 }
 
-export function state(value: unknown): TaskState | undefined {
+function state(value: unknown): TaskState | undefined {
   if (value === undefined) return undefined;
   if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") {
     throw new TypeError("state is invalid");

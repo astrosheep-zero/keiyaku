@@ -24,7 +24,7 @@ import {
 import type { TaskBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: TaskBoard; bytes: ReadonlyMap<TaskId, Uint8Array> }>;
-export const DEFAULT_TASK_LOCK_TIMEOUT_MS = 3_000;
+const DEFAULT_TASK_LOCK_TIMEOUT_MS = 3_000;
 
 function tasksDirectory(world: WorldRoot): string {
   return resolve(world, ".keiyaku", "tasks");
@@ -369,8 +369,4 @@ export async function withTaskLocks<T>(
     throw failure;
   }
   return result as T;
-}
-
-export function authorityPath(world: WorldRoot, id: TaskId): string {
-  return taskAuthorityPath(tasksDirectory(world), parseTaskId(id));
 }

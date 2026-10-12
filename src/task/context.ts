@@ -129,7 +129,3 @@ export async function resolveTaskNamespaceContext(
     current = resolvedParent;
   }
 }
-
-export async function writeTaskNamespaceContext(directory: string, value: readonly string[]): Promise<void> {
-  await installNamespaceContext(directory, value);
-}

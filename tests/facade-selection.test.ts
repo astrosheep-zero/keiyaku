@@ -38,7 +38,7 @@ import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
-import { authorityPath, readBoard } from "../src/task/store.js";
+import { readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -52,7 +52,11 @@ import {
 } from "./support/akuma-tell.js";
 import { Schema } from "../src/akuma/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
-import { taskDocument as creatorTask, writeTaskAuthority as writeCreatorTask } from "./support/task.js";
+import {
+  taskAuthorityFile,
+  taskDocument as creatorTask,
+  writeTaskAuthority as writeCreatorTask,
+} from "./support/task.js";
 
 let fixtureHistory = 0;
 
@@ -1082,13 +1086,13 @@ test("recent Task catalog does not skip older-mtime malformed authority", async 
   const root = fixtureRoot(t, "keiyaku-facade-task-catalog-malformed-");
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
   const world = await World.at(root);
-  const older = authorityPath(world, "task/older-malformed");
+  const older = taskAuthorityFile(world, "task/older-malformed");
   const newer = taskCatalogDocument("task/newer-valid", "2026-08-31T00:00:00.000Z");
   writeFileSync(older, "not a task document\n");
   utimesSync(older, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
-  writeFileSync(authorityPath(world, newer.id), serializeTaskDocument(newer));
+  writeFileSync(taskAuthorityFile(world, newer.id), serializeTaskDocument(newer));
   utimesSync(
-    authorityPath(world, newer.id),
+    taskAuthorityFile(world, newer.id),
     new Date("2099-01-01T00:00:00.000Z"),
     new Date("2099-01-01T00:00:00.000Z"),
   );

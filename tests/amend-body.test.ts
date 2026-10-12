@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { applyAmendDocument, prepareAmendDocument } from "../src/body/amend.js";
+import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
@@ -25,7 +25,7 @@ const body: ContractBodyValue = {
 
 function applyAmendOperations(source: string, current: ContractBodyValue) {
   const document = decodeContractDocument(renderContractBody(current));
-  return decodeContractDocument(applyAmendDocument(source, document).document);
+  return decodeContractDocument(prepareAmendDocument(source)(document).document);
 }
 
 test("amend H2 operations form one complete body replacement", () => {
@@ -117,7 +117,7 @@ test("bare amend H2 headings replace existing sections and add new extensions", 
 test("amend requires a timeout for new Verification declarations", () => {
   const current = decodeContractDocument(renderContractBody(body));
   assert.throws(
-    () => applyAmendDocument("## Replace: Verification\n~~~bash\ntrue\n~~~\n", current),
+    () => prepareAmendDocument("## Replace: Verification\n~~~bash\ntrue\n~~~\n")(current),
     /must specify timeout=<duration>/,
   );
 });
@@ -213,28 +213,28 @@ test("Criteria amendments preserve H3 boundaries and caller-context diagnostics"
   const current = decodeContractDocument(renderContractBody(body));
   const source =
     "## Replace: Criteria\n### Nested bytes\nline\r\n> quote\r\n#### detail\r\n~~~\r\nfenced\r\n~~~\r\ntail\n\n### Last\nlast\n";
-  const result = decodeContractDocument(applyAmendDocument(source, current).document);
+  const result = decodeContractDocument(prepareAmendDocument(source)(current).document);
   assert.deepEqual(result.criteria, [
     { title: "Nested bytes", body: "\nline\r\n> quote\r\n#### detail\r\n~~~\r\nfenced\r\n~~~\r\ntail\n\n" },
     { title: "Last", body: "\nlast\n\n" },
   ]);
-  assert.throws(() => applyAmendDocument("## Criteria\nflat\n", current), {
+  assert.throws(() => prepareAmendDocument("## Criteria\nflat\n")(current), {
     name: "TypeError",
     message: "Criteria operation must contain one or more H3 entries",
   });
-  assert.throws(() => applyAmendDocument("## Criteria\nstray\n### Entry\nbody\n", current), {
+  assert.throws(() => prepareAmendDocument("## Criteria\nstray\n### Entry\nbody\n")(current), {
     name: "TypeError",
     message: "Criteria operation may contain only H3 entries",
   });
-  assert.throws(() => applyAmendDocument("## Criteria\n### Entry\nbody\n### ENTRY\nother\n", current), {
+  assert.throws(() => prepareAmendDocument("## Criteria\n### Entry\nbody\n### ENTRY\nother\n")(current), {
     name: "TypeError",
     message: "criteria operation contains duplicate or empty titles",
   });
-  assert.throws(() => applyAmendDocument("## Criteria\n### Empty\n", current), {
+  assert.throws(() => prepareAmendDocument("## Criteria\n### Empty\n")(current), {
     name: "TypeError",
     message: "criterion 'Empty' operation body is empty",
   });
-  assert.throws(() => applyAmendDocument("## Add: Criteria\n### KEEP\nnew\n", current), {
+  assert.throws(() => prepareAmendDocument("## Add: Criteria\n### KEEP\nnew\n")(current), {
     name: "TypeError",
     message: "Add Criteria targets an existing criterion",
   });

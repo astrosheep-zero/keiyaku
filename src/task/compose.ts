@@ -19,7 +19,6 @@ export type {
   TaskCompositionPlanOrder,
 } from "./compose-language.js";
 export type { TaskCompositionAlias } from "./compose-language.js";
-export { taskCompositionNamespaceHeader } from "./compose-language.js";
 
 export type TaskDocumentChange = Readonly<AcceptedComposition["documentChanges"][number]>;
 export type TaskCompositionFacts = Readonly<Pick<AcceptedComposition, "aliases" | "admissionOrder" | "admissions">>;

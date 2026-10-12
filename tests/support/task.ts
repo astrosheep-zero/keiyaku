@@ -1,9 +1,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { serializeTaskDocument, type TaskDocument } from "../../src/task/document.js";
-import type { TaskId } from "../../src/task/index.js";
-import { authorityPath } from "../../src/task/store.js";
+import { parseTaskId, taskAuthorityPath, type TaskId } from "../../src/task/identity.js";
 import type { WorldRoot } from "../../src/world.js";
+
+/** The physical Task authority path a World gives one Task identity. */
+export function taskAuthorityFile(world: WorldRoot, id: TaskId): string {
+  return taskAuthorityPath(resolve(world, ".keiyaku", "tasks"), parseTaskId(id));
+}
 
 export function taskDocument(
   input: Readonly<{
@@ -35,7 +39,7 @@ export function taskDocument(
 }
 
 export function writeTaskAuthority(world: WorldRoot, document: TaskDocument): void {
-  const path = authorityPath(world, document.id);
+  const path = taskAuthorityFile(world, document.id);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, serializeTaskDocument(document));
 }

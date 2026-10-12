@@ -3,8 +3,8 @@ import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import type { ParsedTaskCommand } from "./task-grammar.js";
 import {
   Tasks,
-  taskRowViewLimit,
   tasksWithExecution,
+  taskRowViewLimit,
   type TaskBatchResult,
   type TaskDetail,
   type TaskId,
@@ -16,7 +16,7 @@ import {
   type TaskUpdateResult,
 } from "../../task/index.js";
 import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
-import { resolveTaskNamespaceContext, writeTaskNamespaceContext } from "../../task/context.js";
+import { installNamespaceContext, resolveTaskNamespaceContext } from "../../task/context.js";
 import { displayContext, writeJson, writeStderr, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import type { CliCoordinates } from "../coordinates.js";
@@ -462,7 +462,7 @@ async function runMutation(input: TaskInput): Promise<number> {
     case "context": {
       const selected = namespace(command.positionals[0]);
       if (selected !== undefined) {
-        await writeTaskNamespaceContext(input.context.writeRoot ?? input.context.directory, selected);
+        await installNamespaceContext(input.context.writeRoot ?? input.context.directory, selected);
         const resolved = await resolveTaskNamespaceContext(input.context);
         if (typeof resolved === "object" && "kind" in resolved) {
           const result = { kind: "refused" as const, refusal: resolved };

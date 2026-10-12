@@ -6,13 +6,13 @@ import test from "node:test";
 import fsPromises, { readFile } from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { taskDocument, writeTaskAuthority } from "./support/task.js";
+import { taskAuthorityFile, taskDocument, writeTaskAuthority } from "./support/task.js";
 import { TaskAuthorityCorruptionError } from "../src/task/document.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Tasks } from "../src/task/index.js";
 import { nukeTask } from "../src/task/operations.js";
 import { parseTaskId, type TaskId } from "../src/task/identity.js";
-import { authorityPath, readBoard } from "../src/task/store.js";
+import { readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 
 test("complete Task reads bound in-flight I/O and retain canonical board and byte order", async (t) => {
@@ -50,7 +50,7 @@ test("complete Task reads bound in-flight I/O and retain canonical board and byt
     assert.equal(active, 0);
     assert.deepEqual([...snapshot.board.tasks.keys()], ids);
     assert.deepEqual([...snapshot.bytes.keys()], ids);
-    for (const id of ids) assert.deepEqual(snapshot.bytes.get(id), readFileSync(authorityPath(root, id)));
+    for (const id of ids) assert.deepEqual(snapshot.bytes.get(id), readFileSync(taskAuthorityFile(root, id)));
   } finally {
     released.resolve();
     await pending.catch(() => undefined);
@@ -66,8 +66,8 @@ test("complete Task reads drain before reporting the first canonical authority f
       const root = await world();
       const ids = Array.from({ length: 16 }, (_, index) => `task/failure-${String(index).padStart(2, "0")}` as TaskId);
       for (const id of ids) writeTaskAuthority(root, taskDocument({ id, title: id }));
-      const first = authorityPath(root, ids[0]!);
-      const later = authorityPath(root, ids[1]!);
+      const first = taskAuthorityFile(root, ids[0]!);
+      const later = taskAuthorityFile(root, ids[1]!);
       if (corrupt) writeFileSync(first, "not Task authority\n");
       const earlyError = new Error("earlier read failed");
       const laterError = new Error("later read failed");
@@ -129,8 +129,8 @@ test("Task nuke lock contention is busy and does not delete unlocked files", asy
     assert.equal(locked.kind, "accepted");
     assert.equal(otherTask.kind, "accepted");
     if (locked.kind !== "accepted" || otherTask.kind !== "accepted") return;
-    const owned = authorityPath(root, locked.value.id);
-    const other = authorityPath(root, otherTask.value.id);
+    const owned = taskAuthorityFile(root, locked.value.id);
+    const other = taskAuthorityFile(root, otherTask.value.id);
     const foreign = join(root, ".keiyaku", "tasks", "Not-Valid.md");
     writeFileSync(foreign, "invalid coordinate\n");
     const ownedBytes = readFileSync(owned);
@@ -159,7 +159,7 @@ test("Task nuke re-enumerates after the allocation lock so a Task created while 
     const tasks = Tasks.of(root);
     const ownedTask = await tasks.add({ title: "Already owned" });
     assert.ok(ownedTask.kind === "accepted", "expected ownedTask.kind = \"accepted\"");
-    const existing = authorityPath(root, ownedTask.value.id);
+    const existing = taskAuthorityFile(root, ownedTask.value.id);
     const created = join(root, ".keiyaku", "tasks", "created-while-waiting.md");
     const held = await acquireSqliteTransactionLock({
       path: join(root, ".keiyaku", "locks", "task-allocation.sqlite"),
