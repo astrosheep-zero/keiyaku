@@ -47,6 +47,22 @@ function builtCli(): string {
   );
 }
 
+test("category status refuses invalid combinations before reading the invocation cwd", async () => {
+  for (const argv of [
+    ["status", "aku", "--limit", "0"],
+    ["status", "kei", "--limit", "9007199254740992"],
+    ["status", "kei/exact", "--limit", "2"],
+    ["status", "aku", "--guidance"],
+    ["status", "kei", "kei/exact"],
+    ["status", "kei/exact", "aku/worker/*"],
+  ]) {
+    const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", ...argv]));
+    assert.equal(result.exit, 64);
+    assert.equal(result.stdout, "");
+    assert.doesNotMatch(result.stderr, /invocation cwd/u);
+  }
+});
+
 test("task query defaults to active rows and opts into terminal rows", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-query-"));
   try {
@@ -244,6 +260,8 @@ test("a local status on an absent complete id reports one caller-facing fact", (
       "  reason  Akuma not found",
       `  id  ${id}`,
       "  accepts  keiyaku status [<contract>|@name|<aku/...>]...",
+      "           keiyaku status (aku|aku/|aku/*) [--limit <count>]",
+      "           keiyaku status (kei|kei/|kei/*) [--limit <count>]",
       "           keiyaku status --guidance [<contract>|@<contract>]",
       "  help  keiyaku status --help",
       "",

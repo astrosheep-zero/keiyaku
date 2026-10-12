@@ -94,6 +94,12 @@ world selection is refused before that read. The returned guidance bytes are the
 owner's own value, rendered directly in text and serialized directly in JSON.
 There is no separate guidance-reading verb.
 
+`status` can request a bounded recent category independently of the World overview.
+The edge selects the category before observation and keeps category bounds out of
+exact and plural identity selection. A category reads its selected owner section;
+Contract categories require Repo, while Akuma categories remain available in a
+World without Repo.
+
 `ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and
 Tasks through `Tasks.of(world).list`. Contract selector resolution continues

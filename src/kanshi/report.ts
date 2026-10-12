@@ -91,4 +91,19 @@ export type KanshiReport = Readonly<{
   akuma: Section<AkumaKanshiWorld>;
   region?: Section<RegionRead>;
 }>;
+
+/** Internal category observation retains only the requested owner section. */
+export type KanshiCategoryReport =
+  | Readonly<{
+      category: "akuma";
+      root: WorldRoot | null;
+      observedAt: string;
+      akuma: Section<AkumaKanshiWorld>;
+    }>
+  | Readonly<{
+      category: "contract";
+      root: WorldRoot | null;
+      observedAt: string;
+      contracts: Section<ContractKanshiBoard>;
+    }>;
 export type { CurrentPhysicalIssue };

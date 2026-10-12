@@ -1,4 +1,12 @@
-import type { ContractKanshiRow, KanshiReport } from "../../kanshi/index.js";
+import type {
+  AkumaKanshiWorld,
+  ContractKanshiBoard,
+  ContractKanshiRow,
+  KanshiCategoryReport,
+  KanshiReport,
+  Section,
+  TaskKanshiWorld,
+} from "../../kanshi/index.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -13,6 +21,7 @@ import {
 } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
+  emptyCatalogue,
   entityLines,
   elapsedMilliseconds,
   identityLine,
@@ -25,7 +34,7 @@ import {
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
-import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
+import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard } from "./kanshi-akuma.js";
 import { contractMark, taskDispositionMark } from "./marks.js";
 import { dispositionText } from "./task.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
@@ -56,13 +65,19 @@ function contractStatusTone(row: ContractKanshiRow, observedAt: string): Semanti
   return journalAge !== null && journalAge <= RECENT_TONE_MS ? "recent" : null;
 }
 
-function gitAbbreviations(report: KanshiReport): ReadonlyMap<string, string> {
+function contractAbbreviations(section: ContractKanshiBoard): ReadonlyMap<string, string> {
   const ids: string[] = [];
-  if (report.contracts.kind !== "present") return abbreviateGitIds(ids);
-  if (report.contracts.value.state !== null) ids.push(report.contracts.value.state);
-  report.contracts.value.rows.forEach((row) => ids.push(...gitIdsInRow(row)));
+  if (section.state !== null) ids.push(section.state);
+  section.rows.forEach((row) => ids.push(...gitIdsInRow(row)));
   return abbreviateGitIds(ids);
 }
+
+/** The owner facts one Contract board can read; an unread owner stays absent rather than guessed. */
+type ContractBoardFacts = Readonly<{
+  observedAt: string;
+  akuma?: Section<AkumaKanshiWorld>;
+  tasks?: Section<TaskKanshiWorld>;
+}>;
 
 function workspaceState(row: ContractKanshiRow): string {
   const observation = row.workspaceObservation;
@@ -81,9 +96,9 @@ function mergeFacts(row: ContractKanshiRow): readonly string[] {
   return summary === undefined ? [] : [summary];
 }
 
-function linkedTask(report: KanshiReport, taskId: string): string {
-  if (report.tasks.kind !== "present") return `! ${taskId} · unavailable`;
-  const task = report.tasks.value.rows.find((candidate) => candidate.id === taskId);
+function linkedTask(tasks: Section<TaskKanshiWorld>, taskId: string): string {
+  if (tasks.kind !== "present") return `! ${taskId} · unavailable`;
+  const task = tasks.value.rows.find((candidate) => candidate.id === taskId);
   return task === undefined
     ? `! ${taskId} · unavailable`
     : `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)}`;
@@ -95,10 +110,10 @@ function isTerminalAkuma(life: string): boolean {
   return life === "killed" || life === "stillborn";
 }
 
-function linkedAkumaSummary(row: ContractKanshiRow, report: KanshiReport): string | undefined {
+function linkedAkumaSummary(row: ContractKanshiRow, akuma: Section<AkumaKanshiWorld> | undefined): string | undefined {
   if (row.roster.length === 0) return undefined;
-  if (report.akuma.kind !== "present") return "akuma  unavailable";
-  const byId = new Map<string, AkumaAttachmentRow>(report.akuma.value.rows.map((akuma) => [akuma.id, akuma]));
+  if (akuma === undefined || akuma.kind !== "present") return "akuma  unavailable";
+  const byId = new Map<string, AkumaAttachmentRow>(akuma.value.rows.map((akuma) => [akuma.id, akuma]));
   const known = row.roster
     .map((attached) => byId.get(attached.id))
     .filter((akuma): akuma is AkumaAttachmentRow => akuma !== undefined);
@@ -130,11 +145,11 @@ function payload(label: string, text: string, context: TextRenderContext): reado
   });
 }
 
-function liveAlarms(row: ContractKanshiRow, report: KanshiReport): readonly string[] {
+function liveAlarms(row: ContractKanshiRow, tasks: Section<TaskKanshiWorld> | undefined): readonly string[] {
   return [
     ...mergeFacts(row),
     ...(row.holder.kind === "unavailable" ? ["task unavailable"] : []),
-    ...(row.holder.kind === "held" && linkedTask(report, row.holder.taskId).startsWith("!")
+    ...(row.holder.kind === "held" && tasks !== undefined && linkedTask(tasks, row.holder.taskId).startsWith("!")
       ? ["task unavailable"]
       : []),
     ...(row.issue === undefined ? [] : ["pending reconciliation"]),
@@ -169,17 +184,17 @@ function staleVerificationFacts(row: ContractKanshiRow): readonly string[] {
 
 function renderSelectedContractRow(
   row: ContractKanshiRow,
-  report: KanshiReport,
+  facts: ContractBoardFacts,
   context: TextRenderContext,
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
-  const statusTone = contractStatusTone(row, report.observedAt);
+  const statusTone = contractStatusTone(row, facts.observedAt);
   const lines = [
     ...entityLines({
       mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
       identity: row.id,
-      state: `${lifecycleWord(row.phase)} · ${formatAge(row.phaseAt, report.observedAt)}`,
+      state: `${lifecycleWord(row.phase)} · ${formatAge(row.phaseAt, facts.observedAt)}`,
       title,
       facts: [],
       context,
@@ -229,20 +244,20 @@ function renderSelectedContractRow(
   }
   if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
     lines.push(...payload("review  ×", deniedReview.current.summary, context));
-  const akuma = linkedAkumaSummary(row, report);
+  const akuma = linkedAkumaSummary(row, facts.akuma);
   if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
   if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
-  lines.push(...semanticBlock("alarms", liveAlarms(row, report), context));
+  lines.push(...semanticBlock("alarms", liveAlarms(row, facts.tasks), context));
   return lines;
 }
 
 function renderWorldContractRow(
   row: ContractKanshiRow,
-  report: KanshiReport,
+  facts: ContractBoardFacts,
   context: TextRenderContext,
+  abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const title = row.title ?? "title unavailable";
-  const abbreviations = gitAbbreviations(report);
   const contractFacts =
     row.phase === "claimed" || row.phase === "abandoned"
       ? terminalFacts(row, context, abbreviations)
@@ -250,32 +265,50 @@ function renderWorldContractRow(
           .slice(0, 1)
       : [
           progressStrip(row),
-          ...(linkedAkumaSummary(row, report) === undefined ? [] : [linkedAkumaSummary(row, report)!]),
-          ...liveAlarms(row, report),
+          ...(linkedAkumaSummary(row, facts.akuma) === undefined ? [] : [linkedAkumaSummary(row, facts.akuma)!]),
+          ...liveAlarms(row, facts.tasks),
         ];
-  const statusTone = contractStatusTone(row, report.observedAt);
+  const statusTone = contractStatusTone(row, facts.observedAt);
   return entityLines({
     mark: statusTone === null ? contractMark(row) : tone(contractMark(row), statusTone, context.color),
     identity: row.id,
-    state: formatAge(row.phaseAt, report.observedAt),
+    state: formatAge(row.phaseAt, facts.observedAt),
     title,
     facts: contractFacts,
     context,
   });
 }
 
-function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
-  const section = report.contracts;
+/**
+ * One Contract board section. A category board states its own emptiness; the World
+ * board leaves an empty section out because the world is its surrounding answer.
+ */
+function renderContractBoard(
+  section: Section<ContractKanshiBoard>,
+  facts: ContractBoardFacts,
+  context: TextRenderContext,
+  emptyRows: readonly string[],
+): readonly string[] {
   if (section.kind === "absent") return ["CONTRACTS // absent"];
   if (section.kind === "failed")
     return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
-  if (section.value.rows.length === 0) return [];
+  if (section.value.rows.length === 0) return emptyRows;
+  const abbreviations = contractAbbreviations(section.value);
   const rendered = renderSectionBlock({
     name: "CONTRACTS",
-    rows: section.value.rows.map((row) => renderWorldContractRow(row, report, context)),
+    rows: section.value.rows.map((row) => renderWorldContractRow(row, facts, context, abbreviations)),
   });
   const header = "CONTRACTS // recent";
   return [header, ...rendered.slice(1), ...(section.value.hasMore === true ? ["…"] : [])];
+}
+
+function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  return renderContractBoard(
+    report.contracts,
+    { observedAt: report.observedAt, akuma: report.akuma, tasks: report.tasks },
+    context,
+    [],
+  );
 }
 
 function renderSelectedContract(report: KanshiReport, context: TextRenderContext): readonly string[] {
@@ -285,7 +318,12 @@ function renderSelectedContract(report: KanshiReport, context: TextRenderContext
   const row = section.value.rows[0];
   return row === undefined
     ? ["  keiyaku absent"]
-    : renderSelectedContractRow(row, report, context, gitAbbreviations(report));
+    : renderSelectedContractRow(
+        row,
+        { observedAt: report.observedAt, akuma: report.akuma, tasks: report.tasks },
+        context,
+        contractAbbreviations(section.value),
+      );
 }
 
 function taskFailureFact(failure: Readonly<{ message: string; coordinate?: string }>): string {
@@ -348,4 +386,16 @@ export function renderKanshiText(
     (block) => block.length > 0,
   );
   return blocks.length === 0 ? "○ world empty" : blocks.map((block) => block.join("\n")).join("\n\n");
+}
+
+/** One category board: the section the selector asked for, and nothing it did not read. */
+export function renderKanshiCategoryText(
+  report: KanshiCategoryReport,
+  context: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false },
+): string {
+  if (report.category === "akuma")
+    return renderAkumaBoard(report.akuma, report.observedAt, context, [emptyCatalogue("akuma")]).join("\n");
+  return renderContractBoard(report.contracts, { observedAt: report.observedAt }, context, [
+    emptyCatalogue("contracts"),
+  ]).join("\n");
 }

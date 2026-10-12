@@ -1,5 +1,5 @@
 import { withoutReportedChanges } from "../akuma/projection.js";
-import { readAkumaRoster, readAkumaTimeline } from "../akuma/akuma.js";
+import { observeAkumaRoster, readAkumaTimeline } from "../akuma/akuma.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { assertRegionPattern } from "../body/region.js";
@@ -20,6 +20,7 @@ import type {
   AkumaKanshiWorld,
   ContractEndpointObservation,
   ContractKanshiBoard,
+  KanshiCategoryReport,
   KanshiRegionSelection,
   KanshiReport,
   RegionDeclaration,
@@ -30,6 +31,8 @@ import type {
 } from "./report.js";
 import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { selectKanshi, selectRegion } from "./select.js";
+
+const WORLD_CONTRACT_ROWS = 10;
 
 export type KanshiInput = Readonly<{
   world: WorldRoot | null;
@@ -156,13 +159,14 @@ async function readBranch(repo?: Repo): Promise<string | null> {
 async function readContracts(
   observation: GitReadObservation,
   include?: ContractBoard["rows"][number]["id"],
+  limit = WORLD_CONTRACT_ROWS,
 ): Promise<Section<ContractBoard | ContractCatalogue>> {
   try {
     return {
       kind: "present",
       value:
         include === undefined
-          ? await readContractCatalogue(observation, 10)
+          ? await readContractCatalogue(observation, limit)
           : await readContractBoard(observation, include),
     };
   } catch (error) {
@@ -353,11 +357,12 @@ async function joinAkuma(
   observeContract: ObserveContractEndpoint,
   isContractClaimed: (id: string) => boolean,
   dispatches: readonly Dispatch[],
-  aliases: Section<readonly AliasBinding[]>,
+  input: Readonly<{ aliases: Section<readonly AliasBinding[]>; limit?: number }>,
 ): Promise<Section<AkumaKanshiWorld>> {
+  const { aliases, limit = ROSTER_VISIBLE_ROWS } = input;
   if (aliases.kind !== "present") return aliases;
   try {
-    const source = await readAkumaRoster(path, { limit: ROSTER_VISIBLE_ROWS });
+    const source = await observeAkumaRoster(path, limit);
     const aliasById = new Map<string, typeof aliases.value>();
     for (const binding of aliases.value)
       aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
@@ -434,7 +439,9 @@ async function observeWithoutRepo(
   const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
   const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
   const akuma =
-    world === null ? { kind: "absent" as const } : await joinAkuma(world, observeContract, () => false, [], aliases);
+    world === null
+      ? { kind: "absent" as const }
+      : await joinAkuma(world, observeContract, () => false, [], { aliases });
   return {
     report: {
       root: world,
@@ -491,7 +498,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
             ? { kind: "absent" as const }
             : dispatches.kind === "failed"
               ? dispatches
-              : await joinAkuma(world, observeContract, (id) => claimed.has(id), dispatches.value, aliases);
+              : await joinAkuma(world, observeContract, (id) => claimed.has(id), dispatches.value, { aliases });
         const assembled = {
           root: world,
           observedAt,
@@ -540,6 +547,99 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
 export async function kanshi(input: KanshiInput): Promise<KanshiReport> {
   return (await observeKanshi(input)).report;
 }
+
+export type KanshiCategoryInput = Readonly<{
+  world: WorldRoot | null;
+  repo?: Repo;
+  category: KanshiCategoryReport["category"];
+  limit?: number;
+}>;
+
+/** Category observations reuse owner rows without reading the Task board. */
+async function observeAkumaCategory(
+  world: WorldRoot | null,
+  repo: ReturnType<typeof scopeForRepo> | undefined,
+  limit: number,
+  observedAt: string,
+): Promise<KanshiCategoryReport> {
+  const report = (akuma: Section<AkumaKanshiWorld>): KanshiCategoryReport => ({
+    category: "akuma",
+    root: world,
+    observedAt,
+    akuma,
+  });
+  if (world === null) return report({ kind: "absent" });
+  const composed = async (observation?: GitReadObservation): Promise<KanshiCategoryReport> => {
+    const aliases = await readAliasBindings(world);
+    if (aliases.kind !== "present") return report(aliases);
+    if (observation === undefined)
+      return report(
+        await joinAkuma(
+          world,
+          () => "unavailable",
+          () => false,
+          [],
+          { aliases, limit },
+        ),
+      );
+    const dispatches = await readDispatches(observation);
+    if (dispatches.kind === "failed") return report(dispatches);
+    const claimed = await claimedAssociatedContracts(observation, dispatches.value);
+    return report(
+      await joinAkuma(
+        world,
+        () => "unavailable",
+        (id) => claimed.has(id),
+        dispatches.value,
+        { aliases, limit },
+      ),
+    );
+  };
+  if (repo === undefined) return await composed();
+  try {
+    return await withGitDecodeChannel(repo, (channel) => withGitReadObservation(repo, channel, composed));
+  } catch (error) {
+    return report({ kind: "failed", failure: { message: diagnostic(error) } });
+  }
+}
+
+async function observeContractCategory(
+  world: WorldRoot | null,
+  repo: ReturnType<typeof scopeForRepo>,
+  limit: number,
+  observedAt: string,
+): Promise<KanshiCategoryReport> {
+  const report = (contracts: Section<ContractKanshiBoard>): KanshiCategoryReport => ({
+    category: "contract",
+    root: world,
+    observedAt,
+    contracts,
+  });
+  try {
+    return await withGitDecodeChannel(repo, (channel) =>
+      withGitReadObservation(repo, channel, async (observation) => {
+        const [contracts, holders] = await Promise.all([
+          readContracts(observation, undefined, limit),
+          readHolders(observation),
+        ]);
+        return report(decorateContracts(contracts, holders));
+      }),
+    );
+  } catch (error) {
+    return report({ kind: "failed", failure: { message: diagnostic(error) } });
+  }
+}
+
+export async function kanshiCategory(input: KanshiCategoryInput): Promise<KanshiCategoryReport> {
+  const observedAt = new Date().toISOString();
+  const { world, repo, category, limit = 10 } = input;
+  if (category === "contract") {
+    if (repo === undefined) throw new TypeError("kanshi contract category requires a Repo");
+    return await observeContractCategory(world, scopeForRepo(repo), limit, observedAt);
+  }
+  return await observeAkumaCategory(world, repo === undefined ? undefined : scopeForRepo(repo), limit, observedAt);
+}
+
 async function attachSelectedIssue(
   observation: GitReadObservation,
   contracts: Section<ContractKanshiBoard>,

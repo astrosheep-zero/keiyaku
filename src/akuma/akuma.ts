@@ -172,7 +172,12 @@ function rosterArchetype(
  */
 export async function readAkumaRoster(path: WorldRoot, input: AkumaListInput = {}): Promise<AkumaList> {
   const selected = rosterArchetype(input, true);
-  const limit = boundedListLimit((input as AkumaListInput).limit);
+  const limit = boundedListLimit(input.limit);
+  return observeAkumaRoster(path, limit, selected);
+}
+
+/** Internal recent observation with an aperture already validated by the composition. */
+export async function observeAkumaRoster(path: WorldRoot, limit: number, selected?: string): Promise<AkumaList> {
   const observedAt = new Date().toISOString();
   const known = await knownAkuma(path, selected);
   const candidatesWithBounds = await boundedMap(known.rows, async (row) => ({

@@ -47,7 +47,7 @@ import type {
 } from "../src/index.js";
 import { parseAkumaAlias, type AkumaAlias } from "../src/identity/selector.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
-import { renderKanshiText } from "../src/cli/render/kanshi.js";
+import { renderKanshiCategoryText, renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
   displayColumns,
   orderRefusalFacts,
@@ -700,6 +700,23 @@ test("empty World status has one explicit empty row", () => {
     ),
     "○ world empty",
   );
+});
+
+test("category boards reuse World rows and bounded omission while naming their own empty state", () => {
+  const context = { columns: 120, color: false };
+  const report = akumaWorldReport([activityAkumaRow("aku/worker/11110001", "asleep", idleAkumaSnapshot([]))]);
+  assert.equal(
+    renderKanshiCategoryText({ category: "akuma", root: report.root, observedAt: report.observedAt, akuma: report.akuma }, context),
+    renderAkuma(report, context).join("\n"),
+  );
+  const contracts = { kind: "present" as const, value: { ...contractCatalog([contractRow()]), rows: [contractRow()], hasMore: true } };
+  const category = { category: "contract" as const, root: report.root, observedAt: report.observedAt, contracts };
+  const text = renderKanshiCategoryText(category, context);
+  assert.equal(text, renderKanshiText({ ...akumaWorldReport([]), contracts, tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } }, observedAt: report.observedAt }, context));
+  assert.ok(text.endsWith("…"));
+  assert.equal(renderKanshiCategoryText({ ...category, contracts: { kind: "present", value: { ...contracts.value, rows: [], hasMore: false } } }), "contracts  none");
+  assert.equal(renderKanshiCategoryText({ ...category, contracts: { kind: "absent" } }), "CONTRACTS // absent");
+  assert.match(renderKanshiCategoryText({ ...category, contracts: { kind: "failed", failure: { message: "owner unavailable" } } }), /CONTRACTS \/\/ unavailable\n\n! owner unavailable/u);
 });
 
 test("empty catalogues share a surface-named none state", () => {

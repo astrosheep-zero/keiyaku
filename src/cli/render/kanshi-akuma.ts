@@ -1,4 +1,4 @@
-import type { AkumaKanshiRow, KanshiReport } from "../../kanshi/index.js";
+import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, Section } from "../../kanshi/index.js";
 import { snapshotActivityLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
 import {
@@ -57,21 +57,30 @@ function endpointFact(id: string, observed: string | undefined): string {
   return observed === "missing" ? `${id} (missing)` : id;
 }
 
-function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
-  const section = report.akuma;
+/**
+ * One Akuma board section. The World board omits an empty section because its other
+ * sections already say what the World holds; a category board states that emptiness
+ * itself, since it is the whole answer.
+ */
+function renderAkumaBoard(
+  section: Section<AkumaKanshiWorld>,
+  observedAt: string,
+  context: TextRenderContext,
+  emptyRows: readonly string[],
+): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;
-  if (rows.length === 0) return [];
+  if (rows.length === 0) return emptyRows;
   const rowLines = rows.map((row) => {
-    const statusTone = akumaStatusTone(row, report.observedAt);
+    const statusTone = akumaStatusTone(row, observedAt);
     const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
-    const lifeAge = formatAge(lifeAt, report.observedAt);
+    const lifeAge = formatAge(lifeAt, observedAt);
     const life = `${row.life} · ${lifeAge}`;
     const activityAge =
-      "lastActivityAt" in row && row.lastActivityAt !== null ? formatAge(row.lastActivityAt, report.observedAt) : null;
+      "lastActivityAt" in row && row.lastActivityAt !== null ? formatAge(row.lastActivityAt, observedAt) : null;
     const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
     const key =
       row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
@@ -105,9 +114,13 @@ function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly
   return [header, ...rendered.slice(1)];
 }
 
+function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  return renderAkumaBoard(report.akuma, report.observedAt, context, []);
+}
+
 function formatAge(source: string | null | undefined, observedAt: string): string {
   if (source === null || source === undefined) return "—";
   return ageText(source, observedAt);
 }
 
-export { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma };
+export { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };

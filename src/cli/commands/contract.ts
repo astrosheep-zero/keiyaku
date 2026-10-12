@@ -14,8 +14,8 @@ import type {
   WorldRoot,
 } from "../../index.js";
 import { Akumas, Keiyaku, KeiyakuError, nuke } from "../../index.js";
-import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
-import { kanshi, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
+import type { KanshiCategoryReport, KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
+import { kanshi, kanshiCategory, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
 import { resolveNamedAddress } from "../../library/address.js";
 import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
@@ -36,7 +36,7 @@ import {
   renderTaskCatalogue,
 } from "../render/catalog.js";
 import { renderAccepted, renderContractHistory, renderRetry, type ContractOutcome } from "../render/contract.js";
-import { renderKanshiText } from "../render/kanshi.js";
+import { renderKanshiCategoryText, renderKanshiText } from "../render/kanshi.js";
 import { nukeExitCode, renderNukeText } from "../render/nuke.js";
 import { reconcileHasFailure, renderReconcile } from "../render/reconcile.js";
 import { renderConflictMaterialized, renderRefusal, type RenderableRefusal } from "../render/refusal.js";
@@ -54,7 +54,7 @@ import { displayContext, writeJson, writeStdout } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { amendFromCommand } from "./amend.js";
 import { bindFromCommand } from "./bind.js";
-import type { ParsedContractCommand } from "./contract-grammar.js";
+import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
@@ -621,19 +621,26 @@ async function runStatusSelection(
   return 0;
 }
 
-async function runStatus(
+async function runStatusCategory(
+  command: Extract<ParsedContractCommand, { command: "status" }> & Readonly<{ category: StatusCategory }>,
+  coordinates: CliCoordinates,
+): Promise<number> {
+  if (command.category === "contract") requiredRepo(coordinates);
+  const report: KanshiCategoryReport = await kanshiCategory({
+    world: coordinates.world,
+    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
+    category: command.category,
+    ...(command.limit === undefined ? {} : { limit: command.limit }),
+  });
+  if (command.output === "json") writeJson(report);
+  else writeStdout(renderKanshiCategoryText(report, displayContext()));
+  return 0;
+}
+
+async function runStatusIdentity(
   command: Extract<ParsedContractCommand, { command: "status" }>,
   coordinates: CliCoordinates,
 ): Promise<number> {
-  if (command.guidance === true) return await runStatusGuidance(command, coordinates);
-  if ("selectors" in command && command.selectors !== undefined)
-    return await runStatusSelection({ ...command, selectors: command.selectors }, coordinates);
-  if (command.akuma === true && command.contract !== undefined) {
-    const resolved = await readAkumaStatus(command.contract, undefined, coordinates);
-    if (command.output === "json") writeJson(resolved.value);
-    else writeStdout(resolved.project());
-    return 0;
-  }
   if (command.contract === undefined) {
     const report = await kanshi({
       world: coordinates.world,
@@ -678,6 +685,23 @@ async function runStatus(
   if (command.output === "json") writeJson(selected);
   else writeStdout(renderKanshiText(selected, displayContext(), "contract"));
   return 0;
+}
+
+async function runStatus(
+  command: Extract<ParsedContractCommand, { command: "status" }>,
+  coordinates: CliCoordinates,
+): Promise<number> {
+  if (command.guidance === true) return await runStatusGuidance(command, coordinates);
+  if (command.category !== undefined) return await runStatusCategory(command, coordinates);
+  if ("selectors" in command && command.selectors !== undefined)
+    return await runStatusSelection({ ...command, selectors: command.selectors }, coordinates);
+  if (command.akuma === true && command.contract !== undefined) {
+    const resolved = await readAkumaStatus(command.contract, undefined, coordinates);
+    if (command.output === "json") writeJson(resolved.value);
+    else writeStdout(resolved.project());
+    return 0;
+  }
+  return await runStatusIdentity(command, coordinates);
 }
 
 async function runRegion(

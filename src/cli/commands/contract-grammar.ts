@@ -82,8 +82,19 @@ export type ParsedStatus = Output &
         selectors?: readonly string[];
         akuma?: never;
         guidance?: true;
+        category?: never;
+        limit?: never;
       }>
-    | Readonly<{ command: "status"; contract: string; akuma: true; guidance?: never }>
+    | Readonly<{ command: "status"; contract: string; akuma: true; guidance?: never; category?: never; limit?: never }>
+    | Readonly<{
+        command: "status";
+        category: StatusCategory;
+        limit?: number;
+        contract?: never;
+        selectors?: never;
+        akuma?: never;
+        guidance?: never;
+      }>
   );
 export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
 export type ParsedAudit = Output &
@@ -247,27 +258,60 @@ function parseReview(parts: ParsedContractParts): ParsedReview {
   };
 }
 
-function parseStatus(parts: ParsedContractParts): ParsedStatus {
-  const guidance = parts.flags.guidance === true;
-  if (guidance) {
-    const selected = parts.positionals[0];
-    if (parts.positionals.length > 1) refuse("status", "--guidance accepts at most one Contract selector");
-    if (selected?.startsWith("aku/") === true) refuse("status", "--guidance cannot select an Akuma");
-    return {
-      command: "status",
-      ...(selected === undefined ? {} : { contract: selected }),
-      guidance: true,
-      output: parts.output,
-    };
+// Only these fixed category forms are status selectors.
+const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, StatusCategory> = new Map([
+  ["aku", "akuma"],
+  ["aku/", "akuma"],
+  ["aku/*", "akuma"],
+  ["kei", "contract"],
+  ["kei/", "contract"],
+  ["kei/*", "contract"],
+]);
+
+export type StatusCategory = "akuma" | "contract";
+
+function rejectStatusGlobs(positionals: readonly string[]): void {
+  for (const selector of positionals) {
+    if (!STATUS_CATEGORY_SELECTORS.has(selector) && !selector.startsWith("@") && /[*?\[\]]/u.test(selector))
+      refuse("status", `unsupported status glob: ${selector}`);
   }
+}
+
+function parseStatusGuidance(parts: ParsedContractParts, limit: number | undefined): ParsedStatus {
+  if (limit !== undefined) refuse("status", "--limit is not valid with --guidance");
+  const selected = parts.positionals[0];
+  if (selected !== undefined && STATUS_CATEGORY_SELECTORS.has(selected))
+    refuse("status", "--guidance cannot select a category");
+  if (parts.positionals.length > 1) refuse("status", "--guidance accepts at most one Contract selector");
+  if (selected?.startsWith("aku/") === true) refuse("status", "--guidance cannot select an Akuma");
+  if (selected !== undefined && !selected.startsWith("@") && /[*?\[\]]/u.test(selected))
+    refuse("status", `unsupported status glob: ${selected}`);
+  return {
+    command: "status",
+    ...(selected === undefined ? {} : { contract: selected }),
+    guidance: true,
+    output: parts.output,
+  };
+}
+
+function parseStatus(parts: ParsedContractParts): ParsedStatus {
+  const limit = listLimit(parts, "status");
+  if (parts.flags.guidance === true) return parseStatusGuidance(parts, limit);
+  rejectStatusGlobs(parts.positionals);
   if (parts.positionals.length > 1) {
+    if (limit !== undefined) refuse("status", "--limit is valid only for one category selector");
+    if (parts.positionals.some((selector) => STATUS_CATEGORY_SELECTORS.has(selector)))
+      refuse("status", "a category selector cannot combine with other selectors");
     return { command: "status", selectors: parts.positionals, output: parts.output };
   }
-  const contract = parts.positionals[0];
-  if (contract?.startsWith("aku/") === true) {
-    return { command: "status", contract, akuma: true, output: parts.output };
-  }
-  return { command: "status", ...(contract === undefined ? {} : { contract }), output: parts.output };
+  const selected = parts.positionals[0];
+  const category = selected === undefined ? undefined : STATUS_CATEGORY_SELECTORS.get(selected);
+  if (category !== undefined)
+    return { command: "status", category, ...(limit === undefined ? {} : { limit }), output: parts.output };
+  if (limit !== undefined) refuse("status", "--limit is valid only for a category selector");
+  if (selected?.startsWith("aku/") === true)
+    return { command: "status", contract: selected, akuma: true, output: parts.output };
+  return { command: "status", ...(selected === undefined ? {} : { contract: selected }), output: parts.output };
 }
 
 function parseRegion(parts: ParsedContractParts): ParsedRegion {
@@ -296,10 +340,10 @@ function akumaCatalogQuery(
   };
 }
 
-function listLimit(parts: ParsedContractParts): number | undefined {
+function listLimit(parts: ParsedContractParts, command: "ls" | "status" = "ls"): number | undefined {
   const limit = optionalFlag(parts.flags, "limit");
   if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
-    refuse("ls", "--limit requires a positive safe integer");
+    refuse(command, "--limit requires a positive safe integer");
   return limit === undefined ? undefined : Number(limit);
 }
 

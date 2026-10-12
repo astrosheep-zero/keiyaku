@@ -44,6 +44,12 @@ manufacturing a roster total. This bounded display observation never supplies
 the frozen complete subject set required by selection, waiting, mutation, or
 other complete roster operations.
 
+A requested category retains the same recent owner order and bounded extent as
+the corresponding World section. It observes that section independently, preserving
+absence and failure, and attaches only available Alias, Dispatch, and TaskHolder
+facts without reading the Task board. The category aperture is never used to
+resolve exact identities.
+
 ## Associations and selection
 
 Kanshi may attach already observed TaskHolder and Dispatch facts to their

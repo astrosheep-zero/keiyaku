@@ -156,11 +156,16 @@ export const CONTRACT_COMMAND_SPECS = {
   status: {
     positional: "optional",
     stdin: "none",
-    flags: { guidance: "boolean", json: "boolean" },
-    usage: "status [<contract>|@name|<aku/...>]...\nstatus --guidance [<contract>|@<contract>]",
+    flags: { guidance: "boolean", limit: "value", json: "boolean" },
+    usage:
+      "status [<contract>|@name|<aku/...>]...\nstatus (aku|aku/|aku/*) [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]\nstatus --guidance [<contract>|@<contract>]",
     purpose: "Show the world overview or selected Contract and Akuma status.",
     details: [
       "Akuma entries show the directory each Akuma was started in.",
+      "",
+      "aku, aku/, and aku/* show the recent Akuma board; kei, kei/, and kei/* show the",
+      "recent active Contract board. --limit bounds the board to that many recent rows",
+      "(default 10). The Contract category requires a Repo; the Akuma category does not.",
       "",
       "--guidance reads one Contract's guidance instead of status. It accepts one Contract",
       "selector or the installed Contract selection context, and refuses an Akuma, plural,",
