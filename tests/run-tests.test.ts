@@ -44,6 +44,48 @@ test("test runner removes ambient Akuma requests and preserves unrelated environ
   }
 });
 
+test("focused and sweep runners isolate Square ledgers through descendant exit and clean failures", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-runner-square-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const ambient = join(directory, "ambient");
+  mkdirSync(ambient);
+  writeFileSync(join(ambient, "sentinel"), "untouched");
+  mkdirSync(join(directory, "tests"));
+  mkdirSync(join(directory, ".test-build", "tests"), { recursive: true });
+  writeFileSync(join(directory, "tests", "ledger.test.ts"), "// fixture source\n");
+  const record = join(directory, "observed-root");
+  const roots: string[] = [];
+  for (const sweep of [false, true]) {
+    writeFileSync(join(directory, ".test-build", "tests", "ledger.test.js"), `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const assert = require('node:assert/strict');
+      require('node:test')('isolated ledger', () => {
+        const root = process.env.SQUARE_HOST_LEDGER_ROOT;
+        assert.notEqual(root, ${JSON.stringify(ambient)});
+        assert.ok(fs.existsSync(root));
+        fs.writeFileSync(${JSON.stringify(record)}, root);
+        const child = require('node:child_process').spawnSync(process.execPath, ['-e',
+          "require('node:fs').writeFileSync(require('node:path').join(process.env.SQUARE_HOST_LEDGER_ROOT, 'descendant'), 'owned')"]);
+        assert.equal(child.status, 0);
+        assert.equal(fs.readFileSync(path.join(root, 'descendant'), 'utf8'), 'owned');
+        ${sweep ? "assert.fail('chosen failure');" : ""}
+      });
+    `);
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/run-tests.mjs"), "--compiled",
+      ...(sweep ? ["--test-concurrency=1"] : ["tests/ledger.test.ts"])], {
+      cwd: directory, encoding: "utf8", env: { ...process.env, SQUARE_HOST_LEDGER_ROOT: ambient },
+    });
+    assert.equal(result.status, sweep ? 1 : 0, result.stdout + result.stderr);
+    const observed = readFileSync(record, "utf8");
+    roots.push(observed);
+    assert.equal(existsSync(observed), false, "runner returned before ledger cleanup");
+    assert.deepEqual(readdirSync(ambient), ["sentinel"]);
+    assert.equal(readFileSync(join(ambient, "sentinel"), "utf8"), "untouched");
+  }
+  assert.notEqual(roots[0], roots[1]);
+});
+
 test("test runner suite selection is explicit and fail-closed", () => {
   assert.deepEqual([...TEST_MANIFESTS.local].sort(), TEST_MANIFESTS.local);
   assert.deepEqual([...TEST_MANIFESTS.integration].sort(), TEST_MANIFESTS.integration);

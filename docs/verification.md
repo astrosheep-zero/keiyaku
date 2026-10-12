@@ -102,6 +102,16 @@ Cancellation requests termination only for work still owned by this attempt;
 it stops later owned phases and still awaits independently bounded retirement.
 It never erases a confirmed leading admission or its cleanup residue.
 
+## Repository Test Isolation
+
+The repository test runner owns a fresh temporary Square host ledger for each
+invocation, replacing any inherited host-ledger location. Test children and their
+descendants share that invocation's ledger; nested runners create their own.
+The runner removes its ledger after owned test children terminate, on passing and
+failing runs alike. Tests never add synthetic presence to the caller's live ledger.
+This is test-harness isolation, not a change to Verification's inherited-environment
+contract or to production provider environments.
+
 ## Ownership
 
 Verification resolves declarations and produces terminal verdicts. Protocol

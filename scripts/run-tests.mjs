@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, globSync, mkdirSync, mkdtempSync, statSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { TEST_MANIFESTS } from "./test-manifests.mjs";
 import { orderSweepEntries } from "./test-plan.mjs";
@@ -117,7 +118,9 @@ if (compiled && runtimeFiles.some((file) => !existsSync(file))) {
   process.exit(1);
 }
 const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
+const ledgerRoot = mkdtempSync(join(tmpdir(), "keiyaku-test-square-ledger-"));
 const environment = { ...process.env };
+environment.SQUARE_HOST_LEDGER_ROOT = ledgerRoot;
 delete environment.AKUMA_REQUESTS;
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
@@ -125,86 +128,90 @@ const started = performance.now();
 // Keep the ordinary compiled sweep expensive-first while owning every isolated native
 // child through terminal settlement. The embedded node:test runner does not give
 // this process custody of those children.
-if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
-  const logDirectory = makeSweepLogDirectory();
-  // Print the artifact directory before any child starts so a hanging sweep is diagnosable.
-  console.log(`[run-tests] per-file logs: ${logDirectory}`);
-  const executionEntries = orderSweepEntries(selectedFiles.map((file) => ({ file, size: statSync(file).size })))
-    .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
-    .map((file, index) => ({
-      file,
-      log: join(logDirectory, `${String(index).padStart(3, "0")}-${file.replace(/[/\\]+/gu, "_")}.log`),
-    }));
-  const stillRunningThresholdMs = positiveMilliseconds(
-    process.env.KEIYAKU_TEST_STILL_RUNNING_MS,
-    STILL_RUNNING_THRESHOLD_MS,
-  );
-  const stillRunningIntervalMs = positiveMilliseconds(
-    process.env.KEIYAKU_TEST_STILL_RUNNING_INTERVAL_MS,
-    STILL_RUNNING_INTERVAL_MS,
-  );
-  const concurrency = Math.max(1, Number(testOptions.at(-1)?.split("=")[1] ?? 8));
-  let next = 0;
-  let failed = false;
-  const worker = async () => {
-    for (;;) {
-      const entry = executionEntries[next++];
-      if (entry === undefined) return;
-      const { file, log } = entry;
-      const fileStarted = performance.now();
-      console.log(`RUNS ${file}`);
-      const status = await new Promise((resolve) => {
-        let stopAnnouncements = () => {};
-        const threshold = setTimeout(() => {
-          console.log(`still running: ${file} (${formatElapsed(performance.now() - fileStarted)})`);
-          const interval = setInterval(() => {
+try {
+  if (compiled && files.length === 0 && testOptions.every((option) => /^--test-concurrency=\d+$/u.test(option))) {
+    const logDirectory = makeSweepLogDirectory();
+    // Print the artifact directory before any child starts so a hanging sweep is diagnosable.
+    console.log(`[run-tests] per-file logs: ${logDirectory}`);
+    const executionEntries = orderSweepEntries(selectedFiles.map((file) => ({ file, size: statSync(file).size })))
+      .map(({ file }) => ".test-build/" + file.replace(/\.ts$/u, ".js"))
+      .map((file, index) => ({
+        file,
+        log: join(logDirectory, `${String(index).padStart(3, "0")}-${file.replace(/[/\\]+/gu, "_")}.log`),
+      }));
+    const stillRunningThresholdMs = positiveMilliseconds(
+      process.env.KEIYAKU_TEST_STILL_RUNNING_MS,
+      STILL_RUNNING_THRESHOLD_MS,
+    );
+    const stillRunningIntervalMs = positiveMilliseconds(
+      process.env.KEIYAKU_TEST_STILL_RUNNING_INTERVAL_MS,
+      STILL_RUNNING_INTERVAL_MS,
+    );
+    const concurrency = Math.max(1, Number(testOptions.at(-1)?.split("=")[1] ?? 8));
+    let next = 0;
+    let failed = false;
+    const worker = async () => {
+      for (;;) {
+        const entry = executionEntries[next++];
+        if (entry === undefined) return;
+        const { file, log } = entry;
+        const fileStarted = performance.now();
+        console.log(`RUNS ${file}`);
+        const status = await new Promise((resolve) => {
+          let stopAnnouncements = () => {};
+          const threshold = setTimeout(() => {
             console.log(`still running: ${file} (${formatElapsed(performance.now() - fileStarted)})`);
-          }, stillRunningIntervalMs);
-          stopAnnouncements = () => clearInterval(interval);
-        }, stillRunningThresholdMs);
-        /** @param {number} code */
-        const settle = (code) => {
-          clearTimeout(threshold);
-          stopAnnouncements();
-          resolve(code);
-        };
-        // Node pairs each reporter with its own destination; keep the stdout
-        // reporter exactly as the outer path chose it, then add the spec log.
-        const child = spawn(
-          process.execPath,
-          [
-            ...loader,
-            "--test",
-            // This worker already owns exactly one file in its own native process.
-            "--experimental-test-isolation=none",
-            ...reporterOptions,
-            "--test-reporter-destination=stdout",
-            "--test-reporter=spec",
-            `--test-reporter-destination=${log}`,
-            file,
-          ],
-          { stdio: "inherit", env: environment },
-        );
-        child.once("error", () => settle(1));
-        child.once("close", (code) => settle(code ?? 1));
-      });
-      console.log(`${status === 0 ? "PASS" : "FAIL"} ${file} (${formatElapsed(performance.now() - fileStarted)})`);
-      if (status !== 0) failed = true;
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, executionEntries.length) }, worker));
-  process.exitCode = failed ? 1 : 0;
-} else {
-  const result = spawnSync(
-    process.execPath,
-    [...loader, "--test", ...reporterOptions, ...testOptions, ...runtimeFiles],
-    {
-      stdio: "inherit",
-      env: environment,
-    },
-  );
-  if (result.error) throw result.error;
-  process.exitCode = result.status ?? 1;
+            const interval = setInterval(() => {
+              console.log(`still running: ${file} (${formatElapsed(performance.now() - fileStarted)})`);
+            }, stillRunningIntervalMs);
+            stopAnnouncements = () => clearInterval(interval);
+          }, stillRunningThresholdMs);
+          /** @param {number} code */
+          const settle = (code) => {
+            clearTimeout(threshold);
+            stopAnnouncements();
+            resolve(code);
+          };
+          // Node pairs each reporter with its own destination; keep the stdout
+          // reporter exactly as the outer path chose it, then add the spec log.
+          const child = spawn(
+            process.execPath,
+            [
+              ...loader,
+              "--test",
+              // This worker already owns exactly one file in its own native process.
+              "--experimental-test-isolation=none",
+              ...reporterOptions,
+              "--test-reporter-destination=stdout",
+              "--test-reporter=spec",
+              `--test-reporter-destination=${log}`,
+              file,
+            ],
+            { stdio: "inherit", env: environment },
+          );
+          child.once("error", () => settle(1));
+          child.once("close", (code) => settle(code ?? 1));
+        });
+        console.log(`${status === 0 ? "PASS" : "FAIL"} ${file} (${formatElapsed(performance.now() - fileStarted)})`);
+        if (status !== 0) failed = true;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, executionEntries.length) }, worker));
+    process.exitCode = failed ? 1 : 0;
+  } else {
+    const result = spawnSync(
+      process.execPath,
+      [...loader, "--test", ...reporterOptions, ...testOptions, ...runtimeFiles],
+      {
+        stdio: "inherit",
+        env: environment,
+      },
+    );
+    if (result.error) throw result.error;
+    process.exitCode = result.status ?? 1;
+  }
+} finally {
+  rmSync(ledgerRoot, { recursive: true, force: true });
 }
 if (suite !== undefined) {
   process.once("beforeExit", () =>
