@@ -133,11 +133,19 @@ export async function withPrivateGitIndex<Value>(
   action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>,
 ): Promise<Value> {
   const directory = await mkdtemp(join(tmpdir(), "keiyaku-v4-index-"));
+  let value: Value;
   try {
-    return await action({ GIT_INDEX_FILE: join(directory, "index") });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+    value = await action({ GIT_INDEX_FILE: join(directory, "index") });
+  } catch (error) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Private Git index capture and cleanup failed");
+    }
+    throw error;
   }
+  await rm(directory, { recursive: true, force: true });
+  return value;
 }
 
 function fields(record: string, count: number): readonly string[] {
@@ -157,15 +165,12 @@ type WorkspaceStatus = WorkspaceChanges & Readonly<{ unmergedPaths: readonly str
 
 async function workspaceStatus(repository: GitRepository, workspace: string): Promise<WorkspaceStatus> {
   const records = (
-    await runGit(repository, [
-      "-C",
-      workspace,
-      "status",
-      "--porcelain=v2",
-      "-z",
-      "--untracked-files=all",
-      "--ignore-submodules=none",
-    ])
+    await runGitWithEnvironment(
+      repository,
+      ["-C", workspace, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"],
+      undefined,
+      { GIT_OPTIONAL_LOCKS: "0" },
+    )
   )
     .toString("utf8")
     .split("\0");
@@ -373,11 +378,28 @@ export async function captureWorkspaceTree(repository: GitRepository, workspace:
   if (!dirty) return { tree, head, at, dirty, changes };
 
   return await withPrivateGitIndex(async (environment) => {
-    await runGitWithEnvironment(repository, ["-C", workspace, "read-tree", "HEAD"], undefined, environment);
-    await runGitWithEnvironment(repository, ["-C", workspace, "add", "--all"], undefined, environment);
+    await runGitWithEnvironment(
+      repository,
+      ["-C", workspace, "-c", "core.splitIndex=false", "read-tree", gitObjectId(head)],
+      undefined,
+      environment,
+    );
+    await runGitWithEnvironment(
+      repository,
+      ["-C", workspace, "-c", "core.splitIndex=false", "add", "--all"],
+      undefined,
+      environment,
+    );
     return {
       tree: gitObjectId(
-        (await runGitWithEnvironment(repository, ["-C", workspace, "write-tree"], undefined, environment))
+        (
+          await runGitWithEnvironment(
+            repository,
+            ["-C", workspace, "-c", "core.splitIndex=false", "write-tree"],
+            undefined,
+            environment,
+          )
+        )
           .toString("utf8")
           .trim(),
         "workspace tree",

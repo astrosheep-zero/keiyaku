@@ -74,6 +74,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/git-read-observation.test.ts",
   "tests/git-reconciliation.test.ts",
   "tests/git-repository.test.ts",
+  "tests/git-workspace-capture.test.ts",
   "tests/grok-live-tell.test.ts",
   "tests/invocation-failure-boundary.test.ts",
   "tests/kanshi.test.ts",

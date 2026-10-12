@@ -322,10 +322,14 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     const git = await cachedRepositoryAt(repository.path);
     const state = (await observeContract(git, id)).state;
     if (state === null) throw new Error("contract was not observed");
+    const indexPath = repository.run([
+      "-C", worktree, "rev-parse", "--path-format=absolute", "--git-path", "index",
+    ]).trim();
+    const indexBefore = readFileSync(indexPath);
+    const headBefore = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
     const review = await prepareReview(git, preparationCoordinates(state));
     assert.ok(review.kind === "prepared", "expected review.kind = \"prepared\"");
     assert.equal("documentKey" in review, false);
-    const indexBefore = repository.run(["-C", worktree, "diff", "--cached", "--binary"]);
 
     const prepared = await prepareDelivery(git, preparationCoordinates(state), {
       title: "Patch identity",
@@ -341,7 +345,8 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
       unmergedPaths: [],
     });
-    assert.equal(repository.run(["-C", worktree, "diff", "--cached", "--binary"]), indexBefore);
+    assert.deepEqual(readFileSync(indexPath), indexBefore);
+    assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), headBefore);
     assert.match(
       repository.run(["show", "-s", "--format=%B", prepared.data.integration.snapshot]),
       /kei\/.*: Patch identity/,
