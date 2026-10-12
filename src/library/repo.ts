@@ -5,7 +5,6 @@ import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
 
 export { NoGitWorldError };
-export type { RepoContractReconcileReport, RepoReconcileReport } from "./reconcile.js";
 
 export type RepoAtInput = Readonly<{ path?: string; gitPath?: string }>;
 

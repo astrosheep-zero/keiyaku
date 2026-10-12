@@ -6,7 +6,7 @@ import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../
 import { unmergedWorkspacePaths, worktreePath } from "../git/workspace.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
-  contractStateWitness,
+  externalPreparation,
   privateStateSeatAttempt,
   runBoundedAttempts,
   sameWorktreeWitness,
@@ -44,7 +44,7 @@ const reviewWorkspaceEvidenceSchema = workspaceDirtyDeltaSchema
   .strict();
 type ReviewWorkspaceEvidence = z.infer<typeof reviewWorkspaceEvidenceSchema>;
 export const reviewAdmissionValueSchema = z.object({ workspace: reviewWorkspaceEvidenceSchema.optional() }).strict();
-export type ReviewAdmissionValue = z.infer<typeof reviewAdmissionValueSchema>;
+type ReviewAdmissionValue = z.infer<typeof reviewAdmissionValueSchema>;
 
 type PreparedReview = Readonly<{
   workspace?: ReviewWorkspaceEvidence;
@@ -99,33 +99,6 @@ async function captureReviewableWorktree(
       changeId: await worktreeChangeId(repository, stage, tender.data),
       tender: tender.data,
       ...(workspaceEvidence === undefined ? {} : { workspace: workspaceEvidence }),
-    },
-  };
-}
-
-export async function prepareReview(
-  repository: RepositoryScope,
-  stage: Readonly<{
-    contractId: import("../core/facts/types.js").ContractId;
-    coordinates: ContractState["coordinates"];
-  }>,
-): Promise<
-  | {
-      kind: "prepared";
-      data: Readonly<{
-        changeId: DeliverData["integration"]["changeId"];
-        workspace?: ReviewWorkspaceEvidence;
-      }>;
-    }
-  | { kind: "refused"; refusal: ReviewPreparationRefusal }
-> {
-  const prepared = await captureReviewableWorktree(repository, stage);
-  if (prepared.kind === "refused") return prepared;
-  return {
-    kind: "prepared",
-    data: {
-      changeId: prepared.data.changeId,
-      ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
     },
   };
 }
@@ -194,25 +167,19 @@ async function recaptureReviewWorktree(
 
 /** Capture the reviewable worktree from one non-authoritative private-state read. */
 async function prepareExternalReview(input: ReviewOperationInput): Promise<ExternalReviewPreparation> {
-  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(observation.decision, input.contractId);
-  if (state === null) return { kind: "unavailable" };
-  const prepared = await captureReviewableWorktree(input.scope, {
-    contractId: state.id,
-    coordinates: state.coordinates,
+  return await externalPreparation(input, async (_, state) => {
+    const prepared = await captureReviewableWorktree(input.scope, {
+      contractId: state.id,
+      coordinates: state.coordinates,
+    });
+    return prepared.kind === "refused"
+      ? { kind: "refused", refusal: prepared.refusal }
+      : {
+          kind: "captured",
+          ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
+          worktree: reviewWorktreeInput(prepared),
+        };
   });
-  return {
-    kind: "artifacts",
-    witness: contractStateWitness(state),
-    artifacts:
-      prepared.kind === "refused"
-        ? { kind: "refused", refusal: prepared.refusal }
-        : {
-            kind: "captured",
-            ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
-            worktree: reviewWorktreeInput(prepared),
-          },
-  };
 }
 
 /** Assemble the in-custody attestation input from the fresh Contract and validated artifacts. */
@@ -256,16 +223,7 @@ async function decideAndAdmitReview(
     observation: observation.decision,
   });
   if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
-  const admission = await admitDecidedOffer({
-    channel: input.channel,
-    repository: input.scope,
-    seat,
-    decisionObservation: observation,
-    attempt,
-    offer: decision.offer,
-    primaryContract: input.contractId,
-    ...(input.progress === undefined ? {} : { progress: input.progress }),
-  });
+  const admission = await admitDecidedOffer({ ...input, seat, observation, attempt, offer: decision.offer });
   if (admission.kind !== "accepted") return admission;
   return {
     ...admission,

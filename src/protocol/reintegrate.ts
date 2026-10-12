@@ -22,7 +22,7 @@ import type { GitRefAssertion } from "../git/repository.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type AttemptTerminal } from "./attempt.js";
 import { timestamp } from "./operations.js";
 import {
-  contractStateWitness,
+  externalPreparation,
   STALE_PRIVATE_STATE_PREPARATION,
   type ContractStateWitness,
   type ProtocolTerminal,
@@ -30,7 +30,7 @@ import {
 import { runUnderTargetPlacementFence, type PlacementExecutionFailure } from "./placement.js";
 
 type TargetMissing = Readonly<{ kind: "target-missing"; contractId: ContractId }>;
-export type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal;
+type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal;
 export type ReintegrationResult =
   | (AcceptedAdmission & Readonly<{ value: ReintegratedData }>)
   | Readonly<{ kind: "refused"; refusal: ReintegrationRefusal }>
@@ -77,14 +77,9 @@ type ExternalReintegrationPreparation =
 
 /** Plan and materialize the target-specific reintegration artifacts outside the publication seat. */
 async function prepareExternalReintegration(input: ReintegrationInput): Promise<ExternalReintegrationPreparation> {
-  const observation = await observeContractsForAdmissionAt(input.repository, input.channel, [input.contractId]);
-  const state = contractState(observation.decision, input.contractId);
-  if (state === null) return { kind: "unavailable" };
-  return {
-    kind: "artifacts",
-    witness: contractStateWitness(state),
-    artifacts: await planReintegrationArtifacts(input, state),
-  };
+  return await externalPreparation({ ...input, scope: input.repository }, (_, state) =>
+    planReintegrationArtifacts(input, state),
+  );
 }
 
 async function planReintegrationArtifacts(
@@ -163,14 +158,12 @@ async function runReintegration(
         });
         if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
         const admitted = await admitDecidedOffer({
-          channel: input.channel,
-          repository: input.repository,
+          ...input,
+          scope: input.repository,
           seat,
-          decisionObservation: observation,
+          observation,
           attempt,
           offer: decision.offer,
-          primaryContract: input.contractId,
-          ...(input.progress === undefined ? {} : { progress: input.progress }),
           ...(assembled.kind === "prepared" ? { assertions: [assembled.assertion] } : {}),
         });
         if (admitted.kind === "accepted") {

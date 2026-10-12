@@ -1,13 +1,7 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { prerequisitesReach, samePrerequisites } from "../facts/eligibility.js";
 import { activeContract, prerequisiteStatus } from "../facts/observation.js";
-import {
-  type ActorId,
-  type AmendData,
-  type ContractId,
-  type ContractTerms,
-  type JournalEntry,
-} from "../facts/types.js";
+import { journalEntry, type ActorId, type AmendData, type ContractId, type ContractTerms } from "../facts/types.js";
 
 export type AmendInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -53,14 +47,6 @@ export function decideAmend<Failure>({
   if (prerequisitesReach(id, data.after, observation)) {
     return { kind: "refused", refusal: { kind: "cyclic-prerequisite", contractId: id } };
   }
-  const entry: JournalEntry = {
-    v: 1,
-    kind: "amend",
-    contract: id,
-    entry: attempt.entryUlids[0]!,
-    at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data,
-  };
+  const entry = journalEntry("amend", input, attempt.entryUlids[0]!, data);
   return { kind: "offer", offer: { facts: [{ contractId: id, entries: [entry] }] } };
 }

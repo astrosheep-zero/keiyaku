@@ -132,7 +132,7 @@ export type DeliverData = Readonly<{
   }>;
 }>;
 
-export type CurrentIntegration = DeliverData["integration"];
+type CurrentIntegration = DeliverData["integration"];
 
 export type ReintegratedData = Readonly<{
   predecessor: SnapshotId;
@@ -169,7 +169,7 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
 export type BindEntry = JournalEnvelope<"bind", BindData>;
 type AmendEntry = JournalEnvelope<"amend", AmendData>;
 type DeliverEntry = JournalEnvelope<"deliver", DeliverData>;
-export type ReintegratedEntry = JournalEnvelope<"reintegrated", ReintegratedData>;
+type ReintegratedEntry = JournalEnvelope<"reintegrated", ReintegratedData>;
 export type AttestationEntry = JournalEnvelope<"attestation", AttestationData>;
 type ClaimedEntry = JournalEnvelope<"claimed", ClaimedData>;
 export type ArcEntry = JournalEnvelope<"arc", ArcData>;
@@ -186,6 +186,30 @@ export type JournalEntry =
   | AbandonedEntry;
 
 export type FactKind = JournalEntry["kind"];
+
+/**
+ * The one journal-envelope constructor for every verb offering a single fact: entry identity, the
+ * invoking decision input's Contract, timestamp, and optional actor, and the verb's own payload.
+ */
+export function journalEntry<
+  Kind extends FactKind,
+  Input extends Readonly<{ contractId: ContractId; at: string; actor?: ActorId }>,
+>(
+  kind: Kind,
+  input: Input,
+  entry: EntryUlid,
+  data: Extract<JournalEntry, { kind: Kind }>["data"],
+): Extract<JournalEntry, { kind: Kind }> {
+  return {
+    v: 1,
+    kind,
+    contract: input.contractId,
+    entry,
+    at: input.at,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    data,
+  } as Extract<JournalEntry, { kind: Kind }>;
+}
 
 type ContractTerminal = ClaimedEntry | AbandonedEntry;
 

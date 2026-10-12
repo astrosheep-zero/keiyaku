@@ -5,10 +5,18 @@ import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
 import { contractId, documentKey, snapshotId, type ContractHead, type ContractState } from "../src/core/facts/types.js";
-import { mergeAdmissions } from "../src/protocol/operations.js";
 const id = contractId("kei/mutation-finality-test");
-function outcome(progress: InvocationAccumulator, value: unknown = undefined, operation: "review" | "audit" | "amend" = "review") {
-  const result = project(operation, progress.snapshot(), { kind: "accepted", contract: id, head: "head" as ContractHead, value });
+function outcome(
+  progress: InvocationAccumulator,
+  value: unknown = undefined,
+  operation: "review" | "audit" | "amend" = "review",
+) {
+  const result = project(operation, progress.snapshot(), {
+    kind: "accepted",
+    contract: id,
+    head: "head" as ContractHead,
+    value,
+  });
   assert.equal(result.kind, "returned");
   assert.ok(result.kind === "returned");
   return result.outcome;
@@ -25,20 +33,27 @@ function auditReport(): AuditReport {
   };
 }
 
-
 test("audit terminal verification projects complete", () => {
   assert.deepEqual(outcome(new InvocationAccumulator(), auditReport(), "audit").pending, []);
 });
 
 test("mutation lag scopes identify the affected pending action", () => {
   const progress = new InvocationAccumulator();
-  progress.recordReconciliation(id, { lag: [
-    { kind: "worktree-retained", path: "/tmp/terminal" },
-    { kind: "unsealed-bytes", path: "/tmp/scratch", paths: [] },
-    { kind: "worktree-follow-retained", path: "/tmp/dependent", tender: snapshotId("tender"), head: snapshotId("head"), reason: "head-moved" },
-    { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
-    { kind: "reconcile-failed", stage: "effect", diagnostic: "busy" },
-  ] });
+  progress.recordReconciliation(id, {
+    lag: [
+      { kind: "worktree-retained", path: "/tmp/terminal" },
+      { kind: "unsealed-bytes", path: "/tmp/scratch", paths: [] },
+      {
+        kind: "worktree-follow-retained",
+        path: "/tmp/dependent",
+        tender: snapshotId("tender"),
+        head: snapshotId("head"),
+        reason: "head-moved",
+      },
+      { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
+      { kind: "reconcile-failed", stage: "effect", diagnostic: "busy" },
+    ],
+  });
   assert.deepEqual(outcome(progress).pending, [
     { surface: "continuation", required: true },
     { surface: "placement", required: true },
@@ -79,16 +94,19 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
     journal: [],
     seatClose: [second],
   };
-  const merged = mergeAdmissions(current, next);
-  assert.deepEqual(merged.seatClose, [first, second]);
   const seatClose = concatenatePrivateStateSeatClose(current.seatClose, next.seatClose);
   assert.deepEqual(seatClose, [first, second]);
+  const merged = seatClose === undefined ? next : { ...next, seatClose };
   const progress = new InvocationAccumulator();
   progress.recordResidue(state.id, merged);
   assert.deepEqual(outcome(progress, undefined, "amend").pending, [{ surface: "cleanup", required: false }]);
-  assert.deepEqual(progress.snapshot().effects.filter((effect) => effect.kind === "cleanup").map((effect) => effect.issue),
-    [first, second].map((failure) => ({ kind: "private-state-seat-close", contractId: state.id, failure })));
-
+  assert.deepEqual(
+    progress
+      .snapshot()
+      .effects.filter((effect) => effect.kind === "cleanup")
+      .map((effect) => effect.issue),
+    [first, second].map((failure) => ({ kind: "private-state-seat-close", contractId: state.id, failure })),
+  );
 });
 
 test("mutation nuke confirmed seat-close failure remains a typed outcome", async () => {
@@ -124,7 +142,9 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
     assert.deepEqual(publicResult.pending, [{ surface: "reset", required: false }]);
     assert.deepEqual(publicResult.effects, [
       {
-        kind: "reset-residue", world, owner: "git",
+        kind: "reset-residue",
+        world,
+        owner: "git",
         diagnostic: "nuke seat close failed after publication",
       },
     ]);

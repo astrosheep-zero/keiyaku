@@ -36,7 +36,7 @@ export type PlacementExecutionFailure = Readonly<{
   diagnostic: string;
 }>;
 
-export type TargetMovedStop = Readonly<{
+type TargetMovedStop = Readonly<{
   kind: "target-moved";
   contractId: ContractId;
   target: string;
@@ -143,14 +143,13 @@ async function runFencedPlacement(
         const physical = await prepareTargetPlacement(repository, state, target, changes);
         if (physical.kind === "refused") return physical;
         const admitted = await admitDecidedOffer({
-          channel: protocol.channel,
-          repository,
+          ...protocol,
+          scope: repository,
+          contractId: input.contractId,
           seat,
-          decisionObservation: prepared.observation,
+          observation: prepared.observation,
           attempt: prepared.attempt,
           offer: prepared.offer,
-          primaryContract: input.contractId,
-          ...(protocol.progress === undefined ? {} : { progress: protocol.progress }),
         });
         if (admitted.kind === "accepted") preparedPhysical = physical.placement;
         return admitted;

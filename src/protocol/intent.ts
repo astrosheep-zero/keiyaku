@@ -44,7 +44,7 @@ type CommonIntentAdmissionOptions<Refusal> = Readonly<{
   observationSelection?: GitTreeSelection;
 }>;
 
-type IntentAdmissionOptions<Refusal = never> = CommonIntentAdmissionOptions<Refusal>;
+export type IntentAdmissionOptions<Refusal = never> = CommonIntentAdmissionOptions<Refusal>;
 
 type PreparedIntentAdmissionOptions<Input, Refusal, Seed, Prepared> = CommonIntentAdmissionOptions<Refusal> &
   Readonly<{ preparation: ProtocolPreparation<Input, Refusal, Seed, Prepared> }>;

@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
+import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import type { ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
@@ -9,7 +10,6 @@ import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/in
 import { currentBranch, observeContractAt } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
-  concatenatePrivateStateSeatClose,
   mergePrivateStateSeatClose,
   type PrivateStateSeatCloseLag,
   type PrivateStateSeatOutcome,
@@ -28,9 +28,10 @@ import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspac
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
+import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
 import type { VerificationCleanupFailure, VerificationResult } from "./intent.js";
 import { verificationRuntimeStopSchema } from "./intent.js";
-import type { AcceptedProtocolStep, IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import { complete, type AcceptedProtocolStep, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
 import type { PlacementProtocolResult } from "./placement.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
@@ -181,6 +182,29 @@ type OperationInput = Readonly<{
 export type MutationOperationInput = OperationInput &
   Readonly<{ channel: GitDecodeChannel; progress?: ProtocolProgress }>;
 
+/** The decision input of an intent whose verb contributes only its own payload. */
+type VoidIntentDecision<Payload extends object> = Payload &
+  Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+
+/**
+ * Observe, decide, and atomically admit one intent over the invoking actor and time, then complete it
+ * as a void outcome. The verb contributes only its own decision payload.
+ */
+export async function admitVoidIntent<Payload extends object, Refusal>(
+  input: MutationOperationInput,
+  payload: Payload,
+  decide: (input: DecideInput<VoidIntentDecision<Payload>>) => OfferDecision<Refusal>,
+  options?: IntentAdmissionOptions<Refusal>,
+): Promise<IntentOutcome<void, Refusal>> {
+  const decisionInput: VoidIntentDecision<Payload> = {
+    contractId: input.contractId,
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    at: timestamp(),
+    ...payload,
+  };
+  return complete(await admitIntent(input.channel, input.scope, decisionInput, decide, options), undefined);
+}
+
 export type DocumentDerivation = Readonly<{
   document: DocumentKey;
   bytes: string;
@@ -257,19 +281,7 @@ export function attemptDecisionWithSeatClose<Value, Refusal = IntentRefusal>(
   });
 }
 
-export function mergeAdmissions(current: AcceptedProtocolStep, next: AcceptedProtocolStep): AcceptedProtocolStep {
-  const effects = [...(current.physical?.effects ?? []), ...(next.physical?.effects ?? [])];
-  const lag = [...(current.physical?.lag ?? []), ...(next.physical?.lag ?? [])];
-  const seatClose = concatenatePrivateStateSeatClose(current.seatClose, next.seatClose);
-  return {
-    ...next,
-    facts: [...current.facts, ...next.facts],
-    ...(effects.length === 0 && lag.length === 0 ? {} : { physical: { effects, lag } }),
-    ...(seatClose === undefined ? {} : { seatClose }),
-  };
-}
-
-export function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
+function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
   if (result.kind === "accepted") return undefined;
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }

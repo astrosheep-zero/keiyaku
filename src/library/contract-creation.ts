@@ -24,7 +24,7 @@ import { actorOption, normalizedList, requireInput, requireMarkdown, taskOption 
 import { InvocationAccumulator } from "./invocation.js";
 import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
 import { project, validated, type OutcomeProjection } from "./outcome.js";
-import { completeReconcile } from "./reconcile.js";
+import { reconcileAffectedContracts } from "./reconcile.js";
 import type { OperationRefusals } from "./refusal.js";
 import { observeRegion, type RegionObservation } from "./region.js";
 import { scopeForRepo } from "./repo.js";
@@ -172,7 +172,7 @@ async function bindComplete<Value>(
   value: () => Promise<BindValue>,
 ): Promise<BindValue> {
   retainAdmission(accumulator, id, leading, false);
-  await reconcileAll(accumulator, id, scope, channel, hooks);
+  await reconcileAffectedContracts(accumulator, id, scope, channel, hooks);
   try {
     const appointment = await readManagedWorktreeAppointment(scope, id);
     if (appointment.kind === "appointed")
@@ -186,38 +186,6 @@ async function bindComplete<Value>(
   const built = { ...(await value()), ...accumulator.conclusions(id) } as BindValue;
   accumulator.extendConclusions(id, conclusions(built));
   return built;
-}
-
-async function reconcileAll(
-  accumulator: InvocationAccumulator,
-  id: ContractId,
-  scope: RepositoryScope,
-  channel: GitDecodeChannel,
-  hooks: WorktreeHooks,
-): Promise<void> {
-  for (const contract of [...new Set([id, ...accumulator.snapshot().affected])]) {
-    try {
-      accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "started" });
-      const report = await (async () => {
-        try {
-          return await completeReconcile({
-            scope,
-            channel,
-            contractId: contract,
-            hooks,
-            retryHooks: false,
-            progress: accumulator,
-          });
-        } finally {
-          accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "finished" });
-        }
-      })();
-      void report;
-    } catch (error) {
-      if (!isOperationalStop(error, scope.signal)) throw error;
-      accumulator.recordStop(executionStop(contract, "reconciliation", error, scope.signal));
-    }
-  }
 }
 
 // eslint-disable-next-line max-params -- Keep this local operation's custody, admission, and policy witnesses explicit.

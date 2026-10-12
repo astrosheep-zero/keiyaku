@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractFileEffectSchema } from "../contract-worktree.js";
-import { decodeJournalEntry } from "../core/facts/codec.js";
+import { validateEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractHead, ContractId } from "../core/facts/types.js";
 import { contractHeadSchema } from "../git/identity.js";
@@ -453,7 +453,7 @@ const partialValueSchemas = {
 } as const;
 const journalEntrySchema = z.unknown().transform((value, context) => {
   try {
-    return decodeJournalEntry(value);
+    return validateEntry(value);
   } catch {
     context.addIssue({ code: "custom", message: "invalid journal fact" });
     return z.NEVER;

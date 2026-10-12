@@ -16,7 +16,8 @@ import type { GitRepository } from "../git/process.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
 import type { AttemptContext, DecideInput, OfferDecision } from "../core/decide.js";
 import type { Offer, TreeUpdate } from "../core/facts/offer.js";
-import type { ChangeId, ContractHead, ContractId, SnapshotId } from "../core/facts/types.js";
+import { contractState } from "../core/facts/observation.js";
+import type { ChangeId, ContractHead, ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
 import type { GitObjectId } from "../git/identity.js";
 import { admitDecidedOffer, type AcceptedAdmission, type AttemptTerminal, type DecidedOfferResult } from "./attempt.js";
 
@@ -118,14 +119,14 @@ type ProtocolAdmission<Input extends Readonly<{ contractId: ContractId }>, Refus
 }>;
 
 /** An intent whose invocation is already its decision input. */
-export type DirectRunProtocolInput<Seed extends Readonly<{ contractId: ContractId }>, Refusal> = ProtocolAdmission<
+type DirectRunProtocolInput<Seed extends Readonly<{ contractId: ContractId }>, Refusal> = ProtocolAdmission<
   Seed,
   Refusal
 > &
   Readonly<{ input: Seed; preparation?: undefined }>;
 
 /** An intent whose repeatable preparation runs outside custody and is assembled inside it. */
-export type SplitRunProtocolInput<
+type SplitRunProtocolInput<
   Input extends Readonly<{ contractId: ContractId }>,
   Refusal,
   Seed extends Readonly<{ contractId: ContractId }>,
@@ -140,7 +141,7 @@ export type RunProtocolInput<
   Prepared = Seed,
 > = DirectRunProtocolInput<Seed, Refusal> | SplitRunProtocolInput<Input, Refusal, Seed, Prepared>;
 
-export type PreparedProtocolAttempt<Refusal> =
+type PreparedProtocolAttempt<Refusal> =
   | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{
@@ -163,7 +164,7 @@ type PreparedProtocolInput<Input> = Readonly<{
  */
 export type ContractStateWitness = Readonly<{ head: ContractHead | null }>;
 
-export function contractStateWitness(state: ContractStateWitness): ContractStateWitness {
+function contractStateWitness(state: ContractStateWitness): ContractStateWitness {
   return { head: state.head };
 }
 
@@ -199,7 +200,7 @@ export function sameWorktreeWitness(
   );
 }
 
-export async function privateStateAssertionsMatch(
+async function privateStateAssertionsMatch(
   repository: GitRepository,
   assertions: readonly GitRefAssertion[],
 ): Promise<boolean> {
@@ -208,9 +209,26 @@ export async function privateStateAssertionsMatch(
   return assertions.every((assertion) => refs.get(assertion.ref) === assertion.oid);
 }
 
-export function publicationFailedFromSeatError(error: unknown): AttemptTerminal {
+function publicationFailedFromSeatError(error: unknown): AttemptTerminal {
   if (isPrivateStateSeatContention(error)) return { kind: "publication-failed", diagnostic: error.message };
   throw error;
+}
+
+/**
+ * The repeatable outside-custody preamble shared by prepared operations: one non-authoritative
+ * observation of the invoked Contract, and the artifacts its fresh state justifies.
+ */
+export async function externalPreparation<Artifacts>(
+  input: Readonly<{ scope: GitRepository; channel: GitDecodeChannel; contractId: ContractId }>,
+  artifacts: (observation: GitDecisionObservation, state: ContractState) => Promise<Artifacts>,
+): Promise<
+  | Readonly<{ kind: "unavailable" }>
+  | Readonly<{ kind: "artifacts"; witness: ContractStateWitness; artifacts: Artifacts }>
+> {
+  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const state = contractState(observation.decision, input.contractId);
+  if (state === null) return { kind: "unavailable" };
+  return { kind: "artifacts", witness: contractStateWitness(state), artifacts: await artifacts(observation, state) };
 }
 
 export async function privateStateSeatAttempt<T>(
@@ -294,16 +312,14 @@ async function admitDecidedProtocolOffer<Input extends Readonly<{ contractId: Co
   const decided = await decideDecoratedProtocolOffer(admission, primaryContract, decisionObservation, prepared);
   if (decided.kind === "refused") return decided;
   return await admitDecidedOffer<Refusal>({
-    channel: admission.channel,
-    repository: admission.repository,
+    ...admission,
+    scope: admission.repository,
+    contractId: primaryContract,
     seat,
-    decisionObservation: decided.observation,
+    observation: decided.observation,
     attempt: decided.attempt,
     offer: decided.offer,
-    primaryContract,
-    ...(admission.progress === undefined ? {} : { progress: admission.progress }),
     assertions: decided.assertions,
-    ...(admission.validateAdmission === undefined ? {} : { validateAdmission: admission.validateAdmission }),
   });
 }
 

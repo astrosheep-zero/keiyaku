@@ -52,7 +52,7 @@ function nextEntryUlid(): EntryUlid {
   return entryUlid(value);
 }
 
-export function mintEntryUlids(count: number): readonly EntryUlid[] {
+function mintEntryUlids(count: number): readonly EntryUlid[] {
   return Array.from({ length: count }, nextEntryUlid);
 }
 
@@ -62,7 +62,7 @@ export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly 
   }));
 }
 
-export type UnknownAttemptClassification =
+type UnknownAttemptClassification =
   | Readonly<{ kind: "accepted" }>
   | Readonly<{ kind: "redecide" }>
   | Readonly<{
@@ -169,19 +169,20 @@ async function publicationPremiseMoved(
 /** Admit one decided offer without making another legal decision. */
 export async function admitDecidedOffer<Refusal = never>(
   input: Readonly<{
+    scope: GitRepository;
     channel: GitDecodeChannel;
-    repository: GitRepository;
+    contractId: ContractId;
     seat: PrivateStatePublicationSeat;
-    decisionObservation: GitDecisionObservation;
+    observation: GitDecisionObservation;
     attempt: AttemptContext;
     offer: Offer;
-    primaryContract: ContractId;
     assertions?: readonly GitRefAssertion[];
     validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
     progress?: ProtocolProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
-  const { repository, decisionObservation, attempt, offer, primaryContract } = input;
+  const { seat, observation: decisionObservation, attempt, offer, contractId: primaryContract } = input;
+  const repository = input.scope;
   const assertions = input.assertions ?? [];
   validateOffer(offer, attempt);
   const primary = primaryAppend(offer, primaryContract);
@@ -191,7 +192,7 @@ export async function admitDecidedOffer<Refusal = never>(
   }
   const admission = await admit(repository, offer, decisionObservation.admission, assertions);
   if (admission.kind === "accepted") {
-    confirmPrivateStatePublication(input.seat);
+    confirmPrivateStatePublication(seat);
     input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
     const accepted: AcceptedAdmission = {
       kind: "accepted",
@@ -217,7 +218,7 @@ export async function admitDecidedOffer<Refusal = never>(
   );
   const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
   if (classification.kind === "accepted") {
-    const accepted = confirmRecoveredAcceptance(input.seat, { contracts: recovered.journals }, offer, primaryContract);
+    const accepted = confirmRecoveredAcceptance(seat, { contracts: recovered.journals }, offer, primaryContract);
     input.progress?.recordAdmission(accepted);
     return accepted;
   }
@@ -236,7 +237,7 @@ function confirmRecoveredAcceptance(
 }
 
 /** Classify an unknown atomic-publication outcome using only a captured Git observation. */
-export function classifyUnknownAttempt(
+function classifyUnknownAttempt(
   observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
   offer: Offer,
 ): UnknownAttemptClassification {

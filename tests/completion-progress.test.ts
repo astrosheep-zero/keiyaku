@@ -9,7 +9,7 @@ import {
   type JournalEntry,
 } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
-import { InvocationAccumulator, physicalOf } from "../src/library/invocation.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project } from "../src/library/outcome.js";
 import type { AcceptedProtocolStep } from "../src/protocol/outcome.js";
 import { contractCheckpoint, executionStop, type ContractCheckpoint } from "../src/protocol/progress.js";
@@ -58,10 +58,17 @@ test("an observed checkpoint cannot manufacture an invocation receipt", () => {
   assert.deepEqual(progress.snapshot().facts, []);
   assert.equal(progress.head(captured.state.id), undefined);
   assert.equal(progress.snapshot().checkpoints.size, 0);
-  const projected = project("arc", progress.snapshot(), { kind: "failed", contract: captured.state.id, error: new Error("stopped") });
+  const projected = project("arc", progress.snapshot(), {
+    kind: "failed",
+    contract: captured.state.id,
+    error: new Error("stopped"),
+  });
   assert.equal(projected.kind, "failed");
   if (projected.kind === "failed") {
-    assert.equal(projected.error.outcome && "head" in projected.error.outcome ? projected.error.outcome.head : undefined, undefined);
+    assert.equal(
+      projected.error.outcome && "head" in projected.error.outcome ? projected.error.outcome.head : undefined,
+      undefined,
+    );
   }
 });
 
@@ -80,11 +87,16 @@ test("physical and seat-close reports accumulate without replay duplication or i
   progress.recordAdmission(leading);
   progress.recordAdmission(next);
   progress.recordAdmission(next);
-  assert.deepEqual(physicalOf(progress.snapshot()).lag, [...leading.physical!.lag, ...next.physical!.lag]);
+  const lags = progress
+    .snapshot()
+    .effects.flatMap((effect) => (effect.kind === "reconciliation-lag" ? [effect.lag] : []));
+  assert.deepEqual(lags, [...leading.physical!.lag, ...next.physical!.lag]);
   assert.deepEqual(
     progress
       .snapshot()
-      .effects.filter((effect) => effect.kind === "cleanup").map((effect) => effect.issue).map((issue) => (issue.kind === "private-state-seat-close" ? issue.failure.diagnostic : null)),
+      .effects.filter((effect) => effect.kind === "cleanup")
+      .map((effect) => effect.issue)
+      .map((issue) => (issue.kind === "private-state-seat-close" ? issue.failure.diagnostic : null)),
     ["first", "second"],
   );
   assert.equal(leading.physical!.lag.length, 1);
@@ -139,7 +151,9 @@ test("all verification cleanup and leaks survive repeated candidates and depende
   assert.deepEqual(
     progress
       .snapshot()
-      .effects.filter((effect) => effect.kind === "cleanup").map((effect) => effect.issue).filter((item) => item.kind === "worktree-leak")
+      .effects.filter((effect) => effect.kind === "cleanup")
+      .map((effect) => effect.issue)
+      .filter((item) => item.kind === "worktree-leak")
       .map((item) => [item.contractId, item.snapshot, item.leak.path]),
     [
       [primary, "one", "/scratch/one"],

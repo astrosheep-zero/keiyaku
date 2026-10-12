@@ -11,11 +11,7 @@ import {
 import type { ActorId } from "../core/facts/types.js";
 import { auditReportSchema } from "../protocol/audit.js";
 import { materializedConflictSchema } from "../protocol/deliver.js";
-import {
-  decodeExecutionObservation,
-  observeExecution,
-  type ExecutionObserver,
-} from "../protocol/execution-observation.js";
+import { observationSchema, observeExecution, type ExecutionObserver } from "../protocol/execution-observation.js";
 import { contractIdSchema } from "../protocol/operations.js";
 import { deliveryValueSchema } from "./delivery.js";
 import { InvocationAccumulator } from "./invocation.js";
@@ -103,7 +99,7 @@ const contractServiceSchema = z.union([
   materializedHandoffServiceSchema,
   reviewReferenceSchema,
 ]);
-export type ContractService = z.infer<typeof contractServiceSchema>;
+type ContractService = z.infer<typeof contractServiceSchema>;
 type ContractReference = ContractService | z.infer<typeof materializedHandoffReferenceSchema>;
 export type ContractRequestPort = Readonly<{
   audit(
@@ -329,7 +325,7 @@ export async function requestForwardedContractLive<Action extends ContractReques
     value: input.request,
     onProgress: (value) => {
       try {
-        observeExecution(input.observe, decodeExecutionObservation(value));
+        observeExecution(input.observe, observationSchema.parse(value));
       } catch {
         observeExecution(input.observe, { kind: "progress-dropped", count: 1 });
       }

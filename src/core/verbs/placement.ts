@@ -1,6 +1,6 @@
 import { gateReports, type GateReport } from "../facts/gate.js";
 import { activeContract, contractState } from "../facts/observation.js";
-import { type ActorId, type ContractId, type ContractState, type JournalEntry } from "../facts/types.js";
+import { journalEntry, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
@@ -9,7 +9,7 @@ type PlacementInput = Readonly<{
   at: string;
 }>;
 
-export type UnmetPrerequisite = Readonly<{
+type UnmetPrerequisite = Readonly<{
   contractId: ContractId;
   state: "missing" | "active" | "abandoned";
 }>;
@@ -82,15 +82,7 @@ export function decidePlacement({
     };
   }
 
-  const claimed: JournalEntry = {
-    v: 1,
-    kind: "claimed",
-    contract: id,
-    entry: attempt.entryUlids[0]!,
-    at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data: { delivery: delivery.entry },
-  };
+  const claimed = journalEntry("claimed", input, attempt.entryUlids[0]!, { delivery: delivery.entry });
   return {
     kind: "offer",
     offer: {

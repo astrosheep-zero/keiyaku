@@ -26,7 +26,7 @@ import {
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
-  contractStateWitness,
+  externalPreparation,
   privateStateSeatAttempt,
   runBoundedAttempts,
   sameWorktreeWitness,
@@ -59,7 +59,7 @@ export const deliverLeadingSchema = z
   .strict();
 type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
 type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
-export type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
+type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
 export const materializedConflictSchema = z
   .object({
     kind: z.literal("integration-conflict-materialized"),
@@ -342,14 +342,7 @@ function hasSupersedingVerification(state: ContractState, journal: readonly Jour
  * one non-authoritative private-state read, capture its bytes, and materialize the prepared artifacts.
  */
 async function prepareExternalDelivery(input: DeliverOperationInput): Promise<ExternalDeliveryPreparation> {
-  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-  const state = contractState(observation.decision, input.contractId);
-  if (state === null) return { kind: "unavailable" };
-  return {
-    kind: "artifacts",
-    witness: contractStateWitness(state),
-    artifacts: await prepareDeliveryArtifacts(input, observation, state),
-  };
+  return await externalPreparation(input, (observation, state) => prepareDeliveryArtifacts(input, observation, state));
 }
 
 async function prepareDeliveryArtifacts(
@@ -566,16 +559,7 @@ async function decideAndAdmitDelivery(
   });
   if (decision.kind === "refused") return { kind: "refused", refusal: decision.refusal };
   if (preparation.kind !== "prepared") throw new Error("offered delivery is missing its mechanical preparation");
-  const admission = await admitDecidedOffer({
-    channel: input.channel,
-    repository: input.scope,
-    seat,
-    decisionObservation: observation,
-    attempt,
-    offer: decision.offer,
-    primaryContract: input.contractId,
-    ...(input.progress === undefined ? {} : { progress: input.progress }),
-  });
+  const admission = await admitDecidedOffer({ ...input, seat, observation, attempt, offer: decision.offer });
   if (admission.kind !== "accepted") return admission;
   const deliverFact = admission.facts.find((fact) => fact.contract === input.contractId && fact.kind === "deliver");
   if (deliverFact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");

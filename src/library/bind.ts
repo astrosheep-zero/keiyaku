@@ -8,7 +8,7 @@ import { mintIdentitySegment } from "../identity/mint.js";
 import { fitIdentityStemWords, normalizeIdentityStem } from "../identity/normalize.js";
 import { bindOperation, type BindTargetSelection } from "../protocol/bind.js";
 import { stateOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
-import { claimTaskHolder, claimTaskHolderWithFence } from "../settlement/holder.js";
+import { admitWithTaskHolderFence, claimTaskHolder } from "../settlement/holder.js";
 import type { ProtocolProgress } from "../protocol/progress.js";
 import type { TaskId } from "../task/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
@@ -73,10 +73,6 @@ async function attemptCandidates(
     attempt: (segment) => attempt(input, contractIdFromSegment(segment)),
     collision: (result) => result.kind === "refused" && result.refusal.kind === "contract-exists",
   });
-}
-
-export async function admitBindWithAppointment(input: BindAttemptInput) {
-  return await attemptCandidates(input);
 }
 
 type ForkBindAdmission = Readonly<{
@@ -167,23 +163,6 @@ export async function admitForkBindWithAppointment(
   return { kind: "document", admission, document };
 }
 
-export async function admitMarkdownBind(
-  input: Readonly<{
-    scope: RepositoryScope;
-    channel: GitDecodeChannel;
-    title: string;
-    terms: Parameters<typeof bindOperation>[0]["terms"];
-    verification: VerificationDeclarationPreparation;
-    workspace: "worktree";
-    targetSelection?: BindTargetSelection;
-    task?: TaskId;
-    progress?: ProtocolProgress;
-    actor?: ActorId;
-  }>,
-) {
-  return await admitBindWithAppointment(input);
-}
-
 export async function prepareMarkdownBind(
   input: Readonly<{
     scope: RepositoryScope;
@@ -200,7 +179,7 @@ export async function prepareMarkdownBind(
 ) {
   const terms = contractTerms(input.document, input.gates, input.after);
   const admitCandidate = () =>
-    admitMarkdownBind({
+    attemptCandidates({
       scope: input.scope,
       channel: input.channel,
       title: input.document.title,
@@ -213,6 +192,6 @@ export async function prepareMarkdownBind(
       ...(input.progress === undefined ? {} : { progress: input.progress }),
     });
   const admission =
-    input.task === undefined ? null : await claimTaskHolderWithFence(input.scope, input.task, admitCandidate);
+    input.task === undefined ? null : await admitWithTaskHolderFence(input.scope, input.task, admitCandidate);
   return { admission, result: admission === null ? await admitCandidate() : admission.result };
 }

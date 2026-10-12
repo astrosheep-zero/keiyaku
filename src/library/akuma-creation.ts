@@ -28,9 +28,7 @@ import type { Keiyaku } from "./keiyaku.js";
 import { seatForKeiyaku } from "./keiyaku.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
-export type { AkumaStatus } from "../akuma/akuma.js";
-
-export type IntegrationFailure = Readonly<{
+type IntegrationFailure = Readonly<{
   kind: "authority-corruption" | "infrastructure";
   diagnostic: string;
 }>;
@@ -40,7 +38,7 @@ export type DispatchStage =
   | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
   | Readonly<{ kind: "failed"; failure: DispatchFailure | IntegrationFailure }>;
 
-export type AliasStage =
+type AliasStage =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "aliased"; alias: AliasBinding; previous: AkuId | null }>
   | Readonly<{ kind: "skipped"; reason: "dispatch-failed" }>
@@ -51,7 +49,7 @@ export type CallWaitHead = Readonly<{
   alias: AliasStage;
 }>;
 
-export type CallWaitObserver = Readonly<{
+type CallWaitObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"], head: CallWaitHead) => void | Promise<void>;
   observe?: AskObserver["observe"];
 }>;

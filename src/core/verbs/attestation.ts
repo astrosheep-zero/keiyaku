@@ -1,6 +1,6 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { activeContract, type ActiveContractRefusal } from "../facts/observation.js";
-import { type ActorId, type AttestationData, type ContractId, type JournalEntry } from "../facts/types.js";
+import { journalEntry, type ActorId, type AttestationData, type ContractId } from "../facts/types.js";
 
 export type AttestationInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -20,15 +20,7 @@ export function decideAttestation<Failure>({
     throw new Error("active contract requires an attestation preparation");
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
-  const attestation: JournalEntry = {
-    v: 1,
-    kind: "attestation",
-    contract: input.contractId,
-    entry: attempt.entryUlids[0]!,
-    at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data: input.preparation.data,
-  };
+  const attestation = journalEntry("attestation", input, attempt.entryUlids[0]!, input.preparation.data);
   return {
     kind: "offer",
     offer: { facts: [{ contractId: input.contractId, entries: [attestation] }] },

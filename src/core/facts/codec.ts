@@ -249,7 +249,7 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
   }
 }
 
-function validateEntry(value: unknown): JournalEntry {
+export function validateEntry(value: unknown): JournalEntry {
   const object = requireRecord(value, "entry");
   requireKeys(object, ["v", "kind", "contract", "entry", "at", "data"], "entry", ["actor"]);
   const kind = object.kind;
@@ -274,11 +274,6 @@ function validateEntry(value: unknown): JournalEntry {
   return entry;
 }
 
-/** Validate one in-memory journal value with the persisted-fact authority. */
-export function decodeJournalEntry(value: unknown): JournalEntry {
-  return validateEntry(value);
-}
-
 function canonicalValue(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
@@ -294,13 +289,9 @@ function canonicalValue(value: unknown): string {
   throw new AuthorityCorruptionError("canonical JSON accepts only JSON values");
 }
 
-function canonicalJson(value: unknown): string {
-  return canonicalValue(value);
-}
-
 export function encodeEntry(entry: JournalEntry): string {
   const validated = validateEntry(entry);
-  return `${canonicalJson(validated)}\n`;
+  return `${canonicalValue(validated)}\n`;
 }
 
 function decodeEntry(line: string): JournalEntry {
@@ -315,7 +306,7 @@ function decodeEntry(line: string): JournalEntry {
     throw new AuthorityCorruptionError("journal entry is not valid JSON", { cause: error });
   }
   const entry = validateEntry(value);
-  if (canonicalJson(value) !== body) throw new AuthorityCorruptionError("journal entry is not canonical");
+  if (canonicalValue(value) !== body) throw new AuthorityCorruptionError("journal entry is not canonical");
   return entry;
 }
 

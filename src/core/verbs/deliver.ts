@@ -1,6 +1,6 @@
 import type { DecideInput, OfferDecision, StampedPreparation } from "../decide.js";
 import { activeContract, documentIsCurrent } from "../facts/observation.js";
-import { type ActorId, type ContractId, type DeliverData, type JournalEntry } from "../facts/types.js";
+import { journalEntry, type ActorId, type ContractId, type DeliverData } from "../facts/types.js";
 
 export type DeliverInput<Failure = never> = Readonly<{
   contractId: ContractId;
@@ -28,14 +28,6 @@ export function decideDeliver<Failure>({
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
-  const deliver: JournalEntry = {
-    v: 1,
-    kind: "deliver",
-    contract: input.contractId,
-    entry: attempt.entryUlids[0]!,
-    at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    data: input.preparation.data,
-  };
+  const deliver = journalEntry("deliver", input, attempt.entryUlids[0]!, input.preparation.data);
   return { kind: "offer", offer: { facts: [{ contractId: input.contractId, entries: [deliver] }] } };
 }

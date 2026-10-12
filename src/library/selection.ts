@@ -20,7 +20,7 @@ import {
 import { type AkumaStatus } from "../akuma/akuma.js";
 import { parsePublicHistoryId } from "../akuma/identity.js";
 import { type ActivityHistory, type OutcomeRow } from "../akuma/projection.js";
-import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import { executionChannel, type ExecutionContext } from "../akuma/requests.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type {
   AkumaAskResult,
@@ -188,18 +188,14 @@ export type AkumaAskInput<T = string> = AkumaAddressInput &
     signal?: AbortSignal;
     observe?: AskObserver;
   }>;
-export type { TellResult, TellWake } from "../akuma/body.js";
 export type {
   AkumaAskResult,
   AkumaKillResult,
   AkumaObservation,
   AkumaObservationStage,
   AkumaTellResult,
-  AkumaUnobserved,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-export type { DispatchAssociation } from "../dispatch/association.js";
-export type { CreatedTaskObservation } from "../task/created-observation.js";
 export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
@@ -482,13 +478,6 @@ async function localWait(
   }
 }
 
-export async function waitAkuma(
-  input: AkumaWaitInput & Readonly<{ path: WorldRoot }>,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaWaitResult> {
-  return await waitAkumaOn(selectionSeam(execution), input);
-}
-
 function waitObserver(value: unknown): WaitObserver | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "object" || value === null || Array.isArray(value))
@@ -548,13 +537,6 @@ export async function killAkumaOn(
     }
   }
   return await seam.kill(await seam.addressSet(setAddress(values)), signal(values.signal));
-}
-
-export async function tellAkuma(
-  input: AkumaTellInput & Readonly<{ path: WorldRoot }>,
-  execution: ExecutionContext = localExecutionContext(),
-): Promise<AkumaTellResult> {
-  return await tellAkumaOn(selectionSeam(execution), input);
 }
 
 export async function tellAkumaOn(

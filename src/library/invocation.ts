@@ -3,7 +3,7 @@ import { encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
-import type { Effect, ReconcileLag, ReconcileResult } from "../git/reconcile.js";
+import type { ReconcileResult } from "../git/reconcile.js";
 import type { AuditReport } from "../protocol/audit.js";
 import type { CandidateCompletion, CompletionEvidence } from "../protocol/completion.js";
 import {
@@ -56,11 +56,6 @@ function entryKey(fact: JournalEntry): string {
   return `${fact.contract}\u0000${fact.entry}`;
 }
 
-/** The owner codec's canonical bytes: identity is (contract, entry), the payload is retained whole. */
-function entryBytes(fact: JournalEntry): string {
-  return encodeEntry(fact);
-}
-
 /**
  * The one invocation accumulator. It exists before any admission-capable await, satisfies the lower
  * Protocol progress sink, and holds every confirmed publication, candidate conclusion and physical
@@ -98,7 +93,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     const incoming = new Map<string, Readonly<{ fact: JournalEntry; bytes: string }>>();
     for (const fact of facts) {
       const key = entryKey(fact);
-      const bytes = entryBytes(fact);
+      const bytes = encodeEntry(fact);
       const previous = incoming.get(key)?.bytes ?? this.entries.get(key);
       if (previous !== undefined && previous !== bytes)
         throw new AuthorityCorruptionError("conflicting invocation receipt");
@@ -131,7 +126,7 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   hasFact(fact: JournalEntry): boolean {
-    return this.entries.get(entryKey(fact)) === entryBytes(fact);
+    return this.entries.get(entryKey(fact)) === encodeEntry(fact);
   }
 
   head(contract: ContractId): ContractHead | undefined {
@@ -343,16 +338,4 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.records.push({ kind: "reconciliation-lag", contract, affects, lag });
     if (affects !== "none") this.affectedContracts.add(contract);
   }
-}
-
-export function physicalOf(snapshot: InvocationSnapshot): ReconcileResult {
-  const effects: Effect[] = [];
-  const lag: ReconcileLag[] = [];
-  for (const record of snapshot.effects) {
-    if (record.kind === "reconciliation-effect" && record.effect.kind !== "contract-file")
-      effects.push(record.effect as Effect);
-    else if (record.kind === "reconciliation-lag" && record.lag.kind !== "contract-file-failed")
-      lag.push(record.lag as ReconcileLag);
-  }
-  return { effects, lag };
 }

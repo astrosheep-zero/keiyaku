@@ -76,7 +76,7 @@ import {
   type ProjectedOutcome,
   type Review,
 } from "./outcome.js";
-import { completeReconcile } from "./reconcile.js";
+import { reconcileAffectedContracts } from "./reconcile.js";
 import type { OperationRefusals } from "./refusal.js";
 import { observeChangedRegion } from "./region.js";
 
@@ -260,7 +260,7 @@ export class ContractExecution {
         const retained = accumulator.conclusions(this.id) ?? {};
         const value: DeliveryValue = { ...base, ...leadingValue, ...retained } as DeliveryValue;
         accumulator.recordConclusions(this.id, value);
-        await this.reconcileContracts(accumulator, scope, localChannel, hooks);
+        await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
         return acceptedOutcome("deliver", this.id, accumulator, deliveryForContract(this.scope, value));
       },
       values.signal,
@@ -341,7 +341,7 @@ export class ContractExecution {
         }
         const retained: Review = { ...value, ...accumulator.conclusions(this.id) };
         accumulator.extendConclusions(this.id, retained);
-        await this.reconcileContracts(accumulator, scope, localChannel, hooks);
+        await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
         return acceptedOutcome("review", this.id, accumulator, retained);
       },
       signal,
@@ -548,40 +548,8 @@ export class ContractExecution {
     retainAdmission(accumulator, this.id, input.leading, input.verificationResidueRecorded);
     const value = input.value(input.leading.value);
     accumulator.extendConclusions(this.id, conclusions(value));
-    await this.reconcileContracts(accumulator, input.scope, input.channel, input.hooks);
+    await reconcileAffectedContracts(accumulator, this.id, input.scope, input.channel, input.hooks);
     return value;
-  }
-
-  private async reconcileContracts(
-    accumulator: InvocationAccumulator,
-    scope: RepositoryScope,
-    channel: GitDecodeChannel,
-    hooks: WorktreeHooks,
-  ): Promise<void> {
-    for (const contract of [...new Set([this.id, ...accumulator.snapshot().affected])]) {
-      try {
-        scope.signal?.throwIfAborted();
-        accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "started" });
-        const report = await (async () => {
-          try {
-            return await completeReconcile({
-              scope,
-              channel,
-              contractId: contract,
-              hooks,
-              retryHooks: false,
-              progress: accumulator,
-            });
-          } finally {
-            accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "finished" });
-          }
-        })();
-        void report;
-      } catch (error) {
-        if (!isOperationalStop(error, scope.signal)) throw error;
-        accumulator.recordStop(executionStop(contract, "reconciliation", error, scope.signal));
-      }
-    }
   }
 }
 function changedAmendTerms(before: ContractState["terms"], after: ContractState["terms"]): AmendValue["changes"] {

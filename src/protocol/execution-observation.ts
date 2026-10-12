@@ -1,14 +1,14 @@
 import { z } from "zod";
-import { decodeJournalEntry } from "../core/facts/codec.js";
+import { validateEntry } from "../core/facts/codec.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { verificationObservationSchema } from "../verification/observation.js";
 
-const observationSchema = z.discriminatedUnion("kind", [
+export const observationSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("admitted"),
       contractId: contractIdSchema,
-      fact: z.unknown().transform(decodeJournalEntry),
+      fact: z.unknown().transform(validateEntry),
     })
     .strict(),
   z
@@ -32,11 +32,6 @@ const observationSchema = z.discriminatedUnion("kind", [
 
 export type ExecutionObservation = z.infer<typeof observationSchema>;
 export type ExecutionObserver = (event: ExecutionObservation) => void | PromiseLike<void>;
-
-/** One owner decoder for local and transported ephemeral observations. */
-export function decodeExecutionObservation(value: unknown): ExecutionObservation {
-  return observationSchema.parse(value);
-}
 
 /** Observation failure cannot change execution, admission, or process custody. */
 export function observeExecution(observer: ExecutionObserver | undefined, event: ExecutionObservation): void {

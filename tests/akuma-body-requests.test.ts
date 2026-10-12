@@ -37,7 +37,7 @@ import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { AKUMA_REQUESTS_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
-import { waitAkuma, tellAkuma } from "../src/library/selection.js";
+import { selectionSeam, tellAkumaOn, waitAkumaOn } from "../src/library/selection.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
@@ -1564,10 +1564,10 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
     },
   });
   try {
-    const result = await waitAkuma(
-      { path: root, akuma: ["aku/worker/00000001" as AkuId, "aku/worker/00000002" as AkuId] },
-      bodyRequestExecutionContext(pump.directory),
-    );
+    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+      path: root,
+      akuma: ["aku/worker/00000001" as AkuId, "aku/worker/00000002" as AkuId],
+    });
     assert.deepEqual(completions, ["any"]);
     assert.equal(result.mode, "any");
   } finally {
@@ -1613,10 +1613,11 @@ test("a forwarded operation answers from the parent World without reading the ch
   const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
   try {
     // The child's own Heart is unreadable here: a local probe would fail this.
-    const result = await waitAkuma(
-      { path: childWorld, akuma: [target.id], timeoutMs: 0 },
-      bodyRequestExecutionContext(pump.directory),
-    );
+    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+      path: childWorld,
+      akuma: [target.id],
+      timeoutMs: 0,
+    });
     assert.deepEqual(
       result.observations.map((observation) => observation.status.id),
       [target.id],
@@ -1638,7 +1639,7 @@ test("a forwarded refusal keeps the parent's answer over the child's local birth
     // The target is born only in the child's World, so a locally proved
     // operation would succeed instead of answering as the parent does.
     await assert.rejects(
-      waitAkuma({ path: childWorld, akuma: [local.id] }, bodyRequestExecutionContext(pump.directory)),
+      waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), { path: childWorld, akuma: [local.id] }),
       (error: unknown) => error instanceof AkumaNotBornError && error.id === local.id,
     );
   } finally {
@@ -1658,7 +1659,11 @@ test("a forwarded observation failure keeps the parent's reason", async () => {
   const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
   try {
     await assert.rejects(
-      tellAkuma({ path: childWorld, akuma: target.id, body: "hello" }, bodyRequestExecutionContext(pump.directory)),
+      tellAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+        path: childWorld,
+        akuma: target.id,
+        body: "hello",
+      }),
       (error: unknown) => {
         assert.ok(error instanceof AkumaObservationError);
         assert.equal(error.id, target.id);
@@ -1708,7 +1713,10 @@ test("transport rejects malformed target sets and foreign World coordinates befo
         payload: { target: "aku/worker/22222222", body: "x", world: "/foreign" },
       },
     ];
-    const rejectedPayload = assert.rejects(pump.failure, /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u);
+    const rejectedPayload = assert.rejects(
+      pump.failure,
+      /registered request action akuma\.(?:wait|kill|tell) rejected its payload/u,
+    );
     await Promise.all(
       claims.map(
         async (claim) =>
@@ -1865,7 +1873,11 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     const answered = await pending;
     assert.deepEqual(answered.value.observation, { reason: "answered", answer: "facade delayed answer" });
     assert.equal(answered.value.tell.row.text, "facade delayed");
-    assert.equal(askRawAnswer(answered.value, undefined), "facade delayed answer", "forwarded CLI preserves exact stdout bytes");
+    assert.equal(
+      askRawAnswer(answered.value, undefined),
+      "facade delayed answer",
+      "forwarded CLI preserves exact stdout bytes",
+    );
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
     restoreTellRuntime();
@@ -2200,7 +2212,10 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
   });
   try {
     const observations: string[] = [];
-    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory }), createKeiyakuHandle).select({
+    const forwarded = composeContractLibrary(
+      bodyRequestExecution({ directory: pump.directory }),
+      createKeiyakuHandle,
+    ).select({
       repo,
       id: bound.contract,
     });
@@ -2256,7 +2271,10 @@ test("forwarded native review preserves the owner outcome and stores the address
   });
   try {
     const observations: string[] = [];
-    const forwarded = composeContractLibrary(bodyRequestExecution({ directory: pump.directory }), createKeiyakuHandle).select({
+    const forwarded = composeContractLibrary(
+      bodyRequestExecution({ directory: pump.directory }),
+      createKeiyakuHandle,
+    ).select({
       repo,
       id: bound.contract,
     });

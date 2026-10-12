@@ -14,7 +14,7 @@ import type { ReconcileResult } from "../git/reconcile.js";
 import { gitReconcileLagSchema, reconcileObservationFailure } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
-import { isOperationalFailure, type ProtocolProgress } from "../protocol/progress.js";
+import { isOperationalFailure, isOperationalStop, executionStop, type ProtocolProgress } from "../protocol/progress.js";
 import { reconcileAllOperation, reconcileOperation, worldContractStates } from "../protocol/reconcile.js";
 import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
 import {
@@ -23,6 +23,7 @@ import {
   releaseManagedWorktrees,
   type PlaceRegister,
 } from "../workspace-place.js";
+import type { InvocationAccumulator } from "./invocation.js";
 
 export type ReconcileReport = Readonly<{
   effects: readonly (ReconcileResult["effects"][number] | ContractFileEffect)[];
@@ -331,6 +332,40 @@ export async function completeReconcile(
   });
   const terminal = await finishTerminalReconcile(input, retained, appointed);
   return assembleReconcile(retained.report, projection, settlement, terminal);
+}
+
+/**
+ * The one post-admission reconciliation walk: every affected Contract is observed afresh, and an
+ * operational stop is recorded rather than thrown.
+ */
+export async function reconcileAffectedContracts(
+  accumulator: InvocationAccumulator,
+  contractId: ContractId,
+  scope: RepositoryScope,
+  channel: GitDecodeChannel,
+  hooks: WorktreeHooks,
+): Promise<void> {
+  for (const contract of [...new Set([contractId, ...accumulator.snapshot().affected])]) {
+    try {
+      scope.signal?.throwIfAborted();
+      accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "started" });
+      try {
+        await completeReconcile({
+          scope,
+          channel,
+          contractId: contract,
+          hooks,
+          retryHooks: false,
+          progress: accumulator,
+        });
+      } finally {
+        accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "finished" });
+      }
+    } catch (error) {
+      if (!isOperationalStop(error, scope.signal)) throw error;
+      accumulator.recordStop(executionStop(contract, "reconciliation", error, scope.signal));
+    }
+  }
 }
 
 function attachReleaseLag(

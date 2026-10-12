@@ -119,7 +119,7 @@ function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function finishTaskHolderAdmission<T extends AdmissionOutcome>(
+function finishTaskHolderAdmission<T extends AdmissionOutcome>(
   taskId: TaskId,
   result: T,
   close: () => void,
@@ -133,7 +133,7 @@ export function finishTaskHolderAdmission<T extends AdmissionOutcome>(
   }
 }
 
-async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
+export async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
   repository: GitRepository,
   taskId: TaskId,
   action: () => T | Promise<T>,
@@ -153,14 +153,6 @@ async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
   return finishTaskHolderAdmission(taskId, result, () => held.close());
 }
 
-export function claimTaskHolderWithFence<T extends AdmissionOutcome>(
-  repository: GitRepository,
-  taskId: TaskId,
-  action: () => T | Promise<T>,
-): Promise<TaskHolderAdmission<T>> {
-  return admitWithTaskHolderFence(repository, taskId, action);
-}
-
 export async function releaseTaskHolder(
   channel: GitDecodeChannel,
   observation: GitDecisionObservation,
@@ -170,7 +162,7 @@ export async function releaseTaskHolder(
   return current === null || current.disposition !== "held" ? null : update({ ...current, disposition: "released" });
 }
 
-export type TaskHolderReleasePublication =
+type TaskHolderReleasePublication =
   | Readonly<{ kind: "released" }>
   | Readonly<{ kind: "not-held" }>
   | Readonly<{ kind: "non-published"; diagnostic: string }>;
@@ -252,7 +244,7 @@ export async function readTaskHolderProjectionFromDecision(
   return projectTaskHolders(await readTaskHoldersAt(read));
 }
 
-export function observeTaskHolderProjection(
+function observeTaskHolderProjection(
   repository: GitRepository,
   channel: GitDecodeChannel,
 ): Promise<TaskHolderProjection> {
