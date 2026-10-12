@@ -205,7 +205,7 @@ waiting, the stated prerequisites remain; do not bind a duplicate Contract.
 
 The holder now owns the lifecycle:
 
-1. Start the work directly or delegate Tasks, Arc chapters, Akumas, or seats.
+1. Start the work directly or delegate Tasks, Arc chapters, Akumas, or Contract roles.
 2. Run independent work in parallel and let it converge on the one acceptance
    boundary.
 3. Prepare and deliver the candidate.

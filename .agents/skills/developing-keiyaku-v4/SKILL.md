@@ -126,7 +126,7 @@ when its judgment frame or context is contaminated. A new Contract always gets
 a new `call --contract`; never repurpose another Contract's Akuma with `tell`.
 
 Prefer parallel Akuma lanes whenever the work can be split without overlapping
-write surfaces: for example, implementation, independent review, and a broad
+write surfaces: for example, implementation, review, and a broad
 scan can run together. Give each lane one bounded responsibility and one
 observable handoff; serialize only the part that truly depends on another
 lane's result.

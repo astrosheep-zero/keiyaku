@@ -48,5 +48,5 @@ Porting documents are planning evidence and never an owner chapter.
 
 Use [`developing-keiyaku-v4`](../developing-keiyaku-v4/SKILL.md) for task-board,
 Akuma dispatch, observation-window, and Faye-escalation procedure. Use
-[`review-keiyaku-v4`](../review-keiyaku-v4/SKILL.md) for independent review
+[`review-keiyaku-v4`](../review-keiyaku-v4/SKILL.md) for review
 method and test-quality judgment. Neither skill is an authority source.

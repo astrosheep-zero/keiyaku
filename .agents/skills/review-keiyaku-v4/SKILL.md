@@ -1,6 +1,6 @@
 ---
 name: review-keiyaku-v4
-description: Use for independent Keiyaku v4 review when judging architecture, implementation, tests, model-change impact, duplication, redundancy, or simplification opportunities by root cause, authority, deletion, ownership, and future-change friction.
+description: Use when reviewing Keiyaku v4: judging architecture, implementation, tests, model-change impact, duplication, redundancy, or simplification opportunities by root cause, authority, deletion, ownership, and future-change friction.
 ---
 
 # Review Keiyaku V4

@@ -1,8 +1,9 @@
 ---
 name: keiyaku-akuma
 description: >-
-  Calling an Akuma: delegate work to a new or existing worker, then observe,
-  guide, and collect the result.
+  Use when the work involves Akuma or Aku, or when you want other hands on
+  it: delegating a job, or fanning out research, checks, or other parallel
+  work.
 ---
 
 # Keiyaku Akuma
@@ -22,7 +23,7 @@ waiting for the first answer. Use explicit `--wait <duration>` when this
 invocation should block while observing that initial work. `--wait` only bounds
 this command; it never stops the Akuma. Read `call --help` for flag syntax,
 defaults, and action vocabulary.
-For seat grants see `keiyaku-workflow`'s table; Reviewers need `--allowed contract.review`.
+To hand a Contract role to an Akuma, use the grant table in `keiyaku-workflow`.
 
 The selected Akuma name is a reusable worker configuration, not an individual.
 Calling it again creates an independent Akuma. Use different names for

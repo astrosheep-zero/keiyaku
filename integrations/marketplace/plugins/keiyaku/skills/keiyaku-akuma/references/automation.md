@@ -46,8 +46,8 @@ skeptics to break the finalists, and generate replacements only for the
 identified weaknesses. Bound rounds and cost; "keep improving" is not a useful
 stop condition.
 
-Independent judgment needs independent contexts. Create separate Akuma for
-blind comparisons or adversarial verification. Reuse an identity for follow-up
+Blind comparisons and adversarial checks need separate contexts. Create
+separate Akuma for them. Reuse an identity for follow-up
 investigation, not as a supposedly fresh judge of its own earlier answer.
 
 ## Public Entry And A Single Structured Turn

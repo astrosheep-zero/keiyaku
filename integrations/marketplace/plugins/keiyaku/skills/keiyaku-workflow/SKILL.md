@@ -38,13 +38,26 @@ to create parallel work.
 Use `after` only when one `kei` requires another to be accepted first. Ordinary
 overlap is not a dependency.
 
-## 3. Hold the `kei`
+## 3. Roles
 
-Every `kei` has exactly one holder. The holder coordinates the work and owns
-acceptance until the Contract is accepted or abandoned. Delegation does not
-transfer that responsibility. An Akuma holding the whole loop needs the `kei`, current Arc
-when one exists, appointed worktree, holder duties, and actions its commission
-will perform. Birth freezes permissions; Contract association grants none.
+A `kei` has three roles. They are responsibilities, not people, and one agent
+may fill more than one of them, with one exception below.
+
+- **Holder:** exactly one per `kei`. Owns the fulfillment loop and acceptance
+  until the Contract is accepted or abandoned. Handing work to others never
+  transfers this responsibility.
+- **Deliverer:** produces the candidate in the appointed worktree and tenders
+  it with `deliver`.
+- **Reviewer:** judges the complete Contract against its acceptance conditions
+  and records the verdict with `review`.
+
+Review is independent when the Reviewer did not deliver the candidate under
+review. That is the whole requirement. The holder may review its own `kei`; a
+fresh Akuma is not what makes review independent. Keiyaku does not check who
+reviews, so keeping the Reviewer apart from the Deliverer is the holder's duty.
+
+Any role may be filled directly or handed to an Akuma. Hand one over when other
+hands help the work, not to make review count.
 
 ## 4. Lifecycle
 
@@ -78,31 +91,30 @@ Placement judges declared gates, not the producer's identity. Review does not
 replace Verification; audit never requests placement. Read the final receipt
 for stops and reconciliation lag after an admitted act.
 
-## 5. Seats And Capabilities
+## 5. Handing A Role To An Akuma
 
 This is the one commissioning map. `call --help` owns the exact action
-vocabulary and default set. `--contract` records association, not authority.
+vocabulary and default set. The flagship acting directly needs no grant.
+Birth freezes an Akuma's actions; `--contract` records association, not
+authority.
 
-| Seat | Grant and commission | Return |
+| Role | Grant at birth | Return |
 | --- | --- | --- |
-| Holder | Direct flagship commands need no Akuma grant. A delegated holder gets only its birth-time actions; include review when the delegated loop records review. | Own the acceptance loop and inspect receipts. |
-| Deliverer | The ordinary baseline includes every Task mutation, Contract audit and delivery, and Akuma management. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | Produce and tender the candidate; return the receipt. |
-| Reviewer | Add `--allowed contract.review` at birth: `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> --allowed contract.review -` | Record a verdict and return its receipt. Without the grant, `not-allowed` refuses the mutation; no Contract verdict is recorded. |
+| Holder | The actions the delegated loop will perform; include `contract.review` when this holder will review. Commission with the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
+| Deliverer | The ordinary baseline: every Task mutation, Contract audit and delivery, and Akuma management. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
+| Reviewer | `--allowed contract.review`: `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> --allowed contract.review -` | The verdict receipt. Without the grant, `not-allowed` refuses and no verdict is recorded. |
 
-An Archetype's explicit allowed set replaces the ordinary baseline. Check
+An Archetype's explicit allowed set replaces the ordinary baseline; check
 `status` for effective actions. `tell` and `fork` cannot add a grant to a live
-Akuma; call a fresh one with the grant. Nested calls cannot exceed their direct
-parent's actions.
-
-## 6. Delegate the Work
+Akuma, so call a fresh one with the grant. Nested calls cannot exceed their
+direct parent's actions.
 
 Commission with a clear objective, current Arc when one exists, appointed
-worktree, and expected result. A Deliverer produces the candidate. A Reviewer
-checks the complete Contract against its acceptance conditions and returns
-verdict evidence. Use `keiyaku-akuma` for invocation and observation, and
-command help for exact syntax.
+worktree, and expected result. Never ask the Akuma that delivered a candidate
+to review it. Use `keiyaku-akuma` for invocation and observation, and command
+help for exact syntax.
 
-## 7. Decide What Happens Next
+## 6. Decide What Happens Next
 
 The holder checks candidate, verification, review, prerequisites, and gates.
 
