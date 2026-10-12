@@ -148,9 +148,10 @@ function selectionOrderedIds(
  * The one lower set-observation owner for Akuma wait completion. It serves the
  * standalone one-ID association-free face and the plural any/all face with one
  * ordered round algorithm, one shared ordinary-detail budget, transient
- * unreadable peers, and an honest final deadline edge. The default completion
- * probe is used only without live row callbacks and never with a custom
- * predicate; a live viewer always observes rounds.
+ * unreadable peers, and an honest final deadline edge. A silent observation —
+ * no live row callback and no custom judge — decides which running rounds to
+ * skip with the owner's lightweight completion probe over the selected set; a
+ * live viewer or a custom judge always observes full rounds.
  */
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
   const readers =
@@ -187,12 +188,11 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
       }
       input.observe(structuredClone(observed));
     };
-    const live = input.observe !== undefined;
     const waited = await waitForObservation({
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.predicate === undefined && !live && input.ids.length === 1
-        ? { probe: async () => await readWaitComplete(input.path, input.ids[0]!) }
+      ...(input.predicate === undefined && input.observe === undefined
+        ? { probe: async () => await readWaitComplete(input.path, input.ids, input.completion, input.signal) }
         : {}),
       observe: async () => await observeWaitRound(input.path, input.ids, input.signal, readers),
       complete: (round) => roundComplete(round, input.completion, input.predicate),

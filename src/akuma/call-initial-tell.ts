@@ -64,7 +64,7 @@ export async function admitCallInitialTell(
   const birth = await waitForObservation({
     timeoutMs: BIRTH_TIMEOUT_MS,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
-    probe: async () => await readWaitComplete(input.world, input.id),
+    probe: async () => await readWaitComplete(input.world, [input.id], "all", input.signal),
     observe: async () => (await bornStatus(paths, input.id, { aperture: "receipt" })).status,
     complete: defaultWaitComplete,
   });

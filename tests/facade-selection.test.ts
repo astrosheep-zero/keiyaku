@@ -21,10 +21,7 @@ import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, beginTurn, endTurn, initializeHeart } from "../src/akuma/heart/index.js";
-import { bornDirectAkuma } from "./support/akuma-fixtures.js";
-import { createLiveStatusReader } from "../src/akuma/akuma-observe.js";
-import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
+import { activitySlice, appendActivity, beginTurn, breakBody, endTurn, HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
 import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
@@ -36,12 +33,15 @@ import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/library/akumas.js";
+import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
 import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { Tasks, type TaskId } from "../src/task/index.js";
 import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import {
   answering,
   bornWorld,
@@ -269,6 +269,360 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.equal("rows" in result.observations[0]!, false, "the final public wait result discards the live companion");
 });
 
+const WAIT_AT = "2026-08-11T00:00:00.000Z";
+
+// Keep the leash held so retained history belongs to real running work.
+async function retainedRunningWorker(root: string, suffix: string, at: string, historySize = 1) {
+  const born = await bornDirectAkuma({ root, archetype: "worker", draw: suffix, createdAt: at });
+  const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
+  const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at, call: "retained work" });
+  for (let index = 0; index < historySize; index += 1) {
+    await appendActivity(born.paths, { turnSequence: turn.sequence, at, event: { type: "thought", text: `retained step ${index}` } });
+  }
+  return {
+    ...born,
+    end: async () => {
+      await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at });
+      born.leash.release();
+    },
+  };
+}
+
+// Count full frontier reads separately from lifecycle probes.
+function waitStatementCounter() {
+  const original = DatabaseSync.prototype.prepare;
+  let projections = 0;
+  let lifeReads = 0;
+  let statements = 0;
+  DatabaseSync.prototype.prepare = function (...args) {
+    const sql = String(args[0]);
+    statements += 1;
+    if (sql.startsWith("WITH selected(sequence) AS")) projections += 1;
+    if (sql.startsWith("SELECT 1 FROM tells WHERE")) lifeReads += 1;
+    return original.apply(this, args);
+  };
+  return {
+    async measure<T>(action: () => Promise<T>) {
+      projections = 0;
+      lifeReads = 0;
+      statements = 0;
+      const value = await action();
+      return { value, projections, lifeReads, statements };
+    },
+    restore: () => {
+      DatabaseSync.prototype.prepare = original;
+    },
+  };
+}
+
+test("a silent plural wait completes from the selected set's real life", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-life-");
+  const finished = await answered(root, "worker", "00000011");
+  const running = await retainedRunningWorker(root, "00000012", WAIT_AT);
+  try {
+    const ids = [running.id, finished.id];
+    // Compare the returned evidence with the existing full-round path.
+    const watched = await executeWaitAkuma({
+      path: root,
+      ids,
+      completion: "any",
+      timeoutMs: 0,
+      observe: () => undefined,
+    });
+    const any = await executeWaitAkuma({ path: root, ids, completion: "any", timeoutMs: 5_000 });
+    assert.equal(any.reason, "completed");
+    assert.deepEqual(
+      any.observations.map((status) => status.id),
+      ids,
+      "a silent wait keeps the caller's order",
+    );
+    assert.deepEqual(any.unobserved, []);
+    assert.deepEqual(any, watched, "the silent wait returns exactly the live round's evidence");
+    assert.equal(defaultWaitComplete(any.observations[0]!), false);
+    assert.equal(defaultWaitComplete(any.observations[1]!), true);
+
+    const all = await executeWaitAkuma({
+      path: root,
+      ids,
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.equal(all.reason, "deadline", "one running peer keeps an all wait incomplete at the deadline edge");
+    assert.deepEqual(
+      all.observations.map((status) => status.id),
+      [running.id, finished.id],
+    );
+    assert.deepEqual(all.unobserved, []);
+
+    const pending = await answered(root, "reviewer", "00000013");
+    const edge = await executeWaitAkuma({
+      path: root,
+      ids: [finished.id, pending.id],
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.equal(edge.reason, "completed", "full completion wins at the deadline edge");
+    await recordTell(pending.paths, { kind: "tell", id: "pending-work", body: "waiting", recordedAt: WAIT_AT });
+    const withPending = await executeWaitAkuma({
+      path: root,
+      ids: [finished.id, pending.id],
+      completion: "all",
+      timeoutMs: 0,
+    });
+    assert.equal(withPending.reason, "deadline");
+    assert.equal(defaultWaitComplete(withPending.observations[0]!), true);
+    assert.equal(
+      defaultWaitComplete(withPending.observations[1]!),
+      false,
+      "a non-running peer with a pending Tell is not complete",
+    );
+
+    const nothing = await executeWaitAkuma({ path: root, ids: [], completion: "all", timeoutMs: 0 });
+    assert.deepEqual(
+      nothing,
+      { mode: "all", reason: "deadline", observations: [], unobserved: [] },
+      "an empty selection is never a vacuous completion",
+    );
+  } finally {
+    await running.end();
+  }
+});
+
+test("a silent plural wait skips running projection without lengthening its cadence", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-probe-");
+  const first = await retainedRunningWorker(root, "00000021", WAIT_AT, 40);
+  const second = await retainedRunningWorker(root, "00000022", WAIT_AT, 40);
+  const ids = [first.id, second.id];
+  const window = { path: root, ids, completion: "all", timeoutMs: 250 } as const;
+  const counter = waitStatementCounter();
+  try {
+    const startedAt = performance.now();
+    const silent = await counter.measure(async () => await executeWaitAkuma({ ...window }));
+    const silentElapsed = performance.now() - startedAt;
+    const selectedOnly = await counter.measure(
+      async () => await executeWaitAkuma({ ...window, onSelected: () => undefined }),
+    );
+    const baseline = await counter.measure(async () => await executeWaitAkuma({ ...window, predicate: defaultWaitComplete }));
+    let liveRounds = 0;
+    const watched = await counter.measure(async () => await executeWaitAkuma({ ...window, observe: () => { liveRounds += 1; } }));
+    const judged = await counter.measure(async () => await executeWaitAkuma({ ...window, predicate: () => true }));
+    const oneRound = ids.length;
+
+    assert.equal(silent.value.reason, "deadline");
+    assert.equal(silent.projections, oneRound, "only the final deadline round projects while both peers run");
+    assert.ok(
+      silent.lifeReads >= oneRound * 3,
+      `the probe kept polling every ordinary round (${silent.lifeReads} lifecycle reads)`,
+    );
+    assert.ok(silentElapsed >= 200, `the silent wait still polled to its deadline (${silentElapsed}ms)`);
+
+    assert.equal(selectedOnly.projections, oneRound, "an onSelected callback alone is not a live row viewer");
+    assert.ok(
+      selectedOnly.lifeReads >= oneRound * 3,
+      `onSelected alone still probes every round (${selectedOnly.lifeReads})`,
+    );
+
+    assert.ok(liveRounds >= 2, "a live viewer still observes every round");
+    assert.equal(watched.lifeReads, liveRounds * oneRound, "a live viewer reads life once per member each round");
+    assert.equal(watched.projections, watched.lifeReads, "live rounds still read current frontier evidence before reuse");
+    assert.equal(baseline.lifeReads, baseline.projections, "the full-round baseline never uses the probe");
+    assert.ok(
+      silent.projections < baseline.projections,
+      `the silent wait projected ${silent.projections} to the full-round baseline's ${baseline.projections}`,
+    );
+
+    assert.equal(judged.lifeReads, judged.projections, "a custom judge only reads life within full rounds");
+    assert.equal(judged.value.reason, "completed");
+    assert.equal(judged.projections, oneRound);
+
+    assert.deepEqual(watched.value.observations.map((status) => status.id), ids, "caller order survives the baseline");
+    assert.deepEqual(
+      silent.value,
+      baseline.value,
+      "the silent wait returns exactly the full-round baseline's final statuses and budget outcome",
+    );
+    assert.deepEqual(silent.value, watched.value, "live projection reuse preserves the same final evidence");
+    for (const status of silent.value.observations) {
+      assert.ok(status.timeline.entries.some((entry) => entry.kind === "gap"), "retained detail exceeds the shared budget");
+      assert.ok(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "call"), "each opening input remains pinned");
+    }
+    assert.ok(silent.statements < baseline.statements, "silent rounds reduce total SQL work against the full-round baseline");
+    t.diagnostic(`250ms two-worker wait: silent ${silent.projections} projections / ${silent.statements} SQL statements; baseline ${baseline.projections} projections / ${baseline.statements} SQL statements; live ${watched.projections} projections / ${watched.statements} SQL statements / ${liveRounds} rounds; elapsed ${Math.round(silentElapsed)}ms`);
+    assert.deepEqual(silent.value.unobserved, []);
+  } finally {
+    counter.restore();
+    await first.end();
+    await second.end();
+  }
+});
+
+test("a transiently unreadable plural peer proves nothing until the next round", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-transient-");
+  const first = await answered(root, "worker", "00000031");
+  const second = await answered(root, "worker", "00000032");
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  let lifecycleReads = 0;
+  DatabaseSync.prototype.prepare = function (...args) {
+    const statement = originalPrepare.apply(this, args);
+    if (String(args[0]).startsWith("SELECT 1 FROM tells WHERE")) {
+      lifecycleReads += 1;
+      if (lifecycleReads === 2)
+        statement.get = () => {
+          throw new Error("transient Heart read failure");
+        };
+    }
+    return statement;
+  };
+  try {
+    const startedAt = performance.now();
+    const result = await executeWaitAkuma({
+      path: root,
+      ids: [first.id, second.id],
+      completion: "all",
+      timeoutMs: 5_000,
+    });
+    const elapsed = performance.now() - startedAt;
+    assert.equal(result.reason, "completed");
+    assert.ok(
+      lifecycleReads >= 4,
+      `the unreadable member was retried on the next round (${lifecycleReads} lifecycle reads)`,
+    );
+    assert.ok(elapsed >= 90, `the unreadable member proved nothing, so one ordinary round was skipped (${elapsed}ms)`);
+    assert.deepEqual(
+      result.observations.map((status) => status.id),
+      [first.id, second.id],
+      "the full round still returns every selected member in caller order",
+    );
+    assert.deepEqual(result.unobserved, []);
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+  }
+});
+
+test("a persistently unreadable plural peer is reported unobserved at the deadline", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-unreadable-");
+  const readable = await answered(root, "worker", "00000041");
+  const broken = await answered(root, "worker", "00000042");
+  writeFileSync(broken.paths.heart, "not a Heart database\n");
+  const result = await executeWaitAkuma({
+    path: root,
+    ids: [readable.id, broken.id],
+    completion: "all",
+    timeoutMs: 150,
+  });
+  assert.equal(result.reason, "deadline", "an unreadable member never proves completion");
+  assert.deepEqual(
+    result.observations.map((status) => status.id),
+    [readable.id],
+  );
+  assert.deepEqual(
+    result.unobserved.map((member) => member.id),
+    [broken.id],
+  );
+  assert.ok((result.unobserved[0]!.diagnostic ?? "").length > 0, "the final round reports the real diagnostic");
+  assert.equal(defaultWaitComplete(result.observations[0]!), true, "a readable peer keeps its own honest evidence");
+
+  const any = await executeWaitAkuma({
+    path: root,
+    ids: [broken.id, readable.id],
+    completion: "any",
+    timeoutMs: 5_000,
+  });
+  assert.equal(any.reason, "completed", "an unreadable first member does not hide a completed peer");
+  assert.deepEqual(any.observations.map((status) => status.id), [readable.id]);
+  assert.deepEqual(any.unobserved.map((member) => member.id), [broken.id]);
+  await assert.rejects(
+    executeWaitAkuma({ path: root, ids: [broken.id], completion: "all", timeoutMs: 0 }),
+    /not a database/u,
+    "a single identity still propagates its read failure",
+  );
+});
+
+test("cancellation reaches a plural probe between selected identities", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-cancel-");
+  const first = await retainedRunningWorker(root, "00000051", WAIT_AT);
+  const second = await retainedRunningWorker(root, "00000052", WAIT_AT);
+  const before = (await activitySlice(first.paths)).highest;
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled the plural wait");
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  let lifecycleReads = 0;
+  let projections = 0;
+  DatabaseSync.prototype.prepare = function (...args) {
+    const sql = String(args[0]);
+    if (sql.startsWith("WITH selected(sequence) AS")) projections += 1;
+    if (sql.startsWith("SELECT 1 FROM tells WHERE")) {
+      lifecycleReads += 1;
+      if (lifecycleReads === 1) controller.abort(reason);
+    }
+    return originalPrepare.apply(this, args);
+  };
+  try {
+    await assert.rejects(
+      executeWaitAkuma({
+        path: root,
+        ids: [first.id, second.id],
+        completion: "all",
+        timeoutMs: 5_000,
+        signal: controller.signal,
+      }),
+      (error: unknown) => error === reason,
+    );
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+    await first.end();
+    await second.end();
+  }
+  assert.equal(lifecycleReads, 1, "the abort stopped the probe between selected identities");
+  assert.equal(projections, 0, "cancellation stops observation before a full round");
+  assert.equal((await activitySlice(first.paths)).highest, before, "cancellation interrupted observation, not work");
+});
+
+test("a Tell admitted after a completion probe is judged by the full round", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-successor-");
+  const first = await answered(root, "worker", "00000061");
+  const second = await retainedRunningWorker(root, "00000062", WAIT_AT);
+  const originalTry = HeldAkumaLeash.try;
+  let firstReads = 0;
+  t.mock.method(HeldAkumaLeash, "try", async (paths: typeof first.paths) => {
+    const claim = await originalTry(paths);
+    if (paths.directory === first.paths.directory && ++firstReads === 2) {
+      await recordTell(first.paths, { kind: "tell", id: "new-work", body: "continue", recordedAt: WAIT_AT });
+    }
+    return claim;
+  });
+  try {
+    const result = await executeWaitAkuma({
+      path: root,
+      ids: [first.id, second.id],
+      completion: "any",
+      timeoutMs: 150,
+    });
+    assert.equal(result.reason, "deadline", "a stale probe cannot return completion");
+    assert.ok(firstReads > 2, "the shared loop continues after full evidence invalidates the probe");
+    assert.ok(result.observations.every((status) => !defaultWaitComplete(status)));
+    assert.ok(result.observations[0]!.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending"));
+  } finally {
+    t.mock.restoreAll();
+    await second.end();
+  }
+});
+
+test("a missing Soul remains a hard failure behind a running plural peer", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-not-born-");
+  const running = await retainedRunningWorker(root, "00000071", WAIT_AT);
+  const missing = akuId({ archetype: "worker", suffix: "00000072" });
+  try {
+    for (const completion of ["any", "all"] as const) {
+      await assert.rejects(
+        executeWaitAkuma({ path: root, ids: [running.id, missing], completion, timeoutMs: 5_000 }),
+        { name: "AkumaNotBornError" },
+      );
+    }
+  } finally {
+    await running.end();
+  }
+});
 test("live wait reselects an unchanged later Heart when an earlier member releases the shared budget", async (t) => {
   const root = fixtureRoot(t, "keiyaku-live-wait-budget-");
   const members: (Awaited<ReturnType<typeof bornDirectAkuma>> & { turn: Awaited<ReturnType<typeof beginTurn>> })[] = [];

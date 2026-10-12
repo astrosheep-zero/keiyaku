@@ -234,10 +234,28 @@ export function defaultWaitComplete(status: AkumaStatus): boolean {
   );
 }
 
-export async function readWaitComplete(worldPath: WorldRoot, id: AkuId): Promise<boolean> {
-  const paths = pathsForAkuId(worldPath, id);
-  const observed = await bornObservation(paths, id, () => readLifeSnapshot(paths));
-  return complete(observed.currentLife, observed.snapshot.hasPendingTell);
+/** Probe completion only; returned statuses still come from a full observation. */
+export async function readWaitComplete(
+  worldPath: WorldRoot,
+  ids: readonly AkuId[],
+  completion: "any" | "all",
+  signal?: AbortSignal,
+): Promise<boolean> {
+  let completed = 0;
+  for (const id of ids) {
+    signal?.throwIfAborted();
+    try {
+      const paths = pathsForAkuId(worldPath, id);
+      const observed = await bornObservation(paths, id, () => readLifeSnapshot(paths, signal));
+      if (complete(observed.currentLife, observed.snapshot.hasPendingTell)) {
+        if (completion === "any") return true;
+        completed += 1;
+      }
+    } catch (error) {
+      if (ids.length === 1 || error instanceof AkumaNotBornError) throw error;
+    }
+  }
+  return ids.length > 0 && completed === ids.length;
 }
 
 export type WaitReason = "completed" | "deadline";
