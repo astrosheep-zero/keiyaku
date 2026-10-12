@@ -5,10 +5,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { captureOutput } from "./support/cli-fixtures.js";
-import { CliUsageError, parseArgv, renderContractHelp, renderHelp, renderRootHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, renderHelp, renderRootHelp } from "../src/cli/parse.js";
+import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
-import { renderTaskHelp } from "../src/cli/commands/task.js";
+import { renderTaskHelp } from "../src/cli/commands/task-grammar.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {

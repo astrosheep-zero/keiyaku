@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { cliJson } from "./support/cli-fixtures.js";
-import { resolveCliCoordinates } from "../src/cli/coordinates.js";
+import { cliCoordinateDiscovery } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { Keiyaku, Repo } from "../src/index.js";
@@ -44,7 +44,7 @@ test("CLI and Repo canonicalize a relative repository coordinate with spaces", a
   assert.equal(await fromAlias.currentBranch(), "refs/heads/main");
 
   const command = parseArgv(["-C", alias, "--repo", ".", "bind", "-"]).command;
-  const coordinates = await resolveCliCoordinates({
+  const coordinates = await cliCoordinateDiscovery.resolve({
     processCwd: process.cwd(),
     cwd: alias,
     repo: ".",

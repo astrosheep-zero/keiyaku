@@ -28,7 +28,7 @@ import { createExecutionProgressRenderer } from "./render/execution-progress.js"
 import { executionFailureLines } from "./render/receipt.js";
 import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
-import { displayContext, writeJson, writeStderr, writeStdout } from "./streams.js";
+import { displayContext, emit, writeJson, writeStderr, writeStdout } from "./streams.js";
 
 export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
 
@@ -130,9 +130,7 @@ async function runInstall(
   environment: NodeJS.ProcessEnv,
 ): Promise<number> {
   const result: InstallInvocationResult = await installHarnesses(command.harnesses, environment);
-  if (command.output === "json") writeJson(result);
-  else writeStdout(renderInstallText(result));
-  return installExitCode(result);
+  return emit(command.output, result, () => renderInstallText(result), installExitCode(result));
 }
 
 type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
@@ -247,23 +245,18 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<num
     return akumaFailure.exitCode;
   }
   if (error instanceof AkumaArchetypeError && command.command === "call") {
-    if (command.output === "json")
-      writeJson({
-        kind: "refused",
-        diagnostic: "Akuma not found",
-        archetype: error.archetype,
-        available: "keiyaku ls aku/",
-      });
-    else
-      writeStdout(
+    return emit(
+      command.output,
+      { kind: "refused", diagnostic: "Akuma not found", archetype: error.archetype, available: "keiyaku ls aku/" },
+      () =>
         renderStructuredRefusal(
           "call",
           `Akuma not found · ${safeText(error.archetype)}`,
           ["available  keiyaku ls aku/"],
           usageGuideForCommand(command),
         ),
-      );
-    return 1;
+      1,
+    );
   }
   if (command.output === "json") writeJson(encodeFailureWire(error));
   else writeStderr(await commandFailureText(error, command));

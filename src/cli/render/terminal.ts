@@ -13,7 +13,7 @@ export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
 
 export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
 
-export type GitShortStat = Readonly<{
+type GitShortStat = Readonly<{
   filesChanged: number;
   insertions: number;
   deletions: number;
@@ -260,12 +260,17 @@ export function checkoutNotFollowableLines(refusal: CheckoutNotFollowable): read
   return lines;
 }
 
-export function renderTextBlock(value: string, indent: string, columns: number): readonly string[] {
+/**
+ * Wrap `value` into the column budget under one indent. A `lead` such as an em dash joins the first
+ * word as one unit, so it never dangles alone at a line end.
+ */
+export function renderTextBlock(value: string, indent: string, columns: number, lead?: string): readonly string[] {
   const words = safeText(value)
     .trim()
     .split(/\s+/u)
     .filter((word) => word.length > 0);
-  if (words.length === 0) return [indent];
+  if (words.length === 0) return [lead === undefined ? indent : `${indent}${lead}`];
+  if (lead !== undefined) words[0] = `${lead} ${words[0]}`;
   const lines: string[] = [];
   let current = indent;
   for (const word of words) {

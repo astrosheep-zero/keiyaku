@@ -22,7 +22,14 @@ import type {
 } from "../../task/index.js";
 import { taskMark } from "./marks.js";
 import { outcomeLines, receiptPayload, receiptRow, refusalLines } from "./receipt.js";
-import { DEFAULT_CLI_COLUMNS, displayColumns, emptyCatalogue, safeText, type TextRenderContext } from "./terminal.js";
+import {
+  DEFAULT_CLI_COLUMNS,
+  displayColumns,
+  emptyCatalogue,
+  renderTextBlock,
+  safeText,
+  type TextRenderContext,
+} from "./terminal.js";
 
 export { taskMark } from "./marks.js";
 
@@ -86,27 +93,7 @@ function entityLines(entity: TaskEntity, columns: number, indent = ""): readonly
   const title = safeText(entity.title);
   const inline = `${scan} — ${title}`;
   if (displayColumns(inline) <= columns) return [inline];
-  return [scan, ...dashTitleLines(title, `${indent}  `, columns)];
-}
-
-/** Wrap `— <title>` as one unit: the dash never dangles alone at a line end. */
-function dashTitleLines(title: string, indent: string, columns: number): readonly string[] {
-  const words = title
-    .trim()
-    .split(/\s+/u)
-    .filter((word) => word.length > 0);
-  const unit = words.length === 0 ? [`—`] : [`— ${words[0]!}`, ...words.slice(1)];
-  const lines: string[] = [];
-  let current = indent;
-  for (const word of unit) {
-    const candidate = current === indent ? `${indent}${word}` : `${current} ${word}`;
-    if (current !== indent && displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `${indent}${word}`;
-    } else current = candidate;
-  }
-  lines.push(current);
-  return lines;
+  return [scan, ...renderTextBlock(title, `${indent}  `, columns, "—")];
 }
 
 function stateEntity(task: TaskView | (TaskRef & { priority?: number | null })): TaskEntity {
@@ -279,7 +266,7 @@ function doctorIssue(issue: TaskDoctorIssue): string {
   return `! cycle ${issue.relation} ${issue.tasks.join(" ")}`;
 }
 
-function renderDoctor(report: TaskDoctorReport): string {
+export function renderDoctor(report: TaskDoctorReport): string {
   if (report.issues.length === 0) return "✓ doctor  healthy";
   const noun = report.issues.length === 1 ? "issue" : "issues";
   return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
@@ -398,10 +385,6 @@ export function renderTaskTree(result: TaskDecompositionTree, context: TextRende
   return result.kind === "accepted"
     ? treeLines(result.value, context.columns).join("\n")
     : renderFailure("tree", result, context.columns);
-}
-
-export function renderTaskDoctor(result: TaskDoctorReport): string {
-  return renderDoctor(result);
 }
 
 export function renderTaskContext(result: TaskContextResult, context: TextRenderContext = DEFAULT_CONTEXT): string {

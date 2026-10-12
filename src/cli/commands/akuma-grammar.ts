@@ -1,4 +1,5 @@
-import { CliUsageError, commandGuide, isBlankInput, usageLine, type CliUsageGuide } from "../usage.js";
+import { CliUsageError, commandGuide, usageLine, type CliUsageGuide } from "../usage.js";
+import { scanArgs, type ScanFlagKind, type ScanSpec } from "../scan.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 import {
@@ -52,7 +53,7 @@ type FlagValue = string | true | readonly string[];
 type AkumaCommandSpec = Readonly<{
   arity: number | "one-or-more";
   stdin: boolean;
-  flags: Readonly<Record<string, "boolean" | "value" | "repeatable">>;
+  flags: Readonly<Record<string, ScanFlagKind>>;
   usage: string;
   purpose: string;
   details?: string;
@@ -68,7 +69,7 @@ const AKUMA_COMMAND_SPECS = {
       contract: "value",
       alias: "value",
       wait: "value",
-      allowed: "repeatable",
+      allowed: "repeat",
       json: "boolean",
       schema: "value",
     },
@@ -198,7 +199,24 @@ export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
   return commandGuide(action, AKUMA_COMMAND_SPECS[action].usage);
 }
 
-type Scanned = Readonly<{ flags: Readonly<Record<string, FlagValue>>; positionals: readonly string[]; stdin: boolean }>;
+const TELL_ONLY_REFUSALS = {
+  "--wait": "tell --wait is not supported; use ask --wait",
+  "--schema": "tell --schema is not supported; use ask --schema",
+};
+
+/** The prompt is the only stdin reader; the ask-only options are refused tokens, as is `-d`. */
+function scanSpec(action: AkumaAction, spec: AkumaCommandSpec): ScanSpec {
+  return {
+    subject: action,
+    flags: spec.flags,
+    ...(spec.stdin ? { stdin: "prompt" } : {}),
+    stdinRefusal: `stdin marker '-' is not valid for ${action}`,
+    refused: {
+      "-d": `option -d is not valid for ${action}`,
+      ...(action === "tell" ? TELL_ONLY_REFUSALS : {}),
+    },
+  };
+}
 
 function stringFlag(value: FlagValue | undefined, diagnostic: string, fail: (message: string) => never): string {
   if (typeof value !== "string") fail(diagnostic);
@@ -211,67 +229,6 @@ function parseDuration(raw: FlagValue, option: string, fail: (message: string) =
   if (duration.kind === "invalid") fail(`${option} requires an integer duration with unit ms, s, m, or h`);
   if (duration.kind === "overflow") fail(`${option} duration exceeds the safe millisecond range`);
   return duration.milliseconds;
-}
-
-function scanNamedOption(
-  input: Readonly<{
-    action: AkumaAction;
-    spec: AkumaCommandSpec;
-    argv: readonly string[];
-    index: number;
-  }>,
-  flags: Record<string, FlagValue>,
-  fail: (message: string) => never,
-): number {
-  const token = input.argv[input.index]!;
-  const name = token.slice(2);
-  const kind = input.spec.flags[name];
-  if (kind === undefined) fail(`option ${token} is not valid for ${input.action}`);
-  if (kind !== "repeatable" && flags[name] !== undefined) fail(`duplicate option: ${token}`);
-  if (kind === "boolean") {
-    flags[name] = true;
-    return input.index;
-  }
-  const value = input.argv[input.index + 1];
-  if (value === undefined || value === "-" || value === "-d" || value.startsWith("--")) {
-    fail(`${token} requires a value`);
-  }
-  if (isBlankInput(value)) fail(`${token} requires a nonblank value`);
-  flags[name] = kind === "repeatable" ? [...(Array.isArray(flags[name]) ? flags[name] : []), value] : value;
-  return input.index + 1;
-}
-
-function scanAkuma(action: AkumaAction, argv: readonly string[], fail: (message: string) => never): Scanned {
-  const spec = AKUMA_COMMAND_SPECS[action];
-  const flags: Record<string, FlagValue> = {};
-  const positionals: string[] = [];
-  let stdin = false;
-  let positionalOnly = false;
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!positionalOnly && token === "--") {
-      positionalOnly = true;
-      continue;
-    }
-    if (positionalOnly) {
-      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
-      positionals.push(token);
-    } else if (token === "-") {
-      if (!spec.stdin) fail(`stdin marker '-' is not valid for ${action}`);
-      if (stdin) fail("stdin marker '-' may appear only once");
-      stdin = true;
-    } else if (token === "-d") {
-      fail(`option ${token} is not valid for ${action}`);
-    } else if (!token.startsWith("--")) {
-      if (isBlankInput(token)) fail(`${action} requires a nonblank value`);
-      positionals.push(token);
-    } else {
-      if (action === "tell" && (token === "--wait" || token === "--schema"))
-        fail(`tell ${token} is not supported; use ask ${token}`);
-      index = scanNamedOption({ action, spec, argv, index }, flags, fail);
-    }
-  }
-  return { flags, positionals, stdin };
 }
 
 function positiveIndex(raw: FlagValue, option: string, fail: (message: string) => never): number {
@@ -505,10 +462,10 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const fail = (message: string): never => {
     throw new CliUsageError(message, akumaUsageGuide(action));
   };
-  const { flags, positionals, stdin } = scanAkuma(action, argv, fail);
+  const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "call" || action === "tell" || action === "ask") {
-    const parsed = parsePrompted(action, positionals, stdin, fail);
+    const parsed = parsePrompted(action, positionals, stdin !== undefined, fail);
     return action === "call"
       ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
       : action === "tell"
@@ -529,6 +486,6 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
           : `${action} accepts exactly ${spec.arity} Akuma selectors`,
       );
   }
-  if (stdin) fail(`${action} reads no stdin`);
+  if (stdin !== undefined) fail(`${action} reads no stdin`);
   return parseAddressed(action, positionals, flags, output, fail);
 }

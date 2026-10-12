@@ -1,10 +1,5 @@
-import {
-  CliUsageError,
-  isBlankInput,
-  TASK_FAMILY_USAGE_GUIDE,
-  unknownCommandGuide,
-  type CliUsageGuide,
-} from "../usage.js";
+import { CliUsageError, TASK_FAMILY_USAGE_GUIDE, unknownCommandGuide, type CliUsageGuide } from "../usage.js";
+import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import { parseTaskId } from "../../task/identity.js";
 import {
@@ -47,7 +42,7 @@ export type ParsedTaskCommand = Readonly<{
 
 type TaskCommandSpec = Readonly<{
   arity: readonly [minimum: number, maximum: number];
-  flags: Readonly<Record<string, "boolean" | "value" | "repeat">>;
+  flags: Readonly<Record<string, ScanFlagKind>>;
   stdin?: "document" | "compose";
   usage: string;
   purpose: string;
@@ -299,93 +294,17 @@ export function taskUsageGuide(action: TaskAction): CliUsageGuide {
   };
 }
 
-function setFlag(
-  flags: Record<string, TaskFlagValue>,
-  name: string,
-  kind: "boolean" | "value" | "repeat",
-  value: string | undefined,
-  fail: (message: string) => never,
-): void {
-  if (flags[name] !== undefined && kind !== "repeat") fail(`duplicate option: --${name}`);
-  if (kind === "boolean") {
-    flags[name] = true;
-    return;
-  }
-  if (value === undefined) fail(`--${name} requires a value`);
-  if (isBlankInput(value)) fail(`--${name} requires a nonblank value`);
-  if (kind === "repeat") {
-    const current = flags[name];
-    flags[name] = [...(Array.isArray(current) ? current : []), value];
-  } else flags[name] = value;
-}
+type ScannedTask = ScannedArgs<TaskStdin>;
 
-type ScannedTask = Readonly<{
-  positionals: readonly string[];
-  flags: Readonly<Record<string, TaskFlagValue>>;
-  stdin?: TaskStdin;
-}>;
-
-function scanTaskOption(
-  input: Readonly<{
-    action: TaskAction;
-    spec: TaskCommandSpec;
-    argv: readonly string[];
-    index: number;
-    flags: Record<string, TaskFlagValue>;
-    stdin?: TaskStdin;
-  }>,
-  fail: (message: string) => never,
-): Readonly<{ index: number; stdin?: TaskStdin }> {
-  const token = input.argv[input.index]!,
-    name = token.slice(2),
-    kind = input.spec.flags[name];
-  if (kind === undefined) fail(`option ${token} is not valid for task ${input.action}`);
-  const next = kind === "boolean" ? undefined : input.argv[input.index + 1];
-  if (next === "-" && input.action === "update" && name === "body") {
-    if (input.stdin !== undefined) fail("stdin marker '-' may appear only once");
-    input.flags[name] = "";
-    return { index: input.index + 1, stdin: name };
-  }
-  if (kind !== "boolean" && (next === undefined || next.startsWith("--") || next === "-"))
-    fail(`--${name} requires a value`);
-  setFlag(input.flags, name, kind, next, fail);
+/** One scan spec per Task action: `-` reads the document, or `--body -` replaces an update body. */
+function scanSpec(action: TaskAction, spec: TaskCommandSpec): ScanSpec<TaskStdin> {
   return {
-    index: input.index + (kind === "boolean" ? 0 : 1),
-    ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
+    subject: `task ${action}`,
+    flags: spec.flags,
+    ...(spec.stdin === undefined ? {} : { stdin: spec.stdin }),
+    stdinRefusal: "stdin marker '-' is not valid here",
+    ...(action === "update" ? { stdinValue: "body" } : {}),
   };
-}
-
-function scanTaskArgv(action: TaskAction, argv: readonly string[], fail: (message: string) => never): ScannedTask {
-  const spec = TASK_COMMAND_SPECS[action],
-    positionals: string[] = [],
-    flags: Record<string, TaskFlagValue> = {};
-  let stdin: TaskStdin | undefined;
-  let positionalOnly = false;
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!positionalOnly && token === "--") {
-      positionalOnly = true;
-      continue;
-    }
-    if (!positionalOnly && token === "-") {
-      if (spec.stdin === undefined) fail("stdin marker '-' is not valid here");
-      if (stdin !== undefined) fail("stdin marker '-' may appear only once");
-      stdin = spec.stdin;
-      continue;
-    }
-    if (positionalOnly || !token.startsWith("--")) {
-      if (isBlankInput(token)) fail(`task ${action} requires a nonblank value`);
-      positionals.push(token);
-      continue;
-    }
-    const scanned = scanTaskOption(
-      { action, spec, argv, index, flags, ...(stdin === undefined ? {} : { stdin }) },
-      fail,
-    );
-    index = scanned.index;
-    stdin = scanned.stdin;
-  }
-  return { positionals, flags, ...(stdin === undefined ? {} : { stdin }) };
 }
 
 function validateUpdate(scanned: ScannedTask, fail: (message: string) => never): void {
@@ -508,7 +427,7 @@ export function parseTaskCommand(argv: readonly string[]): ParsedTaskCommand {
   const fail = (message: string): never => {
     throw new CliUsageError(message, taskUsageGuide(action));
   };
-  const scanned = scanTaskArgv(action, argv, fail);
+  const scanned = scanArgs(argv, scanSpec(action, TASK_COMMAND_SPECS[action]), fail);
   validateTaskScan(action, scanned, fail);
   let where: TaskQueryExpression | undefined;
   if (action === "query" && typeof scanned.flags.where === "string") {

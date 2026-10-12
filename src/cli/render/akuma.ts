@@ -1,31 +1,21 @@
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkuId } from "../../akuma/identity.js";
-import type {
-  AkumaAskResult,
-  AkumaKillResult,
-  AkumaObservation,
-  AkumaTellResult,
-  AkumaWaitResult,
-} from "../../akuma/selection-observation.js";
+import type { AkumaAskResult, AkumaKillResult, AkumaTellResult } from "../../akuma/selection-observation.js";
 import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
 import type { CallResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
-  DEFAULT_CONTEXT,
   associatedIdentity,
-  historyText,
   inputWaitStream,
   killResultText,
   snapshotHeading,
-  snapshotText,
   tellText,
-  waitText,
   type ObservedCallHead,
 } from "./akuma-activity.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
 
-export type AskProgress = Readonly<{
+type AskProgress = Readonly<{
   admitted: (tell: TellResult, id: AkuId) => readonly string[];
   observe: (observation: LiveStatusObservation) => readonly string[];
   frame: () => readonly string[];
@@ -138,43 +128,6 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
     observation: inputObservation.observation,
     ...(inputObservation.completedAt === undefined ? {} : { completedAt: inputObservation.completedAt }),
   });
-}
-
-export function renderWaitText(
-  result: AkumaWaitResult,
-  presentation: Readonly<{
-    alias?: string;
-    startedAt?: number;
-    selection?: readonly import("./akuma-activity.js").WaitSelectedIdentity[];
-  }>,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return waitText(result, presentation, context);
-}
-
-export function renderStatusText(
-  status: AkumaObservation,
-  alias: string | undefined,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return snapshotText(status, context, ...(alias === undefined ? [{}] : [{ alias }]));
-}
-
-export function renderTellText(
-  result: AkumaTellResult,
-  alias: string | undefined,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-  options: Readonly<{ identity?: boolean }> = {},
-): string {
-  return tellText(result, alias, context, options);
-}
-
-export function renderHistoryText(
-  result: AkumaHistoryResult,
-  presentation: Readonly<{ alias?: string; id?: string; last?: boolean }>,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return historyText(result, presentation, context);
 }
 
 export function renderForkText(receipt: ForkResult): string {

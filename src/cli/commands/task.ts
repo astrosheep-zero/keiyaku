@@ -17,13 +17,13 @@ import {
 } from "../../task/index.js";
 import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { installNamespaceContext, resolveTaskNamespaceContext } from "../../task/context.js";
-import { displayContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import { displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import type { CliCoordinates } from "../coordinates.js";
 import {
+  renderDoctor,
   renderTaskCompose,
   renderTaskContext,
-  renderTaskDoctor,
   renderTaskFailure,
   renderTaskIncompleteDiagnostic,
   renderTaskLifecycle,
@@ -38,7 +38,6 @@ import {
 } from "../render/task.js";
 import { actorFromEdge } from "../actor.js";
 import { taskQuerySelection } from "../../task/query.js";
-export { renderTaskHelp } from "./task-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
@@ -113,16 +112,6 @@ function taskStdinDiagnostic(command: ParsedTaskCommand): string | undefined {
     default:
       return undefined;
   }
-}
-
-/**
- * The shared output primitive: one native answer, its matching rendered text, and the native exit
- * classifier's verdict. JSON writes the untouched native value; text writes the rendered lines.
- */
-function emitTask<Result>(output: "text" | "json", result: Result, project: () => string, code: number): number {
-  if (output === "json") writeJson(result);
-  else writeStdout(project());
-  return code;
 }
 
 async function invokeAdd(input: TaskInput): Promise<TaskMutationResult> {
@@ -207,17 +196,14 @@ async function runShow(command: ParsedTaskCommand, tasks: TaskProduct): Promise<
   for (const id of handles) details.push(await tasks.task({ id }).read());
   const missing = details.findIndex((detail) => detail === null);
   const code = missing >= 0 ? 1 : 0;
-  if (command.output === "json") {
-    writeJson(handles.length === 1 ? details[0] : details);
-    return code;
-  }
+  const projected = handles.length === 1 ? details[0] : details;
   if (missing >= 0) {
     const refusal: TaskShowResult = { kind: "refused", refusal: { kind: "task-missing", taskId: handles[missing]! } };
-    return emitTask(command.output, refusal, () => renderTaskShow(refusal, displayContext()), code);
+    return emit(command.output, projected, () => renderTaskShow(refusal, displayContext()), code);
   }
   const found = details.filter((detail): detail is TaskDetail => detail !== null);
   const result: TaskShowResult = found.length === 1 ? found[0]! : found;
-  return emitTask(command.output, result, () => renderTaskShow(result, displayContext()), code);
+  return emit(command.output, projected, () => renderTaskShow(result, displayContext()), code);
 }
 
 /** Presentation-only list scope the leaf acquired, never part of the native answer. */
@@ -240,7 +226,7 @@ async function runRead(input: TaskInput): Promise<number> {
           : { namespace: explicitListNamespace(command)! }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
       });
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskList("ls", scope, result, displayContext()),
@@ -253,7 +239,7 @@ async function runRead(input: TaskInput): Promise<number> {
         ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
       });
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskList("ready", scope, result, displayContext()),
@@ -266,7 +252,7 @@ async function runRead(input: TaskInput): Promise<number> {
         ...(value(command, "parent") === undefined ? {} : { parent: value(command, "parent")! }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
       });
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskList("blocked", scope, result, displayContext()),
@@ -283,7 +269,7 @@ async function runRead(input: TaskInput): Promise<number> {
         ...(value(command, "sort") === undefined ? {} : { sort: value(command, "sort") as TaskQuerySort }),
         ...(limit(command) === undefined ? {} : { limit: limit(command)! }),
       });
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskList("query", scope, result, displayContext()),
@@ -292,11 +278,11 @@ async function runRead(input: TaskInput): Promise<number> {
     }
     case "tree": {
       const result = await tasks.task({ id }).tree();
-      return emitTask(command.output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
+      return emit(command.output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
     }
     case "doctor": {
       const result = await tasks.doctor();
-      return emitTask(command.output, result, () => renderTaskDoctor(result), taskExitCode(result));
+      return emit(command.output, result, () => renderDoctor(result), taskExitCode(result));
     }
     default:
       throw new Error(`task action is not a read: ${command.action}`);
@@ -330,24 +316,22 @@ function missingWorld(command: ParsedTaskCommand): number {
       return 1;
     }
     const refusal: TaskShowResult = missingTask(command.positionals[0]!);
-    return emitTask(output, refusal, () => renderTaskShow(refusal, displayContext()), 1);
+    return emit(output, refusal, () => renderTaskShow(refusal, displayContext()), 1);
   }
   if (isWorldObservationAction(command) || (command.action === "compose" && command.flags.plan === true)) {
-    if (output === "json") writeJson({ kind: "absent" });
-    else writeStdout("task world absent");
-    return 1;
+    return emit(output, { kind: "absent" }, () => "task world absent", 1);
   }
   if (command.action === "context") {
     const result = { kind: "accepted" as const, value: { namespace: [], source: "default-root" as const } };
-    return emitTask(output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+    return emit(output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
   }
   if (command.action === "tree") {
     const result = missingTask(command.positionals[0]!);
-    return emitTask(output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
+    return emit(output, result, () => renderTaskTree(result, displayContext()), taskExitCode(result));
   }
   if (command.action === "update") {
     const result = missingTask(command.positionals[0]!);
-    return emitTask(output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
+    return emit(output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
   }
   if (
     command.action === "start" ||
@@ -357,7 +341,7 @@ function missingWorld(command: ParsedTaskCommand): number {
   ) {
     if (command.positionals.length === 1) {
       const result = missingTask(command.positionals[0]!);
-      return emitTask(
+      return emit(
         output,
         result,
         () => renderTaskMutation(command.action, result, displayContext()),
@@ -367,7 +351,7 @@ function missingWorld(command: ParsedTaskCommand): number {
     const result = {
       items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missingTask(id) })),
     };
-    return emitTask(
+    return emit(
       output,
       result,
       () => renderTaskLifecycle(command.action, result, displayContext()),
@@ -378,7 +362,7 @@ function missingWorld(command: ParsedTaskCommand): number {
     const result = {
       items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missingTask(id) })),
     };
-    return emitTask(
+    return emit(
       output,
       result,
       () => renderTaskLifecycle(command.action, result, displayContext()),
@@ -419,12 +403,7 @@ async function runBatchLifecycle(
     ids: command.positionals,
     ...(note === undefined ? {} : { note }),
   });
-  return emitTask(
-    command.output,
-    result,
-    () => renderTaskLifecycle(verb, result, displayContext()),
-    taskExitCode(result),
-  );
+  return emit(command.output, result, () => renderTaskLifecycle(verb, result, displayContext()), taskExitCode(result));
 }
 
 async function runMutation(input: TaskInput): Promise<number> {
@@ -433,7 +412,7 @@ async function runMutation(input: TaskInput): Promise<number> {
   switch (command.action) {
     case "add": {
       const result = await invokeAdd(input);
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskMutation("add", result, displayContext()),
@@ -442,13 +421,13 @@ async function runMutation(input: TaskInput): Promise<number> {
     }
     case "update": {
       const result = await invokeUpdate(input);
-      return emitTask(command.output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
+      return emit(command.output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
     }
     case "start":
     case "stop":
     case "resume": {
       const result = await invokeLifecycle(tasks, command.positionals, command.positionals[0]!, command.action);
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskLifecycle(command.action, result, displayContext()),
@@ -466,26 +445,16 @@ async function runMutation(input: TaskInput): Promise<number> {
         const resolved = await resolveTaskNamespaceContext(input.context);
         if (typeof resolved === "object" && "kind" in resolved) {
           const result = { kind: "refused" as const, refusal: resolved };
-          return emitTask(
-            command.output,
-            result,
-            () => renderTaskContext(result, displayContext()),
-            taskExitCode(result),
-          );
+          return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
         }
         const result = { kind: "accepted" as const, value: resolved };
-        return emitTask(
-          command.output,
-          result,
-          () => renderTaskContext(result, displayContext()),
-          taskExitCode(result),
-        );
+        return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
       }
       const result = {
         kind: "accepted" as const,
         value: { namespace: current ?? [], source: "default-root" as const },
       };
-      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+      return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
     }
     case "compose": {
       const result = await tasks.compose({
@@ -533,7 +502,7 @@ function refuseNamespace(
     case "blocked":
     case "query": {
       const action = command.action;
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskList(action, listPresentation(command), result, displayContext()),
@@ -541,16 +510,16 @@ function refuseNamespace(
       );
     }
     case "add":
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskMutation("add", result, displayContext()),
         taskExitCode(result),
       );
     case "context":
-      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+      return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
     case "compose":
-      return emitTask(
+      return emit(
         command.output,
         result,
         () => renderTaskFailure("compose", result, displayContext()),
@@ -605,7 +574,7 @@ export async function runTaskCommand(
     current = resolved.namespace;
     if (command.action === "context" && command.positionals.length === 0) {
       const result = { kind: "accepted" as const, value: resolved };
-      return emitTask(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
+      return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
     }
   }
   if (command.action === "show") return await runShow(command, tasks);

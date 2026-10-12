@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import {
-  installAssetsRoot,
-  installExitCode,
-  installHarnesses,
-  renderInstallText,
-} from "../src/cli/commands/install.js";
+import { installExitCode, installHarnesses, renderInstallText } from "../src/cli/commands/install.js";
 import type { ProcessInput, ProcessOutcome } from "../src/runtime/proc/run.js";
+
+// The install recipes name the bundled marketplace root relative to the module that holds them, so the
+// expectation follows that same module through the compile seam (.test-build/src links to build/src).
+const installModule = fileURLToPath(
+  new URL(
+    import.meta.url.endsWith(".js") ? "../src/cli/commands/install.js" : "../src/cli/commands/install.ts",
+    import.meta.url,
+  ),
+);
+const assetsRoot = resolve(dirname(realpathSync(installModule)), "../../../integrations/marketplace");
 
 const terminal = (code = 0, stderr = ""): ProcessOutcome => ({
   kind: "terminal",
@@ -46,7 +52,7 @@ test("Codex and Claude use their native marketplace recipes", async () => {
     return terminal();
   };
   const result = await installHarnesses(["codex", "claude"], {}, runner);
-  const root = installAssetsRoot();
+  const root = assetsRoot;
   assert.deepEqual(calls, [
     ["codex", "plugin", "marketplace", "add", root, "--json"],
     ["codex", "plugin", "add", "keiyaku", "--marketplace", "keiyaku", "--json"],
@@ -77,13 +83,7 @@ test("--all records failure and continues in fixed harness order", async () => {
     calls.map((argv) => argv[0]),
     ["codex", "codex", "claude", "opencode", "pi"],
   );
-  assert.deepEqual(calls[3], [
-    "opencode",
-    "plugin",
-    join(installAssetsRoot(), "plugins", "keiyaku"),
-    "--global",
-    "--force",
-  ]);
+  assert.deepEqual(calls[3], ["opencode", "plugin", join(assetsRoot, "plugins", "keiyaku"), "--global", "--force"]);
   assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
   assert.equal(installExitCode(result), 1);
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
@@ -98,7 +98,7 @@ test("the bundled plugin contains all six skills", () => {
     "keiyaku-akuma",
     "keiyaku-babysit",
   ]) {
-    const path = join(installAssetsRoot(), "plugins", "keiyaku", "skills", name, "SKILL.md");
+    const path = join(assetsRoot, "plugins", "keiyaku", "skills", name, "SKILL.md");
     const markdown = readFileSync(path, "utf8");
     assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));
     assert.doesNotMatch(markdown, /keiyaku-v4/u);
@@ -106,7 +106,7 @@ test("the bundled plugin contains all six skills", () => {
 });
 
 test("the bundled Akuma skill links to its packaged automation guide", () => {
-  const skill = join(installAssetsRoot(), "plugins", "keiyaku", "skills", "keiyaku-akuma");
+  const skill = join(assetsRoot, "plugins", "keiyaku", "skills", "keiyaku-akuma");
   const index = readFileSync(join(skill, "SKILL.md"), "utf8");
   assert.ok(index.includes("(references/automation.md)"));
   const guide = readFileSync(join(skill, "references", "automation.md"), "utf8");
@@ -116,7 +116,7 @@ test("the bundled Akuma skill links to its packaged automation guide", () => {
 });
 
 test("bundled instructions keep invocation and execution coordinates distinct", () => {
-  const plugin = join(installAssetsRoot(), "plugins", "keiyaku", "skills");
+  const plugin = join(assetsRoot, "plugins", "keiyaku", "skills");
   const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
   const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
   assert.match(rootSkill, /`-C` selects the invocation cwd and therefore the World/u);

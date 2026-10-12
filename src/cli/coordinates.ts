@@ -18,7 +18,7 @@ export type CliCoordinates = Readonly<{
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
-export type CliCoordinateInput = Readonly<{
+type CliCoordinateInput = Readonly<{
   processCwd?: string;
   cwd?: string;
   repo?: string;
@@ -122,10 +122,6 @@ async function resolveWorld(cwd: string, repo: Repo | undefined) {
   }
 }
 
-export async function resolveCliCoordinates(input: CliCoordinateInput): Promise<CliCoordinates> {
-  return cliCoordinateDiscovery.resolve(input);
-}
-
 /** One explicit Git executable override from the process edge; a blank value is usage, not absence. */
 function gitPathFromEdge(environment: NodeJS.ProcessEnv): string | undefined {
   const value = environment.KEIYAKU_GIT_PATH;
@@ -148,7 +144,7 @@ export async function resolveInvocationCoordinates(
   environment: NodeJS.ProcessEnv,
 ): Promise<CliCoordinates> {
   const gitPath = gitPathFromEdge(environment);
-  return resolveCliCoordinates({
+  return cliCoordinateDiscovery.resolve({
     ...(invocation.processCwd === undefined ? {} : { processCwd: invocation.processCwd }),
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
     ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),

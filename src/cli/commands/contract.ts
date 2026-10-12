@@ -50,7 +50,7 @@ import {
   resolveContractId,
   resolveKanshiContract,
 } from "../selectors.js";
-import { displayContext, writeJson, writeStdout } from "../streams.js";
+import { displayContext, emit, writeJson, writeStdout } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { amendFromCommand } from "./amend.js";
 import { bindFromCommand } from "./bind.js";
@@ -194,9 +194,8 @@ async function finishContractAnswer(
   output: "text" | "json",
   project?: (refusal: RenderableRefusal) => RenderableRefusal,
 ): Promise<number> {
-  if (output === "json") writeJson(answer);
-  else writeStdout(renderContractAnswer(answer, project, displayContext()));
-  return contractExitCode(answer);
+  const text = () => renderContractAnswer(answer, project, displayContext());
+  return emit(output, answer, text, contractExitCode(answer));
 }
 
 async function selectedContract(
@@ -283,9 +282,8 @@ async function runBind(
     });
     if (answer.kind !== "refused") return await finishContractAnswer(answer, command.output);
     const draft = await bindDraftReceipt(coordinates.establishWorld, markdown);
-    if (command.output === "json") writeJson(answer);
-    else writeStdout(renderRefusal(refusedInvocation(answer), draft, displayContext()));
-    return 1;
+    const text = () => renderRefusal(refusedInvocation(answer), draft, displayContext());
+    return emit(command.output, answer, text, 1);
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
     // A selected Settings namespace failure is the Contract owner's invalid input, not a bad draft.
@@ -379,9 +377,8 @@ async function runArc(
     if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
       throw error;
     const refusal: RenderableRefusal = { kind: "invalid-document", diagnostic: error.message };
-    if (command.output === "json") writeJson({ kind: "refused", operation: "arc", contract: seat.id, refusal });
-    else writeStdout(renderRefusal({ operation: "arc", contract: seat.id, refusal }, undefined, displayContext()));
-    return 1;
+    const refused = { kind: "refused", operation: "arc", contract: seat.id, refusal };
+    return emit(command.output, refused, () => renderRefusal(refused, undefined, displayContext()), 1);
   }
   const answer = await seat.contract.arc({
     markdown,
@@ -460,9 +457,7 @@ async function runSettings(
   output: "text" | "json",
 ): Promise<number> {
   const value = await settingsAt(coordinates.world ?? undefined, home);
-  if (output === "json") writeJson(settingsJsonValue(value));
-  else writeStdout(renderSettingsText(value, displayContext().columns));
-  return 0;
+  return emit(output, settingsJsonValue(value), () => renderSettingsText(value, displayContext().columns), 0);
 }
 
 async function runNuke(
@@ -474,9 +469,7 @@ async function runNuke(
     world: coordinates.world,
     ...(command.confirm === undefined ? {} : { confirm: command.confirm }),
   });
-  if (command.output === "json") writeJson(result);
-  else writeStdout(renderNukeText(result));
-  return nukeExitCode(result);
+  return emit(command.output, result, () => renderNukeText(result), nukeExitCode(result));
 }
 
 async function runLs(
@@ -490,9 +483,7 @@ async function runLs(
       repo: requiredRepo(coordinates),
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
-    if (command.output === "json") writeJson(list);
-    else writeStdout(renderContractCatalogue(list));
-    return 0;
+    return emit(command.output, list, () => renderContractCatalogue(list), 0);
   }
   if (query.kind === "archetypes") {
     const list = await listArchetypeDefinitions({
@@ -500,9 +491,7 @@ async function runLs(
       ...(query.limit === undefined ? {} : { limit: query.limit }),
       ...(home === undefined ? {} : { home }),
     });
-    if (command.output === "json") writeJson(list);
-    else writeStdout(renderArchetypeCatalogue(list));
-    return 0;
+    return emit(command.output, list, () => renderArchetypeCatalogue(list), 0);
   }
   if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   if (query.kind === "tasks") {
@@ -512,17 +501,13 @@ async function runLs(
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
     if (listed.kind !== "accepted") throw new Error("Task list did not return an accepted observation");
-    if (command.output === "json") writeJson(listed);
-    else writeStdout(renderTaskCatalogue(listed.value, query.namespace ?? []));
-    return 0;
+    return emit(command.output, listed, () => renderTaskCatalogue(listed.value, query.namespace ?? []), 0);
   }
   const listed = await Akumas.of(coordinates.world).list({
     ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
   });
-  if (command.output === "json") writeJson(listed);
-  else writeStdout(renderAkumaCatalogue(listed, query.archetype ?? null));
-  return 0;
+  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.archetype ?? null), 0);
 }
 
 async function readAkumaStatus(
@@ -579,13 +564,10 @@ async function runStatusGuidance(
   const selected = await selectedContract(repo, command.contract, coordinates.cwd);
   const guidance = await selected.contract.guidance();
   if (guidance === null) {
-    if (command.output === "json") writeJson(null);
-    else writeStdout(renderRefusal(statusRefusal("status", selected.id), undefined, displayContext()));
-    return 1;
+    const refusal = statusRefusal("status", selected.id);
+    return emit(command.output, null, () => renderRefusal(refusal, undefined, displayContext()), 1);
   }
-  if (command.output === "json") writeJson(guidance);
-  else writeStdout(guidance);
-  return 0;
+  return emit(command.output, guidance, () => guidance, 0);
 }
 
 async function runStatusSelection(
@@ -616,9 +598,7 @@ async function runStatusSelection(
     values.push(resolved.value);
     if (command.output === "text") blocks.push(resolved.project());
   }
-  if (command.output === "json") writeJson(values);
-  else writeStdout(blocks.join("\n\n"));
-  return 0;
+  return emit(command.output, values, () => blocks.join("\n\n"), 0);
 }
 
 async function runStatusCategory(
@@ -632,9 +612,7 @@ async function runStatusCategory(
     category: command.category,
     ...(command.limit === undefined ? {} : { limit: command.limit }),
   });
-  if (command.output === "json") writeJson(report);
-  else writeStdout(renderKanshiCategoryText(report, displayContext()));
-  return 0;
+  return emit(command.output, report, () => renderKanshiCategoryText(report, displayContext()), 0);
 }
 
 async function runStatusIdentity(
@@ -646,9 +624,7 @@ async function runStatusIdentity(
       world: coordinates.world,
       ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
     });
-    if (command.output === "json") writeJson(report);
-    else writeStdout(renderKanshiText(report, displayContext(), "world"));
-    return 0;
+    return emit(command.output, report, () => renderKanshiText(report, displayContext(), "world"), 0);
   }
   if (command.contract.startsWith("@")) {
     const resolved = await namedStatus(
@@ -659,22 +635,17 @@ async function runStatusIdentity(
         ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
       }),
     );
-    if (command.output === "json") writeJson(resolved.value);
-    else writeStdout(resolved.project());
-    return 0;
+    return emit(command.output, resolved.value, () => resolved.project(), 0);
   }
   if (command.contract.startsWith("kei/")) {
     const repo = requiredRepo(coordinates);
     const contract = canonicalContractSelector(command.contract);
     const report = await kanshi({ world: coordinates.world, repo, contract });
     if (report.contracts.kind === "present" && report.contracts.value.rows.length === 0) {
-      if (command.output === "json") writeJson(statusRefusal("status", contract).refusal);
-      else writeStdout(renderRefusal(statusRefusal("status", contract), undefined, displayContext()));
-      return 1;
+      const refusal = statusRefusal("status", contract);
+      return emit(command.output, refusal.refusal, () => renderRefusal(refusal, undefined, displayContext()), 1);
     }
-    if (command.output === "json") writeJson(report);
-    else writeStdout(renderKanshiText(report, displayContext(), "contract"));
-    return 0;
+    return emit(command.output, report, () => renderKanshiText(report, displayContext(), "contract"), 0);
   }
   const report = await kanshi({
     world: coordinates.world,
@@ -682,9 +653,7 @@ async function runStatusIdentity(
   });
   const contract = resolveKanshiContract(report, command.contract);
   const selected = selectKanshi({ report, contract });
-  if (command.output === "json") writeJson(selected);
-  else writeStdout(renderKanshiText(selected, displayContext(), "contract"));
-  return 0;
+  return emit(command.output, selected, () => renderKanshiText(selected, displayContext(), "contract"), 0);
 }
 
 async function runStatus(
@@ -697,9 +666,7 @@ async function runStatus(
     return await runStatusSelection({ ...command, selectors: command.selectors }, coordinates);
   if (command.akuma === true && command.contract !== undefined) {
     const resolved = await readAkumaStatus(command.contract, undefined, coordinates);
-    if (command.output === "json") writeJson(resolved.value);
-    else writeStdout(resolved.project());
-    return 0;
+    return emit(command.output, resolved.value, () => resolved.project(), 0);
   }
   return await runStatusIdentity(command, coordinates);
 }
@@ -709,17 +676,14 @@ async function runRegion(
   coordinates: CliCoordinates,
 ): Promise<number> {
   const repo = requiredRepo(coordinates);
-  const emit = (section: Section<RegionRead>): number => {
-    if (command.output === "json") writeJson(section);
-    else writeStdout(renderRegionText(section));
-    return 0;
-  };
+  const emitSection = (section: Section<RegionRead>): number =>
+    emit(command.output, section, () => renderRegionText(section), 0);
   if (command.paths !== undefined) {
     const report = await kanshi({ world: coordinates.world, repo, region: { kind: "path", patterns: command.paths } });
-    return emit(report.region ?? { kind: "absent" });
+    return emitSection(report.region ?? { kind: "absent" });
   }
   const report = await kanshi({ world: coordinates.world, repo, region: { kind: "declarations" } });
-  if (command.contract === undefined) return emit(report.region ?? { kind: "absent" });
+  if (command.contract === undefined) return emitSection(report.region ?? { kind: "absent" });
   const contract = resolveKanshiContract(report, command.contract) as ContractId;
   const observed = await observeKeiyaku({ repo, id: contract });
   if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
@@ -732,8 +696,8 @@ async function runRegion(
     return 1;
   }
   if (report.region?.kind !== "present" || report.region.value.kind !== "declarations")
-    return emit(report.region ?? { kind: "absent" });
-  return emit({
+    return emitSection(report.region ?? { kind: "absent" });
+  return emitSection({
     kind: "present",
     value: selectRegion({
       declarations: report.region.value.declarations,
@@ -763,9 +727,7 @@ export async function runContractHistoryCommand(
       writeStdout(renderRefusal({ operation: "history", contract: selected.id, refusal }, undefined, displayContext()));
     return 1;
   }
-  if (command.output === "json") writeJson(history);
-  else writeStdout(renderContractHistory(history, { full: command.full }));
-  return 0;
+  return emit(command.output, history, () => renderContractHistory(history, { full: command.full }), 0);
 }
 
 async function runReconcile(

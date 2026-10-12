@@ -37,3 +37,13 @@ export function resultContext(): TextRenderContext {
 export function writeJson(value: unknown): void {
   writeStdout(JSON.stringify(value));
 }
+
+/**
+ * One product result: JSON writes the untouched native value, text writes the rendered projection,
+ * and the native exit classifier's verdict follows.
+ */
+export function emit<Result>(output: "text" | "json", result: Result, text: () => string, code: number): number {
+  if (output === "json") writeJson(result);
+  else writeStdout(text());
+  return code;
+}

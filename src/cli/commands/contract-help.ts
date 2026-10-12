@@ -1,11 +1,10 @@
 import { usageLine } from "../usage.js";
-
-type ContractFlagKind = "boolean" | "value" | "raw-value" | "repeat-value";
+import type { ScanFlagKind } from "../scan.js";
 
 export type ContractCommandSpec = Readonly<{
   positional: "none" | "optional";
   stdin: "none" | "optional" | "required";
-  flags: Readonly<Record<string, ContractFlagKind>>;
+  flags: Readonly<Record<string, ScanFlagKind>>;
   usage: string;
   purpose: string;
   details?: string;
@@ -19,7 +18,7 @@ export const CONTRACT_COMMAND_SPECS = {
       actor: "value",
       task: "value",
       target: "value",
-      after: "repeat-value",
+      after: "repeat",
       gates: "raw-value",
       "fork-of": "value",
       json: "boolean",
@@ -68,7 +67,7 @@ export const CONTRACT_COMMAND_SPECS = {
   amend: {
     positional: "optional",
     stdin: "optional",
-    flags: { actor: "value", after: "repeat-value", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
+    flags: { actor: "value", after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
     usage:
       "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
     purpose: "Change a Contract's document, prerequisites, or acceptance gates.",
@@ -226,7 +225,7 @@ export const CONTRACT_COMMAND_SPECS = {
   region: {
     positional: "optional",
     stdin: "none",
-    flags: { path: "repeat-value", json: "boolean" },
+    flags: { path: "repeat", json: "boolean" },
     usage: "region [<contract>]\nregion --path <pattern> [--path <pattern> ...]",
     purpose: "Show declared Contract write patterns — all, one Contract's, or those overlapping given paths.",
     details: "Check overlap before starting parallel work.",

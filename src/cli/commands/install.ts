@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url";
 import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
 import { CliUsageError, commandGuide, usageLine } from "../usage.js";
 
-export const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
-export type HarnessName = (typeof HARNESS_NAMES)[number];
+const HARNESS_NAMES = ["codex", "claude", "opencode", "pi"] as const;
+type HarnessName = (typeof HARNESS_NAMES)[number];
 
 export type ParsedInstallCommand = Readonly<{
   command: "install";
@@ -12,7 +12,7 @@ export type ParsedInstallCommand = Readonly<{
   output: "text" | "json";
 }>;
 
-export type HarnessInstallResult = Readonly<{
+type HarnessInstallResult = Readonly<{
   harness: HarnessName;
   status: "installed" | "failed";
   diagnostic?: string;
@@ -23,7 +23,7 @@ export type InstallInvocationResult = Readonly<{
   results: readonly HarnessInstallResult[];
 }>;
 
-export type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
+type InstallRunner = (input: ProcessInput) => Promise<ProcessOutcome>;
 
 export const INSTALL_USAGE = "install <codex|claude|opencode|pi>\ninstall --all";
 export const INSTALL_ROOT_PURPOSE = "Install the Keiyaku plugin into a supported coding harness.";
@@ -100,10 +100,6 @@ function diagnostic(argv: readonly string[], outcome: ProcessOutcome): string {
   if (outcome.code === 0) return "";
   const detail = outcome.stderr.trim() || outcome.stdout.trim();
   return `${argv[0]} exited ${outcome.code}${detail.length === 0 ? "" : `: ${detail}`}`;
-}
-
-export function installAssetsRoot(): string {
-  return ASSET_ROOT;
 }
 
 export async function installHarnesses(

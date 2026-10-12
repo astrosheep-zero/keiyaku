@@ -15,7 +15,7 @@ import { World, type WorldRoot } from "../../world.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
-import { displayContext, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import { displayContext, emit, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import {
   callObservationStream,
@@ -23,7 +23,15 @@ import {
   waitObservationStream,
   type WaitSelectedIdentity,
 } from "../render/akuma-activity.js";
-import { askRawAnswer, callRawAnswer, historyRawAnswer, waitRawAnswer } from "../render/akuma-activity.js";
+import {
+  askRawAnswer,
+  callRawAnswer,
+  historyRawAnswer,
+  historyText,
+  tellText,
+  waitRawAnswer,
+  waitText,
+} from "../render/akuma-activity.js";
 import {
   askExitCode,
   askProgressStream,
@@ -34,10 +42,7 @@ import {
   killExitCode,
   renderCallText,
   renderForkText,
-  renderHistoryText,
   renderKillText,
-  renderTellText,
-  renderWaitText,
   tellExitCode,
   waitedTellProgress,
 } from "../render/akuma.js";
@@ -136,7 +141,7 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
   return { initiator };
 }
 
-function emitResult(body: string, exact: boolean): void {
+function emitAnswer(body: string, exact: boolean): void {
   if (exact) process.stdout.write(body);
   else writeStdout(body);
 }
@@ -207,8 +212,8 @@ async function runCall(
       return callExitCode(result);
     }
     const raw = callRawAnswer(result, streamed);
-    if (raw === undefined) emitResult(renderCallText(result, streamed, displayContext()), false);
-    else emitResult(raw, true);
+    if (raw === undefined) emitAnswer(renderCallText(result, streamed, displayContext()), false);
+    else emitAnswer(raw, true);
     return callExitCode(result);
   } finally {
     driver.close(stream?.flush() ?? []);
@@ -251,8 +256,8 @@ async function runWait(
       return 0;
     }
     const raw = waitRawAnswer(result, streamed);
-    if (raw === undefined) emitResult(renderWaitText(result, presentation, displayContext()), false);
-    else emitResult(raw, true);
+    if (raw === undefined) emitAnswer(waitText(result, presentation, displayContext()), false);
+    else emitAnswer(raw, true);
     return 0;
   } finally {
     driver.close(stream?.flush() ?? []);
@@ -272,12 +277,8 @@ async function runTell(
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  if (command.output === "json") {
-    writeJson(result);
-    return tellExitCode(result);
-  }
-  emitResult(renderTellText(result, inputAlias(command.akuma), displayContext()), false);
-  return tellExitCode(result);
+  const text = () => tellText(result, inputAlias(command.akuma), displayContext());
+  return emit(command.output, result, text, tellExitCode(result));
 }
 
 async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>, input: InvokeInput): Promise<number> {
@@ -320,7 +321,7 @@ async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>,
       writeJson(result);
       return askExitCode(result);
     }
-    emitResult(askRawAnswer(result, schema !== undefined) ?? "", true);
+    emitAnswer(askRawAnswer(result, schema !== undefined) ?? "", true);
     return askExitCode(result);
   } finally {
     driver.close(progress?.flush() ?? []);
@@ -350,9 +351,9 @@ async function runHistory(
     ...(command.id === undefined ? {} : { id: command.id }),
     last: command.last,
   };
-  if (raw !== undefined) emitResult(raw, true);
-  else if (command.last && result.kind === "last") emitResult(result.answer, true);
-  else emitResult(renderHistoryText(result, presentation, displayContext()), false);
+  if (raw !== undefined) emitAnswer(raw, true);
+  else if (command.last && result.kind === "last") emitAnswer(result.answer, true);
+  else emitAnswer(historyText(result, presentation, displayContext()), false);
   return historyExitCode(result, command.id);
 }
 
@@ -365,12 +366,7 @@ async function runFork(
     at: command.at,
     ...(input.repo === undefined ? {} : { repo: input.repo }),
   });
-  if (command.output === "json") {
-    writeJson(receipt);
-    return forkExitCode(receipt);
-  }
-  emitResult(renderForkText(receipt), false);
-  return forkExitCode(receipt);
+  return emit(command.output, receipt, () => renderForkText(receipt), forkExitCode(receipt));
 }
 
 async function runKill(
@@ -383,12 +379,8 @@ async function runKill(
     ...(input.repo === undefined ? {} : { repo: input.repo }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  if (command.output === "json") {
-    writeJson(result);
-    return killExitCode(result);
-  }
-  emitResult(renderKillText(result, alias, displayContext()), false);
-  return killExitCode(result);
+  const text = () => renderKillText(result, alias, displayContext());
+  return emit(command.output, result, text, killExitCode(result));
 }
 
 async function akumaWorld(command: InvokedAkumaCommand, coordinates: CliCoordinates): Promise<WorldRoot> {

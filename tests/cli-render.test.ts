@@ -27,9 +27,11 @@ import {
 } from "../src/cli/render/catalog.js";
 import type { CallObservation } from "../src/library/akuma-creation.js";
 import {
+  DEFAULT_CONTEXT,
   activityStream,
   callObservationStream,
   frameRule,
+  historyText as nativeHistoryText,
   snapshotActivityLines,
   snapshotText,
   waitObservationStream,
@@ -75,7 +77,7 @@ import {
 import type { ContractRow } from "../src/protocol/read/status.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { askProgressStream, renderHistoryText, renderStatusText } from "../src/cli/render/akuma.js";
+import { askProgressStream } from "../src/cli/render/akuma.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
@@ -2894,7 +2896,7 @@ test("status text and JSON report the Akuma execution workdir", () => {
     contract: { kind: "none" as const },
     createdTasks: { kind: "present" as const, rows: [] },
   };
-  assert.match(renderStatusText(observation, undefined), /^cwd {2}\/work\/tree$/mu);
+  assert.match(snapshotText(observation, DEFAULT_CONTEXT), /^cwd {2}\/work\/tree$/mu);
   const json = JSON.parse(JSON.stringify(observation)) as { status: { cwd?: string } };
   assert.equal(json.status.cwd, "/work/tree");
 });
@@ -2984,9 +2986,9 @@ test("status renders selected activity evidence while preserving history and com
   const status = parseAkumaStatus({ id, life: "running", allowed: [], timeline: snapshot });
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
-  const statusText = renderStatusText(
+  const statusText = snapshotText(
     { status, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
-    undefined,
+    DEFAULT_CONTEXT,
   );
   assert.doesNotMatch(statusText, /internal thought/u);
   for (const command of ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"])
@@ -3024,9 +3026,9 @@ test("status renders selected activity evidence while preserving history and com
     answeredOutcome(13, "final outcome"),
   );
   const answeredStatus = parseAkumaStatus({ id, life: "asleep", allowed: [], timeline: outcomeSnapshot });
-  const outcomeText = renderStatusText(
+  const outcomeText = snapshotText(
     { status: answeredStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
-    undefined,
+    DEFAULT_CONTEXT,
   );
   assert.match(outcomeText, /final outcome/u, "an answered status retains its complete outcome");
   assert.doesNotMatch(outcomeText, /✓ say\s+“”/u, "a retained answer never becomes an empty say");
@@ -3039,7 +3041,7 @@ test("status renders selected activity evidence while preserving history and com
     at: AKUMA_ACTIVITY_AT,
     outcome: { kind: "failed", historyId: "history-1", diagnostic: "retained provider diagnostic" },
   };
-  const failedText = renderStatusText(
+  const failedText = snapshotText(
     {
       status: parseAkumaStatus({
         id,
@@ -3050,7 +3052,7 @@ test("status renders selected activity evidence while preserving history and com
       contract: { kind: "none" },
       createdTasks: { kind: "present", rows: [] },
     },
-    undefined,
+    DEFAULT_CONTEXT,
   );
   assert.match(failedText, /retained provider diagnostic/u, "a failed status retains its diagnostic");
   assert.match(failedText, /\$ c5/u, "failed status retains selected activity around its diagnostic");
@@ -3066,9 +3068,10 @@ test("status renders selected activity evidence while preserving history and com
     lowestRetained: 1,
     highest: 12,
   };
-  const historyText = renderHistoryText(
+  const historyText = nativeHistoryText(
     { kind: "history", id: status.id, history, contract: { kind: "none" } },
     {},
+    DEFAULT_CONTEXT,
   );
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
   assert.match(historyText, /      ⋮ 55 earlier events · showing last 12/u);

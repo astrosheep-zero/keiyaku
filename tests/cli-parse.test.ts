@@ -3,7 +3,8 @@ import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
 import { contractId, documentKey, entryUlid, gateWord, snapshotId } from "../src/core/facts/types.js";
-import { CliUsageError, parseArgv, renderContractHelp, type ParsedCommand } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv, type ParsedCommand } from "../src/cli/parse.js";
+import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 
 function command(argv: readonly string[]): ParsedCommand {
   const parsed = parseArgv(argv);

@@ -46,6 +46,7 @@ import {
   type ContractCommandSpec as CommandSpec,
 } from "./commands/contract-help.js";
 import { renderOpaqueBlock, renderTextBlock } from "./render/terminal.js";
+import { scanArgs, type ScanSpec } from "./scan.js";
 import {
   CliUsageError,
   commandGuide,
@@ -56,7 +57,6 @@ import {
 } from "./usage.js";
 export { CliUsageError } from "./usage.js";
 export type { CliUsageGuide } from "./usage.js";
-export { renderContractHelp } from "./commands/contract-help.js";
 
 export type { Command };
 
@@ -162,7 +162,7 @@ export type ParsedCommand =
   | ParsedAkumaCommand
   | ParsedTaskCommand;
 
-export type CliHelpCoordinate =
+type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "contract"; command: Command }>
   | Readonly<{ kind: "task"; action?: TaskAction }>
@@ -175,7 +175,7 @@ export type ParsedInvocation =
   | Readonly<{ version: true }>;
 
 type RepoUse = "none" | "optional" | "required";
-export type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
+type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
 
 export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
   switch (command.command) {
@@ -228,67 +228,18 @@ export function assertExplicitRepoUse(command: ParsedCommand, repo: string | und
   if (repo !== undefined && !commandRepoPolicy(command).acceptsExplicit) refuseUnusedRepo(command);
 }
 
-type ScanState = {
-  flags: Record<string, string | true | readonly string[]>;
-  positionals: string[];
-  stdin: boolean;
-};
-
 function refuse(command: Command, message: string): never {
   throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
-function scanStdin(command: Command, state: ScanState): void {
-  if (state.stdin) refuse(command, "stdin marker '-' may appear only once");
-  if (CONTRACT_COMMAND_SPECS[command].stdin === "none") refuse(command, `${command} reads no stdin`);
-  state.stdin = true;
-}
-
-function scanOption(command: Command, argv: readonly string[], state: ScanState, index: number): number {
-  const token = argv[index]!;
-  const name = token.slice(2);
-  const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
-  const kind = spec.flags[name];
-  if (kind === undefined) refuse(command, `option ${token} is not valid for ${command}`);
-  if (state.flags[name] !== undefined && kind !== "repeat-value") refuse(command, `duplicate option: ${token}`);
-  if (kind === "boolean") {
-    state.flags[name] = true;
-    return index;
-  }
-  const value = argv[index + 1];
-  if (value === undefined || value.startsWith("--")) refuse(command, `${token} requires a value`);
-  if (kind !== "raw-value" && value === "-") {
-    refuse(command, `${token} requires a value`);
-  }
-  if (kind !== "raw-value" && isBlankInput(value)) refuse(command, `${token} requires a nonblank value`);
-  if (kind === "repeat-value") {
-    const values = state.flags[name];
-    state.flags[name] = [...(Array.isArray(values) ? values : values === undefined ? [] : [values]), value];
-  } else {
-    state.flags[name] = value;
-  }
-  return index + 1;
-}
-
-function scanContractTokens(command: Command, argv: readonly string[], state: ScanState): void {
-  let positionalOnly = false;
-  for (let index = 1; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (!positionalOnly && token === "--") {
-      positionalOnly = true;
-      continue;
-    }
-    if (!positionalOnly && token === "-") {
-      scanStdin(command, state);
-      continue;
-    }
-    if (!positionalOnly && token.startsWith("--")) {
-      index = scanOption(command, argv, state, index);
-      continue;
-    }
-    if (isBlankInput(token)) refuse(command, `${command} requires a nonblank value`);
-    state.positionals.push(token);
-  }
+/** The contract surfaces' one scan spec: `-` carries the edge's own stdin input. */
+function contractScanSpec(command: Command, spec: CommandSpec): ScanSpec {
+  return {
+    subject: command,
+    flags: spec.flags,
+    ...(spec.stdin === "none" ? {} : { stdin: "input" }),
+    stdinRefusal: `${command} reads no stdin`,
+  };
 }
 
 function scanArgv(argv: readonly string[]): ParsedContractParts {
@@ -301,22 +252,29 @@ function scanArgv(argv: readonly string[]): ParsedContractParts {
   }
   const command = candidate as Command;
   const spec: CommandSpec = CONTRACT_COMMAND_SPECS[command];
-  const state: ScanState = { flags: {}, positionals: [], stdin: false };
-  scanContractTokens(command, argv, state);
+  const scanned = scanArgs(argv, contractScanSpec(command, spec), (message) => refuse(command, message));
+  const stdin = scanned.stdin !== undefined;
 
-  if (spec.positional === "none" && state.positionals.length > 0) {
+  if (spec.positional === "none" && scanned.positionals.length > 0) {
     refuse(command, `${command} accepts no contract`);
   }
-  if (spec.positional === "optional" && state.positionals.length > 1 && command !== "status") {
+  if (spec.positional === "optional" && scanned.positionals.length > 1 && command !== "status") {
     refuse(command, `${command} accepts at most one contract`);
   }
-  if (spec.stdin === "required" && !state.stdin) {
+  if (spec.stdin === "required" && !stdin) {
     refuse(command, `${command} requires stdin`);
   }
 
-  const output = state.flags.json === true ? ("json" as const) : ("text" as const);
-  const actor = typeof state.flags.actor === "string" ? state.flags.actor : undefined;
-  return { command, ...state, output, ...(actor === undefined ? {} : { actor }) };
+  const output = scanned.flags.json === true ? ("json" as const) : ("text" as const);
+  const actor = typeof scanned.flags.actor === "string" ? scanned.flags.actor : undefined;
+  return {
+    command,
+    flags: scanned.flags,
+    positionals: scanned.positionals,
+    stdin,
+    output,
+    ...(actor === undefined ? {} : { actor }),
+  };
 }
 
 function invocationOptions(
