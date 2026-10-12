@@ -103,7 +103,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   cursor.ran = undefined;
   input.progress.recordCandidate(state.id, cursor.evidence);
   const current = currentVerifiedAttestation(state);
-  if (current !== undefined) {
+  if (current?.verdict === "satisfied") {
     cursor.evidence = {
       verificationReuse: current,
       verificationSubject: { snapshot, mode: "reused", verdict: current.verdict },
@@ -145,9 +145,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
     ...(verified.reuse === undefined ? {} : { verificationReuse: verified.reuse }),
     ...(subject === undefined ? {} : { verificationSubject: subject }),
     ...(verified.stop === undefined ? {} : { verification: verified.stop }),
-    ...(verified.counts?.verdict !== "unsatisfied" || verified.counts.summary === undefined
-      ? {}
-      : { verificationSummary: verified.counts.summary }),
+    ...(verified.counts?.verdict === "unsatisfied" ? { verificationSummary: verified.counts.summary } : {}),
   };
   input.progress.recordCandidate(state.id, cursor.evidence);
 }

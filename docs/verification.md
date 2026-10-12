@@ -43,8 +43,11 @@ retargets it. A completed older observation remains truthful history even when
 it is no longer current. Generic lifecycle currentness alone decides whether
 that evidence satisfies a declared gate. Audit may create evidence for a
 prospective candidate; it becomes current only if delivery later names the same
-candidate. Deliver can reuse matching current evidence, satisfied or
-unsatisfied, without creating a cache or another evidence source. `verified`
+candidate. Deliver reuses matching current satisfied evidence. A current unsatisfied
+verdict remains evidence, but does not suppress execution on a later delivery:
+that invocation runs Verification once against its candidate and may supersede
+the failure with satisfaction. Repeated failure may deduplicate its testimony;
+there is no automatic retry loop, cache, or another evidence source. `verified`
 is only this producer's conventional token; other opaque gates are outside this
 chapter.
 

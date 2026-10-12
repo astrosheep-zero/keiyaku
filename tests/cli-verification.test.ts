@@ -1,6 +1,7 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, resolve } from "node:path";
 import { Writable } from "node:stream";
 import { setImmediate } from "node:timers/promises";
@@ -146,6 +147,42 @@ test("review refreshes a moved target before an old failed verification blocks p
   assert.equal(after.currentIntegration?.changeId, before.currentIntegration?.changeId);
   assert.notEqual(after.currentIntegration?.snapshot, before.currentIntegration?.snapshot);
   assert.equal(after.attestations.at(-1)?.data.verdict, "satisfied");
+});
+
+test("unchanged delivery retries failure once and reuses later satisfaction", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "verification-retry-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const runs = resolve(external, "runs");
+  const ready = resolve(external, "ready");
+  const { raw, id, worktree } = await bindCandidate(
+    `echo run >> '${runs}'\ntest -f '${ready}'`,
+    ["reviewed", "verified"],
+  );
+  const head = raw.run(["-C", worktree, "rev-parse", "HEAD"]);
+  const deliver = async () => {
+    const result = (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value;
+    assert.equal(result.kind, "accepted");
+    return result;
+  };
+  const repository = await repositoryAt(raw.path);
+  await deliver();
+  assert.equal(readFileSync(runs, "utf8"), "run\n");
+  assert.equal((await observeContract(repository, id)).state?.terminal, null);
+  await deliver();
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n", "one retry per invocation, never a loop");
+  assert.equal((await observeContract(repository, id)).state?.terminal, null);
+  writeFileSync(ready, "ready");
+  const recovered = await deliver();
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n");
+  assert.ok(recovered.kind === "accepted" && recovered.facts.some(
+    (fact) => fact.kind === "attestation" && fact.data.verdict === "satisfied",
+  ));
+  await deliver();
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n", "satisfaction skips execution");
+  assert.equal(raw.run(["-C", worktree, "rev-parse", "HEAD"]), head, "retry never changes the work");
+  const reviewed = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
+  assert.equal(reviewed.exit, 0);
+  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
 });
 
 test("audit reports execution even when an unchanged verdict is deduplicated", async () => {
