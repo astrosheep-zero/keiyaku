@@ -930,6 +930,8 @@ test("multi-member wait and kill project every member from one Task board snapsh
     }),
   );
   const expected = projectTaskBoardObservation((await readBoard(world)).board);
+  const status = await Akumas.of(root).status({ akuma: worker.id });
+  assert.deepEqual(status.createdTasks, { kind: "present", rows: expected.selectCreatedBy(worker.id) });
   const waited = await Akumas.of(root).wait({
     akuma: [worker.id, reviewer.id],
     completion: "all",

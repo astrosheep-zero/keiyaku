@@ -3,12 +3,118 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import fsPromises, { readFile } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { deferred as promiseBarrier } from "./support/process.js";
+import { taskDocument, writeTaskAuthority } from "./support/task.js";
+import { TaskAuthorityCorruptionError } from "../src/task/document.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Tasks } from "../src/task/index.js";
 import { nukeTask } from "../src/task/operations.js";
-import { parseTaskId } from "../src/task/identity.js";
-import { authorityPath } from "../src/task/store.js";
+import { parseTaskId, type TaskId } from "../src/task/identity.js";
+import { authorityPath, readBoard } from "../src/task/store.js";
 import { World } from "../src/world.js";
+
+test("complete Task reads bound in-flight I/O and retain canonical board and byte order", async (t) => {
+  const root = await world();
+  const ids = Array.from({ length: 24 }, (_, index) => `task/read-${String(index).padStart(2, "0")}` as TaskId);
+  for (const id of [...ids].reverse()) writeTaskAuthority(root, taskDocument({ id, title: id }));
+  const firstWave = promiseBarrier<void>();
+  const released = promiseBarrier<void>();
+  const originalRead = fsPromises.readFile;
+  let active = 0, maximum = 0, started = 0, completed = 0;
+  const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+    if (!String(args[0]).startsWith(join(root, ".keiyaku", "tasks"))) return originalRead(...args);
+    active += 1;
+    started += 1;
+    maximum = Math.max(maximum, active);
+    if (started === 8) firstWave.resolve();
+    try {
+      await released.promise;
+      return await originalRead(...args);
+    } finally {
+      active -= 1;
+      completed += 1;
+    }
+  });
+  syncBuiltinESMExports();
+  const pending = readBoard(root);
+  try {
+    await firstWave.promise;
+    assert.equal(started, 8);
+    assert.equal(active, 8);
+    released.resolve();
+    const snapshot = await pending;
+    assert.equal(maximum, 8);
+    assert.equal(completed, ids.length);
+    assert.equal(active, 0);
+    assert.deepEqual([...snapshot.board.tasks.keys()], ids);
+    assert.deepEqual([...snapshot.bytes.keys()], ids);
+    for (const id of ids) assert.deepEqual(snapshot.bytes.get(id), readFileSync(authorityPath(root, id)));
+  } finally {
+    released.resolve();
+    await pending.catch(() => undefined);
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("complete Task reads drain before reporting the first canonical authority failure", async (t) => {
+  for (const corrupt of [false, true]) {
+    await t.test(corrupt ? "earlier corrupt Markdown" : "earlier I/O failure", async (t) => {
+      const root = await world();
+      const ids = Array.from({ length: 16 }, (_, index) => `task/failure-${String(index).padStart(2, "0")}` as TaskId);
+      for (const id of ids) writeTaskAuthority(root, taskDocument({ id, title: id }));
+      const first = authorityPath(root, ids[0]!);
+      const later = authorityPath(root, ids[1]!);
+      if (corrupt) writeFileSync(first, "not Task authority\n");
+      const earlyError = new Error("earlier read failed");
+      const laterError = new Error("later read failed");
+      const released = promiseBarrier<void>();
+      const othersFinished = promiseBarrier<void>();
+      const originalRead = fsPromises.readFile;
+      let completed = 0, settled = false;
+      const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+        const path = String(args[0]);
+        if (!path.startsWith(join(root, ".keiyaku", "tasks"))) return originalRead(...args);
+        try {
+          if (path === first) {
+            await released.promise;
+            if (!corrupt) throw earlyError;
+          }
+          if (path === later) throw laterError;
+          return await originalRead(...args);
+        } finally {
+          completed += 1;
+          if (completed === ids.length - 1) othersFinished.resolve();
+        }
+      });
+      syncBuiltinESMExports();
+      const pending = readBoard(root).then(
+        () => { settled = true; assert.fail("expected authority failure"); },
+        (error: unknown) => { settled = true; return error; },
+      );
+      try {
+        await othersFinished.promise;
+        assert.equal(settled, false);
+        released.resolve();
+        const error = await pending;
+        assert.equal(completed, ids.length);
+        if (corrupt) {
+          assert.ok(error instanceof TaskAuthorityCorruptionError);
+          assert.equal(error.message, "task document must begin with YAML front matter");
+        } else assert.equal(error, earlyError);
+      } finally {
+        released.resolve();
+        await pending;
+        mock.mock.restore();
+        syncBuiltinESMExports();
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
 
 async function world() {
   return await World.at(mkdtempSync(join(tmpdir(), "keiyaku-v4-task-store-")));

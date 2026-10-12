@@ -191,7 +191,39 @@ export function projectRows(
     .filter((task) => inScope(task, scope))
     .filter((task) => selection === "all" || (selection === "closed") === terminal(task.state))
     .map((task) => projectTaskRow(board, relations, task))
-    .sort((a, b) => a.priority - b.priority || Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
+    .sort(compareTaskRows);
+}
+
+/** The established Task row order: priority first, then canonical identity bytes. */
+function compareTaskRows(left: TaskRow, right: TaskRow): number {
+  return left.priority - right.priority || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id));
+}
+
+/**
+ * Rows for the identities that created work, grouped by creator. Only documents a
+ * requested identity created reach row projection, and each group keeps the
+ * established row order.
+ */
+export function projectCreatedByRows(
+  board: TaskBoard,
+  relations: TaskRelationProjection,
+  createdByIds: readonly string[],
+): ReadonlyMap<string, readonly TaskRow[]> {
+  const requested = new Set(createdByIds);
+  const attributed: { createdBy: string; row: TaskRow }[] = [];
+  for (const task of board.tasks.values()) {
+    const createdBy = task.createdBy;
+    if (createdBy === undefined || !requested.has(createdBy)) continue;
+    attributed.push({ createdBy, row: projectTaskRow(board, relations, task) });
+  }
+  attributed.sort((left, right) => compareTaskRows(left.row, right.row));
+  const grouped = new Map<string, TaskRow[]>();
+  for (const { createdBy, row } of attributed) {
+    const rows = grouped.get(createdBy);
+    if (rows === undefined) grouped.set(createdBy, [row]);
+    else rows.push(row);
+  }
+  return grouped;
 }
 export function projectBlocked(
   board: TaskBoard,

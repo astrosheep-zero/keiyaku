@@ -1,7 +1,7 @@
 import type { WorldRoot } from "../world.js";
 import { z } from "zod";
-import { taskRowsSchema } from "./board.js";
-import { observeTaskBoard } from "./operations.js";
+import { createTaskRelations, projectCreatedByRows, taskRowsSchema, type TaskBoard } from "./board.js";
+import { readBoard } from "./store.js";
 
 export const createdTaskObservationSchema = z.union([
   z.object({ kind: z.literal("present"), rows: taskRowsSchema }).strict(),
@@ -16,17 +16,23 @@ function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Project Task board rows created by each identity, preserving input order. */
+/**
+ * Project Task board rows created by each identity, preserving input order. One complete
+ * board and one relationship projection answer every requested identity, and only the
+ * documents those identities created reach row projection.
+ */
 export async function observeCreatedTaskObservations(
   world: WorldRoot,
   createdByIds: readonly string[],
 ): Promise<readonly CreatedTaskObservation[]> {
-  let board;
+  if (createdByIds.length === 0) return [];
+  let board: TaskBoard;
   try {
-    board = await observeTaskBoard(world);
+    board = (await readBoard(world)).board;
   } catch (error) {
     const failed = { kind: "failed" as const, diagnostic: observationDiagnostic(error) };
     return createdByIds.map(() => failed);
   }
-  return createdByIds.map((createdBy) => ({ kind: "present", rows: board.selectCreatedBy(createdBy) }));
+  const rows = projectCreatedByRows(board, createTaskRelations(board), createdByIds);
+  return createdByIds.map((createdBy) => ({ kind: "present", rows: rows.get(createdBy) ?? [] }));
 }

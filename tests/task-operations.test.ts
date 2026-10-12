@@ -32,8 +32,11 @@ import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transac
 import { parseTaskDocument, serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
 import { parseTaskId } from "../src/task/identity.js";
 import { observeTaskDetails, settleTask } from "../src/task/operations.js";
+import { observeCreatedTaskObservations } from "../src/task/created-observation.js";
+import { createTaskRelations, projectCreatedByRows, projectTaskBoardObservation } from "../src/task/board.js";
 import {
   authorityPath,
+  readBoard,
   nukeTaskAuthority,
   replaceAuthority,
   withTaskLocks
@@ -79,6 +82,63 @@ function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"
   assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
   return result.value.id;
 }
+
+test("created Task association rows match complete board views and re-read manual edits", async (t) => {
+  const { root, tasks } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const parent = acceptedId(await tasks.add({ title: "Created parent", actor: "one", priority: 1, body: "body" }));
+  const need = acceptedId(await tasks.add({ title: "Other creator prerequisite", actor: "two", priority: 0 }));
+  const child = acceptedId(await tasks.add({ title: "Created child", actor: "one", parent, needs: [need], priority: 0 }));
+  acceptedId(await tasks.add({ title: "Terminal child", parent, state: "done", actor: "two" }));
+  acceptedId(await tasks.add({ title: "Created dropped", actor: "one", state: "drop", priority: 1 }));
+  acceptedId(await tasks.add({ title: "Unsigned dependency", needs: [parent] }));
+  const ids = ["two", "absent", "one", "one"];
+  const expected = projectTaskBoardObservation((await readBoard(root)).board);
+  const observed = await observeCreatedTaskObservations(root, ids);
+  assert.deepEqual(observed, ids.map((id) => ({ kind: "present", rows: expected.selectCreatedBy(id) })));
+  const rows = observed[2];
+  assert.ok(rows?.kind === "present");
+  assert.equal(rows.rows[0]?.id, child);
+  assert.equal(rows.rows[0]?.disposition, "blocked");
+  assert.deepEqual(rows.rows.find((row) => row.id === parent)?.children, { live: 1, total: 2 });
+  assert.equal(rows.rows.find((row) => row.id === parent)?.bodyPresent, true);
+
+  const before = await tasks.task({ id: need }).read();
+  assert.ok(before !== null);
+  writeFileSync(authorityPath(root, need), serializeTaskDocument({ ...before.task, state: "done", createdBy: "one", title: "Manual edit" }));
+  const fresh = await observeCreatedTaskObservations(root, ids);
+  const freshExpected = projectTaskBoardObservation((await readBoard(root)).board);
+  assert.deepEqual(fresh, ids.map((id) => ({ kind: "present", rows: freshExpected.selectCreatedBy(id) })));
+  assert.ok(fresh[2]?.kind === "present");
+  assert.equal(fresh[2].rows.find((row) => row.id === child)?.disposition, "ready");
+  assert.equal(fresh[2].rows.find((row) => row.id === need)?.title, "Manual edit");
+
+  const corrupt = join(root, ".keiyaku", "tasks", "unrelated.md");
+  writeFileSync(corrupt, "not Task authority\n");
+  const failed = await observeCreatedTaskObservations(root, ids);
+  assert.ok(failed.every((result) => result.kind === "failed"));
+  assert.deepEqual(await observeCreatedTaskObservations(root, []), []);
+  unlinkSync(corrupt);
+  const link = join(root, ".keiyaku", "tasks", "linked");
+  symlinkSync(root, link, "dir");
+  const linked = await observeCreatedTaskObservations(root, ids);
+  assert.ok(linked.every((result) => result.kind === "failed" && /custody violation/u.test(result.diagnostic)));
+});
+
+test("created Task projection visits relationships only for requested creators", () => {
+  const selected = taskDocument({ id: "task/selected" as TaskId, title: "Selected", createdBy: "one" });
+  const unrelated = taskDocument({ id: "task/unrelated" as TaskId, title: "Unrelated", createdBy: "two" });
+  const board = { tasks: new Map([[selected.id, selected], [unrelated.id, unrelated]]) };
+  const relations = createTaskRelations(board);
+  const visited: TaskId[] = [];
+  const rows = projectCreatedByRows(board, {
+    ...relations,
+    children: (id) => { visited.push(id); return relations.children(id); },
+  }, ["one", "one", "absent"]);
+  assert.deepEqual(visited, [selected.id]);
+  assert.deepEqual([...rows.keys()], ["one"]);
+  assert.equal(rows.get("one")?.[0]?.id, selected.id);
+});
 
 test("note is replaceable authority and product timestamps advance only on change", async () => {
   const { tasks } = await world();

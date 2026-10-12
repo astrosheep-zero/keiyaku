@@ -18,6 +18,7 @@ import {
   TASK_LOCAL_ID_BYTES,
   sameNamespace,
   taskAuthorityPath,
+  type TaskCoordinate,
   type TaskId,
 } from "./identity.js";
 import type { TaskBoard } from "./board.js";
@@ -136,16 +137,35 @@ async function removeEmptyTaskDirectories(directory: string, removeSelf: boolean
 
 export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
   const directory = tasksDirectory(world);
+  const paths = await authorityFiles(directory);
+  const reads = new Array<
+    { kind: "read"; coordinate: TaskCoordinate; source: Uint8Array } | { kind: "failed"; error: unknown }
+  >(paths.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < paths.length) {
+      const index = next++;
+      const path = paths[index]!;
+      try {
+        const stat = await lstat(path);
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          throw new Error(`Task authority is not a regular file: ${path}`);
+        }
+        const coordinate = coordinateFromPath(directory, path);
+        reads[index] = { kind: "read", coordinate, source: await readFile(path) };
+      } catch (error) {
+        reads[index] = { kind: "failed", error };
+      }
+    }
+  };
+  // Drain all owned reads; authority and errors are then judged in canonical path order.
+  await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
   const tasks = new Map<TaskId, TaskDocument>();
   const bytes = new Map<TaskId, Uint8Array>();
-  for (const path of await authorityFiles(directory)) {
-    const stat = await lstat(path);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error(`Task authority is not a regular file: ${path}`);
-    }
-    const coordinate = coordinateFromPath(directory, path);
+  for (const read of reads) {
+    if (read.kind === "failed") throw read.error;
+    const { coordinate, source } = read;
     const id = formatTaskId(coordinate);
-    const source = await readFile(path);
     tasks.set(id, parseTaskDocument(source, coordinate));
     bytes.set(id, source);
   }
