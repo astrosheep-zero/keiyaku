@@ -125,6 +125,29 @@ test("a deliver that accepts names the landed diff's shape", async () => {
   assert.equal((text.match(/^  changes /gmu) ?? []).length, 1, "one bounded changes row");
 });
 
+test("review refreshes a moved target before an old failed verification blocks placement", async () => {
+  const { raw, id, worktree } = await bindCandidate("test -f target-ready", ["reviewed", "verified"]);
+  await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} });
+  const repository = await repositoryAt(raw.path);
+  const before = (await observeContract(repository, id)).state!;
+  assert.equal(before.attestations.at(-1)?.data.verdict, "unsatisfied");
+  const unchanged = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
+  assert.equal(unchanged.exit, 0);
+  assert.equal((await observeContract(repository, id)).state?.terminal, null);
+  writeFileSync(resolve(raw.path, "target-ready"), "ready");
+  raw.run(["add", "target-ready"]);
+  raw.run(["commit", "--quiet", "-m", "target now supplies prerequisite"]);
+  assert.equal(raw.run(["-C", worktree, "ls-files", "target-ready"]), "", "candidate is not manually rebased");
+  const reviewed = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
+  assert.equal(reviewed.exit, 0);
+  const after = (await observeContract(repository, id)).state!;
+  assert.equal(after.terminal?.kind, "claimed");
+  assert.equal(after.delivery?.entry, before.delivery?.entry, "no replacement delivery required");
+  assert.equal(after.currentIntegration?.changeId, before.currentIntegration?.changeId);
+  assert.notEqual(after.currentIntegration?.snapshot, before.currentIntegration?.snapshot);
+  assert.equal(after.attestations.at(-1)?.data.verdict, "satisfied");
+});
+
 test("audit reports execution even when an unchanged verdict is deduplicated", async () => {
   const { raw, id } = await bindAndDeliver("printf 'audit-executed\\n'; false");
   const first = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;

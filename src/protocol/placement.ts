@@ -45,6 +45,25 @@ type TargetMovedStop = Readonly<{
   observedTreeEqualsCandidate: boolean;
 }>;
 
+export async function observeIntegrationTargetMovement(
+  repository: GitRepository,
+  state: import("../core/facts/types.js").ContractState,
+): Promise<TargetMovedStop | undefined> {
+  const target = state.coordinates.target;
+  const integration = state.currentIntegration;
+  if (target === undefined || integration === null) return undefined;
+  const observed = await observeTargetHead(repository, target);
+  if (observed === integration.predecessor) return undefined;
+  return {
+    kind: "target-moved",
+    contractId: state.id,
+    target,
+    expected: integration.predecessor,
+    observed,
+    observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, integration.snapshot),
+  };
+}
+
 export type PlacementProtocolResult<ExtraRefusal = never> =
   | (AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>)
   | Exclude<ProtocolResult<PlacementRefusal | TargetPlacementRefusal | ExtraRefusal>, AcceptedAdmission>

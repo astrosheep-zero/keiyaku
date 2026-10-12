@@ -6,7 +6,7 @@ import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.j
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
-import { admitPlacement, observeTargetPlacement } from "./placement.js";
+import { admitPlacement, observeTargetPlacement, observeIntegrationTargetMovement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
   contractCheckpoint,
@@ -315,13 +315,19 @@ async function verifyCandidateReadiness(
 }
 
 async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor): Promise<CompletionResult> {
-  if (input.start === "verification") {
-    const stopped = await verifyCandidateReadiness(input, cursor);
-    if (stopped !== undefined) return stopped;
-  }
   const target = cursor.checkpoint.state.coordinates.target;
-  let placement = await placeCurrentCandidate(input, cursor);
+  let needsVerification = input.start === "verification";
   for (let cycles = 0; ; cycles += 1) {
+    input.signal?.throwIfAborted();
+    let placement: Awaited<ReturnType<typeof placeCurrentCandidate>> | undefined =
+      await observeIntegrationTargetMovement(input.repository, cursor.checkpoint.state);
+    if (placement === undefined) {
+      if (needsVerification) {
+        const stopped = await verifyCandidateReadiness(input, cursor);
+        if (stopped !== undefined) return stopped;
+      }
+      placement = await placeCurrentCandidate(input, cursor);
+    }
     if (placement.kind === "accepted") return await completedResult(input, cursor);
     if (placement.kind !== "target-moved" || target === undefined || placement.observedTreeEqualsCandidate) {
       const stop = placementStop(placement);
@@ -352,9 +358,7 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
     if (reintegrated.kind !== "accepted") return stoppedResult(cursor, reintegrationStop(reintegrated));
     cursor.checkpoint = contractCheckpoint(reintegrated);
     input.progress.recordResidue(reintegrated.state.id, reintegrated);
-    const stopped = await verifyCandidateReadiness(input, cursor);
-    if (stopped !== undefined) return stopped;
-    placement = await placeCurrentCandidate(input, cursor);
+    needsVerification = true;
   }
 }
 

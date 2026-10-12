@@ -87,7 +87,11 @@ stop blocks placement only when the Contract selected `verified`. Without that
 selection, placement proceeds under the declared gates and the result stays
 observable evidence. `reviewed` is independent and neither enables nor replaces
 Verification. Unsatisfied review and audit do not trigger placement. The trigger
-changes the entry point, never the placement rules.
+changes the entry point, never the placement rules. Completion observes target
+movement before judging the old integration's gates: an old failed verdict
+cannot prevent refreshing a moved target. A refreshed integration needs its
+own applicable Verification evidence before placement; target movement alone
+never discards review of unchanged candidate content.
 
 The invocation composes those steps synchronously. Dependent discovery is a
 bounded scheduling observation, not permission to mutate a stale worktree or
