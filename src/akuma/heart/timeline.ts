@@ -9,7 +9,13 @@ import {
   type CallRow,
   type TurnRow,
 } from "./rows.js";
-import { tellFactsAtSequences, tellStateSql, pendingTellProtectionSql, pendingTellSequencesSql } from "./tells.js";
+import {
+  decodeTellBatch,
+  tellBatchAtSequences,
+  tellStateSql,
+  pendingTellProtectionSql,
+  pendingTellSequencesSql,
+} from "./tells.js";
 
 export type TimelineFact = TurnStartFact | CallFact | ActivityFact | TellFact | TurnEndFact;
 export type ActivityFactSlice = Readonly<{
@@ -82,42 +88,55 @@ type TimelineRow = Readonly<{
   kind: "turn-start" | "call" | "activity" | "tell" | "turn-end";
 }>;
 
-function decodeTimelineRows(database: DatabaseSync, rows: readonly TimelineRow[]): readonly TimelineFact[] {
+type TimelineBatch = Readonly<{
+  rows: readonly TimelineRow[];
+  turns: readonly TurnRow[];
+  calls: readonly CallRow[];
+  activity: readonly ActivityRow[];
+  tells: ReturnType<typeof tellBatchAtSequences>;
+}>;
+
+function readTimelineBatch(database: DatabaseSync, rows: readonly TimelineRow[]): TimelineBatch {
   const sequences = (kind: TimelineRow["kind"]) =>
     JSON.stringify(rows.filter((row) => row.kind === kind).map((row) => row.sequence));
-  const facts = new Map<number, TimelineFact>();
   const turns = database
     .prepare(
       `SELECT sequence, body_sequence, started_at, end_sequence, outcome,
     history_id, session_json, answer, answer_json, schema_json, initiator, diagnostic, completed_at FROM turns
-    WHERE sequence IN (SELECT value FROM json_each(?)) OR end_sequence IN (SELECT value FROM json_each(?))`,
+    WHERE sequence IN (SELECT value FROM json_each(?)) OR end_sequence IN (SELECT value FROM json_each(?))
+    ORDER BY sequence`,
     )
     .all(sequences("turn-start"), sequences("turn-end")) as unknown as readonly TurnRow[];
-  for (const row of turns) {
+  const calls = database
+    .prepare(
+      `SELECT sequence, turn_sequence, body, at FROM calls
+    WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+    )
+    .all(sequences("call")) as unknown as readonly CallRow[];
+  const activity = database
+    .prepare(
+      `SELECT sequence, turn_sequence, event_json, at FROM activity
+    WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+    )
+    .all(sequences("activity")) as unknown as readonly ActivityRow[];
+  const tells = tellBatchAtSequences(
+    database,
+    rows.filter((row) => row.kind === "tell").map((row) => row.sequence),
+  );
+  return { rows, turns, calls, activity, tells };
+}
+
+export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact[] {
+  const facts = new Map<number, TimelineFact>();
+  for (const row of batch.turns) {
     const { end, ...start } = decodeTurnRow(row);
     facts.set(start.sequence, start);
     if (end !== undefined) facts.set(end.sequence, end);
   }
-  const calls = database
-    .prepare(
-      `SELECT sequence, turn_sequence, body, at FROM calls
-    WHERE sequence IN (SELECT value FROM json_each(?))`,
-    )
-    .all(sequences("call")) as unknown as readonly CallRow[];
-  for (const row of calls) facts.set(row.sequence, decodeCallRow(row));
-  const activity = database
-    .prepare(
-      `SELECT sequence, turn_sequence, event_json, at FROM activity
-    WHERE sequence IN (SELECT value FROM json_each(?))`,
-    )
-    .all(sequences("activity")) as unknown as readonly ActivityRow[];
-  for (const row of activity) facts.set(row.sequence, decodeActivityRow(row));
-  const tells = tellFactsAtSequences(
-    database,
-    rows.filter((row) => row.kind === "tell").map((row) => row.sequence),
-  );
-  for (const fact of tells) facts.set(fact.sequence, fact);
-  return rows.map((row) => {
+  for (const row of batch.calls) facts.set(row.sequence, decodeCallRow(row));
+  for (const row of batch.activity) facts.set(row.sequence, decodeActivityRow(row));
+  for (const fact of decodeTellBatch(batch.tells)) facts.set(fact.sequence, fact);
+  return batch.rows.map((row) => {
     const fact = facts.get(row.sequence);
     if (fact === undefined || fact.kind !== row.kind)
       throw new Error(`Akuma timeline references missing ${row.kind} ${row.sequence}`);
@@ -128,7 +147,7 @@ function decodeTimelineRows(database: DatabaseSync, rows: readonly TimelineRow[]
 export type StatusFactInput = Readonly<{ aperture: "monitoring" | "receipt"; admittedTellId?: string }>;
 
 /** Select the frontier and its delivered Tells, plus aperture-required Tell pins. */
-export function statusFacts(database: DatabaseSync, input: StatusFactInput): readonly TimelineFact[] {
+export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) {
   const frontier = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
     | { sequence: number }
     | undefined;
@@ -155,7 +174,11 @@ export function statusFacts(database: DatabaseSync, input: StatusFactInput): rea
       input.admittedTellId ?? null,
       input.aperture === "monitoring" || input.admittedTellId === undefined ? 1 : 0,
     ) as unknown as readonly TimelineRow[];
-  return decodeTimelineRows(database, rows);
+  return { frontier: frontier?.sequence ?? null, ...readTimelineBatch(database, rows) };
+}
+
+export function statusFacts(database: DatabaseSync, input: StatusFactInput): readonly TimelineFact[] {
+  return decodeTimelineBatch(readStatusBatch(database, input));
 }
 
 export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
@@ -167,7 +190,7 @@ export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
     .prepare("SELECT sequence, kind FROM timeline ORDER BY sequence")
     .all() as unknown as readonly TimelineRow[];
   return {
-    rows: decodeTimelineRows(database, rows),
+    rows: decodeTimelineBatch(readTimelineBatch(database, rows)),
     lowestRetained: bounds.lowest,
     highest: bounds.highest,
   };

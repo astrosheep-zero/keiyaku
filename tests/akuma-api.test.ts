@@ -4,12 +4,21 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { z } from "zod";
 import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/akuma/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
-import { readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
+import {
+  appendActivity, beginTurn, bindTellsToTurn, breakBody, decidePendingTellDisposition, endTurn, finishBodyIfIdle,
+  HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellDeliveries, recordTellReceipt,
+  resolvePendingTellDisposition,
+} from "../src/akuma/heart/index.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { createLiveStatusReader } from "../src/akuma/akuma-observe.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
+import { DatabaseSync } from "node:sqlite";
+import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
 import {
@@ -532,4 +541,457 @@ test("idle timeout with a pending tell reports pendingTell", async (context) => 
   const timed = await akuma.idle({ timeoutMs: 100 });
   assert.equal(timed.reason, "deadline");
   assert.equal(timed.status.id, allocated.id);
+});
+
+const LIVE_WAIT_AT = "2026-10-01T00:00:00.000Z";
+
+async function liveWaitFixture(context: TestContext, count = 1) {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-live-wait-"));
+  const members = [];
+  for (let index = 0; index < count; index += 1) {
+    const born = await bornDirectAkuma({
+      root,
+      archetype: "worker",
+      draw: index.toString(16).padStart(8, "0"),
+      createdAt: LIVE_WAIT_AT,
+    });
+    context.after(() => born.leash.release());
+    const body = await born.leash.recordBody(born.paths, { leashTakenAt: LIVE_WAIT_AT });
+    const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: LIVE_WAIT_AT, call: "work" });
+    members.push({ ...born, body, turn });
+  }
+  return { root, members };
+}
+
+function seedWaitNarration(
+  member: Awaited<ReturnType<typeof liveWaitFixture>>["members"][number],
+  count: number,
+): void {
+  const database = new DatabaseSync(member.paths.heart);
+  try {
+    database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+    for (let index = 0; index < count; index += 1)
+      insertActivityFact(database, {
+        turnSequence: member.turn.sequence,
+        event: { type: "thought", text: `reuse-wait-${index}` },
+        at: LIVE_WAIT_AT,
+      });
+    database.exec("COMMIT");
+  } finally {
+    database.close();
+  }
+}
+
+test("unchanged live wait rounds decode and project once, clone callbacks, and end their scope", async (context) => {
+  const {
+    root,
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  seedWaitNarration(member, 12);
+  const parse = JSON.parse;
+  let decodes = 0;
+  context.mock.method(JSON, "parse", (text: string, ...args: unknown[]) => {
+    if (text.includes('"text":"reuse-wait-')) decodes += 1;
+    return Reflect.apply(parse, JSON, [text, ...args]);
+  });
+  const clone = globalThis.structuredClone;
+  const frontiers = new Set<unknown>();
+  const selections = new Set<unknown>();
+  context.mock.method(globalThis, "structuredClone", (value: unknown) => {
+    const round = value as { rows: unknown; status: { timeline: unknown } }[];
+    frontiers.add(round[0]!.rows);
+    selections.add(round[0]!.status.timeline);
+    return clone(value);
+  });
+  const controller = new AbortController();
+  const stop = new Error("four rounds observed");
+  let rounds = 0;
+  await assert.rejects(
+    executeWaitAkuma({
+      path: root,
+      ids: [member.id],
+      completion: "all",
+      signal: controller.signal,
+      observe(observed) {
+        rounds += 1;
+        const view = observed[0]!;
+        assert.equal(view.status.life, "running");
+        assert.equal(view.rows.length, 14);
+        assert.ok(view.rows.some((row) => row.kind === "thought" && row.text === "reuse-wait-0"));
+        // A viewer may retain or mutate its payload, including nested pins and life.
+        (view.rows as unknown[]).length = 0;
+        (view.status as { life: string }).life = "asleep";
+        (view.status.timeline.entries as unknown[]).length = 0;
+        if (rounds === 4) controller.abort(stop);
+      },
+    }),
+    (error) => error === stop,
+  );
+  assert.equal(rounds, 4);
+  assert.equal(decodes, 12);
+  assert.equal(frontiers.size, 1, "one projectTurns frontier across unchanged rounds");
+  assert.equal(selections.size, 1, "one selection across normalized-equivalent rounds");
+  await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0, observe() {} });
+  assert.equal(decodes, 24, "another wait decodes anew");
+  assert.equal(frontiers.size, 2);
+});
+
+test("scoped status invalidates Tell binding, delivery, and receipt without timeline growth", async (context) => {
+  const {
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  await recordTell(member.paths, { kind: "tell", id: "steer", body: "continue", recordedAt: LIVE_WAIT_AT });
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const input = { aperture: "monitoring" as const };
+  const first = await reader.read(input);
+  const database = new DatabaseSync(member.paths.heart);
+  const highest = database.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value;
+  database.close();
+  await bindTellsToTurn(member.paths, {
+    turnSequence: member.turn.sequence,
+    tellIds: ["steer"],
+    boundAt: LIVE_WAIT_AT,
+  });
+  const bound = await reader.read(input);
+  assert.notStrictEqual(bound.rows, first.rows);
+  assert.equal((await readTell(member.paths, "steer"))?.binding?.turnSequence, member.turn.sequence);
+  await recordTellDeliveries(member.paths, [
+    {
+      tellId: "steer",
+      route: "live",
+      receipt: "required",
+      turnSequence: member.turn.sequence,
+      fence: "steer-fence",
+      deliveredAt: LIVE_WAIT_AT,
+    },
+  ]);
+  const delivered = await reader.read(input);
+  assert.notStrictEqual(delivered.rows, bound.rows);
+  assert.equal(delivered.rows.find((row) => row.kind === "tell")?.deliveries.length, 1);
+  assert.equal(delivered.rows.find((row) => row.kind === "tell")?.state, "pending");
+  await recordTellReceipt(member.paths, {
+    evidence: "fence",
+    turnSequence: member.turn.sequence,
+    fence: "steer-fence",
+    kind: "consumed",
+    receivedAt: LIVE_WAIT_AT,
+  });
+  const settled = await reader.read(input);
+  assert.notStrictEqual(settled.rows, delivered.rows);
+  assert.equal(settled.rows.find((row) => row.kind === "tell")?.state, "told");
+  assert.strictEqual((await reader.read(input)).rows, settled.rows);
+  const after = new DatabaseSync(member.paths.heart);
+  assert.equal(after.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value, highest);
+  after.close();
+});
+
+test("a cached frontier rebuilds on Turn closure and preserves final rows idle status omits", async (context) => {
+  const {
+    root,
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  seedWaitNarration(member, 12);
+  let rounds = 0;
+  let closing: Promise<void> | undefined;
+  const result = await executeWaitAkuma({
+    path: root,
+    ids: [member.id],
+    completion: "all",
+    timeoutMs: 5_000,
+    observe(observed) {
+      rounds += 1;
+      const view = observed[0]!;
+      if (rounds === 1) {
+        closing = (async () => {
+          await endTurn(member.paths, {
+            turnSequence: member.turn.sequence,
+            outcome: { kind: "failed", diagnostic: "done" },
+            completedAt: LIVE_WAIT_AT,
+          });
+          await finishBodyIfIdle(member.paths, { sequence: member.body.sequence, at: LIVE_WAIT_AT });
+          member.leash.release();
+        })();
+      }
+      if (view.status.life === "asleep") {
+        assert.equal(view.status.timeline.kind, "idle");
+        assert.equal(view.status.timeline.entries.length, 0);
+        assert.equal(view.rows.filter((row) => row.kind === "thought").length, 12);
+        assert.equal(view.rows.at(-1)?.kind, "outcome");
+      }
+    },
+  });
+  await closing;
+  assert.equal(result.reason, "completed");
+  assert.ok(rounds >= 2);
+  assert.equal(result.observations[0]?.life, "asleep");
+});
+
+test("a scoped reader discards failed read, decode, schema, and commit attempts", async (context) => {
+  const {
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  seedWaitNarration(member, 1);
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const input = { aperture: "monitoring" as const };
+  let previous = await reader.read(input);
+  for (const failure of ["read", "commit", "decode", "schema"] as const) {
+    const database = new DatabaseSync(member.paths.heart);
+    const version = database.prepare("SELECT version FROM akuma_schema").get()?.version;
+    if (failure === "decode") database.exec("UPDATE activity SET event_json = '{}'");
+    if (failure === "schema") database.exec("PRAGMA ignore_check_constraints=ON; UPDATE akuma_schema SET version = -1");
+    const prepare = DatabaseSync.prototype.prepare;
+    const exec = DatabaseSync.prototype.exec;
+    let commits = 0;
+    let selected = false;
+    const injectedRead = context.mock.method(
+      DatabaseSync.prototype,
+      "prepare",
+      function (this: DatabaseSync, sql: string) {
+        if (sql.startsWith("WITH selected")) {
+          selected = true;
+          if (failure === "read") throw new Error("selected read failed");
+        }
+        return prepare.call(this, sql);
+      },
+    );
+    const injectedCommit = context.mock.method(
+      DatabaseSync.prototype,
+      "exec",
+      function (this: DatabaseSync, sql: string) {
+        if (sql === "COMMIT" && selected && failure === "commit") {
+          commits += 1;
+          throw new Error("selected commit failed");
+        }
+        return exec.call(this, sql);
+      },
+    );
+    await assert.rejects(reader.read(input));
+    injectedRead.mock.restore();
+    injectedCommit.mock.restore();
+    if (failure === "commit") assert.equal(commits, 1, "no retry after admission");
+    if (failure === "decode")
+      database
+        .prepare("UPDATE activity SET event_json = ?")
+        .run(JSON.stringify({ type: "thought", text: "reuse-wait-0" }));
+    if (failure === "schema") database.prepare("UPDATE akuma_schema SET version = ?").run(version!);
+    database.close();
+    const recovered = await reader.read(input);
+    assert.notStrictEqual(recovered.rows, previous.rows, `${failure} invalidates even when original bytes return`);
+    assert.deepEqual(recovered.rows, previous.rows);
+    previous = recovered;
+  }
+});
+
+test("live wait cancellation during Heart admission and callback failure close the observation", async (context) => {
+  const {
+    root,
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  const blocker = new DatabaseSync(member.paths.heart);
+  blocker.exec("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE");
+  blocker.prepare("SELECT version FROM akuma_schema").get();
+  const controller = new AbortController();
+  const reason = new Error("cancel read admission");
+  const waiting = executeWaitAkuma({
+    path: root,
+    ids: [member.id],
+    completion: "all",
+    signal: controller.signal,
+    observe() {
+      assert.fail("no admitted round");
+    },
+  });
+  const rejected = assert.rejects(waiting, (error) => error === reason);
+  const timer = setTimeout(() => controller.abort(reason), 20);
+  await rejected;
+  clearTimeout(timer);
+  blocker.close();
+  const callbackFailure = new Error("viewer failed");
+  await assert.rejects(
+    executeWaitAkuma({
+      path: root,
+      ids: [member.id],
+      completion: "all",
+      observe() {
+        throw callbackFailure;
+      },
+    }),
+    (error) => error === callbackFailure,
+  );
+  const identityFailure = new Error("identity failed");
+  await assert.rejects(
+    executeWaitAkuma({
+      path: root,
+      ids: [member.id],
+      completion: "all",
+      identity: async () => {
+        throw identityFailure;
+      },
+      observe() {},
+    }),
+    (error) => error === identityFailure,
+  );
+  await finishBodyIfIdle(member.paths, { sequence: member.body.sequence, at: LIVE_WAIT_AT });
+  member.leash.release();
+  const result = await executeWaitAkuma({
+    path: root,
+    ids: [member.id],
+    completion: "all",
+    timeoutMs: 0,
+    observe() {},
+  });
+  assert.equal(result.reason, "completed");
+  const claim = await HeldAkumaLeash.try(member.paths);
+  assert.ok(claim, "no observation retains a free seat");
+  claim.release();
+});
+
+test("live reuse refreshes life across Body end, free-seat races, and succession", async (context) => {
+  const {
+    root,
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const input = { aperture: "monitoring" as const };
+  const first = await reader.read(input);
+  const original = HeldAkumaLeash.try;
+  let raced = false;
+  const injected = context.mock.method(HeldAkumaLeash, "try", async (paths: Parameters<typeof original>[0]) => {
+    if (paths.heart === member.paths.heart && !raced) {
+      raced = true;
+      const database = new DatabaseSync(paths.heart);
+      try {
+        finishBodyFact(database, { sequence: member.body.sequence, at: LIVE_WAIT_AT });
+      } finally {
+        database.close();
+      }
+      member.leash.release();
+    }
+    return await original(paths);
+  });
+  const ended = await reader.read(input);
+  injected.mock.restore();
+  assert.equal(ended.status.life, "asleep", "refresh under the free claim wins over the old running read");
+  assert.strictEqual(ended.rows, first.rows, "fresh life does not force unchanged projection");
+  const successor = (await HeldAkumaLeash.try(member.paths))!;
+  context.after(() => successor.release());
+  const body = await successor.recordBody(member.paths, { leashTakenAt: LIVE_WAIT_AT });
+  assert.equal((await reader.read(input)).status.life, "running");
+  assert.strictEqual((await reader.read(input)).rows, first.rows);
+  await breakBody(member.paths, { sequence: body.sequence, end: "put-down", at: LIVE_WAIT_AT });
+  successor.release();
+  assert.equal((await reader.read(input)).status.life, "stranded");
+  const final = await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0, observe() {} });
+  assert.equal(final.reason, "completed", "completion precedes a passed deadline");
+});
+
+test("releasing retention protection removes evidence from the memo without timeline growth", async (context) => {
+  const {
+    members: [member],
+  } = await liveWaitFixture(context);
+  assert.ok(member);
+  await recordTell(member.paths, { kind: "tell", id: "retired", body: "protected", recordedAt: LIVE_WAIT_AT });
+  await decidePendingTellDisposition(member.paths, {
+    bodySequence: member.body.sequence,
+    at: LIVE_WAIT_AT,
+    handoff: true,
+  });
+  await recordTellDeliveries(member.paths, [
+    {
+      tellId: "retired",
+      route: "launch",
+      turnSequence: member.turn.sequence,
+      fence: "retained-launch",
+      deliveredAt: LIVE_WAIT_AT,
+    },
+  ]);
+  seedWaitNarration(member, 5_501);
+  await appendActivity(member.paths, {
+    turnSequence: member.turn.sequence,
+    event: { type: "note", text: "compact" },
+    at: LIVE_WAIT_AT,
+  });
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const input = { aperture: "receipt" as const, admittedTellId: "retired" };
+  const protectedView = await reader.read(input);
+  assert.ok(protectedView.rows.some((row) => row.kind === "tell" && row.tellId === "retired"));
+  const database = new DatabaseSync(member.paths.heart);
+  const highest = database.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value;
+  database.close();
+  assert.equal(await resolvePendingTellDisposition(member.paths, member.body.sequence, LIVE_WAIT_AT), true);
+  const released = await reader.read(input);
+  assert.notStrictEqual(released.rows, protectedView.rows);
+  assert.equal(
+    released.rows.some((row) => row.kind === "tell" && row.tellId === "retired"),
+    false,
+  );
+  assert.equal(await readTell(member.paths, "retired"), null);
+  const after = new DatabaseSync(member.paths.heart);
+  assert.equal(after.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value, highest);
+  after.close();
+});
+
+test("plural live wait drops an unreadable member memo and decodes anew when it recovers", async (context) => {
+  const { root, members } = await liveWaitFixture(context, 2);
+  const first = members[0]!;
+  const second = members[1]!;
+  seedWaitNarration(first, 1);
+  seedWaitNarration(second, 1);
+  const prepare = DatabaseSync.prototype.prepare;
+  let failRead = false;
+  let reads = 0;
+  context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.startsWith("WITH selected")) {
+      reads += 1;
+      if (failRead && reads % 2 === 1) throw new Error("transient selected read failure");
+    }
+    return prepare.call(this, sql);
+  });
+  const parse = JSON.parse;
+  let decodes = 0;
+  context.mock.method(JSON, "parse", (text: string, ...args: unknown[]) => {
+    if (text.includes('"text":"reuse-wait-')) decodes += 1;
+    return Reflect.apply(parse, JSON, [text, ...args]);
+  });
+  const controller = new AbortController();
+  const reason = new Error("recovery witnessed");
+  let rounds = 0;
+  await assert.rejects(
+    executeWaitAkuma({
+      path: root,
+      ids: members.map((member) => member.id),
+      completion: "all",
+      signal: controller.signal,
+      observe(views) {
+        rounds += 1;
+        if (rounds === 1) failRead = true;
+        if (rounds === 2) {
+          assert.deepEqual(
+            views.map((view) => view.status.id),
+            [second.id],
+          );
+          failRead = false;
+        }
+        if (rounds === 3) {
+          assert.deepEqual(
+            views.map((view) => view.status.id),
+            [first.id, second.id],
+          );
+          controller.abort(reason);
+        }
+      },
+    }),
+    (error) => error === reason,
+  );
+  assert.equal(decodes, 3, "the failed member recomputes; its readable peer reuses");
 });

@@ -46,17 +46,36 @@ export const pendingTellProtectionSql = `SELECT d.turn_sequence FROM tell_delive
   JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'
   UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id`;
 
-function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): readonly TellFact[] {
-  if (rows.length === 0) return [];
+type TellBatch = Readonly<{
+  rows: readonly TellRow[];
+  deliveries: readonly (TellDeliveryRow & { sequence: number; tell_id: string; fence: string })[];
+  bindings: readonly { sequence: number; tell_id: string; turn_sequence: number; bound_at: string }[];
+}>;
+
+function readTellBatch(database: DatabaseSync, rows: readonly TellRow[]): TellBatch {
+  if (rows.length === 0) return { rows, deliveries: [], bindings: [] };
   const ids = JSON.stringify(rows.map((row) => row.id));
-  const deliveries = new Map<string, TellDelivery[]>();
-  const deliveryRows = database
+  const deliveries = database
     .prepare(
-      `SELECT tell_id, turn_sequence, route, receipt, delivered_at
+      `SELECT sequence, tell_id, turn_sequence, fence, route, receipt, delivered_at
     FROM tell_deliveries WHERE tell_id IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
-    .all(ids) as unknown as readonly (TellDeliveryRow & { tell_id: string })[];
-  for (const row of deliveryRows) {
+    .all(ids) as unknown as TellBatch["deliveries"];
+  const bindings = database
+    .prepare(
+      `SELECT sequence, tell_id, turn_sequence, bound_at FROM tell_bindings
+    WHERE sequence IN (
+      SELECT MAX(sequence) FROM tell_bindings
+      WHERE tell_id IN (SELECT value FROM json_each(?)) GROUP BY tell_id
+    ) ORDER BY sequence`,
+    )
+    .all(ids) as unknown as TellBatch["bindings"];
+  return { rows, deliveries, bindings };
+}
+
+export function decodeTellBatch(batch: TellBatch): readonly TellFact[] {
+  const deliveries = new Map<string, TellDelivery[]>();
+  for (const row of batch.deliveries) {
     const group = deliveries.get(row.tell_id) ?? [];
     group.push({
       turnSequence: row.turn_sequence,
@@ -67,17 +86,9 @@ function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): reado
     deliveries.set(row.tell_id, group);
   }
   const bindings = new Map<string, TellBinding>();
-  const bindingRows = database
-    .prepare(
-      `SELECT tell_id, turn_sequence, bound_at FROM tell_bindings
-    WHERE sequence IN (
-      SELECT MAX(sequence) FROM tell_bindings
-      WHERE tell_id IN (SELECT value FROM json_each(?)) GROUP BY tell_id
-    )`,
-    )
-    .all(ids) as unknown as readonly { tell_id: string; turn_sequence: number; bound_at: string }[];
-  for (const row of bindingRows) bindings.set(row.tell_id, { turnSequence: row.turn_sequence, boundAt: row.bound_at });
-  return rows.map((row) => ({
+  for (const row of batch.bindings)
+    bindings.set(row.tell_id, { turnSequence: row.turn_sequence, boundAt: row.bound_at });
+  return batch.rows.map((row) => ({
     kind: "tell",
     sequence: row.sequence,
     id: row.id,
@@ -91,15 +102,19 @@ function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): reado
   }));
 }
 
-export function tellFactsAtSequences(database: DatabaseSync, sequences: readonly number[]): readonly TellFact[] {
-  if (sequences.length === 0) return [];
+function decodeTellRows(database: DatabaseSync, rows: readonly TellRow[]): readonly TellFact[] {
+  return decodeTellBatch(readTellBatch(database, rows));
+}
+
+export function tellBatchAtSequences(database: DatabaseSync, sequences: readonly number[]): TellBatch {
+  if (sequences.length === 0) return { rows: [], deliveries: [], bindings: [] };
   const rows = database
     .prepare(
       `SELECT sequence, id, body, initiator, schema_json, recorded_at, ${tellStateSql} AS state
     FROM tells WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
     .all(JSON.stringify(sequences)) as unknown as readonly TellRow[];
-  return decodeTellRows(database, rows);
+  return readTellBatch(database, rows);
 }
 
 export function hasPendingTell(database: DatabaseSync): boolean {

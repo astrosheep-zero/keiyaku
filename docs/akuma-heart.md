@@ -9,8 +9,12 @@ are not law.
 
 Heart observation and mutation are asynchronous at its owner boundary. Each
 read observes one consistent snapshot; each mutation is one bounded owner
-transaction. These implementation boundaries do not create synchronous public
-APIs, a cache, a daemon, or a queue. Existing Heart custody is opened without
+transaction. An operation may reuse decoded facts and pure projections only
+when Heart's current observation proves their complete inputs equivalent.
+Such reuse never substitutes for fresh lifecycle or custody observation, never
+survives a failed read, and ends with the observing operation. These
+implementation boundaries do not create synchronous public APIs, a daemon,
+a queue, or a persistent cache. Existing Heart custody is opened without
 creating it; only a true absence becomes absence. Corruption and unsupported
 schema are hard failures, never partial reading, silent repair, migration, or
 compatibility decoding.

@@ -65,6 +65,8 @@ import {
 import {
   activityFactSlice,
   statusFacts,
+  readStatusBatch,
+  decodeTimelineBatch,
   type StatusFactInput,
   lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
@@ -180,23 +182,81 @@ export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
   return await withReadOnlyHeart(paths, (heart) => activityFactSlice(heart));
 }
 
-export async function readStatusFacts(paths: AkumaPaths, input: StatusFactInput): Promise<ActivitySlice["rows"]> {
-  return await withReadOnlyHeart(paths, (heart) => statusFacts(heart, input));
+export async function readStatusFacts(
+  paths: AkumaPaths,
+  input: StatusFactInput,
+  signal?: AbortSignal,
+): Promise<ActivitySlice["rows"]> {
+  return await withReadOnlyHeart(paths, (heart) => statusFacts(heart, input), signal);
+}
+
+// Each query returns a fixed set of scalar columns; compare JSON columns as text.
+function sameRawRows<Row extends object>(left: readonly Row[], right: readonly Row[]): boolean {
+  if (left.length !== right.length) return false;
+  if (left.length === 0) return true;
+  const columns = Object.keys(left[0]!) as (keyof Row)[];
+  return left.every((row, index) => columns.every((column) => row[column] === right[index]![column]));
+}
+
+function sameStatusBatch(left: ReturnType<typeof readStatusBatch>, right: ReturnType<typeof readStatusBatch>): boolean {
+  return (
+    left.frontier === right.frontier &&
+    sameRawRows(left.rows, right.rows) &&
+    sameRawRows(left.turns, right.turns) &&
+    sameRawRows(left.calls, right.calls) &&
+    sameRawRows(left.activity, right.activity) &&
+    sameRawRows(left.tells.rows, right.tells.rows) &&
+    sameRawRows(left.tells.deliveries, right.tells.deliveries) &&
+    sameRawRows(left.tells.bindings, right.tells.bindings)
+  );
+}
+
+/** One live observation's successful raw input and decoded frontier, never a connection. */
+export function createStatusFactReader(paths: AkumaPaths) {
+  let memo: Readonly<{ batch: ReturnType<typeof readStatusBatch>; facts: ActivitySlice["rows"] }> | undefined;
+  return {
+    clear(): void {
+      memo = undefined;
+    },
+    async read(input: StatusFactInput, signal?: AbortSignal): Promise<ActivitySlice["rows"]> {
+      try {
+        const next = await withReadOnlyHeart(
+          paths,
+          (heart) => {
+            const batch = readStatusBatch(heart, input);
+            if (memo !== undefined && sameStatusBatch(batch, memo.batch)) return memo;
+            return { batch, facts: decodeTimelineBatch(batch) };
+          },
+          signal,
+        );
+        // Publication follows COMMIT, so failed reads can never supply a fallback.
+        memo = next;
+        return next.facts;
+      } catch (error) {
+        memo = undefined;
+        throw error;
+      }
+    },
+  };
 }
 
 type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill"> &
   Readonly<{ hasPendingTell: boolean }>;
 
 /** Lifecycle probes do not load narration, Tell bodies, or delivery histories. */
-export async function readLifeSnapshot(paths: AkumaPaths): Promise<LifeSnapshot> {
+export async function readLifeSnapshot(paths: AkumaPaths, signal?: AbortSignal): Promise<LifeSnapshot> {
   try {
-    return await withReadOnlyHeart(paths, (heart) => ({
-      soul: soulFact(heart),
-      latestBody: latestBodyFact(heart),
-      latestSession: latestSessionFact(heart),
-      latestKill: latestKillFact(heart),
-      hasPendingTell: hasPendingTell(heart),
-    }));
+    return await withReadOnlyHeart(
+      paths,
+      (heart) => ({
+        soul: soulFact(heart),
+        latestBody: latestBodyFact(heart),
+        latestSession: latestSessionFact(heart),
+        latestKill: latestKillFact(heart),
+        hasPendingTell: hasPendingTell(heart),
+      }),
+      signal,
+    );
   } catch (error) {
     if (isHeartAbsent(error))
       return { soul: null, latestBody: null, latestSession: null, latestKill: null, hasPendingTell: false };

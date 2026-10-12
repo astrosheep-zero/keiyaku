@@ -1,5 +1,6 @@
 import {
   readStatusFacts,
+  createStatusFactReader,
   readLifeSnapshot,
   HeldAkumaLeash,
   isHeartAbsent,
@@ -20,6 +21,7 @@ import {
   type ActivityHistory,
   type ActivityRow,
   type ActivitySnapshot,
+  type TurnLedger,
 } from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { abortableDelay } from "./abort.js";
@@ -100,26 +102,80 @@ type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelecte
  */
 export type LiveStatusObservation = BudgetedStatusObservation & Readonly<{ rows: readonly ActivityRow[] }>;
 
+type StatusObservationInput = Readonly<{
+  aperture: "monitoring" | "receipt";
+  ordinaryBudget?: number;
+  admittedTellId?: string;
+}>;
+type StatusProjection = Readonly<{ ledger: TurnLedger; selected: ReturnType<typeof selectSnapshot> }>;
+
+function snapshotSelection(input: StatusObservationInput) {
+  return {
+    aperture: input.aperture,
+    budget: ordinarySnapshotBudget(input.ordinaryBudget),
+    ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
+  };
+}
+
+/** Private to a live wait: retain only this member's current frontier and last selection. */
+export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
+  const reader = createStatusFactReader(paths);
+  let memo:
+    | Readonly<{
+        facts: Awaited<ReturnType<typeof readStatusFacts>>;
+        ledger: TurnLedger;
+        options: ReturnType<typeof snapshotSelection>;
+        selected: ReturnType<typeof selectSnapshot>;
+      }>
+    | undefined;
+  const clear = (): void => {
+    reader.clear();
+    memo = undefined;
+  };
+  return {
+    clear,
+    async read(input: StatusObservationInput, signal?: AbortSignal): Promise<LiveStatusObservation> {
+      try {
+        return await bornLiveStatus(paths, expected, input, signal, async () => {
+          const facts = await reader.read(input, signal);
+          const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
+          const options = snapshotSelection(input);
+          const selected =
+            memo?.ledger === ledger &&
+            memo.options.aperture === options.aperture &&
+            memo.options.admittedTellId === options.admittedTellId &&
+            memo.options.budget.tail === options.budget.tail &&
+            memo.options.budget.voice === options.budget.voice
+              ? memo.selected
+              : selectSnapshot(ledger, options);
+          memo = { facts, ledger, options, selected };
+          return { ledger, selected };
+        });
+      } catch (error) {
+        clear();
+        throw error;
+      }
+    },
+  };
+}
+
 /** Internal live companion for an observation loop; it is not a public result. */
 export async function bornLiveStatus(
   paths: AkumaPaths,
   expected: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
+  input: StatusObservationInput,
+  signal?: AbortSignal,
+  readProjection?: () => Promise<StatusProjection>,
 ): Promise<LiveStatusObservation> {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
-  const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => readLifeSnapshot(paths));
+  const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => readLifeSnapshot(paths, signal));
   const resumeUnsupported =
     currentLife === "stranded" &&
     snapshot.latestSession?.provider === soul.provider.name &&
     (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
-  const facts = await readStatusFacts(paths, input);
-  const ledger = projectTurns(facts);
-  const selected = selectSnapshot(ledger, {
-    aperture: input.aperture,
-    budget: ordinarySnapshotBudget(input.ordinaryBudget),
-    ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
-  });
+  const { ledger, selected } =
+    readProjection === undefined ? await readStatusProjection(paths, input, signal) : await readProjection();
   return {
     status: {
       id: soul.id,
@@ -134,10 +190,23 @@ export async function bornLiveStatus(
   };
 }
 
+async function readStatusProjection(
+  paths: AkumaPaths,
+  input: StatusObservationInput,
+  signal?: AbortSignal,
+): Promise<StatusProjection> {
+  const facts = await readStatusFacts(paths, input, signal);
+  const ledger = projectTurns(facts);
+  return {
+    ledger,
+    selected: selectSnapshot(ledger, snapshotSelection(input)),
+  };
+}
+
 export async function bornStatus(
   paths: AkumaPaths,
   expected: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
+  input: StatusObservationInput,
 ): Promise<BudgetedStatusObservation> {
   const { rows: _rows, ...status } = await bornLiveStatus(paths, expected, input);
   return status;
@@ -146,9 +215,10 @@ export async function bornStatus(
 export async function readLiveStatus(
   worldPath: WorldRoot,
   id: AkuId,
-  input: Readonly<{ aperture: "monitoring" | "receipt"; ordinaryBudget?: number; admittedTellId?: string }>,
+  input: StatusObservationInput,
+  signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
-  return await bornLiveStatus(pathsForAkuId(worldPath, id), id, input);
+  return await bornLiveStatus(pathsForAkuId(worldPath, id), id, input, signal);
 }
 
 function complete(life: AkumaStatus["life"], pending: boolean): boolean {

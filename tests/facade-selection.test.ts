@@ -21,7 +21,10 @@ import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { appendActivity, initializeHeart } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, endTurn, initializeHeart } from "../src/akuma/heart/index.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { createLiveStatusReader } from "../src/akuma/akuma-observe.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
@@ -264,6 +267,73 @@ test("a wait's live observation carries each observed Akuma's alias and Dispatch
   assert.equal(single?.alias, "@observed");
   assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
   assert.equal("rows" in result.observations[0]!, false, "the final public wait result discards the live companion");
+});
+
+test("live wait reselects an unchanged later Heart when an earlier member releases the shared budget", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-live-wait-budget-");
+  const members: (Awaited<ReturnType<typeof bornDirectAkuma>> & { turn: Awaited<ReturnType<typeof beginTurn>> })[] = [];
+  const at = "2026-10-01T00:00:00.000Z";
+  for (let index = 0; index < 6; index += 1) {
+    const born = await bornDirectAkuma({
+      root,
+      archetype: "worker",
+      draw: index.toString(16).padStart(8, "0"),
+      createdAt: at,
+    });
+    t.after(() => born.leash.release());
+    const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
+    const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at, call: "opening" });
+    for (let row = 0; row < 6; row += 1)
+      await appendActivity(born.paths, {
+        turnSequence: turn.sequence,
+        event: { type: "thought", text: `detail-${row}` },
+        at,
+      });
+    members.push({ ...born, turn });
+  }
+  const later = members[5]!;
+  const reader = createLiveStatusReader(later.paths, later.id);
+  const input = { aperture: "monitoring" as const };
+  const zero = await reader.read({ ...input, ordinaryBudget: 0 });
+  const six = await reader.read({ ...input, ordinaryBudget: 6 });
+  assert.strictEqual(six.rows, zero.rows, "budget changes reuse the ledger");
+  assert.notStrictEqual(six.status.timeline, zero.status.timeline, "budget changes rerun selection");
+  assert.strictEqual(
+    (await reader.read({ ...input, ordinaryBudget: 30 })).status.timeline,
+    six.status.timeline,
+    "normalized equivalent budgets reuse selection",
+  );
+  reader.clear();
+  const controller = new AbortController();
+  const reason = new Error("budget change witnessed");
+  let rounds = 0;
+  let closing: Promise<unknown> | undefined;
+  const selectedCounts: number[] = [];
+  await assert.rejects(
+    executeWaitAkuma({
+      path: root,
+      ids: members.map((member) => member.id),
+      completion: "all",
+      signal: controller.signal,
+      observe(observed) {
+        rounds += 1;
+        const view = observed.find((view) => view.status.id === later.id)!;
+        selectedCounts.push(
+          view.status.timeline.entries.filter((entry) => entry.kind === "row" && entry.row.kind === "thought").length,
+        );
+        if (rounds === 1)
+          closing = endTurn(members[0]!.paths, {
+            turnSequence: members[0]!.turn.sequence,
+            outcome: { kind: "failed", diagnostic: "done" },
+            completedAt: at,
+          });
+        if (rounds === 3) controller.abort(reason);
+      },
+    }),
+    (error) => error === reason,
+  );
+  await closing;
+  assert.deepEqual(selectedCounts, [0, 6, 6]);
 });
 
 test("one and ten selected identities use one Dispatch batch per live and final wait stage", async (t) => {

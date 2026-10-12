@@ -2,6 +2,7 @@ import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import {
+  createLiveStatusReader,
   defaultWaitComplete,
   readLiveStatus,
   readWaitComplete,
@@ -9,6 +10,7 @@ import {
   type LiveStatusObservation,
   type WaitReason,
 } from "./akuma-observe.js";
+import { pathsForAkuId } from "./identity.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { DispatchAssociation } from "./dispatch-association.js";
 import type { ActivityRow } from "./projection.js";
@@ -70,12 +72,21 @@ async function observeWaitRound(
   path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
   signal?: AbortSignal,
+  readers?: Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>,
 ): Promise<WaitRound> {
+  const read = async (id: AkumaStatus["id"], ordinaryBudget?: number): Promise<LiveStatusObservation> => {
+    const options = { aperture: "monitoring" as const, ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) };
+    if (readers === undefined) return await readLiveStatus(path, id, options, signal);
+    let reader = readers.get(id);
+    if (reader === undefined) {
+      reader = createLiveStatusReader(pathsForAkuId(path, id), id);
+      readers.set(id, reader);
+    }
+    return await reader.read(options, signal);
+  };
   signal?.throwIfAborted();
   if (ids.length <= 1) {
-    const observations = await Promise.all(
-      ids.map(async (id) => await readLiveStatus(path, id, { aperture: "monitoring" })),
-    );
+    const observations = await Promise.all(ids.map(async (id) => await read(id)));
     return { observations, unobserved: [] };
   }
   let remaining = SHARED_ORDINARY_BUDGET;
@@ -84,10 +95,12 @@ async function observeWaitRound(
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
-      const observed = await readLiveStatus(path, id, { aperture: "monitoring", ordinaryBudget: remaining });
+      const observed = await read(id, remaining);
       observations.push(observed);
       remaining -= observed.ordinarySelected;
     } catch (error) {
+      readers?.get(id)?.clear();
+      readers?.delete(id);
       if (error instanceof AkumaNotBornError) throw error;
       unobserved.push({ id, diagnostic: diagnostic(error) });
     }
@@ -140,54 +153,61 @@ function selectionOrderedIds(
  * predicate; a live viewer always observes rounds.
  */
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
-  // Identity facts are read once per observed Akuma, not once per 100ms round.
-  const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
-  if (input.onSelected !== undefined) {
-    for (const id of input.ids) {
-      input.signal?.throwIfAborted();
-      const known = input.identity === undefined ? undefined : await input.identity(id);
-      facts.set(id, known ?? { contract: { kind: "none" } });
+  const readers =
+    input.observe === undefined ? undefined : new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
+  try {
+    // Identity facts are read once per observed Akuma, not once per 100ms round.
+    const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
+    if (input.onSelected !== undefined) {
+      for (const id of input.ids) {
+        input.signal?.throwIfAborted();
+        const known = input.identity === undefined ? undefined : await input.identity(id);
+        facts.set(id, known ?? { contract: { kind: "none" } });
+      }
+      const ordered =
+        input.selectionOrder === undefined ? input.ids : selectionOrderedIds(input.ids, input.selectionOrder);
+      input.onSelected(ordered.map((id) => ({ id, ...facts.get(id)! })));
     }
-    const ordered =
-      input.selectionOrder === undefined ? input.ids : selectionOrderedIds(input.ids, input.selectionOrder);
-    input.onSelected(ordered.map((id) => ({ id, ...facts.get(id)! })));
+    const observeRound = async (round: WaitRound): Promise<void> => {
+      if (input.observe === undefined) return;
+      const observed: WaitObservedAkuma[] = [];
+      for (const observation of round.observations) {
+        input.signal?.throwIfAborted();
+        const { status, rows } = observation;
+        let known = facts.get(status.id);
+        if (known === undefined && input.identity !== undefined) {
+          known = await input.identity(status.id);
+          facts.set(status.id, known);
+        }
+        if (known === undefined) {
+          observed.push({ status, rows, contract: { kind: "none" } });
+          continue;
+        }
+        observed.push({ status, rows, ...known });
+      }
+      input.observe(structuredClone(observed));
+    };
+    const live = input.observe !== undefined;
+    const waited = await waitForObservation({
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.predicate === undefined && !live && input.ids.length === 1
+        ? { probe: async () => await readWaitComplete(input.path, input.ids[0]!) }
+        : {}),
+      observe: async () => await observeWaitRound(input.path, input.ids, input.signal, readers),
+      complete: (round) => roundComplete(round, input.completion, input.predicate),
+      onObserve: async (round) => await observeRound(round),
+    });
+    return {
+      mode: input.completion,
+      reason: waited.reason,
+      observations: waited.value.observations.map((observation) => observation.status),
+      unobserved: waited.value.unobserved,
+    };
+  } finally {
+    for (const reader of readers?.values() ?? []) reader.clear();
+    readers?.clear();
   }
-  const observeRound = async (round: WaitRound): Promise<void> => {
-    if (input.observe === undefined) return;
-    const observed: WaitObservedAkuma[] = [];
-    for (const observation of round.observations) {
-      input.signal?.throwIfAborted();
-      const { status, rows } = observation;
-      let known = facts.get(status.id);
-      if (known === undefined && input.identity !== undefined) {
-        known = await input.identity(status.id);
-        facts.set(status.id, known);
-      }
-      if (known === undefined) {
-        observed.push({ status, rows, contract: { kind: "none" } });
-        continue;
-      }
-      observed.push({ status, rows, ...known });
-    }
-    input.observe(observed);
-  };
-  const live = input.observe !== undefined;
-  const waited = await waitForObservation({
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(input.predicate === undefined && !live && input.ids.length === 1
-      ? { probe: async () => await readWaitComplete(input.path, input.ids[0]!) }
-      : {}),
-    observe: async () => await observeWaitRound(input.path, input.ids, input.signal),
-    complete: (round) => roundComplete(round, input.completion, input.predicate),
-    onObserve: async (round) => await observeRound(round),
-  });
-  return {
-    mode: input.completion,
-    reason: waited.reason,
-    observations: waited.value.observations.map((observation) => observation.status),
-    unobserved: waited.value.unobserved,
-  };
 }
 
 function diagnostic(error: unknown): string {
