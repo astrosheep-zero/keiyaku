@@ -57,6 +57,17 @@ import type { PluginSignal } from "../src/plugin/public.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { World } from "../src/world.js";
 
+/** Lifecycle watchdogs exclude optional default-observer startup and delivery. */
+function bodyTestDirectory(prefix: string): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
+  );
+  return root;
+}
+
 type TurnOutcomePluginRecorder = {
   activations: number;
   observations: Array<Readonly<{ signal: PluginSignal; outcomes: unknown }>>;
@@ -98,6 +109,7 @@ function configureTurnOutcomePlugins(root: string): void {
     join(root, ".keiyaku", "settings.json"),
     JSON.stringify({
       plugins: {
+        square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
         broken: { package: "./plugins/broken.mjs" },
         observer: { package: "./plugins/observer.mjs" },
       },
@@ -132,7 +144,12 @@ function configureBodyEndPlugins(root: string): void {
   mkdirSync(join(root, ".keiyaku"), { recursive: true });
   writeFileSync(
     join(root, ".keiyaku", "settings.json"),
-    JSON.stringify({ plugins: { "body-observer": { package: "./plugins/body-observer.mjs" } } }),
+    JSON.stringify({
+      plugins: {
+        square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+        "body-observer": { package: "./plugins/body-observer.mjs" },
+      },
+    }),
   );
 }
 
@@ -443,7 +460,7 @@ function adapter(
 }
 
 test("turn-outcome plugins observe every committed answered Turn exactly once", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-answered-"));
+  const root = bodyTestDirectory("keiyaku-akuma-plugin-turn-answered-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1234abce");
     configureTurnOutcomePlugins(root);
@@ -581,7 +598,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
 });
 
 test("turn-outcome plugins observe a committed failed Turn without changing it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-turn-failed-"));
+  const root = bodyTestDirectory("keiyaku-akuma-plugin-turn-failed-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1234abcf");
     configureTurnOutcomePlugins(root);
@@ -618,7 +635,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
 });
 
 test("body-ended plugins attribute only the exact Body's latest admitted Turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-plugin-body-end-"));
+  const root = bodyTestDirectory("keiyaku-akuma-plugin-body-end-");
   try {
     const allocated = await allocatedHeart(root, "claude", "b0d1e2f3");
     configureBodyEndPlugins(root);
@@ -697,7 +714,7 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
 });
 
 test("live receipt persistence waits for its Body-scoped delivery mapping", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-tell-"));
+  const root = bodyTestDirectory("keiyaku-akuma-live-tell-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4d");
     configureTurnOutcomePlugins(root);
@@ -771,7 +788,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
 });
 
 test("a receipt-free live acknowledgement settles the tell in the current Body", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-live-ack-"));
+  const root = bodyTestDirectory("keiyaku-akuma-live-ack-");
   try {
     const allocated = await allocatedHeart(root, "codex", "1a2b3c40");
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
@@ -838,7 +855,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
 });
 
 test("Pi native steer evidence keeps a Tell in its current Body and Turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-steer-"));
+  const root = bodyTestDirectory("keiyaku-pi-body-steer-");
   try {
     const allocated = await allocatedHeart(root, "pi", "1a2b3c41");
     const { promise: released, resolve: release } = promiseBarrier<void>();
@@ -903,7 +920,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
 });
 
 test("Pi native end without steer evidence carries the pending Tell to the next Turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-body-late-"));
+  const root = bodyTestDirectory("keiyaku-pi-body-late-");
   try {
     const allocated = await allocatedHeart(root, "pi", "1a2b3c42");
     const { promise: released, resolve: release } = promiseBarrier<void>();
@@ -971,7 +988,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
 });
 
 test("a failed release recovery spawn records Heart undelivered disposition", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-release-spawn-failure-"));
+  const root = bodyTestDirectory("keiyaku-akuma-release-spawn-failure-");
   try {
     const allocated = await allocatedHeart(root, "acp", "1a2b3c45");
     let spawnAttempts = 0;
@@ -1005,7 +1022,7 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
 });
 
 test("duplicate wake after a recorded successor disposition does not create a second Body", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-duplicate-wake-"));
+  const root = bodyTestDirectory("keiyaku-akuma-duplicate-wake-");
   try {
     const allocated = await allocatedHeart(root, "acp", "1a2b3c46");
     let spawnCount = 0;
@@ -1055,7 +1072,7 @@ test("duplicate wake after a recorded successor disposition does not create a se
 });
 
 test("successor Body record before admission failure yields Heart undelivered for the snapshot", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-successor-admission-fail-"));
+  const root = bodyTestDirectory("keiyaku-akuma-successor-admission-fail-");
   try {
     const allocated = await allocatedHeart(root, "acp", "1a2b3c52");
     const emptyLog = { path: allocated.paths.log, from: 0, to: 0 };
@@ -1215,7 +1232,7 @@ test("open disposition referencing a missing Tell is Heart corruption, not prove
 
 
 test("receipt persistence failure aborts the Session and terminates the Body", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-receipt-failure-"));
+  const root = bodyTestDirectory("keiyaku-akuma-receipt-failure-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let aborted = false;
@@ -1261,7 +1278,7 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
 });
 
 test("request-pump failure aborts the Session and closes request transport", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-failure-"));
+  const root = bodyTestDirectory("keiyaku-akuma-request-pump-failure-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let aborted = false;
@@ -1313,7 +1330,7 @@ test("request-pump failure aborts the Session and closes request transport", asy
 });
 
 test("request-pump failure aborts pending ProviderAdapter.start and closes transport", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-pump-setup-failure-"));
+  const root = bodyTestDirectory("keiyaku-akuma-request-pump-setup-failure-");
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4e");
     let directory!: string;
@@ -1363,7 +1380,7 @@ test("request-pump failure aborts pending ProviderAdapter.start and closes trans
 });
 
 test("an answer without an admitted or resumed session is retained as a failed turn", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-sessionless-answer-"));
+  const root = bodyTestDirectory("keiyaku-akuma-sessionless-answer-");
   try {
     const allocated = await allocatedHeart(root, "claude", "decafbad");
     await driveAkumaBody(
@@ -1388,7 +1405,7 @@ test("an answer without an admitted or resumed session is retained as a failed t
 });
 
 test("a successor admits through the leash without reconstructing custody of an untidy predecessor", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-orphan-stop-"));
+  const root = bodyTestDirectory("keiyaku-akuma-orphan-stop-");
   try {
     const allocated = await allocatedHeart(root, "claude", "a1b2c3d4");
     const soul = {
@@ -1450,7 +1467,7 @@ test("a successor admits through the leash without reconstructing custody of an 
 });
 
 test("pause aborts stalled provider setup and records clean Body settlement", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-setup-pause-"));
+  const root = bodyTestDirectory("keiyaku-akuma-setup-pause-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffed00");
     const { promise: started, resolve: setupStarted } = promiseBarrier<void>();
@@ -1483,7 +1500,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
 });
 
 test("pause interrupts pre-drive reserved-request recovery", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-request-settlement-pause-"));
+  const root = bodyTestDirectory("keiyaku-akuma-request-settlement-pause-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffed01");
     const soul = {
@@ -1550,7 +1567,7 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
 });
 
 test("pause aborts the current drive and records the body as put down", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-pause-"));
+  const root = bodyTestDirectory("keiyaku-akuma-pause-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee00");
     let aborted = false;
@@ -1599,7 +1616,7 @@ test("pause aborts the current drive and records the body as put down", async ()
 });
 
 test("forced disposal failure records hung and broke-off before the Body returns", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hung-"));
+  const root = bodyTestDirectory("keiyaku-akuma-hung-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee06");
     const body = driveAkumaBody(
@@ -1639,7 +1656,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
 });
 
 test("provider closure failure enters Body supervision before session completion", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-closed-failure-"));
+  const root = bodyTestDirectory("keiyaku-akuma-closed-failure-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee07");
     const { promise: closed, reject: rejectClosed } = promiseBarrier<void>();
@@ -1683,7 +1700,7 @@ test("provider closure failure enters Body supervision before session completion
 });
 
 test("a stalled Tell is fenced by Body cancellation before leash release", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-violating-tell-"));
+  const root = bodyTestDirectory("keiyaku-akuma-violating-tell-");
   let releaseTell: (() => void) | undefined;
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee02");
@@ -1758,7 +1775,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
 });
 
 test("schema Turn malformed JSON is invalid-output and open bound Turns fail when Body is put down", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-invalid-output-"));
+  const root = bodyTestDirectory("keiyaku-akuma-invalid-output-");
   try {
     const allocated = await allocatedHeart(root, "claude", "bad00001");
     const schemaJson = '{"type":"object"}';
