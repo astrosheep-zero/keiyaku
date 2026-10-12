@@ -93,7 +93,7 @@ function processDiagnostic(
   index: number,
   outcome: Readonly<{ code: number; stdout: string; stderr: string; truncated: boolean }>,
 ): string | null {
-  if (outcome.code === 0 && outcome.stdout.length === 0 && outcome.stderr.length === 0 && !outcome.truncated) {
+  if (outcome.code === 0) {
     return null;
   }
   return [

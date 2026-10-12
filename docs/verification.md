@@ -51,9 +51,10 @@ there is no automatic retry loop, cache, or another evidence source. `verified`
 is only this producer's conventional token; other opaque gates are outside this
 chapter.
 
-Terminal output may be rendered as bounded contextual summary on the
-attestation. It is not a log, artifact, report store, or source for callers to
-parse counts. A stopped producer is a typed public stop. Delivery can still
+Terminal failure output may be rendered as bounded contextual summary on the
+attestation. Successful declaration output remains live execution evidence,
+not summary material that can displace failure diagnostics. The summary is not
+a log, artifact, report store, or source for callers to parse counts. A stopped producer is a typed public stop. Delivery can still
 report its independently observed placement stop, but does not perform placement
 until Verification and gates permit it. Audit independently observes target
 followability without placing it.

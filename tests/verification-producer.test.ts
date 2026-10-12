@@ -126,7 +126,7 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
         declaration(
           'printf "first-out"; printf "%*s" 12000 "" | tr " " a; printf "%*s" 12000 "" | tr " " b >&2; false',
         ),
-        declaration('printf "%*s" 12000 "" | tr " " x; printf "%*s" 12000 "" | tr " " y >&2'),
+        declaration('printf "%*s" 12000 "" | tr " " x; printf "%*s" 12000 "" | tr " " y >&2; false'),
       ]),
     );
 
@@ -136,9 +136,31 @@ test("producer preserves ordered terminal diagnostics within one 32 KiB summary"
     const summary = outcome.outcome.summary!;
     assert.ok(Buffer.byteLength(summary) <= 32 * 1024);
     assert.match(summary, /^\[earlier output truncated\]\n/);
-    assert.match(summary, /\[2 bash exit 0\]/);
+    assert.match(summary, /\[2 bash exit 1\]/);
     assert.match(summary, /stdout:\n[x]+\nstderr:\n[y]+$/);
     assert.doesNotMatch(summary, /first-out/);
+  });
+});
+
+test("verbose success stays live without evicting an earlier failure", async () => {
+  await inTemporaryDirectory(async (root) => {
+    let successOutput = "";
+    const result = await executeVerification(input(root, [
+      declaration('printf "failure-detail"; false'),
+      declaration('printf "%*s" 40000 "" | tr " " x'),
+    ], {
+      observe: (event) => {
+        if (event.kind === "output" && event.index === 2) successOutput += event.text;
+      },
+    }));
+    assert.equal(successOutput, "x".repeat(40000));
+    assert.deepEqual(result.outcome, {
+      kind: "terminal",
+      verdict: "unsatisfied",
+      passed: 1,
+      total: 2,
+      summary: "[1 bash exit 1]\nstdout:\nfailure-detail",
+    });
   });
 });
 
