@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -519,6 +519,12 @@ async function boundedOutcome(body: Promise<unknown>, timeoutMs: number): Promis
 test("OpenCode Body supervises control stop while stream closure is unproven", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-opencode-body-stop-"));
   try {
+    // Measure custody retirement, not optional Body-end observer delivery.
+    mkdirSync(join(root, ".keiyaku"), { recursive: true });
+    writeFileSync(
+      join(root, ".keiyaku", "settings.json"),
+      JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
+    );
     const allocated = await allocatedHeart(root, "claude", "feed0001");
     const { session, prompts } = fixtureSession();
     const phase: UnprovenRetirementPhase = { returned: false };
