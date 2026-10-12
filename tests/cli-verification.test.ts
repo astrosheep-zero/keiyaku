@@ -125,8 +125,8 @@ test("a deliver that accepts names the landed diff's shape", async () => {
   assert.equal((text.match(/^  changes /gmu) ?? []).length, 1, "one bounded changes row");
 });
 
-test("audit reports reuse on a second unchanged verification", async () => {
-  const { raw, id } = await bindAndDeliver("false");
+test("audit reports execution even when an unchanged verdict is deduplicated", async () => {
+  const { raw, id } = await bindAndDeliver("printf 'audit-executed\\n'; false");
   const first = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
   const second = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
   assert.equal(first.kind, "accepted");
@@ -135,13 +135,17 @@ test("audit reports reuse on a second unchanged verification", async () => {
   assert.equal(second.kind, "accepted");
   if (second.kind !== "accepted") throw new Error("second audit was not accepted");
   assert.equal(second.facts.length, 0);
-  assert.equal(second.value.verification.kind, "reused");
+  assert.equal(second.value.verification.kind, "unsatisfied");
+  if (second.value.verification.kind !== "unsatisfied") throw new Error("audit did not report execution");
+  assert.equal(second.value.verification.passed, 0);
+  assert.equal(second.value.verification.total, 1);
+  assert.match(second.value.verification.summary ?? "", /audit-executed/u);
   const repository = await repositoryAt(raw.path);
   const state = (await observeContract(repository, id)).state!;
   assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 2);
 });
 
-test("concurrent unchanged audits admit one attestation and reuse the loser", async () => {
+test("concurrent unchanged audits admit one attestation but both report execution", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   raw.run(["checkout", "--quiet", "-b", "candidate"]);
@@ -166,8 +170,8 @@ test("concurrent unchanged audits admit one attestation and reuse the loser", as
   assert.equal(second.kind, "accepted");
   if (first.kind !== "accepted" || second.kind !== "accepted") throw new Error("audit was not accepted");
   assert.equal(first.facts.length + second.facts.length, 1);
-  const reused = [first, second].filter((result) => result.kind === "accepted" && result.value.verification.kind === "reused");
-  assert.equal(reused.length, 1);
+  assert.equal(first.value.verification.kind, "unsatisfied");
+  assert.equal(second.value.verification.kind, "unsatisfied");
   const repository = await repositoryAt(raw.path);
   const state = (await observeContract(repository, id)).state!;
   assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 1);

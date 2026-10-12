@@ -138,12 +138,9 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
       (fact) => fact.kind === "attestation" && fact.data.gate === "verified",
     )?.entry;
   }
+  if (verified.reuse !== undefined) cursor.ran = verified.reuse.entry;
   const subject: VerificationSubject | undefined =
-    verified.reuse !== undefined
-      ? { snapshot, mode: "reused", verdict: verified.reuse.verdict }
-      : verified.counts === undefined
-        ? undefined
-        : { snapshot, mode: "ran", verdict: verified.counts.verdict };
+    verified.counts === undefined ? undefined : { snapshot, mode: "ran", verdict: verified.counts.verdict };
   cursor.evidence = {
     ...(verified.reuse === undefined ? {} : { verificationReuse: verified.reuse }),
     ...(subject === undefined ? {} : { verificationSubject: subject }),

@@ -31,7 +31,10 @@ only settings authority for those hooks. Declarations run in order even after a
 failing command. A terminal run records one ordinary `verified` attestation
 with a satisfied or unsatisfied verdict. When the current attestation for the
 same Contract, gate, verdict, captured snapshot, and declaration subject already exists, result
-admission records no new fact and reports reuse instead. A timeout is terminal
+admission records no new fact. This admission reuse does not erase execution:
+an invocation that executed declarations reports its own verdict and counts,
+while only an invocation that skipped execution reports standing-evidence reuse.
+A timeout is terminal
 unsatisfied evidence; candidate unavailability, environment/setup failure,
 spawn failure, unknown exit, and caller cancellation admit no attestation.
 

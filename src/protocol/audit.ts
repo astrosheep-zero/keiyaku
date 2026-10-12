@@ -148,7 +148,6 @@ function auditVerificationAnswer(
   if (!declared) return { kind: "undeclared" };
   if (verified === undefined) return { kind: "not-run" };
   if (verified.stop !== undefined) return { kind: "stopped", stop: verified.stop };
-  if (verified.reuse !== undefined) return { kind: "reused", ...verified.reuse };
   if (verified.counts === undefined) throw new Error("terminal Verification is missing producer counts");
   return {
     kind: verified.counts.verdict,
