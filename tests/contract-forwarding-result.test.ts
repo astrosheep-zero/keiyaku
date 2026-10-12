@@ -77,16 +77,16 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
         integration: snapshot,
         target: "refs/heads/main",
         predecessor,
-        verification: { mode: "ran", verdict: "satisfied" },
       },
       verification: {
-        failure: "cancelled",
-        stdout: "forwarded delivery tail",
-        stderr: "delivery diagnostic",
-        truncated: true,
+        kind: "stopped",
+        stop: {
+          failure: "cancelled",
+          stdout: "forwarded delivery tail",
+          stderr: "delivery diagnostic",
+          truncated: true,
+        },
       },
-      verificationReuse: { entry: fact.entry, verdict: "unsatisfied", summary: "reuse" },
-      verificationSummary: "ran",
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
@@ -292,7 +292,7 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
         shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
         unmergedPaths: [],
       },
-      verification: { failure: "unknown-exit", stdout: "forwarded review tail" },
+      verification: { kind: "stopped", stop: { failure: "unknown-exit", stdout: "forwarded review tail" } },
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],

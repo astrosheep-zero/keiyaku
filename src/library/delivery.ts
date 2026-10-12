@@ -18,9 +18,6 @@ class DeliveryHandle {
   declare readonly leading?: DeliveryValue["leading"];
   declare readonly completion?: DeliveryValue["completion"];
   declare readonly verification?: DeliveryValue["verification"];
-  declare readonly verificationReuse?: DeliveryValue["verificationReuse"];
-  declare readonly verificationSubject?: DeliveryValue["verificationSubject"];
-  declare readonly verificationSummary?: DeliveryValue["verificationSummary"];
   declare readonly placement?: DeliveryValue["placement"];
   declare readonly continuation?: DeliveryValue["continuation"];
   declare readonly tenderSnapshot: SnapshotId;
@@ -32,17 +29,7 @@ class DeliveryHandle {
     identity: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
     outcomes: Partial<
-      Pick<
-        DeliveryValue,
-        | "leading"
-        | "completion"
-        | "verification"
-        | "verificationReuse"
-        | "verificationSubject"
-        | "verificationSummary"
-        | "placement"
-        | "continuation"
-      >
+      Pick<DeliveryValue, "leading" | "completion" | "verification" | "placement" | "continuation">
     > = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
@@ -80,19 +67,7 @@ export function deliveryHandle(
 ): Delivery;
 export function deliveryHandle(
   delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
-    Partial<
-      Pick<
-        DeliveryValue,
-        | "leading"
-        | "completion"
-        | "verification"
-        | "verificationReuse"
-        | "verificationSubject"
-        | "verificationSummary"
-        | "placement"
-        | "continuation"
-      >
-    >,
+    Partial<Pick<DeliveryValue, "leading" | "completion" | "verification" | "placement" | "continuation">>,
   readDiff: () => Promise<string | null>,
 ): Delivery {
   return new DeliveryHandle(delivery, readDiff, delivery);

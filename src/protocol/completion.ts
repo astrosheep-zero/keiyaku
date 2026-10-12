@@ -1,6 +1,11 @@
 import { z } from "zod";
-import { snapshotIdSchema, verdictSchema, verificationStopSchema, placementStopSchema } from "./operations.js";
-import { verificationReuseSchema } from "./intent.js";
+import {
+  snapshotIdSchema,
+  verdictSchema,
+  verificationStopSchema,
+  placementStopSchema,
+  entryUlidSchema,
+} from "./operations.js";
 import type { ActorId, ContractId, EntryUlid } from "../core/facts/types.js";
 import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
@@ -23,7 +28,18 @@ import { placementStop, timestamp, unpackVerificationOutcome } from "./operation
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-const verdictProvenanceSchema = z.object({ mode: z.enum(["ran", "reused"]), verdict: verdictSchema }).strict();
+const verificationVerdictSchema = z.object({
+  snapshot: snapshotIdSchema,
+  verdict: verdictSchema,
+  entry: entryUlidSchema,
+  summary: z.string().optional(),
+});
+const verificationEvidenceSchema = z.discriminatedUnion("kind", [
+  verificationVerdictSchema.extend({ kind: z.literal("ran"), entry: entryUlidSchema.optional() }).strict(),
+  verificationVerdictSchema.extend({ kind: z.literal("reused") }).strict(),
+  z.object({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
+]);
+export type VerificationEvidence = z.infer<typeof verificationEvidenceSchema>;
 const candidateCompletionSchema = z
   .object({
     integration: snapshotIdSchema,
@@ -33,22 +49,13 @@ const candidateCompletionSchema = z
       .refine((value) => value.trim() !== "")
       .optional(),
     scope: deliveryDiffScopeSchema.omit({ paths: true }).optional(),
-    verification: verdictProvenanceSchema.optional(),
   })
   .strict();
 export type CandidateCompletion = z.infer<typeof candidateCompletionSchema>;
-const verificationSubjectSchema = verdictProvenanceSchema.extend({ snapshot: snapshotIdSchema }).strict();
-type VerificationSubject = z.infer<typeof verificationSubjectSchema>;
 export const completionEvidenceSchema = z
   .object({
     completion: candidateCompletionSchema.optional(),
-    verification: verificationStopSchema.optional(),
-    verificationReuse: verificationReuseSchema.optional(),
-    verificationSubject: verificationSubjectSchema.optional(),
-    verificationSummary: z
-      .string()
-      .refine((value) => value.trim() !== "")
-      .optional(),
+    verification: verificationEvidenceSchema.optional(),
     placement: placementStopSchema.optional(),
   })
   .strict();
@@ -103,7 +110,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   input.progress.recordCandidate(state.id, cursor.evidence);
   const declaration = input.deriveDocument(state).verification;
   if (declaration.kind === "refused") {
-    cursor.evidence = { verification: { refusal: declaration.refusal } };
+    cursor.evidence = { verification: { kind: "stopped", stop: { refusal: declaration.refusal } } };
     input.progress.recordCandidate(state.id, cursor.evidence);
     return;
   }
@@ -111,8 +118,7 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
   const current = currentVerifiedAttestation(state);
   if (current?.verdict === "satisfied") {
     cursor.evidence = {
-      verificationReuse: current,
-      verificationSubject: { snapshot, mode: "reused", verdict: current.verdict },
+      verification: { kind: "reused", snapshot, ...current },
     };
     input.progress.recordCandidate(state.id, cursor.evidence);
     return;
@@ -139,14 +145,21 @@ async function verifyCurrentCandidate(input: CompletionInput, cursor: Completion
     )?.entry;
   }
   if (verified.reuse !== undefined) cursor.ran = verified.reuse.entry;
-  const subject: VerificationSubject | undefined =
-    verified.counts === undefined ? undefined : { snapshot, mode: "ran", verdict: verified.counts.verdict };
-  cursor.evidence = {
-    ...(verified.reuse === undefined ? {} : { verificationReuse: verified.reuse }),
-    ...(subject === undefined ? {} : { verificationSubject: subject }),
-    ...(verified.stop === undefined ? {} : { verification: verified.stop }),
-    ...(verified.counts?.verdict === "unsatisfied" ? { verificationSummary: verified.counts.summary } : {}),
-  };
+  const verification: VerificationEvidence | undefined =
+    verified.stop !== undefined
+      ? { kind: "stopped", stop: verified.stop }
+      : verified.reuse !== undefined
+        ? { kind: "reused", snapshot, ...verified.reuse }
+        : verified.counts === undefined
+          ? undefined
+          : {
+              kind: "ran",
+              snapshot,
+              verdict: verified.counts.verdict,
+              ...(cursor.ran === undefined ? {} : { entry: cursor.ran }),
+              ...(verified.counts.verdict === "unsatisfied" ? { summary: verified.counts.summary } : {}),
+            };
+  cursor.evidence = verification === undefined ? {} : { verification };
   input.progress.recordCandidate(state.id, cursor.evidence);
 }
 
@@ -190,44 +203,27 @@ async function completedResult(
   input.progress.recordCompletion(state.id, cursor.completion);
   const declaration = input.deriveDocument(state).verification;
   const current = declaration.data == null ? undefined : currentVerifiedAttestation(state);
-  const verification =
+  const verification: VerificationEvidence | undefined =
     current === undefined
       ? undefined
-      : {
-          mode: cursor.ran === current.entry ? ("ran" as const) : ("reused" as const),
-          verdict: current.verdict,
-        };
-  cursor.completion = { ...cursor.completion, ...(verification === undefined ? {} : { verification }) };
-  input.progress.recordCompletion(state.id, cursor.completion);
+      : { kind: cursor.ran === current.entry ? "ran" : "reused", snapshot: integration, ...current };
+  cursor.evidence = verification === undefined ? {} : { verification };
+  input.progress.recordCandidate(state.id, { ...cursor.evidence, completion: cursor.completion });
   const scope =
     predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
-  const {
-    verificationSummary: _oldSummary,
-    verificationReuse: _oldReuse,
-    verificationSubject: _oldSubject,
-    ...evidence
-  } = cursor.evidence;
   const completion: CandidateCompletion = {
     integration,
     ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
     ...(scope === undefined
       ? {}
       : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
-    ...(verification === undefined ? {} : { verification }),
   };
   cursor.completion = completion;
   input.progress.recordCompletion(state.id, completion);
   return {
     kind: "completed",
     checkpoint: cursor.checkpoint,
-    evidence: {
-      ...evidence,
-      completion,
-      ...(verification?.mode !== "reused" ? {} : { verificationReuse: current }),
-      ...(current?.verdict !== "unsatisfied" || current.summary === undefined
-        ? {}
-        : { verificationSummary: current.summary }),
-    },
+    evidence: { ...cursor.evidence, completion },
   };
 }
 
@@ -294,7 +290,7 @@ async function verifyCandidateReadiness(
 ): Promise<CompletionResult | undefined> {
   const observedPlacement = await observeCandidateTarget(input, cursor);
   await verifyCurrentCandidate(input, cursor);
-  const stop = cursor.evidence.verification ?? observedPlacement;
+  const stop = cursor.evidence.verification?.kind === "stopped" ? cursor.evidence.verification.stop : observedPlacement;
   if (stop !== undefined) {
     return {
       kind: "stopped",

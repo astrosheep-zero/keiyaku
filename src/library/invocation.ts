@@ -43,14 +43,7 @@ type ReconciliationRecord = Readonly<{
   retainedWorktree?: string;
 }>;
 
-const CANDIDATE_CONCLUSION_KEYS = [
-  "completion",
-  "verification",
-  "verificationReuse",
-  "verificationSubject",
-  "verificationSummary",
-  "placement",
-] as const;
+const CANDIDATE_CONCLUSION_KEYS = ["completion", "verification", "placement"] as const;
 
 function entryKey(fact: JournalEntry): string {
   return `${fact.contract}\u0000${fact.entry}`;

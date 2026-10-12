@@ -410,7 +410,8 @@ function completedPlacementLines(
       columns,
     );
   }
-  if (completion.verification?.verdict === "satisfied") {
+  const verification = result.value.verification;
+  if (verification?.kind !== "stopped" && verification?.verdict === "satisfied") {
     receiptRow(
       lines,
       " ",
@@ -418,7 +419,7 @@ function completedPlacementLines(
       [
         {
           text: `${displayGitId(completion.integration, abbreviations)} · verification ${
-            completion.verification.mode === "reused" ? "reused " : ""
+            verification.kind === "reused" ? "reused " : ""
           }satisfied`,
         },
       ],
@@ -541,18 +542,19 @@ function deliverIdentityLines(
 
 function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number): string {
   const complete = result.value.completion !== undefined;
+  const verification = result.value.verification;
+  const subject = verification?.kind === "stopped" ? undefined : verification;
   const lines = titleLines("✓", "delivered", result.contract, columns);
   const abbreviations = abbreviateGitIds([
     result.value.tenderSnapshot ?? "",
     result.value.integration?.changeId ?? "",
-    result.value.verificationSubject?.snapshot ?? "",
+    subject?.snapshot ?? "",
     result.value.completion?.predecessor ?? "",
     result.value.completion?.integration ?? "",
   ]);
   lines.push(...deliverIdentityLines(result, abbreviations, columns, !complete));
   if (complete) lines.push(...completedPlacementLines(result, columns));
   else {
-    const subject = result.value.verificationSubject;
     if (subject !== undefined)
       receiptRow(
         lines,
@@ -561,7 +563,7 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
         [
           {
             text: `${displayGitId(subject.snapshot, abbreviations)} · verification ${
-              subject.mode === "reused" ? "reused " : ""
+              subject.kind === "reused" ? "reused " : ""
             }${subject.verdict}`,
           },
         ],
@@ -569,8 +571,7 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
       );
     lines.push(...movementLines(result, columns));
   }
-  if (result.value.verification !== undefined)
-    lines.push(...stopLines(result.value.verification, columns, result.contract));
+  if (verification?.kind === "stopped") lines.push(...stopLines(verification.stop, columns, result.contract));
   if (!complete && result.value.placement !== undefined)
     lines.push(...stopLines(result.value.placement, columns, result.contract));
   lines.push(
@@ -585,8 +586,8 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
 function renderAcceptedReview(result: Accepted<ReviewOutcome>, columns: number): string {
   const lines = titleLines("✓", `review ${attestationVerdict(result.facts)}`, result.contract, columns);
   lines.push(...completedPlacementLines(result, columns));
-  if (result.value.verification !== undefined) {
-    lines.push(...stopLines(result.value.verification, columns, result.contract));
+  if (result.value.verification?.kind === "stopped") {
+    lines.push(...stopLines(result.value.verification.stop, columns, result.contract));
   }
   if (result.value.placement !== undefined) {
     lines.push(...stopLines(result.value.placement, columns, result.contract));

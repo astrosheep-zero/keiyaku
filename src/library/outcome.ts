@@ -162,11 +162,11 @@ function phasePending(operation: OutcomeOperation, value: unknown): readonly Pen
   }
   if (operation !== "review" && operation !== "deliver") return [];
   const concluded = value as
-    | { verification?: unknown; placement?: unknown; continuation?: ContinuationReport }
+    | { verification?: { kind?: string }; placement?: unknown; continuation?: ContinuationReport }
     | undefined;
   if (concluded === undefined) return [];
   const pending: PendingSurface[] = [];
-  if (concluded.verification !== undefined) pending.push(surface("verification", true));
+  if (concluded.verification?.kind === "stopped") pending.push(surface("verification", true));
   if (concluded.placement !== undefined) pending.push(surface("placement", true));
   if (concluded.continuation !== undefined && concluded.continuation.stopped.length > 0)
     pending.push(surface("continuation", true));

@@ -1521,9 +1521,12 @@ test("Verification create action names are safe in text receipts", () => {
     {
       ...deliveryIdentity(),
       verification: {
-        failure: "environment-failure",
-        name,
-        detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+        kind: "stopped",
+        stop: {
+          failure: "environment-failure",
+          name,
+          detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+        },
       },
     },
   );
@@ -1533,7 +1536,7 @@ test("Verification create action names are safe in text receipts", () => {
   assert.doesNotMatch(text, /\nINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
   const verification = result.value.verification;
-  assert.equal(verification !== undefined && "name" in verification ? verification.name : undefined, name);
+  assert.equal(verification?.kind === "stopped" && "name" in verification.stop ? verification.stop.name : undefined, name);
 });
 
 test("Verification cleanup action names are safe in text receipts", () => {
@@ -2016,8 +2019,8 @@ test("deliver projects a ran Verification completion", () => {
           integration,
           predecessor: snapshotId("3".repeat(40)),
           target: "refs/heads/main",
-          verification: { mode: "ran", verdict: "satisfied" },
         },
+        verification: { kind: "ran", snapshot: integration, verdict: "satisfied" },
       },
     ),
   );
@@ -2036,7 +2039,8 @@ test("deliver projects a ran Verification completion", () => {
 
 test("placement receipts name reused provenance in the audit surface's vocabulary", () => {
   const text = reviewText(contractId("kei/placement-reuse"), {
-    completion: movement({ verification: { mode: "reused", verdict: "satisfied" } }),
+    completion: movement(),
+    verification: { kind: "reused", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
   });
   assert.equal(
     text,
@@ -2060,7 +2064,7 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
         snapshot: snapshotId("b".repeat(40)),
         changeId: changeId("c".repeat(40)),
       },
-      verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+      verification: { snapshot: integration, kind: "reused", verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
     }),
     [
       "✓ delivered  kei/standalone-subject",
@@ -2070,7 +2074,7 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
     ].join("\n"),
   );
   const fresh = deliverText(contract, {
-    verificationSubject: { snapshot: integration, mode: "ran", verdict: "unsatisfied" },
+    verification: { snapshot: integration, kind: "ran", verdict: "unsatisfied" },
   });
   assert.match(fresh, /^  integration result  aaaaaaa · verification unsatisfied$/mu);
   assert.equal((fresh.match(/integration result/gu) ?? []).length, 1);
@@ -2079,8 +2083,8 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
 test("a placed deliver keeps the verdict on the placement integration row only", () => {
   const integration = snapshotId("4".repeat(40));
   const text = deliverText(contractId("kei/one-row"), {
-    completion: movement({ verification: { mode: "reused", verdict: "satisfied" } }),
-    verificationSubject: { snapshot: integration, mode: "reused", verdict: "satisfied" },
+    completion: movement(),
+    verification: { snapshot: integration, kind: "reused", verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
   });
   assert.equal((text.match(/integration result/gu) ?? []).length, 1);
   assert.match(text, /^  integration result  4444444 · verification reused satisfied$/mu);
@@ -2090,7 +2094,7 @@ test("terminal receipts name the retired worktree last", () => {
   const retiredReview = contractId("kei/retired-review");
   const review = reviewText(
     retiredReview,
-    { completion: movement({ verification: { mode: "ran", verdict: "satisfied" } }) },
+    { completion: movement(), verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" } },
     { effects: [retiredWorktreeEffect(retiredReview, "fridge")] },
   );
   assert.match(review, /^  worktree  fridge retired$/mu);
@@ -2160,10 +2164,8 @@ test("a terminal receipt names each checkout its own follow left behind", () => 
 test("a completed placement names the landed diff's shape through the shared diffstat rule", () => {
   const contract = contractId("kei/landed-shape");
   const text = reviewText(contract, {
-    completion: movement({
-      scope: { filesChanged: 3, insertions: 4, deletions: 1 },
-      verification: { mode: "ran", verdict: "satisfied" },
-    }),
+    completion: movement({ scope: { filesChanged: 3, insertions: 4, deletions: 1 } }),
+    verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" },
   });
   assert.equal(
     text,
@@ -2184,7 +2186,7 @@ test("a completed placement names the landed diff's shape through the shared dif
   });
   assert.ok(single.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 2, removed: 0 })}`));
   const unplaced = deliverText(contract, {
-    verificationSubject: { snapshot: snapshotId("a".repeat(40)), mode: "ran", verdict: "satisfied" },
+    verification: { snapshot: snapshotId("a".repeat(40)), kind: "ran", verdict: "satisfied" },
   });
   assert.doesNotMatch(unplaced, /changes/u, "a deliver without placement carries no changes row");
 });

@@ -403,9 +403,9 @@ function acceptedContract(
             method: "squash" as const,
             policy: { requireBranchesToBeUpToDate: false },
             leading: { kind: "already-admitted" as const, fact: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
-            verificationSummary: marker,
+            verification: { kind: "ran" as const, snapshot: snapshotId("snapshot"), verdict: "unsatisfied" as const, summary: marker },
           }
-        : { verificationSummary: marker },
+        : { verification: { kind: "ran" as const, snapshot: snapshotId("snapshot"), verdict: "unsatisfied" as const, summary: marker } },
   };
   return result as FixtureDeliveryResult | FixtureReviewResult;
 }

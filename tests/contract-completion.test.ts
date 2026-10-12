@@ -129,9 +129,6 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const delivered = accepted(await bound.value.keiyaku.deliver());
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.equal(delivered.value.verification, undefined);
-    assert.equal(delivered.value.verificationReuse, undefined);
-    assert.equal(delivered.value.verificationSubject, undefined);
-    assert.equal(delivered.value.verificationSummary, undefined);
     assert.equal(present(await bound.value.keiyaku.state()).terminal, null);
     await primary.deliver();
     const reviewed = accepted(await primary.review({ verdict: "satisfied" }));

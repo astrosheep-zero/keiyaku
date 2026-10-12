@@ -403,7 +403,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
     const delivered = await bound.value.keiyaku.deliver();
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.equal(delivered.value.completion?.verification, undefined);
+    assert.equal(delivered.value.verification, undefined);
     assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
     assert.equal(delivered.value.placement, undefined);
     assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "claimed");

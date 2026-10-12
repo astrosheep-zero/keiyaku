@@ -56,22 +56,14 @@ async function bindAndCommit(options: {
   return { repository, keiyaku: bound.value.keiyaku, state };
 }
 
-function assertNoVerification(value: {
-  completion?: { verification?: unknown } | undefined;
-  verification?: unknown;
-  verificationReuse?: unknown;
-  verificationSubject?: unknown;
-  verificationSummary?: unknown;
-}): void {
-  for (const key of ["verification", "verificationReuse", "verificationSubject", "verificationSummary"] as const) {
-    assert.equal(Object.hasOwn(value, key), false, key);
-  }
+function assertNoVerification(value: { completion?: object | undefined; verification?: unknown }): void {
+  assert.equal(Object.hasOwn(value, "verification"), false);
   assert.equal(Object.hasOwn(value.completion ?? {}, "verification"), false);
 }
 
 function assertRuntimeStop(value: unknown): void {
-  assert.ok(value !== null && typeof value === "object" && "failure" in value);
-  assert.equal((value as { failure: unknown }).failure, "environment-failure");
+  assert.ok(value !== null && typeof value === "object" && "kind" in value && value.kind === "stopped" && "stop" in value);
+  assert.equal((value.stop as { failure: unknown }).failure, "environment-failure");
 }
 
 /**
@@ -269,16 +261,19 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.equal(delivered.value.completion, undefined);
     assert.equal(delivered.effects.some((effect) => effect.kind === "worktree-retired"), false, "an active Contract retires nothing");
     assert.equal((present(await keiyaku.state())).terminal, null);
-    const subject = delivered.value.verificationSubject;
+    const subject = delivered.value.verification;
+    assert.ok(subject?.kind === "ran");
     assert.deepEqual(subject, {
       snapshot: (present(await keiyaku.state())).currentIntegration?.snapshot,
-      mode: "ran",
+      kind: "ran",
       verdict: "satisfied",
+      entry: delivered.facts.find((fact) => fact.kind === "attestation" && fact.data.gate === "verified")?.entry,
     });
+    assert.equal(delivered.pending.some((item) => item.surface === "verification"), false);
 
     const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
-    assert.equal(reviewed.value.completion?.integration, subject?.snapshot, "the placement names the same id");
+    assert.equal(reviewed.value.completion?.integration, subject.snapshot, "the placement names the same id");
   });
 
   test("a terminal acceptance reports the retired appointed worktree", async () => {
@@ -342,7 +337,8 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     await verified.keiyaku.deliver();
     const blocked = accepted(await verified.keiyaku.deliver());
     assert.ok(blocked.kind === "accepted", JSON.stringify(blocked));
-    assert.equal(blocked.value.verificationReuse?.verdict, "unsatisfied");
+    assert.ok(blocked.value.verification?.kind === "reused");
+    assert.equal(blocked.value.verification.verdict, "unsatisfied");
     assert.equal((present(await verified.keiyaku.state())).terminal, null);
   });
 
