@@ -1224,6 +1224,8 @@ type FakePiObservation = {
   branched?: string;
   aborted: number;
   disposed: number;
+  binds: number;
+  calls: string[];
   servicesCreated: number;
   sessionsCreated: number;
   invalidated: number;
@@ -1234,6 +1236,7 @@ type FakePiObservation = {
   emitNative(event: Record<string, unknown>): void;
   finishPrompt(): void;
   agentListeners: number;
+  sessionListeners: number;
   bash?: {
     cwd: string;
     options: Parameters<PiSdk["createBashToolDefinition"]>[1];
@@ -1253,6 +1256,8 @@ function fakePiSdk(
     subscriptionFailure?: boolean;
     missingModel?: boolean;
     sessionCreationFailure?: boolean;
+    bindFailure?: Error;
+    bindGate?: Promise<void>;
   } = {},
 ): { sdk: PiSdk; seen: FakePiObservation } {
   const nativeListeners = new Set<(event: Record<string, unknown>) => void>();
@@ -1264,6 +1269,8 @@ function fakePiSdk(
   const seen: FakePiObservation = {
     aborted: 0,
     disposed: 0,
+    binds: 0,
+    calls: [],
     servicesCreated: 0,
     sessionsCreated: 0,
     invalidated: 0,
@@ -1276,6 +1283,9 @@ function fakePiSdk(
     finishPrompt: () => releasePrompt(),
     get agentListeners() {
       return nativeListeners.size;
+    },
+    get sessionListeners() {
+      return session.listener === undefined ? 0 : 1;
     },
   };
   const manager = {
@@ -1291,6 +1301,7 @@ function fakePiSdk(
     sessionManager: manager,
     agent: {
       subscribe(listener: (event: Record<string, unknown>) => void) {
+        seen.calls.push("agent-subscribe");
         nativeListeners.add(listener);
         return () => {
           nativeListeners.delete(listener);
@@ -1301,6 +1312,7 @@ function fakePiSdk(
       },
     },
     subscribe(listener: (event: Record<string, unknown>) => void) {
+      seen.calls.push("subscribe");
       if (input.subscriptionFailure === true) throw new Error("Pi subscription failed");
       this.listener = listener;
       return () => {
@@ -1308,7 +1320,14 @@ function fakePiSdk(
       };
     },
     listener: undefined as ((event: Record<string, unknown>) => void) | undefined,
+    async bindExtensions() {
+      seen.binds += 1;
+      seen.calls.push("bind");
+      if (input.bindFailure !== undefined) throw input.bindFailure;
+      if (input.bindGate !== undefined) await input.bindGate;
+    },
     async prompt(text?: string) {
+      seen.calls.push("prompt");
       if (typeof text === "string") seen.prompt = text;
       if (input.fail !== undefined) throw input.fail;
       if (input.promptNeverSettles === true) await new Promise<void>(() => undefined);
@@ -1835,6 +1854,80 @@ test("Pi retires loaded services when selection or session construction fails be
     assert.equal(fake.seen.prompt, undefined);
     assert.equal(fake.seen.disposed, 0);
   }
+});
+
+test("Pi binds host extensions once before the first prompt on fresh and resumed sessions", async () => {
+  for (const resumed of [false, true]) {
+    const fake = fakePiSdk({
+      events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }],
+    });
+    const provider = createPiProvider(undefined, async () => fake.sdk);
+    const input = freshInput("work", { launchTells: [{ id: "tell-1", text: "also check" }], cwd: tmpdir() });
+    const attempt = resumed
+      ? provider.resume!({
+          ...input,
+          session: { kind: "resume", coordinate: { sessionFile: "/sessions/pi.jsonl" } },
+        })
+      : provider.start(input);
+    const drive = await attempt.result;
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
+    await attempt.closed;
+    assert.deepEqual(fake.seen.calls, ["agent-subscribe", "subscribe", "bind", "prompt"]);
+    assert.equal(fake.seen.binds, 1);
+    assert.equal(fake.seen.prompt, "work\n\nalso check");
+    assert.equal(fake.seen.opened, resumed ? "/sessions/pi.jsonl" : undefined);
+    assert.equal(fake.seen.disposed, 1);
+  }
+});
+
+test("Pi retires the bound session without prompting when host extension binding fails", async () => {
+  const fake = fakePiSdk({ bindFailure: new Error("Pi host extension binding failed") });
+  const provider = createPiProvider(undefined, async () => fake.sdk);
+  const attempt = provider.start(freshInput("work"));
+  await assert.rejects(attempt.result, /Pi host extension binding failed/u);
+  await attempt.closed;
+  assert.equal(fake.seen.binds, 1);
+  assert.equal(fake.seen.prompt, undefined);
+  assert.equal(fake.seen.disposed, 1);
+  assert.equal(fake.seen.agentListeners, 0);
+  assert.equal(fake.seen.sessionListeners, 0);
+});
+
+test("Pi retires a session whose host extension binding is cancelled before the prompt", async () => {
+  const { promise: binding, resolve: finishBinding } = promiseBarrier<void>();
+  const fake = fakePiSdk({ bindGate: binding });
+  const provider = createPiProvider(undefined, async () => fake.sdk);
+  const attempt = provider.start(freshInput("work"));
+  await waitForCondition("Pi host extension binding to begin", () => fake.seen.binds === 1);
+  await attempt.abort();
+  await assert.rejects(attempt.result, /provider attempt retired/u);
+  await attempt.closed;
+  assert.equal(fake.seen.prompt, undefined);
+  assert.equal(fake.seen.disposed, 1);
+  assert.equal(fake.seen.agentListeners, 0);
+  // A binding that settles after cancellation cannot prompt a retired session.
+  finishBinding();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(fake.seen.prompt, undefined);
+  assert.equal(fake.seen.disposed, 1);
+});
+
+test("Pi cancellation after binding settles still prevents the first prompt", async () => {
+  const binding = promiseBarrier<void>();
+  const controller = new AbortController();
+  const fake = fakePiSdk({ bindGate: binding.promise });
+  const provider = createPiProvider(undefined, async () => fake.sdk);
+  const attempt = provider.start(freshInput("work", { signal: controller.signal }));
+  const rejected = assert.rejects(attempt.result, /cancel before prompt/u);
+  await waitForCondition("Pi host extension binding to begin", () => fake.seen.binds === 1);
+  binding.resolve();
+  queueMicrotask(() => controller.abort(new Error("cancel before prompt")));
+  await rejected;
+  await attempt.closed;
+  assert.equal(fake.seen.prompt, undefined);
+  assert.equal(fake.seen.disposed, 1);
+  assert.equal(fake.seen.agentListeners, 0);
+  assert.equal(fake.seen.sessionListeners, 0);
 });
 
 test("Pi live tells require exact native message evidence, not queue acknowledgement", async () => {

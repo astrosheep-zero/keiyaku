@@ -37,6 +37,7 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
       steer: () => {},
     },
     subscribe: () => () => {},
+    bindExtensions: async () => {},
     prompt: async () => {},
     abort: async () => {},
     dispose: () => {},

@@ -859,6 +859,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
         return () => { this.listener = undefined; };
       },
       listener: undefined as ((event: { type: string; message?: unknown; messages?: unknown[]; willRetry?: boolean }) => void) | undefined,
+      async bindExtensions() {},
       async prompt() {
         await released;
         this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "steered answer" }] } });
@@ -929,6 +930,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
             return () => { this.listener = undefined; };
           },
           listener: undefined as ((event: { type: string; message?: unknown }) => void) | undefined,
+          async bindExtensions() {},
           async prompt(text: string) {
             prompts.push(text);
             if (first) await released;

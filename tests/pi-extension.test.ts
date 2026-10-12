@@ -1,10 +1,14 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import * as sdk from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
+import { temporaryDirectory } from "./support/process.js";
 
 type PackageJson = {
   keywords?: unknown;
@@ -24,6 +28,225 @@ if (!existsSync(builtExtension)) {
 const { default: keiyakuExtension } = (await import(new URL(piExtension[0], rootUrl).href)) as {
   default: (pi: ExtensionAPI) => void;
 };
+
+async function extensionSdk(root: string, fixture: ExtensionFactory, eventBus: sdk.EventBus): Promise<PiSdk> {
+  const modelRuntime = await sdk.ModelRuntime.create({
+    credentials: {
+      read: async () => undefined,
+      list: async () => [],
+      modify: async () => {
+        throw new Error("fixture must not modify credentials");
+      },
+      delete: async () => {
+        throw new Error("fixture must not delete credentials");
+      },
+    },
+    modelsPath: null,
+    allowModelNetwork: false,
+    refreshOnCreate: false,
+  });
+  return {
+    ...sdk,
+    getAgentDir: () => root,
+    SessionManager: {
+      create: (cwd: string) => sdk.SessionManager.create(cwd, join(root, "sessions")),
+      open: sdk.SessionManager.open,
+    } as typeof sdk.SessionManager,
+    createAgentSessionServices: async (options) =>
+      await sdk.createAgentSessionServices({
+        ...options,
+        modelRuntime,
+        settingsManager: sdk.SettingsManager.inMemory({}),
+        resourceLoaderOptions: {
+          ...options.resourceLoaderOptions,
+          eventBus,
+          noExtensions: true,
+          noSkills: true,
+          noPromptTemplates: true,
+          noThemes: true,
+          noContextFiles: true,
+          extensionFactories: [keiyakuExtension, fixture],
+        },
+      }),
+  };
+}
+
+test("Pi native extensions finish session start and discover resources before fresh and resumed prompts", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-pi-extension-order-");
+  const skill = join(root, "skill");
+  mkdirSync(skill);
+  writeFileSync(join(skill, "SKILL.md"), "---\nname: bind-fixture\ndescription: Binding fixture\n---\nFixture\n");
+  let sessionFile: string | undefined;
+  for (const resumed of [false, true]) {
+    const calls: string[] = [];
+    const started = promiseBarrier<void>();
+    const binding = promiseBarrier<void>();
+    let context: ExtensionContext | undefined;
+    let probe = 0;
+    const eventBus = sdk.createEventBus();
+    const nativeSdk = await extensionSdk(
+      root,
+      (pi) => {
+        pi.events.on("binding-probe", () => {
+          probe += 1;
+        });
+        pi.on("session_start", async (_event, ctx) => {
+          context = ctx;
+          sessionFile = ctx.sessionManager.getSessionFile();
+          calls.push("session_start");
+          started.resolve();
+          await binding.promise;
+          calls.push("session_start_done");
+        });
+        pi.on("resources_discover", () => {
+          calls.push("resources_discover");
+          return { skillPaths: [skill] };
+        });
+        pi.on("input", (event) => {
+          calls.push(event.text);
+          return { action: "handled" };
+        });
+      },
+      eventBus,
+    );
+    const createSession = nativeSdk.createAgentSessionFromServices;
+    let native: sdk.AgentSession | undefined;
+    const provider = createPiProvider(undefined, async () => ({
+      ...nativeSdk,
+      createAgentSessionFromServices: async (options) => {
+        const created = await createSession(options);
+        native = created.session;
+        return created;
+      },
+    }));
+    const input = {
+      body: "work",
+      launchTells: [{ id: "tell-1", text: "also check" }],
+      cwd: root,
+      options: {},
+      requests: { dir: join(root, "requests") },
+      signal: new AbortController().signal,
+    };
+    assert.ok(!resumed || sessionFile);
+    const attempt = resumed
+      ? provider.resume!({ ...input, session: { kind: "resume", coordinate: { sessionFile: sessionFile! } } })
+      : provider.start({ ...input, session: { kind: "fresh" } });
+    try {
+      await started.promise;
+      assert.deepEqual(calls, ["session_start"]);
+      assert.equal(context?.cwd, root);
+      assert.equal(context?.hasUI, false);
+      assert.ok(native);
+      assert.ok(native.extensionRunner?.getRegisteredCommands().some((command) => command.name === "keiyaku"));
+      eventBus.emit("binding-probe", undefined);
+      assert.equal(probe, 1);
+      binding.resolve();
+      const drive = await attempt.result;
+      // Input is handled locally by the fixture: this checks the real native
+      // prompt/extension path without a network model or a fabricated answer.
+      assert.deepEqual(await drive.completion, {
+        kind: "failed",
+        diagnostic: "Pi completed without a native assistant answer",
+      });
+      await attempt.closed;
+      assert.deepEqual(calls, ["session_start", "session_start_done", "resources_discover", "work\n\nalso check"]);
+      assert.ok(native.systemPrompt.includes("bind-fixture"));
+      assert.throws(() => context!.cwd, /stale/u);
+      assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
+      eventBus.emit("binding-probe", undefined);
+      assert.equal(probe, 1);
+    } finally {
+      binding.resolve();
+      await attempt.forceDispose();
+      await attempt.closed;
+    }
+  }
+});
+
+test("Pi retires native extension contexts and subscriptions when cancellation interrupts binding", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-pi-extension-abort-");
+  for (const phase of ["session_start", "resources_discover"] as const) {
+    const controller = new AbortController();
+    const binding = promiseBarrier<void>();
+    const started = promiseBarrier<void>();
+    const eventBus = sdk.createEventBus();
+    let context: ExtensionContext | undefined;
+    let native: sdk.AgentSession | undefined;
+    let bindingOperation: Promise<void> | undefined;
+    let inputs = 0;
+    let probe = 0;
+    const nativeSdk = await extensionSdk(
+      root,
+      (pi) => {
+        pi.events.on("binding-probe", () => {
+          probe += 1;
+        });
+        pi.on("session_start", (_event, ctx) => {
+          context = ctx;
+          if (phase === "session_start") controller.abort(new Error("cancel during session start"));
+        });
+        pi.on("resources_discover", async () => {
+          started.resolve();
+          if (phase === "resources_discover") await binding.promise;
+          return {};
+        });
+        pi.on("input", () => {
+          inputs += 1;
+          return { action: "handled" };
+        });
+      },
+      eventBus,
+    );
+    const createSession = nativeSdk.createAgentSessionFromServices;
+    const provider = createPiProvider(undefined, async () => ({
+      ...nativeSdk,
+      createAgentSessionFromServices: async (options) => {
+        const created = await createSession(options);
+        native = created.session;
+        const bind = native.bindExtensions.bind(native);
+        native.bindExtensions = (bindings) => {
+          bindingOperation = bind(bindings);
+          return bindingOperation;
+        };
+        return created;
+      },
+    }));
+    const attempt = provider.start({
+      body: "work",
+      launchTells: [],
+      cwd: root,
+      options: {},
+      requests: { dir: join(root, "requests") },
+      signal: controller.signal,
+      session: { kind: "fresh" },
+    });
+    const rejected = assert.rejects(attempt.result, /cancel during session start|provider attempt retired/u);
+    try {
+      if (phase === "resources_discover") {
+        await started.promise;
+        await attempt.abort();
+      }
+      await rejected;
+      await attempt.closed;
+      assert.equal(inputs, 0);
+      assert.ok(native);
+      assert.throws(() => context!.cwd, /stale/u);
+      assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
+      eventBus.emit("binding-probe", undefined);
+      assert.equal(probe, 0);
+      binding.resolve();
+      // The SDK can finish or reject its in-flight bind after disposal; either
+      // result must already have a rejection handler and cannot start a prompt.
+      await bindingOperation?.catch(() => undefined);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.equal(inputs, 0);
+    } finally {
+      binding.resolve();
+      await attempt.forceDispose();
+      await attempt.closed;
+    }
+  }
+});
 
 test("npm root package declares its Pi resources", () => {
   assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);

@@ -277,6 +277,11 @@ async function drivePi(
     await settle({ kind: "failed", diagnostic: "Pi session admitted without sessionFile" });
     throw new Error("Pi session admitted without sessionFile");
   }
+  await abortable(
+    Promise.resolve().then(() => native.bindExtensions({})),
+    signal,
+  );
+  signal.throwIfAborted();
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
   void runPiPrompt(native, input, eventState, state, (result) => {
     void settle(result);
