@@ -255,13 +255,15 @@ async function removeCollectableScratch(
   acc: ReconcileAccumulation,
 ): Promise<void> {
   for (const removal of await removeCollectableScratchWorktrees(repository, topology.paths)) {
-    acc.recordEffect({ kind: "worktree", path: removal.path, action: removal.action });
-    if (removal.retained)
-      acc.recordLag({
-        kind: "worktree-retained",
-        path: removal.path,
-        ...(removal.diagnostic === undefined ? {} : { diagnostic: removal.diagnostic }),
-      });
+    if (!removal.retained) {
+      acc.recordEffect({ kind: "worktree", path: removal.path, action: "removed" });
+      continue;
+    }
+    acc.recordLag({
+      kind: "worktree-retained",
+      path: removal.path,
+      ...(removal.diagnostic === undefined ? {} : { diagnostic: removal.diagnostic }),
+    });
   }
 }
 

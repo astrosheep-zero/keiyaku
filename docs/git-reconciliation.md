@@ -71,10 +71,11 @@ Successful Git removal alone does not prove that the filesystem path is gone.
 Cleanup confirms physical absence before reporting removal and releasing
 custody. Observation failure or a leftover or recreated path retains custody
 and reports lag; an unregistered residual path is not adopted merely to delete
-it. Reconciliation re-observes such lag on retry, without a background deletion
-queue or repeated destructive attempts in one invocation. Cleanup is not a
-cross-process writer barrier, and runtime files or lock-file presence alone do
-not establish whether another process is writing.
+it. A removal failure becomes that lag's diagnostic, and an attempted removal
+never reports an unchanged worktree. Reconciliation re-observes such lag on
+retry, without a background deletion queue or repeated destructive attempts in
+one invocation. Cleanup is not a cross-process writer barrier, and runtime files
+or lock-file presence alone do not establish whether another process is writing.
 
 ## Hooks And Scratch
 
@@ -91,7 +92,8 @@ Verification scratch has a separate disposable lifecycle. It is never a
 managed-worktree replay, does not gain markers or resumable command state, and
 is never re-executed by reconciliation. Reconciliation may collect a scratch
 path only after proving its owner no longer holds it; this is garbage collection,
-not command recovery.
+not command recovery. A collection that cannot confirm physical absence retains
+custody and reports a diagnostic.
 
 ## World Reconciliation
 

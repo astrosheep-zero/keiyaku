@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { access, realpath, unlink } from "node:fs/promises";
+import { lstat, realpath, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -14,6 +14,8 @@ import { executeGit, type GitRepository } from "./process.js";
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
 const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24})$/;
+/** One bounded removal attempt per scratch; expiry is reported, never retried inside this call. */
+const SCRATCH_REMOVAL_TIMEOUT_MS = 120_000;
 
 export type MaterializedScratchCandidate = Readonly<{
   cwd: string;
@@ -30,7 +32,7 @@ export const worktreeLeakSchema = z.object({ path: z.string(), diagnostic: z.str
 export type WorktreeLeak = z.infer<typeof worktreeLeakSchema>;
 type CollectableScratchRemoval = Readonly<{
   path: string;
-  action: "removed" | "unchanged";
+  /** False only when Git removed the path and absence was confirmed; retained removals own a diagnostic. */
   retained: boolean;
   diagnostic?: string;
 }>;
@@ -62,11 +64,16 @@ async function collectableScratchWorktrees(paths: Iterable<string>): Promise<rea
   return collectable;
 }
 
-const pathExists = (path: string) =>
-  access(path).then(
-    () => true,
-    () => false,
-  );
+/** Absence is ENOENT on the path entry itself: a dangling symlink is present residue, not a missing path. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
 
 /** Remove only abandoned Verification scratch worktrees whose ownership locks are held. */
 export async function removeCollectableScratchWorktrees(
@@ -77,26 +84,23 @@ export async function removeCollectableScratchWorktrees(
   for (const scratch of await collectableScratchWorktrees(paths)) {
     let removed = false;
     try {
-      if (!(await pathExists(scratch.path))) {
-        await executeGit(repository, ["worktree", "remove", scratch.path]);
-        paths.delete(scratch.path);
-        removed = true;
-        removals.push({ path: scratch.path, action: "removed", retained: false });
+      let diagnostic: string | undefined;
+      try {
+        const present = await pathExists(scratch.path);
+        await executeGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), scratch.path]);
+        if (await pathExists(scratch.path)) {
+          diagnostic = `Git reported scratch worktree removal but the path remains: ${scratch.path}`;
+        }
+      } catch (error) {
+        diagnostic = error instanceof Error ? error.message : String(error);
+      }
+      if (diagnostic !== undefined) {
+        removals.push({ path: scratch.path, retained: true, diagnostic });
         continue;
       }
-      try {
-        await executeGit(repository, ["worktree", "remove", "--force", scratch.path]);
-        paths.delete(scratch.path);
-        removed = true;
-        removals.push({ path: scratch.path, action: "removed", retained: false });
-      } catch (error) {
-        removals.push({
-          path: scratch.path,
-          action: "unchanged",
-          retained: true,
-          diagnostic: error instanceof Error ? error.message : String(error),
-        });
-      }
+      paths.delete(scratch.path);
+      removed = true;
+      removals.push({ path: scratch.path, retained: false });
     } finally {
       scratch.release();
       if (removed) await removeOwnershipLock(scratch.lockPath);
@@ -131,17 +135,25 @@ export async function materializeScratchCandidate(
     dispose: async () => {
       if (disposed) return null;
       disposed = true;
+      const removal = AbortSignal.timeout(SCRATCH_REMOVAL_TIMEOUT_MS);
       let leak: WorktreeLeak | null = null;
+      let removed = false;
       try {
-        await executeGit({ ...repository, signal: AbortSignal.timeout(5_000) }, ["worktree", "remove", "--force", cwd]);
+        await executeGit({ ...repository, signal: removal }, ["worktree", "remove", "--force", cwd]);
+        removed = !(await pathExists(cwd));
+        if (!removed)
+          leak = { path: cwd, diagnostic: `Git reported scratch worktree removal but the path remains: ${cwd}` };
       } catch (error) {
+        const original = error instanceof Error ? error.message : String(error);
         leak = {
           path: cwd,
-          diagnostic: error instanceof Error ? error.message : String(error),
+          diagnostic: removal.aborted
+            ? `scratch worktree removal timed out after ${SCRATCH_REMOVAL_TIMEOUT_MS}ms: ${original}`
+            : original,
         };
       } finally {
         ownership.close();
-        if (leak === null) await removeOwnershipLock(lockPath);
+        if (removed) await removeOwnershipLock(lockPath);
       }
       return leak;
     },

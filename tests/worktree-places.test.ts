@@ -294,7 +294,26 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
     await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
       const first = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
-      assert.ok(first.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "worktree-retained"));
+      const lags = first.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag);
+      assert.ok(
+        lags.some(
+          (lag) =>
+            lag.kind === "worktree-retained" &&
+            lag.path === appointment.path &&
+            /forced worktree removal failure/u.test(lag.diagnostic ?? ""),
+        ),
+      );
+      // Projection observes the worktree as-is; the failed removal must not add a second claim.
+      assert.equal(
+        first.effects.filter(
+          (effect) =>
+            effect.kind === "reconciliation-effect" &&
+            effect.effect.kind === "worktree" &&
+            effect.effect.path === appointment.path &&
+            effect.effect.action === "unchanged",
+        ).length,
+        1,
+      );
       assert.equal(repository.run(custody), beforeRefs);
       assert.equal(existsSync(appointment.path), true);
       assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
@@ -339,7 +358,15 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       },
       async (gitPath) => {
         const retained = await Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id }).abandon();
-        assert.ok(retained.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "worktree-retained"));
+        const lags = retained.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag);
+        assert.ok(
+          lags.some(
+            (lag) =>
+              lag.kind === "worktree-retained" &&
+              lag.path === appointment.path &&
+              /worktree removal but the path remains/u.test(lag.diagnostic ?? ""),
+          ),
+        );
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
         assert.equal(repository.run(custody), beforeRefs);
         assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);

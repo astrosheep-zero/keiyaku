@@ -1,17 +1,36 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { materializeScratchCandidate } from "../src/git/scratch.js";
+import { materializeScratchCandidate, removeCollectableScratchWorktrees } from "../src/git/scratch.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { projectSettings } from "../src/settings.js";
 import { executeVerification } from "../src/verification/execution.js";
 import type { VerificationObservation } from "../src/verification/observation.js";
-import { appointedWorktreePath } from "./support/git.js";
+import { appointedWorktreePath, withGitShim } from "./support/git.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
+
+/** Recreate a dangling path after every successful `git worktree remove`, as a lost race would. */
+const RECREATE_AFTER_REMOVAL_SHIM = [
+  'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then',
+  '  "$KEIYAKU_REAL_GIT" "$@"',
+  "  status=$?",
+  '  if [ "$status" -eq 0 ]; then',
+  '    for arg in "$@"; do last="$arg"; done',
+  '    ln -s "$KEIYAKU_MISSING_TARGET" "$last"',
+  "  fi",
+  '  exit "$status"',
+  "fi",
+  'exec "$KEIYAKU_REAL_GIT" "$@"',
+].join("\n");
+
+function ownershipLockFor(scratch: string): string {
+  return join(realpathSync(tmpdir()), `.${basename(scratch)}.owner.sqlite`);
+}
 
 test("delivery prepares clean candidate scratch without importing worktree symlinks", async (t) => {
   for (const layout of ["external-dependencies", "workspace-self-link"]) {
@@ -167,4 +186,79 @@ test("clean scratch cleanup runs after setup or declaration failure without an a
       assert.equal(execution.leak, undefined);
     });
   }
+});
+
+test("scratch disposal names its bounded removal timeout and keeps ownership evidence", async (context) => {
+  const repository = repositoryWithMain();
+  const git = await repositoryAt(repository.path);
+  const scratch = await materializeScratchCandidate(git, snapshotId(repository.run(["rev-parse", "HEAD"]).trim()));
+  const lock = ownershipLockFor(scratch.cwd);
+  try {
+    context.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
+      assert.equal(milliseconds, 120_000);
+      const controller = new AbortController();
+      controller.abort(new Error("TimeoutError"));
+      return controller.signal;
+    });
+    const leak = await scratch.dispose();
+    assert.ok(leak !== null);
+    assert.match(leak.diagnostic, /scratch worktree removal timed out after 120000ms/u);
+    assert.match(leak.diagnostic, /git process cancelled/u);
+    assert.equal(existsSync(scratch.cwd), true);
+    assert.equal(existsSync(lock), true);
+  } finally {
+    context.mock.restoreAll();
+    repository.run(["worktree", "remove", "--force", scratch.cwd]);
+    rmSync(lock, { force: true });
+  }
+});
+
+test("scratch disposal that leaves a recreated path keeps custody and reports residue", async () => {
+  const repository = repositoryWithMain();
+  await withGitShim(
+    RECREATE_AFTER_REMOVAL_SHIM,
+    { KEIYAKU_MISSING_TARGET: join(repository.path, "missing-scratch-target") },
+    async (gitPath) => {
+      const scratch = await materializeScratchCandidate(
+        await repositoryAt(repository.path, gitPath),
+        snapshotId(repository.run(["rev-parse", "HEAD"]).trim()),
+      );
+      const lock = ownershipLockFor(scratch.cwd);
+      try {
+        const leak = await scratch.dispose();
+        assert.ok(leak !== null);
+        assert.match(leak.diagnostic, /worktree removal but the path remains/u);
+        assert.equal(lstatSync(scratch.cwd).isSymbolicLink(), true);
+        assert.equal(existsSync(lock), true);
+      } finally {
+        rmSync(scratch.cwd, { force: true });
+        rmSync(lock, { force: true });
+      }
+    },
+  );
+});
+
+test("collectable scratch removal that leaves residue keeps custody and cites the path", async () => {
+  const repository = repositoryWithMain();
+  const scratch = join(realpathSync(tmpdir()), `keiyaku-v4-verify-${randomBytes(12).toString("hex")}`);
+  const lock = ownershipLockFor(scratch);
+  repository.run(["worktree", "add", "--detach", scratch, "HEAD"]);
+  await withGitShim(
+    RECREATE_AFTER_REMOVAL_SHIM,
+    { KEIYAKU_MISSING_TARGET: join(repository.path, "missing-scratch-target") },
+    async (gitPath) => {
+      const removals = await removeCollectableScratchWorktrees(await repositoryAt(repository.path, gitPath), new Set([scratch]));
+      assert.deepEqual(removals, [
+        {
+          path: scratch,
+          retained: true,
+          diagnostic: `Git reported scratch worktree removal but the path remains: ${scratch}`,
+        },
+      ]);
+      assert.equal(lstatSync(scratch).isSymbolicLink(), true);
+      assert.equal(existsSync(lock), true);
+    },
+  );
+  rmSync(scratch, { force: true });
+  rmSync(lock, { force: true });
 });

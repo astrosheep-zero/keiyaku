@@ -54,25 +54,36 @@ type TerminalCustody = Readonly<{
 }>;
 type TerminalCustodyRefs = Readonly<{ ref: string; pin: string }>;
 
+type TerminalWorktreeRemoval = Readonly<{ effect?: Effect; retainedLag?: ReconcileLag }>;
+
+/** Attempt removal once. Retention is a lag carrying its reason; no effect claims the worktree state after it. */
 async function removeTerminalWorktree(
   repository: GitRepository,
   topology: WorktreeTopology,
   path: string,
-): Promise<Readonly<{ effect?: Effect; retained: boolean }>> {
+): Promise<TerminalWorktreeRemoval> {
   const registered = topology.paths.has(path);
   if (!registered) {
-    return { retained: await pathExists(path) };
+    return (await pathExists(path)) ? { retainedLag: { kind: "worktree-retained", path } } : {};
   }
   const present = await pathExists(path);
   try {
     await executeGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
-    return { effect: { kind: "worktree", path, action: "unchanged" }, retained: true };
+    return { retainedLag: { kind: "worktree-retained", path, diagnostic: error.message } };
   }
   topology.paths.delete(path);
-  const retained = await pathExists(path);
-  return { effect: { kind: "worktree", path, action: retained ? "unchanged" : "removed" }, retained };
+  if (await pathExists(path)) {
+    return {
+      retainedLag: {
+        kind: "worktree-retained",
+        path,
+        diagnostic: `Git reported worktree removal but the path remains: ${path}`,
+      },
+    };
+  }
+  return { effect: { kind: "worktree", path, action: "removed" } };
 }
 
 export async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
@@ -257,7 +268,10 @@ async function removeSealedTerminalWorktree({
     }
   }
   const removal = await removeTerminalWorktree(repository, topology, path);
-  if (removal.retained) return retainTerminalWorktree(path, { kind: "worktree-retained", path }, acc);
+  if (removal.retainedLag !== undefined) {
+    acc.recordLag(removal.retainedLag);
+    return complete(acc.effects, acc.lag, acc.hookRuns);
+  }
   if (removal.effect !== undefined) acc.recordEffect(removal.effect);
   return null;
 }

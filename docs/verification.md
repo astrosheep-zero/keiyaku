@@ -91,12 +91,13 @@ loss or process crash are outside that portable guarantee. No persisted pid,
 reconstructed process identity, or background disposer supplies a second
 termination authority.
 
-Scratch provisioning and disposal are awaited physical work. They create no
-marker, progress record, retry/resume state, or durable run record. Cleanup
-happens after any admitted fact: a failed destroy action or leaked disposable
-worktree is reported separately and cannot reverse acceptance. Reconciliation
-may remove only a scratch path it can prove is no longer owned; it never recovers
-the run or executes candidate commands.
+Scratch provisioning and disposal are awaited physical work. Disposal is one
+independently bounded removal attempt; expiry or failure becomes that attempt's
+removal diagnostic. They create no marker, progress record, retry/resume state,
+or durable run record. Cleanup happens after any admitted fact: a failed destroy
+action or leaked disposable worktree is reported separately and cannot reverse
+acceptance. Reconciliation may remove only a scratch path it can prove is no
+longer owned; it never recovers the run or executes candidate commands.
 
 Cancellation requests termination only for work still owned by this attempt;
 it stops later owned phases and still awaits independently bounded retirement.
