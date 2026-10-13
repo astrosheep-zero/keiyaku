@@ -2,7 +2,15 @@ import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type {
+  ActorId,
+  ContractId,
+  ContractState,
+  DeliverData,
+  DocumentKey,
+  JournalEntry,
+  SnapshotId,
+} from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
 import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
@@ -58,6 +66,10 @@ export const gateSchema = z.string().transform((value, context) => {
 });
 export const deliverDataSchema = z
   .object({
+    note: z
+      .string()
+      .refine((value) => value.trim() !== "")
+      .optional(),
     tenderSnapshot: snapshotIdSchema,
     integration: z
       .object({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema, changeId: changeIdSchema })
@@ -66,6 +78,18 @@ export const deliverDataSchema = z
     policy: z.object({ requireBranchesToBeUpToDate: z.boolean() }).strict(),
   })
   .strict();
+export function recordedIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
+  return journal
+    .flatMap((entry) =>
+      entry.kind === "deliver"
+        ? [entry.data.integration.snapshot]
+        : entry.kind === "reintegrated"
+          ? [entry.data.snapshot]
+          : [],
+    )
+    .reverse();
+}
+
 export const verdictSchema = z.enum(["satisfied", "unsatisfied"]);
 export const activeContractRefusalSchema = z
   .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })

@@ -541,6 +541,16 @@ function deliverIdentityLines(
       ],
       columns,
     );
+  if (result.value.note !== undefined) receiptPayload(lines, "note", result.value.note);
+  const reusedIntegration = result.value.leading.reusedIntegration;
+  if (reusedIntegration !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "integration",
+      [{ text: `${displayGitId(reusedIntegration, abbreviations)} reused · commit message kept from first delivery` }],
+      columns,
+    );
   return lines;
 }
 
@@ -551,6 +561,7 @@ function deliveryIdentityAbbreviations(
   return abbreviateGitIds([
     value.tenderSnapshot ?? "",
     value.integration?.changeId ?? "",
+    value.integration.snapshot,
     value.contentChange?.previousChange ?? "",
     value.contentChange?.currentChange ?? "",
     verificationSnapshot ?? "",

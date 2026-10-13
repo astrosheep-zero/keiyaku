@@ -120,6 +120,7 @@ export type BindData = Readonly<{
 export type AmendData = ContractTerms;
 
 export type DeliverData = Readonly<{
+  note?: string;
   tenderSnapshot: SnapshotId;
   integration: Readonly<{
     predecessor: SnapshotId;

@@ -26,7 +26,7 @@ import type {
   MutationOperationInput,
   RepositoryScope,
 } from "./operations.js";
-import { timestamp, unpackVerificationOutcome } from "./operations.js";
+import { recordedIntegrationSnapshots, timestamp, unpackVerificationOutcome } from "./operations.js";
 
 export const auditReportSchema = z
   .object({
@@ -237,6 +237,7 @@ export async function auditOperation(input: AuditOperationInput): Promise<Intent
     {
       contractId: state.id,
       coordinates: state.coordinates,
+      recordedIntegrations: recordedIntegrationSnapshots(observed.journals.get(state.id)?.entries ?? []),
       ...(workspace.appointment === undefined ? {} : { appointment: workspace.appointment }),
     },
     {

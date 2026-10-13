@@ -28,6 +28,7 @@ class DeliveryHandle {
   declare readonly placement?: DeliveryValue["placement"];
   declare readonly continuation?: DeliveryValue["continuation"];
   declare readonly tenderSnapshot: SnapshotId;
+  declare readonly note?: string;
   declare readonly integration: DeliveryValue["integration"];
   declare readonly method: DeliveryValue["method"];
   declare readonly policy: DeliveryValue["policy"];

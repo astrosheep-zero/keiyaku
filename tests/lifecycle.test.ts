@@ -73,6 +73,16 @@ function deliveryData(snapshot: string) {
 
 
 
+test("delivery notes round-trip without changing older note-free facts", () => {
+  const original = entry("deliver", deliveryData("candidate"), 2);
+  const originalBytes = encodeEntry(original);
+  assert.deepEqual(decodeJournal(originalBytes), [original]);
+  assert.equal(encodeEntry(decodeJournal(originalBytes)[0]!), originalBytes);
+  const noted = { ...original, data: { ...original.data, note: "  exact caller note\nsecond line  " } };
+  assert.deepEqual(decodeJournal(encodeEntry(noted)), [noted]);
+  assert.throws(() => encodeEntry({ ...noted, data: { ...noted.data, note: " " } }), /data\.deliver\.note/u);
+});
+
 test("malformed inherited refusals, journals, and folds refuse without inventing status", () => {
   const bind = bindEntry(0);
   const deliver = entry("deliver", deliveryData("candidate"), 2);

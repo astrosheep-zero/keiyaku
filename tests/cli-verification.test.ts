@@ -149,6 +149,68 @@ test("review refreshes a moved target before an old failed verification blocks p
   assert.equal(after.attestations.at(-1)?.data.verdict, "satisfied");
 });
 
+test("redelivery reuses a recorded integration and Verification while preserving each note", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "integration-reuse-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const runs = resolve(external, "runs");
+  const script = `echo run >> '${runs}'`;
+  const { raw, id, worktree } = await bindCandidate(script, ["reviewed", "verified"]);
+  const contract = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
+  const first = accepted(await contract.deliver({ message: "first delivery" }));
+  const snapshot = first.value.integration.snapshot;
+  assert.equal(first.value.verification?.kind, "ran");
+  assert.equal(readFileSync(runs, "utf8"), "run\n");
+
+  writeFileSync(resolve(worktree, "candidate.txt"), "changed\n");
+  raw.run(["-C", worktree, "add", "candidate.txt"]);
+  raw.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
+  raw.run(["-C", worktree, "revert", "--no-edit", "HEAD"]);
+  const second = accepted(await contract.deliver({ message: "second delivery" }));
+  assert.notEqual(second.value.tenderSnapshot, first.value.tenderSnapshot);
+  assert.equal(second.value.integration.snapshot, snapshot);
+  assert.equal(second.value.leading.reusedIntegration, snapshot);
+  assert.equal(second.value.verification?.kind, "reused");
+  assert.equal(readFileSync(runs, "utf8"), "run\n", "reused satisfaction never executes declarations");
+  assert.equal(second.value.note, "second delivery");
+  assert.equal(JSON.parse(JSON.stringify(second.value)).note, "second delivery");
+  const deliveries = (await observeContract(await repositoryAt(raw.path), id)).entries.filter((entry) => entry.kind === "deliver");
+  assert.deepEqual(deliveries.map((entry) => entry.data.note), ["first delivery", "second delivery"]);
+  assert.equal(raw.run(["show", "-s", "--format=%s", snapshot]).trim(), "first delivery");
+  const text = renderAccepted(second, { columns: 200, color: false });
+  assert.match(text, /second delivery/u);
+  assert.match(text, /integration\s+[0-9a-f]+ reused · commit message kept from first delivery/u);
+
+  writeFileSync(resolve(worktree, "candidate.txt"), "different tree\n");
+  raw.run(["-C", worktree, "add", "candidate.txt"]);
+  raw.run(["-C", worktree, "commit", "--quiet", "-m", "different tree"]);
+  const changed = accepted(await contract.deliver());
+  assert.notEqual(changed.value.integration.snapshot, snapshot);
+  assert.equal(changed.value.verification?.kind, "ran");
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
+
+  raw.run(["-C", worktree, "revert", "--no-edit", "HEAD"]);
+  const restored = accepted(await contract.deliver());
+  assert.equal(restored.value.integration.snapshot, snapshot, "lookup reaches earlier, non-current integrations");
+  assert.equal(restored.value.verification?.kind, "reused");
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
+
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "move target without changing tree"]);
+  const moved = accepted(await contract.deliver());
+  assert.equal(moved.value.verification?.kind, "ran");
+  if (moved.value.verification?.kind !== "ran") throw new Error("moved target was not verified");
+  const movedSnapshot = moved.value.verification.snapshot;
+  assert.notEqual(movedSnapshot, snapshot);
+  assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.currentIntegration?.snapshot, movedSnapshot);
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n");
+
+  accepted(await contract.amend({ markdown: markdown(`${script}\ntrue`) }));
+  const amended = accepted(await contract.deliver());
+  assert.equal(amended.value.verification?.kind, "ran", "a new declaration cannot reuse old testimony");
+  if (amended.value.verification?.kind !== "ran") throw new Error("amended declaration was not verified");
+  assert.equal(amended.value.verification.snapshot, movedSnapshot);
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\nrun\n");
+});
+
 test("unchanged delivery retries failure once and reuses later satisfaction", async (t) => {
   const external = mkdtempSync(resolve(tmpdir(), "verification-retry-"));
   t.after(() => rmSync(external, { recursive: true, force: true }));
@@ -244,7 +306,7 @@ test("audit reports execution even when an unchanged verdict is deduplicated", a
   const second = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
   assert.equal(first.kind, "accepted");
   if (first.kind !== "accepted") throw new Error("first audit was not accepted");
-  assert.equal(first.facts.length, 1);
+  assert.equal(first.facts.length, 0, "the recorded integration preserves the existing failure subject");
   assert.equal(second.kind, "accepted");
   if (second.kind !== "accepted") throw new Error("second audit was not accepted");
   assert.equal(second.facts.length, 0);
@@ -255,7 +317,7 @@ test("audit reports execution even when an unchanged verdict is deduplicated", a
   assert.match(second.value.verification.summary ?? "", /audit-executed/u);
   const repository = await repositoryAt(raw.path);
   const state = (await observeContract(repository, id)).state!;
-  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 2);
+  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 1);
 });
 
 test("concurrent unchanged audits admit one attestation but both report execution", async () => {
@@ -305,7 +367,7 @@ test("audit admits a new attestation after the candidate changes", async () => {
   if (second.kind !== "accepted") throw new Error("second audit was not accepted");
   assert.equal(second.facts.length, 1);
   const after = (await observeContract(repository, id)).state!;
-  assert.equal(after.attestations.filter((fact) => fact.data.gate === "verified").length, 3);
+  assert.equal(after.attestations.filter((fact) => fact.data.gate === "verified").length, 2);
   assert.notEqual(after.attestations.at(-1)?.data.subject, state.attestations.at(-1)?.data.subject);
 });
 

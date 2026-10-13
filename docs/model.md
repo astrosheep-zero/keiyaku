@@ -19,6 +19,13 @@ compatibility projection. Times, counts, elapsed durations, history order, and
 combined Contract/Akuma views are read-time presentation, never independent
 authority. Optional actor testimony is not lifecycle identity or gate input.
 
+A delivery may retain the caller's note as bounded intent independently of its
+integration commit message. Each recorded delivery owns its note; reuse of an
+earlier integration preserves that commit's original message without replacing
+the new delivery's intent. A delivery recorded without a note remains complete
+authority and requires no migration. Notes never participate in candidate
+identity, testimony currentness, or placement eligibility.
+
 A journal fold is a current read model, not stored authority. It exposes one
 coherent Contract state or explicit absence; a missing observation entry is a
 broken observation, not another representation of absence. A Contract has at

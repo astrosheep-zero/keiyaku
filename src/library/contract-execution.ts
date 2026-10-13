@@ -241,6 +241,7 @@ export class ContractExecution {
             return { kind: "handoff", contract: this.id, value: outcome };
           if (outcome.kind !== "accepted") return expected(this.id, outcome);
           leadingValue = outcome.value;
+          accumulator.extendConclusions(this.id, { leading: outcome.value.leading });
           stage = "verification";
           await advanceAndContinue(
             accumulator,

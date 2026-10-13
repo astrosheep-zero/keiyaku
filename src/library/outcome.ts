@@ -437,7 +437,7 @@ const amendEvidenceSchema = z
   .strict()
   .refine((value) => value.overlaps === undefined || value.overlapFailure === undefined);
 const partialDeliverySchema = deliveryValueSchema.partial().superRefine((value, context) => {
-  const fields = deliverDataSchema.keyof().options;
+  const fields = deliverDataSchema.omit({ note: true }).keyof().options;
   const present = fields.filter((field) => value[field] !== undefined);
   if (present.length !== 0 && present.length !== fields.length)
     context.addIssue({ code: "custom", message: "delivery identity must be complete when present" });

@@ -199,7 +199,7 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       return termsValue(value, path) satisfies AmendData;
     case "deliver": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path);
+      requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path, ["note"]);
       const integration = requireRecord(object.integration, `${path}.integration`);
       requireKeys(integration, ["predecessor", "snapshot", "changeId"], `${path}.integration`);
       const method = stringValue(object.method, `${path}.method`);
@@ -207,6 +207,7 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       const policy = requireRecord(object.policy, `${path}.policy`);
       requireKeys(policy, ["requireBranchesToBeUpToDate"], `${path}.policy`);
       return {
+        ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }),
         tenderSnapshot: brandedValue(object.tenderSnapshot, `${path}.tenderSnapshot`, snapshotId),
         integration: {
           predecessor: brandedValue(integration.predecessor, `${path}.integration.predecessor`, snapshotId),

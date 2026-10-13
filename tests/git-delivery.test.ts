@@ -255,6 +255,24 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     assert.equal(repository.run(["show", `${delivery.data.integration.snapshot}:tender.txt`]), "tender\n");
   });
 
+  test("an unavailable recorded integration materializes a fresh snapshot", async () => {
+    const { repository, preparation } = await targetedContract(["reviewed"]);
+    const missing = mintSnapshotId("0".repeat(40));
+    const prepared = await prepareDelivery(await cachedRepositoryAt(repository.path), {
+      ...preparation,
+      recordedIntegrations: [missing],
+    }, {
+      title: "Unavailable integration",
+      document: contractBody(),
+      message: "fresh after missing integration",
+    });
+    assert.equal(prepared.kind, "prepared");
+    if (prepared.kind !== "prepared") throw new Error("expected fresh integration");
+    assert.notEqual(prepared.data.integration.snapshot, missing);
+    assert.equal(repository.run(["show", "-s", "--format=%s", prepared.data.integration.snapshot]).trim(), "fresh after missing integration");
+    assert.equal(prepared.data.note, "fresh after missing integration");
+  });
+
   test("strict targeted delivery refuses a tender not based on the target head", async () => {
     const { repository, preparation } = await targetedContract();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "advance target"]);

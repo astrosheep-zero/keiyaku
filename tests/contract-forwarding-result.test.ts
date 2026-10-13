@@ -588,7 +588,15 @@ import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 
 test("post-admission failures round-trip their category and receipt without becoming no-effect refusals", () => {
   for (const original of [new Error("unexpected"), new TypeError("bug"), new AuthorityCorruptionError("corrupt")]) {
-    const receipt = { operation: "deliver" as const, contract, head, facts: [fact], effects: [], pending: [] };
+    const receipt = {
+      operation: "deliver" as const,
+      contract,
+      head,
+      facts: [fact],
+      effects: [],
+      pending: [],
+      value: { ...fact.data, leading: { kind: "admitted-now" as const, fact: fact.entry } },
+    };
     const encoded = encodeFailureWire(withOutcomeReceipt(original, receipt));
     assert.equal(encoded.kind, "failed");
     const decoded = decodeFailureWire(encoded);

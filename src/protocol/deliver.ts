@@ -6,6 +6,7 @@ import {
   materializeIntegrationSnapshot,
   materializeJudgedConflict,
   planIntegration,
+  reusableIntegrationSnapshot,
   worktreeChangeId,
 } from "../git/integration.js";
 import {
@@ -36,7 +37,15 @@ import {
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ChangeId, ContractId, ContractState, DeliverData, JournalEntry } from "../core/facts/types.js";
+import type {
+  ActorId,
+  ChangeId,
+  ContractId,
+  ContractState,
+  DeliverData,
+  JournalEntry,
+  SnapshotId,
+} from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
@@ -50,12 +59,16 @@ import type {
   DocumentDerivation,
   MutationOperationInput,
 } from "./operations.js";
-import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
+import { attemptDecisionWithSeatClose, recordedIntegrationSnapshots, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
 export const deliverLeadingSchema = z
-  .object({ kind: z.enum(["admitted-now", "already-admitted"]), fact: entryUlidSchema })
+  .object({
+    kind: z.enum(["admitted-now", "already-admitted"]),
+    fact: entryUlidSchema,
+    reusedIntegration: snapshotIdSchema.optional(),
+  })
   .strict();
 type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
 type DeliverValue = DeliveryIdentity &
@@ -142,6 +155,7 @@ async function prepareDeliveryWithWorktree(
   stage: Readonly<{
     contractId: ContractId;
     coordinates: ContractState["coordinates"];
+    recordedIntegrations?: readonly SnapshotId[];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
   input: Readonly<{
@@ -154,7 +168,7 @@ async function prepareDeliveryWithWorktree(
   }>,
   captured?: TenderCapture,
 ): Promise<
-  | { kind: "prepared"; data: DeliverData; worktree: WorktreeWitness }
+  | { kind: "prepared"; data: DeliverData; worktree: WorktreeWitness; reusedIntegration?: SnapshotId }
   | { kind: "refused"; refusal: DeliveryPreparationRefusal }
 > {
   const { contractId, coordinates } = stage;
@@ -181,13 +195,22 @@ async function prepareDeliveryWithWorktree(
   );
   if (integration.kind === "refused") return integration;
   const changeId = await worktreeChangeId(repository, { contractId, coordinates }, tender.data);
+  const reusedIntegration = await reusableIntegrationSnapshot(
+    repository,
+    integration.data.tree,
+    integration.data.predecessor,
+    stage.recordedIntegrations ?? [],
+  );
   const integrationSnapshot =
-    coordinates.target === undefined
+    reusedIntegration ??
+    (coordinates.target === undefined
       ? tenderSnapshot
-      : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, commit);
+      : await materializeIntegrationSnapshot(repository, integration.data.tree, integration.data.predecessor, commit));
   return {
     kind: "prepared",
+    ...(reusedIntegration === undefined ? {} : { reusedIntegration }),
     data: {
+      ...(input.message === undefined ? {} : { note: input.message }),
       tenderSnapshot,
       integration: {
         predecessor: integration.data.predecessor,
@@ -212,6 +235,7 @@ export async function prepareDelivery(
   stage: Readonly<{
     contractId: ContractId;
     coordinates: ContractState["coordinates"];
+    recordedIntegrations?: readonly SnapshotId[];
     appointment?: Extract<ManagedWorktreeAppointment, { kind: "appointed" }>;
   }>,
   input: Readonly<{
@@ -237,7 +261,7 @@ type DeliveryArtifacts =
   | Readonly<{ kind: "reuse"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
   | Readonly<{ kind: "continuation"; worktree: WorktreeWitness }>
-  | Readonly<{ kind: "mechanical"; data: DeliveryIdentity; worktree: WorktreeWitness }>;
+  | Readonly<{ kind: "mechanical"; data: DeliveryIdentity; worktree: WorktreeWitness; reusedIntegration?: SnapshotId }>;
 
 type ExternalDeliveryPreparation =
   | Readonly<{ kind: "unavailable" }>
@@ -251,6 +275,7 @@ type AssembledDelivery =
       derivation?: DocumentDerivation;
       preparation?: DeliverInput<DeliveryFailure>["preparation"];
       continuation?: boolean;
+      reusedIntegration?: SnapshotId;
       reuse?: boolean;
     }>;
 
@@ -292,6 +317,7 @@ async function mechanicalDeliveryPreparation(
   input: DeliverOperationInput,
   state: ContractState,
   derivation: DocumentDerivation,
+  journal: readonly JournalEntry[],
   captured?: TenderCapture,
 ): Promise<
   | Extract<DeliverInput<DeliveryFailure>["preparation"], { kind: "refused" }>
@@ -300,11 +326,16 @@ async function mechanicalDeliveryPreparation(
       document: DocumentDerivation["document"];
       data: DeliveryIdentity;
       worktree: WorktreeWitness;
+      reusedIntegration?: SnapshotId;
     }>
 > {
   const prepared = await prepareDeliveryWithWorktree(
     input.scope,
-    { contractId: state.id, coordinates: state.coordinates },
+    {
+      contractId: state.id,
+      coordinates: state.coordinates,
+      recordedIntegrations: recordedIntegrationSnapshots(journal),
+    },
     deliveryPreparationInput(input, derivation),
     captured,
   );
@@ -316,6 +347,7 @@ async function mechanicalDeliveryPreparation(
     document: derivation.document,
     data: prepared.data,
     worktree: prepared.worktree,
+    ...(prepared.reusedIntegration === undefined ? {} : { reusedIntegration: prepared.reusedIntegration }),
   };
 }
 
@@ -381,9 +413,20 @@ async function prepareDeliveryArtifacts(
       worktree,
     };
   }
-  const prepared = await mechanicalDeliveryPreparation(input, state, derivation, captured.data);
+  const prepared = await mechanicalDeliveryPreparation(
+    input,
+    state,
+    derivation,
+    observation.journals.get(state.id)?.entries ?? [],
+    captured.data,
+  );
   return prepared.kind === "prepared"
-    ? { kind: "mechanical", data: prepared.data, worktree: prepared.worktree }
+    ? {
+        kind: "mechanical",
+        data: prepared.data,
+        worktree: prepared.worktree,
+        ...(prepared.reusedIntegration === undefined ? {} : { reusedIntegration: prepared.reusedIntegration }),
+      }
     : { kind: "refused", refusal: prepared.refusal };
 }
 
@@ -414,7 +457,8 @@ async function assembleDeliveryAttempt(
     };
   }
   const artifacts = external.artifacts;
-  if (artifacts.kind === "defer") return await completeDeferredDelivery(input, state, derivation);
+  if (artifacts.kind === "defer")
+    return await completeDeferredDelivery(input, state, derivation, observation.journals.get(state.id)?.entries ?? []);
   if (artifacts.kind === "refused") {
     return {
       kind: "assembled",
@@ -447,6 +491,7 @@ async function assembleDeliveryAttempt(
     state,
     derivation,
     preparation: { kind: "prepared", document: derivation.document, data: artifacts.data },
+    ...(artifacts.reusedIntegration === undefined ? {} : { reusedIntegration: artifacts.reusedIntegration }),
   };
 }
 
@@ -459,6 +504,7 @@ async function completeDeferredDelivery(
   input: DeliverOperationInput,
   state: ContractState,
   derivation: DocumentDerivation,
+  journal: readonly JournalEntry[],
 ): Promise<AssembledDelivery> {
   if (input.materializeConflict !== true || state.terminal !== null) return { kind: "assembled", state, derivation };
   const worktree = await recaptureDeliveryWorktree(input, state);
@@ -474,11 +520,14 @@ async function completeDeferredDelivery(
       preparation: { kind: "refused", document: derivation.document, refusal: materialization },
     };
   }
-  const prepared = await mechanicalDeliveryPreparation(input, state, derivation);
+  const prepared = await mechanicalDeliveryPreparation(input, state, derivation, journal);
   return {
     kind: "assembled",
     state,
     derivation,
+    ...(prepared.kind !== "prepared" || prepared.reusedIntegration === undefined
+      ? {}
+      : { reusedIntegration: prepared.reusedIntegration }),
     preparation:
       prepared.kind === "prepared"
         ? { kind: "prepared", document: derivation.document, data: prepared.data }
@@ -587,7 +636,11 @@ async function decideAndAdmitDelivery(
     ...admission,
     value: {
       ...preparation.data,
-      leading: { kind: "admitted-now", fact: deliverFact.entry },
+      leading: {
+        kind: "admitted-now",
+        fact: deliverFact.entry,
+        ...(assembled.reusedIntegration === undefined ? {} : { reusedIntegration: assembled.reusedIntegration }),
+      },
       ...(previousChange === undefined || previousChange === currentChange
         ? {}
         : {

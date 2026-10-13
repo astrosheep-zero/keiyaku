@@ -13,6 +13,7 @@ import {
   type TenderCapture,
 } from "./tender.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
+import { withGitDecodeChannel } from "./read-observation.js";
 
 export { workspaceMergeStatePresent };
 
@@ -115,6 +116,32 @@ export async function worktreeChangeId(
   );
   const id = result.toString("utf8").trim().split(/\s/, 1)[0] ?? "";
   return mintChangeId(id === "" ? "0000000000000000000000000000000000000000" : id);
+}
+
+/** Reuse only recorded commits with this exact tree and sole predecessor. */
+export async function reusableIntegrationSnapshot(
+  repository: GitRepository,
+  tree: GitObjectId,
+  parent: SnapshotId,
+  recordedSnapshots: readonly SnapshotId[],
+): Promise<SnapshotId | undefined> {
+  if (recordedSnapshots.length === 0) return undefined;
+  return await withGitDecodeChannel(repository, async (channel) => {
+    for (const snapshot of recordedSnapshots) {
+      const oid = gitObjectIdForSnapshot(snapshot);
+      const object = (await channel.readObjects([oid])).get(oid)!;
+      if (object.kind === "missing") continue;
+      if (object.type !== "commit") {
+        throw new AuthorityCorruptionError(`recorded integration snapshot is not a Git commit: ${snapshot}`);
+      }
+      const headers = object.bytes.toString("utf8").split("\n\n", 1)[0]!.split("\n");
+      const parents = headers.filter((line) => line.startsWith("parent "));
+      if (headers[0] === `tree ${tree}` && parents.length === 1 && parents[0] === `parent ${parent}`) {
+        return snapshot;
+      }
+    }
+    return undefined;
+  });
 }
 
 /** Materialize the exact integration tree against its observed predecessor. */

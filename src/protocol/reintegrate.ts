@@ -1,11 +1,12 @@
 import type { ProtocolProgress } from "./progress.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, ReintegratedData } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, ReintegratedData, SnapshotId } from "../core/facts/types.js";
 import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
 import {
   materializeReintegrationSnapshot,
   persistedTender,
   planIntegration,
+  reusableIntegrationSnapshot,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
@@ -20,7 +21,7 @@ import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type AttemptTerminal } from "./attempt.js";
-import { timestamp } from "./operations.js";
+import { recordedIntegrationSnapshots, timestamp } from "./operations.js";
 import {
   externalPreparation,
   STALE_PRIVATE_STATE_PREPARATION,
@@ -77,14 +78,19 @@ type ExternalReintegrationPreparation =
 
 /** Plan and materialize the target-specific reintegration artifacts outside the publication seat. */
 async function prepareExternalReintegration(input: ReintegrationInput): Promise<ExternalReintegrationPreparation> {
-  return await externalPreparation({ ...input, scope: input.repository }, (_, state) =>
-    planReintegrationArtifacts(input, state),
+  return await externalPreparation({ ...input, scope: input.repository }, (observation, state) =>
+    planReintegrationArtifacts(
+      input,
+      state,
+      recordedIntegrationSnapshots(observation.journals.get(state.id)?.entries ?? []),
+    ),
   );
 }
 
 async function planReintegrationArtifacts(
   input: ReintegrationInput,
   state: ContractState,
+  recordedIntegrations: readonly SnapshotId[],
 ): Promise<ReintegrationArtifacts> {
   if (state.delivery === null || state.currentIntegration === null) return { kind: "defer" };
   const planned = await planIntegration(
@@ -94,12 +100,19 @@ async function planReintegrationArtifacts(
     state.delivery.data.policy.requireBranchesToBeUpToDate,
   );
   if (planned.kind === "refused") return { kind: "refused", refusal: planned.refusal };
-  const snapshot = await materializeReintegrationSnapshot(
-    input.repository,
-    planned.data.tree,
-    planned.data.predecessor,
-    state.delivery.data.integration.snapshot,
-  );
+  const snapshot =
+    (await reusableIntegrationSnapshot(
+      input.repository,
+      planned.data.tree,
+      planned.data.predecessor,
+      recordedIntegrations,
+    )) ??
+    (await materializeReintegrationSnapshot(
+      input.repository,
+      planned.data.tree,
+      planned.data.predecessor,
+      state.delivery.data.integration.snapshot,
+    ));
   return {
     kind: "prepared",
     data: { predecessor: planned.data.predecessor, snapshot },

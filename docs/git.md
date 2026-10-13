@@ -65,6 +65,14 @@ It returns mechanical data or typed failures; it does not judge Contract
 lifecycle or decode Contract documents. Document bytes used for delivery are
 opaque Git inputs, and Git never judges their currentness.
 
+Integration preparation reuses the newest available integration already recorded
+for the same Contract when its tree and sole predecessor match the planned
+integration. The reused commit keeps its original message and dates; a new
+delivery note does not rewrite it. A different tree or predecessor requires a
+fresh integration, and an unavailable recorded commit is skipped rather than
+blocking preparation. This reuse creates no additional identity or evidence
+authority; Verification still judges the exact snapshot and declaration.
+
 Content identity consumes the complete canonical patch without retaining that
 intermediate patch in the caller. A producer failure, consumer failure, or
 cancelled transfer yields no identity, even when partial output resembles one.
