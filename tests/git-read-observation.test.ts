@@ -61,6 +61,31 @@ test("handoff batching exposes ref, missing-object and decode transport failures
   }
 });
 
+test("Git decode retirement allows a slow clean EOF close without cancelling the caller", async () => {
+  const repository = makeGitRepository();
+  await withGitShim(
+    [
+      'if [ "$1 $2" = "cat-file --batch" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@" || exit "$?"',
+      // Deliberately exceeds the former one-second grace, without delaying object reads.
+      '  sleep 1.2',
+      '  exit 0',
+      'fi',
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const controller = new AbortController();
+      const git = { ...(await repositoryAt(repository.path, gitPath)), signal: controller.signal };
+      const result = await withGitDecodeChannel(git, async (channel) =>
+        (await channel.readObjects([MISSING_OID])).get(MISSING_OID),
+      );
+      assert.deepEqual(result, { kind: "missing" });
+      assert.equal(controller.signal.aborted, false);
+    },
+  );
+});
+
 test("Git read observation returns a close-only batch failure", async () => {
   const repository = makeGitRepository();
 

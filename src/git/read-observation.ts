@@ -8,7 +8,7 @@ import { GitPlumbingError, type GitRepository } from "./process.js";
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");
-const BATCH_RETIREMENT_GRACE_MS = 1_000;
+const BATCH_RETIREMENT_GRACE_MS = 5_000;
 
 export type GitBlobResult = Readonly<{ kind: "present"; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 
