@@ -27,8 +27,11 @@ candidate or continues a candidate already admitted before this attempt. Fresh
 provenance comes only from the confirmed admission of this invocation; continued
 provenance comes only from the historical entry observed in custody during this
 attempt, and that historical entry never appears among the invocation's newly
-admitted facts. Forwarded execution preserves that provenance as returned and
-never rereads later authority to recover it; a missing or disagreeing provenance
+admitted facts. A replacement reports the candidate-content-change explanation
+with its previous and current content identities, witnessed in the admission
+attempt rather than recovered from later Contract state. Forwarded execution
+preserves that provenance as returned and never rereads later authority to
+recover it; a missing or disagreeing provenance
 is an integrity failure, not a reason to infer from newer state. Text names the
 candidate and integration result, patch-id as `content identity (not commit)`,
 keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.

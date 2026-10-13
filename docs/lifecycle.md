@@ -125,9 +125,13 @@ preparation; uncertain outcomes are resolved only from durable journal facts.
 Bounded retries eventually return a typed non-admission outcome. The journal,
 rather than a queue or cache, is the only recovery and handoff receipt.
 An admitted current candidate still awaiting terminal Verification is reused by
-subsequent delivery unless the caller explicitly requests overwrite. Reuse
-references its earlier admission without claiming that the new invocation
-admitted it again. Other redelivery and terminal refusal behavior is unchanged.
+subsequent delivery only when the observed worktree-content identity is unchanged.
+Changed content replaces the candidate under the ordinary delivery rules and starts
+Verification for that candidate. Testimony from an older running invocation remains
+history for its captured subject, never evidence for the replacement. Explicit
+overwrite retains its remaining replacement behavior. Reuse references its earlier
+admission without claiming that the new invocation admitted it again. Other
+redelivery and terminal refusal behavior is unchanged.
 
 Audit judges an active Contract and may create ordinary producer testimony, but
 never requests placement, claims, or moves a target. Once a leading act is

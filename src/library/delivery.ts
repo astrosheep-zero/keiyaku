@@ -2,13 +2,19 @@ import { z } from "zod";
 import type { SnapshotId } from "../core/facts/types.js";
 import { completionEvidenceSchema } from "../protocol/completion.js";
 import { deliverLeadingSchema } from "../protocol/deliver.js";
-import { deliverDataSchema, deliveryDiffOperation, type RepositoryScope } from "../protocol/operations.js";
+import {
+  candidateContentChangeSchema,
+  deliverDataSchema,
+  deliveryDiffOperation,
+  type RepositoryScope,
+} from "../protocol/operations.js";
 import { continuationReportSchema } from "./continuation.js";
 
 export const deliveryValueSchema = completionEvidenceSchema
   .extend({
     ...deliverDataSchema.shape,
     leading: deliverLeadingSchema,
+    contentChange: candidateContentChangeSchema.optional(),
     continuation: continuationReportSchema.optional(),
   })
   .strict();
@@ -16,6 +22,7 @@ export type DeliveryValue = z.infer<typeof deliveryValueSchema>;
 
 class DeliveryHandle {
   declare readonly leading?: DeliveryValue["leading"];
+  declare readonly contentChange?: DeliveryValue["contentChange"];
   declare readonly completion?: DeliveryValue["completion"];
   declare readonly verification?: DeliveryValue["verification"];
   declare readonly placement?: DeliveryValue["placement"];
@@ -29,7 +36,7 @@ class DeliveryHandle {
     identity: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
     outcomes: Partial<
-      Pick<DeliveryValue, "leading" | "completion" | "verification" | "placement" | "continuation">
+      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
     > = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
@@ -67,7 +74,9 @@ export function deliveryHandle(
 ): Delivery;
 export function deliveryHandle(
   delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
-    Partial<Pick<DeliveryValue, "leading" | "completion" | "verification" | "placement" | "continuation">>,
+    Partial<
+      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
+    >,
   readDiff: () => Promise<string | null>,
 ): Delivery {
   return new DeliveryHandle(delivery, readDiff, delivery);

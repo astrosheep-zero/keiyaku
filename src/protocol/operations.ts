@@ -85,7 +85,7 @@ export const deliverRefusalSchema = z
 export const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.optional() })
   .strict();
-const staleGateReasonSchema = z
+export const candidateContentChangeSchema = z
   .object({
     kind: z.literal("candidate-content-changed"),
     target: z.string().optional(),
@@ -102,7 +102,11 @@ export const gateReportSchema = z
         .object({ kind: z.literal("attested"), verdict: verdictSchema, at: z.string(), summary: z.string().optional() })
         .strict(),
       z
-        .object({ kind: z.literal("stale"), priorVerdict: verdictSchema, reason: staleGateReasonSchema.optional() })
+        .object({
+          kind: z.literal("stale"),
+          priorVerdict: verdictSchema,
+          reason: candidateContentChangeSchema.optional(),
+        })
         .strict(),
     ]),
   })

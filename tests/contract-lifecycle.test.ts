@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import type { ReviewOutcome } from "../src/index.js";
+import type { DeliverOutcome, ReviewOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
@@ -342,10 +342,10 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.equal((present(await verified.keiyaku.state())).terminal, null);
   });
 
-  test("a forwarded deliver carries overwrite through the parent Body port", async () => {
+  test("a forwarded deliver replaces changed unfinished content and verifies the new candidate", async () => {
     const { repository, keiyaku, state } = await bindAndCommit({
-      gates: ["verified"],
-      verification: "exit 0",
+      gates: ["reviewed", "verified"],
+      verification: "node -e \"if (require('node:fs').readFileSync('candidate.txt', 'utf8') !== 'replacement\\\\n') process.exit(1)\"",
       runtimeStop: true,
     });
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
@@ -357,15 +357,13 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assertRuntimeStop(firstValue.verification);
     assert.equal((present(await keiyaku.state())).terminal, null, "the stopped Verification keeps the Contract nonterminal");
 
-    writeFileSync(join(worktree, "candidate.txt"), "replacement\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
-
     const reused = await deliver(state.id, false);
-    assert.equal(reused.deliveryFactId, first.deliveryFactId, "overwrite=false reuses the admitted candidate");
+    assert.equal(reused.deliveryFactId, first.deliveryFactId, "unchanged content reuses the admitted candidate");
     const reusedValue = acceptedDeliveryValue(reused.result);
     assert.deepEqual(reusedValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
-    assert.deepEqual(reusedValue.integration, firstValue.integration, "overwrite=false keeps the old tender bytes");
+    assert.deepEqual(reusedValue.integration, firstValue.integration);
+    assert.equal(reusedValue.contentChange, undefined);
+    assertRuntimeStop(reusedValue.verification);
     assert.ok(typeof reused.result === "object" && reused.result !== null && "facts" in reused.result);
     assert.ok(Array.isArray(reused.result.facts));
     assert.deepEqual(
@@ -376,12 +374,59 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
       "reuse admits no extra delivery fact",
     );
 
-    const replaced = await deliver(state.id, true);
-    assert.notEqual(replaced.deliveryFactId, first.deliveryFactId, "overwrite=true admits a new deliver fact");
+    writeFileSync(join(worktree, "candidate.txt"), "replacement\n");
+    writeFileSync(join(worktree, ".keiyaku", "settings.json"), "{}\n");
+    repository.run(["-C", worktree, "add", "candidate.txt", ".keiyaku/settings.json"]);
+    repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
+
+    const replaced = await deliver(state.id, false);
+    assert.notEqual(replaced.deliveryFactId, first.deliveryFactId, "changed content admits a new deliver fact without overwrite");
     const replacedValue = acceptedDeliveryValue(replaced.result);
     assert.deepEqual(replacedValue.leading, { kind: "admitted-now", fact: replaced.deliveryFactId });
-    assert.notDeepEqual(replacedValue.integration, firstValue.integration, "overwrite=true captures the new bytes");
-    assert.equal((present(await keiyaku.state())).terminal, null);
+    const current = present(await keiyaku.state());
+    assert.equal(current.delivery?.entry, replaced.deliveryFactId);
+    assert.notEqual(current.delivery?.data.tenderSnapshot, firstValue.tenderSnapshot);
+    const integration = current.delivery?.data.integration;
+    assert.ok(integration);
+    const firstIntegration = firstValue.integration as { changeId: string };
+    assert.notEqual(integration.changeId, firstIntegration.changeId);
+    assert.deepEqual(replacedValue.contentChange, {
+      kind: "candidate-content-changed",
+      previousChange: firstIntegration.changeId,
+      currentChange: integration.changeId,
+    });
+    assert.ok(typeof replaced.result === "object" && replaced.result !== null && "facts" in replaced.result);
+    assert.ok(Array.isArray(replaced.result.facts));
+    assert.equal(replaced.result.facts.filter((entry: { kind: string }) => entry.kind === "deliver").length, 1);
+    assert.deepEqual(replacedValue.verification, {
+      kind: "ran",
+      verdict: "satisfied",
+      snapshot: integration.snapshot,
+      entry: current.attestations.at(-1)?.entry,
+    });
+    const text = renderAccepted(replaced.result as Extract<DeliverOutcome, { kind: "accepted" }>);
+    assert.match(text, /candidate-content-changed/u);
+    assert.ok(text.includes(`previous ${firstIntegration.changeId.slice(0, 7)}`), text);
+    assert.ok(text.includes(`current ${integration.changeId.slice(0, 7)}`), text);
+    assert.equal(current.terminal, null);
+  });
+
+  test("unfinished candidate reuse refuses unauthorized dirty content", async () => {
+    const { repository, keiyaku, state } = await bindAndCommit({
+      gates: ["verified"],
+      verification: "exit 0",
+      runtimeStop: true,
+    });
+    const first = accepted(await keiyaku.deliver());
+    assertRuntimeStop(first.value.verification);
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
+    writeFileSync(join(worktree, "candidate.txt"), "dirty replacement\n");
+
+    const refused = await keiyaku.deliver();
+    assert.equal(refused.kind, "refused");
+    assert.ok(refused.kind === "refused");
+    assert.equal(refused.refusal.kind, "dirty-workspace");
+    assert.equal(present(await keiyaku.state()).delivery?.entry, first.value.leading.fact);
   });
 
   test("an unchanged second forwarded deliver continues without a new delivery fact", async () => {

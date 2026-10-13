@@ -530,7 +530,33 @@ function deliverIdentityLines(
       [{ text: displayGitId(result.value.integration.changeId, abbreviations), opaque: true }],
       columns,
     );
+  if (result.value.contentChange !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "candidate-content-changed",
+      [
+        { text: `previous ${displayGitId(result.value.contentChange.previousChange, abbreviations)}`, opaque: true },
+        { text: `current ${displayGitId(result.value.contentChange.currentChange, abbreviations)}`, opaque: true },
+      ],
+      columns,
+    );
   return lines;
+}
+
+function deliveryIdentityAbbreviations(
+  value: Accepted<DeliverOutcome>["value"],
+  verificationSnapshot: string | undefined,
+): ReadonlyMap<string, string> {
+  return abbreviateGitIds([
+    value.tenderSnapshot ?? "",
+    value.integration?.changeId ?? "",
+    value.contentChange?.previousChange ?? "",
+    value.contentChange?.currentChange ?? "",
+    verificationSnapshot ?? "",
+    value.completion?.predecessor ?? "",
+    value.completion?.integration ?? "",
+  ]);
 }
 
 function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number): string {
@@ -538,13 +564,7 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
   const verification = result.value.verification;
   const subject = verification?.kind === "stopped" ? undefined : verification;
   const lines = titleLines("✓", "delivered", result.contract, columns);
-  const abbreviations = abbreviateGitIds([
-    result.value.tenderSnapshot ?? "",
-    result.value.integration?.changeId ?? "",
-    subject?.snapshot ?? "",
-    result.value.completion?.predecessor ?? "",
-    result.value.completion?.integration ?? "",
-  ]);
+  const abbreviations = deliveryIdentityAbbreviations(result.value, subject?.snapshot);
   lines.push(...deliverIdentityLines(result, abbreviations, columns, !complete));
   if (complete) lines.push(...completedPlacementLines(result, columns));
   else {

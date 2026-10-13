@@ -1,6 +1,6 @@
 import { entryUlidSchema } from "./attempt.js";
 import { z } from "zod";
-import { snapshotIdSchema } from "./operations.js";
+import { candidateContentChangeSchema, snapshotIdSchema } from "./operations.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
   materializeIntegrationSnapshot,
@@ -36,7 +36,7 @@ import {
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData, JournalEntry } from "../core/facts/types.js";
+import type { ActorId, ChangeId, ContractId, ContractState, DeliverData, JournalEntry } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
@@ -58,7 +58,12 @@ export const deliverLeadingSchema = z
   .object({ kind: z.enum(["admitted-now", "already-admitted"]), fact: entryUlidSchema })
   .strict();
 type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
-type DeliverValue = DeliveryIdentity & CompletionEvidence & Readonly<{ leading: DeliverLeading }>;
+type DeliverValue = DeliveryIdentity &
+  CompletionEvidence &
+  Readonly<{
+    leading: DeliverLeading;
+    contentChange?: z.infer<typeof candidateContentChangeSchema>;
+  }>;
 type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
 export const materializedConflictSchema = z
   .object({
@@ -229,6 +234,7 @@ export async function prepareDelivery(
  */
 type DeliveryArtifacts =
   | Readonly<{ kind: "defer" }>
+  | Readonly<{ kind: "reuse"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
   | Readonly<{ kind: "continuation"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "mechanical"; data: DeliveryIdentity; worktree: WorktreeWitness }>;
@@ -245,6 +251,7 @@ type AssembledDelivery =
       derivation?: DocumentDerivation;
       preparation?: DeliverInput<DeliveryFailure>["preparation"];
       continuation?: boolean;
+      reuse?: boolean;
     }>;
 
 function deliveryPreparationInput(input: DeliverOperationInput, derivation: DocumentDerivation) {
@@ -352,7 +359,6 @@ async function prepareDeliveryArtifacts(
 ): Promise<DeliveryArtifacts> {
   const derivation = input.deriveDocument(state);
   if (derivation.verification.kind === "refused") return { kind: "defer" };
-  if (reusesCurrentCandidate(input, state, derivation)) return { kind: "defer" };
   if (input.materializeConflict === true && state.terminal === null) return { kind: "defer" };
   const captured = await captureAuthorizedDeliveryTender(
     input.scope,
@@ -361,6 +367,9 @@ async function prepareDeliveryArtifacts(
   );
   if (captured.kind === "refused") return { kind: "refused", refusal: captured.refusal };
   const worktree = await worktreeInput(input.scope, state, captured.data);
+  if (reusesCurrentCandidate(input, state, derivation, worktree.changeId)) {
+    return { kind: "reuse", worktree };
+  }
   if (
     state.terminal === null &&
     state.delivery !== null &&
@@ -404,7 +413,6 @@ async function assembleDeliveryAttempt(
       preparation: { kind: "refused", document: derivation.document, refusal: derivation.verification.refusal },
     };
   }
-  if (reusesCurrentCandidate(input, state, derivation)) return { kind: "assembled", state, derivation };
   const artifacts = external.artifacts;
   if (artifacts.kind === "defer") return await completeDeferredDelivery(input, state, derivation);
   if (artifacts.kind === "refused") {
@@ -417,6 +425,11 @@ async function assembleDeliveryAttempt(
   }
   if (!sameWorktreeWitness(artifacts.worktree, await recaptureDeliveryWorktree(input, state))) {
     return { kind: "stale" };
+  }
+  if (artifacts.kind === "reuse") {
+    return reusesCurrentCandidate(input, state, derivation, artifacts.worktree.changeId)
+      ? { kind: "assembled", state, derivation, reuse: true }
+      : { kind: "stale" };
   }
   if (artifacts.kind === "continuation") {
     const delivery = state.delivery;
@@ -440,7 +453,7 @@ async function assembleDeliveryAttempt(
 /**
  * Complete a preparation the outside phase could not settle. A requested conflict materialization
  * must retire its owned handoff and then capture the worktree that follows, so it only runs under
- * this custody; every other deferred state is decided by reuse above or refuses on its own.
+ * this custody; an unchanged candidate may still be reused before that materialization.
  */
 async function completeDeferredDelivery(
   input: DeliverOperationInput,
@@ -448,6 +461,10 @@ async function completeDeferredDelivery(
   derivation: DocumentDerivation,
 ): Promise<AssembledDelivery> {
   if (input.materializeConflict !== true || state.terminal !== null) return { kind: "assembled", state, derivation };
+  const worktree = await recaptureDeliveryWorktree(input, state);
+  if (worktree !== undefined && reusesCurrentCandidate(input, state, derivation, worktree.changeId)) {
+    return { kind: "assembled", state, derivation, reuse: true };
+  }
   const materialization = await materializationMergeStateRefusal(input);
   if (materialization !== undefined) {
     return {
@@ -473,6 +490,7 @@ function reusesCurrentCandidate(
   input: DeliverOperationInput,
   state: ContractState,
   derivation: DocumentDerivation,
+  changeId: ChangeId,
 ): boolean {
   return (
     input.overwrite !== true &&
@@ -480,7 +498,8 @@ function reusesCurrentCandidate(
     state.delivery !== null &&
     derivation.verification.kind === "prepared" &&
     derivation.verification.data !== null &&
-    currentVerifiedAttestation(state) === undefined
+    currentVerifiedAttestation(state) === undefined &&
+    state.delivery.data.integration.changeId === changeId
   );
 }
 
@@ -491,8 +510,7 @@ function currentCandidateDeliveryDecision(
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
 ): AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined {
   const state = assembled.state;
-  if (state === null || assembled.derivation === undefined) return undefined;
-  if (!reusesCurrentCandidate(input, state, assembled.derivation)) return undefined;
+  if (state === null || assembled.derivation === undefined || assembled.reuse !== true) return undefined;
   const record = observation.journals.get(input.contractId);
   const delivery = record?.entries.findLast((entry) => entry.kind === "deliver");
   if (record === undefined || delivery === undefined) throw new Error("current delivery is missing its journal fact");
@@ -563,11 +581,25 @@ async function decideAndAdmitDelivery(
   if (admission.kind !== "accepted") return admission;
   const deliverFact = admission.facts.find((fact) => fact.contract === input.contractId && fact.kind === "deliver");
   if (deliverFact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");
+  const previousChange = assembled.state?.delivery?.data.integration.changeId;
+  const currentChange = preparation.data.integration.changeId;
   return {
     ...admission,
     value: {
       ...preparation.data,
       leading: { kind: "admitted-now", fact: deliverFact.entry },
+      ...(previousChange === undefined || previousChange === currentChange
+        ? {}
+        : {
+            contentChange: {
+              kind: "candidate-content-changed" as const,
+              ...(assembled.state?.coordinates.target === undefined
+                ? {}
+                : { target: assembled.state.coordinates.target }),
+              previousChange,
+              currentChange,
+            },
+          }),
     },
   };
 }
