@@ -1,7 +1,7 @@
 import { accepted } from "./support/library-verbs.js";
 import { present } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
-import { deferred as promiseBarrier, waitForCondition } from "./support/process.js";
+import { deferred as promiseBarrier, settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -53,7 +53,6 @@ import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
   installAkumaBodyPidReceipt,
-  waitForFixtureFile,
 } from "./support/process.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
@@ -321,7 +320,9 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
     let result: Awaited<typeof pending>;
     try {
       const readyPath = join(emptyPublicationBarrier, "ready");
-      await waitForFixtureFile(readyPath);
+      await waitForCondition("empty Body publication barrier", () => existsSync(readyPath), {
+        terminalState: settlementProbe(pending, () => "call settled before empty Body publication"),
+      });
       const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
       const whileHeld = await readHeart(pathsForAkuId(world, parseAkuId(held.id).id));
       assert.equal(whileHeld.latestBody?.end, undefined);
@@ -378,6 +379,7 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let wake: Promise<unknown> | undefined;
+  let pending: Promise<CallResult> | undefined;
   const admitInitialTell = AkumaOwner.prototype.admitInitialTell;
   t.mock.method(
     AkumaOwner.prototype,
@@ -390,7 +392,7 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   );
   let operationFailed = true;
   try {
-    const pending = Akumas.of(world).call({
+    pending = Akumas.of(world).call({
       archetype: "worker",
       body: "zero-budget-after-birth",
       cwd: world,
@@ -401,7 +403,9 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
     });
     void pending.catch(() => undefined);
     const readyPath = join(emptyPublicationBarrier, "ready");
-    await waitForFixtureFile(readyPath);
+    await waitForCondition("empty Body publication barrier before zero-budget observation", () => existsSync(readyPath), {
+      terminalState: settlementProbe(pending, () => "call settled before empty Body publication"),
+    });
     const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
     const child = parseAkuId(held.id).id;
     assert.equal((await readHeart(pathsForAkuId(world, child))).latestBody?.end, undefined);
@@ -426,13 +430,15 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   } finally {
     try {
       releaseAnswer();
+      const releasePath = join(emptyPublicationBarrier, "release");
+      if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
+      const settled = await pending?.catch(() => undefined);
+      akumaId ??= settled?.akuma;
       if (akumaId !== undefined)
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
       await wake?.catch(() => undefined);
-      const releasePath = join(emptyPublicationBarrier, "release");
-      if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
       await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreEmptyPublicationBarrier();

@@ -1,21 +1,22 @@
 import { present, accepted, assertRefused } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import test, { describe } from "node:test";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
-import { contractJournalPath, contractPhysicalName } from "../src/git/identity.js";
-import { GIT_REF, HANDOFF_RECEIPT_REF_NAMESPACE, readBlob, readGitPaths, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
-import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
+import { contractJournalPath, contractPhysicalName, gitRefLocator } from "../src/git/identity.js";
+import { GIT_REF, HANDOFF_RECEIPT_REF_NAMESPACE, commonGitDirectory, readBlob, readGitPaths, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
+import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Keiyaku, Repo, type ContractRow } from "../src/index.js";
 import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, snapshotGitRepository, withGitShim } from "./support/git.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { conflictRecovery } from "../src/git/workspace.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 
 type ContractHandle = Pick<Keiyaku, "state">;
 
@@ -315,74 +316,108 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
   test("a satisfied review cannot interleave a stale integration stop across the target fence", async () => {
     const { repository, contract, targetHead } = await reviewGatedConflictCandidateFixture();
     const git = await cachedRepositoryAt(repository.path);
-    const held = await acquireTargetPlacementFence(git, "refs/heads/main");
-    const pending = contract.review({ verdict: "satisfied" });
-    // A full parallel suite can delay Git observation without changing the fence ordering.
-    const deadline = Date.now() + 15000;
-    let state = present(await contract.state());
-    while (state.attestations.at(-1)?.data.verdict !== "satisfied" && Date.now() < deadline) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 20);
-      });
-      state = present(await contract.state());
-    }
-    assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
-    assert.equal(state.delivery, null);
-    const reviewedChangeId = changeIdFromSubject(state.attestations.at(-1)?.data.subject);
-    if (reviewedChangeId === undefined) throw new Error("reviewed subject is missing its ChangeId");
-    const journalPath = contractJournalPath(state.id);
-    const before = await readGitPaths(git, [journalPath]);
-    const active = before.paths.get(journalPath);
-    if (active?.type !== "blob") throw new Error("missing active journal");
-    const oid = await writeBlob(
-      git,
-      Buffer.concat([
-        await readBlob(git, active.oid),
-        Buffer.from(
-          encodeEntry({
-            v: 1,
-            kind: "deliver",
-            contract: state.id,
-            entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBX"),
-            at: "2026-08-17T00:00:01.000Z",
-            data: {
-              tenderSnapshot: snapshotId(targetHead),
-              integration: {
-                predecessor: snapshotId(targetHead),
-                snapshot: snapshotId(targetHead),
-                changeId: changeId(reviewedChangeId),
-              },
-              method: "squash",
-              policy: { requireBranchesToBeUpToDate: false },
+    const armed = join(repository.path, ".git", "placement-fence-armed");
+    const parked = join(repository.path, ".git", "placement-fence-parked");
+    const released = join(repository.path, ".git", "placement-fence-released");
+    await withGitShim(
+      [
+        // Park the first Git observation after placement acquires its fence. Preparing competing
+        // journal/target changes now consumes no lock-acquisition budget.
+        'if [ -f "$KEIYAKU_FENCE_ARMED" ] && [ ! -f "$KEIYAKU_FENCE_RELEASED" ]; then',
+        '  : > "$KEIYAKU_FENCE_PARKED"',
+        '  while [ ! -f "$KEIYAKU_FENCE_RELEASED" ]; do sleep 0.05; done',
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      { KEIYAKU_FENCE_ARMED: armed, KEIYAKU_FENCE_PARKED: parked, KEIYAKU_FENCE_RELEASED: released },
+      async (gitPath) => {
+        const traced = Keiyaku.with().select({
+          repo: await Repo.at({ path: repository.path, gitPath }),
+          id: await publicContractId(contract),
+        });
+        const pending = traced.review(
+          { verdict: "satisfied" },
+          {
+            observe: (event) => {
+              if (event.kind === "stage" && event.stage === "placement" && event.state === "started")
+                writeFileSync(armed, "");
             },
-          }),
-        ),
-      ]),
+          },
+        );
+        try {
+          await waitForCondition("review parked inside the placement fence", () => existsSync(parked), {
+            terminalState: settlementProbe(pending, () => "review settled before parking"),
+          });
+          // The parked review holds the target-placement fence, so a contender cannot enter it.
+          const contender = await tryAcquireSqliteTransactionLock({
+            path: resolve(
+              commonGitDirectory(git),
+              "keiyaku",
+              "locks",
+              "target-placement",
+              `${gitRefLocator("refs/heads/main")}.sqlite`,
+            ),
+            mode: "immediate",
+          });
+          contender?.close();
+          assert.equal(contender, null);
+          const state = present(await contract.state());
+          assert.equal(state.attestations.at(-1)?.data.verdict, "satisfied");
+          assert.equal(state.delivery, null);
+          const reviewedChangeId = changeIdFromSubject(state.attestations.at(-1)?.data.subject);
+          if (reviewedChangeId === undefined) throw new Error("reviewed subject is missing its ChangeId");
+          const journalPath = contractJournalPath(state.id);
+          const before = await readGitPaths(git, [journalPath]);
+          const active = before.paths.get(journalPath);
+          if (active?.type !== "blob") throw new Error("missing active journal");
+          const oid = await writeBlob(
+            git,
+            Buffer.concat([
+              await readBlob(git, active.oid),
+              Buffer.from(
+                encodeEntry({
+                  v: 1,
+                  kind: "deliver",
+                  contract: state.id,
+                  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBX"),
+                  at: "2026-08-17T00:00:01.000Z",
+                  data: {
+                    tenderSnapshot: snapshotId(targetHead),
+                    integration: {
+                      predecessor: snapshotId(targetHead),
+                      snapshot: snapshotId(targetHead),
+                      changeId: changeId(reviewedChangeId),
+                    },
+                    method: "squash",
+                    policy: { requireBranchesToBeUpToDate: false },
+                  },
+                }),
+              ),
+            ]),
+          );
+          const tree = await updateGitTree(git, before.tree, new Map([[journalPath, { oid }]]));
+          const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+          if (before.commit === null) throw new Error("missing state ref");
+          repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
+          writeFileSync(join(repository.path, "unrelated-target.txt"), "moved\n");
+          repository.run(["add", "unrelated-target.txt"]);
+          repository.run(["commit", "--quiet", "-m", "move target under fence"]);
+        } finally {
+          // Release the parked review and drain it on every path so its fence closes.
+          writeFileSync(released, "");
+          await pending.catch(() => undefined);
+        }
+        const reviewed = await pending;
+        assert.deepEqual(
+          reviewed.facts.map((fact) => fact.kind),
+          ["attestation", "reintegrated", "claimed"],
+        );
+        assert.equal(accepted(reviewed).value.placement, undefined);
+        const finalState = present(await contract.state());
+        assert.equal(finalState.terminal?.kind, "claimed");
+        assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
+      },
     );
-    const tree = await updateGitTree(git, before.tree, new Map([[journalPath, { oid }]]));
-    const commit = await writeCommit({ repository: git, tree, parent: before.commit });
-    if (before.commit === null) throw new Error("missing state ref");
-    repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
-    writeFileSync(join(repository.path, "unrelated-target.txt"), "moved\n");
-    repository.run(["add", "unrelated-target.txt"]);
-    repository.run(["commit", "--quiet", "-m", "move target under fence"]);
-    const stillHeld = await Promise.race([
-      pending.then(() => "finished" as const),
-      new Promise<"blocked">((resolve) => {
-        setTimeout(() => resolve("blocked"), 50);
-      }),
-    ]);
-    assert.equal(stillHeld, "blocked");
-    held.close();
-    const reviewed = await pending;
-    assert.deepEqual(
-      reviewed.facts.map((fact) => fact.kind),
-      ["attestation", "reintegrated", "claimed"],
-    );
-    assert.equal(accepted(reviewed).value.placement, undefined);
-    const finalState = present(await contract.state());
-    assert.equal(finalState.terminal?.kind, "claimed");
-    assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
   });
 
   test("ungated Verification is absent from a library delivery claim", async () => {

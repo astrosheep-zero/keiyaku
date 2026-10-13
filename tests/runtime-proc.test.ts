@@ -34,7 +34,7 @@ import {
 function input(argv: readonly string[], overrides: Partial<ProcessInput> = {}): ProcessInput {
   return {
     argv,
-    timeoutMs: 2_000,
+    // Only deadline tests set a process timeout; ordinary output tests do not time child startup.
     ...overrides,
   };
 }
@@ -487,6 +487,20 @@ async function waitForFile(path: string, timeoutMs = 2_000): Promise<string> {
   }
 }
 
+/**
+ * Await fixture readiness while its owning process is still live. A process that
+ * settles first reports that outcome instead of leaving the readiness pending,
+ * so a killed or failed launch fails its test by name rather than hanging.
+ */
+async function awaitReadiness<T>(description: string, readiness: Promise<void>, settlement: Promise<T>): Promise<void> {
+  await Promise.race([
+    readiness,
+    settlement.then((outcome) => {
+      throw new Error(`${description}: the owned process settled first (${JSON.stringify(outcome)})`);
+    }),
+  ]);
+}
+
 async function expectNoTerminationSignals(pid: number, run: () => Promise<void>): Promise<void> {
   let signals = 0;
   const originalKill = process.kill;
@@ -522,46 +536,74 @@ test("runProcess returns terminal diagnostics from both streams", async () => {
   });
 });
 
-test("runProcess observes split UTF-8 output before the child completes while retaining its tail", async () => {
+test("runProcess observes split UTF-8 output before the child completes while retaining its tail", { timeout: 60_000 }, async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-v4-runtime-split-utf8-");
+  const tailRelease = join(root, "tail-release");
+  const exitRelease = join(root, "exit-release");
   let observed = "";
-  const { promise: liveOutput, resolve: ready } = promiseBarrier<void>();
   let settled = false;
+  const controller = new AbortController();
+  context.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  const { promise: liveOutput, resolve: ready } = promiseBarrier<void>();
+  const { promise: liveTail, resolve: tail } = promiseBarrier<void>();
   const pending = runProcess(
     input(
       [
         process.execPath,
         "-e",
         [
+          'const { existsSync } = require("node:fs");',
+          `const [tailRelease, exitRelease] = ${JSON.stringify([tailRelease, exitRelease])};`,
           'process.stdout.write("ready\\n");',
-          "setTimeout(() => process.stdout.write(Buffer.from([0xe2])), 20);",
-          "setTimeout(() => process.stdout.write(Buffer.from([0x82])), 40);",
-          "setTimeout(() => process.stdout.write(Buffer.from([0xac])), 60);",
-          "setTimeout(() => process.exit(0), 200);",
+          "const waitFor = (path, next) => {",
+          "  const poll = () => (existsSync(path) ? next() : setTimeout(poll, 5));",
+          "  poll();",
+          "};",
+          "waitFor(tailRelease, () => {",
+          "  process.stdout.write(Buffer.from([0xe2]));",
+          "  process.stdout.write(Buffer.from([0x82]));",
+          "  process.stdout.write(Buffer.from([0xac]));",
+          "  waitFor(exitRelease, () => process.exit(0));",
+          "});",
         ].join(" "),
       ],
       {
+        signal: controller.signal,
         onOutput: ({ stream, text }) => {
           if (stream !== "stdout") return;
           observed += text;
           if (observed.includes("ready\n")) ready();
+          if (observed.includes("€")) tail();
         },
       },
     ),
   );
-  void pending.then(() => {
+  const finished = pending.then((outcome) => {
     settled = true;
+    return outcome;
   });
 
-  await liveOutput;
-  assert.equal(settled, false);
-  assert.deepEqual(await pending, {
-    kind: "terminal",
-    code: 0,
-    stdout: "ready\n€",
-    stderr: "",
-    truncated: false,
-  });
-  assert.equal(observed, "ready\n€");
+  try {
+    // The child holds its tail and its exit until this test releases each stage,
+    // so readiness is a handshake instead of an elapsed-time assumption.
+    await awaitReadiness("the split UTF-8 readiness line", liveOutput, finished);
+    assert.equal(settled, false);
+    writeFileSync(tailRelease, "release\n");
+    await awaitReadiness("the decoded UTF-8 tail", liveTail, finished);
+    assert.equal(settled, false);
+    writeFileSync(exitRelease, "release\n");
+    assert.deepEqual(await finished, {
+      kind: "terminal",
+      code: 0,
+      stdout: "ready\n€",
+      stderr: "",
+      truncated: false,
+    });
+    assert.equal(observed, "ready\n€");
+  } finally {
+    controller.abort();
+    await finished.catch(() => undefined);
+  }
 });
 
 test("runProcess isolates an observation consumer failure and still cleans up cancellation", async () => {
@@ -622,8 +664,12 @@ for (const [name, run] of [
   ["runProcess", runProcess],
   ["runCrossPlatformProcess", runCrossPlatformProcess],
 ] as const) {
-  test(`${name} retains truncated output at its exact timeout`, { timeout: 10_000 }, async (context) => {
+  test(`${name} retains truncated output at its exact timeout`, { timeout: 60_000 }, async (context) => {
     const controller = new AbortController();
+    context.signal.addEventListener("abort", () => {
+      context.mock.timers.reset();
+      controller.abort();
+    }, { once: true });
     const { promise: outputReady, resolve: ready } = promiseBarrier<void>();
     const observed = { stdout: "", stderr: "" };
     let settled = false;
@@ -641,7 +687,7 @@ for (const [name, run] of [
     }));
     const finished = pending.then((outcome) => { settled = true; return outcome; });
     try {
-      await Promise.race([outputReady, finished.then(() => { throw new Error("process ended before producing both tails"); })]);
+      await awaitReadiness(`the ${name} output tails`, outputReady, finished);
       context.mock.timers.tick(1_999);
       await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(settled, false, "deadline must not fire early");

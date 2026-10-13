@@ -35,6 +35,7 @@ import {
   readHeart,
   readOpenPendingTellDisposition, readTell,
   readTurn,
+  readLatestTurnForBody,
   recordSession,
   recordTell as heartRecordTell,
   requestPause,
@@ -370,8 +371,9 @@ function hangingSession(fence: string, abort: () => Promise<void> = async () => 
   };
 }
 
-function hangingAdapter(fence: string, abort?: () => Promise<void>): FixtureProviderAdapter {
+function hangingAdapter(fence: string, abort?: () => Promise<void>, onStart?: () => void): FixtureProviderAdapter {
   return scenarioProvider(async () => {
+      onStart?.();
       return hangingSession(fence, abort);
   });
 }
@@ -402,6 +404,24 @@ async function waitUntilLatestBody(
       ? {}
       : { terminalState: settlementProbe(settlement, () => "the driving Body pump settled without a recorded Body") },
   );
+}
+
+/**
+ * Wait until the driving Body has started its provider session.
+ *
+ * A Tell recorded while a Body is still being born can be drained into the Turn's launch submission
+ * instead of reaching the session's live tell callback: the Body snapshots its pending Tells before
+ * it starts the provider. A test that expects the live callback, or a live-only handoff, records
+ * only after this handshake. The Body's own settlement ends the wait by name instead of spinning.
+ */
+async function awaitProviderSession(
+  started: () => boolean,
+  driving: Promise<unknown>,
+  description: string,
+): Promise<void> {
+  await waitForCondition(description, started, {
+    terminalState: settlementProbe(driving, () => "the driving Body settled before its provider session started"),
+  });
 }
 
 async function eventually(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
@@ -715,14 +735,18 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
 
 test("live receipt persistence waits for its Body-scoped delivery mapping", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-live-tell-");
+  const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
+  const { promise: receiptReleased, resolve: releaseReceipt } = promiseBarrier<void>();
+  let body: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const allocated = await allocatedHeart(root, "claude", "1a2b3c4d");
     configureTurnOutcomePlugins(root);
     const recorder = installTurnOutcomeRecorder(allocated.paths);
-    const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
-    const { promise: receiptReleased, resolve: releaseReceipt } = promiseBarrier<void>();
-    const { promise: observed, resolve: tellObserved } = promiseBarrier<void>();
+    let observed = false;
+    const tellObserved = () => { observed = true; };
+    let sessionStarted = false;
     const live: FixtureProviderAdapter = scenarioProvider(async () => {
+        sessionStarted = true;
         return {
           admission: { fence: "initial-turn" },
           events: {
@@ -763,17 +787,24 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
       initiator: "Carol",
       recordedAt: "2026-08-08T00:00:00.000Z",
     });
-    const body = driveAkumaBody(launch, live, {
+    body = driveAkumaBody(launch, live, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the live Tell",
+    );
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
       initiator: "Bob",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await observed;
+    await waitForCondition("the live Tell callback", () => observed, {
+      terminalState: settlementProbe(body, () => "Body settled before the live Tell callback"),
+    });
     releaseEvents();
     await body;
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
@@ -782,6 +813,9 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
       participants: signal.participants,
     } : null), [{ initiator: "Alice", participants: ["Alice", "Carol", "Bob"] }]);
   } finally {
+    releaseReceipt();
+    releaseEvents();
+    await body;
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
     rmSync(root, { recursive: true, force: true });
   }
@@ -789,15 +823,19 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
 
 test("a receipt-free live acknowledgement settles the tell in the current Body", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-live-ack-");
+  const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
+  let body: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const allocated = await allocatedHeart(root, "codex", "1a2b3c40");
-    const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
-    const { promise: observed, resolve: tellObserved } = promiseBarrier<void>();
+    let observed = false;
+    const tellObserved = () => { observed = true; };
+    let sessionStarted = false;
     const live: FixtureProviderAdapter = scenarioProvider(() => {
         return sessionAttempt(async () => ({
           admission: { fence: "initial-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
+              sessionStarted = true;
               yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
               await eventsReleased;
             },
@@ -815,7 +853,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
           async forceDispose() {},
         }));
     });
-    const body = driveAkumaBody(
+    body = driveAkumaBody(
       {
         paths: allocated.paths,
         seed: {
@@ -834,12 +872,19 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
       },
     );
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the live Tell",
+    );
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await observed;
+    await waitForCondition("the receipt-free live Tell callback", () => observed, {
+      terminalState: settlementProbe(body, () => "Body settled before the live Tell callback"),
+    });
     await waitForCondition(
       "the live acknowledgement to settle the pending Tell",
       async () => (await readHeart(allocated.paths)).pending.length === 0,
@@ -850,6 +895,8 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     await body;
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
   } finally {
+    releaseEvents();
+    await body;
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -861,6 +908,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     const { promise: released, resolve: release } = promiseBarrier<void>();
     const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
     let steered: { role: string; content: unknown } | undefined;
+    let sessionStarted = false;
     const manager = { getLeafId: () => "pi-answer" };
     const session = {
       sessionFile: "/sessions/pi-body.jsonl", sessionId: "pi-body", sessionManager: manager,
@@ -878,6 +926,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       listener: undefined as ((event: { type: string; message?: unknown; messages?: unknown[]; willRetry?: boolean }) => void) | undefined,
       async bindExtensions() {},
       async prompt() {
+        sessionStarted = true;
         await released;
         this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "steered answer" }] } });
       },
@@ -898,6 +947,13 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       initialBody: "work",
     }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the Pi session to start before recording the live Tell",
+    );
+    const initialTurn = await readLatestTurnForBody(allocated.paths, 1);
+    assert.ok(initialTurn !== null);
     await recordTell(allocated.paths, { id: "pi-live", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z" });
     await waitForCondition("Pi to queue the native steer", () => steered !== undefined, { terminalState: settlementProbe(body, () => "Body settled before native steer") });
     assert.deepEqual(steered?.content, [{ type: "text", text: "steer" }]);
@@ -909,7 +965,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     await waitForCondition("Pi native evidence to settle the Tell", async () =>
       (await readTell(allocated.paths, "pi-live"))?.state === "told", { terminalState: settlementProbe(body, () => "Body settled before native evidence") });
     const turnSequence = (await readTell(allocated.paths, "pi-live"))?.binding?.turnSequence;
-    assert.equal(turnSequence, 2);
+    assert.equal(turnSequence, initialTurn.sequence);
     release();
     await body;
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
@@ -928,6 +984,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     const nativeListeners = new Set<(event: { type: string; message?: unknown }) => void>();
     const prompts: string[] = [];
     let steered = false;
+    let sessionStarted = false;
     let sessions = 0;
     const manager = { getLeafId: () => `pi-answer-${sessions}` };
     const sdk = {
@@ -950,6 +1007,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
           listener: undefined as ((event: { type: string; message?: unknown }) => void) | undefined,
           async bindExtensions() {},
           async prompt(text: string) {
+            sessionStarted = true;
             prompts.push(text);
             if (first) await released;
             this.listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } });
@@ -971,6 +1029,11 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
       initialBody: "work",
     }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the Pi session to start before recording the live Tell",
+    );
     await recordTell(allocated.paths, { id: "pi-late", body: "late input", recordedAt: "2026-08-08T00:00:01.000Z" });
     await waitForCondition("Pi to queue the late steer", () => steered, { terminalState: settlementProbe(body, () => "Body settled before native steer") });
     for (const listener of nativeListeners) listener({ type: "agent_end" });
@@ -994,7 +1057,10 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
   try {
     const allocated = await allocatedHeart(root, "acp", "1a2b3c45");
     let spawnAttempts = 0;
-    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("release-spawn-failure"), {
+    let sessionStarted = false;
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("release-spawn-failure", undefined, () => {
+      sessionStarted = true;
+    }), {
       now: () => "2026-08-08T00:00:00.000Z",
       async spawnBody() {
         spawnAttempts += 1;
@@ -1006,6 +1072,11 @@ test("a failed release recovery spawn records Heart undelivered disposition", as
       },
     });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the disposition Tell",
+    );
     await recordTell(allocated.paths, {
       id: "release-spawn-failure",
       body: "continue",
@@ -1028,7 +1099,10 @@ test("duplicate wake after a recorded successor disposition does not create a se
   try {
     const allocated = await allocatedHeart(root, "acp", "1a2b3c46");
     let spawnCount = 0;
-    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("duplicate-wake"), {
+    let sessionStarted = false;
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("duplicate-wake", undefined, () => {
+      sessionStarted = true;
+    }), {
       now: () => "2026-08-08T00:00:00.000Z",
       async spawnBody(launch) {
         spawnCount += 1;
@@ -1044,6 +1118,11 @@ test("duplicate wake after a recorded successor disposition does not create a se
       },
     });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the handoff Tell",
+    );
     await recordTell(allocated.paths, {
       id: "tell-duplicate",
       body: "once",
@@ -1079,7 +1158,10 @@ test("successor Body record before admission failure yields Heart undelivered fo
     const allocated = await allocatedHeart(root, "acp", "1a2b3c52");
     const emptyLog = { path: allocated.paths.log, from: 0, to: 0 };
     let spawnAttempts = 0;
-    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("parent-before-successor-fail"), {
+    let sessionStarted = false;
+    const body = driveAkumaBody(acpLaunch(allocated, root), hangingAdapter("parent-before-successor-fail", undefined, () => {
+      sessionStarted = true;
+    }), {
       now: () => "2026-08-08T00:00:00.000Z",
       async spawnBody(launch) {
         spawnAttempts += 1;
@@ -1101,6 +1183,11 @@ test("successor Body record before admission failure yields Heart undelivered fo
       },
     });
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the handoff Tell",
+    );
     await recordTell(allocated.paths, {
       id: "tell-admission-fail",
       body: "continue",
@@ -1714,9 +1801,11 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     const { promise: returned, resolve: tellReturned } = promiseBarrier<void>();
     const { promise: completion, resolve: settle } = promiseBarrier<TurnResult>();
     let successorSpawns = 0;
+    let sessionStarted = false;
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
       scenarioProvider(async () => {
+          sessionStarted = true;
           return {
             admission: { fence: "violating-tell-turn" },
             events: {
@@ -1755,6 +1844,11 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
       },
     );
     await waitUntilLatestBody(allocated.paths, body);
+    await awaitProviderSession(
+      () => sessionStarted,
+      body,
+      "the provider session to start before recording the stalled Tell",
+    );
     await recordTell(allocated.paths, {
       id: "violating-live-tell",
       body: "steer",

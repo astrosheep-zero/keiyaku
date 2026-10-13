@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { repositoryAt } from "../src/git/repository.js";
@@ -9,7 +9,8 @@ import { GitPlumbingError, runGitPipe } from "../src/git/process.js";
 import { captureWorkspaceTree } from "../src/git/workspace.js";
 import { worktreeChangeId } from "../src/git/integration.js";
 import { mintSnapshotId } from "../src/git/identity.js";
-import { protocolContractId, repositoryWithCommit, waitForFile } from "./support/git.js";
+import { protocolContractId, repositoryWithCommit } from "./support/git.js";
+import { settlementProbe, waitForCondition } from "./support/process.js";
 
 test("change identity streams a large binary patch without retaining the patch in Node", async (t) => {
   const repository = repositoryWithCommit();
@@ -97,7 +98,9 @@ test("cancelling a Git pipe retires both live commands before rejection", async 
   void pending.catch(() => undefined);
   let pids: number[] = [];
   try {
-    await Promise.all(files.map(waitForFile));
+    await waitForCondition("both live Git pipe PID receipts", () => files.every((file) => existsSync(file)), {
+      terminalState: settlementProbe(pending, () => "Git pipe settled before cancellation"),
+    });
     pids = files.map((file) => Number(readFileSync(file, "utf8")));
     for (const pid of pids) {
       assert.ok(Number.isSafeInteger(pid) && pid > 0, "published receipt must name an actual child");
