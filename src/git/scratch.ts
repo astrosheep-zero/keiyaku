@@ -4,22 +4,23 @@ import { lstat, realpath, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
+  acquireSqliteTransactionLock,
   tryAcquireSqliteTransactionLock,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
-import type { SnapshotId } from "../core/facts/types.js";
-import { gitObjectIdForSnapshot } from "./identity.js";
+import type { ContractId, SnapshotId } from "../core/facts/types.js";
+import { contractLocator, gitRefLocator, gitObjectIdForSnapshot } from "./identity.js";
 import { executeGit, type GitRepository } from "./process.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
-const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24})$/;
+const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24}|[0-9a-f]{64}-[0-9a-f]{64})$/;
 /** One bounded removal attempt per scratch; expiry is reported, never retried inside this call. */
 const SCRATCH_REMOVAL_TIMEOUT_MS = 120_000;
 
 export type MaterializedScratchCandidate = Readonly<{
   cwd: string;
-  dispose: () => Promise<WorktreeLeak | null>;
+  dispose: (retain?: boolean) => Promise<WorktreeLeak | null>;
 }>;
 
 type CollectableScratchWorktree = Readonly<{
@@ -37,8 +38,12 @@ type CollectableScratchRemoval = Readonly<{
   diagnostic?: string;
 }>;
 
-function scratchPath(): string {
-  return join(SCRATCH_ROOT, `${SCRATCH_PREFIX}${randomBytes(12).toString("hex")}`);
+function scratchPath(repository: GitRepository, contract?: ContractId): string {
+  const identity =
+    contract === undefined
+      ? randomBytes(12).toString("hex")
+      : `${gitRefLocator(repository.commonDirectory)}-${contractLocator(contract)}`;
+  return join(SCRATCH_ROOT, `${SCRATCH_PREFIX}${identity}`);
 }
 
 function ownershipLockPath(path: string): string | null {
@@ -53,11 +58,15 @@ async function removeOwnershipLock(lockPath: string): Promise<void> {
   });
 }
 
-async function collectableScratchWorktrees(paths: Iterable<string>): Promise<readonly CollectableScratchWorktree[]> {
+async function collectableScratchWorktrees(
+  paths: Iterable<string>,
+  terminalScratch?: string,
+): Promise<readonly CollectableScratchWorktree[]> {
   const collectable: CollectableScratchWorktree[] = [];
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);
     if (lockPath === null) continue;
+    if (basename(path).length !== SCRATCH_PREFIX.length + 24 && path !== terminalScratch) continue;
     const lock = await tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
     if (lock !== null) collectable.push({ path, lockPath, release: () => lock.close() });
   }
@@ -75,27 +84,46 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function removeScratch(repository: GitRepository, path: string): Promise<WorktreeLeak | null> {
+  const removal = AbortSignal.timeout(SCRATCH_REMOVAL_TIMEOUT_MS);
+  try {
+    const present = await pathExists(path);
+    await executeGit({ ...repository, signal: removal }, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
+    return (await pathExists(path))
+      ? { path, diagnostic: `Git reported scratch worktree removal but the path remains: ${path}` }
+      : null;
+  } catch (error) {
+    const original = error instanceof Error ? error.message : String(error);
+    return {
+      path,
+      diagnostic: removal.aborted
+        ? `scratch worktree removal timed out after ${SCRATCH_REMOVAL_TIMEOUT_MS}ms: ${original}`
+        : original,
+    };
+  }
+}
+
+export class ScratchRemovalError extends Error {
+  constructor(readonly leak: WorktreeLeak) {
+    super(leak.diagnostic);
+    this.name = "ScratchRemovalError";
+  }
+}
+
 /** Remove only abandoned Verification scratch worktrees whose ownership locks are held. */
 export async function removeCollectableScratchWorktrees(
   repository: GitRepository,
   paths: Set<string>,
+  terminalContract?: ContractId,
 ): Promise<readonly CollectableScratchRemoval[]> {
   const removals: CollectableScratchRemoval[] = [];
-  for (const scratch of await collectableScratchWorktrees(paths)) {
+  const terminalScratch = terminalContract === undefined ? undefined : scratchPath(repository, terminalContract);
+  for (const scratch of await collectableScratchWorktrees(paths, terminalScratch)) {
     let removed = false;
     try {
-      let diagnostic: string | undefined;
-      try {
-        const present = await pathExists(scratch.path);
-        await executeGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), scratch.path]);
-        if (await pathExists(scratch.path)) {
-          diagnostic = `Git reported scratch worktree removal but the path remains: ${scratch.path}`;
-        }
-      } catch (error) {
-        diagnostic = error instanceof Error ? error.message : String(error);
-      }
-      if (diagnostic !== undefined) {
-        removals.push({ path: scratch.path, retained: true, diagnostic });
+      const leak = await removeScratch(repository, scratch.path);
+      if (leak !== null) {
+        removals.push({ path: scratch.path, retained: true, diagnostic: leak.diagnostic });
         continue;
       }
       paths.delete(scratch.path);
@@ -103,7 +131,7 @@ export async function removeCollectableScratchWorktrees(
       removals.push({ path: scratch.path, retained: false });
     } finally {
       scratch.release();
-      if (removed) await removeOwnershipLock(scratch.lockPath);
+      if (removed && scratch.path !== terminalScratch) await removeOwnershipLock(scratch.lockPath);
     }
   }
   return removals;
@@ -113,49 +141,40 @@ export async function removeCollectableScratchWorktrees(
 export async function materializeScratchCandidate(
   repository: GitRepository,
   candidate: SnapshotId,
+  contract?: ContractId,
 ): Promise<MaterializedScratchCandidate> {
-  const cwd = scratchPath();
+  const cwd = scratchPath(repository, contract);
   const lockPath = ownershipLockPath(cwd);
   if (lockPath === null) throw new Error("scratch ownership lock path is invalid");
-  const ownership: HeldSqliteTransactionLock | null = await tryAcquireSqliteTransactionLock({
+  const ownership: HeldSqliteTransactionLock = await acquireSqliteTransactionLock({
     path: lockPath,
     mode: "exclusive",
+    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
-  if (ownership === null) throw new Error("new scratch ownership lock is unexpectedly held");
   try {
+    if (await pathExists(cwd)) {
+      const leak = await removeScratch(repository, cwd);
+      if (leak !== null) throw new ScratchRemovalError(leak);
+    }
     await executeGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
   } catch (error) {
     ownership.close();
-    await removeOwnershipLock(lockPath);
+    if (contract === undefined && !(error instanceof ScratchRemovalError)) await removeOwnershipLock(lockPath);
     throw error;
   }
   let disposed = false;
   return {
     cwd,
-    dispose: async () => {
+    dispose: async (retain = false) => {
       if (disposed) return null;
       disposed = true;
-      const removal = AbortSignal.timeout(SCRATCH_REMOVAL_TIMEOUT_MS);
-      let leak: WorktreeLeak | null = null;
-      let removed = false;
       try {
-        await executeGit({ ...repository, signal: removal }, ["worktree", "remove", "--force", cwd]);
-        removed = !(await pathExists(cwd));
-        if (!removed)
-          leak = { path: cwd, diagnostic: `Git reported scratch worktree removal but the path remains: ${cwd}` };
-      } catch (error) {
-        const original = error instanceof Error ? error.message : String(error);
-        leak = {
-          path: cwd,
-          diagnostic: removal.aborted
-            ? `scratch worktree removal timed out after ${SCRATCH_REMOVAL_TIMEOUT_MS}ms: ${original}`
-            : original,
-        };
+        if (retain) return { path: cwd, diagnostic: "failed Verification scratch retained for diagnosis" };
+        return await removeScratch(repository, cwd);
       } finally {
         ownership.close();
-        if (removed) await removeOwnershipLock(lockPath);
+        if (contract === undefined && !(await pathExists(cwd))) await removeOwnershipLock(lockPath);
       }
-      return leak;
     },
   };
 }

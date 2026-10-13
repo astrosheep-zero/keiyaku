@@ -59,7 +59,7 @@ completed effects and is retried under the World-owned confirmation rule.
 ## Delivery And Placement
 
 Git prepares tenders, target-specific integration results, content identity from
-patch-id (not a commit), recorded delivery diffs, and disposable Verification
+patch-id (not a commit), recorded delivery diffs, and Verification
 scratch custody.
 It returns mechanical data or typed failures; it does not judge Contract
 lifecycle or decode Contract documents. Document bytes used for delivery are
@@ -71,10 +71,14 @@ cancelled transfer yields no identity, even when partial output resembles one.
 A failed transfer awaits retirement of both owned commands and preserves any
 retirement failure.
 For each Verification attempt Git materializes the exact candidate in an
-independent disposable worktree without importing mutable execution state from
-another checkout. Preparation and command execution belong to
-[verification.md](verification.md); Git owns the scratch's byte custody and
-physical removal.
+independent clean worktree without importing mutable execution state from
+another checkout. Preparation, command execution, and the decision to retain a
+failed scene belong to [verification.md](verification.md); Git owns scratch byte
+custody, Contract association, and physical removal. A retained diagnostic
+scratch stays outside candidate content and Git history. Existing private
+ownership custody proves its association without another journal fact. The
+next attempt retires it before creating a fresh scene, and terminal cleanup
+retires it when no live attempt owns it.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's

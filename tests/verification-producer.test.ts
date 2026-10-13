@@ -32,6 +32,7 @@ function input(
   return {
     repository: {} as ExecuteVerificationInput["repository"],
     candidate: "snapshot" as ExecuteVerificationInput["candidate"],
+    contractId: contractId("kei/producer"),
     declarations,
     materializeScratchCandidate: async () => scratch,
     projectSettings: async () => await settings({ root }),

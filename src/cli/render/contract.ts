@@ -280,14 +280,7 @@ function acceptedLagRows(result: AcceptedContractOutcome, columns: number): read
       receiptRow(obligations, "!", "settlement owner", [{ text: contract, opaque: true }], columns);
     pushBlock(obligations, settlementLagRows(lag, columns));
   }
-  pushBlock(
-    obligations,
-    executionCleanupLines(
-      effectCleanup(result.effects).filter((issue) => issue.kind !== "worktree-leak"),
-      columns,
-      result.contract,
-    ),
-  );
+  pushBlock(obligations, executionCleanupLines(effectCleanup(result.effects), columns, result.contract));
   pushBlock(obligations, executionStopLines(effectExecutionStops(result.effects), columns));
   return obligations;
 }

@@ -20,9 +20,9 @@ that selection, no verb runs the producer and a Verification section is inert
 document text. Selecting the gate requires a declaration.
 
 Verification runs the selected declarations against the exact integration
-snapshot in a clean disposable worktree for each attempt. Project-configured
+snapshot in a clean scratch worktree for each attempt. Project-configured
 setup prepares that worktree before declarations, and configured cleanup runs
-before its removal, including after setup or declaration failure. Mutable
+after the attempt, including after setup or declaration failure. Mutable
 ignored and untracked state from another checkout is not automatically copied
 or linked into the scratch. Dependency installation and any intentional reuse
 belong to the project's hooks, not ecosystem inference by Keiyaku. This is a
@@ -91,13 +91,22 @@ loss or process crash are outside that portable guarantee. No persisted pid,
 reconstructed process identity, or background disposer supplies a second
 termination authority.
 
-Scratch provisioning and disposal are awaited physical work. Disposal is one
-independently bounded removal attempt; expiry or failure becomes that attempt's
-removal diagnostic. They create no marker, progress record, retry/resume state,
-or durable run record. Cleanup happens after any admitted fact: a failed destroy
-action or leaked disposable worktree is reported separately and cannot reverse
-acceptance. Reconciliation may remove only a scratch path it can prove is no
-longer owned; it never recovers the run or executes candidate commands.
+Scratch provisioning and disposal are awaited physical work. Successful and
+cancelled attempts dispose their scratch. Unsatisfied verdicts, including
+timeouts, and setup or declaration failures retain the whole scratch for
+diagnosis after configured cleanup; the invocation reports its path. This is
+not an archive, a log store, candidate content, or replay authority. Each Contract
+has at most one retained scratch. Its next attempt removes the previous scene
+before materializing a clean snapshot; acceptance or abandonment also removes
+it through terminal cleanup. Git proves association and ownership without a
+journal fact or durable run record.
+
+Disposal is one independently bounded removal attempt; expiry or failure becomes
+that attempt's removal diagnostic. A failed destroy action or retained scratch
+is reported separately and cannot reverse acceptance. Reconciliation preserves
+an active Contract's diagnostic scratch and removes it on terminal cleanup only
+when it can prove that no attempt still owns it; it never recovers the run or
+executes candidate commands.
 
 Cancellation requests termination only for work still owned by this attempt;
 it stops later owned phases and still awaits independently bounded retirement.

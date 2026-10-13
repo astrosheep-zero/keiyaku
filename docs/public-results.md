@@ -144,10 +144,11 @@ preservation semantics are owned by [world.md](world.md).
 
 ## Cleanup Boundary
 
-Verification scratch cleanup or worktree removal can report physical residue
-after admission. Such reports stay on the accepted invocation result, do not
-change its exit meaning, and never become journal facts, cleanup authority, or
-reconciliation input.
+Verification scratch cleanup, intentional failed-scene retention, or worktree
+removal failure can report physical residue after admission. The invocation
+reports the retained diagnostic path without adding a journal fact. Such reports
+stay on the invocation result, do not change its exit meaning, and never become
+cleanup authority or reconciliation input.
 
 Ephemeral execution observations are separate from this final result boundary.
 They can expose a confirmed leading fact before later work settles, but neither

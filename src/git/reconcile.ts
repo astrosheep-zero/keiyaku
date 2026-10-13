@@ -253,8 +253,9 @@ async function removeCollectableScratch(
   repository: GitRepository,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
+  terminalContract?: ContractId,
 ): Promise<void> {
-  for (const removal of await removeCollectableScratchWorktrees(repository, topology.paths)) {
+  for (const removal of await removeCollectableScratchWorktrees(repository, topology.paths, terminalContract)) {
     if (!removal.retained) {
       acc.recordEffect({ kind: "worktree", path: removal.path, action: "removed" });
       continue;
@@ -392,7 +393,7 @@ async function reconcileWithTopology(
   const acc = reconcileAccumulation(input.onPhysical);
   const { effects, lag, hookRuns } = acc;
   try {
-    await removeCollectableScratch(repository, topology, acc);
+    await removeCollectableScratch(repository, topology, acc, state?.terminal ? state.id : undefined);
     if (!state) return complete(effects, lag);
     const targetCheckouts = await reconcileTargetCheckouts(repository, state, input.onPhysical);
     acc.recordEffect(...targetCheckouts.effects);

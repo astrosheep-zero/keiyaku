@@ -1,6 +1,6 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, resolve } from "node:path";
 import { Writable } from "node:stream";
@@ -183,6 +183,59 @@ test("unchanged delivery retries failure once and reuses later satisfaction", as
   const reviewed = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
   assert.equal(reviewed.exit, 0);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
+});
+
+test("failed verification keeps its scene until the next attempt or terminal cleanup", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "verification-scene-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const ready = resolve(external, "ready");
+  const script = `test ! -e scene.log || exit 8\nprintf 'failure scene\\n' > scene.log\ntest -f '${ready}'`;
+  const { raw, id } = await bindCandidate(script, ["reviewed", "verified"]);
+  const repo = await Repo.at({ path: raw.path });
+  const native = Keiyaku.with().select({ repo, id });
+  const first = accepted(await native.deliver());
+  const retained = first.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
+  assert.ok(retained?.kind === "cleanup" && retained.issue.kind === "worktree-leak");
+  const scratch = retained.issue.leak.path;
+  assert.equal(readFileSync(resolve(scratch, "scene.log"), "utf8"), "failure scene\n");
+  assert.match(renderAccepted(first, { columns: 400, color: false }), /verification scratch kept at/u);
+  assert.ok(renderAccepted(first, { columns: 400, color: false }).includes(scratch));
+  assert.equal(first.value.verification?.kind, "ran");
+  assert.ok(first.value.verification?.kind === "ran" && first.value.verification.verdict === "unsatisfied");
+  await Keiyaku.with().reconcile({ repo, contract: id });
+  assert.equal(existsSync(scratch), true, "active reconciliation preserves the scene");
+
+  const second = accepted(await native.audit());
+  assert.ok(second.value.verification.kind === "unsatisfied");
+  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "the prior scene was removed");
+  assert.equal(raw.run(["worktree", "list", "--porcelain"]).split(scratch).length - 1, 1);
+  writeFileSync(ready, "ready");
+  const successful = accepted(await native.deliver());
+  assert.ok(successful.value.verification?.kind === "ran" && successful.value.verification.verdict === "satisfied");
+  assert.equal(existsSync(scratch), false);
+  accepted(await native.review({ verdict: "satisfied", summary: "fixture acceptance" }));
+  assert.equal(existsSync(scratch), false);
+
+  rmSync(ready);
+  const abandoning = await bindCandidate(script);
+  const abandonedRepo = await Repo.at({ path: abandoning.raw.path });
+  const abandonedNative = Keiyaku.with().select({ repo: abandonedRepo, id: abandoning.id });
+  const failed = accepted(await abandonedNative.deliver());
+  const scene = failed.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
+  assert.ok(scene?.kind === "cleanup" && scene.issue.kind === "worktree-leak");
+  assert.equal(existsSync(scene.issue.leak.path), true);
+  accepted(await abandonedNative.abandon());
+  assert.equal(existsSync(scene.issue.leak.path), false, "abandonment removes the scene");
+
+  const claiming = await bindCandidate(script);
+  const claimRepo = await Repo.at({ path: claiming.raw.path });
+  const claimNative = Keiyaku.with().select({ repo: claimRepo, id: claiming.id });
+  const pending = accepted(await claimNative.deliver());
+  const claimScene = pending.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
+  assert.ok(claimScene?.kind === "cleanup" && claimScene.issue.kind === "worktree-leak");
+  accepted(await claimNative.amend({ gates: [] }));
+  accepted(await claimNative.deliver());
+  assert.equal(existsSync(claimScene.issue.leak.path), false, "acceptance removes a retained scene without another run");
 });
 
 test("audit reports execution even when an unchanged verdict is deduplicated", async () => {

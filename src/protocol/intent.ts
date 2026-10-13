@@ -314,6 +314,7 @@ export async function verifyDelivery(input: VerifyDeliveryInput): Promise<Verifi
   const execution = await executeVerification({
     repository: input.repository,
     candidate: snapshot,
+    contractId: input.contractId,
     declarations: input.verification.declarations,
     materializeScratchCandidate,
     projectSettings,

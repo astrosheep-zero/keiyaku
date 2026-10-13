@@ -1,6 +1,6 @@
-import type { SnapshotId } from "../core/facts/types.js";
+import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { runHookCommands, worktreeHooksFrom, type HookCommand, type HookFailure } from "../git/hooks.js";
-import type { MaterializedScratchCandidate, WorktreeLeak } from "../git/scratch.js";
+import { ScratchRemovalError, type MaterializedScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import type { GitRepository } from "../git/process.js";
 import type { Settings } from "../settings.js";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
@@ -57,10 +57,12 @@ export type VerificationExecution = Readonly<{
 export type ExecuteVerificationInput = Readonly<{
   repository: GitRepository;
   candidate: SnapshotId;
+  contractId: ContractId;
   declarations: readonly VerificationDeclaration[];
   materializeScratchCandidate: (
     repository: GitRepository,
     candidate: SnapshotId,
+    contract: ContractId,
   ) => Promise<MaterializedScratchCandidate>;
   projectSettings: (root: string) => Promise<Settings>;
   observe?: (event: VerificationObservation) => void;
@@ -208,7 +210,7 @@ async function materializeScratch(
   observe(input, { kind: "phase", phase: "materialize", state: "started" });
   try {
     input.signal?.throwIfAborted();
-    const scratch = await input.materializeScratchCandidate(input.repository, input.candidate);
+    const scratch = await input.materializeScratchCandidate(input.repository, input.candidate, input.contractId);
     observe(input, { kind: "phase", phase: "materialize", state: "finished", cwd: scratch.cwd, outcome: "ok" });
     return scratch;
   } catch (error) {
@@ -221,6 +223,7 @@ async function materializeScratch(
     if (input.signal?.aborted) return { outcome: { kind: "cancelled" } };
     return {
       outcome: { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+      ...(error instanceof ScratchRemovalError ? { leak: error.leak } : {}),
     };
   }
 }
@@ -275,6 +278,7 @@ async function retireScratch(
   input: ExecuteVerificationInput,
   scratch: MaterializedScratchCandidate,
   destroy: readonly HookCommand[] | undefined,
+  outcome: PreparedScratchExecution["outcome"],
 ): Promise<Pick<VerificationExecution, "cleanup" | "leak">> {
   observe(input, { kind: "phase", phase: "cleanup", cwd: scratch.cwd, state: "started" });
   let cleanup: VerificationExecution["cleanup"];
@@ -289,13 +293,14 @@ async function retireScratch(
     if (result.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
     if (result.kind === "failed") cleanup = { phase: "destroy", name: result.name, detail: result.failure };
   }
-  const leak = await scratch.dispose();
+  const retain = outcome.kind === "terminal" ? outcome.verdict === "unsatisfied" : outcome.kind !== "cancelled";
+  const leak = await scratch.dispose(retain);
   observe(input, {
     kind: "phase",
     phase: "cleanup",
     cwd: scratch.cwd,
     state: "finished",
-    outcome: leak !== null || cleanup !== undefined ? "failed" : "ok",
+    outcome: cleanup !== undefined ? "failed" : retain ? "retained" : leak !== null ? "failed" : "ok",
   });
   return {
     ...(cleanup === undefined ? {} : { cleanup }),
@@ -308,5 +313,8 @@ export async function executeVerification(input: ExecuteVerificationInput): Prom
   const materialized = await materializeScratch(input);
   if ("outcome" in materialized) return materialized;
   const prepared = await runScratch(input, materialized);
-  return { outcome: prepared.outcome, ...(await retireScratch(input, materialized, prepared.destroy)) };
+  return {
+    outcome: prepared.outcome,
+    ...(await retireScratch(input, materialized, prepared.destroy, prepared.outcome)),
+  };
 }

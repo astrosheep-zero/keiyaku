@@ -172,11 +172,7 @@ function targetLines(
 
 function obligationLines(result: AcceptedAudit, columns: number): readonly string[] {
   return [
-    ...executionCleanupLines(
-      effectCleanup(result.effects).filter((issue) => issue.kind !== "worktree-leak"),
-      columns,
-      result.contract,
-    ),
+    ...executionCleanupLines(effectCleanup(result.effects), columns, result.contract),
     ...executionStopLines(effectExecutionStops(result.effects), columns),
   ];
 }

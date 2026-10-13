@@ -88,12 +88,13 @@ custody, reports a lag, and cannot abandon or reverse the Contract. Hooks cannot
 reenter mutation or reconciliation for the same Contract while that effect
 decision owns its custody boundary.
 
-Verification scratch has a separate disposable lifecycle. It is never a
-managed-worktree replay, does not gain markers or resumable command state, and
-is never re-executed by reconciliation. Reconciliation may collect a scratch
-path only after proving its owner no longer holds it; this is garbage collection,
-not command recovery. A collection that cannot confirm physical absence retains
-custody and reports a diagnostic.
+Verification scratch has a separate lifecycle. It is never a managed-worktree
+replay and has no resumable command state. Reconciliation preserves diagnostic
+scratch associated with an active Contract and collects it when that Contract
+is accepted or abandoned. Unassociated abandoned scratch remains collectable.
+Collection proves that no live attempt owns the path; it never re-executes
+commands or recovers a run. A collection that cannot confirm physical absence
+retains custody and reports a diagnostic.
 
 ## World Reconciliation
 

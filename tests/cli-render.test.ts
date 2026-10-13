@@ -1207,7 +1207,7 @@ test("reconcile reports retained workspace and failed cleanup in human words", (
   assert.doesNotMatch(text, /!.*worktree-retained/u);
 });
 
-test("verb receipts keep retained workspace and scratch residue in typed results only", () => {
+test("verb receipts expose scratch residue while retained workspace remains typed-only", () => {
   for (const verb of ["amend", "review", "deliver"] as const) {
     const contract = contractId("kei/residue");
     const effects: AcceptedContractOutcome["effects"] = [
@@ -1225,7 +1225,9 @@ test("verb receipts keep retained workspace and scratch residue in typed results
           ? acceptedReview({ contract, effects, facts: [reviewAttestationFact(contract, "satisfied")] }, {})
           : acceptedDeliver({ contract, effects }, deliveryIdentity());
     const text = renderAccepted(result);
-    assert.doesNotMatch(text, /lag  worktree|leak  worktree|\/tmp\//u);
+    assert.doesNotMatch(text, /lag  worktree|leak  worktree|\/tmp\/wt/u);
+    assert.match(text, /verification scratch kept at\s+\/tmp\/scratch/u);
+    assert.match(text, /cleanup failed/u);
     assert.equal(effects[1]?.kind, "cleanup");
   }
 });
