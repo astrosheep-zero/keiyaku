@@ -109,7 +109,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(packageManifest.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.version, packageManifest.version);
-  assert.deepEqual(installedPackage.bin, { keiyaku: "build/src/cli/index.js" });
+  assert.deepEqual(installedPackage.bin, { kei: "build/src/cli/index.js", keiyaku: "build/src/cli/index.js" });
 
   const target = join(installed, "node_modules", "@astrosheep", "keiyaku", "build", "src", "cli", "index.js");
   assert.equal(readFileSync(target, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");

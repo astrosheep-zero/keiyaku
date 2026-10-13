@@ -20,7 +20,8 @@
     }
   },
   "bin": {
-    "keiyaku": "build/src/cli/index.js"
+    "keiyaku": "build/src/cli/index.js",
+    "kei": "build/src/cli/index.js"
   },
   "type": "module",
   "engines": {
