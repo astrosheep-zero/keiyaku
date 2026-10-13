@@ -84,9 +84,11 @@ another checkout. Preparation, command execution, and the decision to retain a
 failed scene belong to [verification.md](verification.md); Git owns scratch byte
 custody, Contract association, and physical removal. A retained diagnostic
 scratch stays outside candidate content and Git history. Existing private
-ownership custody proves its association without another journal fact. The
-next attempt retires it before creating a fresh scene, and terminal cleanup
-retires it when no live attempt owns it.
+ownership custody proves its association without another journal fact.
+Running attempts neither wait for nor remove one another's execution scenes.
+A failing attempt replaces the Contract's single retained scene during
+retirement under bounded custody, without changing its verdict if retention
+fails. Terminal cleanup retires it when no live attempt owns it.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's

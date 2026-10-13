@@ -247,7 +247,7 @@ test("unchanged delivery retries failure once and reuses later satisfaction", as
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
 });
 
-test("failed verification keeps its scene until the next attempt or terminal cleanup", async (t) => {
+test("failed verification keeps its scene until replacement or terminal cleanup", async (t) => {
   const external = mkdtempSync(resolve(tmpdir(), "verification-scene-"));
   t.after(() => rmSync(external, { recursive: true, force: true }));
   const ready = resolve(external, "ready");
@@ -269,12 +269,12 @@ test("failed verification keeps its scene until the next attempt or terminal cle
 
   const second = accepted(await native.audit());
   assert.ok(second.value.verification.kind === "unsatisfied");
-  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "the prior scene was removed");
+  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "the attempt ran in its own clean scene");
   assert.equal(raw.run(["worktree", "list", "--porcelain"]).split(scratch).length - 1, 1);
   writeFileSync(ready, "ready");
   const successful = accepted(await native.deliver());
   assert.ok(successful.value.verification?.kind === "ran" && successful.value.verification.verdict === "satisfied");
-  assert.equal(existsSync(scratch), false);
+  assert.equal(existsSync(scratch), true, "satisfaction preserves the retained scene until acceptance");
   accepted(await native.review({ verdict: "satisfied", summary: "fixture acceptance" }));
   assert.equal(existsSync(scratch), false);
 

@@ -20,7 +20,8 @@ that selection, no verb runs the producer and a Verification section is inert
 document text. Selecting the gate requires a declaration.
 
 Verification runs the selected declarations against the exact integration
-snapshot in a clean scratch worktree for each attempt. Project-configured
+snapshot in its own clean scratch worktree for each attempt. Attempts never
+wait for or remove one another's running scenes. Project-configured
 setup prepares that worktree before declarations, and configured cleanup runs
 after the attempt, including after setup or declaration failure. Mutable
 ignored and untracked state from another checkout is not automatically copied
@@ -96,10 +97,13 @@ cancelled attempts dispose their scratch. Unsatisfied verdicts, including
 timeouts, and setup or declaration failures retain the whole scratch for
 diagnosis after configured cleanup; the invocation reports its path. This is
 not an archive, a log store, candidate content, or replay authority. Each Contract
-has at most one retained scratch. Its next attempt removes the previous scene
-before materializing a clean snapshot; acceptance or abandonment also removes
-it through terminal cleanup. Git proves association and ownership without a
-journal fact or durable run record.
+has at most one retained scratch. A failing attempt replaces the previous
+retained scene during retirement under bounded custody, never during
+materialization or execution. Failed retention reports its reason and retires
+only that attempt's execution scene without changing its verdict. Successful
+and cancelled attempts leave the retained scene untouched; acceptance or
+abandonment removes it through terminal cleanup. Git proves association and
+ownership without a journal fact or durable run record.
 
 Disposal is one independently bounded removal attempt; expiry or failure becomes
 that attempt's removal diagnostic. A failed destroy action or retained scratch

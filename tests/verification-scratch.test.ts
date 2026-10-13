@@ -8,6 +8,7 @@ import { Keiyaku, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { materializeScratchCandidate, removeCollectableScratchWorktrees } from "../src/git/scratch.js";
 import { contractId, snapshotId } from "../src/core/facts/types.js";
+import { contractLocator, gitRefLocator } from "../src/git/identity.js";
 import { projectSettings } from "../src/settings.js";
 import { executeVerification } from "../src/verification/execution.js";
 import type { VerificationObservation } from "../src/verification/observation.js";
@@ -109,7 +110,7 @@ test("delivery prepares clean candidate scratch without importing worktree symli
       assert.ok(scratch);
       assert.notEqual(scratch, source);
       assert.equal(existsSync(scratch), false);
-      assert.equal(existsSync(ownershipLockFor(scratch)), true);
+      assert.equal(existsSync(ownershipLockFor(scratch)), false);
       assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), false);
       assert.equal(readFileSync(cleanupLog, "utf8"), `${scratch}\n`);
       assert.deepEqual(
@@ -182,47 +183,173 @@ test("clean scratch cleanup runs after setup or declaration failure and keeps th
         assert.ok(execution.outcome.kind === "terminal" && execution.outcome.verdict === "unsatisfied");
       }
       const scratch = readFileSync(cleanupLog, "utf8");
-      assert.equal(existsSync(scratch), true);
+      assert.equal(existsSync(scratch), false);
+      assert.equal(existsSync(ownershipLockFor(scratch)), false);
       assert.equal(execution.cleanup, undefined);
-      assert.equal(execution.leak?.path, scratch);
+      assert.ok(execution.leak);
+      assert.equal(existsSync(execution.leak.path), true);
       const removals = await removeCollectableScratchWorktrees(
-        await repositoryAt(raw.path), new Set([scratch]), contractId("kei/scratch-failure"),
+        await repositoryAt(raw.path), new Set([execution.leak.path]), contractId("kei/scratch-failure"),
       );
       assert.equal(removals[0]?.retained, false);
     });
   }
 });
 
-test("a prior failed scratch removal stops the next attempt with its leak diagnostic", async () => {
+test("concurrent scratches for one Contract execute independently and dispose only themselves", async () => {
+  const raw = repositoryWithMain();
+  const git = await repositoryAt(raw.path);
+  const candidate = snapshotId(raw.run(["rev-parse", "HEAD"]).trim());
+  const id = contractId("kei/concurrent-scratch");
+  const first = await materializeScratchCandidate(git, candidate, id);
+  try {
+    const second = await materializeScratchCandidate({ ...git, signal: AbortSignal.timeout(5_000) }, candidate, id);
+    try {
+      assert.notEqual(first.cwd, second.cwd);
+      assert.match(basename(second.cwd), /^keiyaku-v4-verify-[0-9a-f]{24}$/u);
+      assert.equal(existsSync(first.cwd), true);
+      assert.equal(await first.dispose(), null);
+      assert.equal(existsSync(second.cwd), true);
+      assert.equal(await second.dispose(), null);
+    } finally {
+      await second.dispose();
+    }
+  } finally {
+    await first.dispose();
+  }
+});
+
+test("failed attempts move into and replace the single detached retained scene", async () => {
+  const raw = repositoryWithMain();
+  const git = await repositoryAt(raw.path);
+  const id = contractId("kei/retained-scratch");
+  const retained = join(realpathSync(tmpdir()), `keiyaku-v4-verify-${gitRefLocator(git.commonDirectory)}-${contractLocator(id)}`);
+  const firstCandidate = snapshotId(raw.run(["rev-parse", "HEAD"]).trim());
+  const first = await materializeScratchCandidate(git, firstCandidate, id);
+  try {
+    writeFileSync(join(first.cwd, "scene.log"), "first\n");
+    assert.deepEqual(await first.dispose(true), {
+      path: retained,
+      diagnostic: "failed Verification scratch retained for diagnosis",
+    });
+    assert.equal(existsSync(first.cwd), false);
+    assert.equal(existsSync(ownershipLockFor(first.cwd)), false);
+    assert.equal(raw.run(["-C", retained, "rev-parse", "HEAD"]).trim(), firstCandidate);
+    assert.match(raw.run(["worktree", "list", "--porcelain"]), new RegExp(`worktree ${retained}\\nHEAD ${firstCandidate}\\ndetached`, "u"));
+    assert.equal(readFileSync(join(retained, "scene.log"), "utf8"), "first\n");
+    assert.deepEqual(await removeCollectableScratchWorktrees(git, new Set([retained])), []);
+
+    writeFileSync(join(raw.path, "next.txt"), "next\n");
+    raw.run(["add", "next.txt"]);
+    raw.run(["commit", "--quiet", "-m", "second candidate"]);
+    const secondCandidate = snapshotId(raw.run(["rev-parse", "HEAD"]).trim());
+    const second = await materializeScratchCandidate(git, secondCandidate, id);
+    try {
+      assert.equal(readFileSync(join(retained, "scene.log"), "utf8"), "first\n");
+      writeFileSync(join(second.cwd, "scene.log"), "second\n");
+      assert.deepEqual(await second.dispose(true), {
+        path: retained,
+        diagnostic: "failed Verification scratch retained for diagnosis (replaced the previous retained scratch)",
+      });
+      assert.equal(existsSync(second.cwd), false);
+      assert.equal(existsSync(ownershipLockFor(second.cwd)), false);
+      assert.equal(raw.run(["-C", retained, "rev-parse", "HEAD"]).trim(), secondCandidate);
+      assert.equal(readFileSync(join(retained, "scene.log"), "utf8"), "second\n");
+      assert.deepEqual(
+        raw.run(["worktree", "list", "--porcelain"]).split("\n").filter((line) => line.includes("keiyaku-v4-verify-")),
+        [`worktree ${retained}`],
+      );
+    } finally {
+      await second.dispose();
+    }
+  } finally {
+    await first.dispose();
+    const removals = await removeCollectableScratchWorktrees(git, new Set([retained]), id);
+    assert.equal(removals[0]?.retained, false);
+  }
+});
+
+test("failed retained removal retires only the new scene and preserves its verdict", async () => {
   const raw = repositoryWithMain();
   const git = await repositoryAt(raw.path);
   const id = contractId("kei/removal-failure");
   const candidate = snapshotId(raw.run(["rev-parse", "HEAD"]).trim());
   const scratch = await materializeScratchCandidate(git, candidate, id);
   writeFileSync(join(scratch.cwd, "scene.log"), "retained\n");
-  await scratch.dispose(true);
+  const retained = await scratch.dispose(true);
+  assert.ok(retained);
   try {
     await withGitShim(
-      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then echo "removal denied" >&2; exit 7; fi\nexec "$KEIYAKU_REAL_GIT" "$@"',
-      {},
+      'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then\n  for arg in "$@"; do last="$arg"; done\n  if [ "$last" = "$KEIYAKU_RETAINED" ]; then echo "removal denied" >&2; exit 7; fi\nfi\nexec "$KEIYAKU_REAL_GIT" "$@"',
+      { KEIYAKU_RETAINED: retained.path },
       async (gitPath) => {
+        let executionPath: string | undefined;
         const result = await executeVerification({
           repository: await repositoryAt(raw.path, gitPath),
           candidate,
           contractId: id,
-          declarations: [{ executor: "bash", script: "touch second-attempt" }],
+          declarations: [{ executor: "bash", script: "touch second-attempt; false" }],
           materializeScratchCandidate,
           projectSettings,
+          observe: (event) => {
+            if (event.phase === "materialize" && event.cwd) executionPath = event.cwd;
+          },
         });
-        assert.equal(result.outcome.kind, "candidate-unavailable");
-        assert.equal(result.leak?.path, scratch.cwd);
-        assert.match(result.leak?.diagnostic ?? "", /removal denied/u);
-        assert.equal(readFileSync(join(scratch.cwd, "scene.log"), "utf8"), "retained\n");
-        assert.equal(existsSync(join(scratch.cwd, "second-attempt")), false);
+        assert.ok(result.outcome.kind === "terminal" && result.outcome.verdict === "unsatisfied");
+        assert.equal(result.outcome.total, 1);
+        assert.equal(result.leak?.path, retained.path);
+        assert.match(result.leak?.diagnostic ?? "", /failed Verification scratch could not be retained: .*removal denied/su);
+        assert.ok(executionPath);
+        assert.equal(existsSync(executionPath), false);
+        assert.equal(existsSync(ownershipLockFor(executionPath)), false);
+        assert.equal(readFileSync(join(retained.path, "scene.log"), "utf8"), "retained\n");
+        assert.equal(existsSync(join(retained.path, "second-attempt")), false);
       },
     );
   } finally {
-    await removeCollectableScratchWorktrees(git, new Set([scratch.cwd]), id);
+    await removeCollectableScratchWorktrees(git, new Set([retained.path]), id);
+  }
+});
+
+test("satisfied and cancelled attempts remove only their own scenes", async () => {
+  const raw = repositoryWithMain();
+  const git = await repositoryAt(raw.path);
+  const id = contractId("kei/preserved-scratch");
+  const candidate = snapshotId(raw.run(["rev-parse", "HEAD"]).trim());
+  const scratch = await materializeScratchCandidate(git, candidate, id);
+  writeFileSync(join(scratch.cwd, "scene.log"), "retained\n");
+  const retained = await scratch.dispose(true);
+  assert.ok(retained);
+  const paths: string[] = [];
+  const observe = (event: VerificationObservation) => {
+    if (event.phase === "materialize" && event.cwd) paths.push(event.cwd);
+  };
+  const input = { repository: git, candidate, contractId: id, materializeScratchCandidate, projectSettings, observe };
+  try {
+    const satisfied = await executeVerification({ ...input, declarations: [{ executor: "bash", script: "true" }] });
+    assert.deepEqual(satisfied, { outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 } });
+    assert.equal(readFileSync(join(retained.path, "scene.log"), "utf8"), "retained\n");
+    const controller = new AbortController();
+    const cancelled = await executeVerification({
+      ...input,
+      repository: { ...git, signal: controller.signal },
+      signal: controller.signal,
+      declarations: [{ executor: "bash", script: "printf ready; sleep 30" }],
+      observe: (event) => {
+        observe(event);
+        if (event.kind === "output" && event.phase === "declaration") controller.abort();
+      },
+    });
+    assert.equal(cancelled.outcome.kind, "cancelled");
+    assert.equal(cancelled.leak, undefined);
+    assert.equal(paths.length, 2);
+    for (const path of paths) {
+      assert.equal(existsSync(path), false);
+      assert.equal(existsSync(ownershipLockFor(path)), false);
+    }
+    assert.equal(readFileSync(join(retained.path, "scene.log"), "utf8"), "retained\n");
+  } finally {
+    await removeCollectableScratchWorktrees(git, new Set([retained.path]), id);
   }
 });
 
