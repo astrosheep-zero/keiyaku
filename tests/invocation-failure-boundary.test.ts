@@ -195,6 +195,8 @@ test("native review retains an earlier claimed sibling when a later continuation
         repo,
         markdown: document().replace("# Library verbs", "# " + title),
         gates: [],
+        // The continuation fixtures stay targetless, like their prerequisite.
+        target: null,
         after: [primaryId],
       }),
     ).value.keiyaku;

@@ -61,17 +61,12 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | task | Delegate to the separate Task command surface. | Task owns Task judgment and result semantics. |
 | call, fork, wait, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
 
-Ordinary Markdown bind treats a caller-supplied target literally at the public
-target boundary. An omitted target names the invocation worktree's current
-attached branch as an internal target-selection intent, resolved inside the
-same bind coordinate observation used for admission: an attached existing
-branch becomes the canonical target, a detached committed HEAD stays
-targetless, and an unborn HEAD returns the typed `unborn-head` refusal rather
-than `target-missing`. The edge neither inspects Git itself nor pre-reads a
-branch name as an explicit target. Fork bind is unaffected: an omitted target
-copies the source target and never the caller's current branch. The
-package-root Contract composition keeps its own omitted-target meaning, so this
-default stays at the CLI edge.
+Bind target selection, including the omitted-target default and fork
+inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
+its literal option grammar onto those intents and inspects no Git state itself.
+The edge resolves the invocation worktree coordinate once and hands that same
+resolved coordinate to the operation, so the Contract owner reads it rather
+than any ambient directory.
 
 In a declared direct-parent request channel, the CLI forwards only the
 caller-selected operation and the information needed to execute it locally.

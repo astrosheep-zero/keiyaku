@@ -21,6 +21,9 @@ declare const id: ContractId;
 declare const markdown: string;
 
 const input: BindInput = { repo, markdown, after: [id], gates: ["reviewed"] };
+const targetlessInput: BindInput = { repo, markdown, target: null };
+// @ts-expect-error a target is a branch name or an explicit absence, never another value
+const invalidTarget: BindInput = { repo, markdown, target: 7 };
 const bound: Promise<BindResult> = Keiyaku.with().bind(input);
 const selected = Keiyaku.with().select({ repo, id });
 const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
@@ -61,12 +64,16 @@ new Keiyaku();
 new Delivery();
 // @ts-expect-error Repo requires an explicit coordinate object
 Repo.at(".");
+// @ts-expect-error an omitted coordinate is never read from an ambient directory
+Repo.at();
 // @ts-expect-error a selected handle cannot switch repositories during an operation
 selected.review({ ...cancellable, repo });
 // @ts-expect-error binding must contain Markdown or a fork source
 Keiyaku.with().bind({ repo });
 
 void bound;
+void targetlessInput;
+void invalidTarget;
 void effects;
 void pending;
 void receipt;

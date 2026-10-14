@@ -123,6 +123,8 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       markdown: document("exit 1"),
       workspace: "worktree",
       gates: [],
+      // Continuation fixtures stay targetless like their prerequisite.
+      target: null,
       after: [prerequisite.id],
     }));
     const state = present(await bound.value.keiyaku.state());
@@ -181,6 +183,8 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
           markdown: document().replace("# Library verbs", `# ${title}`),
           workspace: "worktree",
           gates: [],
+          // Continuation fixtures stay targetless like their prerequisite.
+          target: null,
           after,
         }))
       ).value.keiyaku;

@@ -34,7 +34,7 @@ type BindOperationInput = Readonly<{
   channel: GitDecodeChannel;
   terms: BindData["terms"];
   verification: VerificationDeclarationPreparation;
-  targetSelection?: BindTargetSelection;
+  targetSelection: BindTargetSelection;
   workspace: "worktree";
   actor?: ActorId;
   decorateOffer?: CompanionDecorator;
@@ -128,7 +128,7 @@ export async function bindOperation(
     BindRefusal | TargetInputRefusal | VerificationDeclarationRefusal | ForkSourceMovedRefusal
   >
 > {
-  let selection: BindTargetSelection = input.targetSelection ?? { kind: "targetless" };
+  let selection: BindTargetSelection = input.targetSelection;
   if (selection.kind === "explicit") {
     const normalized = await normalizeTargetBranch(input.scope, selection.target);
     if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };

@@ -28,6 +28,28 @@ test("fork bind copies the source target and does not substitute the caller bran
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
 });
 
+test("fork bind target:null clears the source target and a string overrides it", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  repository.run(["branch", "release"]);
+  const source = accepted(
+    await Keiyaku.with().bind({
+      repo,
+      markdown: document().replace("# Library verbs", "# Targeted source"),
+      workspace: "worktree",
+      target: "release",
+      gates: [],
+    }),
+  );
+  const sourceState = present(await source.value.keiyaku.state());
+
+  const cleared = accepted(await Keiyaku.with().bind({ repo, forkOf: sourceState.id, target: null }));
+  assert.equal(present(await cleared.value.keiyaku.state()).coordinates.target, undefined);
+
+  const overridden = accepted(await Keiyaku.with().bind({ repo, forkOf: sourceState.id, target: "main" }));
+  assert.equal(present(await overridden.value.keiyaku.state()).coordinates.target, "refs/heads/main");
+});
+
 test("fork bind refuses missing sources and incompatible term inputs", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });

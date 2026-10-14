@@ -1,18 +1,24 @@
 import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute } from "node:path";
 import { currentBranchOperation, scopeOperation, type RepositoryScope } from "../protocol/operations.js";
 import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
 
 export { NoGitWorldError };
 
-export type RepoAtInput = Readonly<{ path?: string; gitPath?: string }>;
+/** One explicit worktree coordinate. The caller resolves relative and ambient spellings, never this edge. */
+export type RepoAtInput = Readonly<{ path: string; gitPath?: string }>;
 
 const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 
-async function resolvePinnedScope(path?: string, gitPath?: string): Promise<RepositoryScope> {
+async function resolvePinnedScope(values: Record<string, unknown>): Promise<RepositoryScope> {
+  const path = values.path;
+  if (typeof path !== "string" || path.trim().length === 0)
+    throw new TypeError("repository path must be a nonblank string");
+  if (!isAbsolute(path)) throw new TypeError(`repository path must be absolute: ${path}`);
+  const gitPath = optionalNonblank(values.gitPath, "Git executable path");
   return await scopeOperation({
-    coordinate: await realpath(resolve(path === undefined ? process.cwd() : path)),
+    coordinate: await realpath(path),
     ...(gitPath === undefined ? {} : { gitPath }),
   });
 }
@@ -28,14 +34,8 @@ export class Repo {
     REPO_SCOPES.set(this, scope);
   }
 
-  static async at(input?: RepoAtInput): Promise<Repo> {
-    const values = input === undefined ? undefined : requireInput(input, "Repo.at input");
-    return new Repo(
-      await resolvePinnedScope(
-        optionalNonblank(values?.path, "repository path"),
-        optionalNonblank(values?.gitPath, "Git executable path"),
-      ),
-    );
+  static async at(input: RepoAtInput): Promise<Repo> {
+    return new Repo(await resolvePinnedScope(requireInput(input, "Repo.at input", ["path", "gitPath"])));
   }
 
   async currentBranch(): Promise<string | null> {

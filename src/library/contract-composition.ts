@@ -2,7 +2,6 @@
 import { localExecutionContext, type ExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import type { BindTargetSelection } from "../protocol/bind.js";
 import {
   contractCatalogueOperation,
   contractObservationOperation,
@@ -54,19 +53,16 @@ export type KeiyakuLibrary = Readonly<{
  * The one private Contract composition constructor. `Keiyaku.with` fixes local execution; CLI and
  * Body pass their captured internal channel explicitly here instead of a second constructor. The
  * carrier is a positional argument, never a field of the public construction input, so no runtime
- * value reaching the public surface can select a private channel. `omittedMarkdownTarget` is the
- * internal bind intent an edge supplies for a Markdown bind whose caller omitted the target; the
- * public package-root composition leaves it targetless.
+ * value reaching the public surface can select a private channel.
  */
 export function composeContractLibrary(
   execution: LibraryExecution,
   createHandle: typeof createKeiyakuHandle,
   input?: LocalContractComposition,
-  omittedMarkdownTarget: BindTargetSelection = { kind: "targetless" },
 ): KeiyakuLibrary {
   const composition = captureLocalContractComposition(input);
   return Object.freeze({
-    bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, execution, composition, omittedMarkdownTarget),
+    bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, execution, composition),
     select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, execution, composition),
     list: (operation: ContractListInput) => listKeiyaku(operation),
     observe: (operation: ContractObservationInput) => observeKeiyaku(operation),

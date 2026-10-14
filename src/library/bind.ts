@@ -23,7 +23,7 @@ type BindAttemptInput = Readonly<{
   terms: Parameters<typeof bindOperation>[0]["terms"];
   verification: VerificationDeclarationPreparation;
   workspace: "worktree";
-  targetSelection?: BindTargetSelection;
+  targetSelection: BindTargetSelection;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
   source?: Parameters<typeof bindOperation>[0]["source"];
   task?: TaskId;
@@ -33,6 +33,16 @@ type BindAttemptInput = Readonly<{
 
 const CONTRACT_ID_CODE_POINTS = 32;
 const CONTRACT_ID_ATTEMPTS = 4;
+
+/** A fork with no target copies its source; `null` clears it and a string overrides it. */
+function forkTargetSelection(
+  target: string | null | undefined,
+  sourceTarget: string | undefined,
+): BindTargetSelection {
+  if (target === null) return { kind: "targetless" };
+  if (target !== undefined) return { kind: "explicit", target };
+  return sourceTarget === undefined ? { kind: "targetless" } : { kind: "explicit", target: sourceTarget };
+}
 
 function drawContractSuffix(): string {
   return randomBytes(2).toString("hex");
@@ -45,10 +55,10 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     terms: input.terms,
     verification: input.verification,
     workspace: input.workspace,
+    targetSelection: input.targetSelection,
     ...(input.coordinates === undefined ? {} : { coordinates: input.coordinates }),
     ...(input.source === undefined ? {} : { source: input.source }),
     contractId: id,
-    ...(input.targetSelection === undefined ? {} : { targetSelection: input.targetSelection }),
     ...(input.task === undefined
       ? {}
       : {
@@ -90,7 +100,7 @@ export async function admitForkBindWithAppointment(
     scope: RepositoryScope;
     channel: GitDecodeChannel;
     sourceId: ContractId;
-    target?: string;
+    target?: string | null;
     progress?: ProtocolProgress;
     actor?: ActorId;
   }>,
@@ -144,12 +154,7 @@ export async function admitForkBindWithAppointment(
     terms,
     verification: documentDerivation(document, terms.gates).verification,
     workspace: "worktree",
-    targetSelection:
-      input.target === undefined
-        ? source.coordinates.target === undefined
-          ? { kind: "targetless" }
-          : { kind: "explicit", target: source.coordinates.target }
-        : { kind: "explicit", target: input.target },
+    targetSelection: forkTargetSelection(input.target, source.coordinates.target),
     coordinates: { start: source.coordinates.start },
     source: {
       contractId: input.sourceId,
@@ -171,7 +176,7 @@ export async function prepareMarkdownBind(
     gates: readonly import("../core/facts/types.js").Gate[];
     after: readonly ContractId[];
     workspace: "worktree";
-    targetSelection?: BindTargetSelection;
+    targetSelection: BindTargetSelection;
     task?: TaskId;
     progress?: ProtocolProgress;
     actor?: ActorId;
@@ -186,7 +191,7 @@ export async function prepareMarkdownBind(
       terms,
       verification: documentDerivation(input.document, terms.gates).verification,
       workspace: input.workspace,
-      ...(input.targetSelection === undefined ? {} : { targetSelection: input.targetSelection }),
+      targetSelection: input.targetSelection,
       ...(input.task === undefined ? {} : { task: input.task }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.progress === undefined ? {} : { progress: input.progress }),

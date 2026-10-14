@@ -148,10 +148,14 @@ async function observeHeadCoordinates(
   }
 }
 
-/** Observe bind's tender start and optional reward target without creating persistent state. */
+/**
+ * Observe bind's tender start and optional reward target without creating persistent state.
+ * `current-branch` reads the observed worktree coordinate's own attached branch; the caller names
+ * which coordinate it wants observed.
+ */
 export async function observeBindCoordinates(
   repository: GitRepository,
-  selection: BindTargetSelection = { kind: "targetless" },
+  selection: BindTargetSelection,
 ): Promise<BindCoordinatesObservation | UnbornHeadObservation | null> {
   if (selection.kind === "explicit") {
     const requestedTarget = selection.target;

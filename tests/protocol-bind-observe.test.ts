@@ -58,16 +58,18 @@ const DELIVERY_DOCUMENT = "# Contract\n";
 let untitledBind = 0;
 
 function bindOperation(
-  input: Omit<Parameters<typeof rawBindOperation>[0], "channel" | "verification" | "contractId"> &
+  input: Omit<Parameters<typeof rawBindOperation>[0], "channel" | "verification" | "contractId" | "targetSelection"> &
     Readonly<{
       title?: string;
       contractId?: ContractId;
+      targetSelection?: Parameters<typeof rawBindOperation>[0]["targetSelection"];
     }>,
 ) {
-  const { title, contractId: id, ...rest } = input;
+  const { title, contractId: id, targetSelection = { kind: "targetless" }, ...rest } = input;
   return withGitDecodeChannel(input.scope, (channel) =>
     rawBindOperation({
       ...rest,
+      targetSelection,
       channel,
       contractId:
         id ??
@@ -157,7 +159,10 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     repository.run(["checkout", "--quiet", "--detach"]);
     const start = repository.run(["rev-parse", "HEAD"]).trim();
 
-    assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path)), { start, branch: null });
+    assert.deepEqual(await observeBindCoordinates(await repositoryAt(repository.path), { kind: "targetless" }), {
+      start,
+      branch: null,
+    });
   });
 
   test("observes a missing explicit bind target without inventing coordinates", async () => {

@@ -40,7 +40,8 @@ async function bindAndCommit(options: {
     markdown: document(options.verification),
     workspace: "worktree",
     gates: options.gates,
-    ...(options.target === undefined ? {} : { target: options.target }),
+    // These lifecycle fixtures are targetless unless a case names a target.
+    target: options.target ?? null,
   }));
   const state = present(await bound.value.keiyaku.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);

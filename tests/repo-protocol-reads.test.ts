@@ -66,6 +66,7 @@ async function bind(
       channel,
       contractId: protocolContractId(title),
       terms: terms(title, after),
+      targetSelection: { kind: "targetless" },
       verification: { kind: "prepared", data: null },
       workspace,
     }),

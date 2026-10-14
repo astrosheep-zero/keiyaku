@@ -437,6 +437,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["review", "--satisfied", "--summary", " \t"], /--summary requires a nonblank value/],
     [["review", "--satisfied", "--summary", "ok", "--actor", " "], /--actor requires a nonblank value/],
     [["bind", "--target", "", "-"], /--target requires a nonblank value/],
+    [["bind", "--target", "main", "--no-target", "-"], /mutually exclusive/],
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],
     [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
@@ -513,6 +514,15 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     output: "text",
     positionals: ["task/a"],
     flags: { priority: "1" },
+  });
+});
+
+test("a deliberately targetless bind parses as an explicit absence", () => {
+  assert.deepEqual(parseArgv(["bind", "--no-target", "-", "--json"]), {
+    command: { command: "bind", target: null, output: "json" },
+  });
+  assert.deepEqual(parseArgv(["bind", "--fork-of", "kei/source", "--no-target", "--json"]), {
+    command: { command: "bind", forkOf: "kei/source", target: null, output: "json" },
   });
 });
 

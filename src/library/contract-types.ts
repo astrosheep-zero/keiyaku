@@ -22,7 +22,8 @@ type MarkdownBindInput = Readonly<{
   repo: Repo;
   markdown: string;
   task?: TaskId;
-  target?: string;
+  /** A literal target branch; `null` is deliberately targetless; omitted is the Repo worktree's current branch. */
+  target?: string | null;
   workspace?: "worktree";
   actor?: string;
   after?: readonly ContractId[];
@@ -31,7 +32,8 @@ type MarkdownBindInput = Readonly<{
 type ForkBindInput = Readonly<{
   repo: Repo;
   forkOf: ContractId;
-  target?: string;
+  /** A literal target branch; `null` clears the source target; omitted inherits it. */
+  target?: string | null;
   workspace?: "worktree";
   actor?: string;
 }>;

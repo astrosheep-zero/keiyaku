@@ -31,17 +31,17 @@ function repositoryWithSpaces(): string {
   return path;
 }
 
-test("CLI and Repo canonicalize a relative repository coordinate with spaces", async () => {
+test("CLI canonicalizes a relative repository coordinate with spaces while Repo demands the absolute one", async () => {
   const path = repositoryWithSpaces();
   const alias = relative(process.cwd(), path);
   const canonical = await realpath(path);
 
-  const fromAlias = await Repo.at({ path: alias });
-  const fromCanonical = await Repo.at({ path });
-  assert.equal(fromAlias.root, canonical);
-  assert.equal(fromAlias.cwd, canonical);
+  // The edge resolves the caller's relative spelling; the library accepts only the absolute coordinate.
+  await assert.rejects(() => Repo.at({ path: alias }), /repository path must be absolute/u);
+  const fromCanonical = await Repo.at({ path: canonical });
   assert.equal(fromCanonical.root, canonical);
-  assert.equal(await fromAlias.currentBranch(), "refs/heads/main");
+  assert.equal(fromCanonical.cwd, canonical);
+  assert.equal(await fromCanonical.currentBranch(), "refs/heads/main");
 
   const command = parseArgv(["-C", alias, "--repo", ".", "bind", "-"]).command;
   const coordinates = await cliCoordinateDiscovery.resolve({
@@ -52,8 +52,9 @@ test("CLI and Repo canonicalize a relative repository coordinate with spaces", a
   });
   assert.equal(coordinates.cwd, canonical);
   assert.equal(coordinates.repo?.root, canonical);
+  assert.equal(coordinates.repo?.cwd, canonical);
   assert.equal(coordinates.world, canonical);
-  assert.equal((await World.resolve({ cwd: alias, repositoryRoot: fromAlias.root })).root, canonical);
+  assert.equal((await World.resolve({ cwd: alias, repositoryRoot: fromCanonical.root })).root, canonical);
 });
 
 test("registered worktrees retain a prunable record below a regular-file parent", async () => {

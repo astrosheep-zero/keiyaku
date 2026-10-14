@@ -116,6 +116,8 @@ test("audit without Verification still returns an accepted ready candidate", asy
     repo: await Repo.at({ path: repository.path }),
     markdown: verificationBody(null),
     workspace: "worktree",
+    // This audit fixture observes a deliberately targetless Contract.
+    target: null,
   }));
 
   const scope = await scopeOperation({ coordinate: repository.path });

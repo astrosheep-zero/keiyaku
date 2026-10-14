@@ -39,9 +39,11 @@ error shapes belong to generated declarations, leaf help, and executable specifi
 
 ## Contract Surface
 
-`Repo` establishes the one Git world shared by its worktrees. `Keiyaku` is the
-native branded Contract handle created by binding or by selecting a complete
-Contract identity within that repository; instance operations never accept a
+`Repo` establishes the one Git world shared by its worktrees from the one
+explicit worktree coordinate the caller supplies. A missing or unresolved
+coordinate is caller-invalid input, never quietly replaced by an ambient
+current directory. `Keiyaku` is the native branded Contract handle created by
+binding or by selecting a complete Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
 amendment, delivery, review, abandonment, arc, and audit. `Keiyaku.with()`
 synchronously captures one already-loaded immutable Settings value and the
@@ -64,11 +66,19 @@ Contract fact. Markdown is decoded only at the library edge; public callers do
 not receive a decoded document, direct journal writer, Git handle, placement
 operation, or verification runner.
 
-An explicit target is a caller-selected existing branch. It is canonicalized at
-the boundary, never guessed from the current branch, never created by Keiyaku,
-and cannot name Keiyaku-owned storage. Omitting a target is deliberately
-targetless, not an implicit current branch. Gates remain opaque public words;
-the package does not infer a custom gate's meaning or manufacture its producer.
+A bind target carries exactly three caller intents, and this chapter is their
+sole owner. An explicit target is a caller-selected existing branch: it is
+canonicalized at the boundary, never created by Keiyaku, and cannot name
+Keiyaku-owned storage. An omitted target takes the current attached branch of
+the Repo worktree coordinate the caller explicitly supplied; a committed HEAD
+attached to no branch is targetless, and a HEAD that does not exist yet is
+refused as such rather than reported as a missing target. A deliberately absent
+target is targetless. The default branch is resolved within bind coordinate
+observation, never pre-read by an adapter or taken from an ambient process
+directory. Forking differs only
+in what omission means: an omitted target copies the source target, a
+deliberately absent target clears it, and an explicit target overrides it.
+Gates remain opaque public words; the package does not infer a custom gate's meaning or manufacture its producer.
 
 Contract boards and observations are frozen read-time views of the journal and
 Git state. They show the adjudicated phase, current gate and dependency state,

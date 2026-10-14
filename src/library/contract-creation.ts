@@ -30,6 +30,13 @@ import { observeRegion, type RegionObservation } from "./region.js";
 import { scopeForRepo } from "./repo.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
+
+/** The one place a caller's omitted target becomes product behavior. */
+function bindTargetSelection(target: string | null | undefined): BindTargetSelection {
+  if (target === undefined) return { kind: "current-branch" };
+  return target === null ? { kind: "targetless" } : { kind: "explicit", target };
+}
+
 function bindInput(input: BindInput, composition: LocalContractCompositionCapture) {
   return validated(() => {
     const values = requireInput(input, "Keiyaku.bind input");
@@ -40,8 +47,8 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
         : ["repo", "forkOf", "target", "workspace", "actor"];
     requireInput(input, "Keiyaku.bind input", allowed);
     if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
-    if (values.target !== undefined && typeof values.target !== "string")
-      throw new TypeError("target must be a string");
+    if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
+      throw new TypeError("target must be a string or null");
     const actor = actorOption(values.actor);
     const document = forkOf === undefined ? parseMarkdown(requireMarkdown(values.markdown)) : undefined;
     if (forkOf !== undefined) {
@@ -53,7 +60,7 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
       scope: scopeForRepo(values.repo),
       document,
       actor,
-      target: values.target as string | undefined,
+      target: values.target as string | null | undefined,
       task: forkOf === undefined ? taskOption(values.task) : undefined,
       gates: derived,
       after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
@@ -62,16 +69,14 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
 }
 
 /**
- * One Contract bind. `omittedMarkdownTarget` is the internal composition input an edge
- * supplies for a Markdown bind whose caller omitted the target: the public package-root
- * composition leaves it targetless, while the CLI names the invocation branch.
+ * One Contract bind. An omitted Markdown target names the current branch of the caller's explicit
+ * Repo worktree coordinate, `null` is deliberately targetless, and a string is that literal target.
  */
 export async function bindKeiyaku(
   input: BindInput,
   createHandle: typeof createKeiyakuHandle,
   execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
-  omittedMarkdownTarget: BindTargetSelection = { kind: "targetless" },
 ): Promise<BindOutcome> {
   const prepared = bindInput(input, composition);
   const hooks = derivedHooks(composition);
@@ -108,16 +113,7 @@ export async function bindKeiyaku(
               return acceptedOutcome("bind", id, accumulator, value);
             }
             if (document === undefined) throw new Error("Markdown bind requires its prepared document");
-            return await markdownBind(
-              prepared,
-              document,
-              hooks,
-              scope,
-              channel,
-              accumulator,
-              handle,
-              omittedMarkdownTarget,
-            );
+            return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
           })();
           return completed;
         },
@@ -197,12 +193,10 @@ async function markdownBind(
   channel: GitDecodeChannel,
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Keiyaku,
-  omittedMarkdownTarget: BindTargetSelection,
 ): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
   const { task, target, actor, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
-  const targetSelection: BindTargetSelection =
-    target !== undefined ? { kind: "explicit", target } : omittedMarkdownTarget;
+  const targetSelection = bindTargetSelection(target);
   const admission = await prepareMarkdownBind({
     scope,
     channel,

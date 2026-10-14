@@ -29,7 +29,8 @@ export type ParsedBind = Output &
     command: "bind";
     forkOf?: string;
     task?: string;
-    target?: string;
+    /** A literal target branch, or `null` for a deliberately targetless bind. */
+    target?: string | null;
     after?: readonly string[];
     gates?: readonly string[];
   }>;
@@ -169,6 +170,13 @@ function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): 
   return names;
 }
 
+function parseBindTarget(parts: ParsedContractParts): string | null | undefined {
+  const target = optionalFlag(parts.flags, "target");
+  const noTarget = parts.flags["no-target"] === true;
+  if (target !== undefined && noTarget) refuse("bind", "--target and --no-target are mutually exclusive");
+  return noTarget ? null : target;
+}
+
 function parseBind(parts: ParsedContractParts): ParsedBind {
   const forkOf = optionalFlag(parts.flags, "fork-of");
   if (forkOf !== undefined) {
@@ -176,7 +184,7 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
     for (const option of ["task", "after", "gates"]) {
       if (parts.flags[option] !== undefined) refuse("bind", `--${option} is not valid with --fork-of`);
     }
-    const target = optionalFlag(parts.flags, "target");
+    const target = parseBindTarget(parts);
     return {
       command: "bind",
       forkOf,
@@ -187,7 +195,7 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
   }
   if (!parts.stdin) refuse("bind", "bind requires stdin");
   const task = optionalFlag(parts.flags, "task");
-  const target = optionalFlag(parts.flags, "target");
+  const target = parseBindTarget(parts);
   const after =
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = parseGateNames(parts, "bind");

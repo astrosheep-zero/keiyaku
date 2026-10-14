@@ -99,7 +99,10 @@ async function buildPostBindTemplate(
       repo: await Repo.at({ path: repository.path }),
       markdown: contractBody(),
       workspace: "worktree",
-      ...(target === "targeted" ? { target: "refs/heads/main", ...(gates.length === 0 ? {} : { gates }) } : {}),
+      ...(target === "targeted"
+        ? { target: "refs/heads/main", ...(gates.length === 0 ? {} : { gates }) }
+        : // The targetless fixture stays deliberately targetless now that omission names the branch.
+          { target: null }),
     }),
   );
   const state = present(await bound.value.keiyaku.state());

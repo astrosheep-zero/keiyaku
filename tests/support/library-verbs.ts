@@ -96,10 +96,12 @@ export function document(verification?: string): string {
 }
 
 export async function bind(repository: TestGitRepository, verification?: string) {
+  // These lifecycle fixtures exercise targetless Contracts on an attached HEAD.
   const result = await Keiyaku.with().bind({
     repo: await Repo.at({ path: repository.path }),
     markdown: document(verification),
     workspace: "worktree",
+    target: null,
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
   return accepted(result).value.keiyaku;
