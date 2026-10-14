@@ -151,7 +151,9 @@ handle. `Akumas.of(world)` captures a World and execution channel for selector,
 selection, creation, and fork operations; callers do not repeat that World on each
 operation. It retains an explicit Repo only for Contract selection or Dispatch
 association and never infers Repo from World or World from Repo. Archetype
-definitions remain an archetype-owner listing. The independent Task product
+definitions remain an archetype-owner listing, reachable through the root as
+that owner's bounded catalogue and its native error; no public definition
+loader joins the root. The independent Task product
 likewise captures World and does not read or write Contract authority except
 through the settlement owner.
 

@@ -103,11 +103,15 @@ the owner's membership, semantic order, and observed extent; it does not count
 or reopen the whole roster. The lower roster supplies that native membership,
 order, and extent, and World composition attaches the current Alias bindings
 afterward without replacing the semantic order or counting the board. Archetype definitions are listed by the archetype
-owner. An archetype definition may declare `hidden: true`: a hidden definition
+owner. The owner's bounded definitions catalogue and the native Archetype
+error that call admission already throws are reachable from the package root,
+so a root-only caller lists the same callable definitions the CLI shows and
+identifies that error without a private module. An archetype definition may declare `hidden: true`: a hidden definition
 never appears in the archetype catalogue, but it resolves and answers calls by
 name exactly as a visible one, and hiddenness is the definition's own
 catalogue visibility, never inherited through `base`. There is no
-cross-product SDK catalogue or `ls` operation. The CLI's
+cross-product SDK catalogue or `ls` operation, and no public definition loader. The CLI's
 `ls` command adapts Contract, Akuma, archetype, and Task listing through their
-respective owners, and renderers consume those adjudicated values without
+respective owners — catalogue and error adaptation alike through those public
+symbols — and renderers consume those adjudicated values without
 performing their own owner lookup.

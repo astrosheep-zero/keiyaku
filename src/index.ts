@@ -48,11 +48,13 @@ export { z } from "zod";
 export {
   ALLOWED_ACTIONS,
   Akuma,
+  AkumaArchetypeError,
   AkumaBusyError,
   AkumaDecodeError,
   AkumaNotBornError,
   AkumaProviderError,
   Schema,
+  listArchetypeDefinitions,
 } from "./akuma/index.js";
 export type {
   ActivityHistory,
@@ -71,6 +73,9 @@ export type {
   AkumaTellResult,
   AllowedAction,
   AllowedActions,
+  ArchetypeCatalog,
+  ArchetypeCatalogInput,
+  ArchetypeCatalogRow,
   InterruptReceipt,
   JsonSchema,
   JsonSchemaDocument,

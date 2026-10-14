@@ -1,8 +1,7 @@
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaArchetypeError } from "../akuma/archetype.js";
 import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
 import { bodyRequestExecution, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
-import type { ActorId } from "../index.js";
+import { AkumaArchetypeError, type ActorId } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";

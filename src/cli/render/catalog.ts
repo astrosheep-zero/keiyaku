@@ -1,5 +1,5 @@
 import type { AkumaList } from "../../akuma/akuma.js";
-import type { ArchetypeCatalogRow } from "../../akuma/archetype.js";
+import type { ArchetypeCatalog } from "../../index.js";
 import type { ContractList } from "../../library/contract-types.js";
 import type { TaskPage, TaskRow } from "../../task/index.js";
 import { abbreviateGitIds, displayGitId, gitIdsInRow, lifecycleWord, progressStrip } from "./contract-observation.js";
@@ -82,9 +82,7 @@ export function renderContractCatalogue(list: ContractList): string {
   return [header, ...(blocks.length === 0 ? [] : ["", ...blocks]), ...(list.hasMore ? ["…"] : [])].join("\n");
 }
 
-export function renderArchetypeCatalogue(
-  list: Readonly<{ rows: readonly ArchetypeCatalogRow[]; hasMore: boolean }>,
-): string {
+export function renderArchetypeCatalogue(list: ArchetypeCatalog): string {
   if (list.rows.length === 0) return emptyCatalogue("akuma names");
   return [
     "AKUMA NAMES // available",

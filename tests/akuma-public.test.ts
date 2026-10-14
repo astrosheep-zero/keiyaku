@@ -23,7 +23,7 @@ import {
   type ActivityHistory,
   type TurnLedger,
 } from "../src/akuma/projection.js";
-import { AkumaArchetypeError, listArchetypeDefinitions, loadArchetype } from "../src/akuma/archetype.js";
+import { loadArchetype } from "../src/akuma/archetype.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
@@ -47,7 +47,7 @@ import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../s
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
-import { Akumas } from "../src/index.js";
+import { AkumaArchetypeError, Akumas, listArchetypeDefinitions } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
 import type { AkumaOwner } from "../src/akuma/akuma-owner.js";

@@ -1,6 +1,5 @@
-import { listArchetypeDefinitions } from "../../akuma/archetype.js";
 import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
-import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, nuke } from "../../index.js";
+import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
 import type {
   ActorId,
   AkumaObservation,

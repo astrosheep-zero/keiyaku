@@ -1,8 +1,33 @@
-import { Akuma, Akumas, Keiyaku, nuke, type AkuId, type LocalContractComposition, type Repo, type WorldRoot } from "@astrosheep/keiyaku";
+import {
+  Akuma,
+  AkumaArchetypeError,
+  Akumas,
+  Keiyaku,
+  listArchetypeDefinitions,
+  nuke,
+  type AkuId,
+  type ArchetypeCatalog,
+  type ArchetypeCatalogInput,
+  type ArchetypeCatalogRow,
+  type LocalContractComposition,
+  type Repo,
+  type WorldRoot,
+} from "@astrosheep/keiyaku";
 
 declare const world: WorldRoot;
 declare const aku: AkuId;
 declare const repo: Repo;
+declare const nativeError: unknown;
+
+const catalogueInput: ArchetypeCatalogInput = { project: world, home: "/tmp/keiyaku-consumer-home", limit: 25 };
+const catalogue: Promise<ArchetypeCatalog> = listArchetypeDefinitions(catalogueInput);
+const catalogueRows: readonly ArchetypeCatalogRow[] = [];
+if (nativeError instanceof AkumaArchetypeError) {
+  const kind: "akuma-archetype" = nativeError.kind;
+  const searched: readonly string[] = nativeError.searched;
+  void [kind, searched];
+}
+void [catalogue, catalogueRows];
 
 const contractPolicy: LocalContractComposition = { actor: "contract-owner" };
 Keiyaku.with(contractPolicy);
@@ -44,3 +69,7 @@ Keiyaku.with().select({ id: "kei/example" });
 Akuma.nuke({ world, confirm: world });
 // @ts-expect-error the retired ./akumas subpath promise is gone
 type RemovedAkumasSubpath = import("@astrosheep/keiyaku/akumas").Akumas;
+// @ts-expect-error the private Archetype loader stays off the package root
+type RemovedArchetypeLoader = import("@astrosheep/keiyaku").loadArchetype;
+// @ts-expect-error only the bounded definitions catalogue is public, not the name-only list
+type RemovedArchetypeNames = import("@astrosheep/keiyaku").listArchetypes;

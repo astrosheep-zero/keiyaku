@@ -1,6 +1,6 @@
 import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
-import { listArchetypeDefinitions } from "../src/akuma/archetype.js";
+import { listArchetypeDefinitions } from "../src/index.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import {

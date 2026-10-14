@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { parseDocument } from "yaml";
 import { boundedListLimit, type BoundedList } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
@@ -41,6 +41,15 @@ export type ArchetypeCatalogRow = Readonly<{
   name: string;
   model?: string;
   description?: string;
+}>;
+
+export type ArchetypeCatalog = BoundedList<ArchetypeCatalogRow>;
+
+/** One closed catalogue request: omitted project means no project scope, never ambient discovery. */
+export type ArchetypeCatalogInput = Readonly<{
+  project?: string;
+  home?: string;
+  limit?: number;
 }>;
 
 type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
@@ -353,17 +362,41 @@ async function resolveArchetype(
   );
 }
 
-export async function listArchetypeDefinitions(
-  input: ArchetypeCoordinates & Readonly<{ limit?: number }> = {},
-): Promise<BoundedList<ArchetypeCatalogRow>> {
+function catalogueCoordinate(value: unknown, field: "project" | "home"): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new TypeError(`Akuma catalogue ${field} must be a nonblank string`);
+  }
+  if (!isAbsolute(value)) throw new TypeError(`Akuma catalogue ${field} must be absolute: ${value}`);
+  return value;
+}
+
+/** Malformed caller input fails here, before any filesystem observation. */
+function catalogueInput(value: unknown): ArchetypeCatalogInput {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Akuma catalogue input must be an object");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  const unknown = Object.keys(input).find((key) => !["project", "home", "limit"].includes(key));
+  if (unknown !== undefined) throw new TypeError(`Akuma catalogue input has unknown field: ${unknown}`);
+  const project = catalogueCoordinate(input.project, "project");
+  const home = catalogueCoordinate(input.home, "home");
+  return {
+    ...(project === undefined ? {} : { project }),
+    ...(home === undefined ? {} : { home }),
+    ...(input.limit === undefined ? {} : { limit: boundedListLimit(input.limit) }),
+  };
+}
+
+export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}): Promise<ArchetypeCatalog> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
-  const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
-  const all = await archetypePaths(input);
+  const { limit, ...coordinates } = catalogueInput(input);
+  const all = await archetypePaths(coordinates);
   const settled = await Promise.allSettled(
     all.map(async ({ name, path }) => {
       try {
-        return await resolveArchetype(name, input, undefined);
+        return await resolveArchetype(name, coordinates, undefined);
       } catch (error) {
         if (error instanceof AkumaArchetypeError) throw error;
         throw new AkumaArchetypeError(
