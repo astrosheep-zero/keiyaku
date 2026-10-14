@@ -13,7 +13,8 @@ import {
   type RepositoryScope,
 } from "../protocol/operations.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
-import { composeContractLibrary, readContractValue, type KeiyakuLibrary } from "./contract-composition.js";
+import { composeContractLibrary, type KeiyakuLibrary } from "./contract-composition.js";
+import { readContractValue } from "./outcome.js";
 import { ContractExecution } from "./contract-execution.js";
 import type {
   AbandonOutcome,

@@ -8,6 +8,7 @@ import {
   contractsOperation,
 } from "../protocol/operations.js";
 import type { ContractObservation } from "../protocol/read/status.js";
+import { resolveContract } from "./contract-address.js";
 import { bindKeiyaku } from "./contract-creation.js";
 import type { BindOutcome } from "./contract-outcomes.js";
 import {
@@ -20,12 +21,14 @@ import type {
   ContractList,
   ContractListInput,
   ContractObservationInput,
+  ContractResolveInput,
+  ContractResolution,
   KeiyakuSelectInput,
   LocalContractComposition,
 } from "./contract-types.js";
 import { requireInput } from "./input.js";
 import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
-import { KeiyakuError, errorCategory } from "./outcome.js";
+import { readContractValue } from "./outcome.js";
 import {
   completeReconcile,
   completeRepoReconcile,
@@ -44,6 +47,7 @@ interface KeiyakuLibraryReconcile {
 export type KeiyakuLibrary = Readonly<{
   bind(input: BindInput): Promise<BindOutcome>;
   select(input: KeiyakuSelectInput): Keiyaku;
+  resolve(input: ContractResolveInput): Promise<ContractResolution>;
   list(input: ContractListInput): Promise<ContractList>;
   observe(input: ContractObservationInput): Promise<ContractObservation>;
   reconcile: KeiyakuLibraryReconcile;
@@ -64,6 +68,7 @@ export function composeContractLibrary(
   return Object.freeze({
     bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, execution, composition),
     select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, execution, composition),
+    resolve: resolveContract,
     list: (operation: ContractListInput) => listKeiyaku(operation),
     observe: (operation: ContractObservationInput) => observeKeiyaku(operation),
     reconcile: reconcileOperation(composition),
@@ -153,15 +158,4 @@ export async function observeKeiyaku(input: ContractObservationInput): Promise<C
   return readContractValue(() =>
     withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id })),
   );
-}
-
-export async function readContractValue<Value>(operation: () => Promise<Value>): Promise<Value> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (error instanceof KeiyakuError) throw error;
-    throw new KeiyakuError(errorCategory(error), error instanceof Error ? error.message : String(error), {
-      cause: error,
-    });
-  }
 }

@@ -48,7 +48,7 @@ second repository coordinate. A handle offers state and guidance reads, history,
 amendment, delivery, review, abandonment, arc, and audit. `Keiyaku.with()`
 synchronously captures one already-loaded immutable Settings value and the
 Contract-local actor, then exposes the Contract collection operations bind,
-select, list, and observe, and the one public repair entry that reconciles
+select, resolve, list, and observe, and the one public repair entry that reconciles
 either a world or one addressed Contract from an explicit Git-world
 coordinate. Construction performs no I/O and validates no product namespace.
 Public construction is always local; only the CLI and a detached Body supply
@@ -90,8 +90,23 @@ complete.
 
 Contract listing preserves the complete board when no limit is selected. An
 explicit bound reports whether that same observation contains additional
-rows. Selector resolution that requires the complete board uses a private
-complete read and never resolves identity through a bounded public list.
+rows. Contract selector resolution is a read-only, invocation-scoped capability. A
+complete identity is validated without consulting repository authority or proving
+existence; the requested operation owns absence. Short selectors use exact
+short-name equality among active Contracts with a managed, appointed worktree.
+Omitted selection matches the exact canonical worktree coordinate among those
+same candidates, never an ancestor or inferred namespace. The caller supplies an
+absolute directory coordinate or uses the explicit Repo's pinned worktree
+coordinate; resolution never consults ambient process state.
+
+Short and contextual resolution freezes one complete live board, never a bounded
+catalogue. Invalid, redundant, unknown, ambiguous, and unmatched contextual
+selectors return operation-owned refusal evidence. Malformed caller values or
+invalid coordinates are caller-input errors, while corrupt or unavailable
+authority remains exceptional with its native cause. Resolution neither creates
+a handle nor reserves selection for a later mutation, which retains its own
+admission judgment. The mixed Address facet shares only pure Contract candidate
+matching; its cross-family ambiguity and Alias observation judgment stay its own.
 The listing is the live board: terminal Contracts leave it, and their record
 stays in the journal and Git.
 Listing remains a read-time projection, not a lifecycle judgment.

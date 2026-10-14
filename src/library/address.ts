@@ -14,6 +14,7 @@ import {
 } from "../identity/selector.js";
 import { World, type WorldRoot } from "../world.js";
 import type { KanshiReport, Section } from "../kanshi/index.js";
+import { matchContractCandidates } from "./contract-address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -112,12 +113,9 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAddressId(selector).id };
   const alias = parseAddressAlias(selector);
-  const contractMatches = (input.report.contracts.kind === "present" ? input.report.contracts.value.rows : []).filter(
-    (row) =>
-      row.disposition === "active" &&
-      row.workspace === "worktree" &&
-      row.worktreePath !== null &&
-      `@${row.id.slice("kei/".length)}` === alias,
+  const contractMatches = matchContractCandidates(
+    input.report.contracts.kind === "present" ? input.report.contracts.value.rows : [],
+    { selector: alias },
   );
   const aliasId =
     input.aliases.kind === "present"

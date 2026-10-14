@@ -1,28 +1,9 @@
-import { resolve } from "node:path";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { identitySegments } from "../identity/coordinates.js";
-import type { ContractBoard, ContractId, ContractRow, Keiyaku, Repo } from "../index.js";
-import type { KanshiReport } from "../kanshi/index.js";
+import { Keiyaku, type ContractId, type Repo } from "../index.js";
 import { composeContractLibrary } from "../library/contract-composition.js";
 import { createKeiyakuHandle } from "../library/keiyaku.js";
 import { CliUsageError } from "./parse.js";
-
-type SelectorCandidate = Readonly<{
-  id: ContractId;
-  worktreePath: string;
-}>;
-
-function selectorError(message: string): never {
-  throw new CliUsageError(message);
-}
-
-function activeManagedCandidates(rows: readonly ContractRow[]): readonly SelectorCandidate[] {
-  return rows.flatMap((contract) => {
-    if (contract.disposition !== "active" || contract.workspace !== "worktree" || contract.worktreePath === null)
-      return [];
-    return [{ id: contract.id, worktreePath: contract.worktreePath }];
-  });
-}
 
 type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
 
@@ -35,60 +16,38 @@ export function contractFromInput(
     const id = value as ContractId;
     return { id, contract: composeContractLibrary(execution, createKeiyakuHandle).select({ repo, id }) };
   } catch (error) {
-    selectorError(error instanceof Error ? error.message : String(error));
+    throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
 }
 
-function resolveShortContract(rows: readonly ContractRow[], selector: string): ContractId {
-  if (selector.startsWith("@kei/")) selectorError(`redundant short contract selector: ${selector}`);
-  const short = selector.slice(1);
-  const candidates = activeManagedCandidates(rows).filter((candidate) => candidate.id.slice("kei/".length) === short);
-  if (candidates.length === 0) selectorError(`unknown contract selector: ${selector}`);
-  if (candidates.length !== 1) selectorError(`ambiguous contract selector: ${selector}`);
-  return candidates[0]!.id;
-}
-
-function resolveOmittedContract(board: ContractBoard, scope: string): ContractId {
-  const candidates = activeManagedCandidates(board.rows).filter(
-    (candidate) => resolve(scope) === resolve(candidate.worktreePath),
-  );
-  if (candidates.length === 0) {
-    selectorError("an explicit full or @ contract selector is required outside a managed worktree");
+/** Adapt public Contract resolution evidence to the existing CLI usage diagnostics. */
+export async function resolveContractId(repo: Repo, selector: string | undefined, cwd: string): Promise<ContractId> {
+  const result = await Keiyaku.with().resolve({ repo, ...(selector === undefined ? {} : { selector }), cwd });
+  if (result.kind === "resolved") return result.id;
+  const refusal = result.refusal;
+  switch (refusal.kind) {
+    case "invalid-selector":
+      throw new CliUsageError(refusal.diagnostic);
+    case "redundant-short-selector":
+      throw new CliUsageError(`redundant short contract selector: ${refusal.selector}`);
+    case "unknown-short-selector":
+      throw new CliUsageError(`unknown contract selector: ${refusal.selector}`);
+    case "ambiguous-selector":
+      throw new CliUsageError(
+        "selector" in refusal
+          ? `ambiguous contract selector: ${refusal.selector}`
+          : "ambiguous managed worktree contract selector",
+      );
+    case "no-contextual-match":
+      throw new CliUsageError("an explicit full or @ contract selector is required outside a managed worktree");
   }
-  if (candidates.length !== 1) selectorError("ambiguous managed worktree contract selector");
-  return candidates[0]!.id;
-}
-
-export function resolveContextualContract(
-  board: ContractBoard,
-  selector: string | undefined,
-  scope: string,
-): ContractId {
-  if (selector === undefined) return resolveOmittedContract(board, scope);
-  if (selector.startsWith("@")) return resolveShortContract(board.rows, selector);
-  return selectorError(`contract selector must be kei/<contract-segment> or @<contract-segment>: ${selector}`);
-}
-
-/** Resolve one explicit, short, or worktree-contextual selector to its Contract id. */
-export async function resolveContractId(repo: Repo, selector: string | undefined, scope: string): Promise<ContractId> {
-  if (selector !== undefined && !selector.startsWith("@")) return contractFromInput(repo, selector).id;
-  const { listKeiyaku } = await import("../library/contract-composition.js");
-  return resolveContextualContract(await listKeiyaku({ repo }), selector, scope);
 }
 
 export function canonicalContractSelector(selector: string): ContractId {
   try {
     identitySegments({ family: "kei", value: selector });
   } catch {
-    return selectorError(`contract selector must use kei/: ${selector}`);
+    throw new CliUsageError(`contract selector must use kei/: ${selector}`);
   }
   return selector as ContractId;
-}
-
-export function resolveKanshiContract(report: KanshiReport, selector: string): string {
-  if (report.contracts.kind !== "present") {
-    return selectorError(`cannot select a contract while the Contract world is ${report.contracts.kind}`);
-  }
-  if (selector.startsWith("@")) return resolveShortContract(report.contracts.value.rows, selector);
-  return canonicalContractSelector(selector);
 }

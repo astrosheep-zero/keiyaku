@@ -14,6 +14,9 @@ import {
   type PartialOutcomeEnvelope,
   type LocalContractComposition,
   type ContractObservation,
+  type ContractResolveInput,
+  type ContractResolution,
+  type ContractSelectorRefusal,
 } from "@astrosheep/keiyaku";
 
 declare const repo: Repo;
@@ -26,6 +29,15 @@ const targetlessInput: BindInput = { repo, markdown, target: null };
 const invalidTarget: BindInput = { repo, markdown, target: 7 };
 const bound: Promise<BindResult> = Keiyaku.with().bind(input);
 const selected = Keiyaku.with().select({ repo, id });
+const resolveInput: ContractResolveInput = { repo, selector: "@short", cwd: "/explicit/worktree" };
+const resolution: ContractResolution = await Keiyaku.with().resolve(resolveInput);
+if (resolution.kind === "resolved") Keiyaku.with().select({ repo, id: resolution.id });
+if (resolution.kind === "refused") {
+  const refusal: ContractSelectorRefusal = resolution.refusal;
+  void refusal.kind;
+}
+// @ts-expect-error resolution has no transport route
+Keiyaku.with().resolve({ repo, selector: id, execution: {} });
 const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
 const reviewed: ReviewOutcome = await selected.review(cancellable, { observe: async (event) => { void event.kind; } });
 const effects: readonly InvocationEffect[] = reviewed.effects;

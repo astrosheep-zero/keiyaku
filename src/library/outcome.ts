@@ -386,6 +386,15 @@ export function errorCategory(error: unknown): KeiyakuErrorCategory {
   return "internal";
 }
 
+export async function readContractValue<Value>(operation: () => Promise<Value>): Promise<Value> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof KeiyakuError) throw error;
+    throw new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error });
+  }
+}
+
 function errorDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

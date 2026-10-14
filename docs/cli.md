@@ -97,9 +97,11 @@ World without Repo.
 
 `ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and
-Tasks through `Tasks.of(world).list`. Contract selector resolution continues
-to use a complete read where required; a bounded list never narrows selector
-meaning. The SDK exposes product `list` operations and no mixed `ls`.
+Tasks through `Tasks.of(world).list`. Contract-only selection, including region lookup, delegates to the public
+Contract resolver owned by [public-api.md](public-api.md). The edge renders its
+typed refusal evidence as invocation diagnostics without owning candidate
+matching; a bounded display never narrows selector meaning. Complete identities
+retain the requested operation's missing-Contract refusal. The SDK exposes product `list` operations and no mixed `ls`.
 
 The call and ask edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.

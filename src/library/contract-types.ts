@@ -56,6 +56,17 @@ export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;
 export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
 export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
 export type KeiyakuSelectInput = Readonly<{ repo: Repo; id: ContractId }>;
+export type ContractResolveInput = Readonly<{ repo: Repo; selector?: string; cwd?: string }>;
+export type ContractSelectorRefusal =
+  | Readonly<{ kind: "invalid-selector"; selector: string; diagnostic: string }>
+  | Readonly<{ kind: "redundant-short-selector"; selector: string }>
+  | Readonly<{ kind: "unknown-short-selector"; selector: string }>
+  | Readonly<{ kind: "ambiguous-selector"; selector: string }>
+  | Readonly<{ kind: "ambiguous-selector"; cwd: string }>
+  | Readonly<{ kind: "no-contextual-match"; cwd: string }>;
+export type ContractResolution =
+  | Readonly<{ kind: "resolved"; id: ContractId }>
+  | Readonly<{ kind: "refused"; refusal: ContractSelectorRefusal }>;
 export type ReviewInput = ActorOptions &
   Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;

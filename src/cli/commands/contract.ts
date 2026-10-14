@@ -15,7 +15,7 @@ import type {
   WorldRoot,
 } from "../../index.js";
 import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
-import { kanshi, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
+import { kanshi, observeKanshi, selectRegion } from "../../kanshi/index.js";
 import { resolveNamedAddress } from "../../library/address.js";
 import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
@@ -44,12 +44,7 @@ import { renderRegionText } from "../render/region.js";
 import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { CliRuntime } from "../runtime.js";
-import {
-  canonicalContractSelector,
-  contractFromInput,
-  resolveContractId,
-  resolveKanshiContract,
-} from "../selectors.js";
+import { canonicalContractSelector, contractFromInput, resolveContractId } from "../selectors.js";
 import { displayContext, emit, writeJson, writeStdout } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { amendFromCommand } from "./amend.js";
@@ -641,13 +636,7 @@ async function runStatusIdentity(
     }
     return emit(command.output, report, () => renderKanshiText(report, displayContext(), "contract"), 0);
   }
-  const report = await kanshi({
-    world: coordinates.world,
-    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-  });
-  const contract = resolveKanshiContract(report, command.contract);
-  const selected = selectKanshi({ report, contract });
-  return emit(command.output, selected, () => renderKanshiText(selected, displayContext(), "contract"), 0);
+  throw new CliUsageError(`contract selector must use kei/: ${command.contract}`);
 }
 
 async function runStatus(
@@ -676,9 +665,10 @@ async function runRegion(
     const report = await kanshi({ world: coordinates.world, repo, region: { kind: "path", patterns: command.paths } });
     return emitSection(report.region ?? { kind: "absent" });
   }
+  const contract =
+    command.contract === undefined ? undefined : await resolveContractId(repo, command.contract, coordinates.cwd);
   const report = await kanshi({ world: coordinates.world, repo, region: { kind: "declarations" } });
-  if (command.contract === undefined) return emitSection(report.region ?? { kind: "absent" });
-  const contract = resolveKanshiContract(report, command.contract) as ContractId;
+  if (contract === undefined) return emitSection(report.region ?? { kind: "absent" });
   const observed = await observeKeiyaku({ repo, id: contract });
   if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
     const refusal: RenderableRefusal = {

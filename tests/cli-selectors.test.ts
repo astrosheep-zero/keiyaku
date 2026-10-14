@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ContractBoard, ContractId } from "../src/index.js";
-import type { ContractKanshiBoard } from "../src/kanshi/index.js";
-import type { WorldRoot } from "../src/world.js";
 import type { KanshiReport } from "../src/kanshi/index.js";
-import { resolveContextualContract, resolveKanshiContract } from "../src/cli/selectors.js";
+import { resolveContractId } from "../src/cli/selectors.js";
 import { CliUsageError } from "../src/cli/parse.js";
 import { makeGitRepository } from "./support/git.js";
-import { contractRow, kanshiReport as sharedKanshiReport } from "./support/cli-fixtures.js";
 import { rmSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,55 +49,22 @@ function runCliJson(cwd: string, argv: readonly string[]) {
   return result;
 }
 
-const active = "kei/active-contract" as ContractId;
-
-function board(): ContractKanshiBoard {
-  return {
-    root: "/repo",
-    state: null,
-    observedAt: "2026-08-12T00:00:00.000Z",
-    rows: [
-      contractRow({
-        id: active,
-        title: "Active contract",
-        phase: "bound",
-        disposition: "active",
-        worktreePath: "/repo/.keiyaku/wt/active-contract",
-        workspaceObservation: {
-          kind: "clean",
-          location: { kind: "worktree", path: "/repo/.keiyaku/wt/active-contract" },
-          counts: { staged: 0, unstaged: 0, untracked: 0, submodules: 0 },
-          merge: null,
-        },
-        targetLag: { kind: "counted", behind: 0 },
-      }),
-    ],
-  };
-}
-
-test("selectors resolve active worktrees from public status rows", () => {
-  const report = board();
-  assert.equal(resolveContextualContract(report, "@active-contract", "/repo"), active);
-  assert.equal(resolveContextualContract(report, undefined, "/repo/.keiyaku/wt/active-contract"), active);
+test("CLI adapts public Contract selector refusals without owning matching", async () => {
+  const repository = makeGitRepository();
+  const repo = await Repo.at({ path: repository.path });
+  const selector = "@missing";
+  assert.deepEqual(await Keiyaku.with().resolve({ repo, selector }), {
+    kind: "refused",
+    refusal: { kind: "unknown-short-selector", selector },
+  });
+  await assert.rejects(resolveContractId(repo, selector, repo.cwd), (error: unknown) => {
+    assert.ok(error instanceof CliUsageError);
+    assert.match(error.message, /unknown contract selector: @missing/u);
+    return true;
+  });
+  await assert.rejects(resolveContractId(repo, "@kei/missing", repo.cwd), /redundant short contract selector/u);
+  await assert.rejects(resolveContractId(repo, undefined, repo.cwd), /required outside a managed worktree/u);
 });
-
-test("selectors use disposition rather than reinterpreting terminal phases", () => {
-  for (const phase of ["claimed", "abandoned"] as const) {
-    const base = board();
-    const report = {
-      ...base,
-      rows: [{ ...base.rows[0]!, phase, disposition: "terminal" }],
-    } satisfies ContractBoard;
-    assert.throws(() => resolveContextualContract(report, "@active-contract", "/repo"), CliUsageError);
-    assert.throws(
-      () => resolveContextualContract(report, undefined, "/repo/.keiyaku/wt/active-contract"),
-      CliUsageError,
-    );
-  }
-});
-
-const kanshiReport = (contracts: KanshiReport["contracts"]): KanshiReport =>
-  sharedKanshiReport(contracts, { root: "/repo" as WorldRoot });
 
 test("missing Contract selectors refuse uniformly across read and reconcile verbs", () => {
   const repo = makeGitRepository();
@@ -120,14 +83,6 @@ test("missing Contract selectors refuse uniformly across read and reconcile verb
     }
   } finally {
     rmSync(repo.path, { recursive: true, force: true });
-  }
-});
-
-test("Kanshi selectors share Contract identity syntax without hiding world availability", () => {
-  assert.equal(resolveKanshiContract(kanshiReport({ kind: "present", value: board() }), "@active-contract"), active);
-  assert.equal(resolveKanshiContract(kanshiReport({ kind: "present", value: board() }), active), active);
-  for (const contracts of [{ kind: "absent" }, { kind: "failed", failure: { message: "broken" } }] as const) {
-    assert.throws(() => resolveKanshiContract(kanshiReport(contracts), active), CliUsageError);
   }
 });
 
@@ -242,6 +197,20 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
     }));
   }
   const owner = await library.list({ repo, limit: 11 });
+  const oldest = owner.rows[10]!;
+  const short = `@${oldest.id.slice("kei/".length)}`;
+  assert.equal(await resolveContractId(repo, short, repo.cwd), oldest.id);
+  assert.equal(await resolveContractId(repo, undefined, oldest.worktreePath!), oldest.id);
+  const region = await cliJson<{ kind: string; value: { declaration: { contract: string } } }>(
+    ["-C", repository.path, "region", short],
+    { environment: {} },
+  );
+  assert.equal(region.exit, 0, region.stderr);
+  assert.equal(region.value.kind, "present");
+  assert.equal(region.value.value.declaration.contract, oldest.id);
+  const contextual = await cliJson<{ contract: string }>(["-C", oldest.worktreePath!, "audit"], { environment: {} });
+  assert.equal(contextual.exit, 0, contextual.stderr);
+  assert.equal(contextual.value.contract, oldest.id);
   const born = await bornDirectAkuma({ root: world, archetype: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
   born.leash.release();
   const dispatch = await publishDispatch({ repository: await repositoryAt(repository.path), akuId: born.id, contractId: owner.rows[0]!.id });
