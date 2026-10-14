@@ -38,7 +38,7 @@ import {
 import { parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { spawnAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
+import { driveAkumaBody, spawnAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
 import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
@@ -262,11 +262,13 @@ test("prompt-free Akumas.call reports born without admitting a Tell", async (t) 
       ...configured.placement,
     });
     assert.deepEqual(result.observation, { kind: "born" });
-    const history = await PublicAkuma.select(world, result.akuma).history();
+    const handle = PublicAkuma.select(world, result.akuma);
+    assert.deepEqual((await handle.status()).birth, { origin: { kind: "direct" }, caller: { kind: "unknown" } });
+    assert.equal((await readSoul(pathsForAkuId(world, result.akuma)))?.caller, undefined);
+    const history = await handle.history();
     assert.equal(history.rows.some((row) => row.kind === "tell"), false);
-    // Managed retirement is awaited and never ignored, so a failed kill stays a
-    // truthful failure instead of a deletion racing a departing empty Body.
-    await PublicAkuma.select(world, result.akuma).kill();
+    // Soul may precede the first Body. The PID-receipt cleanup below awaits
+    // this prompt-free publication's natural exit rather than racing a kill.
     operationFailed = false;
   } finally {
     try {
@@ -282,6 +284,14 @@ test("prompt-free Akumas.call reports born without admitting a Tell", async (t) 
       restoreBodyPidReceipt();
     }
   }
+});
+
+test("malformed explicit callers refuse before allocation on public call and fork", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-caller-refusal-"));
+  const caller = { kind: "unknown" } as never;
+  await assert.rejects(Akumas.of(world).call({ archetype: "worker", caller }), /Invalid Akuma caller/u);
+  await assert.rejects(Akumas.of(world).fork({ akuma: "aku/worker/1234abcd", at: "turn/1", caller }), /Invalid Akuma caller/u);
+  assert.deepEqual((await Akumas.of(world).list()).rows, []);
 });
 
 test("prompt-free Akumas.call refuses schema and wait options", async () => {
@@ -463,7 +473,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
           appendFileSync(context.config.output, JSON.stringify(signal) + "\\n");
           throw new Error("call observer failed");
         };
-        return { signals: { "akuma.called": record, "akuma.outcome-observed": record } };
+        return { signals: { "akuma.born": record, "akuma.outcome-observed": record } };
       }
     };
   `);
@@ -481,6 +491,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       throw new Error("host rejects diagnostic");
     } }).call({
       archetype: "worker", body: "bounded observation", cwd: world,
+      caller: { kind: "external", integration: "tests", id: "submit:bounded" }, initiator: "Submitter",
       home: configured.home, settings: await settings({ root: world, home: configured.home }),
       mode: "wait", signal: t.signal,
     });
@@ -491,14 +502,18 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
     const tell = await readTell(pathsForAkuId(world, result.akuma), result.observation.tell.admission.tellId);
     assert.ok(tell?.binding);
     assert.deepEqual(readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line)), [
-      { kind: "akuma.called", akumaId: result.akuma },
+      { kind: "akuma.born", akumaId: result.akuma, bodySequence: 1, origin: { kind: "direct" },
+        caller: { kind: "external", integration: "tests", id: "submit:bounded" }, initiator: "Submitter" },
       { kind: "akuma.outcome-observed", akumaId: result.akuma, historyId: `turn/${tell.binding.turnSequence}` },
     ]);
-    assert.deepEqual(diagnostics, ["plugin record signal: call observer failed", "plugin record signal: call observer failed"]);
+    assert.deepEqual(diagnostics, ["plugin record signal: call observer failed"], "remote birth diagnostics belong to the Body, not this host");
+    assert.deepEqual((await PublicAkuma.select(world, result.akuma, { reportDiagnostic() {} }).status()).birth, {
+      origin: { kind: "direct" }, caller: { kind: "external", integration: "tests", id: "submit:bounded" },
+    });
     const log = pathsForAkuId(world, result.akuma).log;
     await waitForCondition("submitting call observation diagnostic log", () => readFileSync(log, "utf8").includes("plugin outcome observation failed:"));
     const logged = readFileSync(log, "utf8");
-    assert.ok(logged.includes("plugin call admission failed: plugin record signal: call observer failed"));
+    assert.ok(logged.includes("plugin birth failed: plugin record signal: call observer failed"));
     assert.ok(logged.includes("plugin outcome observation failed: plugin record signal: call observer failed"));
     assert.deepEqual(stderr, [], "call diagnostics do not use the local observation stderr default");
     operationFailed = false;
@@ -518,7 +533,7 @@ test("call without a host preserves log-only diagnostics", async (t) => {
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(join(world, "plugins", "fail.mjs"), `export default {
     manifest: { id: "fail", apiVersion: 1 },
-    activate() { return { signals: { "akuma.called": () => { throw new Error("call-only failure"); } } }; }
+    activate() { return { signals: { "akuma.born": () => { throw new Error("birth-only failure"); } } }; }
   };`);
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
     plugins: { fail: { package: "./plugins/fail.mjs" } },
@@ -533,8 +548,8 @@ test("call without a host preserves log-only diagnostics", async (t) => {
     });
     assert.deepEqual(result.observation, { kind: "born" });
     const log = pathsForAkuId(world, result.akuma).log;
-    await waitForCondition("log-only call diagnostic", () => existsSync(log) && readFileSync(log, "utf8").includes("call-only failure"));
-    assert.ok(readFileSync(log, "utf8").includes("plugin call admission failed: plugin fail signal: call-only failure"));
+    await waitForCondition("log-only birth diagnostic", () => existsSync(log) && readFileSync(log, "utf8").includes("birth-only failure"));
+    assert.ok(readFileSync(log, "utf8").includes("plugin birth failed: plugin fail signal: birth-only failure"));
     assert.deepEqual(stderr, []);
     // Prompt-free birth can precede its Body fact. The PID-receipt cleanup owns
     // and awaits that process's natural empty publication exit, without a kill race.
@@ -1010,6 +1025,17 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   const { raw, repo, git } = await repositoryFixture();
   const world = await World.at(raw.path);
   const configured = await directArchetypeSettings(world);
+  const births = join(world, "births.jsonl");
+  mkdirSync(join(world, "plugins"));
+  writeFileSync(join(world, "plugins", "birth.mjs"), `
+    import { appendFileSync } from "node:fs";
+    export default { manifest: { id: "birth", apiVersion: 1 }, activate(context) {
+      return { signals: { "akuma.born": (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n") } };
+    } };
+  `);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
+    birth: { package: "./plugins/birth.mjs", config: { output: births } },
+  } }));
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -1017,6 +1043,8 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   let bound: Awaited<ReturnType<ReturnType<typeof Keiyaku.with>["bind"]>> | undefined;
   const environment = { ...process.env };
   delete environment[AKUMA_REQUESTS_ENV];
+  delete environment.KEIYAKU_ACTOR_ID;
+  delete environment.KEIYAKU_ACTOR_WORLD;
   try {
     bound = await Keiyaku.with().bind({
       repo,
@@ -1051,16 +1079,44 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     const explicitDir = join(raw.path, "explicit-workdir");
     mkdirSync(explicitDir);
     const explicit = await cliJson<CallResult>(
-      ["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir", "-"],
+      ["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir"],
       {
         cwd: raw.path,
-        environment: { ...environment, KEIYAKU_HOME: configured.home },
-        readStdin: async () => "explicit placement",
+        environment: { ...environment, KEIYAKU_HOME: configured.home,
+          KEIYAKU_ACTOR_ID: "aku/delegator/abcd1234", KEIYAKU_ACTOR_WORLD: `${world}/.`,
+          KEIYAKU_EXTERNAL_CALLER: "ignored:outer", SQUARE_PARTICIPANT_NAME: "Submitter" },
       },
     );
     assert.equal(explicit.value.kind, "called");
     assert.deepEqual(explicit.value.execution, { cwd: realpathSync(explicitDir), source: "input" });
     assert.equal(explicit.value.dispatch.kind, "dispatched");
+    assert.equal(explicit.value.observation.kind, "born");
+    await waitForCondition("both direct birth notifications", () => existsSync(births) && readFileSync(births, "utf8").trim().split("\n").length === 2);
+    const directBirths = readFileSync(births, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(directBirths.find((signal) => signal.akumaId === explicit.value.akuma), {
+      kind: "akuma.born", akumaId: explicit.value.akuma, bodySequence: 1, origin: { kind: "direct" },
+      caller: { kind: "akuma", world, akuId: "aku/delegator/abcd1234" }, initiator: "Submitter", contractId: managedId,
+    });
+    const { pump, leash } = await requestPump(world, async (launch) => { await driveAkumaBody(launch); });
+    try {
+      const forwarded = await cliJson<CallResult>(["-C", ".", "call", "worker", "--contract", managedId], {
+        cwd: raw.path,
+        environment: { ...environment, KEIYAKU_HOME: configured.home, AKUMA_REQUESTS: pump.directory,
+          KEIYAKU_ACTOR_ID: "old-body-without-world", KEIYAKU_EXTERNAL_CALLER: "malformed",
+          SQUARE_PARTICIPANT_NAME: "Forwarder" },
+      });
+      assert.equal(forwarded.value.observation.kind, "born");
+      const birth = readFileSync(births, "utf8").trim().split("\n").map((line) => JSON.parse(line)).at(-1);
+      assert.equal(birth.akumaId, forwarded.value.akuma);
+      assert.deepEqual(birth.caller, { kind: "akuma", world, akuId: "aku/parent/1234abcd" });
+      assert.equal(birth.origin.kind, "request");
+      assert.equal(birth.initiator, "Forwarder");
+      assert.equal(birth.contractId, managedId);
+      assert.deepEqual((await PublicAkuma.select(world, forwarded.value.akuma).status()).birth, { origin: birth.origin, caller: birth.caller });
+    } finally {
+      await pump.close();
+      leash.release();
+    }
     operationFailed = false;
   } finally {
     try {

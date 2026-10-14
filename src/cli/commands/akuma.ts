@@ -1,3 +1,4 @@
+import { akumaCallerFromEnvironment } from "../akuma-caller.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma-grammar.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
@@ -124,9 +125,7 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
     initiator = squareAssignedParticipantName(input.environment);
   } catch {}
   if (initiator === undefined) return {};
-  // Plugins coordinate within an established World; a `call` may run where the
-  // marker does not exist yet, and activating there would only fail noisily.
-  // The initiator still travels with the request either way.
+  // Identity preparation needs established plugin custody, not just a candidate.
   if (!(await World.established(input.path))) return { initiator };
   await emitPluginSignal(
     {
@@ -151,9 +150,14 @@ async function runCall(
 ): Promise<number> {
   const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
+  const declaredCaller = executionChannel(input.execution).kind === "body-request"
+    ? undefined : await akumaCallerFromEnvironment(input.environment);
+  // Establish the selected World before preparing the submitting Square route.
+  await World.at(input.path);
   const caller = akumas(input);
   const request: CallRequest = {
     ...(await inputInitiator(input)),
+    ...(declaredCaller === undefined ? {} : { caller: declaredCaller }),
     archetype: command.archetype,
     ...(body === undefined ? {} : { body }),
     ...(input.home === undefined ? {} : { home: input.home }),
@@ -359,7 +363,10 @@ async function runFork(
   command: Extract<InvokedAkumaCommand, { command: "fork" }>,
   input: InvokeInput,
 ): Promise<number> {
+  const caller = await akumaCallerFromEnvironment(input.environment);
   const receipt = await akumas(input).fork({
+    ...(await inputInitiator(input)),
+    ...(caller === undefined ? {} : { caller }),
     akuma: command.akuma,
     at: command.at,
     ...(input.repo === undefined ? {} : { repo: input.repo }),

@@ -1,3 +1,4 @@
+import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
@@ -458,7 +459,8 @@ export class AkumaOwner {
     };
   }
 
-  async fork(input: Readonly<{ at: string }>): Promise<ForkReceipt> {
+  async fork(input: Readonly<{ at: string; caller?: AkumaCaller; initiator?: string }>): Promise<ForkReceipt> {
+    const caller = decodeAkumaCaller(input.caller);
     const source = await readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
@@ -503,8 +505,10 @@ export class AkumaOwner {
               allowed: source.allowed,
               cwd: source.cwd,
               origin: { kind: "fork", parent: this.id, at: input.at },
+              ...(caller === undefined ? {} : { caller }),
             },
             birthSession,
+            ...(input.initiator === undefined ? {} : { birthInitiator: input.initiator }),
           });
         },
       });

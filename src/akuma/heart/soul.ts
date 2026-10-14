@@ -1,7 +1,8 @@
+import { decodeAkumaCaller } from "../caller.js";
 import type { DatabaseSync } from "node:sqlite";
 import { parseAkuId, type AkuId } from "../identity.js";
 import { decodeProviderOptions, decodeProviderRecipe } from "../provider-recipe.js";
-import type { AkumaOrigin, Soul, SoulRow } from "./facts.js";
+import { akumaOriginSchema, type Soul, type SoulRow } from "./facts.js";
 import { historicalAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
@@ -25,29 +26,6 @@ function soulAkuIdentity(value: unknown, what: string): ReturnType<typeof parseA
   }
 }
 
-function decodeOrigin(value: unknown): AkumaOrigin {
-  const origin = record(value);
-  if (origin === null) throw new Error("Akuma soul origin must be an object");
-  if (origin.kind === "direct") {
-    return { kind: "direct" };
-  }
-  if (origin.kind === "request") {
-    return {
-      kind: "request",
-      parent: soulAkuIdentity(origin.parent, "request parent").id,
-      requestId: nonblank(origin.requestId, "request requestId"),
-    };
-  }
-  if (origin.kind === "fork") {
-    return {
-      kind: "fork",
-      parent: soulAkuIdentity(origin.parent, "fork parent").id,
-      at: nonblank(origin.at, "fork at"),
-    };
-  }
-  throw new Error("Akuma soul origin must be direct, request, or fork");
-}
-
 export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   const soul = record(value);
   if (soul === null) throw new Error("Akuma soul must be an object");
@@ -58,6 +36,7 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   const description = soul.description === undefined ? undefined : nonblank(soul.description, "description");
   const provider = decodeProviderRecipe(soul.provider);
   const options = decodeProviderOptions(soul.options);
+  const caller = decodeAkumaCaller(soul.caller);
   return {
     id,
     archetype,
@@ -65,7 +44,8 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
     provider,
     options,
     cwd: nonblank(soul.cwd, "cwd"),
-    origin: decodeOrigin(soul.origin),
+    origin: akumaOriginSchema.parse(soul.origin),
+    ...(caller === undefined ? {} : { caller }),
     allowed: historicalAllowedActions(soul.allowed),
   };
 }

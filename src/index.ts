@@ -57,6 +57,8 @@ export {
   listArchetypeDefinitions,
 } from "./akuma/index.js";
 export type {
+  AkumaCaller,
+  AkumaOrigin,
   ActivityHistory,
   ActivityRow,
   AkuId,
@@ -196,6 +198,8 @@ export type { RegionOverlap } from "./library/region.js";
 export type { RepoAtInput } from "./library/repo.js";
 export type {
   KeiyakuPlugin,
+  PluginAkumaCaller,
+  PluginAkumaOrigin,
   PluginBodyEnd,
   PluginContext,
   PluginHooks,

@@ -1,3 +1,4 @@
+import { projectAkumaBirth } from "./caller.js";
 import {
   readStatusFacts,
   createStatusFactReader,
@@ -198,6 +199,7 @@ export async function bornLiveStatus(
   return {
     status: {
       id: soul.id,
+      birth: projectAkumaBirth(soul),
       life: currentLife,
       cwd: soul.cwd,
       allowed: soul.allowed,

@@ -9,8 +9,8 @@ async function __keiyakuAwaitEmptyPublicationBarrier(launch) {
   const release = __keiyakuBarrierJoin(barrier, "release");
   if (__keiyakuBarrierExists(release)) return;
   await new Promise((resolve, reject) => {
-    const watcher = __keiyakuBarrierWatch(barrier, (_event, filename) => {
-      if (filename === "release") {
+    const watcher = __keiyakuBarrierWatch(barrier, () => {
+      if (__keiyakuBarrierExists(release)) {
         watcher.close();
         resolve();
       }

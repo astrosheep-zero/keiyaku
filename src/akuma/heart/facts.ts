@@ -1,4 +1,6 @@
-import type { AkuId } from "../identity.js";
+import type { AkumaCaller } from "../caller.js";
+import { z } from "zod";
+import { akumaIdSchema, type AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../provider-recipe.js";
 import type { AllowedActions } from "../allowed.js";
@@ -11,10 +13,13 @@ export class HeartAuthorityCorruptionError extends Error {
   }
 }
 
-export type AkumaOrigin =
-  | Readonly<{ kind: "direct" }>
-  | Readonly<{ kind: "request"; parent: AkuId; requestId: string }>
-  | Readonly<{ kind: "fork"; parent: AkuId; at: string }>;
+const originText = z.string().refine((value) => value.trim().length > 0);
+export const akumaOriginSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("direct") }),
+  z.object({ kind: z.literal("request"), parent: akumaIdSchema, requestId: originText }),
+  z.object({ kind: z.literal("fork"), parent: akumaIdSchema, at: originText }),
+]);
+export type AkumaOrigin = z.infer<typeof akumaOriginSchema>;
 
 export type Soul = Readonly<{
   id: AkuId;
@@ -24,6 +29,7 @@ export type Soul = Readonly<{
   options: ProviderOptions;
   cwd: string;
   origin: AkumaOrigin;
+  caller?: AkumaCaller;
   allowed: AllowedActions;
   createdAt: string;
 }>;

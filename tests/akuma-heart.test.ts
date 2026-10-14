@@ -1369,6 +1369,35 @@ test("soul codec hard-fails invalid known members", () => {
 
 
 
+test("Soul caller attribution shares admission validation and preserves legal absence", async () => {
+  const { decodeAkumaCaller, projectAkumaBirth } = await import("../src/akuma/caller.js");
+  const unknown = decodeSoul(codecSoul());
+  assert.equal("caller" in unknown, false);
+  assert.deepEqual(projectAkumaBirth(unknown).caller, { kind: "unknown" });
+  assert.equal(JSON.stringify(unknown).includes('"caller"'), false);
+  for (const caller of [
+    { kind: "akuma", world: "/nonexistent/world", akuId: "aku/delegator/1234abcd" },
+    { kind: "external", integration: "slack", id: "channel:thread" },
+  ]) {
+    const admitted = decodeAkumaCaller(caller);
+    assert.deepEqual(decodeSoul({ ...codecSoul(), caller }).caller, admitted);
+    assert.deepEqual(projectAkumaBirth(decodeSoul({ ...codecSoul(), caller })).caller, admitted);
+  }
+  for (const caller of [
+    null, { kind: "unknown" },
+    { kind: "akuma", world: "relative", akuId: "aku/parent/1234abcd" },
+    { kind: "akuma", world: "/world/../elsewhere", akuId: "aku/parent/1234abcd" },
+    { kind: "akuma", world: "/world", akuId: "aku/Parent/1234abcd" },
+    { kind: "external", integration: "Upper", id: "id" },
+    { kind: "external", integration: "slack", id: " " },
+    { kind: "external", integration: "slack", id: "a\u0000b" },
+    { kind: "external", integration: "slack", id: "x".repeat(513) },
+  ]) {
+    assert.throws(() => decodeAkumaCaller(caller), /Invalid Akuma caller/u);
+    assert.throws(() => decodeSoul({ ...codecSoul(), caller }), /Invalid Akuma caller/u);
+  }
+});
+
 test("historical Soul omission retains the complete vocabulary", () => {
   const historical = { ...codecSoul() } as Record<string, unknown>;
   delete historical.allowed;

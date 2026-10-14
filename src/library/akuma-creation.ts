@@ -1,25 +1,24 @@
 /** @architectureCompositionRoot */
 import { randomUUID } from "node:crypto";
 import { appendFile } from "node:fs/promises";
-import { admitAkumaCall, type AdmittedAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
+import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { admitAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
 import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
 import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import type { TellResult } from "../akuma/body.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
-import { readSoul } from "../akuma/heart/index.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
-import { emitPluginSignal, outcomePluginObserver } from "../plugin/akuma-signals.js";
+import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
@@ -67,6 +66,7 @@ export type CallInput = Readonly<{
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
   initiator?: string;
+  caller?: AkumaCaller;
   signal?: AbortSignal;
   observe?: CallWaitObserver;
 }>;
@@ -101,6 +101,8 @@ export type ForkInput = Readonly<{
   akuma: string;
   at: string;
   repo?: Repo;
+  caller?: AkumaCaller;
+  initiator?: string;
 }>;
 
 export type ForkResult =
@@ -194,17 +196,12 @@ function callSeat(contract: unknown) {
   return seat;
 }
 
-async function requestedParent(path: WorldRoot, id: AkuId): Promise<AkuId | undefined> {
-  const soul = await readSoul(pathsForAkuId(path, id));
-  return soul?.origin.kind === "request" ? soul.origin.parent : undefined;
-}
-
 function pluginDiagnostic(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
 }
 
-async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurrence = "call admission"): Promise<void> {
+async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurrence: string): Promise<void> {
   try {
     await appendFile(paths.log, `plugin ${occurrence} failed: ${pluginDiagnostic(error)}\n`);
   } catch {
@@ -222,42 +219,6 @@ function callDiagnosticSink(
     // Return the host's possible Promise for the plugin diagnostic isolation boundary.
     return reportDiagnostic?.(message);
   };
-}
-
-/**
- * The submitting process's optional called-plugin observation. It runs once,
- * after the prepared executor returned its local value or the forwarded caller
- * received its exact live output, and it never gates birth, initial Tell, or a
- * later integration stage. A failed delivery stays a diagnostic.
- */
-async function emitCalledSignal(
-  input: Readonly<{
-    path: WorldRoot;
-    settings?: Settings;
-    admitted: AdmittedAkumaCall;
-    contractId?: ContractId;
-  }>,
-  reportDiagnostic?: (message: string) => void,
-): Promise<void> {
-  try {
-    const paths = pathsForAkuId(input.path, input.admitted.id);
-    const callerAkumaId = input.admitted.requested ? await requestedParent(input.path, input.admitted.id) : undefined;
-    await emitPluginSignal(
-      {
-        world: input.path,
-        ...(input.settings === undefined ? {} : { settings: input.settings }),
-        reportDiagnostic: callDiagnosticSink(paths, "call admission", reportDiagnostic),
-      },
-      {
-        kind: "akuma.called",
-        akumaId: input.admitted.id,
-        ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
-        ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-      },
-    );
-  } catch {
-    // Plugin delivery must not change an already admitted call.
-  }
 }
 
 async function dispatchStage(
@@ -338,6 +299,7 @@ const CALL_INPUT_KEYS = [
   "allowed",
   "schema",
   "initiator",
+  "caller",
   "signal",
   "observe",
 ] as const;
@@ -354,6 +316,8 @@ type ParsedCallInput = Readonly<{
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
   seat: ReturnType<typeof callSeat>;
+  caller?: AkumaCaller;
+  initiator?: string;
   initialTell?: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
   observe?: CallWaitObserver;
 }>;
@@ -365,6 +329,7 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
   const archetype = nonblank(values.archetype, "archetype");
   const body = callBody(values.body);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
+  const caller = decodeAkumaCaller(values.caller);
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   validateCallBodyOptions(body, values, mode);
@@ -400,6 +365,8 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
     ...(alias === undefined ? {} : { alias }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     seat,
+    ...(caller === undefined ? {} : { caller }),
+    ...(initiator === undefined ? {} : { initiator }),
     ...(initialTell === undefined ? {} : { initialTell }),
     ...(observe === undefined ? {} : { observe }),
   };
@@ -416,6 +383,8 @@ function callConfiguration(input: ParsedCallInput, execution: ExecutionContext) 
 function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
   return {
     archetype: input.archetype,
+    ...(input.caller === undefined ? {} : { caller: input.caller }),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(input.initialTell === undefined
       ? {}
       : {
@@ -555,17 +524,6 @@ export async function callAkumas(
     },
     selectedExecution === undefined ? {} : { cwdCanonical: true },
   );
-  // One caller-wiring sequence, after the prepared executor returned its local value
-  // or the forwarded caller received its exact live output, before outcome observation.
-  await emitCalledSignal(
-    {
-      path: parsed.path,
-      ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-      admitted,
-      ...(seat === undefined ? {} : { contractId: seat.id }),
-    },
-    reportDiagnostic,
-  );
   const dispatch: DispatchStage =
     seat === undefined
       ? { kind: "none" }
@@ -617,13 +575,19 @@ export async function callAkumas(
 
 export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }>): Promise<ForkResult> {
   const values = requireInput(input, "Akumas.fork input");
-  onlyKeys(values, ["path", "akuma", "at", "repo"], "Akumas.fork input");
+  onlyKeys(values, ["path", "akuma", "at", "repo", "caller", "initiator"], "Akumas.fork input");
+  const caller = decodeAkumaCaller(values.caller);
+  const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const at = nonblank(values.at, "at");
   const addressed = await addressAkuma({ path: values.path, akuma: nonblank(values.akuma, "akuma") });
   const { path, id: akuma } = addressed;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await new AkumaOwner(akuma, path).fork({ at });
+  const receipt = await new AkumaOwner(akuma, path).fork({
+    at,
+    ...(caller === undefined ? {} : { caller }),
+    ...(initiator === undefined ? {} : { initiator }),
+  });
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch =
     repository === undefined

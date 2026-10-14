@@ -37,7 +37,7 @@ existing Dispatch relation to its child but never inherits an Alias or invents a
 provider fork capability. The submitting process writes its call wiring after
 call admission — including any exact first Tell — and before it observes the
 call outcome, and the same wiring serves a local call and a live forwarded call.
-Submitting-process plugin observation stays optional observation that never gates
+Submitting-process identity preparation stays optional observation that never gates
 birth, Tell, or Dispatch; Dispatch and Alias remain independent cross-product
 authority, not child identity, and each keeps its own integration result.
 
@@ -48,6 +48,13 @@ Contract association never supplies or displaces an execution directory, so
 only an explicit selection or the effective invocation directory determines
 it. Allowed-action additions freeze in Soul. Exact public inputs, result fields,
 and timeout defaults belong to declarations and help.
+
+Creation accepts optional explicit caller and initiator attribution, including
+prompt-free births and forks. Either kind of caller declaration is
+nonauthoritative; the SDK never infers it from ambient process environment.
+Fork attribution describes the invoking edge, not the source's caller. Known
+Contract association may travel as observation metadata to birth execution;
+Dispatch remains solely the submitting composition's authority.
 
 Plugin activation and delivery are external observation, not an Akuma creation
 or facade integration stage. Their absence or failure neither alters birth nor

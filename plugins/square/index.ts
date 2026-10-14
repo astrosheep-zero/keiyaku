@@ -63,8 +63,8 @@ function isOutcomeNotice(activity: Activity, signal: PluginSignalMap["akuma.outc
     (lines.join("\n") === `✓ came back\n${DUPLICATE_HINT}` || lines[0]?.startsWith("× ") === true);
 }
 
-function calledExpression(signal: PluginSignalMap["akuma.called"]): string {
-  const source = signal.callerAkumaId;
+function birthExpression(signal: PluginSignalMap["akuma.born"]): string {
+  const source = signal.caller.kind === "akuma" ? signal.caller.akuId : undefined;
   return `${[source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ")}\n${DUPLICATE_HINT}`;
 }
 
@@ -166,13 +166,16 @@ const plugin: KeiyakuPlugin = {
             await square.close();
           }
         },
-        async "akuma.called"(signal) {
-          if (caller === undefined) return;
-          const square = await openSquare(path, environment, ledger, wakeTransport);
+        async "akuma.born"(signal, cancellation) {
+          cancellation?.throwIfAborted();
+          if (signal.initiator === undefined) return;
+          const square = await openSquare(path, {}, ledger, wakeTransport);
           try {
-            const joined = await square.implicitJoin(caller);
+            cancellation?.throwIfAborted();
+            const joined = await square.implicitJoin(signal.initiator);
             if (joined.state === "done" || joined.participant === undefined) return;
-            await joined.participant.express(calledExpression(signal));
+            cancellation?.throwIfAborted();
+            await joined.participant.express(birthExpression(signal));
           } finally {
             await square.close();
           }

@@ -67,7 +67,11 @@ is returned.
 
 ## Durable Facts And Judges
 
-Soul freezes birth identity, recipe, cwd, origin, restraint, and permissions.
+Soul freezes birth identity, recipe, cwd, origin, optional declared caller,
+restraint, and permissions. Absent caller attribution is valid and remains
+absent without migration or backfill; malformed present attribution is corrupt
+rather than unknown. Caller admission and durable decoding share one validation
+meaning. Attribution introduces no cross-World lookup or second identity store.
 Body facts name lifecycle custody but persist no process coordinate or
 reconstructable signal authority: a launch runtime is a live coordinate of the
 waking process, never durable Heart authority. A seal shares the leash's atomic

@@ -53,8 +53,10 @@ process sends an attributed Akuma input, the optional initiation observation
 lets Square establish that initiator's callable route
 in the submitting session. This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
-When an admitted call has a current Square caller, the call observation also
-establishes that caller's route before later outcome observation. Turn outcomes
+Birth observation expresses only as its explicitly carried initiator, using the
+route already prepared by the submitting session. It never borrows the child
+process's identity or registers the child's harness route for that initiator.
+Without an initiator it is silent. Turn outcomes
 address every participant carried by the Turn's signal, never a caller captured
 from the producing process. The opening initiator remains the owner, not the
 entire audience. No participants produces an unaddressed outcome rather than a
@@ -113,11 +115,17 @@ makes no admission claim. Forwarded submissions prepare that identity before
 crossing the request channel, not in the serving parent's session. This bounded
 observation is optional and cannot gate input admission.
 
-An admitted Akuma call emits `akuma.called` after admission and before any
-outcome observation. It identifies the called Akuma, its calling Akuma when
-there is one, and any Contract association already known at admission. It
-carries no call contents or provider detail.
-The call-admission producer owns this signal's delivery.
+Normal Akuma birth attempts `akuma.born` after Soul is durable and its first
+Body has been recorded, before supervisor or Turn work. It carries frozen
+origin and caller attribution, the recorded Body identity, and any submitting
+initiator and Contract association already known to that launch. Absent caller
+projects unknown. Direct calls, requested calls, and forks share this Body-owned
+producer; wake and succession never replay it. Sealed unborn coordinates emit
+nothing. Loss or failed preparation after Soul durability but before this point
+may leave zero notification. Delivery is best effort, not exactly once or proof
+of provider startup, and cannot roll back birth. This deliberately replaces
+`akuma.called` without an alias or dual emission; the plugin contract version
+stays unchanged for this coordinated replacement.
 
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
@@ -149,8 +157,7 @@ probes remain completion-only. Outcomes established together receive concurrent
 bounded delivery attempts; the operation awaits them without a detached queue
 or a timeout interval multiplied by the number of results. Forwarded wait and ask observe
 in their serving process; their submitting process does not emit again. Bounded
-call answer observation belongs to the submitting process, after call admission
-observation. These are ephemeral observations, not Keiyaku acknowledgment facts or
+call answer observation belongs to the submitting process, after call admission. These are ephemeral observations, not Keiyaku acknowledgment facts or
 cross-operation delivery receipts. An observation may identify its actual
 observer independently of the producing process. Forwarded wait and ask use
 the requesting Body's authenticated identity, never the serving environment;

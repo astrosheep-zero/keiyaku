@@ -492,6 +492,7 @@ test("Selection owner codecs reject malformed live and service payloads", () => 
       {
         status: {
           id: "aku/worker/1234abcd",
+          birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } },
           life: "asleep" as const,
           allowed: ["akuma.call"],
           timeline: { kind: "idle" as const, entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },

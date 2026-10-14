@@ -463,6 +463,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("akuma/allowed.ts"),
         any("akuma/coordinate.ts"),
+        any("akuma/caller.ts"),
         any("akuma/heart/**"),
         any("akuma/identity.ts"),
         any("akuma/provider-recipe.ts"),

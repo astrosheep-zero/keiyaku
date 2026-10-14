@@ -10,13 +10,26 @@ export type PluginOutcome = Readonly<{ kind: "answered"; text: string }> | Reado
 
 export type PluginBodyEnd = "exited" | "broke-off" | "put-down" | "hung";
 
+export type PluginAkumaOrigin =
+  | Readonly<{ kind: "direct" }>
+  | Readonly<{ kind: "request"; parent: string; requestId: string }>
+  | Readonly<{ kind: "fork"; parent: string; at: string }>;
+
+export type PluginAkumaCaller =
+  | Readonly<{ kind: "akuma"; world: string; akuId: string }>
+  | Readonly<{ kind: "external"; integration: string; id: string }>
+  | Readonly<{ kind: "unknown" }>;
+
 export type PluginSignalMap = Readonly<{
   "akuma.initiating": Readonly<{
     initiator: string;
   }>;
-  "akuma.called": Readonly<{
+  "akuma.born": Readonly<{
     akumaId: string;
-    callerAkumaId?: string;
+    bodySequence: number;
+    origin: PluginAkumaOrigin;
+    caller: PluginAkumaCaller;
+    initiator?: string;
     contractId?: string;
   }>;
   "akuma.outcome-observed": Readonly<{

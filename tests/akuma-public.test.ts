@@ -5,8 +5,8 @@ import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import { activityFact, bornBody, claudeBodyLaunch, seedLegacySchema, turnEndFact } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { settlementProbe, waitForCondition, waitForFixtureFile as waitForFile } from "./support/process.js";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1236,6 +1236,40 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
 });
 
+test("SDK fork records its invoking caller independently of source lineage and emits born", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-fork-caller-");
+  const world = await World.at(root);
+  mkdirSync(join(root, "plugins"));
+  const output = join(root, "births.jsonl");
+  writeFileSync(join(root, "plugins", "birth.mjs"), `
+    import { appendFileSync } from "node:fs";
+    export default { manifest: { id: "birth", apiVersion: 1 }, activate(context) {
+      return { signals: { "akuma.born": (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n") } };
+    } };
+  `);
+  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
+    birth: { package: "./plugins/birth.mjs", config: { output } },
+  } }));
+  const source = await answeredSource(root, "f0a10001");
+  const mutable = claudeProvider as MutableProvider;
+  const original = mutable.fork;
+  mutable.fork = () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "native-fork" } }));
+  try {
+    const caller = { kind: "akuma" as const, world, akuId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id };
+    const receipt = await Akumas.of(world).fork({ akuma: source.id, at: "turn/1", caller, initiator: "Invoker" });
+    assert.equal(receipt.kind, "forked");
+    if (receipt.kind !== "forked") return;
+    const status = await (await akumaAt(root)).of({ id: receipt.child }).status();
+    assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
+    const signals = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(signals.length, 2);
+    assert.deepEqual(signals[1], { kind: "akuma.born", akumaId: receipt.child, bodySequence: 1,
+      ...status.birth, initiator: "Invoker" });
+  } finally {
+    mutable.fork = original;
+  }
+});
+
 test("fork preserves categorical, exact-history, native, local, and not-born failures", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-fork-results-"));
   const mutable = claudeProvider as MutableProvider;
@@ -1759,10 +1793,12 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   await initializeHeart(allocated.paths);
   let aborted = false;
   const { promise: completion, resolve: settle } = promiseBarrier<{ kind: "failed"; diagnostic: string }>();
+  const { promise: started, resolve: markStarted } = promiseBarrier<void>();
   const running: ProviderAdapter = fixtureAdapter(async () => ({
     admission: { fence: "kill-fixture-turn" },
     events: {
       async *[Symbol.asyncIterator]() {
+        markStarted();
         while (!aborted) {
           yield { type: "note" as const, text: "Working" };
           await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1791,11 +1827,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   const body = driveAkumaBody(launch, running, {
     now: () => "2026-08-08T00:00:00.000Z",
   });
-  await waitForCondition(
-    "the first Body recorded in Heart",
-    async () => (await readHeart(allocated.paths)).latestBody !== null,
-    { terminalState: settlementProbe(body, () => "the driving Body pump settled without a recorded Body") },
-  );
+  await started;
 
   const handle = (await akumaAt(root)).of({ id: allocated.id });
   const waited = handle.wait();
@@ -1812,7 +1844,7 @@ test("Selection wire retains strict derived tool views without tightening neutra
   const at = "2026-08-08T00:00:00.000Z";
   const row = { kind: "tool", sequence: 2, turnSequence: 1, at, name: "run", call: { kind: "run", command: "x" }, state: { status: "ok" } };
   const timeline = { kind: "idle", entries: [{ kind: "row", row }], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 };
-  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }], unobserved: [] };
+  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }], unobserved: [] };
   const protocol = selectionRequestProtocol("akuma.wait");
   assert.doesNotThrow(() => protocol.decodeResult(value));
   const withRow = (changed: unknown) => ({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, entries: [{ kind: "row", row: changed }] } } }] });

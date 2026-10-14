@@ -1,3 +1,4 @@
+import { akumaBirthSchema } from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
@@ -54,6 +55,7 @@ export type AkumaListInput = Readonly<{
 export const akumaStatusSchema = z
   .object({
     id: akumaIdSchema,
+    birth: akumaBirthSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
     cwd: z.string().optional(),
     allowed: allowedActionsSchema,

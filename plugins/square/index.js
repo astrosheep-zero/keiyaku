@@ -50,8 +50,8 @@ function isOutcomeNotice(activity, signal) {
     return lines.at(-1) === DUPLICATE_HINT &&
         (lines.join("\n") === `✓ came back\n${DUPLICATE_HINT}` || lines[0]?.startsWith("× ") === true);
 }
-function calledExpression(signal) {
-    const source = signal.callerAkumaId;
+function birthExpression(signal) {
+    const source = signal.caller.kind === "akuma" ? signal.caller.akuId : undefined;
     return `${[source, "called", signal.akumaId].filter((value) => value !== undefined).join(" ")}\n${DUPLICATE_HINT}`;
 }
 function bodyNotificationKey(signal) {
@@ -129,15 +129,18 @@ const plugin = {
                         await square.close();
                     }
                 },
-                async "akuma.called"(signal) {
-                    if (caller === undefined)
+                async "akuma.born"(signal, cancellation) {
+                    cancellation?.throwIfAborted();
+                    if (signal.initiator === undefined)
                         return;
-                    const square = await openSquare(path, environment, ledger, wakeTransport);
+                    const square = await openSquare(path, {}, ledger, wakeTransport);
                     try {
-                        const joined = await square.implicitJoin(caller);
+                        cancellation?.throwIfAborted();
+                        const joined = await square.implicitJoin(signal.initiator);
                         if (joined.state === "done" || joined.participant === undefined)
                             return;
-                        await joined.participant.express(calledExpression(signal));
+                        cancellation?.throwIfAborted();
+                        await joined.participant.express(birthExpression(signal));
                     }
                     finally {
                         await square.close();

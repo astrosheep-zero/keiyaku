@@ -10,6 +10,7 @@ const PARENT_HARNESS_IDENTITY_KEYS = [
   "PI_SESSION_FILE",
   "PASEO_AGENT_ID",
   "SQUARE_PARTICIPANT_NAME",
+  "KEIYAKU_EXTERNAL_CALLER",
 ] as const;
 
 type Environment = Readonly<Record<string, string | undefined>>;

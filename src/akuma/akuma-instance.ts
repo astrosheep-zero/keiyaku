@@ -1,3 +1,4 @@
+import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
@@ -41,6 +42,8 @@ export type AkumaBirthInput = Readonly<{
   home?: string;
   settings?: Settings;
   allowed?: readonly AllowedAction[];
+  caller?: AkumaCaller;
+  initiator?: string;
   host?: AkumaHostOptions;
 }>;
 
@@ -89,6 +92,8 @@ export class Akuma {
         archetype,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+        ...(input.caller === undefined ? {} : { caller: input.caller }),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       },
       {},
     );

@@ -1,3 +1,4 @@
+import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths, type AkuId } from "./identity.js";
@@ -367,6 +368,7 @@ type PreparedCallResult = Readonly<{
 type PreparedCallInput = Readonly<{
   archetype: string;
   cwd: string;
+  caller?: AkumaCaller;
   initialTell?: CallInitialTell;
   signal?: AbortSignal;
   custody: PreparedCallCustody;
@@ -421,6 +423,9 @@ async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
  */
 export async function executePreparedCall(input: PreparedCallInput): Promise<PreparedCallResult> {
   const { custody } = input;
+  const caller = custody.kind === "request"
+    ? { kind: "akuma" as const, world: custody.world, akuId: custody.parent.id }
+    : decodeAkumaCaller(input.caller);
   let world: WorldRoot;
   if (custody.kind === "local") {
     world = custody.world;
@@ -467,6 +472,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
             allowed: recipe.allowed,
             cwd: input.cwd,
             origin,
+            ...(caller === undefined ? {} : { caller }),
           },
         });
       },

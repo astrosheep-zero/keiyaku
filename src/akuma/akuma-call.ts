@@ -1,3 +1,4 @@
+import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { Settings } from "../settings.js";
 import { settings as readSettings } from "../settings.js";
@@ -27,6 +28,7 @@ export type AkumaCallInput = Readonly<{
   allowed?: readonly AllowedAction[];
   schema?: Schema<unknown>;
   initiator?: string;
+  caller?: AkumaCaller;
   signal?: AbortSignal;
 }>;
 type AkumaCallContext = Readonly<{
@@ -50,7 +52,7 @@ export type AdmittedAkumaCall = Readonly<{
   failure?: unknown;
 }>;
 
-type AkumaCallRecipe = Omit<NonNullable<BodyLaunch["seed"]>, "id" | "archetype" | "cwd" | "origin">;
+type AkumaCallRecipe = Omit<NonNullable<BodyLaunch["seed"]>, "id" | "archetype" | "cwd" | "origin" | "caller">;
 
 type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> &
   Readonly<{ initialTell?: InitialCallTell; contractId?: string }>;
@@ -77,6 +79,8 @@ async function admitBodyRequest(input: {
     ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
     ...(cwd === undefined ? {} : { cwd }),
     recipe: input.recipe,
+    ...(input.call.initiator === undefined ? {} : { birthInitiator: input.call.initiator }),
+    ...(input.call.contractId === undefined ? {} : { contractId: input.call.contractId }),
     ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
   });
   const bornCwd = await readAkumaBirthCwd(input.path, response.id);
@@ -111,6 +115,7 @@ async function admitDirect(input: {
     result = await executePreparedCall({
       archetype: input.archetype.name,
       cwd,
+      ...(input.call.caller === undefined ? {} : { caller: input.call.caller }),
       ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
       ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
       custody: {
@@ -121,6 +126,7 @@ async function admitDirect(input: {
           await spawnAkumaBody({
             paths: launch.paths,
             seed: launch.seed,
+            ...(input.call.initiator === undefined ? {} : { birthInitiator: input.call.initiator }),
             ...(input.call.contractId === undefined ? {} : { completion: { contractId: input.call.contractId } }),
           }),
         admitInitialTell: async ({ id, initialTell, signal }) =>
@@ -165,6 +171,7 @@ export async function admitAkumaCall(
   input: AkumaCallLaunchInput,
   context: AkumaCallContext,
 ): Promise<AdmittedAkumaCall> {
+  decodeAkumaCaller(input.caller);
   const name = archetypeName(input.archetype);
   const home = configuration.home === undefined ? {} : { home: configuration.home };
   const settings = configuration.settings ?? (await readSettings({ root: path, ...home }));

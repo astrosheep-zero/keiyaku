@@ -269,13 +269,20 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     const handler = instance.signals?.["akuma.turn-outcome"];
     assert.ok(handler);
     assert.ok(instance.signals?.["akuma.body-ended"]);
-    const called = instance.signals?.["akuma.called"];
-    assert.ok(called);
-    await called({
-      kind: "akuma.called",
-      akumaId: "aku/called",
-      callerAkumaId: "aku/caller",
-      contractId: "kei/example",
+    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Alice" });
+    process.env.CODEX_THREAD_ID = "child";
+    process.env.SQUARE_PARTICIPANT_NAME = "Child";
+    const child = await activateSquare(root);
+    const born = child.signals?.["akuma.born"];
+    assert.ok(born);
+    await born({
+      kind: "akuma.born", akumaId: "aku/called", bodySequence: 1,
+      origin: { kind: "direct" }, caller: { kind: "akuma", world: root, akuId: "aku/caller" },
+      initiator: "Alice", contractId: "kei/example",
+    });
+    await born({
+      kind: "akuma.born", akumaId: "aku/silent", bodySequence: 1,
+      origin: { kind: "direct" }, caller: { kind: "unknown" },
     });
     process.env.CODEX_THREAD_ID = "teller";
     process.env.SQUARE_PARTICIPANT_NAME = "Bob";
@@ -350,9 +357,12 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     const fallbackHandler = fallback.signals?.["akuma.turn-outcome"];
     assert.ok(fallbackHandler);
     assert.ok(fallback.signals?.["akuma.body-ended"]);
-    const externalCalled = fallback.signals?.["akuma.called"];
-    assert.ok(externalCalled);
-    await externalCalled({ kind: "akuma.called", akumaId: "aku/external" });
+    const externalBorn = fallback.signals?.["akuma.born"];
+    assert.ok(externalBorn);
+    await externalBorn({ kind: "akuma.born", akumaId: "aku/external", bodySequence: 1,
+      origin: { kind: "direct" }, caller: { kind: "external", integration: "test", id: "not-an-aku" } });
+    await externalBorn({ kind: "akuma.born", akumaId: "aku/external", bodySequence: 1, initiator: "Bob",
+      origin: { kind: "direct" }, caller: { kind: "external", integration: "test", id: "not-an-aku" } });
     await fallbackHandler({
       kind: "akuma.turn-outcome",
       akumaId: "aku/failed",
@@ -372,6 +382,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
         body: "aku/answered turn/2 (@Bob) kei/example\n✓ came back\nignore if you have already seen this.",
         mentions: ["Bob"],
       },
+      { actor: "Bob", body: "called aku/external\nignore if you have already seen this.", mentions: [] },
       {
         actor: "aku/failed",
         body: "aku/failed turn/3\n× provider failed\nignore if you have already seen this.",

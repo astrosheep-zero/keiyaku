@@ -166,6 +166,7 @@ const PARENT_HARNESS_ENVIRONMENT = {
   PASEO_AGENT_ID: "parent-paseo",
   SQUARE_PARTICIPANT_NAME: "Parent",
   AKUMA_REQUESTS: "/parent/requests",
+  KEIYAKU_EXTERNAL_CALLER: "outer:parent",
 } as const;
 
 const PARENT_HARNESS_KEYS = Object.keys(PARENT_HARNESS_ENVIRONMENT) as Array<keyof typeof PARENT_HARNESS_ENVIRONMENT>;
@@ -177,6 +178,8 @@ test("Body launch and provider setup isolate parent harness identity without mut
     API_TOKEN: "credential",
     SQUARE_LOCATION: "configured-location",
     SENTINEL: "survives",
+    KEIYAKU_ACTOR_ID: "aku/body/1234abcd",
+    KEIYAKU_ACTOR_WORLD: "/body/world",
   };
   const overrides = {
     ...PARENT_HARNESS_ENVIRONMENT,
@@ -192,6 +195,8 @@ test("Body launch and provider setup isolate parent harness identity without mut
     if (key !== "AKUMA_REQUESTS") assert.equal(first[key], undefined);
   }
   assert.equal(first.AKUMA_REQUESTS, "/child/requests");
+  assert.equal(first.KEIYAKU_ACTOR_ID, "aku/body/1234abcd");
+  assert.equal(first.KEIYAKU_ACTOR_WORLD, "/body/world");
   assert.equal(first.PATH, parent.PATH);
   assert.equal(first.API_TOKEN, "provider-credential");
   assert.equal(first.SQUARE_LOCATION, parent.SQUARE_LOCATION);
@@ -203,6 +208,8 @@ test("Body launch and provider setup isolate parent harness identity without mut
     API_TOKEN: "credential",
     SQUARE_LOCATION: "configured-location",
     SENTINEL: "survives",
+    KEIYAKU_ACTOR_ID: "aku/body/1234abcd",
+    KEIYAKU_ACTOR_WORLD: "/body/world",
   });
   assert.deepEqual(overrides, {
     ...PARENT_HARNESS_ENVIRONMENT,
@@ -234,6 +241,8 @@ test("Body launch and provider setup isolate parent harness identity without mut
       assert.equal(input.env[key], undefined);
     }
     assert.equal(input.env.KEIYAKU_ACTOR_ID, allocated.id);
+    assert.equal(input.env.KEIYAKU_ACTOR_WORLD, root);
+    assert.equal(input.env.KEIYAKU_EXTERNAL_CALLER, undefined);
     assert.equal(process.env.AKUMA_REQUESTS, "/parent/requests");
   } finally {
     for (const key of PARENT_HARNESS_KEYS) {
@@ -478,6 +487,68 @@ function adapter(
     resume: (input) => sessionAttempt(async () => await drive(input)),
   });
 }
+
+test("birth observes durable Soul and Body once, without Turn ownership or replay", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-body-born-");
+  const world = await World.at(root);
+  const output = join(root, "births.jsonl");
+  mkdirSync(join(root, "plugins"));
+  writeFileSync(join(root, "plugins", "birth.mjs"), `
+    import { appendFileSync } from "node:fs";
+    import { readHeart, readLatestTurnForBody } from ${JSON.stringify(new URL("../src/akuma/heart/index.js", import.meta.url).href)};
+    import { pathsForAkuId } from ${JSON.stringify(new URL("../src/akuma/identity.js", import.meta.url).href)};
+    export default { manifest: { id: "birth", apiVersion: 1 }, activate(context) {
+      return { signals: { "akuma.born": async (signal) => {
+        const heart = await readHeart(pathsForAkuId(context.world, signal.akumaId));
+        const turn = await readLatestTurnForBody(pathsForAkuId(context.world, signal.akumaId), signal.bodySequence);
+        appendFileSync(context.config.output, JSON.stringify({ signal, soul: heart.soul, body: heart.latestBody, turn }) + "\\n");
+        throw new Error("birth observer failure");
+      } } };
+    } };
+  `);
+  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
+    birth: { package: "./plugins/birth.mjs", config: { output } },
+  } }));
+  const allocated = await allocatedHeart(world, "claude", "b1700001");
+  const launch = claudeBodyLaunch(allocated, root, "work", { birthInitiator: "Submitter", completion: { contractId: "kei/birth" } });
+  // Empty publication: birth attribution must not become an opening Turn's owner.
+  const { initialBody: _body, ...empty } = launch;
+  await runAkumaBody(empty);
+  const observations = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(observations.length, 1);
+  assert.deepEqual(observations[0].signal, {
+    kind: "akuma.born", akumaId: allocated.id, bodySequence: 1,
+    origin: { kind: "direct" }, caller: { kind: "unknown" }, initiator: "Submitter", contractId: "kei/birth",
+  });
+  assert.equal(observations[0].soul.id, allocated.id);
+  assert.equal(observations[0].body.sequence, 1);
+  assert.equal(observations[0].body.end, undefined);
+  assert.equal(observations[0].turn, null);
+  assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+  assert.match(readFileSync(allocated.paths.log, "utf8"), /plugin birth failed: plugin birth signal: birth observer failure/u);
+  await runAkumaBody(empty); // Even a stale launch carrying the seed is not another birth.
+  await runAkumaBody({ paths: allocated.paths }); // Ordinary wake also stays silent.
+  assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
+
+  const sealed = await allocatedHeart(world, "claude", "b1700002");
+  const leash = (await HeldAkumaLeash.try(sealed.paths))!;
+  await leash.sealIfUnborn(sealed.paths, { evidence: "sealed", at: new Date().toISOString() });
+  leash.release();
+  await runAkumaBody(claudeBodyLaunch(sealed, root, "ignored"));
+  assert.equal((await readHeart(sealed.paths)).soul, null);
+  assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
+
+  const interrupted = await allocatedHeart(world, "claude", "b1700003");
+  const failedLaunch = { ...empty, paths: interrupted.paths, seed: { ...empty.seed!, id: interrupted.id } };
+  const record = t.mock.method(HeldAkumaLeash.prototype, "recordBody", async () => { throw new Error("lost before Body"); });
+  await assert.rejects(runAkumaBody(failedLaunch), /lost before Body/u);
+  record.mock.restore();
+  const lost = await readHeart(interrupted.paths);
+  assert.equal(lost.soul?.id, interrupted.id);
+  assert.equal(lost.latestBody, null);
+  await runAkumaBody(failedLaunch);
+  assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
+});
 
 test("turn-outcome plugins observe every committed answered Turn exactly once", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-plugin-turn-answered-");
@@ -1661,12 +1732,14 @@ test("pause aborts the current drive and records the body as put down", async ()
     const allocated = await allocatedHeart(root, "claude", "c0ffee00");
     let aborted = false;
     let forced = false;
+    const { promise: started, resolve: markStarted } = promiseBarrier<void>();
     const { promise: completion, resolve: settle } = promiseBarrier<TurnResult>();
     const running: FixtureProviderAdapter = scenarioProvider(async () => {
         return {
           admission: { fence: "pause-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
+              markStarted();
               while (!aborted) {
                 yield { type: "note" as const, text: "Working" };
                 await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1687,7 +1760,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
       now: () => "2026-08-08T00:00:00.000Z",
     });
-    await waitUntilLatestBody(allocated.paths, body);
+    await started;
     const current = (await readHeart(allocated.paths)).latestBody!;
     assert.deepEqual(await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), {
       kind: "requested",
@@ -1708,6 +1781,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
   const root = bodyTestDirectory("keiyaku-akuma-hung-");
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee06");
+    const { promise: started, resolve: markStarted } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
       scenarioProvider(async () => {
@@ -1715,6 +1789,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
             admission: { fence: "hung-fixture-turn" },
             events: {
               async *[Symbol.asyncIterator]() {
+                markStarted();
                 await new Promise<void>(() => {});
               },
             },
@@ -1729,7 +1804,7 @@ test("forced disposal failure records hung and broke-off before the Body returns
       }),
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
-    await waitUntilLatestBody(allocated.paths, body);
+    await started;
     await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
     await body;
     const heart = await readHeart(allocated.paths);

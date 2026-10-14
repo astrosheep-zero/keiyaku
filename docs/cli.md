@@ -108,8 +108,17 @@ the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
-Call, tell, and ask capture the submitting process's assigned Square identity at the
+Call, fork, tell, and ask capture the submitting process's assigned Square identity at the
 invocation edge and pass it as optional input attribution, including through a
 direct-parent request. Missing or unusable Square identity leaves attribution
 absent and never refuses the operation. The Body does not rediscover the caller
-from its own environment.
+from its own environment. Call establishes the already selected World before
+preparing the submitting participant's route; a later failed first call may
+therefore leave that World marker.
+
+Direct call and fork derive optional declared caller attribution at this edge:
+a complete Akuma-and-World environment pair wins over external integration
+attribution, and an incomplete pair refuses rather than inventing a World.
+The supplied World is canonicalized here. Request-custody call skips ambient
+caller parsing entirely because serving custody supplies the actual parent,
+including for older running Bodies without a World declaration.

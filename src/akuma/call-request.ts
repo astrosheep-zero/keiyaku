@@ -49,6 +49,8 @@ const akumaCallPayloadSchema = z
     world: absolutePathSchema,
     archetype: archetypeSchema,
     initialTell: initialTellSchema.optional(),
+    birthInitiator: z.string().optional(),
+    contractId: z.string().optional(),
     cwd: absolutePathSchema.optional(),
     recipe: akumaCallRecipeSchema,
   })
@@ -60,6 +62,8 @@ export type AkumaCallRequest = z.infer<typeof akumaCallPayloadSchema> & Readonly
 export type AkumaCallRequestChildLaunch = Readonly<{
   paths: AkumaPaths;
   seed: Omit<Soul, "createdAt">;
+  birthInitiator?: string;
+  completion?: Readonly<{ contractId?: string }>;
 }>;
 
 export type InitialTellAdmissionRequest = Readonly<{
@@ -139,7 +143,11 @@ async function executeAkumaCall(
       refuse: async (diagnostic) => {
         await refuseRequest(paths, facts.id, diagnostic);
       },
-      spawn,
+      spawn: async (launch) => await spawn({
+        ...launch,
+        ...(request.birthInitiator === undefined ? {} : { birthInitiator: request.birthInitiator }),
+        ...(request.contractId === undefined ? {} : { completion: { contractId: request.contractId } }),
+      }),
       admitInitialTell,
     },
   });

@@ -36,7 +36,16 @@ wait owner creates no custody and manufactures no provider outcome.
 A Body begins with ordinary host configuration but establishes an isolated
 execution identity and request transport before provider or plugin setup.
 Native setup may then establish that Body's own session coordinate; a parent
-execution's harness identity or route never attributes child work.
+execution's harness identity or route never attributes child work. A Body
+establishes its own Akuma and World identity for deeper delegation and removes
+inherited external attribution. Providers retain that Body identity.
+
+Normal birth execution attempts its optional birth observation only when that
+invocation created Soul and subsequently recorded its Body, before Turn work.
+Wake and succession never replay it. Loss or failed preparation between durable
+Soul and that point may leave no notification; birth remains true. Birth's
+submitting initiator is independent of Turn ownership, including when no input
+was submitted.
 
 Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Graceful cancellation and forced disposal both require
@@ -127,7 +136,8 @@ Fork reads one exact retained answered Turn with its native fork point. It never
 substitutes a nearby turn, latest session, or emulation. A provider without fork
 is categorically unable to fork. Upstream success followed by failed local birth
 is reported honestly without inventing a child Heart; a successful child copies
-the frozen parent Soul except its new identity and fork origin.
+the frozen parent Soul except its new identity, fork origin, and invocation's
+optional caller attribution. The source remains lineage, not an inferred caller.
 
 Every committed terminal Turn, including one driven by a later Tell, is followed
 by an optional plugin signal carrying that Turn's sequence and outcome. That

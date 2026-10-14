@@ -1,3 +1,4 @@
+import { projectAkumaBirth } from "./caller.js";
 import { z } from "zod";
 import { decodeSoulSeed } from "./heart/soul.js";
 import { sessionAdmissionSchema } from "./heart/rows.js";
@@ -70,6 +71,7 @@ export const bodyLaunchSchema = z
     birthSession: sessionAdmissionSchema.optional(),
     initialBody: z.string().optional(),
     initiator: z.string().optional(),
+    birthInitiator: z.string().optional(),
     initialSchemaJson: z.string().optional(),
     refuseIfHeld: z.boolean().optional(),
     completion: z.object({ contractId: z.string().optional() }).strict().optional(),
@@ -130,17 +132,18 @@ async function takeLeash(paths: AkumaPaths, refuseIfHeld = false): Promise<HeldA
   }
 }
 
-async function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Promise<Soul | null> {
+async function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Promise<Readonly<{ soul: Soul; created: boolean }> | null> {
   const before = await readHeart(launch.paths);
-  if (before.soul !== null) return before.soul;
+  if (before.soul !== null) return { soul: before.soul, created: false };
   if (launch.seed === undefined) throw new Error("Akuma wake has no born soul");
   const candidate: Soul = { ...launch.seed, createdAt: now };
-  if ((await leash.birth(launch.paths, candidate, launch.birthSession)) === "sealed") return null;
+  const result = await leash.birth(launch.paths, candidate, launch.birthSession);
+  if (result === "sealed") return null;
   const born = (await readHeart(launch.paths)).soul;
   if (born === null || born.id !== candidate.id) {
     throw new Error("Akuma birth identity does not match its directory");
   }
-  return born;
+  return { soul: born, created: result === "born" };
 }
 
 async function launchCwd(launch: BodyLaunch): Promise<string> {
@@ -310,7 +313,10 @@ export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = impor
   return {
     argv: source ? [executable, "--import", import.meta.resolve("tsx"), entry, encoded] : [executable, entry, encoded],
     cwd: await launchCwd(launch),
-    env: akumaExecutionEnvironment(process.env, { KEIYAKU_ACTOR_ID: actorId }),
+    env: akumaExecutionEnvironment(process.env, {
+      KEIYAKU_ACTOR_ID: actorId,
+      KEIYAKU_ACTOR_WORLD: worldRootForAkumaPaths(launch.paths),
+    }),
     log: launch.paths.log,
   };
 }
@@ -330,16 +336,17 @@ async function prepareBodyExecution(
   leash: HeldAkumaLeash,
   runtime: BodyRuntime,
   adapter: ProviderAdapter | undefined,
-): Promise<Readonly<{ soul: Soul; adapter: ProviderAdapter }> | null> {
-  const soul = await bornSoul(launch, leash, runtime.now());
-  if (soul === null) return null;
+): Promise<Readonly<{ soul: Soul; created: boolean; adapter: ProviderAdapter }> | null> {
+  const birth = await bornSoul(launch, leash, runtime.now());
+  if (birth === null) return null;
+  const { soul } = birth;
   if (launch.seed === undefined && launch.initialBody === undefined) {
     const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
     if (heart.pending.length === 0 && requests.length === 0) return null;
   }
   const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
   if (!(await prepareBodyStart(launch.paths, leash))) return null;
-  return { soul, adapter: selected };
+  return { ...birth, adapter: selected };
 }
 
 async function runPreparedBody(input: BodyExecution): Promise<BodyTurnEnd> {
@@ -722,6 +729,19 @@ export async function driveAkumaBody(
     emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul, world);
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     bodySequence = body.sequence;
+    if (prepared.created) {
+      await emitPluginSignal(
+        { world, reportDiagnostic: (message) => { void recordPluginDiagnostic(launch.paths, "birth", message); } },
+        {
+          kind: "akuma.born",
+          akumaId: prepared.soul.id,
+          bodySequence: body.sequence,
+          ...projectAkumaBirth(prepared.soul),
+          ...(launch.birthInitiator === undefined ? {} : { initiator: launch.birthInitiator }),
+          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+        },
+      );
+    }
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
     pendingTellDisposition = await runPreparedBody({
       launch,

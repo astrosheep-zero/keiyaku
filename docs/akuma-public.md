@@ -23,7 +23,9 @@ A born status also observes the Soul's frozen action authority, so callers can
 inspect the granted extent without reconstructing it from mutable Archetype
 configuration or private custody. It also reports the Akuma's frozen execution
 workdir, so a caller sees where its process runs without inferring that from
-Contract association.
+Contract association. Status also projects frozen birth origin and caller
+from that same Soul observation. Missing caller attribution is reported as
+unknown, never persisted or inferred from later execution or lineage.
 A status snapshot shows current actionable work: the open Turn when present,
 active tools, pending tells, and otherwise the latest outcome. Bounded ordinary
 detail can become typed gaps, but active work and actionable tells remain

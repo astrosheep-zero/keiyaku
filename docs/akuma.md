@@ -15,7 +15,11 @@ structural projection, not a second identity. Atomic allocation prevents reuse; 
 coordinate is never adopted as a different Akuma.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider
-recipe, execution cwd, origin, and effective permissions. A
+recipe, execution cwd, origin, optional declared caller, and effective permissions.
+Caller attribution is independent of origin and fork lineage. It names either
+an Akuma in its World or an external integration identity; absence is legal
+for both existing and new births. Attribution is not authentication and never
+changes permissions, actor evidence, or admission authority. A
 Body is the one live driver, holding the exclusive leash for its lifetime. The
 leash is the sole execution-seat and liveness authority; Heart owns durable
 facts. Live process custody is a handle held by the spawning Body or adapter,

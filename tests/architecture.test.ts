@@ -72,6 +72,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract/moved-owner.ts", ["library/akuma-creation.ts", "createAkuma"], false],
   ["library/contract/moved-owner.ts", ["library/bind.ts", "bind"], false],
   ["library/contract/moved-owner.ts", ["protocol/audit.ts", "auditOperation"], false],
+  ["akuma/heart/soul.ts", ["akuma/caller.ts", "decodeAkumaCaller"], true],
+  ["akuma/heart/facts.ts", ["akuma/caller.ts", "AkumaCaller", true], true],
   ["akuma/providers/example/adapter.ts", ["akuma/heart/index.ts", "Heart", true], true],
   ["akuma/providers/example/adapter.ts", ["akuma/heart/index.ts", "writeFact"], false],
   ["protocol/operations.ts", ["git/target-placement.ts", "TargetPlacementRefusal", true], true],
