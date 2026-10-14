@@ -7,9 +7,12 @@ if (releaseVersion === undefined || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test
 }
 
 const root = resolve(import.meta.dirname, "..");
-const plugin = resolve(root, "integrations/marketplace/plugins/keiyaku");
-const codexPath = resolve(plugin, ".codex-plugin/plugin.json");
-const manifestPaths = [codexPath, resolve(plugin, ".claude-plugin/plugin.json"), resolve(plugin, "package.json")];
+const codexPath = resolve(root, "plugins/codex/.codex-plugin/plugin.json");
+const manifestPaths = [
+  codexPath,
+  resolve(root, "plugins/claude/.claude-plugin/plugin.json"),
+  resolve(root, "plugins/opencode/package.json"),
+];
 
 const manifests = manifestPaths.map((path) => {
   const manifest = JSON.parse(readFileSync(path, "utf8"));

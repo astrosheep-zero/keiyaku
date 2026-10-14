@@ -59,7 +59,21 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(archives.length, 1, `expected one package archive, got ${archives.join(", ")}`);
   const packageArchive = join(packed, archives[0]!);
   const listing = command("tar", ["-tzf", packageArchive], root);
-  assert.ok(listing.split(/\r?\n/u).includes("package/build/src/runtime/proc/windows-launch.exe"));
+  const archivePaths = listing.split(/\r?\n/u);
+  for (const path of [
+    "build/src/runtime/proc/windows-launch.exe",
+    "build/plugins/.agents/plugins/marketplace.json",
+    "build/plugins/.claude-plugin/marketplace.json",
+    "build/plugins/claude/.claude-plugin/plugin.json",
+    "build/plugins/codex/.codex-plugin/plugin.json",
+    "build/plugins/opencode/index.js",
+    "build/plugins/opencode/package.json",
+    "build/plugins/pi/keiyaku.ts",
+    "build/skills/keiyaku-akuma/SKILL.md",
+    "build/skills/keiyaku-akuma/references/automation.md",
+  ]) assert.ok(archivePaths.includes(`package/${path}`), `missing packed asset: ${path}`);
+  assert.equal(archivePaths.some((path) => path.includes("/integrations/") || path.includes("/node_modules/")), false);
+  assert.equal(archivePaths.some((path) => path.startsWith("package/build/plugins/square/")), false);
   const claudePackage = join(root, "node_modules", "@anthropic-ai", "claude-agent-sdk");
   npmCommand(["pack", "--ignore-scripts", "--pack-destination", packed, "--cache", cache], claudePackage);
   const claudeArchives = readdirSync(packed).filter(
@@ -111,7 +125,22 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(installedPackage.version, packageManifest.version);
   assert.deepEqual(installedPackage.bin, { kei: "build/src/cli/index.js", keiyaku: "build/src/cli/index.js" });
 
-  const target = join(installed, "node_modules", "@astrosheep", "keiyaku", "build", "src", "cli", "index.js");
+  const installedBuild = join(installed, "node_modules", "@astrosheep", "keiyaku", "build");
+  for (const host of ["claude", "codex", "opencode"]) {
+    for (const skill of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]) {
+      assert.equal(
+        readFileSync(join(installedBuild, "plugins", host, "skills", skill, "SKILL.md"), "utf8"),
+        readFileSync(join(installedBuild, "skills", skill, "SKILL.md"), "utf8"),
+        `${host} must receive a self-contained copy of ${skill}`,
+      );
+    }
+  }
+  const claudeMarketplace = JSON.parse(readFileSync(join(installedBuild, "plugins", ".claude-plugin", "marketplace.json"), "utf8"));
+  assert.equal(claudeMarketplace.plugins[0].source, "./claude");
+  const codexMarketplace = JSON.parse(readFileSync(join(installedBuild, "plugins", ".agents", "plugins", "marketplace.json"), "utf8"));
+  assert.equal(codexMarketplace.plugins[0].source.path, "./codex");
+
+  const target = join(installedBuild, "src", "cli", "index.js");
   assert.equal(readFileSync(target, "utf8").split("\n", 1)[0], "#!/usr/bin/env node");
   if (process.platform !== "win32") {
     assert.notEqual(statSync(target).mode & 0o111, 0, "installed CLI must be executable");

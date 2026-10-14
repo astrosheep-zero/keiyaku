@@ -190,6 +190,13 @@ Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 
 ## Source builds
 
+Host integration sources live in `plugins/pi`, `plugins/claude`, `plugins/codex`,
+and `plugins/opencode`. Shared skills live in `skills/`; the build copies them
+into each host package so native installations are self-contained. The separate
+`plugins/square` workspace is Keiyaku's internal Square observer, not a coding
+harness plugin. Installation recipes and Pi package metadata select the built
+assets under `build/plugins` and `build/skills`.
+
 Building from source also builds the Windows launcher with Zig 0.14.1 or later. Install
 that system tool separately and make `zig` available on `PATH`, or set
 `KEIYAKU_ZIG` to the selected executable. `npm ci` alone is not sufficient for

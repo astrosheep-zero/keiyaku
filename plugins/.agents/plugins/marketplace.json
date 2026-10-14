@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "keiyaku",
-      "source": { "source": "local", "path": "./plugins/keiyaku" },
+      "source": { "source": "local", "path": "./codex" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Productivity"
     }

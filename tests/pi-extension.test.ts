@@ -24,7 +24,7 @@ const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {
   throw new Error("Pi package extension is missing");
 }
-const builtExtension = fileURLToPath(new URL("build/integrations/pi/keiyaku.ts", rootUrl));
+const builtExtension = fileURLToPath(new URL("build/plugins/pi/keiyaku.ts", rootUrl));
 if (!existsSync(builtExtension)) {
   execFileSync("npm", ["run", "build"], { cwd: fileURLToPath(rootUrl), stdio: "inherit" });
 }
@@ -322,8 +322,8 @@ test("Pi closure reports extension shutdown failure but still disposes native st
 test("npm root package declares its Pi resources", () => {
   assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);
   assert.deepEqual(packageJson.pi, {
-    extensions: ["./build/integrations/pi/keiyaku.ts"],
-    skills: ["./build/integrations/marketplace/plugins/keiyaku/skills"],
+    extensions: ["./build/plugins/pi/keiyaku.ts"],
+    skills: ["./build/skills"],
   });
 });
 

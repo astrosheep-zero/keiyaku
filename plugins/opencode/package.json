@@ -1,0 +1,6 @@
+{
+  "name": "keiyaku-harness",
+  "version": "4.5.28",
+  "type": "module",
+  "main": "./index.js"
+}

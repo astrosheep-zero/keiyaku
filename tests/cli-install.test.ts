@@ -7,7 +7,7 @@ import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { installExitCode, installHarnesses, renderInstallText } from "../src/cli/commands/install.js";
 import type { ProcessInput, ProcessOutcome } from "../src/runtime/proc/run.js";
 
-// The install recipes name the bundled marketplace root relative to the module that holds them, so the
+// The install recipes name the built marketplace root relative to the module that holds them, so the
 // expectation follows that same module through the compile seam (.test-build/src links to build/src).
 const installModule = fileURLToPath(
   new URL(
@@ -15,7 +15,10 @@ const installModule = fileURLToPath(
     import.meta.url,
   ),
 );
-const assetsRoot = resolve(dirname(realpathSync(installModule)), "../../../integrations/marketplace");
+const assetsRoot = resolve(dirname(realpathSync(installModule)), "../../../plugins");
+// The six skills have one source at the repository root; hosts package copies of it at build time.
+const repositoryRoot = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
+const skillsRoot = join(repositoryRoot, "skills");
 
 const terminal = (code = 0, stderr = ""): ProcessOutcome => ({
   kind: "terminal",
@@ -83,7 +86,7 @@ test("--all records failure and continues in fixed harness order", async () => {
     calls.map((argv) => argv[0]),
     ["codex", "codex", "claude", "opencode", "pi"],
   );
-  assert.deepEqual(calls[3], ["opencode", "plugin", join(assetsRoot, "plugins", "keiyaku"), "--global", "--force"]);
+  assert.deepEqual(calls[3], ["opencode", "plugin", join(assetsRoot, "opencode"), "--global", "--force"]);
   assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
   assert.equal(installExitCode(result), 1);
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
@@ -98,7 +101,7 @@ test("the bundled plugin contains all six skills", () => {
     "keiyaku-akuma",
     "keiyaku-babysit",
   ]) {
-    const path = join(assetsRoot, "plugins", "keiyaku", "skills", name, "SKILL.md");
+    const path = join(skillsRoot, name, "SKILL.md");
     const markdown = readFileSync(path, "utf8");
     assert.match(markdown, new RegExp(`^name: ${name}$`, "m"));
     assert.doesNotMatch(markdown, /keiyaku-v4/u);
@@ -106,7 +109,7 @@ test("the bundled plugin contains all six skills", () => {
 });
 
 test("the bundled Akuma skill links to its packaged automation guide", () => {
-  const skill = join(assetsRoot, "plugins", "keiyaku", "skills", "keiyaku-akuma");
+  const skill = join(skillsRoot, "keiyaku-akuma");
   const index = readFileSync(join(skill, "SKILL.md"), "utf8");
   assert.ok(index.includes("(references/automation.md)"));
   const guide = readFileSync(join(skill, "references", "automation.md"), "utf8");
@@ -116,9 +119,8 @@ test("the bundled Akuma skill links to its packaged automation guide", () => {
 });
 
 test("bundled instructions keep invocation and execution coordinates distinct", () => {
-  const plugin = join(assetsRoot, "plugins", "keiyaku", "skills");
-  const rootSkill = readFileSync(join(plugin, "keiyaku", "SKILL.md"), "utf8");
-  const akumaSkill = readFileSync(join(plugin, "keiyaku-akuma", "SKILL.md"), "utf8");
+  const rootSkill = readFileSync(join(skillsRoot, "keiyaku", "SKILL.md"), "utf8");
+  const akumaSkill = readFileSync(join(skillsRoot, "keiyaku-akuma", "SKILL.md"), "utf8");
   assert.match(rootSkill, /`-C` selects the invocation cwd and therefore the World/u);
   assert.match(rootSkill, /`call\s*\n--workdir <path>` selects execution cwd/u);
   assert.match(rootSkill, /`--contract` associates a\s*\nContract without selecting an execution directory/u);

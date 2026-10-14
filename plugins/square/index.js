@@ -181,10 +181,10 @@ const plugin = {
                                 await application.catch({ id: notice.id }, control);
                             }
                             catch (error) {
-                                // A notice can disappear or lose availability after history lookup.
-                                if (!(error instanceof SquareError && error.code === "invalid_args" &&
-                                    error.message === "That activity is not available to catch."))
+                                // A notice can disappear or lose availability to this participant after history lookup.
+                                if (!(error instanceof SquareError && error.code === "invalid_args" && error.facts?.reason === "not_addressed")) {
                                     throw error;
+                                }
                             }
                         }
                     }
