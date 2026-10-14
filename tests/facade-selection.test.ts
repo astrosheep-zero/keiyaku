@@ -450,8 +450,13 @@ test("a silent plural wait skips running projection without lengthening its cade
       assert.ok(status.timeline.entries.some((entry) => entry.kind === "gap"), "retained detail exceeds the shared budget");
       assert.ok(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "call"), "each opening input remains pinned");
     }
-    assert.ok(silent.statements < baseline.statements, "silent rounds reduce total SQL work against the full-round baseline");
-    t.diagnostic(`250ms two-worker wait: silent ${silent.projections} projections / ${silent.statements} SQL statements; baseline ${baseline.projections} projections / ${baseline.statements} SQL statements; live ${watched.projections} projections / ${watched.statements} SQL statements / ${liveRounds} rounds; elapsed ${Math.round(silentElapsed)}ms`);
+    t.diagnostic(`250ms two-worker wait: silent ${silent.projections} projections / ${silent.statements} SQL statements / ${silent.lifeReads} member rounds; baseline ${baseline.projections} projections / ${baseline.statements} SQL statements / ${baseline.lifeReads} member rounds; live ${watched.projections} projections / ${watched.statements} SQL statements / ${liveRounds} rounds; elapsed ${Math.round(silentElapsed)}ms`);
+    // Independent wall-clock windows can finish different round counts under load.
+    // Compare SQL per member round; cadence and projection savings are checked above.
+    assert.ok(
+      silent.statements / silent.lifeReads < baseline.statements / baseline.lifeReads,
+      "silent rounds reduce SQL work per member round against the full-round baseline",
+    );
     assert.deepEqual(silent.value.unobserved, []);
   } finally {
     counter.restore();
