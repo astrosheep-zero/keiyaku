@@ -5,7 +5,9 @@
     "plugins/square"
   ],
   "files": [
-    "build"
+    "build",
+    "plugins/pi",
+    "skills"
   ],
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
@@ -91,10 +93,10 @@
   ],
   "pi": {
     "extensions": [
-      "./build/plugins/pi/keiyaku.ts"
+      "./plugins/pi/keiyaku.ts"
     ],
     "skills": [
-      "./build/skills"
+      "./skills"
     ]
   },
   "author": "",

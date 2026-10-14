@@ -1,13 +1,8 @@
-import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
 
 async function runStatus(pi: ExtensionAPI): Promise<ExecResult> {
-  const bundledCli = resolve(dirname(fileURLToPath(import.meta.url)), "../../src/cli/index.js");
-  if (existsSync(bundledCli)) return await pi.exec(process.execPath, [bundledCli, "status"]);
   return await pi.exec("keiyaku", ["status"]);
 }
 

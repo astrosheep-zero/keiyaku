@@ -1,6 +1,5 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +12,7 @@ import { temporaryDirectory } from "./support/process.js";
 type PackageJson = {
   keywords?: unknown;
   pi?: { extensions?: unknown; skills?: unknown };
+  files?: unknown;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
@@ -24,10 +24,14 @@ const piExtension = packageJson.pi?.extensions;
 if (!Array.isArray(piExtension) || typeof piExtension[0] !== "string") {
   throw new Error("Pi package extension is missing");
 }
-const builtExtension = fileURLToPath(new URL("build/plugins/pi/keiyaku.ts", rootUrl));
-if (!existsSync(builtExtension)) {
-  execFileSync("npm", ["run", "build"], { cwd: fileURLToPath(rootUrl), stdio: "inherit" });
+const piSkills = packageJson.pi?.skills;
+if (!Array.isArray(piSkills) || piSkills.some((skill) => typeof skill !== "string")) {
+  throw new Error("Pi package skills are missing");
 }
+// Every declared Pi resource loads straight from a source checkout: the manifest names it and the
+// npm package files carry it, so neither the loader nor the tarball needs build output.
+const declaredPiResources: readonly string[] = [...piExtension, ...piSkills];
+const sourceExtension = fileURLToPath(new URL(piExtension[0], rootUrl));
 const { default: keiyakuExtension } = (await import(new URL(piExtension[0], rootUrl).href)) as {
   default: (pi: ExtensionAPI) => void;
 };
@@ -322,9 +326,26 @@ test("Pi closure reports extension shutdown failure but still disposes native st
 test("npm root package declares its Pi resources", () => {
   assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);
   assert.deepEqual(packageJson.pi, {
-    extensions: ["./build/plugins/pi/keiyaku.ts"],
-    skills: ["./build/skills"],
+    extensions: ["./plugins/pi/keiyaku.ts"],
+    skills: ["./skills"],
   });
+  const packaged = Array.isArray(packageJson.files) ? packageJson.files.map((entry) => String(entry)) : [];
+  for (const resource of declaredPiResources) {
+    assert.equal(
+      existsSync(fileURLToPath(new URL(resource, rootUrl))),
+      true,
+      `Pi resource is missing without a build: ${resource}`,
+    );
+    const target = resource.replace(/^\.\//u, "");
+    assert.equal(
+      packaged.some((entry) => {
+        const root = entry.replace(/^\.\//u, "").replace(/\/$/u, "");
+        return target === root || target.startsWith(`${root}/`);
+      }),
+      true,
+      `npm package files omit Pi resource: ${resource}`,
+    );
+  }
 });
 
 test("Pi loads the root package without host-provided dependency warnings", async (t) => {
@@ -343,7 +364,7 @@ test("Pi loads the root package without host-provided dependency warnings", asyn
   t.after(() => result.runtime.invalidate());
   assert.deepEqual(result.errors, []);
   assert.equal(result.extensions.length, 1);
-  assert.equal(result.extensions[0]?.resolvedPath, builtExtension);
+  assert.equal(result.extensions[0]?.resolvedPath, sourceExtension);
   assert.ok(result.extensions[0]?.commands.has("keiyaku"));
   assert.deepEqual(result.warnings, []);
   assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
@@ -415,9 +436,8 @@ test("Pi command runs one text status and does not refresh when dismissed", asyn
   await new Promise<void>((resolve) => setImmediate(resolve));
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.command, process.execPath);
-  assert.equal(calls[0]?.args[0], fileURLToPath(new URL("build/src/cli/index.js", rootUrl)));
-  assert.equal(calls[0]?.args.at(-1), "status");
+  assert.equal(calls[0]?.command, "keiyaku");
+  assert.deepEqual(calls[0]?.args, ["status"]);
   assert.equal(calls[0]?.args.includes("--json"), false);
   assert.ok(overlay);
   assert.equal(

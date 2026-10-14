@@ -186,6 +186,8 @@ lists every recognized namespace.
 npm install -g @astrosheep/keiyaku
 ```
 
+Pi loads the extension from the package source and invokes the `keiyaku` CLI from `PATH`, so Pi users must have that command installed and available in the host environment.
+
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 
 ## Source builds
@@ -194,8 +196,10 @@ Host integration sources live in `plugins/pi`, `plugins/claude`, `plugins/codex`
 and `plugins/opencode`. Shared skills live in `skills/`; the build copies them
 into each host package so native installations are self-contained. The separate
 `plugins/square` workspace is Keiyaku's internal Square observer, not a coding
-harness plugin. Installation recipes and Pi package metadata select the built
-assets under `build/plugins` and `build/skills`.
+harness plugin. Installation recipes and harness package metadata select the built
+assets under `build/plugins` and `build/skills`, except the Pi package metadata,
+which selects the source extension and `skills/` so a source checkout is loadable
+without a build.
 
 Building from source also builds the Windows launcher with Zig 0.14.1 or later. Install
 that system tool separately and make `zig` available on `PATH`, or set
