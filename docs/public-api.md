@@ -4,10 +4,10 @@ The ESM package exposes exactly two entries: the package root and the plugin
 entry. The root exposes Keiyaku as the Contract product and native Contract
 handle, Akuma as the standalone single-Akuma product, Akumas as the World-bound
 plural Akuma composition, Task as its independent product, Kanshi as composite
-observation, Settings, Plugin types, Repo, World, and the named `nuke`
-operation. No other subpath, compatibility alias, or generic mixed
-orchestration facade exists, and no private execution, composition, or storage
-mechanism is reachable from either entry.
+observation including its bounded category aperture, Settings, Plugin types,
+Repo, World, and the named `nuke` operation. No other subpath, compatibility
+alias, or generic mixed orchestration facade exists, and no private execution,
+composition, or storage mechanism is reachable from either entry.
 
 ## Composition Boundary
 

@@ -50,6 +50,15 @@ absence and failure, and attaches only available Alias, Dispatch, and TaskHolder
 facts without reading the Task board. The category aperture is never used to
 resolve exact identities.
 
+That bounded category observation is part of the package root: a library consumer
+and the CLI reach the same operation through one public crossing input and tagged
+report, and neither repeats the other's observation. The caller boundary belongs
+to Kanshi and is decided before any owner read: a malformed request, an unexpected
+key, an invalid category, an invalid coordinate, or an invalid bound is
+caller-invalid, an unrecognized category is never read as Akuma, and a Contract
+category without a Repo is refused rather than reported as a failed section. A
+failure that the owner actually produces stays that owner's evidence in the report.
+
 ## Associations and selection
 
 Kanshi may attach already observed TaskHolder and Dispatch facts to their

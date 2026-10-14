@@ -114,6 +114,12 @@ function regionSelection(value: unknown): KanshiRegionSelection {
   throw new TypeError(`kanshi region selection kind is invalid: ${selection.kind}`);
 }
 
+function worldCoordinate(world: unknown, repo: unknown): void {
+  if (world !== null && (typeof world !== "string" || world.trim().length === 0))
+    throw new TypeError("kanshi world must be a WorldRoot or null");
+  if (repo !== undefined && !(repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
+}
+
 function coordinate(input: KanshiInput): KanshiInput {
   if (typeof input !== "object" || input === null || Array.isArray(input))
     throw new TypeError("kanshi input must be an object");
@@ -122,10 +128,7 @@ function coordinate(input: KanshiInput): KanshiInput {
       throw new TypeError(`kanshi input has unknown field: ${key}`);
     }
   }
-  if (input.world !== null && (typeof input.world !== "string" || input.world.trim().length === 0)) {
-    throw new TypeError("kanshi world must be a WorldRoot or null");
-  }
-  if (input.repo !== undefined && !(input.repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
+  worldCoordinate(input.world, input.repo);
   return {
     ...input,
     ...(input.region === undefined ? {} : { region: regionSelection(input.region) }),
@@ -630,9 +633,24 @@ async function observeContractCategory(
   }
 }
 
+const DEFAULT_CATEGORY_LIMIT = 10;
+
+/** Caller-invalid category requests are refused here, before any owner observation runs. */
+function validateCategoryInput(input: KanshiCategoryInput): void {
+  const value = record(input, "category input");
+  exactKeys(value, ["world", "repo", "category", "limit"], "category input");
+  worldCoordinate(value.world, value.repo);
+  if (value.category !== "akuma" && value.category !== "contract")
+    throw new TypeError(`kanshi category is invalid: ${String(value.category)}`);
+  const { limit } = value;
+  if (limit !== undefined && (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1))
+    throw new TypeError("kanshi category limit must be a positive safe integer");
+}
+
 export async function kanshiCategory(input: KanshiCategoryInput): Promise<KanshiCategoryReport> {
   const observedAt = new Date().toISOString();
-  const { world, repo, category, limit = 10 } = input;
+  validateCategoryInput(input);
+  const { world, repo, category, limit = DEFAULT_CATEGORY_LIMIT } = input;
   if (category === "contract") {
     if (repo === undefined) throw new TypeError("kanshi contract category requires a Repo");
     return await observeContractCategory(world, scopeForRepo(repo), limit, observedAt);

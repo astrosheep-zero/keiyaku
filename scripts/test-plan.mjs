@@ -114,6 +114,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/private-state-seat.test.ts": 400,
   "tests/protocol-bind-observe.test.ts": 4900,
   "tests/protocol-concurrent-publication.test.ts": 6200,
+  "tests/public-kanshi-category.test.ts": 3000,
   "tests/region-observation.test.ts": 4700,
   "tests/region-read.test.ts": 3700,
   "tests/region.test.ts": 300,

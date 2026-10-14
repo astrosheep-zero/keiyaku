@@ -1,5 +1,6 @@
 import { listArchetypeDefinitions } from "../../akuma/archetype.js";
 import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
+import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, nuke } from "../../index.js";
 import type {
   ActorId,
   AkumaObservation,
@@ -7,15 +8,15 @@ import type {
   ContractHistory,
   ContractId,
   DeliverOutcome,
+  KanshiCategoryReport,
   Keiyaku as KeiyakuContract,
   KeiyakuLibrary,
   ReviewOutcome,
   Settings,
   WorldRoot,
 } from "../../index.js";
-import { Akumas, Keiyaku, KeiyakuError, nuke } from "../../index.js";
-import type { KanshiCategoryReport, KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
-import { kanshi, kanshiCategory, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
+import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
+import { kanshi, observeKanshi, selectKanshi, selectRegion } from "../../kanshi/index.js";
 import { resolveNamedAddress } from "../../library/address.js";
 import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";

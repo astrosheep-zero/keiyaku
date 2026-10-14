@@ -94,6 +94,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/protocol-attempt-classification.test.ts",
   "tests/protocol-bind-observe.test.ts",
   "tests/protocol-concurrent-publication.test.ts",
+  "tests/public-kanshi-category.test.ts",
   "tests/public-library.test.ts",
   "tests/region-observation.test.ts",
   "tests/region-read.test.ts",

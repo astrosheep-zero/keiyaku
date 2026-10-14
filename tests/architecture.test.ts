@@ -56,6 +56,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["kanshi/read.ts", ["git/read-observation.ts", "withGitTargetedReadObservation"], false],
   ["kanshi/read.ts", ["library/region.ts", "regionOverlaps"], false],
   ["kanshi/select.ts", ["library/region.ts", "regionOverlaps"], false],
+  ["index.ts", ["kanshi/index.ts", "kanshiCategory"], true],
+  ["cli/commands/contract.ts", ["index.ts", "kanshiCategory"], true],
   ["library/contract-operations.ts", ["protocol/attempt.ts", "admitDecidedOffer"], false],
   ["library/contract-operations.ts", ["protocol/placement.ts", "place"], false],
   ["library/contract-operations.ts", ["protocol/audit.ts", "decodeAuditReport"], false],

@@ -1,7 +1,10 @@
 import {
   kanshi,
+  kanshiCategory,
   selectKanshi,
   type ContractId,
+  type KanshiCategoryInput,
+  type KanshiCategoryReport,
   type KanshiInput,
   type KanshiRegionSelection,
   type RegionDeclaration,
@@ -25,8 +28,19 @@ const deletedSelection: KanshiRegionSelection = { kind: "overlap" };
 type DeletedIntersection = import("@astrosheep/keiyaku").RegionIntersection;
 // @ts-expect-error the retired ./kanshi subpath promise is gone
 type RemovedKanshiSubpath = import("@astrosheep/keiyaku/kanshi").KanshiReport;
+const categoryInput: KanshiCategoryInput = { world: null, category: "akuma" };
+declare const categoryReport: KanshiCategoryReport;
+// @ts-expect-error an unknown category is not admitted at the public edge
+const unknownCategory: KanshiCategoryInput = { world: null, category: "people" };
+// @ts-expect-error the category report is a tagged union, not a loose record
+const untypedCategoryReport: KanshiCategoryReport = { category: "people", root: null, observedAt: "" };
 void kanshi;
+void kanshiCategory;
 void selectKanshi;
+void categoryInput;
+void categoryReport;
+void unknownCategory;
+void untypedCategoryReport;
 void declarations;
 void contract;
 void path;
