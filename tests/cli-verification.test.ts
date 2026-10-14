@@ -8,6 +8,8 @@ import { setImmediate } from "node:timers/promises";
 import test from "node:test";
 import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
+import { executionCleanupLines } from "../src/cli/render/receipt.js";
+import { executionCleanupSchema } from "../src/protocol/progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 import {
   Keiyaku,
@@ -247,6 +249,18 @@ test("unchanged delivery retries failure once and reuses later satisfaction", as
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
 });
 
+test("failed retention without residue renders its reason without a kept path", () => {
+  const diagnostic = "failed Verification scratch could not be retained: move denied";
+  const issue = executionCleanupSchema.parse({
+    kind: "worktree-leak",
+    contractId: "kei/retention-no-residue",
+    leak: { diagnostic },
+  });
+  assert.deepEqual(executionCleanupLines([issue], 200), [
+    `  verification scratch not retained  ${diagnostic}`,
+  ]);
+});
+
 test("failed verification keeps its scene until replacement or terminal cleanup", async (t) => {
   const external = mkdtempSync(resolve(tmpdir(), "verification-scene-"));
   t.after(() => rmSync(external, { recursive: true, force: true }));
@@ -259,6 +273,7 @@ test("failed verification keeps its scene until replacement or terminal cleanup"
   const retained = first.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
   assert.ok(retained?.kind === "cleanup" && retained.issue.kind === "worktree-leak");
   const scratch = retained.issue.leak.path;
+  assert.ok(scratch);
   assert.equal(readFileSync(resolve(scratch, "scene.log"), "utf8"), "failure scene\n");
   assert.match(renderAccepted(first, { columns: 400, color: false }), /verification scratch kept at/u);
   assert.ok(renderAccepted(first, { columns: 400, color: false }).includes(scratch));
@@ -284,7 +299,7 @@ test("failed verification keeps its scene until replacement or terminal cleanup"
   const abandonedNative = Keiyaku.with().select({ repo: abandonedRepo, id: abandoning.id });
   const failed = accepted(await abandonedNative.deliver());
   const scene = failed.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
-  assert.ok(scene?.kind === "cleanup" && scene.issue.kind === "worktree-leak");
+  assert.ok(scene?.kind === "cleanup" && scene.issue.kind === "worktree-leak" && scene.issue.leak.path);
   assert.equal(existsSync(scene.issue.leak.path), true);
   accepted(await abandonedNative.abandon());
   assert.equal(existsSync(scene.issue.leak.path), false, "abandonment removes the scene");
@@ -294,7 +309,7 @@ test("failed verification keeps its scene until replacement or terminal cleanup"
   const claimNative = Keiyaku.with().select({ repo: claimRepo, id: claiming.id });
   const pending = accepted(await claimNative.deliver());
   const claimScene = pending.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
-  assert.ok(claimScene?.kind === "cleanup" && claimScene.issue.kind === "worktree-leak");
+  assert.ok(claimScene?.kind === "cleanup" && claimScene.issue.kind === "worktree-leak" && claimScene.issue.leak.path);
   accepted(await claimNative.amend({ gates: [] }));
   accepted(await claimNative.deliver());
   assert.equal(existsSync(claimScene.issue.leak.path), false, "acceptance removes a retained scene without another run");

@@ -99,8 +99,9 @@ diagnosis after configured cleanup; the invocation reports its path. This is
 not an archive, a log store, candidate content, or replay authority. Each Contract
 has at most one retained scratch. A failing attempt replaces the previous
 retained scene during retirement under bounded custody, never during
-materialization or execution. Failed retention reports its reason and retires
-only that attempt's execution scene without changing its verdict. Successful
+materialization or execution. Failed retention reports its reason and names a
+path only when residue remains; it retires only that attempt's execution scene
+without changing its verdict. Successful
 and cancelled attempts leave the retained scene untouched; acceptance or
 abandonment removes it through terminal cleanup. Git proves association and
 ownership without a journal fact or durable run record.

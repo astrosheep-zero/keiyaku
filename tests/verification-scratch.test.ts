@@ -186,7 +186,7 @@ test("clean scratch cleanup runs after setup or declaration failure and keeps th
       assert.equal(existsSync(scratch), false);
       assert.equal(existsSync(ownershipLockFor(scratch)), false);
       assert.equal(execution.cleanup, undefined);
-      assert.ok(execution.leak);
+      assert.ok(execution.leak?.path);
       assert.equal(existsSync(execution.leak.path), true);
       const removals = await removeCollectableScratchWorktrees(
         await repositoryAt(raw.path), new Set([execution.leak.path]), contractId("kei/scratch-failure"),
@@ -269,6 +269,43 @@ test("failed attempts move into and replace the single detached retained scene",
   }
 });
 
+test("failed retention with no residue reports only its reason and preserves the verdict", async () => {
+  const raw = repositoryWithMain();
+  const git = await repositoryAt(raw.path);
+  const id = contractId("kei/retention-no-residue");
+  const retained = join(realpathSync(tmpdir()), `keiyaku-v4-verify-${gitRefLocator(git.commonDirectory)}-${contractLocator(id)}`);
+  assert.equal(existsSync(retained), false);
+  await withGitShim(
+    'if [ "$1" = "worktree" ] && [ "$2" = "move" ]; then echo "move denied" >&2; exit 7; fi\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    {},
+    async (gitPath) => {
+      let executionPath: string | undefined;
+      const result = await executeVerification({
+        repository: await repositoryAt(raw.path, gitPath),
+        candidate: snapshotId(raw.run(["rev-parse", "HEAD"]).trim()),
+        contractId: id,
+        declarations: [{ executor: "bash", script: "false" }],
+        materializeScratchCandidate,
+        projectSettings,
+        observe: (event) => {
+          if (event.phase === "materialize" && event.cwd) executionPath = event.cwd;
+        },
+      });
+      assert.deepEqual(result.outcome, {
+        kind: "terminal", verdict: "unsatisfied", passed: 0, total: 1, summary: "[1 bash exit 1]",
+      });
+      assert.ok(result.leak);
+      assert.equal("path" in result.leak, false);
+      assert.match(result.leak.diagnostic, /failed Verification scratch could not be retained: .*move denied/su);
+      assert.ok(executionPath);
+      assert.equal(existsSync(executionPath), false);
+      assert.equal(existsSync(ownershipLockFor(executionPath)), false);
+      assert.equal(existsSync(retained), false);
+      assert.doesNotMatch(raw.run(["worktree", "list", "--porcelain"]), /keiyaku-v4-verify-/u);
+    },
+  );
+});
+
 test("failed retained removal retires only the new scene and preserves its verdict", async () => {
   const raw = repositoryWithMain();
   const git = await repositoryAt(raw.path);
@@ -277,7 +314,8 @@ test("failed retained removal retires only the new scene and preserves its verdi
   const scratch = await materializeScratchCandidate(git, candidate, id);
   writeFileSync(join(scratch.cwd, "scene.log"), "retained\n");
   const retained = await scratch.dispose(true);
-  assert.ok(retained);
+  assert.ok(retained?.path);
+  const retainedPath = retained.path;
   try {
     await withGitShim(
       'if [ "$1" = "worktree" ] && [ "$2" = "remove" ]; then\n  for arg in "$@"; do last="$arg"; done\n  if [ "$last" = "$KEIYAKU_RETAINED" ]; then echo "removal denied" >&2; exit 7; fi\nfi\nexec "$KEIYAKU_REAL_GIT" "$@"',
@@ -302,8 +340,8 @@ test("failed retained removal retires only the new scene and preserves its verdi
         assert.ok(executionPath);
         assert.equal(existsSync(executionPath), false);
         assert.equal(existsSync(ownershipLockFor(executionPath)), false);
-        assert.equal(readFileSync(join(retained.path, "scene.log"), "utf8"), "retained\n");
-        assert.equal(existsSync(join(retained.path, "second-attempt")), false);
+        assert.equal(readFileSync(join(retainedPath, "scene.log"), "utf8"), "retained\n");
+        assert.equal(existsSync(join(retainedPath, "second-attempt")), false);
       },
     );
   } finally {
@@ -319,7 +357,7 @@ test("satisfied and cancelled attempts remove only their own scenes", async () =
   const scratch = await materializeScratchCandidate(git, candidate, id);
   writeFileSync(join(scratch.cwd, "scene.log"), "retained\n");
   const retained = await scratch.dispose(true);
-  assert.ok(retained);
+  assert.ok(retained?.path);
   const paths: string[] = [];
   const observe = (event: VerificationObservation) => {
     if (event.phase === "materialize" && event.cwd) paths.push(event.cwd);

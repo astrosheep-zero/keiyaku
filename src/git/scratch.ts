@@ -29,7 +29,7 @@ type CollectableScratchWorktree = Readonly<{
   release(): void;
 }>;
 
-export const worktreeLeakSchema = z.object({ path: z.string(), diagnostic: z.string() }).strict();
+export const worktreeLeakSchema = z.object({ path: z.string().optional(), diagnostic: z.string() }).strict();
 export type WorktreeLeak = z.infer<typeof worktreeLeakSchema>;
 type CollectableScratchRemoval = Readonly<{
   path: string;
@@ -141,8 +141,9 @@ async function retainScratch(repository: GitRepository, cwd: string, contract: C
   const { signal: _signal, ...retirementRepository } = repository;
   const fallback = async (reason: string): Promise<WorktreeLeak> => {
     const ownLeak = await removeScratch(retirementRepository, cwd);
+    const path = ownLeak?.path ?? ((await pathExists(retained)) ? retained : undefined);
     return {
-      path: ownLeak?.path ?? retained,
+      ...(path === undefined ? {} : { path }),
       diagnostic: `failed Verification scratch could not be retained: ${reason}${
         ownLeak === null ? "" : `; ${ownLeak.diagnostic}`
       }`,

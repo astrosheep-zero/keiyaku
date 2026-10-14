@@ -314,8 +314,12 @@ export function leakLines(
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, " ", "verification scratch kept at", [{ text: leak.path, opaque: true }], columns);
-  receiptPayload(lines, "reason", leak.diagnostic);
+  if (leak.path === undefined) {
+    receiptRow(lines, " ", "verification scratch not retained", [{ text: leak.diagnostic, opaque: true }], columns);
+  } else {
+    receiptRow(lines, " ", "verification scratch kept at", [{ text: leak.path, opaque: true }], columns);
+    receiptPayload(lines, "reason", leak.diagnostic);
+  }
   return lines;
 }
 
