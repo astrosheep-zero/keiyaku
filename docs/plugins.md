@@ -132,8 +132,22 @@ bounded delivery attempts; the operation awaits them without a detached queue
 or a timeout interval multiplied by the number of results. Forwarded wait and ask observe
 in their serving process; their submitting process does not emit again. Bounded
 call answer observation belongs to the submitting process, after call admission
-observation. These are ephemeral observations, not acknowledgment facts or
-cross-operation delivery receipts.
+observation. These are ephemeral observations, not Keiyaku acknowledgment facts or
+cross-operation delivery receipts. An observation may identify its actual
+observer independently of the producing process. Forwarded wait and ask use
+the requesting Body's authenticated identity, never the serving environment;
+local observations may use the observer plugin's current participant identity.
+This attribution grants no permission and changes no public operation result.
+
+Square may acknowledge only already-existing outcome notices corresponding to
+the observed Akuma and exact retained outcome, for that observer alone. Explicit
+observer attribution takes precedence over ambient participant identity and
+never borrows the producing session's ownership or route. Square owns the
+acknowledgment; core owns only the semantic observation. Missing Square,
+observer, standing participant, corresponding notice, or availability to that
+participant is silence, not permission to create, join, take over, consume other
+notices, or remember an intent. A notice arriving later remains unseen until
+another ordinary observation; no retry, queue, or mapping authority is created.
 
 Every Body that reaches a durable terminal state emits `akuma.body-ended` after
 that Body fact is durable. The signal identifies the Akuma and Body sequence

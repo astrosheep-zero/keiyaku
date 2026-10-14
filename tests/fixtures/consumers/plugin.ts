@@ -16,6 +16,7 @@ const hooks: PluginHooks = {
   "akuma.outcome-observed": (observed) => {
     observed.akumaId.toUpperCase();
     observed.historyId.toUpperCase();
+    observed.observer?.toUpperCase();
     // @ts-expect-error Outcome observation carries no answer body.
     observed.outcome;
   },

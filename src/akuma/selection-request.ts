@@ -136,6 +136,7 @@ export type SelectionRequestPort = Readonly<{
       targets: readonly AkumaStatus["id"][];
       completion: "any" | "all";
       timeoutMs?: number;
+      observer: string;
       signal: AbortSignal;
     }>,
   ): Promise<AkumaWaitResult>;
@@ -160,6 +161,7 @@ export type SelectionRequestPort = Readonly<{
       schemaJson?: string;
       initiator?: string;
       interrupt?: boolean;
+      observer: string;
       signal: AbortSignal;
     }>,
   ): Promise<AkumaAskResult>;
@@ -251,7 +253,7 @@ export function selectionRequestCommand(
       if (request.action === "akuma.wait") {
         return {
           kind: "served",
-          result: await port.wait({ ...request, signal: facts.signal }),
+          result: await port.wait({ ...request, observer: facts.requester, signal: facts.signal }),
           service: { action: request.action },
         };
       }
@@ -279,6 +281,7 @@ export function selectionRequestCommand(
             body: request.body,
             tellId: facts.id,
             recordedAt: facts.admittedAt,
+            observer: facts.requester,
             ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
             ...(request.schemaJson === undefined ? {} : { schemaJson: request.schemaJson }),
             ...(request.initiator === undefined ? {} : { initiator: request.initiator }),

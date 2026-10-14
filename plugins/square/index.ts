@@ -1,7 +1,10 @@
 import {
   createDefaultWakeTransport,
   createHostLedgerPort,
+  createSquareApplication,
   Square,
+  SquareError,
+  type Activity,
   squareAssignedParticipantName,
 } from "@astrosheep/square";
 import { join } from "node:path";
@@ -46,6 +49,18 @@ function outcomeExpression(signal: PluginSignalMap["akuma.turn-outcome"]): strin
     .join(" ");
   const outcome = signal.outcome.kind === "answered" ? "✓ came back" : `× ${signal.outcome.reason}`;
   return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
+}
+
+function isOutcomeNotice(activity: Activity, signal: PluginSignalMap["akuma.outcome-observed"]): boolean {
+  if (!/^turn\/[1-9]\d*$/u.test(signal.historyId) ||
+      activity.kind !== "say" || activity.actor !== signal.akumaId || activity.body === undefined) return false;
+  const [header, ...lines] = activity.body.split("\n");
+  const identity = `${signal.akumaId} ${signal.historyId}`;
+  if (header !== identity && !header?.startsWith(`${identity} `)) return false;
+  const suffix = header.slice(identity.length);
+  if (!/^(?: \(@[^\n]+\))?(?: kei\/\S+)?$/u.test(suffix)) return false;
+  return lines.at(-1) === DUPLICATE_HINT &&
+    (lines.join("\n") === `✓ came back\n${DUPLICATE_HINT}` || lines[0]?.startsWith("× ") === true);
 }
 
 function calledExpression(signal: PluginSignalMap["akuma.called"]): string {
@@ -158,6 +173,47 @@ const plugin: KeiyakuPlugin = {
             const joined = await square.implicitJoin(caller);
             if (joined.state === "done" || joined.participant === undefined) return;
             await joined.participant.express(calledExpression(signal));
+          } finally {
+            await square.close();
+          }
+        },
+        async "akuma.outcome-observed"(signal, cancellation) {
+          cancellation?.throwIfAborted();
+          const observer = signal.observer ?? caller;
+          if (observer === undefined) return;
+          // A forwarded semantic identity must not borrow the serving harness's
+          // session ownership or publish its wake route for the requester.
+          const env = signal.observer === undefined ? environment : {};
+          let square: Square;
+          try {
+            square = await Square.at({ path, env, hostLedger: ledger });
+          } catch (error) {
+            if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable") return;
+            throw error;
+          }
+          try {
+            cancellation?.throwIfAborted();
+            const participants = await square.participants();
+            if (!participants.some((item) => item.name === observer && item.state === "joined") ||
+                !participants.some((item) => item.name === signal.akumaId)) return;
+            const control = cancellation === undefined ? {} : { signal: cancellation };
+            const notices = await square.history({
+              from: [signal.akumaId], fixed: `${signal.akumaId} ${signal.historyId}`,
+            }, control);
+            const application = createSquareApplication({
+              cwd: context.world, squarePath: path, participant: observer, env, hostLedger: ledger,
+            });
+            for (const notice of notices) {
+              if (!isOutcomeNotice(notice, signal)) continue;
+              cancellation?.throwIfAborted();
+              try {
+                await application.catch({ id: notice.id }, control);
+              } catch (error) {
+                // A notice can disappear or lose availability after history lookup.
+                if (!(error instanceof SquareError && error.code === "invalid_args" &&
+                    error.message === "That activity is not available to catch.")) throw error;
+              }
+            }
           } finally {
             await square.close();
           }

@@ -47,7 +47,8 @@ creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics. Public selection observations explicitly
 participate in identified-outcome observation, while association reads and
 roster expansion do not. Forwarded wait and ask leave delivery with the serving
-observer; bounded call answer observation stays with the submitting observer.
+observer on behalf of the authenticated requesting Body, not the serving
+session; bounded call answer observation stays with the submitting observer.
 Composition never rereads later state to infer the identity of an earlier
 observed answer.
 

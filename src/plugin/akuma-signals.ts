@@ -28,7 +28,7 @@ export async function emitPluginSignal(emission: PluginSignalEmission, signal: P
 }
 
 /** One public observer operation, never shared with incidental owner reads. */
-export function outcomePluginObserver(emission: PluginSignalEmission) {
+export function outcomePluginObserver(emission: PluginSignalEmission, observer?: string) {
   const seen = new Set<string>();
   return async (akumaId: string, historyIds: readonly string[]): Promise<void> => {
     const fresh = historyIds.filter((historyId) => {
@@ -39,7 +39,13 @@ export function outcomePluginObserver(emission: PluginSignalEmission) {
     });
     await Promise.all(
       fresh.map(
-        async (historyId) => await emitPluginSignal(emission, { kind: "akuma.outcome-observed", akumaId, historyId }),
+        async (historyId) =>
+          await emitPluginSignal(emission, {
+            kind: "akuma.outcome-observed",
+            akumaId,
+            historyId,
+            ...(observer === undefined ? {} : { observer }),
+          }),
       ),
     );
   };

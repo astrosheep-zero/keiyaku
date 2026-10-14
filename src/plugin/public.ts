@@ -22,6 +22,7 @@ export type PluginSignalMap = Readonly<{
   "akuma.outcome-observed": Readonly<{
     akumaId: string;
     historyId: string;
+    observer?: string;
   }>;
   "akuma.turn-outcome": Readonly<{
     akumaId: string;

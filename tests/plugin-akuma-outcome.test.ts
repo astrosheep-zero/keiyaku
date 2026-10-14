@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { Square } from "@astrosheep/square";
+import squarePlugin from "../plugins/square/index.js";
 import test from "node:test";
 import { Akuma, Akumas, Schema, World, type WorldRoot } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -13,10 +15,10 @@ import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
 import { akumasWithExecution } from "../src/library/akumas.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
-import { temporaryDirectory } from "./support/process.js";
+import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
-type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; historyId: string }>;
+type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; historyId: string; observer?: string }>;
 
 function recordingPlugin(world: WorldRoot, fail = false) {
   const output = join(world, "observations.jsonl");
@@ -155,6 +157,12 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
   const source = await bornWorld(root, "0b500006");
   const world = source.world;
   const recorded = recordingPlugin(world, true);
+  const priorParticipant = process.env.SQUARE_PARTICIPANT_NAME;
+  process.env.SQUARE_PARTICIPANT_NAME = "UnrelatedServingSession";
+  t.after(() => {
+    if (priorParticipant === undefined) delete process.env.SQUARE_PARTICIPANT_NAME;
+    else process.env.SQUARE_PARTICIPANT_NAME = priorParticipant;
+  });
   const diagnostics: string[] = [];
   const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500007", createdAt: AT });
   t.after(() => parent.leash.release());
@@ -173,11 +181,11 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
     assert.deepEqual(asked.observation, { reason: "answered", answer: "forwarded answer" });
     const tell = await readTell(source.allocated.paths, asked.tell.admission.tellId);
     assert.ok(tell?.binding);
-    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
+    assert.deepEqual(recorded.signals(), [{ ...signal(source.allocated.id, tell.binding.turnSequence), observer: parent.soul.id }]);
     recorded.reset();
     const waited = await api.wait({ akuma: [source.allocated.id], timeoutMs: 5_000 });
     assert.equal(waited.reason, "completed");
-    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
+    assert.deepEqual(recorded.signals(), [{ ...signal(source.allocated.id, tell.binding.turnSequence), observer: parent.soul.id }]);
     assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2,
       "the serving operation owns diagnostics for ask and wait, without submitting-side delivery");
   } finally {
@@ -185,6 +193,52 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
     await settleFixtureBodies(bodies);
     await pump.close();
   }
+});
+
+test("forwarded wait acknowledges real Square notice for the requesting Soul, not the serving session", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-forwarded-"));
+  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT };
+  process.env.SQUARE_PARTICIPANT_NAME = "ServingSession";
+  process.env.SQUARE_HOST_LEDGER_ROOT = join(world, "ledger");
+  t.after(() => restoreEnvironmentValues(prior));
+  const target = await bornBody(world, "0b500009", AT);
+  t.after(() => target.holder.release());
+  const turn = await outcome(target, "known answer");
+  await finish(target);
+  const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500010", createdAt: AT });
+  t.after(() => parent.leash.release());
+  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
+  const path = join(world, ".square", "KEIYAKU.square");
+  mkdirSync(join(world, ".square"), { recursive: true });
+  const square = await Square.build({ path, markdown: "", env: {} });
+  t.after(() => square.close());
+  await square.join(parent.soul.id);
+  await square.join("ServingSession");
+  const observer = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
+  await observer.signals?.["akuma.turn-outcome"]?.({
+    kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
+    turnSequence: turn.sequence, participants: [parent.soul.id, "ServingSession"], outcome: { kind: "answered", text: "known answer" },
+  });
+  const notice = (await square.history({ from: [target.allocated.id] })).find((item) => item.kind === "say")!;
+  mkdirSync(join(world, "plugins"), { recursive: true });
+  writeFileSync(join(world, "plugins", "square.mjs"),
+    `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { package: "./plugins/square.mjs" } } }));
+  const diagnostics: string[] = [];
+  const pump = await BodyRequestPump.open({
+    paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
+    commands: selectionRequestCommands(selectionRequestPort(world, (message) => diagnostics.push(message))),
+  });
+  try {
+    const waited = await akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }))
+      .wait({ akuma: [target.allocated.id], timeoutMs: 5_000, signal: t.signal });
+    assert.equal(waited.reason, "completed");
+    const snapshot = await square.snapshot();
+    assert.equal(snapshot.delivered(parent.soul.id, notice.id), true);
+    assert.equal(snapshot.delivered("ServingSession", notice.id), false);
+    assert.deepEqual(diagnostics, []);
+  } finally { await pump.close(); }
 });
 
 test("ask retains the observed outcome through schema and plugin failure", { timeout: 15_000 }, async (t) => {

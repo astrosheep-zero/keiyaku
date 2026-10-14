@@ -353,6 +353,30 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
   assert.deepEqual(received, ["Bob", "Bob"]);
 });
 
+test("forwarded observation identity is internal requester authority, not wire input", async () => {
+  const observers: string[] = [];
+  const port: SelectionRequestPort = {
+    ...unusedSelectionPort,
+    wait: async (input) => { observers.push(input.observer); return {} as never; },
+    ask: async (input) => { observers.push(input.observer); return {} as never; },
+  };
+  const facts: ExecutionFacts = {
+    id: "request-observer", admittedAt: "2026-09-09T00:00:01.000Z",
+    requester: "aku/requester/11111111", signal: new AbortController().signal, admissionOpen: () => true,
+  };
+  for (const action of ["akuma.wait", "akuma.ask"] as const) {
+    const command = selectionRequestCommand(action, port);
+    const payload = action === "akuma.wait"
+      ? { targets: ["aku/worker/22222222"], completion: "all" }
+      : { target: "aku/worker/22222222", body: "work", initiator: "NotTheObserver" };
+    assert.equal(command.protocol.decodeRequest({ ...payload, observer: "ForgedObserver" }), null);
+    const request = command.protocol.decodeRequest(payload);
+    assert.ok(request);
+    await command.execute(request, facts);
+  }
+  assert.deepEqual(observers, [facts.requester, facts.requester]);
+});
+
 test("selection request permissions stay separated by action", () => {
   assert.equal(selectionRequestProtocol("akuma.wait").isPermitted([]), true);
   assert.equal(selectionRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);

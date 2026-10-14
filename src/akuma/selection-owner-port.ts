@@ -24,7 +24,7 @@ export function selectionRequestPort(
     for (const id of targets) await requireBornAkuma(world, id);
   };
   return {
-    wait: async ({ targets, ...request }) => {
+    wait: async ({ targets, observer, ...request }) => {
       await prove(targets);
       // The lower wait owner returns association-free native evidence; the
       // actual request crossing composes its canonical transport shape.
@@ -32,7 +32,7 @@ export function selectionRequestPort(
         path: world,
         ids: targets,
         ...request,
-        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }),
+        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }, observer),
       });
       return { ...native, observations: native.observations.map(akumaObservationOf) };
     },
@@ -40,13 +40,13 @@ export function selectionRequestPort(
       await prove([target]);
       return await executeTellAkuma({ path: world, id: target, ...request });
     },
-    ask: async ({ target, ...request }) => {
+    ask: async ({ target, observer, ...request }) => {
       await prove([target]);
       return await executeAskAkuma({
         path: world,
         id: target,
         ...request,
-        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }),
+        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }, observer),
       });
     },
     kill: async ({ targets, ...request }) => {

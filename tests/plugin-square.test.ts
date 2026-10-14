@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createHostLedgerPort, Square, squareAssignedParticipantName } from "@astrosheep/square";
+import { createHostLedgerPort, createSquareApplication, Square, squareAssignedParticipantName } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
@@ -122,6 +122,8 @@ type SquareNotificationFixture = Readonly<{
   ): Promise<void>;
   expressions(): Promise<readonly CapturedExpression[]>;
   bodies(): Promise<readonly string[]>;
+  observe(akumaId: string, historyId: string, observer?: string, cancellation?: AbortSignal): Promise<void>;
+  square<T>(operation: (square: Square) => Promise<T>): Promise<T>;
   withHeldExpression<T>(
     akumaId: string,
     callback: (barrier: HeldExpression) => Promise<T>,
@@ -146,6 +148,8 @@ async function withSquareNotificationFixture<T>(
     const turn = instance.signals?.["akuma.turn-outcome"];
     const bodyEnd = instance.signals?.["akuma.body-ended"];
     const initiating = instance.signals?.["akuma.initiating"];
+    const observed = instance.signals?.["akuma.outcome-observed"];
+    assert.ok(observed);
     assert.ok(turn);
     assert.ok(bodyEnd);
     assert.ok(initiating);
@@ -194,6 +198,14 @@ async function withSquareNotificationFixture<T>(
           },
           cancellation,
         );
+      },
+      async observe(akumaId, historyId, observer, cancellation) {
+        await observed({ kind: "akuma.outcome-observed", akumaId, historyId,
+          ...(observer === undefined ? {} : { observer }) }, cancellation);
+      },
+      async square(operation) {
+        const square = await Square.at({ path: squarePath(root), env: {} });
+        try { return await operation(square); } finally { await square.close(); }
       },
       expressions: () => expressions(squarePath(root)),
       async bodies() {
@@ -377,6 +389,139 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     } finally {
       await square.close();
     }
+  } finally {
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("outcome observation catches exact notices only for the explicit observer", async () => {
+  await withSquareNotificationFixture("ack", async (fixture) => {
+    await fixture.answeredTurn("aku/worker", 1, 1, "Alice", "done", undefined, ["Alice", "Bob"]);
+    await fixture.answeredTurn("aku/worker", 1, 10, "Alice", "later");
+    await fixture.failedTurn("aku/worker", 1, 2, "Alice", "failed", undefined, ["Alice", "Bob"]);
+    await fixture.bodyEnd("aku/worker", 2, "hung", "Alice");
+    await fixture.square(async (square) => {
+      const worker = (await square.implicitJoin("aku/worker")).participant!;
+      await worker.express("incidental aku/worker turn/1", { mentions: ["Alice", "Bob"], noMention: true, force: true });
+      await worker.express("aku/worker turn/1 extra\n✓ came back\nignore if you have already seen this.",
+        { mentions: ["Alice", "Bob"], noMention: true, force: true });
+      const other = (await square.implicitJoin("aku/other")).participant!;
+      await other.express("aku/worker turn/1\n✓ came back\nignore if you have already seen this.",
+        { mentions: ["Alice", "Bob"], noMention: true, force: true });
+    });
+    const notices = await fixture.square((square) => square.history({ fixed: "aku/worker" }));
+    const first = notices.find((item) => item.body?.startsWith("aku/worker turn/1 (@Alice)"))!;
+    const failed = notices.find((item) => item.body?.startsWith("aku/worker turn/2 (@Alice)"))!;
+    assert.ok(first);
+    assert.ok(failed);
+    // Explicit attribution wins even while the plugin's process belongs to someone else.
+    await fixture.observe("aku/worker", "turn/1", "Bob");
+    await fixture.observe("aku/worker", "turn/1", "Bob");
+    await fixture.observe("aku/worker", "turn/2", "Bob");
+    await fixture.observe("aku/worker", "body/2", "Bob");
+    await fixture.square(async (square) => {
+      const snapshot = await square.snapshot();
+      for (const notice of notices.filter((item) => item.kind === "say")) {
+        assert.equal(snapshot.delivered("Alice", notice.id), false);
+        assert.equal(snapshot.delivered("Bob", notice.id), [first.id, failed.id].includes(notice.id));
+      }
+      const pending = await createSquareApplication({ cwd: ".", squarePath: square.location, participant: "Bob", env: {} }).catch();
+      assert.ok(pending.activities.some((item) => item.body?.startsWith("incidental")));
+      assert.ok(pending.activities.some((item) => item.actor === "aku/other"));
+    });
+  });
+});
+
+test("outcome observation catches an unmentioned listener's notice without consuming another listener", async () => {
+  await withSquareNotificationFixture("listener-ack", async (fixture) => {
+    await fixture.square(async (square) => {
+      for (const name of ["Alice", "Bob"]) {
+        await (await square.implicitJoin(name)).participant!.listen("aku/listened");
+      }
+    });
+    await fixture.answeredTurn("aku/listened", 1, 1, undefined, "public to listeners");
+    const notice = await fixture.square(async (square) =>
+      (await square.history({ from: ["aku/listened"] })).find((item) => item.kind === "say")!);
+    assert.deepEqual(notice.mentions, []);
+    await fixture.observe("aku/listened", "turn/1", "Bob");
+    await fixture.square(async (square) => {
+      const snapshot = await square.snapshot();
+      assert.equal(snapshot.delivered("Bob", notice.id), true);
+      assert.equal(snapshot.delivered("Alice", notice.id), false);
+    });
+  });
+});
+
+test("observation does not create missing Square custody or anticipate a later notice", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-absent-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const instance = await activateSquare(root);
+  const observed = instance.signals?.["akuma.outcome-observed"];
+  assert.ok(observed);
+  await observed({ kind: "akuma.outcome-observed", akumaId: "aku/missing", historyId: "turn/1", observer: "Ghost" });
+  assert.equal(existsSync(join(root, ".square")), false);
+  await withSquareNotificationFixture("absence", async (fixture) => {
+    await fixture.observe("aku/late", "turn/1", "Alice");
+    await fixture.answeredTurn("aku/late", 1, 1, "Alice", "late");
+    await fixture.observe("aku/late", "turn/1", "Ghost");
+    await fixture.observe("aku/late", "turn/1", "Bob"); // Not in its landed audience.
+    await fixture.square(async (square) => {
+      const notice = (await square.history({ from: ["aku/late"] })).find((item) => item.kind === "say")!;
+      assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
+      const alice = (await square.implicitJoin("Alice")).participant!;
+      await alice.done();
+    });
+    await fixture.observe("aku/late", "turn/1", "Alice");
+    await fixture.square(async (square) => {
+      const notice = (await square.history({ from: ["aku/late"] })).find((item) => item.kind === "say")!;
+      const snapshot = await square.snapshot();
+      assert.equal(snapshot.delivered("Alice", notice.id), false);
+      assert.equal(snapshot.participants.find((item) => item.name === "Alice")?.state, "done");
+      assert.equal(snapshot.participants.some((item) => item.name === "Ghost"), false);
+    });
+  });
+});
+
+test("local observation uses captured identity and cancellation prevents acknowledgment", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-local-ack-"));
+  const prior = { ...ambientSessionIdentity(), SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "ledger");
+    const noIdentity = await activateSquare(root);
+    process.env.SQUARE_PARTICIPANT_NAME = "Alice";
+    const instance = await activateSquare(root);
+    await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Alice" });
+    await instance.signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: "aku/local",
+      bodySequence: 1, turnSequence: 1, participants: ["Alice"], outcome: { kind: "answered", text: "ok" } });
+    const event = { kind: "akuma.outcome-observed" as const, akumaId: "aku/local", historyId: "turn/1" };
+    await noIdentity.signals?.["akuma.outcome-observed"]?.(event);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event, controller.signal)));
+    const square = await Square.at({ path: squarePath(root), env: {} });
+    try {
+      const notice = (await square.history({ from: ["aku/local"] })).find((item) => item.kind === "say")!;
+      assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
+      const interrupted = new AbortController();
+      const originalHistory = Square.prototype.history;
+      const historyMock = t.mock.method(Square.prototype, "history", async function (this: Square,
+        ...[query, control]: Parameters<typeof originalHistory>) {
+        assert.equal(control?.signal, interrupted.signal);
+        const result = await originalHistory.call(this, query, control);
+        interrupted.abort();
+        return result;
+      });
+      await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event, interrupted.signal)));
+      historyMock.mock.restore();
+      assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
+      process.env.SQUARE_PARTICIPANT_NAME = "WrongLaterIdentity";
+      await instance.signals?.["akuma.outcome-observed"]?.(event);
+      assert.equal((await square.snapshot()).delivered("Alice", notice.id), true);
+      t.mock.method(square.constructor as typeof Square, "at", async () => { throw new Error("broken Square read"); });
+      await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event)), /broken Square read/u);
+    } finally { await square.close(); }
   } finally {
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
