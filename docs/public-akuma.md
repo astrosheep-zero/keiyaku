@@ -19,6 +19,14 @@ Dispatch, Task, and Heart observation is awaited before its public Promise
 settles. Contract-local actor, hook, and branch-freshness configuration does
 not enter this composition.
 
+Construction may also capture an immutable host diagnostic observer. This
+capability is independent of execution routing: it sees only plugin diagnostics
+produced in that host, never remote Body logs, and cannot change public results.
+The callback itself is captured, not a mutable caller options object; it enters
+neither operation inputs, persisted facts, nor forwarded requests. Independent
+compositions retain independent destinations. Plugin diagnostic defaults,
+producer ownership, and failure isolation belong to [plugins.md](plugins.md).
+
 Akuma creation is owned by Akuma itself. Package composition may add a requested
 Contract Dispatch and then a requested Alias move. Birth or fork is the leading,
 irreversible result: a later Dispatch, Alias, or observation failure is reported

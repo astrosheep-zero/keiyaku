@@ -84,7 +84,9 @@ export function reportPluginDiagnostic(
 ): void {
   if (report === undefined) return;
   try {
-    report(`plugin ${subject} ${stage}: ${message(error)}`.slice(0, DIAGNOSTIC_LIMIT));
+    void Promise.resolve(report(`plugin ${subject} ${stage}: ${message(error)}`.slice(0, DIAGNOSTIC_LIMIT))).catch(
+      () => {},
+    );
   } catch {
     // Diagnostics are optional side effects too.
   }

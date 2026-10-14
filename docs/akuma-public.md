@@ -89,6 +89,13 @@ snapshots do not fabricate a cursor, result, or loss marker.
 
 ## Handles And Lifecycle Evidence
 
+Native selection or birth may capture an immutable host diagnostic observer
+for the resulting handle. This observes plugin diagnostics produced by the
+handle's host, never remote Body logs. It is not routing, lifecycle authority,
+or persisted state, and later mutation of caller options cannot replace it.
+Diagnostic failure never changes a product result; [plugins.md](plugins.md)
+owns diagnostic destinations and producer custody.
+
 Selection over an already resolved World and identity is synchronous; every
 operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, call, fork, receipt, ledger,

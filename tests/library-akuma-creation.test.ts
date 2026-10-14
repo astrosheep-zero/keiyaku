@@ -448,7 +448,7 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   }
 });
 
-test("bounded call observes its exact first result after called, without nested duplicate delivery", async (t) => {
+test("bounded call preserves logs and captures diagnostics without duplicate emission or callback authority", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
@@ -459,7 +459,10 @@ test("bounded call observes its exact first result after called, without nested 
     export default {
       manifest: { id: "record", apiVersion: 1 },
       activate(context) {
-        const record = (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n");
+        const record = (signal) => {
+          appendFileSync(context.config.output, JSON.stringify(signal) + "\\n");
+          throw new Error("call observer failed");
+        };
         return { signals: { "akuma.called": record, "akuma.outcome-observed": record } };
       }
     };
@@ -467,10 +470,16 @@ test("bounded call observes its exact first result after called, without nested 
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
     plugins: { record: { package: "./plugins/record.mjs", config: { output } } },
   }));
+  const diagnostics: string[] = [];
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: string) => { stderr.push(message); });
   let child: string | undefined;
   let operationFailed = true;
   try {
-    const result = await Akumas.of(world).call({
+    const result = await Akumas.of(world, { reportDiagnostic: async (message) => {
+      diagnostics.push(message);
+      throw new Error("host rejects diagnostic");
+    } }).call({
       archetype: "worker", body: "bounded observation", cwd: world,
       home: configured.home, settings: await settings({ root: world, home: configured.home }),
       mode: "wait", signal: t.signal,
@@ -485,9 +494,85 @@ test("bounded call observes its exact first result after called, without nested 
       { kind: "akuma.called", akumaId: result.akuma },
       { kind: "akuma.outcome-observed", akumaId: result.akuma, historyId: `turn/${tell.binding.turnSequence}` },
     ]);
+    assert.deepEqual(diagnostics, ["plugin record signal: call observer failed", "plugin record signal: call observer failed"]);
+    const log = pathsForAkuId(world, result.akuma).log;
+    await waitForCondition("submitting call observation diagnostic log", () => readFileSync(log, "utf8").includes("plugin outcome observation failed:"));
+    const logged = readFileSync(log, "utf8");
+    assert.ok(logged.includes("plugin call admission failed: plugin record signal: call observer failed"));
+    assert.ok(logged.includes("plugin outcome observation failed: plugin record signal: call observer failed"));
+    assert.deepEqual(stderr, [], "call diagnostics do not use the local observation stderr default");
     operationFailed = false;
   } finally {
     if (child !== undefined) await PublicAkuma.select(world, child).kill().catch(() => undefined);
+    await cleanupSpawnCapableFixtureForTest(t, {
+      fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed,
+    });
+    restoreBodyPidReceipt();
+  }
+});
+
+test("call without a host preserves log-only diagnostics", async (t) => {
+  const { raw, world, configured } = await directCallFixture();
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  mkdirSync(join(world, "plugins"), { recursive: true });
+  writeFileSync(join(world, "plugins", "fail.mjs"), `export default {
+    manifest: { id: "fail", apiVersion: 1 },
+    activate() { return { signals: { "akuma.called": () => { throw new Error("call-only failure"); } } }; }
+  };`);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { fail: { package: "./plugins/fail.mjs" } },
+  }));
+  const stderr: string[] = [];
+  t.mock.method(console, "error", (message: string) => { stderr.push(message); });
+  let operationFailed = true;
+  try {
+    const result = await Akumas.of(world).call({
+      archetype: "worker", cwd: world, home: configured.home,
+      settings: await settings({ root: world, home: configured.home }),
+    });
+    assert.deepEqual(result.observation, { kind: "born" });
+    const log = pathsForAkuId(world, result.akuma).log;
+    await waitForCondition("log-only call diagnostic", () => existsSync(log) && readFileSync(log, "utf8").includes("call-only failure"));
+    assert.ok(readFileSync(log, "utf8").includes("plugin call admission failed: plugin fail signal: call-only failure"));
+    assert.deepEqual(stderr, []);
+    // Prompt-free birth can precede its Body fact. The PID-receipt cleanup owns
+    // and awaits that process's natural empty publication exit, without a kill race.
+    operationFailed = false;
+  } finally {
+    await cleanupSpawnCapableFixtureForTest(t, {
+      fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed,
+    });
+    restoreBodyPidReceipt();
+  }
+});
+
+test("native birth retains its captured host callback for the resulting handle", async (t) => {
+  const { raw, world, configured } = await directCallFixture();
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  mkdirSync(join(world, "plugins"), { recursive: true });
+  writeFileSync(join(world, "plugins", "fail.mjs"), `export default {
+    manifest: { id: "fail", apiVersion: 1 },
+    activate() { return { signals: { "akuma.outcome-observed": () => { throw new Error("birth observer failed"); } } }; }
+  };`);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { fail: { package: "./plugins/fail.mjs" } },
+  }));
+  const diagnostics: string[] = [];
+  const host = { reportDiagnostic: (message: string) => { diagnostics.push(message); } };
+  let child: PublicAkuma | undefined;
+  let operationFailed = true;
+  try {
+    child = await PublicAkuma.birth("worker", { root: world, cwd: world, ...configured.placement, host });
+    host.reportDiagnostic = () => { throw new Error("mutated callback must not run"); };
+    const result = await child.ask("answer", { signal: t.signal });
+    assert.deepEqual(result.observation, { reason: "answered", answer: '{"ok":true}' });
+    await child.history();
+    assert.deepEqual(diagnostics, ["plugin fail signal: birth observer failed", "plugin fail signal: birth observer failed"]);
+    await child.kill();
+    operationFailed = false;
+  } finally {
     await cleanupSpawnCapableFixtureForTest(t, {
       fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed,
     });

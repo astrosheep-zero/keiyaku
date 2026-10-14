@@ -3,6 +3,11 @@ import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type { PluginSignal } from "./public.js";
 
+/** The local library observation default; CLI and Body supply their own sinks. */
+export function stderrPluginDiagnostic(message: string): void {
+  console.error(message);
+}
+
 type PluginSignalEmission = Readonly<{
   world: WorldRoot;
   settings?: Settings;

@@ -1,4 +1,5 @@
 /** @architectureCompositionRoot */
+import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akuma-instance.js";
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
 import { readAkumaRoster } from "../akuma/akuma.js";
 import type { TellResult, TellWake } from "../akuma/body.js";
@@ -69,12 +70,14 @@ class AkumasHandle {
   #world: WorldRoot;
   #execution: ExecutionContext;
   #selection: SelectionSeam;
+  #reportDiagnostic: AkumaHostOptions["reportDiagnostic"];
 
-  constructor(world: WorldRoot, execution: ExecutionContext) {
+  constructor(world: WorldRoot, execution: ExecutionContext, host?: AkumaHostOptions) {
     this.#world = world;
     this.#execution = execution;
     // One typed route seam captured at construction: no operation re-derives it.
-    this.#selection = selectionSeam(execution);
+    this.#reportDiagnostic = captureAkumaHostDiagnostic(host);
+    this.#selection = selectionSeam(execution, this.#reportDiagnostic);
     Object.freeze(this);
   }
 
@@ -86,7 +89,7 @@ class AkumasHandle {
   }
 
   call(input: CallInput): Promise<CallResult> {
-    return callAkumas(this.withWorld(input, "Akumas.call input"), this.#execution);
+    return callAkumas(this.withWorld(input, "Akumas.call input"), this.#execution, this.#reportDiagnostic);
   }
 
   fork(input: ForkInput): Promise<ForkResult> {
@@ -94,7 +97,7 @@ class AkumasHandle {
   }
 
   status(input: AkumaAddressInput): Promise<AkumaObservation> {
-    return statusAkuma(this.withWorld(input, "Akumas.status input"));
+    return statusAkuma(this.withWorld(input, "Akumas.status input"), this.#reportDiagnostic);
   }
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
@@ -114,7 +117,7 @@ class AkumasHandle {
   }
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
-    return historyAkuma(this.withWorld(input, "Akumas.history input"));
+    return historyAkuma(this.withWorld(input, "Akumas.history input"), this.#reportDiagnostic);
   }
 
   private withWorld<Input>(input: Input, label: string): Input & Readonly<{ path: WorldRoot }> {
@@ -143,13 +146,13 @@ function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[])
  * The one Akumas composition. Public `of` fixes local execution; CLI and Body pass their captured
  * internal channel through `akumasWithExecution` instead of a second constructor.
  */
-export function akumasWithExecution(world: WorldRoot, execution: ExecutionContext): Akumas {
+export function akumasWithExecution(world: WorldRoot, execution: ExecutionContext, host?: AkumaHostOptions): Akumas {
   if (typeof world !== "string") throw new TypeError("Akumas.of world must be a WorldRoot");
-  return new AkumasHandle(world, execution);
+  return new AkumasHandle(world, execution, host);
 }
 
 export const Akumas = Object.freeze({
-  of(world: WorldRoot): Akumas {
-    return akumasWithExecution(world, localExecutionContext());
+  of(world: WorldRoot, host?: AkumaHostOptions): Akumas {
+    return akumasWithExecution(world, localExecutionContext(), host);
   },
 });

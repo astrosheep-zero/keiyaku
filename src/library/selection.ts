@@ -42,7 +42,7 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver } from "../plugin/akuma-signals.js";
+import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
 import {
   addressAkuma,
   addressAkumaSet,
@@ -81,9 +81,12 @@ export type SelectionSeam = Readonly<{
   ask<T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, signal?: AbortSignal): Promise<AkumaAskResult<T>>;
 }>;
 
-export function selectionSeam(execution: ExecutionContext): SelectionSeam {
+export function selectionSeam(
+  execution: ExecutionContext,
+  reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
+): SelectionSeam {
   const channel = executionChannel(execution);
-  return channel.kind === "body-request" ? forwardedSelection(channel.directory) : localSelection();
+  return channel.kind === "body-request" ? forwardedSelection(channel.directory) : localSelection(reportDiagnostic);
 }
 
 function forwardedSelection(directory: string): SelectionSeam {
@@ -126,12 +129,12 @@ function forwardedSelection(directory: string): SelectionSeam {
   };
 }
 
-function localSelection(): SelectionSeam {
+function localSelection(reportDiagnostic: (message: string) => void): SelectionSeam {
   return {
     addressOne: addressAkuma,
     addressSet: addressAkumaSet,
     wait: async (addressed, mode, observer) =>
-      await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) }),
+      await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) }, reportDiagnostic),
     kill: async (addressed, abort) =>
       await executeKillAkuma({
         path: addressed.path,
@@ -151,7 +154,7 @@ function localSelection(): SelectionSeam {
       const result = await executeAskAkuma({
         path: addressed.path,
         id: addressed.id,
-        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
         body: input.body,
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
@@ -409,14 +412,17 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
   };
 }
 
-export async function statusAkuma(input: AkumaAddressInput & Readonly<{ path: WorldRoot }>): Promise<AkumaObservation> {
+export async function statusAkuma(
+  input: AkumaAddressInput & Readonly<{ path: WorldRoot }>,
+  reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
+): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
   try {
     return await observeAkuma(
       await new AkumaOwner(
         addressed.id,
         addressed.path,
-        outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+        outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
       ).status(),
       addressed.path,
       input.repo,
@@ -465,6 +471,7 @@ async function localWait(
     repo?: Repo;
     observer?: WaitObserver;
   }>,
+  reportDiagnostic: (message: string) => void,
 ): Promise<AkumaWaitResult> {
   try {
     return await composeWaitResult(
@@ -474,7 +481,7 @@ async function localWait(
         path: addressed.path,
         ids: addressed.orderedIds,
         completion: input.completion,
-        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         identity: waitIdentityFacts(addressed.path, input.repo, addressed.orderedIds),
@@ -621,6 +628,7 @@ function validateHistoryInput(values: Record<string, unknown>): void {
 
 export async function historyAkuma(
   input: AkumaHistoryInput & Readonly<{ path: WorldRoot }>,
+  reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): Promise<AkumaHistoryResult> {
   const values = requireInput(input, "Akumas.history input");
   validateHistoryInput(values);
@@ -629,7 +637,7 @@ export async function historyAkuma(
     const handle = new AkumaOwner(
       addressed.id,
       addressed.path,
-      outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+      outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
     );
     const contract = (await dispatchAssociations(values.repo as Repo | undefined, [addressed.id])).get(addressed.id)!;
     if (values.last === true) {

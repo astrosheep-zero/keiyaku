@@ -65,6 +65,7 @@ export type {
   AkumaAskResult,
   AkumaBirthInput,
   AkumaHistoryOptions,
+  AkumaHostOptions,
   AkumaIdleOptions,
   AkumaIdleResult,
   AkumaSignalOptions,

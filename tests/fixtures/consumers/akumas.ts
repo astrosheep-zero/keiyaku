@@ -6,6 +6,7 @@ import {
   listArchetypeDefinitions,
   nuke,
   type AkuId,
+  type AkumaHostOptions,
   type ArchetypeCatalog,
   type ArchetypeCatalogInput,
   type ArchetypeCatalogRow,
@@ -32,15 +33,24 @@ void [catalogue, catalogueRows];
 const contractPolicy: LocalContractComposition = { actor: "contract-owner" };
 Keiyaku.with(contractPolicy);
 
-const plural = Akumas.of(world);
+const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
+const plural = Akumas.of(world, host);
 const roster = plural.list({ limit: 25 });
 const status = plural.status({ akuma: aku });
-const single = Akuma.select(world, aku);
+const single = Akuma.select(world, aku, host);
+const born = Akuma.birth("worker", { root: world, host });
 const reset = nuke({ world, confirm: world });
 
 void roster;
 void status;
 void single;
+void born;
+// @ts-expect-error host options are immutable
+host.reportDiagnostic = () => {};
+// @ts-expect-error diagnostics are a host capability, not an operation input
+plural.status({ akuma: aku, reportDiagnostic: () => {} });
+// @ts-expect-error diagnostic callback must be callable
+Akuma.select(world, aku, { reportDiagnostic: "stderr" });
 void reset;
 
 // @ts-expect-error Akumas captures World instead of accepting it per operation

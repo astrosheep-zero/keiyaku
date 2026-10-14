@@ -212,6 +212,18 @@ async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurre
   }
 }
 
+function callDiagnosticSink(
+  paths: AkumaPaths,
+  occurrence: string,
+  reportDiagnostic?: (message: string) => void,
+): (message: string) => void {
+  return (message) => {
+    void recordPluginDiagnostic(paths, message, occurrence);
+    // Return the host's possible Promise for the plugin diagnostic isolation boundary.
+    return reportDiagnostic?.(message);
+  };
+}
+
 /**
  * The submitting process's optional called-plugin observation. It runs once,
  * after the prepared executor returned its local value or the forwarded caller
@@ -225,6 +237,7 @@ async function emitCalledSignal(
     admitted: AdmittedAkumaCall;
     contractId?: ContractId;
   }>,
+  reportDiagnostic?: (message: string) => void,
 ): Promise<void> {
   try {
     const paths = pathsForAkuId(input.path, input.admitted.id);
@@ -233,7 +246,7 @@ async function emitCalledSignal(
       {
         world: input.path,
         ...(input.settings === undefined ? {} : { settings: input.settings }),
-        reportDiagnostic: (message) => void recordPluginDiagnostic(paths, message),
+        reportDiagnostic: callDiagnosticSink(paths, "call admission", reportDiagnostic),
       },
       {
         kind: "akuma.called",
@@ -465,6 +478,7 @@ async function observeCall(
     signal?: AbortSignal;
     observe?: CallWaitObserver;
   }>,
+  reportDiagnostic?: (message: string) => void,
 ): Promise<CallResult> {
   const onObserve: AskObserver = {
     admitted: async (receipt, id) => {
@@ -485,9 +499,11 @@ async function observeCall(
       outcomeObserved: outcomePluginObserver({
         world: input.path,
         ...(input.settings === undefined ? {} : { settings: input.settings }),
-        reportDiagnostic: (message) => {
-          void recordPluginDiagnostic(pathsForAkuId(input.path, input.akuma), message, "outcome observation");
-        },
+        reportDiagnostic: callDiagnosticSink(
+          pathsForAkuId(input.path, input.akuma),
+          "outcome observation",
+          reportDiagnostic,
+        ),
       }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       onObserve,
@@ -525,6 +541,7 @@ function asError(failure: unknown): Error {
 export async function callAkumas(
   input: CallInput & Readonly<{ path: WorldRoot }>,
   execution: ExecutionContext = localExecutionContext(),
+  reportDiagnostic?: (message: string) => void,
 ): Promise<CallResult> {
   const parsed = await parseCallInput(input);
   const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
@@ -540,12 +557,15 @@ export async function callAkumas(
   );
   // One caller-wiring sequence, after the prepared executor returned its local value
   // or the forwarded caller received its exact live output, before outcome observation.
-  await emitCalledSignal({
-    path: parsed.path,
-    ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-    admitted,
-    ...(seat === undefined ? {} : { contractId: seat.id }),
-  });
+  await emitCalledSignal(
+    {
+      path: parsed.path,
+      ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
+      admitted,
+      ...(seat === undefined ? {} : { contractId: seat.id }),
+    },
+    reportDiagnostic,
+  );
   const dispatch: DispatchStage =
     seat === undefined
       ? { kind: "none" }
@@ -579,17 +599,20 @@ export async function callAkumas(
   }
   return parsed.mode === "detach"
     ? { ...result, observation: { kind: "detached", tell: receipt } }
-    : await observeCall({
-        path: parsed.path,
-        akuma: admitted.id,
-        result,
-        initialTell: parsed.initialTell,
-        receipt,
-        timeoutMs: parsed.timeoutMs,
-        ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-        ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
-        ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
-      });
+    : await observeCall(
+        {
+          path: parsed.path,
+          akuma: admitted.id,
+          result,
+          initialTell: parsed.initialTell,
+          receipt,
+          timeoutMs: parsed.timeoutMs,
+          ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
+          ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
+          ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
+        },
+        reportDiagnostic,
+      );
 }
 
 export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }>): Promise<ForkResult> {

@@ -7,6 +7,7 @@ export type {
   AkumaAskOptions,
   AkumaBirthInput,
   AkumaHistoryOptions,
+  AkumaHostOptions,
   AkumaIdleOptions,
   AkumaIdleResult,
   AkumaSignalOptions,

@@ -78,6 +78,24 @@ activating remains eligible only when that activation settles successfully
 within the signal producer's own bounded delivery; otherwise it is dropped with
 a diagnostic and is never replayed.
 
+## Host Diagnostics
+
+A library host may capture diagnostics through an immutable Akuma composition
+capability. It observes only diagnostics produced in that host process, never
+remote Body logs, and is neither transport routing nor a public result stage.
+Independent handles may select independent destinations. Local public
+observations default to line-oriented stderr; call observations keep their
+existing Akuma log and additionally notify an explicitly selected host.
+CLI output remains owned by its process edge, and serving Body observations
+retain their own log custody and authenticated observer attribution.
+
+Activation remains process-local and is selected once per World. Activation
+diagnostics belong to the producer that initiated activation; delivery
+diagnostics belong to that delivery invocation. A later host destination does
+not replay or inherit earlier diagnostics. A destination that throws or rejects
+asynchronously cannot change product results or hold execution custody.
+Diagnostics create no persistence, retry, or cross-process callback channel.
+
 ## Signals And Boundaries
 
 A process emits a complete owned signal at most once for that occurrence. Its

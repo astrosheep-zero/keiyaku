@@ -45,7 +45,7 @@ import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { CliRuntime } from "../runtime.js";
 import { canonicalContractSelector, contractFromInput, resolveContractId } from "../selectors.js";
-import { displayContext, emit, writeJson, writeStdout } from "../streams.js";
+import { displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { amendFromCommand } from "./amend.js";
 import { bindFromCommand } from "./bind.js";
@@ -505,7 +505,7 @@ async function readAkumaStatus(
   coordinates: CliCoordinates,
 ): Promise<Readonly<{ value: AkumaObservation; project: () => string }>> {
   if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the Akuma selector");
-  const status = await Akumas.of(coordinates.world).status({
+  const status = await Akumas.of(coordinates.world, { reportDiagnostic: writeStderr }).status({
     akuma,
     ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
   });

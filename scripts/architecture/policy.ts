@@ -384,7 +384,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/selection.ts",
-      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["outcomePluginObserver"])],
+      allow: [
+        ...libraryOwner.allow,
+        any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic"]),
+      ],
       deny: libraryOwner.deny,
     },
     { source: "library/**", ...libraryOwner },
@@ -532,7 +535,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/**"),
         any("settings.ts"),
         any("world.ts"),
-        any("plugin/akuma-signals.ts", ["outcomePluginObserver"]),
+        any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic"]),
       ],
     },
     {

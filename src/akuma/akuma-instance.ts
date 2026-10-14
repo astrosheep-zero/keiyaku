@@ -1,6 +1,6 @@
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver } from "../plugin/akuma-signals.js";
+import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
@@ -19,12 +19,29 @@ export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; statu
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
+/** Observes only plugin diagnostics produced in this host, never remote Body logs. */
+export type AkumaHostOptions = Readonly<{ reportDiagnostic?: (message: string) => void }>;
+
+/** Capture the observer capability, not the caller's mutable options object. */
+export function captureAkumaHostDiagnostic(host: AkumaHostOptions | undefined): AkumaHostOptions["reportDiagnostic"] {
+  if (host === undefined) return undefined;
+  if (typeof host !== "object" || host === null || Array.isArray(host))
+    throw new TypeError("Akuma host options must be an object");
+  const unknown = Object.keys(host).find((key) => key !== "reportDiagnostic");
+  if (unknown !== undefined) throw new TypeError(`Akuma host options has unknown field: ${unknown}`);
+  const reportDiagnostic = host.reportDiagnostic;
+  if (reportDiagnostic !== undefined && typeof reportDiagnostic !== "function")
+    throw new TypeError("Akuma host reportDiagnostic must be a function");
+  return reportDiagnostic;
+}
+
 export type AkumaBirthInput = Readonly<{
   root: WorldRoot;
   cwd?: string;
   home?: string;
   settings?: Settings;
   allowed?: readonly AllowedAction[];
+  host?: AkumaHostOptions;
 }>;
 
 export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boolean; initiator?: string }>;
@@ -43,6 +60,7 @@ export class Akuma {
   private constructor(
     readonly id: AkuId,
     private readonly root: WorldRoot,
+    private readonly reportDiagnostic: (message: string) => void,
   ) {
     Object.freeze(this);
   }
@@ -51,7 +69,7 @@ export class Akuma {
     return new AkumaOwner(
       this.id,
       this.root,
-      observing ? outcomePluginObserver({ world: this.root, reportDiagnostic: console.error }) : undefined,
+      observing ? outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }) : undefined,
     );
   }
 
@@ -60,6 +78,7 @@ export class Akuma {
       throw new TypeError("Akuma birth input must be an object");
     }
     if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
+    const reportDiagnostic = captureAkumaHostDiagnostic(input.host) ?? stderrPluginDiagnostic;
     const admitted = await admitAkumaCall(
       input.root,
       {
@@ -74,12 +93,13 @@ export class Akuma {
       {},
     );
     if (admitted.failure !== undefined) throw admitted.failure;
-    return new Akuma(admitted.id, input.root);
+    return new Akuma(admitted.id, input.root, reportDiagnostic);
   }
 
-  static select(root: WorldRoot, selector: string): Akuma {
+  static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {
     if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
-    return new Akuma(parseAkuId(selector).id, root);
+    const reportDiagnostic = captureAkumaHostDiagnostic(host) ?? stderrPluginDiagnostic;
+    return new Akuma(parseAkuId(selector).id, root, reportDiagnostic);
   }
 
   async tell(text: string, options: AkumaTellOptions = {}): Promise<AkumaTellResult> {
@@ -125,7 +145,7 @@ export class Akuma {
     const result = await executeAskAkuma({
       path: this.root,
       id: this.id,
-      outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: console.error }),
+      outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }),
       body: text,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(schema === undefined ? {} : { schemaJson: schemaJsonText(schema) }),

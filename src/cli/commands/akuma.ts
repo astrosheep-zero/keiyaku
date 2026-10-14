@@ -75,7 +75,7 @@ type InvokeInput = Readonly<{
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
 
 function akumas(input: InvokeInput) {
-  return akumasWithExecution(input.path, input.execution);
+  return akumasWithExecution(input.path, input.execution, { reportDiagnostic: writeStderr });
 }
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
