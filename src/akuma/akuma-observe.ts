@@ -93,6 +93,25 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   }
 }
 
+/** Optional semantic seam; the observer composition owns delivery and deduplication. */
+export type OutcomeObserver = (akumaId: AkuId, historyIds: readonly string[]) => Promise<void>;
+
+export async function observeOutcomeRows(
+  id: AkuId,
+  rows: readonly ActivityRow[],
+  observer?: OutcomeObserver,
+): Promise<void> {
+  if (observer === undefined) return;
+  const historyIds = rows.flatMap((row) => (row.kind === "outcome" ? [row.outcome.historyId] : []));
+  if (historyIds.length > 0) await observer(id, historyIds);
+}
+
+export async function observeStatusOutcome(status: AkumaStatus, observer?: OutcomeObserver): Promise<void> {
+  const snapshot = status.timeline;
+  if (snapshot.kind === "idle" && snapshot.outcome !== undefined)
+    await observer?.(status.id, [snapshot.outcome.outcome.historyId]);
+}
+
 type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
 
 /**

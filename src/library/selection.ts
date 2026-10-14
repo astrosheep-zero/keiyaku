@@ -42,6 +42,7 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
+import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import {
   addressAkuma,
   addressAkumaSet,
@@ -150,6 +151,7 @@ function localSelection(): SelectionSeam {
       const result = await executeAskAkuma({
         path: addressed.path,
         id: addressed.id,
+        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
         body: input.body,
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
@@ -410,7 +412,15 @@ function setAddress(values: Record<string, unknown>): Parameters<typeof addressA
 export async function statusAkuma(input: AkumaAddressInput & Readonly<{ path: WorldRoot }>): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
   try {
-    return await observeAkuma(await new AkumaOwner(addressed.id, addressed.path).status(), addressed.path, input.repo);
+    return await observeAkuma(
+      await new AkumaOwner(
+        addressed.id,
+        addressed.path,
+        outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+      ).status(),
+      addressed.path,
+      input.repo,
+    );
   } catch (error) {
     throw observationError(addressed.id, error);
   }
@@ -464,6 +474,7 @@ async function localWait(
         path: addressed.path,
         ids: addressed.orderedIds,
         completion: input.completion,
+        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
         identity: waitIdentityFacts(addressed.path, input.repo, addressed.orderedIds),
@@ -615,7 +626,11 @@ export async function historyAkuma(
   validateHistoryInput(values);
   const addressed = await addressAkuma(directAddress(values));
   try {
-    const handle = new AkumaOwner(addressed.id, addressed.path);
+    const handle = new AkumaOwner(
+      addressed.id,
+      addressed.path,
+      outcomePluginObserver({ world: addressed.path, reportDiagnostic: console.error }),
+    );
     const contract = (await dispatchAssociations(values.repo as Repo | undefined, [addressed.id])).get(addressed.id)!;
     if (values.last === true) {
       const answer = await handle.lastAnswer();

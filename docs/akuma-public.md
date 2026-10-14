@@ -74,6 +74,13 @@ projection. A dropped or failed Contract, an absent or failed association, and
 an unproven Contract read all keep the reported changes: unplaced work still
 matters.
 
+Public status, idle, history, and input-bound answer observation may notify
+optional plugins when they establish a retained committed outcome identity.
+That observation is not body consumption, acknowledgment, or an idle judgment;
+its absence or failure changes no Akuma result or fact. Internal reads do not
+inherit this observation responsibility. [plugins.md](plugins.md) owns delivery
+and operation-local uniqueness.
+
 History pages the same projected ledger and is the sole public execution-history
 read. It retains exact answered outcome bytes, including an empty answer, and
 the public history identity for a retained answered Turn. A fork accepts only

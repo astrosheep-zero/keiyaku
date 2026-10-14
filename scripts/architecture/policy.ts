@@ -359,7 +359,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "library/contract/**", ...contractOwner },
     {
       source: "library/akuma-creation.ts",
-      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitPluginSignal"])],
+      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitPluginSignal", "outcomePluginObserver"])],
       deny: libraryOwner.deny,
     },
     {
@@ -381,6 +381,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/refusal.ts",
       allow: [...libraryOwner.allow, runtime("protocol/run.ts", ["protocolTerminalSchema"])],
       deny: libraryOwner.deny.filter((rule) => rule.target !== "protocol/run.ts"),
+    },
+    {
+      source: "library/selection.ts",
+      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["outcomePluginObserver"])],
+      deny: libraryOwner.deny,
     },
     { source: "library/**", ...libraryOwner },
     {
@@ -520,6 +525,19 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       // Task or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-call.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+    },
+    {
+      source: "akuma/akuma-instance.ts",
+      allow: [
+        any("akuma/**"),
+        any("settings.ts"),
+        any("world.ts"),
+        any("plugin/akuma-signals.ts", ["outcomePluginObserver"]),
+      ],
+    },
+    {
+      source: "akuma/selection-owner-port.ts",
+      allow: [any("akuma/**"), types("world.ts"), any("plugin/akuma-signals.ts", ["outcomePluginObserver"])],
     },
     { source: "akuma/read-pool.ts", allow: [] },
     {

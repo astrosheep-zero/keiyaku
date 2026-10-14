@@ -87,6 +87,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/path-coordinates.test.ts",
   "tests/pi-native-identity.test.ts",
   "tests/pi-virtual-model.test.ts",
+  "tests/plugin-akuma-outcome.test.ts",
   "tests/plugin-runtime.test.ts",
   "tests/plugin-square.test.ts",
   "tests/private-state-seat.test.ts",

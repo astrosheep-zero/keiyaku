@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { bodyLaunchSchema, LEASH_HELD_EXIT, runAkumaBody, type BodyLaunch } from "./akuma/body.js";
+import {
+  bodyLaunchSchema,
+  LEASH_HELD_EXIT,
+  runAkumaBody,
+  recordPluginDiagnostic,
+  type BodyLaunch,
+} from "./akuma/body.js";
 import { worldRootForAkumaPaths } from "./akuma/identity.js";
 import { composeRequestCommands } from "./akuma/request-wire.js";
 import { localExecutionContext } from "./akuma/requests.js";
@@ -146,7 +152,11 @@ export async function externalRequestCommandsFor(
   return {
     world,
     commands: composeRequestCommands(
-      selectionRequestCommands(selectionRequestPort(world)),
+      selectionRequestCommands(
+        selectionRequestPort(world, (message) => {
+          void recordPluginDiagnostic(launch.paths, "outcome observation", message);
+        }),
+      ),
       contractRequestCommands(contractUpstream(processConfiguration)),
       taskMutationRequestCommands(taskMutationRequestPort()),
     ),

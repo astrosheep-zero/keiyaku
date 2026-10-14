@@ -288,6 +288,7 @@ async function writablePaths(
 const SIGNAL_KINDS: Readonly<Record<keyof PluginSignalMap, true>> = Object.freeze({
   "akuma.initiating": true,
   "akuma.called": true,
+  "akuma.outcome-observed": true,
   "akuma.turn-outcome": true,
   "akuma.body-ended": true,
 });

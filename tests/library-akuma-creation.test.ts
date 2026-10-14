@@ -448,6 +448,53 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   }
 });
 
+test("bounded call observes its exact first result after called, without nested duplicate delivery", async (t) => {
+  const { raw, world, configured } = await directCallFixture();
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const output = join(world, "plugin-signals.jsonl");
+  mkdirSync(join(world, "plugins"), { recursive: true });
+  writeFileSync(join(world, "plugins", "record.mjs"), `
+    import { appendFileSync } from "node:fs";
+    export default {
+      manifest: { id: "record", apiVersion: 1 },
+      activate(context) {
+        const record = (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n");
+        return { signals: { "akuma.called": record, "akuma.outcome-observed": record } };
+      }
+    };
+  `);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { record: { package: "./plugins/record.mjs", config: { output } } },
+  }));
+  let child: string | undefined;
+  let operationFailed = true;
+  try {
+    const result = await Akumas.of(world).call({
+      archetype: "worker", body: "bounded observation", cwd: world,
+      home: configured.home, settings: await settings({ root: world, home: configured.home }),
+      mode: "wait", signal: t.signal,
+    });
+    child = result.akuma;
+    assert.equal(result.observation.kind, "observed");
+    assert.ok(result.observation.kind === "observed");
+    assert.deepEqual(result.observation.observation, { reason: "answered", answer: '{"ok":true}' });
+    const tell = await readTell(pathsForAkuId(world, result.akuma), result.observation.tell.admission.tellId);
+    assert.ok(tell?.binding);
+    assert.deepEqual(readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line)), [
+      { kind: "akuma.called", akumaId: result.akuma },
+      { kind: "akuma.outcome-observed", akumaId: result.akuma, historyId: `turn/${tell.binding.turnSequence}` },
+    ]);
+    operationFailed = false;
+  } finally {
+    if (child !== undefined) await PublicAkuma.select(world, child).kill().catch(() => undefined);
+    await cleanupSpawnCapableFixtureForTest(t, {
+      fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed,
+    });
+    restoreBodyPidReceipt();
+  }
+});
+
 test("schema Akumas.call preserves its child when initial Tell admission fails", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();

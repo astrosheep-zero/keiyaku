@@ -36,6 +36,10 @@ function graph(owner: string, edges: readonly Edge[], prefix = ""): readonly Dia
 const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: boolean])[] = [
   ["git/repository.ts", ["git/owner-state.ts", "readOwnerState"], true],
   ["git/repository.ts", ["git/internal/owner-state.ts", "readOwnerState"], true],
+  ["library/selection.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
+  ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
+  ["akuma/selection-owner-port.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
+  ["akuma/akuma-observe.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], false],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "pluginRuntime"], false],
   ["cli/commands/bind.ts", ["core/verbs/bind.ts", "decideBind"], false],

@@ -109,6 +109,32 @@ provider or continuation custody. Plugins cannot participate in providers, gener
 particular, plugin delivery does not make birth reversible, add a pre-Body
 listener, or create rollback or cross-process continuation behavior.
 
+Public Akuma observation emits `akuma.outcome-observed` when it establishes a
+specific retained committed outcome identity, whether answered or failed. This
+means knowing that result exists, not consuming its body, acknowledging it, or
+judging the Akuma idle. Status, wait and idle, history, ask, and bounded call
+answer observation participate; roster and board reads, incidental internal
+reads, and lifecycle production do not. A running Akuma may have an observed
+past outcome. Missing or pruned evidence, unknown completion, and a deadline
+alone establish no identity; answer decoding failure does not undo an outcome
+already observed.
+
+Each observer operation owns its delivery and suppresses repeated observations
+of the same Akuma and outcome within that operation only. Status and silent wait
+observe the outcomes their selected view establishes, never historical outcomes
+read incidentally while building that view. A live wait also observes the
+semantic frontier it actually supplies to its viewer. History observes its
+returned page or chosen result; input-bound answer observation observes only
+the exact admission's committed outcome. A wait can deliver before the whole
+selected set completes, without consuming answer text, while completion-only
+probes remain completion-only. Outcomes established together receive concurrent
+bounded delivery attempts; the operation awaits them without a detached queue
+or a timeout interval multiplied by the number of results. Forwarded wait and ask observe
+in their serving process; their submitting process does not emit again. Bounded
+call answer observation belongs to the submitting process, after call admission
+observation. These are ephemeral observations, not acknowledgment facts or
+cross-operation delivery receipts.
+
 Every Body that reaches a durable terminal state emits `akuma.body-ended` after
 that Body fact is durable. The signal identifies the Akuma and Body sequence
 and carries the terminal reason, including hung custody. It observes that Body

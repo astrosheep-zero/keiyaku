@@ -7,9 +7,43 @@ import test, { type TestContext } from "node:test";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { emitPluginSignal } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
+import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { runCli } from "./support/cli-fixtures.js";
+
+test("one outcome observation batch bounds concurrent attempts rather than multiplying timeouts", async (context) => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(value.root, "alpha", [
+      'import { appendFileSync } from "node:fs";',
+      'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
+      '  return { signals: { "akuma.outcome-observed": (signal, cancellation) => {',
+      '    appendFileSync(context.config.trace, `started:${signal.historyId}\\n`);',
+      '    cancellation.addEventListener("abort", () => appendFileSync(context.config.trace, `cancelled:${signal.historyId}\\n`), { once: true });',
+      '    return new Promise(() => {});',
+      '  } } };',
+      '} };',
+    ].join("\n"));
+    writeProjectPlugins(value.root, { alpha: { package: "./plugins/alpha.mjs", config: { trace: output } } });
+    const world = await World.at(value.root);
+    const diagnostics: string[] = [];
+    const observer = outcomePluginObserver({ world, reportDiagnostic: (message) => { diagnostics.push(message); } });
+    const advance = deadlineClock(context);
+    const pending = observer("aku/worker/00000001", ["turn/1", "turn/2", "turn/1"]);
+    await eventually(() => trace(output).filter((line) => line.startsWith("started:")).length === 2);
+    advance(5_000);
+    await pending;
+    assert.deepEqual(trace(output).filter((line) => line.startsWith("started:")).sort(), ["started:turn/1", "started:turn/2"]);
+    assert.equal(trace(output).filter((line) => line.startsWith("cancelled:")).length, 2);
+    assert.equal(diagnostics.length, 2);
+    await observer("aku/worker/00000001", ["turn/1", "turn/2"]);
+    assert.equal(trace(output).filter((line) => line.startsWith("started:")).length, 2, "operation-local dedup survives timeout");
+  } finally {
+    value.close();
+  }
+});
 
 const SQUARE_SESSION_ENVIRONMENT = [
   "CLAUDE_CODE_SESSION_ID",

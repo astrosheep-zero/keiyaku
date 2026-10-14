@@ -19,7 +19,7 @@ import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
-import { emitPluginSignal } from "../plugin/akuma-signals.js";
+import { emitPluginSignal, outcomePluginObserver } from "../plugin/akuma-signals.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
@@ -204,9 +204,9 @@ function pluginDiagnostic(error: unknown): string {
   return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
 }
 
-async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown): Promise<void> {
+async function recordPluginDiagnostic(paths: AkumaPaths, error: unknown, occurrence = "call admission"): Promise<void> {
   try {
-    await appendFile(paths.log, `plugin call admission failed: ${pluginDiagnostic(error)}\n`);
+    await appendFile(paths.log, `plugin ${occurrence} failed: ${pluginDiagnostic(error)}\n`);
   } catch {
     // Plugin diagnostic loss must not change an already admitted call.
   }
@@ -461,6 +461,7 @@ async function observeCall(
     initialTell: NonNullable<ParsedCallInput["initialTell"]>;
     receipt: TellResult;
     timeoutMs: number;
+    settings?: Settings;
     signal?: AbortSignal;
     observe?: CallWaitObserver;
   }>,
@@ -481,6 +482,13 @@ async function observeCall(
       tellId: input.initialTell.tellId,
       timeoutMs: input.timeoutMs,
       receipt: input.receipt,
+      outcomeObserved: outcomePluginObserver({
+        world: input.path,
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
+        reportDiagnostic: (message) => {
+          void recordPluginDiagnostic(pathsForAkuId(input.path, input.akuma), message, "outcome observation");
+        },
+      }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       onObserve,
     });
@@ -578,6 +586,7 @@ export async function callAkumas(
         initialTell: parsed.initialTell,
         receipt,
         timeoutMs: parsed.timeoutMs,
+        ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
         ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
         ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
       });

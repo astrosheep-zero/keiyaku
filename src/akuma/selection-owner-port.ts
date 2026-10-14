@@ -1,4 +1,5 @@
 import type { WorldRoot } from "../world.js";
+import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import { requireBornAkuma } from "./akuma-probe.js";
 import { executeAskAkuma, executeKillAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
@@ -15,7 +16,10 @@ import type { SelectionRequestPort } from "./selection-request.js";
  * unaddressable member never starts; the executor's own access to the target is
  * then the product act, never a second addressing probe.
  */
-export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
+export function selectionRequestPort(
+  world: WorldRoot,
+  reportDiagnostic: (message: string) => void,
+): SelectionRequestPort {
   const prove = async (targets: readonly AkumaStatus["id"][]): Promise<void> => {
     for (const id of targets) await requireBornAkuma(world, id);
   };
@@ -24,7 +28,12 @@ export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
       await prove(targets);
       // The lower wait owner returns association-free native evidence; the
       // actual request crossing composes its canonical transport shape.
-      const native = await executeWaitAkuma({ path: world, ids: targets, ...request });
+      const native = await executeWaitAkuma({
+        path: world,
+        ids: targets,
+        ...request,
+        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }),
+      });
       return { ...native, observations: native.observations.map(akumaObservationOf) };
     },
     tell: async ({ target, ...request }) => {
@@ -33,7 +42,12 @@ export function selectionRequestPort(world: WorldRoot): SelectionRequestPort {
     },
     ask: async ({ target, ...request }) => {
       await prove([target]);
-      return await executeAskAkuma({ path: world, id: target, ...request });
+      return await executeAskAkuma({
+        path: world,
+        id: target,
+        ...request,
+        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }),
+      });
     },
     kill: async ({ targets, ...request }) => {
       await prove(targets);

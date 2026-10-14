@@ -1585,7 +1585,7 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   const absent = "aku/intern/33dd4670" as AkuId;
-  const pump = await openSelectionPump(parent, selectionRequestPort(root));
+  const pump = await openSelectionPump(parent, selectionRequestPort(root, console.error));
   const id = randomUUID();
   try {
     await assert.rejects(
@@ -1610,7 +1610,7 @@ test("a forwarded operation answers from the parent World without reading the ch
   const target = await born(parentWorld, "worker", "abcd0043");
   const local = await born(childWorld, "worker", "abcd0043");
   await writeFile(local.paths.heart, "this is not a database\n");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
   try {
     // The child's own Heart is unreadable here: a local probe would fail this.
     const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
@@ -1634,7 +1634,7 @@ test("a forwarded refusal keeps the parent's answer over the child's local birth
   const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-child-")));
   const parent = await born(parentWorld, "parent", "44434343");
   const local = await born(childWorld, "intern", "33dd4670");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
   try {
     // The target is born only in the child's World, so a locally proved
     // operation would succeed instead of answering as the parent does.
@@ -1656,7 +1656,7 @@ test("a forwarded observation failure keeps the parent's reason", async () => {
   const target = await born(childWorld, "worker", "abcd0045");
   const mirrored = await born(parentWorld, "worker", "abcd0045");
   await writeFile(mirrored.paths.heart, "this is not a database\n");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
   try {
     await assert.rejects(
       tellAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
@@ -1813,7 +1813,7 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     now: "2026-08-18T00:00:02.000Z",
   });
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openSelectionPump(parent, selectionRequestPort(root));
+  const pump = await openSelectionPump(parent, selectionRequestPort(root, console.error));
   try {
     const pending = requestBodyAsk({
       directory: pump.directory,
@@ -1862,7 +1862,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     now: "2026-08-18T00:00:03.000Z",
   });
   const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot, console.error));
   try {
     const pending = cliJson<AkumaAskResult>(["-C", callerRoot, "ask", target.id, "--wait", "10s", "facade delayed"], {
       environment: { [AKUMA_REQUESTS_ENV]: pump.directory },

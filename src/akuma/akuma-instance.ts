@@ -1,5 +1,6 @@
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
@@ -46,8 +47,12 @@ export class Akuma {
     Object.freeze(this);
   }
 
-  private owner(): AkumaOwner {
-    return new AkumaOwner(this.id, this.root);
+  private owner(observing = false): AkumaOwner {
+    return new AkumaOwner(
+      this.id,
+      this.root,
+      observing ? outcomePluginObserver({ world: this.root, reportDiagnostic: console.error }) : undefined,
+    );
   }
 
   static async birth(archetype: string, input: AkumaBirthInput): Promise<Akuma> {
@@ -120,6 +125,7 @@ export class Akuma {
     const result = await executeAskAkuma({
       path: this.root,
       id: this.id,
+      outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: console.error }),
       body: text,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(schema === undefined ? {} : { schemaJson: schemaJsonText(schema) }),
@@ -133,7 +139,7 @@ export class Akuma {
   }
 
   async status(): Promise<AkumaStatus> {
-    return await this.owner().status();
+    return await this.owner(true).status();
   }
 
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
@@ -146,7 +152,7 @@ export class Akuma {
       throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
     }
     const signal = signalOption(options.signal);
-    const waited = await this.owner().waitReceipt(defaultWaitComplete, {
+    const waited = await this.owner(true).waitReceipt(defaultWaitComplete, {
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(signal === undefined ? {} : { signal }),
     });
@@ -162,7 +168,7 @@ export class Akuma {
     if (options.before !== undefined && options.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }
-    return (await this.owner().history({
+    return (await this.owner(true).history({
       ...(options.before === undefined ? {} : { before: options.before }),
       ...(options.since === undefined ? {} : { since: options.since }),
       ...(options.limit === undefined ? {} : { limit: options.limit }),

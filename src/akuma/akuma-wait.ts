@@ -6,7 +6,10 @@ import {
   defaultWaitComplete,
   readLiveStatus,
   readWaitComplete,
+  observeOutcomeRows,
+  observeStatusOutcome,
   waitForObservation,
+  type OutcomeObserver,
   type LiveStatusObservation,
   type WaitReason,
 } from "./akuma-observe.js";
@@ -43,6 +46,7 @@ type WaitExecutionInput = Readonly<{
   signal?: AbortSignal;
   /** Internal custom completion judge over the full final observation where supplied. */
   predicate?: (status: AkumaStatus) => boolean;
+  outcomeObserved?: OutcomeObserver;
   /** Resolves one Akuma's identity facts; consulted once per Akuma a viewer first sees. */
   identity?: (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts>;
   /** The selected set in the caller's order; a viewer's head and scoreboard follow it. */
@@ -170,6 +174,13 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
       input.onSelected(ordered.map((id) => ({ id, ...facts.get(id)! })));
     }
     const observeRound = async (round: WaitRound): Promise<void> => {
+      await Promise.all(
+        round.observations.map(({ status, rows }) =>
+          input.observe === undefined
+            ? observeStatusOutcome(status, input.outcomeObserved)
+            : observeOutcomeRows(status.id, rows, input.outcomeObserved),
+        ),
+      );
       if (input.observe === undefined) return;
       const observed: WaitObservedAkuma[] = [];
       for (const observation of round.observations) {

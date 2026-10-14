@@ -1,6 +1,6 @@
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
-import type { LiveStatusObservation } from "./akuma-observe.js";
+import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { TellResult } from "./body.js";
@@ -22,6 +22,7 @@ type TellExecutionInput = Readonly<{
   signal?: AbortSignal;
   interrupt?: boolean;
   onObserve?: AskObserver;
+  outcomeObserved?: OutcomeObserver;
 }>;
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
@@ -102,9 +103,10 @@ export async function observeAdmittedAskAkuma(
      */
     receipt?: TellResult;
     onObserve?: AskObserver;
+    outcomeObserved?: OutcomeObserver;
   }>,
 ): Promise<AkumaAskResult> {
-  const owner = new AkumaOwner(input.id, input.path);
+  const owner = new AkumaOwner(input.id, input.path, input.outcomeObserved);
   const tell = input.receipt ?? (await owner.admittedReceipt(input.tellId));
   await input.onObserve?.admitted?.(tell, input.id);
   let settled: TellResult | undefined;
@@ -165,6 +167,7 @@ export async function executeAskAkuma(
     wake: admission.wake,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
+    ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
   });
 }
 

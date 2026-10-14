@@ -5,6 +5,9 @@ import {
   bornLiveStatus,
   bornStatus,
   defaultWaitComplete,
+  observeOutcomeRows,
+  observeStatusOutcome,
+  type OutcomeObserver,
   waitForObservation,
   type LiveStatusObservation,
   type WaitReason,
@@ -167,6 +170,7 @@ export class AkumaOwner {
   constructor(
     readonly id: AkuId,
     private readonly worldPath: WorldRoot,
+    private readonly outcomeObserved?: OutcomeObserver,
   ) {}
 
   private get paths(): AkumaPaths {
@@ -191,13 +195,19 @@ export class AkumaOwner {
   }
 
   async status(): Promise<AkumaStatus> {
-    return (await bornStatus(this.paths, this.id, { aperture: "monitoring" })).status;
+    const { status } = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
+    await observeStatusOutcome(status, this.outcomeObserved);
+    return status;
   }
 
   async history(
     input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }> = {},
   ): Promise<ActivityHistory | ExactHistory> {
-    if (input.id !== undefined) return this.exactHistory(input);
+    if (input.id !== undefined) {
+      const exact = await this.exactHistory(input);
+      if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [exact.outcome.outcome.historyId]);
+      return exact;
+    }
     if (input.before !== undefined && input.since !== undefined) {
       throw new TypeError("Akuma history before and since are mutually exclusive");
     }
@@ -213,11 +223,13 @@ export class AkumaOwner {
     if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
       throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
     }
-    return selectHistory(await this.projectHistoryTurns(), {
+    const history = selectHistory(await this.projectHistoryTurns(), {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
       limit,
     });
+    await observeOutcomeRows(this.id, history.rows, this.outcomeObserved);
+    return history;
   }
 
   async waitReceipt(
@@ -231,6 +243,7 @@ export class AkumaOwner {
       path: this.worldPath,
       ids: [this.id],
       completion: "all",
+      ...(this.outcomeObserved === undefined ? {} : { outcomeObserved: this.outcomeObserved }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(predicate === defaultWaitComplete ? {} : { predicate }),
@@ -336,6 +349,7 @@ export class AkumaOwner {
         const tell = await readTell(this.paths, tellId);
         if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
         const outcome = await this.boundTellOutcome(tell);
+        if (outcome.historyId !== undefined) await this.outcomeObserved?.(this.id, [outcome.historyId]);
         if (options.observe !== undefined) {
           await options.observe(
             await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }),
@@ -354,10 +368,14 @@ export class AkumaOwner {
 
   private async boundTellOutcome(
     tell: TellFact,
-  ): Promise<Readonly<{ outcome: TurnOutcome | null; completedAt: string | null }>> {
+  ): Promise<Readonly<{ outcome: TurnOutcome | null; completedAt: string | null; historyId?: string }>> {
     if (tell.binding === undefined) return { outcome: null, completedAt: null };
     const end = (await readTurn(this.paths, tell.binding.turnSequence))?.end;
-    return { outcome: end?.outcome ?? null, completedAt: end?.completedAt ?? null };
+    return {
+      outcome: end?.outcome ?? null,
+      completedAt: end?.completedAt ?? null,
+      ...(end === undefined ? {} : { historyId: `turn/${tell.binding.turnSequence}` }),
+    };
   }
 
   async interrupt(
@@ -506,9 +524,9 @@ export class AkumaOwner {
 
   async lastAnswer(): Promise<LastAnswer> {
     const turn = await readLastAnsweredTurn(this.paths);
-    return turn?.end?.outcome.kind === "answered"
-      ? { kind: "answer", answer: turn.end.outcome.answer }
-      : { kind: "no-answer" };
+    if (turn?.end?.outcome.kind !== "answered") return { kind: "no-answer" };
+    await this.outcomeObserved?.(this.id, [`turn/${turn.sequence}`]);
+    return { kind: "answer", answer: turn.end.outcome.answer };
   }
 }
 

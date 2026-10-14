@@ -225,7 +225,7 @@ function boundedDiagnostic(error: unknown): string {
   return text.length <= 500 ? text : `${text.slice(0, 500)}...`;
 }
 
-async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, error: unknown): Promise<void> {
+export async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: string, error: unknown): Promise<void> {
   try {
     await appendFile(paths.log, `plugin ${occurrence} failed: ${boundedDiagnostic(error)}\n`);
   } catch {

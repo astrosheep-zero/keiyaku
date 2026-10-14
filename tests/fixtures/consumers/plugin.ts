@@ -13,6 +13,12 @@ const context: PluginContext = rootContext;
 const rootSignal = null as unknown as RootSignal;
 const signal: PluginSignal = rootSignal;
 const hooks: PluginHooks = {
+  "akuma.outcome-observed": (observed) => {
+    observed.akumaId.toUpperCase();
+    observed.historyId.toUpperCase();
+    // @ts-expect-error Outcome observation carries no answer body.
+    observed.outcome;
+  },
   "akuma.turn-outcome": (turn) => {
     turn.turnSequence.toFixed();
     if (turn.outcome.kind === "answered") turn.outcome.text.toUpperCase();
