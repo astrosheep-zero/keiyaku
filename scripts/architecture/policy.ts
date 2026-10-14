@@ -359,7 +359,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "library/contract/**", ...contractOwner },
     {
       source: "library/akuma-creation.ts",
-      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitCalledPluginSignal"])],
+      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitPluginSignal"])],
       deny: libraryOwner.deny,
     },
     {
@@ -482,7 +482,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("dispatch/**"),
         any("identity/**"),
         any("library/**"),
-        any("plugin/runtime.ts", ["pluginRuntime", "PluginRuntime"]),
+        any("plugin/akuma-signals.ts", ["emitPluginSignal"]),
         any("runtime/proc/**"),
         any("settings.ts"),
         any("task/**"),
@@ -644,7 +644,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("index.ts"),
         any("kanshi/**"),
         any("library/**"),
-        any("plugin/akuma-signals.ts", ["emitInitiatingPluginSignal"]),
+        any("plugin/akuma-signals.ts", ["emitPluginSignal"]),
         any("runtime/proc/**"),
         any("settings.ts"),
         any("task/**"),

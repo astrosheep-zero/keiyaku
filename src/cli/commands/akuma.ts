@@ -3,7 +3,7 @@ import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { squareAssignedParticipantName } from "@astrosheep/square";
-import { emitInitiatingPluginSignal } from "../../plugin/akuma-signals.js";
+import { emitPluginSignal } from "../../plugin/akuma-signals.js";
 import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import type { ExecutionContext } from "../../akuma/requests.js";
@@ -128,16 +128,14 @@ async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?
   // marker does not exist yet, and activating there would only fail noisily.
   // The initiator still travels with the request either way.
   if (!(await World.established(input.path))) return { initiator };
-  try {
-    await emitInitiatingPluginSignal({
+  await emitPluginSignal(
+    {
       world: input.path,
       ...(input.settings === undefined ? {} : { settings: input.settings }),
-      initiator,
       reportDiagnostic: (message) => writeStderr(message),
-    });
-  } catch (error) {
-    writeStderr(`! plugin initiation: ${error instanceof Error ? error.message : String(error)}`);
-  }
+    },
+    { kind: "akuma.initiating", initiator },
+  );
   return { initiator };
 }
 

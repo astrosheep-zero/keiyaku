@@ -1,45 +1,28 @@
-import { pluginRuntime } from "./runtime.js";
+import { pluginRuntime, reportPluginDiagnostic } from "./runtime.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
+import type { PluginSignal } from "./public.js";
 
-type CalledPluginSignalInput = Readonly<{
+type PluginSignalEmission = Readonly<{
   world: WorldRoot;
   settings?: Settings;
   reportDiagnostic: (message: string) => void;
-  akumaId: string;
-  callerAkumaId?: string;
-  contractId?: string;
 }>;
 
-export async function emitInitiatingPluginSignal(
-  input: Readonly<{
-    world: WorldRoot;
-    settings?: Settings;
-    initiator: string;
-    reportDiagnostic: (message: string) => void;
-  }>,
-): Promise<void> {
-  const runtime = await pluginRuntime({
-    world: input.world,
-    ...(input.settings === undefined ? {} : { settings: input.settings }),
-    reportDiagnostic: input.reportDiagnostic,
-  });
-  await runtime.emit({ kind: "akuma.initiating", initiator: input.initiator }, input.reportDiagnostic);
-}
-
-export async function emitCalledPluginSignal(input: CalledPluginSignalInput): Promise<void> {
-  const runtime = await pluginRuntime({
-    world: input.world,
-    ...(input.settings === undefined ? {} : { settings: input.settings }),
-    reportDiagnostic: input.reportDiagnostic,
-  });
-  await runtime.emit(
-    {
-      kind: "akuma.called",
-      akumaId: input.akumaId,
-      ...(input.callerAkumaId === undefined ? {} : { callerAkumaId: input.callerAkumaId }),
-      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-    },
-    input.reportDiagnostic,
-  );
+/**
+ * The one producer entry for plugin signals. It owns runtime acquisition, the
+ * World Settings fallback, bounded delivery, and failure isolation: a delivery
+ * problem reaches the producer only as a diagnostic, never as a thrown error.
+ */
+export async function emitPluginSignal(emission: PluginSignalEmission, signal: PluginSignal): Promise<void> {
+  try {
+    const runtime = await pluginRuntime({
+      world: emission.world,
+      ...(emission.settings === undefined ? {} : { settings: emission.settings }),
+      reportDiagnostic: emission.reportDiagnostic,
+    });
+    await runtime.emit(signal, emission.reportDiagnostic);
+  } catch (error) {
+    reportPluginDiagnostic(emission.reportDiagnostic, "runtime", "signal", error);
+  }
 }

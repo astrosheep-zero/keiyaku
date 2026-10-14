@@ -42,7 +42,7 @@ import {
 } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { akumaExecutionEnvironment } from "./providers/execution-environment.js";
-import { pluginRuntime, type PluginRuntime } from "../plugin/runtime.js";
+import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -400,8 +400,7 @@ type TurnOutcomeEmitter = Readonly<{
   emit(turnSequence: number, outcome: CommittedOutcome): Promise<void>;
 }>;
 
-function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter {
-  let plugins: Promise<PluginRuntime> | undefined;
+function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnOutcomeEmitter {
   const reportDiagnostic = (message: string): void => {
     void recordPluginDiagnostic(launch.paths, "turn outcome", message);
   };
@@ -411,13 +410,8 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
         const turn = await readTurn(launch.paths, turnSequence);
         if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
         const participants = await readTurnParticipants(launch.paths, turnSequence);
-        plugins ??= pluginRuntime({
-          world: await World.at(worldRootForAkumaPaths(launch.paths)),
-          reportDiagnostic,
-        });
-        await (
-          await plugins
-        ).emit(
+        await emitPluginSignal(
+          { world, reportDiagnostic },
           {
             kind: "akuma.turn-outcome",
             akumaId: soul.id,
@@ -431,7 +425,6 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
                 : { kind: "failed", reason: outcome.diagnostic },
             ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
           },
-          reportDiagnostic,
         );
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "turn outcome", error);
@@ -443,39 +436,33 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul): TurnOutcomeEmitter 
 function bodyEndEmitter(
   launch: BodyLaunch,
   soul: Soul,
+  world: WorldRoot,
 ): (bodySequence: number, end: BodyEnd | "hung", diagnostic?: string) => Promise<void> {
-  let plugins: Promise<PluginRuntime> | undefined;
   const reportDiagnostic = (message: string): void => {
     void recordPluginDiagnostic(launch.paths, "body end", message);
   };
-  return (bodySequence, end, diagnostic) =>
-    (async () => {
-      try {
-        const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
-        const initiator = latestTurn?.initiator;
-        const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
-        plugins ??= pluginRuntime({
-          world: await World.at(worldRootForAkumaPaths(launch.paths)),
-          reportDiagnostic,
-        });
-        const runtime = await plugins;
-        await runtime.emit(
-          {
-            kind: "akuma.body-ended",
-            akumaId: soul.id,
-            bodySequence,
-            end,
-            ...(initiator === undefined ? {} : { initiator }),
-            ...(participants.length === 0 ? {} : { participants }),
-            ...(diagnostic === undefined ? {} : { diagnostic }),
-            ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-          },
-          reportDiagnostic,
-        );
-      } catch (error) {
-        await recordPluginDiagnostic(launch.paths, "body end", error);
-      }
-    })();
+  return async (bodySequence, end, diagnostic) => {
+    try {
+      const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
+      const initiator = latestTurn?.initiator;
+      const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
+      await emitPluginSignal(
+        { world, reportDiagnostic },
+        {
+          kind: "akuma.body-ended",
+          akumaId: soul.id,
+          bodySequence,
+          end,
+          ...(initiator === undefined ? {} : { initiator }),
+          ...(participants.length === 0 ? {} : { participants }),
+          ...(diagnostic === undefined ? {} : { diagnostic }),
+          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+        },
+      );
+    } catch (error) {
+      await recordPluginDiagnostic(launch.paths, "body end", error);
+    }
+  };
 }
 
 type BodyTurnEnd = "handoff" | undefined;
@@ -731,8 +718,8 @@ export async function driveAkumaBody(
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
     if (prepared === null) return;
-    emitBodyEnd = bodyEndEmitter(launch, prepared.soul);
-    emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul);
+    emitBodyEnd = bodyEndEmitter(launch, prepared.soul, world);
+    emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul, world);
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     bodySequence = body.sequence;
     const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);

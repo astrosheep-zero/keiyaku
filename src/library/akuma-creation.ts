@@ -19,7 +19,7 @@ import type { ContractId } from "../core/facts/types.js";
 import { publishDispatch, readDispatch, type Dispatch, type DispatchFailure } from "../dispatch/index.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import { parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
-import { emitCalledPluginSignal } from "../plugin/akuma-signals.js";
+import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
@@ -229,21 +229,19 @@ async function emitCalledSignal(
   try {
     const paths = pathsForAkuId(input.path, input.admitted.id);
     const callerAkumaId = input.admitted.requested ? await requestedParent(input.path, input.admitted.id) : undefined;
-    const reportDiagnostic = (message: string): void => {
-      void recordPluginDiagnostic(paths, message);
-    };
-    try {
-      await emitCalledPluginSignal({
+    await emitPluginSignal(
+      {
         world: input.path,
         ...(input.settings === undefined ? {} : { settings: input.settings }),
-        reportDiagnostic,
+        reportDiagnostic: (message) => void recordPluginDiagnostic(paths, message),
+      },
+      {
+        kind: "akuma.called",
         akumaId: input.admitted.id,
         ...(callerAkumaId === undefined ? {} : { callerAkumaId }),
         ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-      });
-    } catch (error) {
-      await recordPluginDiagnostic(paths, error);
-    }
+      },
+    );
   } catch {
     // Plugin delivery must not change an already admitted call.
   }

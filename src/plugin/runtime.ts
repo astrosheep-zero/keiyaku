@@ -76,7 +76,12 @@ function message(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, DIAGNOSTIC_LIMIT);
 }
 
-function diagnostic(report: PluginDiagnostic | undefined, subject: string, stage: string, error: unknown): void {
+export function reportPluginDiagnostic(
+  report: PluginDiagnostic | undefined,
+  subject: string,
+  stage: string,
+  error: unknown,
+): void {
   if (report === undefined) return;
   try {
     report(`plugin ${subject} ${stage}: ${message(error)}`.slice(0, DIAGNOSTIC_LIMIT));
@@ -129,30 +134,40 @@ async function settleBefore<T>(promise: Promise<T>, cancellation: AbortSignal): 
 
 function selectedEntry(entry: SettingsEntry, report: PluginDiagnostic | undefined): SelectedPlugin | null {
   if (entry.name.trim().length === 0) {
-    diagnostic(report, "<unnamed>", "selection", new TypeError("plugin setting name must be nonblank"));
+    reportPluginDiagnostic(report, "<unnamed>", "selection", new TypeError("plugin setting name must be nonblank"));
     return null;
   }
   if (!object(entry.value)) {
-    diagnostic(report, entry.name, "selection", new TypeError("plugin setting must be an object"));
+    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin setting must be an object"));
     return null;
   }
   const names = Object.keys(entry.value);
   if (!names.includes("package") || names.some((name) => !["package", "enabled", "config"].includes(name))) {
-    diagnostic(report, entry.name, "selection", new TypeError("plugin setting has unknown or missing fields"));
+    reportPluginDiagnostic(
+      report,
+      entry.name,
+      "selection",
+      new TypeError("plugin setting has unknown or missing fields"),
+    );
     return null;
   }
   const packageName = entry.value.package;
   if (typeof packageName !== "string" || packageName.trim().length === 0) {
-    diagnostic(report, entry.name, "selection", new TypeError("plugin package must be a nonblank string"));
+    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin package must be a nonblank string"));
     return null;
   }
   if (packageName !== packageName.trim()) {
-    diagnostic(report, entry.name, "selection", new TypeError("plugin package must not have surrounding whitespace"));
+    reportPluginDiagnostic(
+      report,
+      entry.name,
+      "selection",
+      new TypeError("plugin package must not have surrounding whitespace"),
+    );
     return null;
   }
   const enabled = entry.value.enabled;
   if (enabled !== undefined && typeof enabled !== "boolean") {
-    diagnostic(report, entry.name, "selection", new TypeError("plugin enabled must be a boolean"));
+    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin enabled must be a boolean"));
     return null;
   }
   if (enabled === false) return null;
@@ -162,7 +177,7 @@ function selectedEntry(entry: SettingsEntry, report: PluginDiagnostic | undefine
 function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined): readonly SelectedPlugin[] {
   const view = input.namespace(PLUGIN_NAMESPACE);
   if (view.kind === "failed") {
-    for (const failure of view.failures) diagnostic(report, "settings", failure.scope, failure.diagnostic);
+    for (const failure of view.failures) reportPluginDiagnostic(report, "settings", failure.scope, failure.diagnostic);
     return BUILTIN_PLUGINS;
   }
   if (view.entries.length === 0) return BUILTIN_PLUGINS;
@@ -265,6 +280,22 @@ async function writablePaths(
   return paths;
 }
 
+/**
+ * The runtime's acceptance vocabulary. The record is exhaustive over the public
+ * payload map, so adding a signal there fails compilation here until the same
+ * kind is accepted.
+ */
+const SIGNAL_KINDS: Readonly<Record<keyof PluginSignalMap, true>> = Object.freeze({
+  "akuma.initiating": true,
+  "akuma.called": true,
+  "akuma.turn-outcome": true,
+  "akuma.body-ended": true,
+});
+
+function isSignalKind(kind: string): kind is keyof PluginSignalMap {
+  return Object.hasOwn(SIGNAL_KINDS, kind);
+}
+
 function handlers(pluginId: string, instance: PluginInstance): readonly RegisteredHandler[] {
   if (!object(instance)) throw new TypeError("plugin activation must return an object");
   if (Object.keys(instance).some((name) => name !== "signals"))
@@ -273,14 +304,7 @@ function handlers(pluginId: string, instance: PluginInstance): readonly Register
   if (!object(instance.signals)) throw new TypeError("plugin signals must be an object");
   const registered: RegisteredHandler[] = [];
   for (const [kind, handler] of Object.entries(instance.signals)) {
-    if (
-      kind !== "akuma.initiating" &&
-      kind !== "akuma.called" &&
-      kind !== "akuma.turn-outcome" &&
-      kind !== "akuma.body-ended"
-    ) {
-      throw new TypeError(`plugin signal is unknown: ${kind}`);
-    }
+    if (!isSignalKind(kind)) throw new TypeError(`plugin signal is unknown: ${kind}`);
     if (typeof handler !== "function") throw new TypeError(`plugin signal handler is not a function: ${kind}`);
     registered.push({ pluginId, kind, handler });
   }
@@ -334,7 +358,7 @@ async function activate(input: ActivationInput): Promise<readonly RegisteredHand
     module = await importFromWorld(world, selected.package);
   } catch (error) {
     markStarted();
-    diagnostic(report, selected.id, "import", error);
+    reportPluginDiagnostic(report, selected.id, "import", error);
     return [];
   }
   if (cancellation.aborted) {
@@ -351,7 +375,7 @@ async function activate(input: ActivationInput): Promise<readonly RegisteredHand
     if (activated.has(candidate.manifest.id)) throw new TypeError(`plugin id is duplicated: ${candidate.manifest.id}`);
   } catch (error) {
     markStarted();
-    diagnostic(report, selected.id, "validation", error);
+    reportPluginDiagnostic(report, selected.id, "validation", error);
     return [];
   }
 
@@ -369,7 +393,7 @@ async function activate(input: ActivationInput): Promise<readonly RegisteredHand
     });
   } catch (error) {
     markStarted();
-    diagnostic(report, selected.id, "validation", error);
+    reportPluginDiagnostic(report, selected.id, "validation", error);
     return [];
   }
   if (cancellation.aborted) {
@@ -385,7 +409,7 @@ async function activate(input: ActivationInput): Promise<readonly RegisteredHand
     activated.add(candidate.manifest.id);
     return registered;
   } catch (error) {
-    diagnostic(report, selected.id, "activation", error);
+    reportPluginDiagnostic(report, selected.id, "activation", error);
     return [];
   }
 }
@@ -397,8 +421,8 @@ async function deliver(
   timeoutMs: number,
 ): Promise<void> {
   const result = await boundedAttempt((cancellation) => entry.handler(signal as never, cancellation), timeoutMs);
-  if (result.kind === "timed-out") diagnostic(reportDiagnostic, entry.pluginId, "signal", timeoutError());
-  if (result.kind === "failed") diagnostic(reportDiagnostic, entry.pluginId, "signal", result.error);
+  if (result.kind === "timed-out") reportPluginDiagnostic(reportDiagnostic, entry.pluginId, "signal", timeoutError());
+  if (result.kind === "failed") reportPluginDiagnostic(reportDiagnostic, entry.pluginId, "signal", result.error);
 }
 
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
@@ -426,7 +450,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
       );
       releaseStarted();
       if (result.kind === "settled") return { handlers: result.value, timedOut: false } satisfies Activation;
-      diagnostic(report, entry.id, "activation", result.kind === "failed" ? result.error : timeoutError());
+      reportPluginDiagnostic(report, entry.id, "activation", result.kind === "failed" ? result.error : timeoutError());
       return { handlers: [], timedOut: result.kind === "timed-out" } satisfies Activation;
     });
     previousStarted = started;
@@ -442,17 +466,17 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
             const activatedHandlers = await settleBefore(activation, cancellation);
             if (activatedHandlers !== ABORTED) {
               if (activatedHandlers.timedOut)
-                diagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
+                reportPluginDiagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
               return activatedHandlers.handlers;
             }
-            diagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
+            reportPluginDiagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
             return [];
           }),
         );
         return handlers.flat();
       });
       if (activated.kind === "failed") {
-        diagnostic(reportDiagnostic, "runtime", "signal", activated.error);
+        reportPluginDiagnostic(reportDiagnostic, "runtime", "signal", activated.error);
         return;
       }
       if (activated.kind === "timed-out") return;

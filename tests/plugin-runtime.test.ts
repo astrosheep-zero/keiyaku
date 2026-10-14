@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { emitPluginSignal } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
@@ -269,6 +270,101 @@ test("plugin activation stages handlers and isolates import and activation failu
       diagnostics.some((value) => value.startsWith("plugin missing import:")),
       true,
     );
+  } finally {
+    value.close();
+  }
+});
+
+test("plugin runtime rejects a handler name outside the accepted vocabulary", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "loose",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "loose", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.unknown": () => appendFileSync(context.config.trace, "unknown\\n") } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "working",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "working", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "working-signal\\n") } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writeProjectPlugins(value.root, {
+      loose: { package: "./plugins/loose.mjs", config: { trace: output } },
+      working: { package: "./plugins/working.mjs", config: { trace: output } },
+    });
+
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (value) => diagnostics.push(value),
+    });
+    await runtime.emit({
+      kind: "akuma.turn-outcome",
+      akumaId: "aku/example",
+      bodySequence: 1,
+      turnSequence: 1,
+      outcome: { kind: "answered", text: "done" },
+    });
+
+    await eventually(() => diagnostics.includes("plugin loose activation: plugin signal is unknown: akuma.unknown"));
+    assert.deepEqual(trace(output), ["working-signal"]);
+  } finally {
+    value.close();
+  }
+});
+
+test("the shared emission entry acquires the runtime, delivers, and isolates handler failure", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "throwing",
+      [
+        "export default {",
+        '  manifest: { id: "throwing", apiVersion: 1 },',
+        '  activate() { return { signals: { "akuma.initiating": () => { throw new Error("handler failure"); } } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "working",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "working", apiVersion: 1 },',
+        '  activate(context) { return { signals: { "akuma.initiating": (signal) => appendFileSync(context.config.trace, `signal:${signal.initiator}\\n`) } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writeProjectPlugins(value.root, {
+      throwing: { package: "./plugins/throwing.mjs" },
+      working: { package: "./plugins/working.mjs", config: { trace: output } },
+    });
+
+    const diagnostics: string[] = [];
+    await emitPluginSignal(
+      { world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) },
+      { kind: "akuma.initiating", initiator: "tester" },
+    );
+
+    await eventually(() => trace(output).includes("signal:tester"));
+    assert.deepEqual(trace(output), ["signal:tester"]);
+    assert.equal(diagnostics.includes("plugin throwing signal: handler failure"), true, diagnostics.join("; "));
   } finally {
     value.close();
   }
