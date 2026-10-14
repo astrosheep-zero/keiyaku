@@ -335,7 +335,8 @@ test("failed retained removal retires only the new scene and preserves its verdi
         });
         assert.ok(result.outcome.kind === "terminal" && result.outcome.verdict === "unsatisfied");
         assert.equal(result.outcome.total, 1);
-        assert.equal(result.leak?.path, retained.path);
+        assert.ok(result.leak);
+        assert.equal("path" in result.leak, false);
         assert.match(result.leak?.diagnostic ?? "", /failed Verification scratch could not be retained: .*removal denied/su);
         assert.ok(executionPath);
         assert.equal(existsSync(executionPath), false);

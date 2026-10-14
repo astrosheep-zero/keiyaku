@@ -100,11 +100,11 @@ not an archive, a log store, candidate content, or replay authority. Each Contra
 has at most one retained scratch. A failing attempt replaces the previous
 retained scene during retirement under bounded custody, never during
 materialization or execution. Failed retention reports its reason and names a
-path only when residue remains; it retires only that attempt's execution scene
-without changing its verdict. Successful
-and cancelled attempts leave the retained scene untouched; acceptance or
-abandonment removes it through terminal cleanup. Git proves association and
-ownership without a journal fact or durable run record.
+path only when this attempt's own scene remains; it retires only that attempt's
+execution scene without changing its verdict. Successful and cancelled attempts
+leave the retained scene untouched; acceptance or abandonment removes it
+through terminal cleanup. Git proves association and ownership without a
+journal fact or durable run record.
 
 Disposal is one independently bounded removal attempt; expiry or failure becomes
 that attempt's removal diagnostic. A failed destroy action or retained scratch

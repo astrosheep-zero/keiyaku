@@ -250,14 +250,18 @@ test("unchanged delivery retries failure once and reuses later satisfaction", as
 });
 
 test("failed retention without residue renders its reason without a kept path", () => {
-  const diagnostic = "failed Verification scratch could not be retained: move denied";
+  const diagnostic = "failed Verification scratch could not be retained:\nmove denied";
   const issue = executionCleanupSchema.parse({
     kind: "worktree-leak",
     contractId: "kei/retention-no-residue",
     leak: { diagnostic },
   });
   assert.deepEqual(executionCleanupLines([issue], 200), [
-    `  verification scratch not retained  ${diagnostic}`,
+    "  verification scratch not retained",
+    "  reason",
+    "  failed Verification scratch could not be retained:",
+    "  move denied",
+    "",
   ]);
 });
 

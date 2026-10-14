@@ -141,9 +141,8 @@ async function retainScratch(repository: GitRepository, cwd: string, contract: C
   const { signal: _signal, ...retirementRepository } = repository;
   const fallback = async (reason: string): Promise<WorktreeLeak> => {
     const ownLeak = await removeScratch(retirementRepository, cwd);
-    const path = ownLeak?.path ?? ((await pathExists(retained)) ? retained : undefined);
     return {
-      ...(path === undefined ? {} : { path }),
+      ...(ownLeak === null ? {} : { path: ownLeak.path }),
       diagnostic: `failed Verification scratch could not be retained: ${reason}${
         ownLeak === null ? "" : `; ${ownLeak.diagnostic}`
       }`,
