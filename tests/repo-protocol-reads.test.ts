@@ -15,7 +15,8 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
-import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
+import { readContractBoard } from "../src/protocol/read/status.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
@@ -311,6 +312,20 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
     board.rows.some((candidate) => candidate.id === claimed || candidate.id === abandoned),
     false,
   );
+  const included = await withGitDecodeChannel(scope, (channel) =>
+    withGitReadObservation(scope, channel, (observation) => readContractBoard(observation, claimed)),
+  );
+  assert.deepEqual(included.rows.slice(0, -1), board.rows);
+  assert.equal(included.rows.at(-1)?.id, claimed);
+  assert.equal(included.rows.at(-1)?.phase, "claimed");
+  assert.deepEqual(included.rows.at(-1)?.dependents, [{ contractId: dependent, phase: "bound" }]);
+  const targeted = await withGitDecodeChannel(scope, (channel) =>
+    contractObservationOperation({ scope, channel, contractId: active }),
+  );
+  assert.equal(targeted.kind, "present");
+  if (targeted.kind === "present") {
+    assert.deepEqual(targeted.row, { ...board.rows.find((candidate) => candidate.id === active), dependents: [] });
+  }
 });
 
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {

@@ -165,17 +165,6 @@ function appointedWorkspace(
     : { contractId: state.id, place: appointed.place, workspace: worktreePath(repository, appointed.place) };
 }
 
-async function readSelectedHandoffs(
-  observation: GitReadObservation,
-  workspaces: readonly (HandoffReceiptCoordinate | undefined)[],
-): Promise<ReadonlyMap<ContractId, ConflictHandoff>> {
-  return await readConflictHandoffs(
-    observation.repository,
-    observation.readBlobs,
-    workspaces.flatMap((workspace) => (workspace === undefined ? [] : [workspace])),
-  );
-}
-
 async function managedWorkspaceFacts(
   repository: GitRepository,
   state: ContractState,
@@ -244,18 +233,10 @@ function afterEdges(
   }));
 }
 
-function reverseDependents(
-  id: ContractId,
-  rows: readonly Readonly<{
-    id: ContractId;
-    phase: ContractPhase;
-    disposition: ContractDisposition;
-    after: readonly ContractAfterEdge[];
-  }>[],
-): readonly ContractDependent[] {
-  return rows
-    .filter((row) => row.disposition === "active" && row.after.some((edge) => edge.contractId === id))
-    .map((row) => ({ contractId: row.id, phase: row.phase }))
+function reverseDependents(id: ContractId, states: readonly SelectedContractState[]): readonly ContractDependent[] {
+  return states
+    .filter(({ state }) => state.terminal === null && state.terms.after.includes(id))
+    .map(({ state }) => ({ contractId: state.id, phase: phaseFor(state) }))
     .sort((left, right) => left.contractId.localeCompare(right.contractId));
 }
 
@@ -306,6 +287,40 @@ async function afterEndpointMap(
   return new Map([...known, ...[...extra.journals].map(([id, record]) => [id, record.state] as const)]);
 }
 
+async function hydrateRows(
+  observation: GitReadObservation,
+  states: readonly SelectedContractState[],
+  endpoints: ReadonlyMap<ContractId, ContractState | null>,
+  dependentStates: readonly SelectedContractState[] = [],
+): Promise<readonly ContractRow[]> {
+  const register = await readPlaceRegister(observation.repository);
+  const selected = states.map((value) => ({
+    ...value,
+    workspace: appointedWorkspace(observation.repository, register, value.state),
+  }));
+  const handoffs = await readConflictHandoffs(
+    observation.repository,
+    observation.readBlobs,
+    selected.flatMap(({ workspace }) => (workspace === undefined ? [] : [workspace])),
+  );
+  return await Promise.all(
+    selected.map(
+      async ({ state, bindAt, lastJournalAt, workspace }) =>
+        await rowFor({
+          repository: observation.repository,
+          state,
+          bindAt,
+          lastJournalAt,
+          targetObservation: await observeDeliveryTargetAt(observation, state),
+          workspace,
+          handoff: handoffs.get(state.id),
+          after: afterEdges(state, endpoints),
+          dependents: reverseDependents(state.id, dependentStates),
+        }),
+    ),
+  );
+}
+
 /** Build the Contract board from one immutable git observation. */
 export async function readContractBoard(observation: GitReadObservation, include?: ContractId): Promise<ContractBoard> {
   const observedAt = new Date().toISOString();
@@ -322,39 +337,8 @@ export async function readContractBoard(observation: GitReadObservation, include
       endpoints = new Map(await afterEndpointMap(observation, endpoints, record.state.terms.after));
     }
   }
-  const register = await readPlaceRegister(observation.repository);
-  const selected = [...contracts.values()].flatMap((value) =>
-    value.state === null
-      ? []
-      : [
-          {
-            ...value,
-            state: value.state,
-            workspace: appointedWorkspace(observation.repository, register, value.state),
-          },
-        ],
-  );
-  const handoffs = await readSelectedHandoffs(
-    observation,
-    selected.map(({ workspace }) => workspace),
-  );
-  const projected = await Promise.all(
-    selected.map(
-      async ({ state, entries, workspace }) =>
-        await rowFor({
-          repository: observation.repository,
-          state,
-          bindAt: entries[0]!.at,
-          lastJournalAt: lastJournalAtFor(entries),
-          targetObservation: await observeDeliveryTargetAt(observation, state),
-          workspace,
-          handoff: handoffs.get(state.id),
-          after: afterEdges(state, endpoints),
-          dependents: [],
-        }),
-    ),
-  );
-  const rows = projected.map((row) => ({ ...row, dependents: reverseDependents(row.id, projected) }));
+  const selected = selectedContractStates(contracts);
+  const rows = await hydrateRows(observation, selected, endpoints, selected);
   return {
     root: observation.repository.primaryWorktree,
     state: observed.snapshot,
@@ -363,24 +347,24 @@ export async function readContractBoard(observation: GitReadObservation, include
   };
 }
 
-type ActiveContractState = Readonly<{
+type SelectedContractState = Readonly<{
   state: ContractState;
   bindAt: string;
   lastJournalAt: string;
 }>;
 
-function compareRecentContracts(left: ActiveContractState, right: ActiveContractState): number {
+function compareRecentContracts(left: SelectedContractState, right: SelectedContractState): number {
   return (
     right.lastJournalAt.localeCompare(left.lastJournalAt) ||
     Buffer.compare(Buffer.from(left.state.id), Buffer.from(right.state.id))
   );
 }
 
-function activeContractStates(
+function selectedContractStates(
   contracts: ReadonlyMap<ContractId, Readonly<{ state: ContractState | null; entries: readonly JournalEntry[] }>>,
-): readonly ActiveContractState[] {
+): readonly SelectedContractState[] {
   return [...contracts.values()].flatMap((record) =>
-    record.state === null || record.state.terminal !== null
+    record.state === null
       ? []
       : [
           {
@@ -392,16 +376,6 @@ function activeContractStates(
   );
 }
 
-function reverseDependentsFromStates(
-  id: ContractId,
-  states: readonly ActiveContractState[],
-): readonly ContractDependent[] {
-  return states
-    .filter(({ state }) => state.terms.after.includes(id))
-    .map(({ state }) => ({ contractId: state.id, phase: phaseFor(state) }))
-    .sort((left, right) => left.contractId.localeCompare(right.contractId));
-}
-
 /** Observe a bounded recent active Contract catalogue from one immutable git observation. */
 export async function readContractCatalogue(
   observation: GitReadObservation,
@@ -409,35 +383,11 @@ export async function readContractCatalogue(
 ): Promise<ContractCatalogue> {
   const observedAt = new Date().toISOString();
   const observed = await observeActiveContractWorld(observation);
-  const active = activeContractStates(observed.contracts);
+  const active = selectedContractStates(observed.contracts).filter(({ state }) => state.terminal === null);
   const selected = projectBoundedList([...active].sort(compareRecentContracts), limit);
   const afterIds = selected.rows.flatMap(({ state }) => state.terms.after);
   const endpoints = await afterEndpointMap(observation, new Map(observed.eligibility), afterIds);
-  const register = await readPlaceRegister(observation.repository);
-  const selectedWorkspaces = selected.rows.map((value) => ({
-    ...value,
-    workspace: appointedWorkspace(observation.repository, register, value.state),
-  }));
-  const handoffs = await readSelectedHandoffs(
-    observation,
-    selectedWorkspaces.map(({ workspace }) => workspace),
-  );
-  const rows = await Promise.all(
-    selectedWorkspaces.map(
-      async ({ state, bindAt, lastJournalAt, workspace }) =>
-        await rowFor({
-          repository: observation.repository,
-          state,
-          bindAt,
-          lastJournalAt,
-          targetObservation: await observeDeliveryTargetAt(observation, state),
-          workspace,
-          handoff: handoffs.get(state.id),
-          after: afterEdges(state, endpoints),
-          dependents: reverseDependentsFromStates(state.id, active),
-        }),
-    ),
-  );
+  const rows = await hydrateRows(observation, selected.rows, endpoints, active);
   return {
     root: observation.repository.primaryWorktree,
     state: observed.snapshot,
@@ -472,22 +422,10 @@ export async function readContractObservation(
   const state = record.state;
   if (state === null) return { kind: "missing", id };
   const endpoints = await afterEndpointMap(observation, new Map([[id, state]]), state.terms.after);
-  const register = await readPlaceRegister(observation.repository);
-  const workspace = appointedWorkspace(observation.repository, register, state);
-  const handoffs = await readSelectedHandoffs(observation, [workspace]);
+  const rows = await hydrateRows(observation, selectedContractStates(observed.journals), endpoints);
   return {
     kind: "present",
-    row: await rowFor({
-      repository: observation.repository,
-      state,
-      bindAt: record.entries[0]!.at,
-      lastJournalAt: lastJournalAtFor(record.entries),
-      targetObservation: await observeDeliveryTargetAt(observation, state),
-      workspace,
-      handoff: handoffs.get(state.id),
-      after: afterEdges(state, endpoints),
-      dependents: [],
-    }),
+    row: rows[0]!,
   };
 }
 
