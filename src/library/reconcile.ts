@@ -131,12 +131,8 @@ function emptySettlement(): SettlementReport {
   return { actions: [], lags: [] };
 }
 
-function isManagedWorktree(state: ContractState): boolean {
-  return state.coordinates.workspace === "worktree";
-}
-
 function isManagedTerminal(state: ContractState | null): boolean {
-  return state !== null && isManagedWorktree(state) && state.terminal !== null;
+  return state !== null && state.terminal !== null;
 }
 
 /**
@@ -161,7 +157,7 @@ function terminalWorktreeOutcome(
 }
 
 function appointableManagedContracts(states: readonly ContractState[]): readonly ContractId[] {
-  return states.filter((state) => isManagedWorktree(state) && state.terminal === null).map((state) => state.id);
+  return states.filter((state) => state.terminal === null).map((state) => state.id);
 }
 
 async function appointPlaces(scope: RepositoryScope, states: readonly ContractState[]): Promise<PlaceRegister> {
@@ -221,7 +217,6 @@ async function appointForContract(
   scope: RepositoryScope,
   state: ContractState,
 ): Promise<Readonly<{ place?: string; register?: PlaceRegister } | { lag: ContractFileLag }>> {
-  if (!isManagedWorktree(state)) return {};
   try {
     const register = await appointPlaces(scope, [state]);
     const place = register.byContract.get(state.id)?.place;
@@ -402,16 +397,13 @@ export async function completeRepoReconcile(input: ReconcileOptions): Promise<Re
   } catch (error) {
     if (!isOperationalFailure(error)) throw error;
     const lag = registerLag(input.scope, error);
-    const contracts: RepoReconcileContracts[number][] = [];
-    for (const state of states) {
-      contracts.push({
+    return {
+      kind: "completed",
+      contracts: states.map((state) => ({
         contractId: state.id,
-        report: isManagedWorktree(state)
-          ? { effects: [], lag: [lag], settlement: emptySettlement() }
-          : await completeReconcile({ ...input, contractId: state.id }),
-      });
-    }
-    return { kind: "completed", contracts };
+        report: { effects: [], lag: [lag], settlement: emptySettlement() },
+      })),
+    };
   }
   const places = new Map(appointed.appointments.map((appointment) => [appointment.contract, appointment.place]));
   const retained = await reconcileAllOperation({
