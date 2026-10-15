@@ -1,4 +1,4 @@
-import { archetypeName } from "../../akuma/identity.js";
+import { validateAkumaName } from "../../identity/normalize.js";
 import { parseTaskNamespaceSelector } from "../../task/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
@@ -17,10 +17,10 @@ function parseAkumaCatalogPath(
   if (value === "aku" || value === "aku/") return { kind: "archetypes" };
   if (value === "aku/*/*") return { kind: "akuma" };
   const scopedGlob = /^aku\/([^/]+)\/\*$/u.exec(value);
-  if (scopedGlob !== null) return { kind: "akuma", archetype: archetypeName(scopedGlob[1]!) };
+  if (scopedGlob !== null) return { kind: "akuma", archetype: validateAkumaName(scopedGlob[1]!) };
   const match = /^aku\/([^/]+)\/?$/u.exec(value);
   if (match === null) return null;
-  return { kind: "akuma", archetype: archetypeName(match[1]!) };
+  return { kind: "akuma", archetype: validateAkumaName(match[1]!) };
 }
 
 export type ParsedBind = Output &

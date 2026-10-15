@@ -14,10 +14,10 @@ import {
   akumaIdSchema,
   akumaPaths,
   akumaRunRoot,
-  archetypeName,
   type AkuId,
   type AkumaPaths,
 } from "./identity.js";
+import { validateAkumaName } from "../identity/normalize.js";
 import { activitySnapshotSchema } from "./projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
@@ -165,7 +165,7 @@ function rosterArchetype(
   const allowed = allowLimit ? ["archetype", "limit"] : ["archetype"];
   const unknown = Object.keys(input).find((key) => !allowed.includes(key));
   if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
-  return input.archetype === undefined ? undefined : archetypeName(input.archetype);
+  return input.archetype === undefined ? undefined : validateAkumaName(input.archetype);
 }
 
 /**

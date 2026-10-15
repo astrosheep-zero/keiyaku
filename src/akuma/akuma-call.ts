@@ -11,7 +11,8 @@ import { spawnAkumaBody, type BodyLaunch, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
 import { canonicalBirthCwd } from "./call-input.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
-import { archetypeName, type AllocatedAkuma } from "./identity.js";
+import { validateAkumaName } from "../identity/normalize.js";
+import { type AllocatedAkuma } from "./identity.js";
 import { PreparedCallAdmissionError, executePreparedCall } from "./publication.js";
 import { executionChannel, type ExecutionContext } from "./requests.js";
 import type { Schema } from "./schema.js";
@@ -172,7 +173,7 @@ export async function admitAkumaCall(
   context: AkumaCallContext,
 ): Promise<AdmittedAkumaCall> {
   decodeAkumaCaller(input.caller);
-  const name = archetypeName(input.archetype);
+  const name = validateAkumaName(input.archetype);
   const home = configuration.home === undefined ? {} : { home: configuration.home };
   const settings = configuration.settings ?? (await readSettings({ root: path, ...home }));
   const archetype = await loadPreparedArchetype({ name, project: path, ...home, settings });

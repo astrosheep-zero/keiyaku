@@ -9,8 +9,8 @@ import {
   akuIdFromDirectoryName,
   ensureAkumaRunRoot,
   parseAkuId,
-  archetypeName,
 } from "../src/akuma/identity.js";
+import { validateAkumaName } from "../src/identity/normalize.js";
 import { matchesAkumaGlob, parseAkumaAlias, parseAkumaGlob } from "../src/identity/selector.js";
 
 test("Aku identity has one exact durable spelling", async () => {
@@ -31,11 +31,11 @@ test("Aku identity has one exact durable spelling", async () => {
 
 test("Akuma archetypes and aliases share bounded canonical name admission", () => {
   for (const name of ["pi-reset-api-review", "审查-二号", "🦈", "9workers", "review.v2", "a.b.c", "a".repeat(64), "鱼".repeat(21)]) {
-    assert.equal(archetypeName(name), name);
+    assert.equal(validateAkumaName(name), name);
     assert.equal(parseAkumaAlias(`@${name}`), `@${name}`);
   }
   for (const name of ["", "Reviewer", "a--b", "a-", "a/b", ".foo", "foo.", "foo..bar", "foo.-bar", "..", "a".repeat(65), "鱼".repeat(22), "🦈".repeat(17)]) {
-    assert.throws(() => archetypeName(name), /Akuma name/u);
+    assert.throws(() => validateAkumaName(name), /Akuma name/u);
     assert.throws(() => parseAkumaAlias(`@${name}`), /Akuma alias name/u);
   }
   assert.throws(() => parseAkumaAlias("reviewer"), /start with @/u);

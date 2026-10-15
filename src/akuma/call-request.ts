@@ -1,7 +1,8 @@
 import { isAbsolute, resolve } from "node:path";
 import { allowedActionsSchema } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
-import { archetypeName, akumaIdSchema, type AkuId, type AkumaPaths } from "./identity.js";
+import { validateAkumaName } from "../identity/normalize.js";
+import { akumaIdSchema, type AkuId, type AkumaPaths } from "./identity.js";
 import { callDiagnostic, executePreparedCall } from "./publication.js";
 import { tellResultSchema, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { providerOptionsSchema, providerRecipeSchema } from "./provider-recipe.js";
@@ -20,7 +21,7 @@ import type { WorldRoot } from "../world.js";
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const archetypeSchema = z.string().transform((value, context) => {
   try {
-    return archetypeName(value);
+    return validateAkumaName(value);
   } catch {
     context.addIssue({ code: "custom", message: "expected Akuma name" });
     return z.NEVER;

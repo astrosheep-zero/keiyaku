@@ -36,10 +36,6 @@ export type AllocatedAkuma = Readonly<{
   paths: AkumaPaths;
 }>;
 
-export function archetypeName(value: string): string {
-  return validateAkumaName(value);
-}
-
 function suffixSegment(value: string): string {
   if (!HEX8.test(value)) throw new TypeError("Akuma suffix must be lower hex8");
   return value;
@@ -48,7 +44,7 @@ function suffixSegment(value: string): string {
 export function akuId(input: Readonly<{ archetype: string; suffix: string }>): AkuId {
   return identityCoordinate({
     family: "aku",
-    segments: [archetypeName(input.archetype), suffixSegment(input.suffix)],
+    segments: [validateAkumaName(input.archetype), suffixSegment(input.suffix)],
   }) as AkuId;
 }
 
@@ -120,7 +116,7 @@ export async function allocateAkumaDirectory(
     draw?: () => string;
   }>,
 ): Promise<AllocatedAkuma> {
-  const archetype = archetypeName(input.archetype);
+  const archetype = validateAkumaName(input.archetype);
   const runRoot = await ensureAkumaRunRoot(input.worldRoot);
   for (;;) {
     const suffix = suffixSegment(input.draw?.() ?? randomBytes(4).toString("hex"));

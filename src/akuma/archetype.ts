@@ -4,7 +4,7 @@ import { isAbsolute, join } from "node:path";
 import { parseDocument } from "yaml";
 import { boundedListLimit, type BoundedList } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
-import { archetypeName } from "./identity.js";
+import { validateAkumaName } from "../identity/normalize.js";
 import type { ProviderAdapter } from "./provider.js";
 import {
   decodeProviderOptions,
@@ -100,7 +100,7 @@ async function pathsInDirectory(directory: string): Promise<readonly Readonly<{ 
         if (!entry.isFile() || !entry.name.endsWith(".md")) return [];
         const name = entry.name.slice(0, -3);
         try {
-          return [{ name: archetypeName(name), path: join(directory, entry.name) }];
+          return [{ name: validateAkumaName(name), path: join(directory, entry.name) }];
         } catch {
           return [];
         }
@@ -222,7 +222,7 @@ type ArchetypeFields = Readonly<{
 function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): ArchetypeFields {
   const provider = archetypeField(values, "provider");
   const baseValue = archetypeField(values, "base");
-  const base = baseValue === undefined ? undefined : archetypeName(baseValue);
+  const base = baseValue === undefined ? undefined : validateAkumaName(baseValue);
   const model = archetypeField(values, "model");
   const effort = archetypeField(values, "effort");
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
@@ -515,7 +515,7 @@ async function admitArchetype(archetype: PreparedArchetype): Promise<AdmittedArc
 export async function loadPreparedArchetype(
   input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
 ): Promise<PreparedArchetype> {
-  const name = archetypeName(input.name);
+  const name = validateAkumaName(input.name);
   const definition = await resolveArchetype(name, input, undefined);
   let provider: ProviderExecution;
   try {
