@@ -16,12 +16,6 @@ import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/ident
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
 import { currentBranch, observeContractAt } from "../git/observe.js";
-import {
-  appendPrivateStateSeatClose,
-  mergePrivateStateSeatClose,
-  type PrivateStateSeatCloseLag,
-  type PrivateStateSeatOutcome,
-} from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { repositoryAt } from "../git/repository.js";
@@ -298,15 +292,6 @@ export type AttemptDecision<Value, Refusal = IntentRefusal> =
 
 export function timestamp(): string {
   return new Date().toISOString();
-}
-
-export function attemptDecisionWithSeatClose<Value, Refusal = IntentRefusal>(
-  outcome: PrivateStateSeatOutcome<AttemptDecision<Value, Refusal>>,
-): AttemptDecision<Value, Refusal> {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
-    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
-  });
 }
 
 function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {

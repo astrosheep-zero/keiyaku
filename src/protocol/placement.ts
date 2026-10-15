@@ -6,13 +6,7 @@ import { contractState } from "../core/facts/observation.js";
 import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContractsForAdmissionAt, observeGitForAdmissionAt } from "../git/observe.js";
-import {
-  appendPrivateStateSeatClose,
-  mergePrivateStateSeatClose,
-  withPrivateStatePublicationSeat,
-  type PrivateStateSeatCloseLag,
-  type PrivateStateSeatOutcome,
-} from "../git/private-state-seat.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
@@ -28,7 +22,13 @@ import {
   type TargetPlacementRefusal,
 } from "../git/target-placement.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission } from "./attempt.js";
-import { prepareProtocolAttempt, runProtocol, type ProtocolResult, type RunProtocolInput } from "./run.js";
+import {
+  prepareProtocolAttempt,
+  protocolSeatClose,
+  runProtocol,
+  type ProtocolResult,
+  type RunProtocolInput,
+} from "./run.js";
 export { observeTargetPlacement } from "../git/target-placement.js";
 
 export type PlacementExecutionFailure = Readonly<{
@@ -100,15 +100,6 @@ type ChangedPreparation =
   | Readonly<{ kind: "stale" }>
   | Readonly<{ kind: "redecide" }>;
 
-function placementResultWithSeatClose<ExtraRefusal = never>(
-  outcome: PrivateStateSeatOutcome<PlacementProtocolResult<ExtraRefusal> | ChangedPreparation>,
-): PlacementProtocolResult<ExtraRefusal> | ChangedPreparation {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
-    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
-  });
-}
-
 async function placementChangesHint(
   repository: GitRepository,
   channel: GitDecodeChannel,
@@ -136,8 +127,8 @@ async function runFencedPlacement(
     )
       changes = await prepareTargetPlacementChanges(repository, movement);
     let preparedPhysical: PreparedTargetPlacement | undefined;
-    const result = placementResultWithSeatClose(
-      await withPrivateStatePublicationSeat(repository, async (seat) => {
+    const result = protocolSeatClose<PlacementProtocolResult | ChangedPreparation>(
+      await withPrivateStatePublicationSeat<PlacementProtocolResult | ChangedPreparation>(repository, async (seat) => {
         // The hint carries no acceptance authority. Form a fresh semantic offer under the seat.
         const prepared = await prepareProtocolAttempt(protocol, protocol.attempts[index]!);
         if (prepared.kind !== "offered") return prepared;

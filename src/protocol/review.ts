@@ -8,6 +8,7 @@ import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   externalPreparation,
   privateStateSeatAttempt,
+  protocolSeatClose,
   runBoundedAttempts,
   sameWorktreeWitness,
   STALE_PRIVATE_STATE_PREPARATION,
@@ -24,7 +25,7 @@ import type { LeadingOutcome } from "./outcome.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
 import type { AttemptDecision, MutationOperationInput, RepositoryScope } from "./operations.js";
-import { attemptDecisionWithSeatClose, timestamp } from "./operations.js";
+import { timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
 type ReviewPreparationRefusal =
@@ -250,7 +251,7 @@ async function reviewAttempt(
       if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
       return await decideAndAdmitReview(input, attempt, seat, observation, assembled);
     },
-    attemptDecisionWithSeatClose,
+    protocolSeatClose,
   );
 }
 

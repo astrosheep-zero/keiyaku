@@ -8,7 +8,8 @@ import type {
   VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
-import { admitted, intentOutcomeWithSeatClose } from "./outcome.js";
+import { admitted } from "./outcome.js";
+import { protocolSeatClose } from "./run.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { MutationOperationInput, IntentOutcome } from "./operations.js";
@@ -60,51 +61,54 @@ export async function amendOperation(
     source === undefined || input.deriveAmendment === undefined
       ? undefined
       : { source, ...input.deriveAmendment(source) };
-  return intentOutcomeWithSeatClose(
-    await withPrivateStatePublicationSeat(input.scope, async (seat) => {
-      const attempts = mintAttempts({ entryCount: 1 });
-      for (let index = 0; index < attempts.length; index += 1) {
-        let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
-        const state = contractState(observation.decision, input.contractId);
-        if (amendment !== undefined) {
-          observation = await extendPrerequisiteClosureAt(input.channel, observation, [
-            ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
-          ]);
+  return protocolSeatClose<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>>(
+    await withPrivateStatePublicationSeat<IntentOutcome<Amendment, AmendRefusal | VerificationDeclarationRefusal>>(
+      input.scope,
+      async (seat) => {
+        const attempts = mintAttempts({ entryCount: 1 });
+        for (let index = 0; index < attempts.length; index += 1) {
+          let observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+          const state = contractState(observation.decision, input.contractId);
+          if (amendment !== undefined) {
+            observation = await extendPrerequisiteClosureAt(input.channel, observation, [
+              ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
+            ]);
+          }
+          const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] =
+            amendment === undefined
+              ? undefined
+              : amendment.verification.kind === "prepared"
+                ? { kind: "prepared", data: amendment.terms }
+                : { kind: "refused", refusal: amendment.verification.refusal };
+          const decision = decideAmend({
+            input: {
+              contractId: input.contractId,
+              ...(input.actor === undefined ? {} : { actor: input.actor }),
+              at: timestamp(),
+              ...(amendment === undefined ? {} : { source: amendment.source }),
+              ...(preparation === undefined ? {} : { preparation }),
+            },
+            attempt: attempts[index]!,
+            observation: observation.decision,
+          });
+          if (decision.kind === "refused") return decision;
+          const admission = await admitDecidedOffer({
+            ...input,
+            seat,
+            observation,
+            attempt: attempts[index]!,
+            offer: decision.offer,
+          });
+          if (admission.kind === "accepted") {
+            if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");
+            return admitted(admission, amendment);
+          }
+          if (admission.kind === "publication-failed") return { kind: "retry", reason: admission };
+          if (admission.kind === "collision" && index + 1 === attempts.length)
+            return { kind: "retry", reason: admission };
         }
-        const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] =
-          amendment === undefined
-            ? undefined
-            : amendment.verification.kind === "prepared"
-              ? { kind: "prepared", data: amendment.terms }
-              : { kind: "refused", refusal: amendment.verification.refusal };
-        const decision = decideAmend({
-          input: {
-            contractId: input.contractId,
-            ...(input.actor === undefined ? {} : { actor: input.actor }),
-            at: timestamp(),
-            ...(amendment === undefined ? {} : { source: amendment.source }),
-            ...(preparation === undefined ? {} : { preparation }),
-          },
-          attempt: attempts[index]!,
-          observation: observation.decision,
-        });
-        if (decision.kind === "refused") return decision;
-        const admission = await admitDecidedOffer({
-          ...input,
-          seat,
-          observation,
-          attempt: attempts[index]!,
-          offer: decision.offer,
-        });
-        if (admission.kind === "accepted") {
-          if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");
-          return admitted(admission, amendment);
-        }
-        if (admission.kind === "publication-failed") return { kind: "retry", reason: admission };
-        if (admission.kind === "collision" && index + 1 === attempts.length)
-          return { kind: "retry", reason: admission };
-      }
-      return { kind: "retry", reason: { kind: "exhausted" } };
-    }),
+        return { kind: "retry", reason: { kind: "exhausted" } };
+      },
+    ),
   );
 }

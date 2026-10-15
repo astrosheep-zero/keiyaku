@@ -10,13 +10,7 @@ import {
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
-import {
-  appendPrivateStateSeatClose,
-  mergePrivateStateSeatClose,
-  withPrivateStatePublicationSeat,
-  type PrivateStateSeatCloseLag,
-  type PrivateStateSeatOutcome,
-} from "../git/private-state-seat.js";
+import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { GitRefAssertion } from "../git/repository.js";
@@ -24,6 +18,7 @@ import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type AttemptTe
 import { recordedIntegrationSnapshots, timestamp } from "./operations.js";
 import {
   externalPreparation,
+  protocolSeatClose,
   STALE_PRIVATE_STATE_PREPARATION,
   type ContractStateWitness,
   type ProtocolTerminal,
@@ -52,15 +47,6 @@ type ReintegrationAttempt =
   | AttemptTerminal
   | Readonly<{ kind: "redecide" }>
   | typeof STALE_PRIVATE_STATE_PREPARATION;
-
-function reintegrationResultWithSeatClose(
-  outcome: PrivateStateSeatOutcome<ReintegrationAttempt>,
-): ReintegrationAttempt {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
-    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
-  });
-}
 
 /** What one seat-external integration plan proves about the target ref it was planned against. */
 type ReintegrationArtifacts =
@@ -152,8 +138,8 @@ async function runReintegration(
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index]!;
     const external = await prepareExternalReintegration(input);
-    const result = reintegrationResultWithSeatClose(
-      await withPrivateStatePublicationSeat(input.repository, async (seat) => {
+    const result = protocolSeatClose<ReintegrationAttempt>(
+      await withPrivateStatePublicationSeat<ReintegrationAttempt>(input.repository, async (seat) => {
         const observation = await observeContractsForAdmissionAt(input.repository, input.channel, [input.contractId]);
         const assembled = assembleReintegrationAttempt(input, observation, external);
         if (assembled.kind === "stale") return assembled;

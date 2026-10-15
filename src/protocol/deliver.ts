@@ -29,6 +29,7 @@ import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   externalPreparation,
   privateStateSeatAttempt,
+  protocolSeatClose,
   runBoundedAttempts,
   sameWorktreeWitness,
   STALE_PRIVATE_STATE_PREPARATION,
@@ -59,7 +60,7 @@ import type {
   DocumentDerivation,
   MutationOperationInput,
 } from "./operations.js";
-import { attemptDecisionWithSeatClose, recordedIntegrationSnapshots, timestamp } from "./operations.js";
+import { recordedIntegrationSnapshots, timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
 export type VerificationReuse = CurrentVerifiedAttestation;
@@ -674,7 +675,7 @@ async function deliverAttempt(
       if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
       return await decideAndAdmitDelivery(input, attempt, seat, observation, assembled);
     },
-    attemptDecisionWithSeatClose,
+    protocolSeatClose,
   );
 }
 

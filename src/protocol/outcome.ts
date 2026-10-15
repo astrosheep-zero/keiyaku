@@ -1,12 +1,7 @@
 import type { ContractHead, ContractState, JournalEntry } from "../core/facts/types.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import type { ReconcileResult } from "../git/reconcile.js";
-import {
-  appendPrivateStateSeatClose,
-  mergePrivateStateSeatClose,
-  type PrivateStateSeatCloseLag,
-  type PrivateStateSeatOutcome,
-} from "../git/private-state-seat.js";
+import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { AcceptedAdmission } from "./attempt.js";
 import type { VerificationCleanupFailure } from "./intent.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
@@ -63,29 +58,21 @@ function seatCloseObligations(
   return seatClose === undefined || seatClose.length === 0 ? {} : { seatClose };
 }
 
-function admissionObligations(admission: AcceptedProtocolStep): AcceptedObligations | undefined {
-  const seatClose = admission.seatClose;
-  return seatClose === undefined || seatClose.length === 0 ? undefined : { seatClose };
-}
-
 export function admitted<Value, Refusal = never>(
   admission: AcceptedProtocolStep,
   value: Value,
 ): IntentOutcome<Value, Refusal> {
-  return accepted(admission.state, admission.facts, value, admission.physical, admissionObligations(admission));
+  return accepted(
+    admission.state,
+    admission.facts,
+    value,
+    admission.physical,
+    admission.seatClose === undefined ? undefined : { seatClose: admission.seatClose },
+  );
 }
 
 export function complete<Value, Refusal>(result: ProtocolResult<Refusal>, value: Value): IntentOutcome<Value, Refusal> {
   if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
   if (result.kind !== "accepted") return { kind: "retry", reason: result };
   return admitted(result, value);
-}
-
-export function intentOutcomeWithSeatClose<Value, Refusal>(
-  outcome: PrivateStateSeatOutcome<IntentOutcome<Value, Refusal>>,
-): IntentOutcome<Value, Refusal> {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag) => {
-    if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
-  });
 }

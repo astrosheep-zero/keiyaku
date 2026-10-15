@@ -323,12 +323,12 @@ async function admitDecidedProtocolOffer<Input extends Readonly<{ contractId: Co
   });
 }
 
-function protocolAttemptWithSeatClose<Refusal>(
-  outcome: PrivateStateSeatOutcome<DecidedOfferResult<Refusal>>,
-): DecidedOfferResult<Refusal> {
-  return mergePrivateStateSeatClose(outcome, (value, closeLag: PrivateStateSeatCloseLag) => {
+export function protocolSeatClose<
+  T extends Readonly<{ kind: string; seatClose?: readonly PrivateStateSeatCloseLag[] }>,
+>(outcome: PrivateStateSeatOutcome<T>): T {
+  return mergePrivateStateSeatClose(outcome, (value, closeLag) => {
     if (value.kind !== "accepted") throw new Error(closeLag.diagnostic);
-    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) };
+    return { ...value, seatClose: appendPrivateStateSeatClose(value.seatClose, closeLag) } as T;
   });
 }
 
@@ -346,7 +346,7 @@ async function runDirectProtocolAttempt<Seed extends Readonly<{ contractId: Cont
         assertions: [],
       });
     },
-    protocolAttemptWithSeatClose,
+    protocolSeatClose,
   );
 }
 
@@ -379,7 +379,7 @@ async function runSplitProtocolAttempt<
         assertions,
       });
     },
-    protocolAttemptWithSeatClose,
+    protocolSeatClose,
   );
 }
 

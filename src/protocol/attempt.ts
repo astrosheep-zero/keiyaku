@@ -17,7 +17,6 @@ import { foldJournal } from "../core/facts/fold.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractJournalAppend, Offer } from "../core/facts/offer.js";
 import {
-  type ContractHead,
   type ContractId,
   type ContractState,
   type EntryUlid,
@@ -114,16 +113,6 @@ function validateOffer(offer: Offer, attempt: AttemptContext): void {
   if (actualEntries.size === 0) throw new Error("offer requires at least one current-attempt ULID");
 }
 
-function snapshotFor(
-  append: ContractJournalAppend,
-  journals: GitDecisionObservation["journals"],
-  head: ContractHead,
-): ContractState {
-  const record = journals.get(append.contractId);
-  if (record === undefined) throw new Error("accepted offer contract is missing from its observation");
-  return foldJournal(append.contractId, [...record.entries, ...append.entries], head);
-}
-
 function journalFor(
   append: ContractJournalAppend,
   journals: GitDecisionObservation["journals"],
@@ -194,11 +183,12 @@ export async function admitDecidedOffer<Refusal = never>(
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(seat);
     input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
+    const journal = journalFor(primary, decisionObservation.journals);
     const accepted: AcceptedAdmission = {
       kind: "accepted",
       facts: offerEntries(offer),
-      state: snapshotFor(primary, decisionObservation.journals, admission.heads[primary.contractId]!),
-      journal: journalFor(primary, decisionObservation.journals),
+      state: foldJournal(primary.contractId, journal, admission.heads[primary.contractId]!),
+      journal,
     };
     input.progress?.recordAdmission(accepted);
     return accepted;
