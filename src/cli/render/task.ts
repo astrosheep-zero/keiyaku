@@ -105,16 +105,8 @@ function stateEntity(task: TaskView | (TaskRef & { priority?: number | null })):
   };
 }
 
-const TASK_REFUSAL_WORDS: Readonly<Record<string, string>> = {
-  "task-missing": "task missing",
-  "invalid-lifecycle-transition": "invalid lifecycle transition",
-  "invalid-namespace-context": "invalid namespace context",
-  "relation-owned-by-other": "relation owned by other",
-  "invalid-composition": "invalid composition",
-};
-
 function projectRefusal(refusal: TaskRefusal): RefusalProjection {
-  const diagnostic = TASK_REFUSAL_WORDS[refusal.kind] ?? refusal.kind.replaceAll("-", " ");
+  const diagnostic = refusal.kind.replaceAll("-", " ");
   if (refusal.kind === "task-missing") return { diagnostic, facts: [`task  ${refusal.taskId}`] };
   if (refusal.kind === "invalid-lifecycle-transition") {
     return { diagnostic, facts: [`task  ${refusal.taskId}`, `state  ${refusal.state} · verb  ${refusal.verb}`] };
@@ -196,12 +188,13 @@ function renderListRow(
   return lines;
 }
 
-function renderRows(
+export function renderTaskList(
   action: "ls" | "ready" | "blocked" | "query",
   scope: TaskListScope,
   result: TaskListOutcome,
-  columns: number,
+  context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
+  const columns = context.columns;
   if (result.kind !== "accepted") return renderFailure(action, result, columns);
   const view = action === "ls" ? "tasks" : action;
   const footer = result.value.hasMore ? ["…"] : [];
@@ -245,7 +238,8 @@ function renderShowDetail(result: TaskDetail, columns: number): string {
   return lines.join("\n");
 }
 
-function renderShow(result: TaskShowResult, columns: number): string {
+export function renderTaskShow(result: TaskShowResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  const columns = context.columns;
   if (Array.isArray(result)) return result.map((detail) => renderShowDetail(detail, columns)).join("\n\n");
   if ("kind" in result) return renderFailure("show", result, columns);
   return renderShowDetail(result, columns);
@@ -301,7 +295,8 @@ function renderMutation(action: string, result: TaskMutationResult, columns: num
   return renderAcceptedMutation(action, result.value, columns);
 }
 
-function renderUpdate(result: TaskUpdateResult, columns: number): string {
+export function renderTaskUpdate(result: TaskUpdateResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  const columns = context.columns;
   if (result.kind !== "accepted") return renderFailure("update", result, columns);
   return renderAcceptedMutation("update", result.value.task, columns, result.value.changedFields);
 }
@@ -355,7 +350,8 @@ function renderPlan(result: Extract<TaskCompositionResult, { kind: "planned" }>)
   return lines.join("\n");
 }
 
-function renderCompose(result: TaskCompositionResult, columns: number): string {
+export function renderTaskCompose(result: TaskCompositionResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
+  const columns = context.columns;
   if (result.kind === "incomplete") return "";
   if (result.kind === "planned") return renderPlan(result);
   if (result.kind !== "accepted") return renderFailure("compose", result, columns);
@@ -364,21 +360,6 @@ function renderCompose(result: TaskCompositionResult, columns: number): string {
     ...aliasLines(result.aliases),
     ...admissionLines(result.admissions),
   ].join("\n");
-}
-
-/** One addressed show selection rendered directly from its native answer. */
-export function renderTaskShow(result: TaskShowResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  return renderShow(result, context.columns);
-}
-
-/** One list read rendered from its native answer and the leaf's presentation-only scope. */
-export function renderTaskList(
-  action: "ls" | "ready" | "blocked" | "query",
-  scope: TaskListScope,
-  result: TaskListOutcome,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return renderRows(action, scope, result, context.columns);
 }
 
 export function renderTaskTree(result: TaskDecompositionTree, context: TextRenderContext = DEFAULT_CONTEXT): string {
@@ -393,10 +374,6 @@ export function renderTaskContext(result: TaskContextResult, context: TextRender
   return `context ${value} · ${result.value.source}`;
 }
 
-export function renderTaskCompose(result: TaskCompositionResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  return renderCompose(result, context.columns);
-}
-
 /** One single-Task mutation answer; `verb` is the literal action the leaf invoked. */
 export function renderTaskMutation(
   verb: string,
@@ -404,10 +381,6 @@ export function renderTaskMutation(
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   return renderMutation(verb, result, context.columns);
-}
-
-export function renderTaskUpdate(result: TaskUpdateResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  return renderUpdate(result, context.columns);
 }
 
 /** One lifecycle answer: a single mutation or a plural batch, both native shapes. */

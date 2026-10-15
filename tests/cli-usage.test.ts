@@ -532,6 +532,25 @@ test("usage refusal exits 64 without touching an absent world", async () => {
   assert.doesNotMatch(result.stderr, /no Keiyaku world/u);
 });
 
+test("a worldless lifecycle request refuses every requested Task in its native shape", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "keiyaku-usage-worldless-"));
+  try {
+    const single = runCli(cwd, ["task", "start", "task/alpha"]);
+    assert.equal(single.status, 1);
+    assert.match(single.stdout, /^× start refused$/mu);
+    assert.match(single.stdout, /^  reason  task missing$/mu);
+    assert.match(single.stdout, /^  task  task\/alpha$/mu);
+    const plural = runCli(cwd, ["task", "done", "task/alpha", "task/beta", "--json"]);
+    assert.equal(plural.status, 1);
+    assert.deepEqual(
+      (JSON.parse(plural.stdout).items as readonly { id: string }[]).map((item) => item.id),
+      ["task/alpha", "task/beta"],
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("a bare invocation prints the root help index instead of a usage refusal", async () => {
   const result = await captureOutput(() => main([]));
   assert.equal(result.exit, 0);
