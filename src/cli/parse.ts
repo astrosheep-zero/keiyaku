@@ -25,19 +25,7 @@ import {
 import {
   parseContractCommand,
   type ParsedContractParts,
-  type ParsedAbandon,
-  type ParsedAmend,
-  type ParsedArc,
-  type ParsedAudit,
-  type ParsedBind,
-  type ParsedDeliver,
-  type ParsedLs,
-  type ParsedNuke,
-  type ParsedReconcile,
-  type ParsedRegion,
-  type ParsedReview,
-  type ParsedSettings,
-  type ParsedStatus,
+  type ParsedContractCommand,
 } from "./commands/contract-grammar.js";
 import {
   CONTRACT_COMMAND_SPECS,
@@ -144,23 +132,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
   return renderHelpText(help, columns);
 }
 
-export type ParsedCommand =
-  | ParsedBind
-  | ParsedAmend
-  | ParsedDeliver
-  | ParsedReview
-  | ParsedArc
-  | ParsedAbandon
-  | ParsedStatus
-  | ParsedLs
-  | ParsedAudit
-  | ParsedReconcile
-  | ParsedNuke
-  | ParsedSettings
-  | ParsedRegion
-  | ParsedInstallCommand
-  | ParsedAkumaCommand
-  | ParsedTaskCommand;
+export type ParsedCommand = ParsedContractCommand | ParsedInstallCommand | ParsedAkumaCommand | ParsedTaskCommand;
 
 type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>

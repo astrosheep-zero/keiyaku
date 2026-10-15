@@ -238,12 +238,6 @@ function positiveIndex(raw: FlagValue, option: string, fail: (message: string) =
   return value;
 }
 
-function validateDirect(value: string, _fail: (message: string) => never): string {
-  // Address validation belongs to the operation boundary so callers receive
-  // the compact Akuma refusal instead of a generic usage page.
-  return value;
-}
-
 function validateSet(value: string, fail: (message: string) => never): string {
   if (value.startsWith("kei/")) return value;
   if (value.includes("*")) {
@@ -254,7 +248,7 @@ function validateSet(value: string, fail: (message: string) => never): string {
     }
     return value;
   }
-  return validateDirect(value, fail);
+  return value;
 }
 
 function parseWait(
@@ -317,7 +311,7 @@ function parseAkumaHistory(
   if (id !== undefined && parsePublicHistoryId(id) === null) fail("history --id requires turn/<positive safe integer>");
   return {
     command: "history",
-    akuma: validateDirect(selector, fail),
+    akuma: selector,
     ...(id === undefined ? {} : { id }),
     last: flags.last === true,
     ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
@@ -342,7 +336,7 @@ function parseAddressed(
     if (selector.includes("*")) fail("history accepts one complete aku/..., @alias, or kei/... selector");
     return parseHistory(selector, flags, output, fail);
   }
-  const akuma = validateDirect(rawSelectors[0]!, fail);
+  const akuma = rawSelectors[0]!;
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
   return { command: action, akuma, at, output };
 }
@@ -375,11 +369,10 @@ function parseTell(
   subject: string,
   prompt: AkumaPromptSource,
   output: "text" | "json",
-  fail: (message: string) => never,
 ): Extract<ParsedAkumaCommand, { command: "tell" }> {
   return {
     command: "tell",
-    akuma: validateDirect(subject, fail),
+    akuma: subject,
     interrupt: flags.interrupt === true,
     prompt,
     output,
@@ -397,7 +390,7 @@ function parseAsk(
     flags.schema === undefined ? undefined : stringFlag(flags.schema, "ask --schema requires a file", fail);
   return {
     command: "ask",
-    akuma: validateDirect(subject, fail),
+    akuma: subject,
     interrupt: flags.interrupt === true,
     ...(schema === undefined ? {} : { schema }),
     ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
@@ -469,7 +462,7 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
     return action === "call"
       ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
       : action === "tell"
-        ? parseTell(flags, parsed.subject, parsed.prompt!, output, fail)
+        ? parseTell(flags, parsed.subject, parsed.prompt!, output)
         : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {

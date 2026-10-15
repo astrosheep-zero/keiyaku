@@ -335,19 +335,6 @@ function parseRegion(parts: ParsedContractParts): ParsedRegion {
   };
 }
 
-function akumaCatalogQuery(
-  query: Readonly<{ kind: "akuma"; archetype?: string }> | Readonly<{ kind: "archetypes" }>,
-  parts: ParsedContractParts,
-): CatalogQuery {
-  const limit = optionalFlag(parts.flags, "limit");
-  if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
-    refuse("ls", "--limit requires a positive safe integer");
-  return {
-    ...query,
-    ...(limit === undefined ? {} : { limit: Number(limit) }),
-  };
-}
-
 function listLimit(parts: ParsedContractParts, command: "ls" | "status" = "ls"): number | undefined {
   const limit = optionalFlag(parts.flags, "limit");
   if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
@@ -388,7 +375,7 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
   try {
     const query = parseAkumaCatalogPath(path);
     if (query === null) refuse("ls", "ls requires a supported identity directory selector");
-    return { command: "ls", query: akumaCatalogQuery(query, parts), output: parts.output };
+    return { command: "ls", query: { ...query, ...(limit === undefined ? {} : { limit }) }, output: parts.output };
   } catch (error) {
     if (error instanceof CliUsageError) throw error;
     refuse("ls", error instanceof Error ? error.message : "invalid ls directory");
