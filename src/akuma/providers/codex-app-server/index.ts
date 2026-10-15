@@ -8,6 +8,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
+import { providerLifecycle } from "../lifecycle.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
 
@@ -252,15 +253,6 @@ export function createCodexAppServerProvider(input: string | ProviderExecution =
         new AbortController().signal,
         async (custody) => await forkCodex(execution, input, custody),
       ),
-    start: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await startCodex(execution, { ...input, signal: custody.signal }, custody),
-      ),
-    resume: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await startCodex(execution, { ...input, signal: custody.signal }, custody),
-      ),
+    ...providerLifecycle((input, custody) => startCodex(execution, input, custody)),
   };
 }

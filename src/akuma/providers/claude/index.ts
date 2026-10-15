@@ -11,6 +11,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
+import { providerLifecycle } from "../lifecycle.js";
 import type { ProviderOptions } from "../../provider-recipe.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
@@ -464,16 +465,7 @@ export function createClaudeProvider(
     admitOptions: admitClaudeOptions,
     fork: (input) =>
       createProviderAttempt(new AbortController().signal, async () => await forkClaude(load, selectedExecution, input)),
-    start: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await driveClaude(load, selectedExecution, { ...input, signal: custody.signal }, custody),
-      ),
-    resume: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await driveClaude(load, selectedExecution, { ...input, signal: custody.signal }, custody),
-      ),
+    ...providerLifecycle((input, custody) => driveClaude(load, selectedExecution, input, custody)),
   };
 }
 

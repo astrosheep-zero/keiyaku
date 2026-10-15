@@ -1,6 +1,6 @@
-import { createProviderAttempt } from "../../provider.js";
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { providerLifecycle } from "../lifecycle.js";
 import { decodeAcpConfig, type AcpExecutionConfig } from "./config.js";
 import { startAcpSession, type AcpDependencies, type AcpStartInput } from "./core.js";
 
@@ -69,15 +69,6 @@ export function createAcpProvider(execution: ProviderExecution, dependencies: Ac
   };
   return {
     admitOptions: (options) => optionAdmission(options, config),
-    start: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
-      ),
-    resume: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
-      ),
+    ...providerLifecycle(drive),
   };
 }

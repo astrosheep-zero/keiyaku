@@ -8,6 +8,7 @@ import {
 } from "../../provider.js";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { providerLifecycle } from "../lifecycle.js";
 import { ownEventStream, type OwnedEventStream } from "./event-stream.js";
 import { createEventState, mapEvent } from "./events.js";
 import {
@@ -572,16 +573,7 @@ export function createOpencodeProvider(
         options: Object.freeze({ ...options }),
       };
     },
-    start: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive(execution, { ...input, signal: custody.signal }, loader, custody),
-      ),
-    resume: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive(execution, { ...input, signal: custody.signal }, loader, custody),
-      ),
+    ...providerLifecycle((input, custody) => drive(execution, input, loader, custody)),
     fork: (input: { session: ResumeCoordinate; at: string; cwd: string }) =>
       createProviderAttempt(new AbortController().signal, async (custody) => {
         const sessionId = opencodeSessionId(input.session);

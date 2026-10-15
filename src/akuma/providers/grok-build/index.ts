@@ -1,6 +1,6 @@
-import { createProviderAttempt } from "../../provider.js";
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { providerLifecycle } from "../lifecycle.js";
 import {
   startAcpSession,
   type AcpDependencies,
@@ -219,15 +219,6 @@ export function createGrokBuildProvider(
   };
   return {
     admitOptions: optionAdmission,
-    start: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
-      ),
-    resume: (input) =>
-      createProviderAttempt(
-        input.signal,
-        async (custody) => await drive({ ...input, signal: custody.signal }, custody),
-      ),
+    ...providerLifecycle(drive),
   };
 }
