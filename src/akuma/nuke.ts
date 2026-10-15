@@ -2,10 +2,11 @@ import { lstat, readdir, rm, rmdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
+import { knownAkuma, type KnownAkuma } from "./akuma.js";
 import { settleAkumaKill } from "./akuma-owner.js";
 import { acquireLeash } from "./control.js";
 import { classifyHeartSchema, readHeart, type HeldAkumaLeash } from "./heart/index.js";
-import { akuIdFromDirectoryName, akumaPaths, akumaRunRoot, type AkuId, type AkumaPaths } from "./identity.js";
+import { akumaRunRoot, type AkumaPaths } from "./identity.js";
 
 export class AkumaResetStopError extends Error {
   constructor(message: string) {
@@ -13,8 +14,6 @@ export class AkumaResetStopError extends Error {
     this.name = "AkumaResetStopError";
   }
 }
-
-type NukeAkumaEntry = Readonly<{ id: AkuId; paths: AkumaPaths }>;
 
 async function hasAkumaCustody(paths: AkumaPaths): Promise<boolean> {
   try {
@@ -26,7 +25,7 @@ async function hasAkumaCustody(paths: AkumaPaths): Promise<boolean> {
   }
 }
 
-async function stopRunningAkuma(entry: NukeAkumaEntry): Promise<HeldAkumaLeash> {
+async function stopRunningAkuma(entry: KnownAkuma): Promise<HeldAkumaLeash> {
   const settled = await settleAkumaKill(entry.paths, undefined, true);
   if (settled.leash !== undefined) return settled.leash;
   throw new AkumaResetStopError(`Akuma ${entry.id} could not be stopped: ${settled.evidence}`);
@@ -100,7 +99,7 @@ async function removeKnownRequestChannel(path: string): Promise<void> {
   await removeEmptyDirectory(path);
 }
 
-async function removeAkumaEntry(entry: NukeAkumaEntry): Promise<void> {
+async function removeAkumaEntry(entry: KnownAkuma): Promise<void> {
   await removeKnownRequestChannel(entry.paths.requests);
   for (const path of [
     join(entry.paths.directory, "request-entry.json"),
@@ -132,31 +131,10 @@ async function removeEmptyAkumaRunRoot(world: WorldRoot): Promise<void> {
   await removeEmptyDirectory(dirname(runRoot));
 }
 
-async function nukeAkumaEntries(world: WorldRoot): Promise<readonly NukeAkumaEntry[]> {
-  const runRoot = akumaRunRoot(world);
-  let names: readonly string[];
-  try {
-    names = (await readdir(runRoot, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") names = [];
-    else throw error;
-  }
-
-  const entries: NukeAkumaEntry[] = [];
-  for (const name of names) {
-    let physical: ReturnType<typeof akuIdFromDirectoryName>;
-    try {
-      physical = akuIdFromDirectoryName(name);
-    } catch {
-      // The run root can contain bytes not produced by Keiyaku. Preserve them.
-      continue;
-    }
-    const paths = akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix });
-    if (!(await hasAkumaCustody(paths))) continue;
-    entries.push({ id: physical.id, paths });
+async function nukeAkumaEntries(world: WorldRoot): Promise<readonly KnownAkuma[]> {
+  const entries: KnownAkuma[] = [];
+  for (const entry of (await knownAkuma(world)).rows) {
+    if (await hasAkumaCustody(entry.paths)) entries.push(entry);
   }
   return entries;
 }

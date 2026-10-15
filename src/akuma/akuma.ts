@@ -77,10 +77,9 @@ export async function listAkumaArchetypes(
 }
 
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
-type KnownAkuma = Readonly<{
-  id: ReturnType<typeof akuIdFromDirectoryName>["id"];
-  paths: ReturnType<typeof akumaPaths>;
-}>;
+
+/** One recognized Akuma directory under this World's run root. */
+export type KnownAkuma = Readonly<{ id: AkuId; paths: AkumaPaths }>;
 
 function activityAt(row: AkumaListRowValue): string | null {
   if (!("lifeAt" in row)) return null;
@@ -113,9 +112,10 @@ async function mtimeBound(paths: AkumaPaths): Promise<number> {
   return Math.max(await read(paths.heart), await read(`${paths.heart}-wal`));
 }
 
-async function knownAkuma(
+/** Enumerate the recognized Akuma directories under this World's run root. */
+export async function knownAkuma(
   path: WorldRoot,
-  selected: string | undefined,
+  selected?: string,
 ): Promise<Readonly<{ runRoot: string; rows: readonly KnownAkuma[] }>> {
   const runRoot = akumaRunRoot(path);
   let names: string[];
@@ -134,6 +134,7 @@ async function knownAkuma(
     try {
       physical = akuIdFromDirectoryName(name);
     } catch {
+      // The run root can contain bytes not produced by Keiyaku. Preserve them.
       continue;
     }
     if (selected !== undefined && physical.archetype !== selected) continue;
