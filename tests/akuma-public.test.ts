@@ -36,7 +36,6 @@ import {
   finishBodyIfIdle,
   HeldAkumaLeash,
   initializeHeart,
-  pauseRequested,
   probeLeash,
   readHeart,
   recordTell,
@@ -1396,7 +1395,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   const finalStatus = await handle.status();
   assert.equal(finalStatus.timeline.kind === "idle" && finalStatus.timeline.outcome?.outcome.kind === "answered", true);
   assert.equal(await handle.kill(), "already-stopped");
-  assert.equal(await pauseRequested(allocated.paths), false);
+  assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
     kind: "answered",
     answer: "public answer",
@@ -1505,7 +1504,7 @@ test("interrupt records a tell only after taking an idle leash", async (context)
   if (receipt.kind !== "interrupted" || "kind" in receipt.tell) return;
   assert.equal(receipt.putDown, "was-idle");
   assert.equal(typeof receipt.tell.wake, "object");
-  assert.equal(await pauseRequested(allocated.paths), false);
+  assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual(
     (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
     [receipt.tell.admission.tellId],
@@ -1587,7 +1586,7 @@ test("interrupt caller cancellation stops waiting without manufacturing control 
     const operation = value.handle.interrupt("cancelled", { signal: controller.signal });
     setTimeout(() => controller.abort(new Error("caller stopped waiting")), 20);
     await assert.rejects(operation, /caller stopped waiting/u);
-    assert.equal(await pauseRequested(value.allocated.paths), true);
+    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
     releaseHolder?.();
     releaseHolder = undefined;
@@ -1605,7 +1604,7 @@ test("interrupt reports untidy when a free leash has no clean Body settlement", 
     kind: "unavailable",
     evidence: "untidy",
   });
-  assert.equal(await pauseRequested(allocated.paths), false);
+  assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual((await readHeart(allocated.paths)).pending, []);
 });
 
@@ -1629,7 +1628,7 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       evidence: "hung",
     });
     assert.equal((await handle.status()).life, "hung");
-    assert.equal(await pauseRequested(allocated.paths), true);
+    assert.notEqual((await readHeart(allocated.paths)).pause, null);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     holder.release();
     assert.deepEqual(await handle.interrupt("still never recorded"), {
@@ -1637,7 +1636,7 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       evidence: "hung",
     });
     assert.equal((await handle.status()).life, "hung");
-    assert.equal(await pauseRequested(allocated.paths), false);
+    assert.equal((await readHeart(allocated.paths)).pause, null);
   } finally {
     holder.release();
   }

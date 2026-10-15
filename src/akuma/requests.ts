@@ -4,7 +4,7 @@ import { AKUMA_REQUESTS_ENTRY_ENV, AKUMA_REQUESTS_ENV } from "./providers/execut
 
 export { AkumaBodyRequestError, requestBodyCommand } from "./request-rendezvous.js";
 
-export type ExecutionChannel = Readonly<{ kind: "local" }> | Readonly<{ kind: "body-request"; directory: string }>;
+type ExecutionChannel = Readonly<{ kind: "local" }> | Readonly<{ kind: "body-request"; directory: string }>;
 export type ExecutionContext = Readonly<{ channel: ExecutionChannel }>;
 export type LibraryExecution = ExecutionContext;
 

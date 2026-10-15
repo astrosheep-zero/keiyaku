@@ -17,7 +17,6 @@ import {
   admitRequest,
   readHeart,
   readRequest,
-  stopRequested,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import { type AkuId } from "../src/akuma/identity.js";
@@ -47,7 +46,7 @@ import {
   selectionRequestCommands,
   type SelectionRequestPort,
 } from "../src/akuma/selection-request.js";
-import { isTellResult, isAskResult, type AkumaTellResult } from "../src/akuma/selection-observation.js";
+import { selectionResultSchemas, type AkumaTellResult } from "../src/akuma/selection-observation.js";
 import {
   contractRequestCommand,
   contractRequestProtocol,
@@ -1696,7 +1695,7 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
     // The whole operation refused, so the request truthfully claims no effect
     // and the killable member was never asked to stop.
     assert.equal((await readRequest(parent.paths, id))?.state, "voided");
-    assert.equal(await stopRequested(target.paths), false);
+    assert.equal((await readHeart(target.paths)).stop, null);
   } finally {
     targetLeash.release();
     await pump.close();
@@ -1875,10 +1874,9 @@ test("bounded forwarded Tell admits once under the request identity", async () =
     const returned = outcomes.find((value) => value.kind === "returned");
     assert.equal(returned?.kind, "returned");
     if (returned?.kind === "returned") {
-      assert.equal(isAskResult(returned.result), true);
-      if (!isAskResult(returned.result)) throw new Error("expected a waited Tell result");
-      assert.equal(returned.result.tell.admission.tellId, id);
-      assert.deepEqual(returned.result.observation, { reason: "deadline" });
+      const result = selectionResultSchemas.ask.parse(returned.result);
+      assert.equal(result.tell.admission.tellId, id);
+      assert.deepEqual(result.observation, { reason: "deadline" });
     }
     assert.equal(calls, 1);
     assert.deepEqual(
@@ -1927,9 +1925,8 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     const outcome = await pending;
     assert.equal(outcome.kind, "returned");
     if (outcome.kind !== "returned") throw new Error("expected a returned waited Tell result");
-    assert.equal(isAskResult(outcome.result), true);
-    if (!isAskResult(outcome.result)) throw new Error("expected a waited Tell result");
-    assert.deepEqual(outcome.result.observation, { reason: "answered", answer: "delayed direct answer" });
+    const result = selectionResultSchemas.ask.parse(outcome.result);
+    assert.deepEqual(result.observation, { reason: "answered", answer: "delayed direct answer" });
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
     restoreTellRuntime();
@@ -2067,7 +2064,8 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     const returned = outcomes.find(
       (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> & { result: AkumaTellResult } =>
         (value as { kind: string }).kind === "returned" &&
-        isTellResult((value as Extract<(typeof outcomes)[number], { kind: "returned" }>).result),
+        selectionResultSchemas.tell.safeParse((value as Extract<(typeof outcomes)[number], { kind: "returned" }>).result)
+          .success,
     );
     assert.equal(returned?.result.tell.admission.tellId, id);
     assert.deepEqual(returned?.result.tell.row, {

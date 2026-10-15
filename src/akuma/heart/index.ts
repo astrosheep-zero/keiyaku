@@ -17,7 +17,6 @@ import type {
   TurnOutcome,
   TurnStartFact,
 } from "./facts.js";
-export type { CallFact } from "./facts.js";
 import {
   answeredTurnFact,
   endBodyFact,
@@ -41,7 +40,6 @@ import {
   stopFact,
   turnFact,
 } from "./rows.js";
-import type { ActivityFact } from "./rows.js";
 import type { AgentEvent } from "./activity-schema.js";
 import {
   insertTellDeliveryFact,
@@ -103,30 +101,14 @@ export type {
   AkumaLife,
   AkumaOrigin,
   BodyEnd,
-  BodyFact,
   HeartSnapshot,
-  ForkPoint,
   KillEvidence,
-  KillFact,
-  LeashProbe,
-  PauseFact,
   RequestFact,
-  RequestInput,
-  RequestRecipe,
-  SealFact,
   SessionFact,
   Soul,
-  StopFact,
-  TellBinding,
   TellFact,
-  TellRow,
-  TellDelivery,
-  TellDeliveryInput,
-  TellReceiptInput,
   TurnEndFact,
-  TurnFact,
   TurnOutcome,
-  TurnStartFact,
 } from "./facts.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
@@ -174,8 +156,7 @@ export async function appendActivity(
   });
 }
 
-export type ActivitySlice = ActivityFactSlice;
-export type { ActivityFact };
+type ActivitySlice = ActivityFactSlice;
 export type { TimelineFact } from "./timeline.js";
 
 export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
@@ -433,20 +414,6 @@ export async function requestPause(
     },
     signal,
   );
-}
-
-export async function stopRequested(paths: AkumaPaths, bodySequence?: number): Promise<boolean> {
-  return await withReadOnlyHeart(paths, (heart) => {
-    const target = stopFact(heart);
-    return target !== null && (bodySequence === undefined || target.bodySequence === bodySequence);
-  });
-}
-
-export async function pauseRequested(paths: AkumaPaths, bodySequence?: number): Promise<boolean> {
-  return await withReadOnlyHeart(paths, (heart) => {
-    const target = pauseFact(heart);
-    return target !== null && (bodySequence === undefined || target.bodySequence === bodySequence);
-  });
 }
 
 export async function breakBody(

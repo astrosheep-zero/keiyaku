@@ -201,7 +201,7 @@ export const activitySnapshotSchema = z.union([
     .strict(),
 ]);
 
-export type TurnOutcome = z.infer<typeof outcomeSchema>;
+type TurnOutcome = z.infer<typeof outcomeSchema>;
 export type TurnStartRow = z.infer<typeof turnRowSchema>;
 type CallRow = z.infer<typeof callRowSchema>;
 type SaidRow = z.infer<ReturnType<typeof textRowSchema>>;
@@ -247,7 +247,6 @@ export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = z.inf
   ReturnType<typeof snapshotEntrySchema<z.ZodType<Row>>>
 >;
 export type ReportedFileChange = z.infer<typeof reportedFileChangeSchema>;
-export type Snapshot = z.infer<typeof activitySnapshotSchema>;
 export type ActivitySnapshot = z.infer<typeof activitySnapshotSchema>;
 
 export type ActivityHistory = Readonly<{

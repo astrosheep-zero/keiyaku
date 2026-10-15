@@ -1,11 +1,12 @@
 import { join } from "node:path";
 import { AkumaOwner } from "../../src/akuma/akuma-owner.js";
-import { listAkumaArchetypes, readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
+import { readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
 import type { AkumaCallInput } from "../../src/akuma/akuma-call.js";
 import { Akumas } from "../../src/index.js";
 import { akumasWithExecution } from "../../src/library/akumas.js";
 import type { AkumaConfiguration } from "../../src/akuma/akuma-call.js";
 import type { AkumaCompleteList, AkumaList, AkumaListInput } from "../../src/akuma/akuma.js";
+import { listArchetypes } from "../../src/akuma/archetype.js";
 import { admitCallInitialTell } from "../../src/akuma/call-initial-tell.js";
 import { parseAkuId } from "../../src/akuma/identity.js";
 import { projectTell } from "../../src/akuma/heart/index.js";
@@ -77,10 +78,10 @@ export class AkumaComposition {
   }
 
   async listArchetypes(): Promise<readonly string[]> {
-    return await listAkumaArchetypes(
-      this.root,
-      this.configuration.home === undefined ? {} : { home: this.configuration.home },
-    );
+    return await listArchetypes({
+      project: this.root,
+      ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
+    });
   }
 
   async listComplete(input: AkumaListInput = {}): Promise<AkumaCompleteList> {

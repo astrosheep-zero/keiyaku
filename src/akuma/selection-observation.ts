@@ -68,14 +68,6 @@ export function akumaObservationOf(status: AkumaStatus): AkumaObservation {
   return { status, contract: NO_DISPATCH_ASSOCIATION, createdTasks: EMPTY_CREATED_TASK_OBSERVATION };
 }
 
-export function isTellResult(value: unknown): value is AkumaTellResult {
-  return akumaTellResultSchema.safeParse(value).success;
-}
-
-export function isAskResult(value: unknown): value is AkumaAskResult {
-  return akumaAskResultSchema.safeParse(value).success;
-}
-
 export const selectionResultSchemas = {
   wait: akumaWaitResultSchema,
   tell: akumaTellResultSchema,

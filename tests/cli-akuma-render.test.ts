@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAkumaStatus, type AkumaStatus } from "../src/akuma/akuma.js";
+import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { type ActivityRow, type IdleSnapshotRow, type OpenSnapshotRow } from "../src/akuma/projection.js";
 import {
   activityStream,
@@ -29,8 +29,11 @@ import {
   reportedFileChange,
 } from "./support/kanshi-activity.js";
 
+const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
+
 function running(id: string, rows: readonly OpenSnapshotRow[]) {
-  return parseAkumaStatus({
+  return akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
     id,
     life: "running",
     allowed: [],
@@ -39,7 +42,8 @@ function running(id: string, rows: readonly OpenSnapshotRow[]) {
 }
 
 function settled(id: string, rows: readonly IdleSnapshotRow[]) {
-  return parseAkumaStatus({
+  return akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
     id,
     life: "asleep",
     allowed: [],
@@ -59,7 +63,8 @@ function liveObservation(status: AkumaStatus, rows: readonly ActivityRow[]) {
 test("status frame closes its timeline before references and ends at cwd", () => {
   const id = "aku/worker/abcd1234";
   const note: ActivityRow = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" };
-  const status = parseAkumaStatus({
+  const status = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
     id,
     life: "running",
     cwd: "/work/appointed",
@@ -107,7 +112,8 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
     state: "pending",
     deliveries: [],
   };
-  const status = parseAkumaStatus({
+  const status = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
     id: "aku/worker/abcd1234",
     life: "asleep",
     allowed: [],
@@ -309,7 +315,8 @@ test("ask activity starts at admission and includes a later settlement of an old
   const next: OpenSnapshotRow = { kind: "note", sequence: 6, turnSequence: 1, at: at(5), text: "new activity" };
   const oldSettled = { ...completedTool(7, "bash", { kind: "run" as const, command: "old tool" }), at: at(6) };
   const status = (rows: readonly OpenSnapshotRow[]) =>
-    parseAkumaStatus({
+    akumaStatusSchema.parse({
+      birth: DIRECT_BIRTH,
       id,
       life: "running",
       allowed: [],
@@ -362,7 +369,8 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
   const afterOpening: OpenSnapshotRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
   const live: OpenSnapshotRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
   const status = (rows: readonly OpenSnapshotRow[]) =>
-    parseAkumaStatus({
+    akumaStatusSchema.parse({
+      birth: DIRECT_BIRTH,
       id,
       life: "running",
       allowed: [],
@@ -627,7 +635,8 @@ test("plural wait attributes omitted spans and the scoreboard by identity tag", 
 });
 
 test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
-  const status = parseAkumaStatus({
+  const status = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
     id: "aku/worker/abcd1234",
     life: "running",
     allowed: [],

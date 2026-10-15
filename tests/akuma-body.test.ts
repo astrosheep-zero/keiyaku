@@ -29,7 +29,6 @@ import {
   HeldAkumaLeash,
   activitySlice,
   admitRequest, decidePendingTellDisposition,
-  pauseRequested,
   probeLeash,
   resolvePendingTellDisposition,
   readHeart,
@@ -41,7 +40,6 @@ import {
   requestPause,
   requestStop,
   reserveRequest,
-  stopRequested
 } from "../src/akuma/heart/index.js";
 import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
@@ -1592,7 +1590,7 @@ test("a successor admits through the leash without reconstructing custody of an 
 
     const stopped = await requestStop(allocated.paths, "2026-08-08T00:00:01.000Z");
     assert.equal(stopped.kind, "requested");
-    assert.equal(await stopRequested(allocated.paths), true);
+    assert.notEqual((await readHeart(allocated.paths)).stop, null);
     await recordTell(allocated.paths, {
       id: "orphan-tell",
       body: "continue",
@@ -1610,7 +1608,7 @@ test("a successor admits through the leash without reconstructing custody of an 
         now: () => "2026-08-08T00:00:03.000Z",
       },
     );
-    assert.equal(await stopRequested(allocated.paths), false);
+    assert.equal((await readHeart(allocated.paths)).stop, null);
     const snapshot = await readHeart(allocated.paths);
     assert.equal(snapshot.latestKill, null);
     assert.equal(snapshot.latestBody?.sequence, predecessor.sequence + 1);
@@ -1770,7 +1768,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     assert.equal(aborted, true);
     assert.equal(forced, true);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
-    assert.equal(await pauseRequested(allocated.paths), true);
+    assert.notEqual((await readHeart(allocated.paths)).pause, null);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
     rmSync(root, { recursive: true, force: true });

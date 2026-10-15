@@ -7,7 +7,6 @@ import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import { allowedActionsSchema } from "./allowed.js";
-import { listArchetypes as readArchetypes } from "./archetype.js";
 import type { AkumaLife } from "./heart/index.js";
 import {
   akuIdFromDirectoryName,
@@ -64,17 +63,6 @@ export const akumaStatusSchema = z
   })
   .strict();
 export type AkumaStatus = z.infer<typeof akumaStatusSchema>;
-
-export function parseAkumaStatus(value: unknown): AkumaStatus {
-  return akumaStatusSchema.parse(value);
-}
-
-export async function listAkumaArchetypes(
-  path: WorldRoot,
-  input: Readonly<{ home?: string }> = {},
-): Promise<readonly string[]> {
-  return readArchetypes({ project: path, ...(input.home === undefined ? {} : { home: input.home }) });
-}
 
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 

@@ -28,7 +28,6 @@ import {
   HeartAbsentError,
   life,
   probeLeash,
-  pauseRequested,
   readHeart,
   readForkPoint,
   readLatestTurnForBody,
@@ -42,7 +41,6 @@ import {
   readTurn,
   requestPause,
   requestStop,
-  stopRequested,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
@@ -729,7 +727,7 @@ test("kill admission witnesses a stranded settled Body instead of requesting a s
       at: "2026-08-08T00:00:02.000Z",
     });
     assert.equal(snapshot.stop, null);
-    assert.equal(await stopRequested(value.allocated.paths), false);
+    assert.equal((await readHeart(value.allocated.paths)).stop, null);
     assert.equal(
       life({ leash: "free", body: snapshot.latestBody, kill: snapshot.latestKill }),
       "killed",
@@ -765,7 +763,7 @@ test("kill admission of a put-down stranded Body consumes its stop control", asy
     // The first kill caller vanished before settling; a later kill witnesses
     // the already settled Body and consumes the lingering stop control.
     assert.equal((await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z")).kind, "witnessed");
-    assert.equal(await stopRequested(value.allocated.paths), false);
+    assert.equal((await readHeart(value.allocated.paths)).stop, null);
     assert.equal(
       (await readHeart(value.allocated.paths)).latestKill?.bodySequence,
       body.sequence,
@@ -1080,20 +1078,20 @@ test("pause remains distinct from stop and can be cleared only under the leash",
       kind: "requested",
       body: firstBody,
     });
-    assert.equal(await stopRequested(value.allocated.paths), true);
-    assert.equal(await pauseRequested(value.allocated.paths), true);
+    assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
+    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
 
     const interruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await interruptor.clearPause(value.allocated.paths);
     interruptor.release();
-    assert.equal(await pauseRequested(value.allocated.paths), false);
-    assert.equal(await stopRequested(value.allocated.paths), true);
+    assert.equal((await readHeart(value.allocated.paths)).pause, null);
+    assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
 
     assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), {
       kind: "requested",
       body: firstBody,
     });
-    assert.equal(await pauseRequested(value.allocated.paths), true);
+    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
   } finally {
     value.close();
   }
