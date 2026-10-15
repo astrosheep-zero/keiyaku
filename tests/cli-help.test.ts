@@ -55,6 +55,17 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(statusHelp, /--guidance reads one Contract's guidance/u);
   assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
+  const settingsHelp = renderContractHelp("settings");
+  assert.match(settingsHelp, /"url": "ws:\/\/127\.0\.0\.1:6767\/ws"/u);
+  assert.match(settingsHelp, /native provider id is bare/u);
+  assert.match(settingsHelp, /model: <native-model-id>/u);
+  assert.match(settingsHelp, /effort: high/u);
+  assert.match(settingsHelp, /PASEO_PASSWORD=<password> keiyaku call/u);
+  assert.match(settingsHelp, /native reload\/restart create a fresh Akuma/u);
+  assert.match(settingsHelp, /check\/send race/u);
+  assert.match(settingsHelp, /session-wide/u);
+  assert.match(settingsHelp, /never cancels later work/u);
+  assert.match(settingsHelp, /Socket closure does not prove native cancellation/u);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {

@@ -1,0 +1,155 @@
+import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
+import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
+import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall, type TurnResult } from "../../provider.js";
+
+function toolCall(item: Extract<AgentTimelineItem, { type: "tool_call" }>): ToolCall {
+  const detail = item.detail;
+  switch (detail.type) {
+    case "shell":
+      return { kind: "run", command: detail.command };
+    case "read":
+      return {
+        kind: "read",
+        path: detail.filePath,
+        ...(detail.offset === undefined ? {} : { offset: detail.offset }),
+        ...(detail.limit === undefined ? {} : { limit: detail.limit }),
+      };
+    case "edit":
+    case "write":
+      return { kind: "fileChange", changes: [{ op: "unspecified", path: detail.filePath }] };
+    case "search":
+      return { kind: "search", query: detail.query, scope: detail.toolName === "web_search" ? "web" : "content" };
+    case "unknown":
+      return otherToolCall(item.name, detail.input);
+    default:
+      return otherToolCall(item.name);
+  }
+}
+
+function timelineNarration(item: AgentTimelineItem, calls: Map<string, ToolCall>): AgentEvent | undefined {
+  switch (item.type) {
+    case "tool_call": {
+      const call = calls.get(item.callId) ?? (item.status === "running" ? toolCall(item) : otherToolCall(item.name));
+      calls.set(item.callId, call);
+      return item.status === "running"
+        ? { type: "tool", phase: "started", id: item.callId, name: item.name, call }
+        : {
+            type: "tool",
+            phase: "completed",
+            id: item.callId,
+            name: item.name,
+            call,
+            result: { status: item.status === "completed" ? "ok" : "error" },
+          };
+    }
+    case "error":
+    case "notification":
+      return { type: "note", text: item.message };
+    case "compaction":
+      return { type: "note", text: `Context compaction ${item.status}` };
+    case "reasoning":
+    case "user_message":
+    case "assistant_message":
+      return undefined;
+    default:
+      return { type: "unknown", kind: item.type };
+  }
+}
+
+/** Live fragments belong to a canonical admitted turn, not agent-wide status. */
+export class PaseoTurn {
+  readonly events = new AgentEventChannel();
+  readonly admission: Promise<string>;
+  readonly completion: Promise<TurnResult>;
+  private admit!: (turnId: string) => void;
+  private rejectAdmission!: (error: unknown) => void;
+  private finish!: (result: TurnResult) => void;
+  private rejectCompletion!: (error: unknown) => void;
+  private turnId: string | undefined;
+  private readonly messages: Array<{ id?: string; text: string }> = [];
+  private readonly messagesById = new Map<string, { text: string }>();
+  private readonly calls = new Map<string, ToolCall>();
+  private answer = "";
+  private assistantContiguous = false;
+  settled = false;
+  terminal = false;
+
+  constructor(readonly messageId: string) {
+    this.admission = new Promise((resolve, reject) => {
+      this.admit = resolve;
+      this.rejectAdmission = reject;
+    });
+    this.completion = new Promise((resolve, reject) => {
+      this.finish = resolve;
+      this.rejectCompletion = reject;
+    });
+    void this.admission.catch(() => undefined);
+    void this.completion.catch(() => undefined);
+  }
+
+  receive(event: AgentStreamEventPayload): void {
+    if (this.settled) return;
+    if (
+      event.type === "timeline" &&
+      event.item.type === "user_message" &&
+      event.item.clientMessageId === this.messageId
+    ) {
+      if (event.turnId === undefined) return this.fail(new Error("Paseo native admission omitted turnId"));
+      if (this.turnId !== undefined) {
+        if (this.turnId !== event.turnId) this.fail(new Error("Paseo canonical admission changed native turn"));
+        return;
+      }
+      this.turnId = event.turnId;
+      this.admit(event.turnId);
+      return;
+    }
+    if (!("turnId" in event) || this.turnId === undefined || event.turnId !== this.turnId) return;
+    if (event.type === "timeline") {
+      if (event.item.type === "assistant_message") this.appendAssistant(event.item);
+      else {
+        this.assistantContiguous = false;
+        const narration = timelineNarration(event.item, this.calls);
+        if (narration !== undefined) this.events.emit(narration);
+      }
+    } else if (event.type === "turn_completed") {
+      this.settled = true;
+      this.finish({
+        kind: "answered",
+        answer: this.answer,
+        historyId: this.turnId,
+      });
+    } else if (event.type === "turn_failed" || event.type === "turn_canceled") {
+      this.settled = true;
+      this.finish({ kind: "failed", diagnostic: event.type === "turn_failed" ? event.error : event.reason });
+    }
+    if (this.settled) {
+      this.terminal = true;
+      for (const message of this.messages) this.events.emit({ type: "assistant", text: message.text });
+    }
+  }
+
+  private appendAssistant(item: Extract<AgentTimelineItem, { type: "assistant_message" }>): void {
+    // Native final text is the last contiguous assistant segment; narration keeps all messages.
+    this.answer = this.assistantContiguous ? this.answer + item.text : item.text;
+    const previous =
+      item.messageId === undefined
+        ? this.assistantContiguous
+          ? this.messages.at(-1)
+          : undefined
+        : this.messagesById.get(item.messageId);
+    this.assistantContiguous = true;
+    if (previous !== undefined) previous.text += item.text;
+    else {
+      const message = { ...(item.messageId === undefined ? {} : { id: item.messageId }), text: item.text };
+      this.messages.push(message);
+      if (item.messageId !== undefined) this.messagesById.set(item.messageId, message);
+    }
+  }
+
+  fail(error: unknown): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.rejectAdmission(error);
+    this.rejectCompletion(error);
+  }
+}

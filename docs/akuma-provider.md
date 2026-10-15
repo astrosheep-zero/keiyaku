@@ -12,7 +12,19 @@ begins. The attempt owns every resource it creates, including resources arriving
 after cancellation, and exposes one eventual result, graceful abort, forced
 disposal, and mandatory closure proof. Closure succeeds only after all owned
 children or native sessions retire, including resources owned by their loaded
-extensions. Native shutdown hooks finish before the session is disposed, and
+extensions. An adapter attached to an externally hosted persistent runtime owns
+its connection and execution-control obligation, not the retained runtime.
+Normal completion retires only that connection. Explicit control cancels the
+runtime's current execution without archiving, deleting, or closing the runtime;
+this may affect concurrent human execution where native control is session-wide.
+Connection closure proves only owned client retirement, never retained runtime
+closure. A native client's logical disposal is not physical connection retirement:
+the adapter observes closure of the connections it created, including during
+cancelled setup, and preserves failures hidden by native cleanup. An inert native
+setup promise is not live custody. Cancellation prevents later setup or submission
+without making that promise a closure precondition. A failed cancellation or
+client retirement remains visible independently of the Turn result.
+Native shutdown hooks finish before an owned session is disposed, and
 in-flight extension setup must finish before that retirement can prove closure.
 Turn completion does not substitute for this proof; cleanup failure remains visible. The Body
 signal is notification, never a custody key or proof. No pid, host, registry,
@@ -36,6 +48,26 @@ launch instead. Missing receipt evidence remains missing; adapters and Body do
 not synthesize it.
 An adapter without resume starts fresh only when no durable native resume promise
 exists. An adapter without fork offers no emulation or capability registry.
+
+When a persistent native session has other writers, the adapter refuses an
+observed busy session before starting its own prompt. A native send option that
+may replace active work is not a guarantee of non-interruption. A remaining
+check-to-send race is an upstream limitation, not exclusive execution custody;
+the adapter never adds a second lease or claims protection it cannot prove.
+Canonical native admission correlates the adapter's submission to its exact
+native turn. Only that turn's complete assistant messages and terminal evidence
+can supply its answer or outcome; unrelated human input, idle status, or transport
+acknowledgement cannot settle it. Live observation loss is an honest failure,
+not permission to infer completion or replay. Normal completion never cancels
+a later human turn.
+
+The Paseo integration supports successive Bodies against a retained live native
+runtime, not upstream native reload or restart. Such reload discards the creation
+environment; an unchanged agent or native session identity is not proof that the
+request entry remains injected. After native reload the caller must create a
+fresh Akuma. If that unsupported reload removes the routing declaration from the
+native environment, this integration cannot promise routing isolation. It adds
+no registry, daemon, plugin, inferred retention proof, or automatic repair.
 
 ## Headless Permission Baseline
 

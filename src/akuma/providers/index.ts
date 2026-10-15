@@ -17,6 +17,7 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
     return (await import("./grok-build/index.js")).createGrokBuildProvider(execution);
   if (execution.kind === "opencode-sdk")
     return (await import("./opencode-sdk/index.js")).createOpencodeProvider(execution);
+  if (execution.kind === "paseo") return (await import("./paseo/index.js")).createPaseoProvider(execution);
   if (execution.kind === "pi") return (await import("./pi/index.js")).createPiProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }

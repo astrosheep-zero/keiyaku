@@ -131,6 +131,10 @@ and is witnessed only after settlement, the asleep Body receipts already
 stopped, and only an already witnessed Body receipts already killed. Hung,
 untidy, held, or changed custody returns the existing unavailable evidence and
 never authorizes external signaling. Pause and stop are distinct control facts.
+For an externally hosted persistent runtime, kill and interrupt control current
+native execution while preserving the runtime for later resume. Ordinary Turn
+completion only disconnects the adapter's owned client. Neither client retirement
+nor Akuma settlement claims that this retained native runtime was closed.
 
 Fork reads one exact retained answered Turn with its native fork point. It never
 substitutes a nearby turn, latest session, or emulation. A provider without fork

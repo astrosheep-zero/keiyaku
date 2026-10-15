@@ -42,7 +42,7 @@ function snapshot(value: unknown): unknown {
 export const providerRecipeSchema = z
   .object({
     name: z.string().refine((value) => value.trim() !== "", "provider execution name must be a nonblank string"),
-    kind: z.enum(["acp", "claude-agent-sdk", "codex-app-server", "grok-build", "opencode-sdk", "pi"], {
+    kind: z.enum(["acp", "claude-agent-sdk", "codex-app-server", "grok-build", "opencode-sdk", "paseo", "pi"], {
       error: "provider execution has unknown kind",
     }),
     executable: z

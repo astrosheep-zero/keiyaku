@@ -462,6 +462,7 @@ const BUILTIN_EXECUTIONS = {
     executable: "kimi",
     config: { argvBefore: ["acp"], argvAfter: [], modelConfigId: "model", effortConfigId: "thinking" },
   },
+  paseo: { kind: "paseo" },
   pi: { kind: "pi" },
   "grok-build": {
     kind: "grok-build",
