@@ -1097,6 +1097,60 @@ test("pause remains distinct from stop and can be cleared only under the leash",
   }
 });
 
+test("interrupt admission clears pause and records one pending Tell under the leash transaction", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await leash.birth(value.allocated.paths, value.soul);
+    const body = await leash.recordBody(value.allocated.paths, {
+      leashTakenAt: "2026-08-08T00:00:00.000Z",
+    });
+    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
+      kind: "requested",
+      body,
+    });
+    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
+
+    const admitted = await leash.recordInterruptTell(value.allocated.paths, {
+      kind: "tell",
+      id: "interrupt-tell",
+      body: "take this interrupt",
+      recordedAt: "2026-08-08T00:00:02.000Z",
+    });
+    assert.equal(admitted.kind, "recorded");
+    if (admitted.kind !== "recorded") return;
+    assert.equal(admitted.tell.id, "interrupt-tell");
+    assert.equal(admitted.tell.body, "take this interrupt");
+    assert.equal(admitted.tell.recordedAt, "2026-08-08T00:00:02.000Z");
+    assert.equal(admitted.tell.state, "pending");
+    assert.deepEqual(admitted.tell.deliveries, []);
+    const snapshot = await readHeart(value.allocated.paths);
+    assert.equal(snapshot.pause, null);
+    assert.deepEqual(snapshot.pending, [admitted.tell]);
+    leash.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("interrupt admission refuses unborn work without recording a Tell", async () => {
+  const value = await fixture();
+  try {
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const admitted = await leash.recordInterruptTell(value.allocated.paths, {
+      kind: "tell",
+      id: "unborn-tell",
+      body: "never admitted",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    assert.deepEqual(admitted, { kind: "not-born" });
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+    leash.release();
+  } finally {
+    value.close();
+  }
+});
+
 test("normal body completion refuses while a tell remains pending", async () => {
   const value = await fixture();
   try {

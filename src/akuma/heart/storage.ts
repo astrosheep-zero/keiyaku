@@ -173,6 +173,16 @@ function finishTransaction<T>(database: DatabaseSync, body: (database: DatabaseS
   }
 }
 
+/** Insert one already-admitted pending Tell into an already-open Heart transaction. */
+export function recordPendingTell(
+  heart: DatabaseSync,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+): Readonly<{ kind: "recorded"; tell: TellFact }> {
+  const sequence = insertTellFact(heart, tell);
+  pruneActivityFacts(heart, ACTIVITY_LIMIT);
+  return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
+}
+
 export async function initializeHeart(paths: AkumaPaths): Promise<void> {
   const heart = new DatabaseSync(paths.heart);
   try {
@@ -297,9 +307,7 @@ export class HeldAkumaLeash {
     return await withHeartTransaction(paths, (heart) => {
       deletePauseControl(heart);
       if (soulFact(heart) === null) return { kind: "not-born" };
-      const sequence = insertTellFact(heart, tell);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT);
-      return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
+      return recordPendingTell(heart, tell);
     });
   }
 

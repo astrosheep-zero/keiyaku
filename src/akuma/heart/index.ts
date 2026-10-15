@@ -46,7 +46,6 @@ import {
   dispositionSnapshotProven,
   insertTellBindingFact,
   insertTellDispositionSnapshot,
-  insertTellFact,
   insertTellReceiptFact,
   insertUndeliveredTellReceipts,
   latestOpenTellDisposition,
@@ -70,7 +69,13 @@ import {
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
-import { isHeartAbsent, readSealFromLeash, withHeartTransaction, withReadOnlyHeart } from "./storage.js";
+import {
+  isHeartAbsent,
+  readSealFromLeash,
+  recordPendingTell,
+  withHeartTransaction,
+  withReadOnlyHeart,
+} from "./storage.js";
 import { soulFact } from "./soul.js";
 import { AkumaBusyError, HeartAuthorityCorruptionError } from "./facts.js";
 export {
@@ -272,9 +277,7 @@ export async function recordTell(
     const body = latestBodyFact(heart);
     const running = body !== null && body.end === undefined && body.hung === undefined;
     if (tell.schemaJson !== undefined && running && options.interrupt !== true) throw new AkumaBusyError();
-    const sequence = insertTellFact(heart, tell);
-    pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    return { kind: "recorded", tell: { sequence, ...tell, state: "pending", deliveries: [] } };
+    return recordPendingTell(heart, tell);
   });
 }
 
