@@ -1,11 +1,15 @@
 import type { ProviderEvent, ProviderTimelineItem } from "@getpaseo/plugin/server/provider";
 import type { Row } from "./keiyaku.js";
+import type { AdmittedMessage } from "./message.js";
 
 type Emit = (event: ProviderEvent) => void;
 export function createMirror(sessionId: string, emit: Emit) {
   let covered: { high: number; signatures: Map<number, string> } | undefined;
   let turn: { sequence: number; closed: boolean } | undefined;
   let unhealthy = false;
+  let submissions = 0;
+  let deferred: Row[] | undefined;
+  const displayedTells = new Map<string, number>();
   const item = (value: ProviderTimelineItem, timestamp?: string) => emit({
     type: "timeline.item", sessionId, item: value, ...(timestamp === undefined ? {} : { timestamp }),
   });
@@ -15,7 +19,35 @@ export function createMirror(sessionId: string, emit: Emit) {
     emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state,
       ...(message === undefined ? {} : { error: { message } }) });
   };
-  return {
+  const userMessage = (row: Extract<Row, { kind: "tell" }>, clientMessageId?: string) => {
+    if (displayedTells.has(row.tellId)) return;
+    displayedTells.set(row.tellId, row.sequence);
+    item({ type: "user_message", id: `keiyaku:tell/${row.tellId}`, text: row.text,
+      ...(clientMessageId === undefined ? {} : { clientMessageId }) }, row.at);
+  };
+  const mirror = {
+    hold() {
+      submissions++;
+      return (publish = true) => {
+        submissions--;
+        if (submissions === 0) {
+          const rows = deferred;
+          deferred = undefined;
+          if (rows && publish) mirror.publish(rows);
+        }
+      };
+    },
+    currentTurnId: () => turn && !turn.closed ? `turn/${turn.sequence}` : undefined,
+    refreshedTurnId() {
+      const latest = deferred?.filter((row) => row.kind === "turn").at(-1);
+      if (latest?.kind !== "turn") return mirror.currentTurnId();
+      if (deferred?.some((row) => row.kind === "outcome" && row.turnSequence === latest.turnSequence)) return undefined;
+      if (turn?.sequence === latest.turnSequence && turn.closed) return undefined;
+      return `turn/${latest.turnSequence}`;
+    },
+    admit(row: AdmittedMessage, clientMessageId: string) {
+      userMessage(row, clientMessageId);
+    },
     cancel: (reason: string) => finish("canceled", reason),
     unreadable() {
       if (!unhealthy) item({ type: "notification", level: "warning",
@@ -24,6 +56,8 @@ export function createMirror(sessionId: string, emit: Emit) {
       unhealthy = true;
     },
     publish(input: Row[]) {
+      // Hold racing reads until native Tell identity can replace the optimistic item.
+      if (submissions > 0) { deferred = input; return; }
       const rows = [...input].sort((a, b) => a.sequence - b.sequence);
       const lowest = rows[0]?.sequence;
       // Reads overlap: only a window beyond the previous frontier loses coverage.
@@ -34,8 +68,8 @@ export function createMirror(sessionId: string, emit: Emit) {
       }
       for (const row of rows) {
         if (covered?.signatures.get(row.sequence) === JSON.stringify(row)) continue;
-        if (row.kind === "tell" && row.state === "told") {
-          item({ type: "user_message", id: `keiyaku:tell/${row.tellId}`, text: row.text }, row.at);
+        if (row.kind === "tell") {
+          userMessage(row);
         } else if (row.kind === "outcome") {
           item(row.outcome.kind === "answered"
             ? { type: "assistant_message", id: `keiyaku:turn/${row.turnSequence}`, text: row.outcome.answer }
@@ -54,7 +88,11 @@ export function createMirror(sessionId: string, emit: Emit) {
       }
       covered = { high: Math.max(covered?.high ?? 0, rows.at(-1)?.sequence ?? 0),
         signatures: new Map(rows.map((row) => [row.sequence, JSON.stringify(row)])) };
+      if (lowest !== undefined) for (const [id, sequence] of displayedTells) {
+        if (sequence < lowest) displayedTells.delete(id);
+      }
       unhealthy = false;
     },
   };
+  return mirror;
 }

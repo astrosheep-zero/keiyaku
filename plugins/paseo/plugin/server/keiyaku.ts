@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { z } from "zod";
 
 export const identityKeys = [
@@ -20,11 +19,35 @@ const row = z.union([
 const history = z.object({ kind: z.literal("history"), history: z.object({ rows: z.array(row) }) });
 export type Row = z.infer<typeof row>;
 export type Reader = (world: string, akuId: string, signal: AbortSignal) => Promise<Row[]>;
-export const readKeiyaku: Reader = async (world, akuId, signal) => {
+export type CommandResult = { code: number; stdout: string; stderr: string };
+export type CommandRunner = (world: string, args: string[], signal: AbortSignal, stdin?: string) => Promise<CommandResult>;
+
+// Nonzero exits may still contain an admitted mutation receipt; callers interpret both.
+export const runKeiyaku: CommandRunner = async (world, args, signal, stdin) => {
+  signal.throwIfAborted();
   const env = { ...process.env };
   for (const key of identityKeys) delete env[key];
-  const { stdout } = await promisify(execFile)("keiyaku", ["-C", world, "history", akuId, "--json", "--limit", "200"], {
-    env, signal, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, encoding: "utf8",
+  return await new Promise<CommandResult>((resolve, reject) => {
+    let completion: CommandResult | Error;
+    const child = execFile("keiyaku", ["-C", world, ...args], {
+      env, signal, timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, encoding: "utf8",
+    }, (error, stdout, stderr) => {
+      completion = error && (typeof error.code !== "number" || error.killed || error.signal)
+        ? new Error(`Keiyaku command outcome is uncertain: ${stderr.trim() || error.message}`)
+        : { code: typeof error?.code === "number" ? error.code : 0, stdout, stderr };
+    });
+    // Abort may call execFile's callback before the child physically retires.
+    child.once("close", () => {
+      if (completion instanceof Error) reject(completion);
+      else resolve(completion);
+    });
+    // EPIPE can race with early CLI refusal; the exit callback owns its diagnostic.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(stdin);
   });
-  return history.parse(JSON.parse(stdout)).history.rows;
+};
+export const readKeiyaku: Reader = async (world, akuId, signal) => {
+  const result = await runKeiyaku(world, ["history", akuId, "--json", "--limit", "200"], signal);
+  if (result.code !== 0) throw new Error(result.stderr.trim() || `Keiyaku history exited ${result.code}`);
+  return history.parse(JSON.parse(result.stdout)).history.rows;
 };
