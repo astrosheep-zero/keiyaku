@@ -5,13 +5,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import ts from "typescript";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
+import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
-import { identityKeys, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { historySchema, identityKeys, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { tellPresentation, tellReceiptSchema } from "../plugins/paseo/plugin/server/message.js";
 import { cleanEnvironment, createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { WORKER_SOURCE } from "../plugins/paseo/plugin/server/sdk-worker.js";
-import type { ProviderConnection, ProviderEvent, ProviderRegistration } from "@getpaseo/plugin/server/provider";
+import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
+  type ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import * as pluginRuntime from "@getpaseo/plugin";
 import * as pluginServerRuntime from "@getpaseo/plugin/server";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
@@ -189,6 +193,62 @@ test("the dedicated worker serves the real public package for history, status, a
   const later = await transport.history(root, value.allocated.id, new AbortController().signal, history.highest ?? undefined);
   assert.deepEqual(later.rows.find((row) => row.kind === "tool")?.state, { status: "ok", message: "hello", exitCode: 0 },
     "coverage-bounded paging also observes mutable tool rows");
+
+  // The worker's own row validation must not silently drop the observed result
+  // text and per-file patch the public projection carries.
+  const patch = "@@ -1 +1 @@\n-old\n+new\n";
+  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
+    event: { type: "tool", phase: "started", id: "edit", name: "edit",
+      call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] } } });
+  const carried = (await transport.history(root, value.allocated.id, new AbortController().signal))
+    .rows.flatMap((row) => row.kind === "tool" && row.name === "edit" ? [row] : []);
+  assert.equal(carried.length, 1, "the bounded read returns the observed edit record");
+  assert.deepEqual(carried[0]?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] },
+    "the worker boundary keeps an observed per-file patch");
+});
+
+/**
+ * The producer's own native chain, not a fabricated final row: a Pi edit and a
+ * bash completion are translated by the real adapter, persisted as Heart
+ * activity, read back through the installed public package, and only then
+ * mapped into Paseo details.
+ */
+test("a native Pi completion reaches a Paseo edit detail through the public projection", async (t) => {
+  const value = await soulFixture("paseo-tool-output-");
+  const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+  t.after(() => { leash.release(); value.close(); });
+  await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
+  await leash.birth(value.allocated.paths, value.soul);
+  const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
+  const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
+  const pi: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  let tick = 0;
+  const observe = async (event: AgentSessionEvent): Promise<void> => {
+    for (const translated of translatePiEvent(event, pi)) {
+      await appendActivity(value.allocated.paths, { turnSequence: started.sequence,
+        at: new Date(Date.parse(at) + (tick += 1) * 1_000).toISOString(), event: translated });
+    }
+  };
+  const patch = "@@ -1,2 +1,2 @@\n-const answer = 1;\n+const answer = 2;\n";
+  await observe({ type: "tool_execution_start", toolCallId: "edit-1", toolName: "edit", args: { path: "src/a.ts" } });
+  await observe({ type: "tool_execution_end", toolCallId: "edit-1", toolName: "edit", isError: false,
+    result: { content: [{ type: "text", text: "edited src/a.ts" }], details: { patch } } });
+  await observe({ type: "tool_execution_start", toolCallId: "run-1", toolName: "bash", args: { command: "npm test" } });
+  await observe({ type: "tool_execution_end", toolCallId: "run-1", toolName: "bash", isError: false,
+    result: { content: [{ type: "text", text: "3 passing\n" }] } });
+
+  const root = await realpath(value.root);
+  const history = historySchema.parse(await (await producer()).select(root, value.allocated.id).history({ limit: 200 }));
+  const events: ProviderEvent[] = [];
+  const mirror = createMirror("session", (event) => { ProviderEventSchema.parse(event); events.push(event); });
+  mirror.publish(history);
+  const calls = events.flatMap((event) => event.type === "timeline.item" && event.item.type === "tool_call"
+    ? [event.item] : []);
+  assert.deepEqual(calls.map((call) => call.name), ["edit", "bash"]);
+  assert.deepEqual(calls[0]?.detail, { type: "edit", filePath: "src/a.ts", unifiedDiff: patch },
+    "the native completion's own patch is the edit detail");
+  assert.deepEqual(calls[1]?.detail, { type: "shell", command: "npm test", output: "3 passing\n" },
+    "the native completion's own output is the shell output, not its diagnostic");
 });
 
 const FAKE_SDK = `import { readFile } from "node:fs/promises";

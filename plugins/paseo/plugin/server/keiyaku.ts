@@ -16,7 +16,7 @@ const call = z.discriminatedUnion("kind", [
     path: z.string().optional(), glob: z.string().optional() }),
   z.object({ kind: z.literal("fileChange"), changes: z.array(z.object({
     op: z.enum(["add", "update", "delete", "unspecified"]), path: z.string(),
-    diffstat: z.object({ added: count, removed: count }).optional(),
+    diffstat: z.object({ added: count, removed: count }).optional(), patch: z.string().optional(),
   })) }),
   z.object({ kind: z.literal("other"), display: z.string(), input: input.optional() }),
 ]);
@@ -32,7 +32,7 @@ const row = z.union([
   ]) }),
   base.extend({ kind: z.literal("tool"), ...turnFields, name: z.string(), toolId: z.string().optional(), call,
     state: z.union([z.enum(["active", "unsettled"]), z.object({ status: z.enum(["ok", "error"]),
-      message: z.string().optional(), exitCode: z.number().int().optional() })]),
+      message: z.string().optional(), exitCode: z.number().int().optional(), output: z.string().optional() })]),
     durationMs: z.number().nonnegative().optional(), truncated: z.literal(true).optional() }),
   base.extend({ kind: z.enum(["said", "thought", "note", "call"]), ...turnFields, text: z.string(),
     truncated: z.literal(true).optional() }),

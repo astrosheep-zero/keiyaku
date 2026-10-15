@@ -81,11 +81,18 @@ read-only display, not model switching. An unspecified model stays unknown;
 a failed status read reports a notice without blocking history. The global
 catalog remains the mirror attachment entry, not a catalogue of native models.
 
-Tool records map to native `tool_call` items with actual call, result, available
-output when supplied by the producer, exit status, duration and truncation.
-This does not restore missing provider output: the current Pi and Claude
-adapters omit tool-result bodies, and Codex retains only limited diagnostics.
-Tool identity is the public
+Tool records map to native `tool_call` items with actual call, result, exit
+status, duration and truncation. Where the installed producer reports a tool
+result's own `output`, that text is what run, read and search display; the
+diagnostic `message` is only the stand-in an older record wrote instead, so an
+honestly empty output is never replaced by its diagnostic. A single-file
+`fileChange` whose change carries an observed `patch` becomes a native edit
+detail with that file path and its unified diff, a trailing truncation marker
+included. Multiple files, and a single change without an observed patch, keep
+the fallback detail with the complete change list and the result, so one file
+never stands in for the whole operation. The mirror never reconstructs a patch
+or write content from the filesystem, Git, or proposed inputs, and absent
+producer evidence stays absent. Tool identity is the public
 producer's `toolId` scoped by its Turn, so starts and results update one native
 item even for identical concurrent calls. An unwitnessed result ends only that
 tool's presentation as canceled, with the original `unsettled` state retained;

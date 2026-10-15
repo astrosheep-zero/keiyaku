@@ -130,11 +130,16 @@ export function createMirror(sessionId: string, emit: Emit) {
               message: `${row.name}: ${state === "active" ? "start observed" : "result not witnessed"}. ${JSON.stringify(row.call)}` }, row.at);
             continue;
           }
-          const output = typeof state === "object" ? state.message : undefined;
+          const result = typeof state === "object" ? state : undefined;
+          // The result's own output is the observed text; its diagnostic message is
+          // only the stand-in an older producer wrote instead, so an honestly empty
+          // output is never replaced by its diagnostic.
+          const output = result === undefined ? undefined : result.output === undefined ? result.message : result.output;
+          const single = row.call.kind === "fileChange" && row.call.changes.length === 1 ? row.call.changes[0] : undefined;
           const detail: Extract<ProviderTimelineItem, { type: "tool_call" }>["detail"] = row.call.kind === "run"
             ? { type: "shell", command: row.call.command,
               ...(output === undefined ? {} : { output }),
-              ...(typeof state === "object" && state.exitCode !== undefined ? { exitCode: state.exitCode } : {}) }
+              ...(result?.exitCode === undefined ? {} : { exitCode: result.exitCode }) }
             : row.call.kind === "read"
               ? { type: "read", filePath: row.call.path,
                 ...(row.call.offset === undefined ? {} : { offset: row.call.offset }),
@@ -145,7 +150,11 @@ export function createMirror(sessionId: string, emit: Emit) {
                   ...(output === undefined ? {} : { content: output }),
                   ...(row.durationMs === undefined ? {} : { durationMs: row.durationMs }),
                   ...(row.truncated === undefined ? {} : { truncated: row.truncated }) }
-                : { type: "unknown", input: z.json().parse(row.call), output: typeof state === "object" ? z.json().parse(state) : null };
+                // One observed file patch is the whole operation; anything else keeps
+                // the complete change list so no single file stands in for the rest.
+                : row.call.kind === "fileChange" && single?.patch !== undefined
+                  ? { type: "edit", filePath: single.path, unifiedDiff: single.patch }
+                  : { type: "unknown", input: z.json().parse(row.call), output: result === undefined ? null : z.json().parse(result) };
           item({ type: "tool_call", id: `keiyaku:tool/${toolIdentity}`, callId: `tool/${toolIdentity}`, name: row.name,
             detail, metadata: { turnSequence: row.turnSequence, sequence: row.sequence,
               ...(row.durationMs === undefined ? {} : { durationMs: row.durationMs }),
