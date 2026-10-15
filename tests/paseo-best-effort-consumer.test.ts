@@ -44,6 +44,7 @@ async function harness(command: CommandRunner, initialRows: Row[] = []) {
   return { agent, bridge, manager, calls, events, root, drain,
     setBeforePrompt(callback: () => Promise<void>) { beforePrompt = callback; },
     setRows(value: Row[]) { rows = value; },
+    async sync() { await bridge.sync({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
     async refresh() { await bridge.refresh({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
     async close() { await registry.shutdown(); await rm(root, { recursive: true, force: true }); },
     send(text: string, id: string) { return startAgentRun(manager, agent.id, text, logger, { activeTurnBehavior: "steer", replaceRunning: true, runOptions: { clientMessageId: id } }); },
@@ -67,7 +68,7 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   h.setRows([turn(2), answer(2, 3)]); await h.refresh();
 });
 
-test("opening skip retains consumer association for the open Turn without replaying historical items", async (t) => {
+test("post-create sync restores the installed consumer's running Turn without replay or execution", async (t) => {
   const snapshot = [
     { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const },
     turn(11), answer(11, 12, "old answer"), turn(13),
@@ -80,9 +81,20 @@ test("opening skip retains consumer association for the open Turn without replay
     return events;
   };
   const opening = await history();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle", "opening precedes manager subscription");
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, null);
   await h.refresh();
-  assert.deepEqual(await history(), opening, "the identical opening snapshot remains deduplicated");
-  // The manager subscribes after opening; its idle-on-open limitation is not repaired here.
+  assert.deepEqual(await history(), opening, "normal refresh keeps the opening snapshot deduplicated");
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle", "a normal hint cannot recover the missed start");
+  await h.sync();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/13");
+  await h.sync();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/13");
+  assert.deepEqual(h.events.map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
+    [["turn_started", "turn/13"], ["turn_started", "turn/13"]], "sync only reannounces the same execution identity");
+  assert.equal(h.manager.listAgents().length, 1, "repeated sync creates no additional agent");
   h.setRows([...snapshot, answer(13, 14, "new answer")]); await h.refresh();
   assert.deepEqual(h.events.flatMap((event) => {
     if (event.type === "timeline" && event.item.type === "assistant_message")
@@ -93,9 +105,12 @@ test("opening skip retains consumer association for the open Turn without replay
   assert.deepEqual(opening.map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
     [["turn_started", "turn/13"]], "skip publishes only the current execution state, not historical starts or timeline");
   const settled = await history();
+  await h.sync();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  assert.deepEqual(await history(), settled, "sync never reannounces a completed Turn");
   await h.refresh();
   assert.deepEqual(await history(), settled, "the new outcome is retained once");
-  assert.deepEqual(h.calls, [], "opening and refresh never control the Akuma");
+  assert.deepEqual(h.calls, [], "opening, sync and refresh never Tell or kill the Akuma");
 });
 
 test("one refresh preserves completed and short Turn output before their terminals and the next open Turn", async (t) => {

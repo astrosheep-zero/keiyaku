@@ -8,7 +8,7 @@ import { decodeStop, type StopAttempt } from "./stop.js";
 
 const identity = z.object({ world: z.string().min(1), akuId: z.string().regex(/^aku\//u) });
 export function createProvider(reader: Reader = readKeiyaku, command: CommandRunner = runKeiyaku) {
-  const sessions = new Set<{ world: string; akuId: string; wake(): Promise<void>; stop(): Promise<void> }>();
+  const sessions = new Set<{ world: string; akuId: string; wake(reannounce?: boolean): Promise<void>; stop(): Promise<void> }>();
   const provider: ProviderRegistration = {
     id: "keiyaku", label: "Keiyaku", description: "Akuma runtime mirror",
     async connect(request): Promise<ProviderConnection> {
@@ -36,22 +36,26 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
             const cancellation = new AbortController();
             let opening = true;
             let pending = false;
+            let pendingReannounce = false;
             let running: Promise<void> | undefined;
             const submissions = new Set<Promise<void>>();
             let stopping: Promise<StopAttempt> | undefined;
             const session = {
               world, akuId: target.akuId,
-              wake(): Promise<void> {
+              wake(reannounce = false): Promise<void> {
                 if (cancellation.signal.aborted) return Promise.resolve();
                 pending = true;
+                pendingReannounce ||= reannounce;
                 running ??= (async () => {
                   while (pending && !cancellation.signal.aborted) {
                     pending = false;
+                    const announce = pendingReannounce;
+                    pendingReannounce = false;
                     try {
                       const rows = await reader(world, target.akuId, cancellation.signal);
                       if (!cancellation.signal.aborted) {
                         if (opening && input.history === "skip") mirror.seed(rows);
-                        else mirror.publish(rows);
+                        else mirror.publish(rows, announce);
                       }
                     } catch {
                       if (!cancellation.signal.aborted) mirror.unreadable();
@@ -183,6 +187,11 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
         woken++;
       }
       return { woken };
+    },
+    async sync(input: { world: string; akuId: string }) {
+      const world = await realpath(input.world);
+      await Promise.all([...sessions].filter((session) => session.world === world && session.akuId === input.akuId)
+        .map((session) => session.wake(true)));
     },
     async close() { await Promise.all([...sessions].map((session) => session.stop())); },
   };

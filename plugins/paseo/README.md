@@ -31,7 +31,15 @@ Child creation reuses daemon idempotency for the Akuma's canonical World and
 identity, not an identity registry or duplicate worker. Completed replay does not
 reattach a detached child or revive an archived child. Unknown, unsupported, and
 nested-Akuma callers create no automatic mirror. Attachment is best effort, with
-no polling, backfill, or retry queue; a missed birth can remain unattached. Lookup
+no polling, backfill, or retry queue; a missed birth can remain unattached. After
+successful SDK creation, attachment synchronizes matching open mirror sessions
+once: it reads fresh history, publishes normal changes, and reannounces only a
+still-open Turn. This compensates for Paseo registering its manager subscription
+after the opening events. It never replays timeline items or submits execution.
+A failed read retains its notice without reannouncing cached running state or
+undoing creation. Repeated attachment may reannounce the same Turn; it does not
+start another worker. Automatic resume or reload without attachment is outside
+this mitigation, and later host races remain possible. Lookup
 and creation are not an atomic transaction. Manual creation remains available.
 
 Create a Paseo agent with `config.provider: "keiyaku/mirror"`, a working directory,

@@ -8,6 +8,6 @@ export default function contribute(server: PluginServerContext) {
   const mirror = createProvider();
   server.registerProvider(mirror.provider);
   server.handle(refreshRpc, (input) => mirror.refresh(input));
-  server.handle(attachRpc, attach);
+  server.handle(attachRpc, (input, context) => attach(input, context, mirror.sync));
   return () => mirror.close();
 }

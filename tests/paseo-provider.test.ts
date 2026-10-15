@@ -40,6 +40,7 @@ async function harness(reader: Reader, command: CommandRunner = async () => { th
   });
   return { bridge, connection, events, calls, root, config, open,
     refresh: () => bridge.refresh({ world: root, akuId: "aku/test/1" }),
+    sync: () => bridge.sync({ world: root, akuId: "aku/test/1" }),
     async close() { await connection.close(); await bridge.close(); await rm(root, { recursive: true, force: true }); } };
 }
 const items = (events: ProviderEvent[]) => events.filter((e) => e.type === "timeline.item");
@@ -136,6 +137,7 @@ test("skip retains open and closed Turn state for Steer and Stop without histori
   ]);
   await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
   await h.refresh(); await tick();
+  await h.sync();
   assert.deepEqual(h.calls.map((call) => call.args[0]), ["tell", "kill"]);
   assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/7", "started"], ["turn/7", "canceled"]],
     "Stop captures the observed Turn and identical refresh never restarts it");
@@ -147,6 +149,36 @@ test("skip retains open and closed Turn state for Steer and Stop without histori
   assert.equal(h.calls.length, 2, "a seeded completed Turn is not steerable");
   assert.deepEqual(items(h.events), []);
   assert.deepEqual(turns(h.events), []);
+});
+
+test("post-attach sync needs a successful fresh read and never restarts an ended Turn", async (t) => {
+  let rows: Row[] = [tell(1), turn(2, 7)];
+  let broken = false, reads = 0;
+  const h = await harness(async () => { reads++; if (broken) throw new Error("unavailable"); return rows; });
+  t.after(() => h.close());
+  await h.open({ history: "skip" });
+  h.events.length = 0;
+  broken = true;
+  await h.sync();
+  assert.equal(reads, 2, "sync makes a fresh read, not a cached announcement");
+  assert.deepEqual(turns(h.events), [], "failed read cannot reannounce the cached open Turn");
+  assert.equal(items(h.events).length, 1);
+  assert.match(notices(h.events)[0]!, /read surface unavailable/u);
+  broken = false;
+  rows = [...rows, answer(3, 7)];
+  h.events.length = 0;
+  await h.sync();
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/7", "completed"]]);
+  assert.deepEqual(items(h.events).map((event) => event.item.type), ["assistant_message"], "normal new output is still published");
+  h.events.length = 0;
+  await h.sync();
+  assert.deepEqual(h.events, [], "ended Turn stays sealed");
+  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
+  const before = reads;
+  await h.sync();
+  await h.bridge.sync({ world: h.root, akuId: "aku/other/1" });
+  assert.equal(reads, before, "closed and missing sessions are harmless");
+  assert.deepEqual(h.calls, [], "sync never performs actual work or controls execution");
 });
 
 test("in-flight hints coalesce and RPC returns without waiting for reads", async (t) => {

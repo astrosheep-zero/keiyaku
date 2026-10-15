@@ -11,6 +11,7 @@ export function createMirror(sessionId: string, emit: Emit) {
   let unhealthy = false;
   let submissions = 0;
   let deferred: Row[] | undefined;
+  let deferredReannounce = false;
   const displayedTells = new Map<string, number>();
   const item = (value: ProviderTimelineItem, timestamp?: string) => emit({
     type: "timeline.item", sessionId, item: value, ...(timestamp === undefined ? {} : { timestamp }),
@@ -45,8 +46,10 @@ export function createMirror(sessionId: string, emit: Emit) {
         submissions--;
         if (submissions === 0) {
           const rows = deferred;
+          const reannounce = deferredReannounce;
           deferred = undefined;
-          if (rows && publish) mirror.publish(rows);
+          deferredReannounce = false;
+          if (rows && publish) mirror.publish(rows, reannounce);
         }
       };
     },
@@ -72,14 +75,15 @@ export function createMirror(sessionId: string, emit: Emit) {
       } };
     },
     unreadable() {
+      deferredReannounce = false;
       if (!unhealthy) item({ type: "notification", level: "warning",
         id: `keiyaku:unreadable/${covered ? Math.min(...covered.signatures.keys()) : 0}`,
         message: "Keiyaku read surface unavailable; retaining the previous mirror." });
       unhealthy = true;
     },
-    publish(input: Row[]) {
+    publish(input: Row[], reannounce = false) {
       // Hold racing reads until native Tell identity can replace the optimistic item.
-      if (submissions > 0) { deferred = input; return; }
+      if (submissions > 0) { deferred = input; deferredReannounce ||= reannounce; return; }
       const rows = [...input].sort((a, b) => a.sequence - b.sequence);
       const lowest = rows[0]?.sequence;
       // Reads overlap: only a window beyond the previous frontier loses coverage.
@@ -116,6 +120,9 @@ export function createMirror(sessionId: string, emit: Emit) {
         if (sequence < lowest) displayedTells.delete(id);
       }
       unhealthy = false;
+      const current = turn;
+      if (reannounce && current && !current.closed && rows.some((row) => row.kind === "turn" && row.turnSequence === current.sequence))
+        emit({ type: "session.turn", sessionId, turnId: `turn/${current.sequence}`, state: "started" });
     },
   };
   return mirror;
