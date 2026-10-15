@@ -8,6 +8,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginContext } from "../src/plugin/public.js";
+import { akumaCallerFromEnvironment } from "../src/cli/akuma-caller.js";
 import { createForwarder } from "../plugins/paseo/forwarder/index.js";
 import contribute from "../plugins/paseo/plugin/index.server.js";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
@@ -160,16 +161,23 @@ test("close during a read aborts the pump and discards its pending wake", async 
   assert.deepEqual(h.events.map((e) => e.type), ["session.opened", "session.closed", "request.completed"]);
 });
 
-test("session env, born attach, SDK creation and identity retries share the registered plugin seam", async (t) => {
+test("native born attach, SDK creation and identity retries share the registered plugin seam without env injection", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "paseo-attach-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const alias = join(root, "alias"); await symlink(root, alias);
   const world = await realpath(root), akuId = "aku/test/1";
   const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
   const created = new Map<string, { id: string; cwd: string }>();
+  const parent = { id: "parent", cwd: root, archivedAt: null,
+    persistence: { provider: "codex", sessionId: "native-codex", nativeHandle: "native-codex" } };
   const paseo = createPaseoApi({
+    async fetchAgents(options: { filter: unknown }) {
+      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
+      return { requestId: "list", entries: [{ agent: parent, project: null }],
+        pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } };
+    },
     async fetchAgent({ agentId }: { agentId: string }) {
-      return agentId === "parent" ? { agent: { id: agentId, cwd: root }, project: null } : null;
+      return agentId === "parent" ? { agent: parent, project: null } : null;
     },
     async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
       wire.push(options);
@@ -193,21 +201,14 @@ test("session env, born attach, SDK creation and identity retries share the regi
   t.after(async () => { await cleanup(); });
   assert.equal(providerId, "keiyaku");
   assert.deepEqual([...handlers.keys()], ["refresh", "attach"]);
-  const [name, hook] = before.mock.calls[0]!.arguments;
-  assert.equal(name, "agent.session_open");
-  for (const provider of ["codex", "keiyaku"]) {
-    const request = { agentId: "parent", workspaceId: null, provider, cwd: root,
-      reason: "create" as const, purpose: "interactive" as const, env: { KEEP: "yes", KEIYAKU_EXTERNAL_CALLER: "stale" } };
-    assert.deepEqual(await hook({ request }, { paseo, signal: new AbortController().signal }), {
-      ...request, env: { KEEP: "yes", KEIYAKU_EXTERNAL_CALLER: "paseo:parent" },
-    });
-  }
+  assert.equal(before.mock.callCount(), 0, "native identity needs no session_open injection");
   const forwarder = createForwarder(async () => ({
     async invokePluginRpc(_plugin, method, input) { return await handlers.get(method)!(input); }, async close() {},
   }));
   const { signals } = await forwarder.activate({ world: alias as PluginContext["world"], config: undefined,
     writablePath() { throw new Error("no writes"); } });
-  const caller = { kind: "external" as const, integration: "paseo", id: "parent" };
+  const caller = await akumaCallerFromEnvironment({ CODEX_THREAD_ID: "native-codex" });
+  assert.deepEqual(caller, { kind: "external", integration: "codex", id: "native-codex" });
   await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" }, caller });
   assert.deepEqual(create.mock.calls[0]?.arguments[0], { parent: "parent", cwd: root,
     config: { provider: "keiyaku/mirror", options: { world, akuId } }, idempotencyKey: `keiyaku:${world}:${akuId}` });
@@ -217,6 +218,9 @@ test("session env, born attach, SDK creation and identity retries share the regi
   assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
   assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");
   assert.equal(wire[1]?.idempotencyKey, wire[0]?.idempotencyKey);
+  assert.deepEqual(await handlers.get("attach")!({ world, akuId,
+    caller: { kind: "external", integration: "paseo", id: "parent" } }), { attached: true });
+  assert.equal(created.size, 1, "legacy Paseo caller replays the same canonical child");
   const diagnostics = t.mock.method(console, "warn", () => {});
   for (const other of [undefined, { kind: "unknown" }, { kind: "akuma", world, akuId },
     { ...caller, integration: "other" }, { ...caller, id: "gone" }]) {
@@ -224,7 +228,7 @@ test("session env, born attach, SDK creation and identity retries share the regi
     assert.deepEqual(await handlers.get("attach")!({ world, akuId, caller: other }), { attached: false });
     assert.equal(diagnostics.mock.callCount(), before + 1);
   }
-  assert.equal(create.mock.callCount(), 2, "only the initial attach and its retry reach create");
+  assert.equal(create.mock.callCount(), 3, "only the initial attach and its native/legacy retries reach create");
 });
 
 test("reader spawns only bounded history, strips inherited identities, and rejects bad/nonzero reads", async (t) => {

@@ -9,8 +9,5 @@ export default function contribute(server: PluginServerContext) {
   server.registerProvider(mirror.provider);
   server.handle(refreshRpc, (input) => mirror.refresh(input));
   server.handle(attachRpc, attach);
-  server.before("agent.session_open", ({ request }) => ({ ...request,
-    env: { ...request.env, KEIYAKU_EXTERNAL_CALLER: `paseo:${request.agentId}` },
-  }));
   return () => mirror.close();
 }

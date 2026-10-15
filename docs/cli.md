@@ -122,6 +122,11 @@ therefore leave that World marker.
 Direct call and fork derive optional declared caller attribution at this edge:
 a complete Akuma-and-World environment pair wins over external integration
 attribution, and an incomplete pair refuses rather than inventing a World.
-The supplied World is canonicalized here. Request-custody call skips ambient
-caller parsing entirely because serving custody supplies the actual parent,
-including for older running Bodies without a World declaration.
+The supplied World is canonicalized here. Without Akuma custody, the enclosing
+native host session supplies external attribution. Conflicting native host
+identities refuse rather than select an arbitrary parent. Only when no native
+host identity is declared does the edge use the explicit external-integration
+fallback. These declarations remain attribution, not authentication or authority;
+the SDK does not infer them from its environment. Request-custody call skips
+ambient caller parsing entirely because serving custody supplies the actual
+parent, including for older running Bodies without a World declaration.
