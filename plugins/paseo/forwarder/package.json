@@ -1,0 +1,16 @@
+{
+  "name": "@astrosheep/keiyaku-plugin-paseo",
+  "version": "0.1.0",
+  "type": "module",
+  "files": ["index.js", "index.d.ts"],
+  "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
+  "scripts": { "build": "tsc -p tsconfig.json", "prepack": "npm run build" },
+  "peerDependencies": { "@astrosheep/keiyaku": "^4.6.8" },
+  "dependencies": {
+    "@getpaseo/client": "0.11.2",
+    "@getpaseo/plugin": "0.11.2",
+    "@getpaseo/protocol": "0.11.2",
+    "@getpaseo/server": "0.11.2",
+    "ws": "^8.22.0"
+  }
+}

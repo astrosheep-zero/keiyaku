@@ -18,6 +18,7 @@ const DIAGNOSTIC_LIMIT = 500;
 const PLUGIN_ATTEMPT_TIMEOUT_MS = 5_000;
 const PLUGIN_NAMESPACE = "plugins";
 const SQUARE_PLUGIN_PACKAGE = "@astrosheep/keiyaku-plugin-square";
+const BUNDLED_PLUGIN_PACKAGES = new Set([SQUARE_PLUGIN_PACKAGE, "@astrosheep/keiyaku-plugin-paseo"]);
 const BUILTIN_PLUGINS: readonly SelectedPlugin[] = Object.freeze([
   Object.freeze({ id: "square", package: SQUARE_PLUGIN_PACKAGE, config: undefined }),
 ]);
@@ -330,7 +331,7 @@ function sourceUrl(world: WorldRoot, packageName: string): string | null {
 }
 
 async function importFromWorld(world: WorldRoot, packageName: string): Promise<Record<string, unknown>> {
-  if (packageName === SQUARE_PLUGIN_PACKAGE) return (await import(packageName)) as Record<string, unknown>;
+  if (BUNDLED_PLUGIN_PACKAGES.has(packageName)) return (await import(packageName)) as Record<string, unknown>;
   const direct = sourceUrl(world, packageName);
   if (direct !== null) return (await import(direct)) as Record<string, unknown>;
   const parentURL = pathToFileURL(join(world, "package.json")).href;

@@ -1,0 +1,4 @@
+{
+  "id": "keiyaku-paseo",
+  "requirements": { "paseo": ">=0.11.2" }
+}

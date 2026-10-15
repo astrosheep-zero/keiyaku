@@ -686,6 +686,27 @@ test("a timed-out handler does not share cancellation with another handler", { t
 });
 
 
+test("bundled Paseo resolves outside the caller World and absent daemon is one diagnostic", async (context) => {
+  const value = fixture();
+  context.after(value.close);
+  const previous = process.env.PASEO_HOME;
+  process.env.PASEO_HOME = value.home;
+  context.after(() => { if (previous === undefined) delete process.env.PASEO_HOME; else process.env.PASEO_HOME = previous; });
+  writeProjectPlugins(value.root, { paseo: { package: "@astrosheep/keiyaku-plugin-paseo" } });
+  const diagnostics: string[] = [];
+  const runtime = await pluginRuntime({
+    world: await World.at(value.root), settings: await settings({ root: value.root, home: value.home }),
+    reportDiagnostic: (message) => { diagnostics.push(message); },
+  });
+  const start = performance.now();
+  await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/test/1", turnSequence: 1 });
+  assert.ok(performance.now() - start < 4000, "missing instance fails quickly");
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0] ?? "", /plugin paseo signal:.*Daemon is not running/u);
+  assert.doesNotMatch(diagnostics[0] ?? "", /Cannot find|activation/u);
+  assert.equal(existsSync(join(value.root, "node_modules")), false);
+});
+
 test("completed plugin emissions leave no timeout keeping their process alive", (context) => {
   const value = fixture();
   context.after(value.close);
