@@ -100,30 +100,12 @@ function checkoutBehindRows(path: string, target: string, columns: number): read
   return lines;
 }
 
-function lagRows(lag: ReconciliationLag, columns: number): readonly string[] {
+function lagRows(
+  lag: Extract<ReconciliationLag, { kind: "worktree-hook-failed" | "contract-file-failed" | "reconcile-failed" }>,
+  columns: number,
+): readonly string[] {
   const lines: string[] = [];
-  if (lag.kind === "worktree-retained") {
-    receiptRow(lines, "!", "lag", [{ text: "worktree retained" }, { text: lag.path, opaque: true }], columns);
-  } else if (lag.kind === "worktree-follow-retained") {
-    receiptRow(
-      lines,
-      "!",
-      "lag",
-      [
-        { text: "worktree follow retained" },
-        { text: "·" },
-        { text: lag.reason.replaceAll("-", " ") },
-        { text: "·" },
-        { text: lag.path, opaque: true },
-      ],
-      columns,
-    );
-  } else if (lag.kind === "unsealed-bytes") {
-    receiptRow(lines, "!", "lag", [{ text: "unsealed bytes" }, { text: lag.path, opaque: true }], columns);
-  } else if (lag.kind === "target-checkout-retained") {
-    pushBlock(lines, checkoutBehindRows(lag.path, lag.target, columns));
-    receiptPayload(lines, "reason", lag.diagnostic);
-  } else if (lag.kind === "worktree-hook-failed") {
+  if (lag.kind === "worktree-hook-failed") {
     receiptRow(
       lines,
       "!",
@@ -234,34 +216,12 @@ function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readon
   return lines;
 }
 
-function pushBlock(lines: string[], block: readonly string[]): void {
-  if (block.length === 0) return;
-  lines.push(...block);
-}
-
-function acceptedRecord(
-  result:
-    | Accepted<BindOutcome>
-    | Accepted<AmendOutcome>
-    | Accepted<DeliverOutcome>
-    | Accepted<ReviewOutcome>
-    | Accepted<ArcOutcome>
-    | Accepted<AbandonOutcome>,
-  columns: number,
-): readonly string[] {
-  const record: string[] = [];
-  const recoverySnapshot = effectRecoverySnapshot(result.effects);
-  if (recoverySnapshot !== undefined)
-    receiptRow(record, " ", "recovery snapshot", [{ text: recoverySnapshot, opaque: true }], columns);
-  return record;
-}
-
 function acceptedLagRows(result: AcceptedContractOutcome, columns: number): readonly string[] {
   const obligations: string[] = [];
   // A checkout this invocation's own follow could not carry is loud; the same arm's reconciliation lag
   // is pre-existing residue and stays in the typed result only.
   for (const checkout of effectRetainedCheckouts(result.effects) ?? []) {
-    pushBlock(obligations, checkoutBehindRows(checkout.path, checkout.target, columns));
+    obligations.push(...checkoutBehindRows(checkout.path, checkout.target, columns));
   }
   for (const { contract, lag } of effectLags(result.effects)) {
     if (
@@ -273,15 +233,15 @@ function acceptedLagRows(result: AcceptedContractOutcome, columns: number): read
       continue;
     if (contract !== result.contract)
       receiptRow(obligations, "!", "lag owner", [{ text: contract, opaque: true }], columns);
-    pushBlock(obligations, lagRows(lag, columns));
+    obligations.push(...lagRows(lag, columns));
   }
   for (const { contract, lag } of effectSettlementLags(result.effects)) {
     if (contract !== result.contract)
       receiptRow(obligations, "!", "settlement owner", [{ text: contract, opaque: true }], columns);
-    pushBlock(obligations, settlementLagRows(lag, columns));
+    obligations.push(...settlementLagRows(lag, columns));
   }
-  pushBlock(obligations, executionCleanupLines(effectCleanup(result.effects), columns, result.contract));
-  pushBlock(obligations, executionStopLines(effectExecutionStops(result.effects), columns));
+  obligations.push(...executionCleanupLines(effectCleanup(result.effects), columns, result.contract));
+  obligations.push(...executionStopLines(effectExecutionStops(result.effects), columns));
   return obligations;
 }
 
@@ -291,7 +251,7 @@ function acceptedDeviations(
   color: boolean,
 ): readonly string[] {
   const deviations: string[] = [];
-  if (result.value.overlaps !== undefined) pushBlock(deviations, overlapRows(result.value.overlaps, color));
+  if (result.value.overlaps !== undefined) deviations.push(...overlapRows(result.value.overlaps, color));
   if (result.value.overlapFailure !== undefined) {
     receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
     receiptPayload(deviations, "reason", result.value.overlapFailure);
@@ -299,17 +259,13 @@ function acceptedDeviations(
   return deviations;
 }
 
-function recordBlock(
-  result:
-    | Accepted<BindOutcome>
-    | Accepted<AmendOutcome>
-    | Accepted<DeliverOutcome>
-    | Accepted<ReviewOutcome>
-    | Accepted<ArcOutcome>
-    | Accepted<AbandonOutcome>,
-  columns: number,
-): readonly string[] {
-  const rows = [...acceptedRecord(result, columns), ...acceptedLagRows(result, columns)];
+/** Evidence handles stay in JSON and history; ordinary receipt text carries only outstanding obligations. */
+function recordBlock(result: AcceptedContractOutcome, columns: number): readonly string[] {
+  const rows: string[] = [];
+  const recoverySnapshot = effectRecoverySnapshot(result.effects);
+  if (recoverySnapshot !== undefined)
+    receiptRow(rows, " ", "recovery snapshot", [{ text: recoverySnapshot, opaque: true }], columns);
+  rows.push(...acceptedLagRows(result, columns));
   return rows;
 }
 
@@ -423,19 +379,6 @@ function completedPlacementLines(
   // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
   receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
   return lines;
-}
-
-/** Evidence handles stay in JSON and history; ordinary receipt text carries only outstanding obligations. */
-function obligationLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome>,
-  columns: number,
-): readonly string[] {
-  const rows: string[] = [];
-  const recoverySnapshot = effectRecoverySnapshot(result.effects);
-  if (recoverySnapshot !== undefined)
-    receiptRow(rows, " ", "recovery snapshot", [{ text: recoverySnapshot, opaque: true }], columns);
-  rows.push(...acceptedLagRows(result, columns));
-  return rows;
 }
 
 function movementLines(result: Accepted<DeliverOutcome>, columns: number): readonly string[] {
@@ -600,7 +543,7 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
     lines.push(...stopLines(result.value.placement, columns, result.contract));
   lines.push(
     ...continuationLines(result, columns),
-    ...(complete ? obligationLines(result, columns) : recordBlock(result, columns)),
+    ...recordBlock(result, columns),
     ...worktreeRetirementLines(result, columns),
     ...gatesAwaitLines(result.value.placement),
   );
@@ -617,7 +560,7 @@ function renderAcceptedReview(result: Accepted<ReviewOutcome>, columns: number):
     lines.push(...stopLines(result.value.placement, columns, result.contract));
   }
   lines.push(...continuationLines(result, columns));
-  lines.push(...obligationLines(result, columns));
+  lines.push(...recordBlock(result, columns));
   lines.push(...worktreeRetirementLines(result, columns));
   lines.push(...gatesAwaitLines(result.value.placement));
   return lines.join("\n");

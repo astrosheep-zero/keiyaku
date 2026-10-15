@@ -1,6 +1,6 @@
 import { parseAkuId } from "../../akuma/identity.js";
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
-import { lifecycleWord, shortGitId } from "./contract-observation.js";
+import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
 import { receiptPayload } from "./receipt.js";
 import { renderOpaqueBlock, DEFAULT_CLI_COLUMNS } from "./terminal.js";
 
@@ -131,17 +131,13 @@ function eventKind(event: ContractHistoryEvent): string {
   return event.source === "journal" ? event.fact.kind : "dispatch";
 }
 
-function gateNoun(gate: string): string {
-  return gate === "reviewed" ? "review" : gate === "verified" ? "verification" : gate;
-}
-
 function mark(verdict: "satisfied" | "unsatisfied"): string {
   return verdict === "satisfied" ? "✓" : "×";
 }
 
 function bindLine(bind: Extract<Fact, { kind: "bind" }>, dispatch: ContractHistoryEvent | undefined): string {
   const target = bind.data.coordinates.target?.replace(/^refs\/heads\//u, "") ?? "targetless";
-  const gates = bind.data.terms.gates.map(gateNoun);
+  const gates = bind.data.terms.gates.map(gateDisplayName);
   const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
   let alias = "";
   if (dispatch?.source === "dispatch") {
@@ -205,7 +201,7 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
       ];
     }
     case "attestation":
-      return [`${clock(first)} ${mark(fact.data.verdict)} ${gateNoun(fact.data.gate)}${evidenceSuffix()}`];
+      return [`${clock(first)} ${mark(fact.data.verdict)} ${gateDisplayName(fact.data.gate)}${evidenceSuffix()}`];
     case "amend": {
       const changed = [fact.data.gates.length > 0 ? "gates" : "", fact.data.after.length > 0 ? "after" : ""]
         .filter((value) => value.length > 0)

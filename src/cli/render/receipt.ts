@@ -1,5 +1,6 @@
 import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
 import type { PlacementStop, VerificationStop } from "../../index.js";
+import { gateDisplayName } from "./contract-observation.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -108,13 +109,6 @@ function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: numbe
   return lines;
 }
 
-/** Requirement names speak as plain event nouns; the "gate" class word never prints on a receipt. */
-function eventNoun(gate: string): string {
-  if (gate === "reviewed") return "review";
-  if (gate === "verified") return "verification";
-  return gate;
-}
-
 /** Only a recorded unsatisfied verdict alarms; missing and stale requirements fold into the await line. */
 function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
   if (!("refusal" in stop) || stop.refusal?.kind !== "gates-unsatisfied") return [];
@@ -125,7 +119,7 @@ function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number):
     receiptRow(
       lines,
       "!",
-      eventNoun(gate),
+      gateDisplayName(gate),
       [{ text: `· ${current.verdict}` }, { text: `· at ${current.at}` }],
       columns,
     );
@@ -144,7 +138,7 @@ export function gatesAwaitLines(placement: VerificationStop | PlacementStop | un
     return [];
   const events = placement.refusal.unmet
     .filter((report) => report.current.kind !== "attested")
-    .map((report) => eventNoun(report.gate));
+    .map((report) => gateDisplayName(report.gate));
   if (events.length === 0) return [];
   return [`⧗ awaiting ${events.length > 3 ? `${events.length} gates` : events.join(", ")}`];
 }
