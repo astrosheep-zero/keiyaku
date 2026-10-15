@@ -15,6 +15,21 @@ that explicit direct-parent channel once; public inputs never carry routes and
 the parent serves requests with forced-local composition. There is no second
 public verb, generic messaging surface, or multi-hop forwarding.
 
+A persistent native execution may retain one stable direct-parent entry instead
+of a disposable channel coordinate. Only the current Body holding the leash
+publishes that entry, naming its actual disposable channel, and clears it when
+the pump closes. Recovery under that same leash removes stale transport; the
+entry is ephemeral discovery, never request admission or durable authority.
+Private process composition resolves the entry asynchronously once and captures
+the resulting channel for its entire execution context. A long-lived caller
+must explicitly recompose to reach a successor Body. Missing or malformed entry
+refuses composition; channel loss after composition keeps the ordinary unknown
+transport outcome. Neither path re-resolves in flight, replays an operation,
+falls back to local execution, or installs a daemon. Existing explicit direct
+channels retain their meaning. Declaring both routes or an invalid or empty route
+refuses composition rather than selecting precedence. Discovery retains cancellation
+and the native failure cause; it creates no Heart admission or caller authority.
+
 Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
 execution carries only request-service facts and never transports product capabilities.
 Forwarded verbs carry their flags verbatim; a flag dropped in transport is a product bug, not
@@ -65,7 +80,16 @@ A reserved request settles only from child Soul, Seal, or current leash evidence
 
 The live pump exists only while its parent Body holds the leash. Completion,
 control, or Heart loss closes admission, drains in-flight service to terminal
-Heart settlement, then disposes the channel. Receipt projection follows durable
+Heart settlement, then disposes the channel. Closure withdraws discovery before
+waiting for service, but withdrawal failure cannot skip truthful drain or channel
+disposal and remains visible. Repeated closure shares the original outcome and
+cannot withdraw a successor's publication. Successor publication waits for prior
+custody and drain to end. Leash-owned recovery clears stale discovery without
+servicing its old bytes. Confirmed World reset includes this recognized transport
+custody before removing Heart, refusing nonregular custody and preserving unknown
+bytes under [world.md](world.md).
+
+Receipt projection follows durable
 settlement; a missing caller cannot reverse it. Caller cancellation before
 request publication remains cancellation. Cancellation after durable
 publication, or losing the ephemeral channel before a receipt, is a

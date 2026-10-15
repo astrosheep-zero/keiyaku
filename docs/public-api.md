@@ -16,7 +16,9 @@ presents public handles and results. It owns neither durable authority nor a
 transport-specific result model. Local and one-hop forwarded invocation return
 the same public value; forwarding cannot recurse or establish an ambient route.
 Operation inputs do not carry routing, and construction captures one immutable
-execution channel.
+execution channel. Private process composition may asynchronously discover that
+channel through the stable entry owned by [akuma-requests.md](akuma-requests.md);
+public construction stays local, synchronous, and free of filesystem observation.
 
 Each crossing value has one structural declaration at its coherent domain owner.
 Library composes those declarations at caller and process boundaries; trusted

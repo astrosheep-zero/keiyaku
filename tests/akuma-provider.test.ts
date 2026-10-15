@@ -2966,6 +2966,7 @@ test("Codex native fork receives an isolated child environment", async () => {
     PASEO_AGENT_ID: "parent-paseo",
     SQUARE_PARTICIPANT_NAME: "Parent",
     AKUMA_REQUESTS: "/parent/requests",
+    AKUMA_REQUESTS_ENTRY: "/parent/request-entry.json",
   } as const;
   const parentKeys = Object.keys(parentHarness) as Array<keyof typeof parentHarness>;
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-fork-environment-"));

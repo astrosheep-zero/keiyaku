@@ -70,6 +70,9 @@ than any ambient directory.
 
 In a declared direct-parent request channel, the CLI forwards only the
 caller-selected operation and the information needed to execute it locally.
+A stable request entry is resolved asynchronously once inside the invocation's
+failure and cancellation boundary before operations begin; its actual channel
+is then pinned for the invocation under [akuma-requests.md](akuma-requests.md).
 The parent reconstructs local custody and returns the ordinary public result;
 forwarding does not create another delivery, review, audit, or Task workflow.
 

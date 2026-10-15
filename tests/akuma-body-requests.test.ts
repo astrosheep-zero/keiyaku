@@ -35,10 +35,10 @@ import {
 } from "../src/akuma/request-wire.js";
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
-import { AKUMA_REQUESTS_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENTRY_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
 import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
 import { selectionSeam, tellAkumaOn, waitAkumaOn } from "../src/library/selection.js";
-import { cliJson } from "./support/cli-fixtures.js";
+import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import {
@@ -67,11 +67,11 @@ import {
 } from "../src/core/facts/types.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Keiyaku, Repo } from "../src/index.js";
-import { bodyRequestExecution } from "../src/akuma/requests.js";
+import { bodyRequestExecution, executionForEnvironment } from "../src/akuma/requests.js";
 import { composeContractLibrary } from "../src/library/contract-composition.js";
 // File-scope: git fixture teardown binds to this file, and both repository tests share its template.
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
-import { Tasks } from "../src/task/index.js";
+import { Tasks, tasksWithExecution } from "../src/task/index.js";
 import {
   taskMutationRequestCommand,
   taskMutationRequestProtocol,
@@ -657,6 +657,8 @@ test("request pump propagates permission errors while reading an enumerated requ
     await writeFile(requestPath, "not read\n");
     await failed;
     await assert.rejects(pump.close(), (error: unknown) => (error as NodeJS.ErrnoException).code === "EACCES");
+    assert.equal(existsSync(pump.entry), false);
+    assert.equal(existsSync(pump.directory), false);
     closed = true;
   } finally {
     if (!closed) await pump.close().catch(() => undefined);
@@ -1396,7 +1398,58 @@ test("an executor throw settles its begun request unproven", async () => {
   }
 });
 
-test("completion fences admission but drains a returned delivery reference", async () => {
+test("stable entry succession serves fresh Task contexts without retargeting pinned callers", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-request-entry-service-"));
+  const parent = await born(root, "parent", "11111111", ["task.add"]);
+  let leash = (await HeldAkumaLeash.try(parent.paths))!;
+  const served: number[] = [];
+  const open = (bodySequence: number) => BodyRequestPump.open({
+    paths: parent.paths,
+    allowed: parent.soul.allowed,
+    bodySequence,
+    now: () => "2026-08-18T00:00:01.000Z",
+    signal: new AbortController().signal,
+    commands: { "task.add": eraseRequestCommand(taskMutationRequestCommand("task.add", {
+      ...unusedTaskPort,
+      add: async ({ world, options }) => {
+        served.push(bodySequence);
+        return await Tasks.of(world).add(options);
+      },
+    })) },
+  });
+  const firstBody = await leash.recordBody(parent.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
+  const first = await open(firstBody.sequence);
+  let second: BodyRequestPump | undefined;
+  try {
+    const environment = { [AKUMA_REQUESTS_ENTRY_ENV]: first.entry };
+    const old = tasksWithExecution(root, await executionForEnvironment(environment));
+    assert.equal((await old.add({ title: "First Body" })).kind, "accepted");
+    await first.close();
+    assert.equal(existsSync(first.entry), false);
+    await assert.rejects(executionForEnvironment(environment), /no current request channel/u);
+    leash.release();
+    leash = (await HeldAkumaLeash.try(parent.paths))!;
+    const secondBody = await leash.recordBody(parent.paths, { leashTakenAt: "2026-08-18T00:00:02.000Z" });
+    second = await open(secondBody.sequence);
+    assert.equal(second.entry, first.entry);
+    await first.close();
+    const fresh = tasksWithExecution(root, await executionForEnvironment(environment));
+    assert.equal((await fresh.add({ title: "Successor Body" })).kind, "accepted");
+    await assert.rejects(old.add({ title: "Never local or replayed" }), (error: unknown) =>
+      error instanceof AkumaBodyRequestError && error.outcome === "unknown");
+    assert.deepEqual(served, [1, 2]);
+    const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+    assert.equal(board.kind, "accepted");
+    if (board.kind === "accepted")
+      assert.deepEqual(board.value.rows.map((row) => row.title).sort(), ["First Body", "Successor Body"]);
+  } finally {
+    await first.close();
+    await second?.close();
+    leash.release();
+  }
+});
+
+test("unpublish failure still fences admission, drains the owner reference and disposes the channel", async (context) => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-drain-")));
   const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
   let started!: () => void;
@@ -1426,10 +1479,30 @@ test("completion fences admission but drains a returned delivery reference", asy
       materializeConflict: false,
     });
     await executorStarted;
-    pump.stopAdmission();
+    const unpublish = promiseBarrier<void>();
+    const failure = Object.assign(new Error("entry unpublish denied"), { code: "EACCES" });
+    const originalRm = fsPromises.rm;
+    const mock = context.mock.method(fsPromises, "rm", async (...args: Parameters<typeof fsPromises.rm>) => {
+      if (String(args[0]) === pump.entry) {
+        unpublish.resolve();
+        throw failure;
+      }
+      return originalRm(...args);
+    });
+    syncBuiltinESMExports();
     const closing = pump.close();
+    const closed = settlementProbe(closing, () => "closed");
+    await unpublish.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(closed(), null, "unpublish failure must still await owner settlement");
+    assert.equal((await readRequest(parent.paths, id))?.state, "begun");
+    assert.equal(pump.close(), closing, "repeated close shares one closure");
     release(acceptedContract("drained", "deliver", "kei/drained"));
-    await closing;
+    await assert.rejects(closing, (error: unknown) => error === failure);
+    assert.equal(existsSync(pump.directory), false);
+    mock.mock.restore();
+    syncBuiltinESMExports();
+    await assert.rejects(pump.close(), (error: unknown) => error === failure);
     // The receipt may reach the caller before transport disposal; only the durable
     // served reference is guaranteed after close drains the in-flight operation.
     await request.catch((error: unknown) => {
@@ -1444,7 +1517,10 @@ test("completion fences admission but drains a returned delivery reference", asy
       deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA3",
     });
   } finally {
-    await pump.close();
+    release(acceptedContract("drained", "deliver", "kei/drained"));
+    await pump.close().catch(() => undefined);
+    context.mock.restoreAll();
+    syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1863,6 +1939,40 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
   }
 });
 
+test("CLI stable entry failures render normally and retire cancellation listeners", async (context) => {
+  const directory = temporaryDirectory(context, "keiyaku-cli-entry-failure-");
+  const entry = join(directory, "missing.json");
+  const listeners = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+  const result = await runCli(["status"], { cwd: directory, environment: { [AKUMA_REQUESTS_ENTRY_ENV]: entry } });
+  assert.equal(result.exit, 3);
+  assert.match(result.stderr, /stable request entry unavailable: no current request channel/u);
+  assert.ok(result.stderr.includes(entry));
+  assert.deepEqual([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")], listeners);
+  await writeFile(entry, "{broken");
+  const malformed = await runCli(["status"], { cwd: directory, environment: { [AKUMA_REQUESTS_ENTRY_ENV]: entry } });
+  assert.equal(malformed.exit, 3);
+  assert.match(malformed.stderr, /stable request entry malformed/u);
+  assert.ok(malformed.stderr.includes(entry));
+  assert.deepEqual([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")], listeners);
+  const controller = new AbortController();
+  const originalRead = fsPromises.readFile;
+  const mock = context.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
+    if (String(args[0]) === entry) controller.abort(new Error("cancel entry discovery"));
+    return originalRead(...args);
+  });
+  syncBuiltinESMExports();
+  const cancelled = await runCli(["status"], {
+    cwd: directory,
+    environment: { [AKUMA_REQUESTS_ENTRY_ENV]: entry },
+    signal: controller.signal,
+  });
+  assert.equal(cancelled.exit, 3);
+  mock.mock.restore();
+  syncBuiltinESMExports();
+  assert.match(cancelled.stderr, /cancel entry discovery/u);
+  assert.deepEqual([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")], listeners);
+});
+
 test("the waited-Tell facade forwards to a serving parent when the caller World lacks the target", async () => {
   const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-facade-")));
   const callerRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-caller-")));
@@ -1890,7 +2000,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
   const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot, console.error));
   try {
     const pending = cliJson<AkumaAskResult>(["-C", callerRoot, "ask", target.id, "--wait", "10s", "facade delayed"], {
-      environment: { [AKUMA_REQUESTS_ENV]: pump.directory },
+      environment: { [AKUMA_REQUESTS_ENTRY_ENV]: pump.entry },
       readStdin: async () => "",
     });
     await started.promise;

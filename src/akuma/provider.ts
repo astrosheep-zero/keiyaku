@@ -5,7 +5,7 @@ import type { ProviderOptions } from "./provider-recipe.js";
 export type { ResumeCoordinate } from "./coordinate.js";
 export { decodeResumeCoordinate, encodeResumeCoordinate } from "./coordinate.js";
 
-export { AKUMA_REQUESTS_ENV } from "./providers/execution-environment.js";
+export { AKUMA_REQUESTS_ENV, AKUMA_REQUESTS_ENTRY_ENV } from "./providers/execution-environment.js";
 
 export const AGENT_EVENT_TEXT_LIMIT = 16_384;
 export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
@@ -457,7 +457,7 @@ export type DriveInput = Readonly<{
   cwd: string;
   options: ProviderOptions;
   signal: AbortSignal;
-  requests: Readonly<{ dir: string }>;
+  requests: Readonly<{ dir: string; entry?: string }>;
   schemaJson?: string;
 }>;
 

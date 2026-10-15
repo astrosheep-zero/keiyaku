@@ -216,6 +216,8 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     writeFileSync(allocated.paths.log, "stdio\n");
     writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");
     writeFileSync(`${allocated.paths.heart}-shm`, "shm\n");
+    const entry = join(allocated.paths.directory, "request-entry.json");
+    writeFileSync(entry, JSON.stringify({ directory: join(allocated.paths.requests, "1") }));
     mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
@@ -232,6 +234,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.equal(existsSync(allocated.paths.log), false);
     assert.equal(existsSync(`${allocated.paths.heart}-wal`), false);
     assert.equal(existsSync(`${allocated.paths.heart}-shm`), false);
+    assert.equal(existsSync(entry), false);
     assert.equal(existsSync(allocated.paths.requests), false);
     assert.equal(existsSync(allocated.paths.directory), false);
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
@@ -322,12 +325,44 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
   }
 });
 
+test("confirmed nuke refuses a symlink at known request-entry custody before deleting Heart", async () => {
+  const world = await testWorld();
+  try {
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "abcd5678" });
+    await initializeHeart(allocated.paths);
+    const entry = join(allocated.paths.directory, "request-entry.json");
+    const unknown = join(world, "unrelated.json");
+    writeFileSync(unknown, "do not adopt or follow\n");
+    symlinkSync(unknown, entry);
+    const stopped = await nuke({ world, confirm: world });
+    assert.equal(stopped.kind, "accepted");
+    assert.deepEqual(stopped.effects, [{
+      kind: "reset-owner-stopped", world, owner: "akuma",
+      diagnostic: `Akuma custody is not a regular file: ${entry}`,
+    }]);
+    assert.deepEqual(stopped.pending, [{ surface: "reset", required: true }]);
+    assert.equal(existsSync(allocated.paths.heart), true);
+    assert.equal(readFileSync(entry, "utf8"), "do not adopt or follow\n");
+    rmSync(entry);
+    writeFileSync(entry, "stale publication\n");
+    const retried = await nuke({ world, confirm: world });
+    assert.deepEqual(retried.pending, []);
+    assert.equal(existsSync(entry), false);
+    assert.equal(existsSync(allocated.paths.heart), false);
+    assert.equal(readFileSync(unknown, "utf8"), "do not adopt or follow\n");
+  } finally {
+    rmSync(world, { recursive: true, force: true });
+  }
+});
+
 test("confirmed nuke preserves unknown descendants inside the request channel", async () => {
   const world = await testWorld();
   try {
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "feedface" });
     await initializeHeart(allocated.paths);
     const sequence = join(allocated.paths.requests, "1");
+    const entry = join(allocated.paths.directory, "request-entry.json");
+    writeFileSync(entry, JSON.stringify({ directory: sequence }));
     mkdirSync(sequence, { recursive: true });
     writeFileSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
@@ -362,6 +397,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
     assert.equal(readFileSync(requestLink, "utf8"), "keep-request-unknown\n");
     assert.equal(readFileSync(join(allocated.paths.requests, "not-a-sequence.request.json"), "utf8"), "sibling\n");
     assert.equal(readFileSync(join(allocated.paths.requests, "other-dir", "inside.bin"), "utf8"), "inside\n");
+    assert.equal(existsSync(entry), false);
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
     assert.equal(existsSync(sequence), true);

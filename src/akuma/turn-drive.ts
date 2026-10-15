@@ -212,7 +212,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     cwd,
     options,
     signal: driveController.signal,
-    requests: { dir: requests.directory },
+    requests: { dir: requests.directory, entry: requests.entry },
     ...(schemaJson === undefined ? {} : { schemaJson }),
   };
   const attempt =

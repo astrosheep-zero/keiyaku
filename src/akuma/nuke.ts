@@ -103,6 +103,7 @@ async function removeKnownRequestChannel(path: string): Promise<void> {
 async function removeAkumaEntry(entry: NukeAkumaEntry): Promise<void> {
   await removeKnownRequestChannel(entry.paths.requests);
   for (const path of [
+    join(entry.paths.directory, "request-entry.json"),
     entry.paths.log,
     `${entry.paths.heart}-wal`,
     `${entry.paths.heart}-shm`,

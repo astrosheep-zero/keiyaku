@@ -1,6 +1,5 @@
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AKUMA_REQUESTS_ENV } from "../akuma/provider.js";
-import { bodyRequestExecution, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
+import { executionForEnvironment, type LibraryExecution } from "../akuma/requests.js";
 import { AkumaArchetypeError, type ActorId } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
@@ -63,12 +62,6 @@ function processStdin(): Promise<string> {
 function memoized(reader: () => Promise<string>): () => Promise<string> {
   let value: Promise<string> | undefined;
   return () => (value ??= reader());
-}
-
-function executionForEnvironment(environment: NodeJS.ProcessEnv): LibraryExecution {
-  return environment[AKUMA_REQUESTS_ENV] === undefined
-    ? localExecutionContext()
-    : bodyRequestExecution({ directory: environment[AKUMA_REQUESTS_ENV] });
 }
 
 function homeFromEnvironment(environment: NodeJS.ProcessEnv): string | undefined {
@@ -269,16 +262,16 @@ export async function runCliCommand(invocation: ParsedCommandInvocation, input: 
   const home = homeFromEnvironment(environment);
   const cancellation = cliCancellation(input.signal);
   let progress: Promise<ExecutionProgressDriver> | undefined;
-  const runtime: CliRuntime = {
-    environment,
-    execution: executionForEnvironment(environment),
-    ...(home === undefined ? {} : { home }),
-    readStdin: memoized(input.readStdin ?? processStdin),
-    signal: cancellation.signal,
-    progress: () => (progress ??= writeExecutionProgress()),
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-  };
   try {
+    const runtime: CliRuntime = {
+      environment,
+      execution: await executionForEnvironment(environment, cancellation.signal),
+      ...(home === undefined ? {} : { home }),
+      readStdin: memoized(input.readStdin ?? processStdin),
+      signal: cancellation.signal,
+      progress: () => (progress ??= writeExecutionProgress()),
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    };
     if (command.command === "install") return await runInstall(command, environment);
     await admitBindInput(command, invocation, runtime, input.cwd ?? process.cwd());
     const coordinates = await resolveInvocationCoordinates(

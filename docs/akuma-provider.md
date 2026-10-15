@@ -100,8 +100,11 @@ admitted model and effort choices before the first prompt of each new or
 resumed native session. Missing choices and unconfirmed selections fail that
 attempt rather than silently running with the agent's default.
 
-Each drive receives the one Body Request channel as provider transport setup.
-This does not alter Library routing or permit recursive service. New provider
+Each drive receives the one Body Request channel and its optional stable entry
+as provider transport setup. Persistent native environments may retain the
+stable entry under [akuma-requests.md](akuma-requests.md); other providers retain
+the direct channel. This does not alter Library routing or permit recursive
+service. New provider
 behavior must fit an existing provider-neutral capability or receive a new owner
 ruling; there is no dialect passthrough, generic extension bag, or second
 provider protocol.

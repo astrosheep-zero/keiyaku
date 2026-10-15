@@ -13,7 +13,7 @@ import {
 } from "./heart/index.js";
 import { pathsForAkuId, worldRootForAkumaPaths, type AkuId, type AkumaPaths } from "./identity.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
-import { decodeEnvelope, type RequestEnvelope } from "./request-wire.js";
+import { atomicJson, decodeEnvelope, type RequestEnvelope } from "./request-wire.js";
 
 export type PumpInput = Readonly<{
   paths: AkumaPaths;
@@ -38,6 +38,7 @@ const POLL_MS = 100;
 
 export class BodyRequestPump {
   readonly directory: string;
+  readonly entry: string;
   readonly failure: Promise<never>;
   private readonly closeSignal = new AbortController();
   private readonly executionSignal = new AbortController();
@@ -45,12 +46,14 @@ export class BodyRequestPump {
   private readonly running: Promise<void>;
   private readonly cancelBody: () => void;
   private admissionClosed = false;
+  private closure: Promise<void> | undefined;
 
   protected constructor(
     private readonly input: PumpInput,
     private readonly serveClaim: ServeClaim,
   ) {
     this.directory = join(input.paths.directory, "requests", String(input.bodySequence));
+    this.entry = join(input.paths.directory, "request-entry.json");
     this.cancelBody = () => {
       this.stopAdmission();
       if (!this.executionSignal.signal.aborted) this.executionSignal.abort(input.signal.reason);
@@ -65,7 +68,15 @@ export class BodyRequestPump {
   }
 
   static async openWithService(input: PumpInput, serveClaim: ServeClaim): Promise<BodyRequestPump> {
-    await mkdir(join(input.paths.directory, "requests", String(input.bodySequence)), { recursive: true });
+    input.signal.throwIfAborted();
+    const directory = join(input.paths.directory, "requests", String(input.bodySequence));
+    await mkdir(directory, { recursive: true });
+    try {
+      await atomicJson(join(input.paths.directory, "request-entry.json"), { directory }, input.signal);
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
     return new BodyRequestPump(input, serveClaim);
   }
 
@@ -111,11 +122,19 @@ export class BodyRequestPump {
     }
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    return (this.closure ??= this.closeTransport());
+  }
+
+  private async closeTransport(): Promise<void> {
     this.stopAdmission();
     if (!this.executionSignal.signal.aborted) this.executionSignal.abort(new Error("Body request pump closed"));
     try {
-      await this.running;
+      try {
+        await rm(this.entry, { force: true });
+      } finally {
+        await this.running;
+      }
     } finally {
       this.input.signal.removeEventListener("abort", this.cancelBody);
       await rm(this.directory, { recursive: true, force: true });
@@ -129,6 +148,7 @@ export class BodyRequestPump {
 }
 
 export async function clearBodyRequestTransport(paths: AkumaPaths): Promise<void> {
+  await rm(join(paths.directory, "request-entry.json"), { force: true });
   await rm(join(paths.directory, "requests"), { recursive: true, force: true });
 }
 

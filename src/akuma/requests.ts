@@ -1,4 +1,6 @@
+import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { AKUMA_REQUESTS_ENTRY_ENV, AKUMA_REQUESTS_ENV } from "./providers/execution-environment.js";
 
 export { AkumaBodyRequestError, requestBodyCommand } from "./request-rendezvous.js";
 
@@ -43,6 +45,40 @@ export function bodyRequestExecution(input: Readonly<{ directory: string }>): Li
     return bodyRequestExecutionContext(value.directory);
   } catch (error) {
     throw new TypeError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** Resolve persistent transport once at private process composition, never during an operation. */
+export async function executionForEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+  signal?: AbortSignal,
+): Promise<LibraryExecution> {
+  signal?.throwIfAborted();
+  const directory = environment[AKUMA_REQUESTS_ENV];
+  const entry = environment[AKUMA_REQUESTS_ENTRY_ENV];
+  if (entry === undefined)
+    return directory === undefined ? localExecutionContext() : bodyRequestExecution({ directory });
+  if (directory !== undefined) throw new TypeError("AKUMA_REQUESTS and AKUMA_REQUESTS_ENTRY are mutually exclusive");
+  if (!isAbsolute(entry) || resolve(entry) !== entry) {
+    throw new TypeError("AKUMA_REQUESTS_ENTRY must be an absolute normalized path");
+  }
+  let serialized: string;
+  try {
+    serialized = await readFile(entry, { encoding: "utf8", signal });
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw new Error(`Akuma stable request entry unavailable: no current request channel at ${entry}`, { cause: error });
+  }
+  signal?.throwIfAborted();
+  try {
+    const value = valueRecord(JSON.parse(serialized), "body request entry");
+    closed(value, ["directory"], "body request entry");
+    return bodyRequestExecution({ directory: value.directory as string });
+  } catch (error) {
+    throw new TypeError(
+      `Akuma stable request entry malformed at ${entry}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
 }
 

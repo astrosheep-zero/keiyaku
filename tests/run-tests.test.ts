@@ -24,6 +24,7 @@ test("test runner removes ambient Akuma requests and preserves unrelated environ
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
+      AKUMA_REQUESTS_ENTRY: resolve(root, ".keiyaku", "ambient-request-entry.json"),
       KEIYAKU_TEST_SENTINEL: sentinel,
     };
     // A deliberately nested runner must not inherit Node's recursion guard.

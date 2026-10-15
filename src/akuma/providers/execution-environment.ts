@@ -1,4 +1,5 @@
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
+export const AKUMA_REQUESTS_ENTRY_ENV = "AKUMA_REQUESTS_ENTRY";
 
 const PARENT_HARNESS_IDENTITY_KEYS = [
   "CLAUDE_CODE_SESSION_ID",
@@ -33,6 +34,7 @@ export function akumaExecutionEnvironment(
   for (const key of PARENT_HARNESS_IDENTITY_KEYS) delete environment[key];
   Object.assign(environment, preserved);
   delete environment[AKUMA_REQUESTS_ENV];
+  delete environment[AKUMA_REQUESTS_ENTRY_ENV];
   if (requests !== undefined) environment[AKUMA_REQUESTS_ENV] = requests;
   return environment;
 }

@@ -23,14 +23,14 @@ import {
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
+import { AKUMA_REQUESTS_ENV, AKUMA_REQUESTS_ENTRY_ENV } from "../src/akuma/provider.js";
 import {
   akumaCallRequestCommands,
   requestForwardedAkumaCall as requestBodyCall,
   type AkumaCallRequestChildLaunch,
 } from "../src/akuma/call-request.js";
-import { AkumaBodyRequestError, bodyRequestExecutionContext } from "../src/akuma/requests.js";
-import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
+import { AkumaBodyRequestError, bodyRequestExecutionContext, executionForEnvironment } from "../src/akuma/requests.js";
+import { BodyRequestPump, clearBodyRequestTransport, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { World } from "../src/world.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
@@ -94,6 +94,43 @@ async function openCallPump(
     signal: new AbortController().signal,
   });
 }
+
+test("private composition validates its one declared route without ambient fallback", async (context) => {
+  const directory = temporaryDirectory(context, "keiyaku-request-entry-input-");
+  const entry = join(directory, "entry.json");
+  const environment = { [AKUMA_REQUESTS_ENTRY_ENV]: entry };
+  assert.deepEqual((await executionForEnvironment({})).channel, { kind: "local" });
+  assert.deepEqual(await executionForEnvironment({ [AKUMA_REQUESTS_ENV]: directory }), bodyRequestExecutionContext(directory));
+  await assert.rejects(executionForEnvironment({ ...environment, [AKUMA_REQUESTS_ENV]: directory }), /mutually exclusive/u);
+  await assert.rejects(executionForEnvironment({ [AKUMA_REQUESTS_ENTRY_ENV]: "" }), /absolute normalized/u);
+  await assert.rejects(executionForEnvironment({ [AKUMA_REQUESTS_ENV]: "" }), /absolute normalized/u);
+  await assert.rejects(executionForEnvironment({ [AKUMA_REQUESTS_ENTRY_ENV]: `${directory}/../entry` }), /absolute normalized/u);
+  await assert.rejects(executionForEnvironment(environment), (error: unknown) =>
+    error instanceof Error && error.message.includes(entry) && (error.cause as NodeJS.ErrnoException).code === "ENOENT");
+  writeFileSync(entry, JSON.stringify({ directory: "relative" }));
+  await assert.rejects(executionForEnvironment(environment), /stable request entry malformed.*absolute normalized/u);
+  writeFileSync(entry, JSON.stringify({ directory, extra: true }));
+  await assert.rejects(executionForEnvironment(environment), /stable request entry malformed.*unknown field/u);
+  writeFileSync(entry, "{}");
+  await assert.rejects(executionForEnvironment(environment), /stable request entry malformed.*directory must be a string/u);
+});
+
+test("failed entry publication removes its disposable channel before propagating failure", async () => {
+  const value = await fixture();
+  const entry = join(value.parent.paths.directory, "request-entry.json");
+  const channel = join(value.parent.paths.requests, "1");
+  mkdirSync(entry);
+  writeFileSync(join(entry, "obstruction"), "not a publication\n");
+  try {
+    await assert.rejects(openCallPump(value, async () => assert.fail("publication failure must not serve")),
+      (error: unknown) => ["EISDIR", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? ""));
+    assert.equal(existsSync(channel), false);
+    assert.equal(existsSync(join(entry, "obstruction")), true);
+  } finally {
+    value.leash.release();
+    value.close();
+  }
+});
 
 test("cancelled publication returns born when Soul appears during termination behind a successor leash", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-publication-cancelled-soul-")));
@@ -821,6 +858,11 @@ test("a drive serves Body Requests through transport while Heart remains authori
 
 test("a new body settles old requests by observation without replay", async () => {
   const value = await fixture();
+  const entry = join(value.parent.paths.directory, "request-entry.json");
+  const staleChannel = join(value.parent.paths.requests, "1");
+  mkdirSync(staleChannel, { recursive: true });
+  writeFileSync(entry, JSON.stringify({ directory: staleChannel }));
+  writeFileSync(join(staleChannel, `${randomUUID()}.request.json`), "old transport\n");
   try {
     const admittedId = "00000000-0000-4000-8000-000000000011";
     await admitRequest(value.parent.paths, {
@@ -897,6 +939,9 @@ test("a new body settles old requests by observation without replay", async () =
     });
     await beginRequest(value.parent.paths, begunId);
     assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-09T00:00:06.000Z"), "settled");
+    await clearBodyRequestTransport(value.parent.paths);
+    assert.equal(existsSync(entry), false);
+    assert.equal(existsSync(staleChannel), false);
     assert.deepEqual(await readRequest(value.parent.paths, begunId), {
       id: begunId,
       requester: value.parent.id,
