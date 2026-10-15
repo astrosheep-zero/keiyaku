@@ -150,8 +150,10 @@ async function runCall(
 ): Promise<number> {
   const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-  const declaredCaller = executionChannel(input.execution).kind === "body-request"
-    ? undefined : await akumaCallerFromEnvironment(input.environment);
+  const declaredCaller =
+    executionChannel(input.execution).kind === "body-request"
+      ? undefined
+      : await akumaCallerFromEnvironment(input.environment);
   // Establish the selected World before preparing the submitting Square route.
   await World.at(input.path);
   const caller = akumas(input);

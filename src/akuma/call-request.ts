@@ -144,11 +144,12 @@ async function executeAkumaCall(
       refuse: async (diagnostic) => {
         await refuseRequest(paths, facts.id, diagnostic);
       },
-      spawn: async (launch) => await spawn({
-        ...launch,
-        ...(request.birthInitiator === undefined ? {} : { birthInitiator: request.birthInitiator }),
-        ...(request.contractId === undefined ? {} : { completion: { contractId: request.contractId } }),
-      }),
+      spawn: async (launch) =>
+        await spawn({
+          ...launch,
+          ...(request.birthInitiator === undefined ? {} : { birthInitiator: request.birthInitiator }),
+          ...(request.contractId === undefined ? {} : { completion: { contractId: request.contractId } }),
+        }),
       admitInitialTell,
     },
   });

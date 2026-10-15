@@ -423,9 +423,10 @@ async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
  */
 export async function executePreparedCall(input: PreparedCallInput): Promise<PreparedCallResult> {
   const { custody } = input;
-  const caller = custody.kind === "request"
-    ? { kind: "akuma" as const, world: custody.world, akuId: custody.parent.id }
-    : decodeAkumaCaller(input.caller);
+  const caller =
+    custody.kind === "request"
+      ? { kind: "akuma" as const, world: custody.world, akuId: custody.parent.id }
+      : decodeAkumaCaller(input.caller);
   let world: WorldRoot;
   if (custody.kind === "local") {
     world = custody.world;

@@ -132,7 +132,11 @@ async function takeLeash(paths: AkumaPaths, refuseIfHeld = false): Promise<HeldA
   }
 }
 
-async function bornSoul(launch: BodyLaunch, leash: HeldAkumaLeash, now: string): Promise<Readonly<{ soul: Soul; created: boolean }> | null> {
+async function bornSoul(
+  launch: BodyLaunch,
+  leash: HeldAkumaLeash,
+  now: string,
+): Promise<Readonly<{ soul: Soul; created: boolean }> | null> {
   const before = await readHeart(launch.paths);
   if (before.soul !== null) return { soul: before.soul, created: false };
   if (launch.seed === undefined) throw new Error("Akuma wake has no born soul");
@@ -731,7 +735,12 @@ export async function driveAkumaBody(
     bodySequence = body.sequence;
     if (prepared.created) {
       await emitPluginSignal(
-        { world, reportDiagnostic: (message) => { void recordPluginDiagnostic(launch.paths, "birth", message); } },
+        {
+          world,
+          reportDiagnostic: (message) => {
+            void recordPluginDiagnostic(launch.paths, "birth", message);
+          },
+        },
         {
           kind: "akuma.born",
           akumaId: prepared.soul.id,
