@@ -64,12 +64,14 @@ import {
   statusFacts,
   readStatusBatch,
   decodeTimelineBatch,
+  timelineDataVersion,
   type StatusFactInput,
   lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
   type ActivityFactSlice,
 } from "./timeline.js";
 import {
+  createHeartReader,
   isHeartAbsent,
   readSealFromLeash,
   recordPendingTell,
@@ -174,6 +176,43 @@ export async function readStatusFacts(
   signal?: AbortSignal,
 ): Promise<ActivitySlice["rows"]> {
   return await withReadOnlyHeart(paths, (heart) => statusFacts(heart, input), signal);
+}
+
+/** One live observation's current retained timeline, or a no-change witness. */
+export type TimelineRead =
+  | Readonly<{ changed: false }>
+  | Readonly<{ changed: true; born: boolean; slice: ActivityFactSlice }>;
+
+/**
+ * One operation-owned reader of the retained timeline. It keeps its read
+ * custody between observations, skips decoding when the same connection's
+ * change counter still names the observed snapshot, and renews that gate
+ * whenever a replaced Heart gives it a new connection.
+ */
+export function createTimelineReader(paths: AkumaPaths): Readonly<{
+  read(signal?: AbortSignal): Promise<TimelineRead>;
+  clear(): void;
+}> {
+  const reader = createHeartReader(paths);
+  let generation = -1;
+  let version: number | undefined;
+  return {
+    clear: reader.clear,
+    async read(signal?: AbortSignal): Promise<TimelineRead> {
+      // Publication follows COMMIT, so a failed read never leaves a memo behind.
+      return await reader.read((heart) => {
+        const current = reader.generation();
+        if (current !== generation) {
+          generation = current;
+          version = undefined;
+        }
+        const observed = timelineDataVersion(heart);
+        if (version !== undefined && observed === version) return { changed: false } as const;
+        version = observed;
+        return { changed: true as const, born: soulFact(heart) !== null, slice: activityFactSlice(heart) };
+      }, signal);
+    },
+  };
 }
 
 // Each query returns a fixed set of scalar columns; compare JSON columns as text.

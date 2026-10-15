@@ -89,6 +89,27 @@ the public history identity for a retained answered Turn. A fork accepts only
 that exact answered point. Pruned history remains honestly unavailable; public
 snapshots do not fabricate a cursor, result, or loss marker.
 
+A stream observes that same retained timeline continuously: the caller pulls
+complete bounded timeline windows, one at a time, instead of asking for a page.
+Each emission is the whole latest window through the existing history
+projection, never a delta, so a consumer reassembles nothing and owns no
+cursor. Its retention and loss evidence keeps the ordinary history meaning. An
+initial window always emits; later windows emit only when their content
+changes. Observation is pull-driven: the stream reads while its consumer pulls
+and retains nothing beyond the current window and one internal reader, so a
+slow consumer accumulates no backlog. Complete windows coalesce, and
+coalescing is not lossless delivery — intermediate states, and rows outside
+the window or pruned before observation, can be missed. The stream exposes no
+cadence, cursor, transport, or lifecycle configuration. Ending the observation
+— abort, an explicit return, or leaving a `for await` loop — releases its read
+custody and timers, whether it is waiting for a change or suspended after an
+emission. An end request never queues behind a pull that an idle timeline would
+not settle: it ends that pull and releases in the same turn. A hard read
+failure ends the stream with that error, and an unborn
+identity fails with the existing unborn refusal. `history` remains the
+paginated execution-history read, and `idle` and `wait` remain completion
+observation.
+
 ## Handles And Lifecycle Evidence
 
 Native selection or birth may capture an immutable host diagnostic observer

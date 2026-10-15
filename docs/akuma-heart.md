@@ -12,7 +12,10 @@ read observes one consistent snapshot; each mutation is one bounded owner
 transaction. An operation may reuse decoded facts and pure projections only
 when Heart's current observation proves their complete inputs equivalent.
 Such reuse never substitutes for fresh lifecycle or custody observation, never
-survives a failed read, and ends with the observing operation. These
+survives a failed read, and ends with the observing operation. A bounded observer
+may retain read resources between observations, but never a transaction or stale
+snapshot; removal or replacement of Heart invalidates that retained custody, and
+every observation still validates current authority. These
 implementation boundaries do not create synchronous public APIs, a daemon,
 a queue, or a persistent cache. Existing Heart custody is opened without
 creating it; only a true absence becomes absence. Corruption and unsupported

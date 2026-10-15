@@ -195,3 +195,14 @@ export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {
     highest: bounds.highest,
   };
 }
+
+/**
+ * SQLite's cross-connection change counter, sampled inside the read
+ * transaction. It identifies exactly the snapshot that transaction decodes: a
+ * commit from another connection during the read cannot be mistaken for this
+ * one and skipped, because the next transaction reports a new counter.
+ */
+export function timelineDataVersion(database: DatabaseSync): number {
+  const row = database.prepare("PRAGMA data_version").get() as { data_version?: number } | undefined;
+  return row?.data_version ?? 0;
+}

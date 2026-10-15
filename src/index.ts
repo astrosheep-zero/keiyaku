@@ -72,6 +72,7 @@ export type {
   AkumaIdleResult,
   AkumaSignalOptions,
   AkumaStatus,
+  AkumaStreamSnapshot,
   AkumaTellOptions,
   AkumaTellResult,
   AllowedAction,

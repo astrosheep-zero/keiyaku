@@ -280,7 +280,8 @@ export async function readWaitComplete(
 }
 
 export type WaitReason = "completed" | "deadline";
-const OBSERVATION_POLL_MS = 100;
+/** The one observation cadence public waiting and timeline streaming share. */
+export const OBSERVATION_POLL_MS = 100;
 
 /**
  * The one deadline-aware observation loop for public Akuma waiting.  It always

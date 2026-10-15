@@ -139,6 +139,67 @@ export async function withReadOnlyHeart<T>(
   }
 }
 
+export type HeartRead = <T>(body: (database: DatabaseSync) => T, signal?: AbortSignal) => Promise<T>;
+
+export type HeartReader = Readonly<{
+  read: HeartRead;
+  clear(): void;
+  /** Counts opened connections, so a caller's own reuse cannot survive a replaced Heart. */
+  generation(): number;
+}>;
+
+/**
+ * A bounded observer owns its connection between observations, never a
+ * transaction: each read settles the transaction it began, and a removed or
+ * replaced Heart invalidates the retained custody through file identity.
+ * Release never interrupts an executing read; it settles after the current
+ * observation, so a caller may release while a pull is still in flight.
+ */
+export function createHeartReader(paths: AkumaPaths): HeartReader {
+  let database: DatabaseSync | undefined;
+  let identity: Awaited<ReturnType<typeof lstat>> | undefined;
+  let tail: Promise<unknown> = Promise.resolve();
+  let opened = 0;
+  const release = (): void => {
+    const retained = database;
+    database = undefined;
+    identity = undefined;
+    try {
+      retained?.close();
+    } catch {
+      // A connection already released by its own failed read stays released.
+    }
+  };
+  const clear = (): void => {
+    tail = tail.then(release, release);
+  };
+  const read: HeartRead = (body, signal) => {
+    const pending = tail.then(async () => {
+      try {
+        signal?.throwIfAborted();
+        const current = await lstat(paths.heart).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") throw new HeartAbsentError(paths.heart, { cause: error });
+          throw error;
+        });
+        if (identity?.dev !== current.dev || identity?.ino !== current.ino) release();
+        if (database === undefined) {
+          database = await openHeart(paths.heart, "ro");
+          identity = current;
+          opened += 1;
+        }
+        await beginTransaction(database, "read", signal);
+        return finishTransaction(database, body);
+      } catch (error) {
+        release();
+        throw error;
+      }
+    });
+    tail = pending.catch(() => undefined);
+    return pending;
+  };
+  return { read, clear, generation: () => opened };
+}
+
 export async function withHeartTransaction<T>(
   paths: AkumaPaths,
   body: (database: DatabaseSync) => T,

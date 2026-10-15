@@ -14,6 +14,7 @@ export type {
   AkumaSignalOptions,
   AkumaTellOptions,
 } from "./akuma-instance.js";
+export type { AkumaStreamSnapshot } from "./akuma-stream.js";
 export type { InterruptReceipt } from "./akuma-owner.js";
 export type { AkumaStatus } from "./akuma.js";
 export { ALLOWED_ACTIONS } from "./allowed.js";

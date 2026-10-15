@@ -14,6 +14,7 @@ import {
   type WaitReason,
 } from "./akuma-observe.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
+import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
 import type { AkumaStatus } from "./akuma.js";
 import {
   handoffPendingTells,
@@ -231,6 +232,15 @@ export class AkumaOwner {
     });
     await observeOutcomeRows(this.id, history.rows, this.outcomeObserved);
     return history;
+  }
+
+  /**
+   * Continuously observe that same retained timeline. Each emission is the whole
+   * latest bounded window through the existing history projection, and the
+   * operation observes until its caller stops pulling or aborts.
+   */
+  stream(options: Readonly<{ signal?: AbortSignal }> = {}): AsyncIterable<AkumaStreamSnapshot> {
+    return createAkumaStream(this.paths, this.id, options, this.outcomeObserved);
   }
 
   async waitReceipt(

@@ -5,6 +5,7 @@ import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-s
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
+import type { AkumaStreamSnapshot } from "./akuma-stream.js";
 import { AkumaOwner, type InterruptReceipt } from "./akuma-owner.js";
 import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { type AkumaStatus } from "./akuma.js";
@@ -198,6 +199,16 @@ export class Akuma {
       ...(options.since === undefined ? {} : { since: options.since }),
       ...(options.limit === undefined ? {} : { limit: options.limit }),
     })) as ActivityHistory;
+  }
+
+  stream(options: AkumaSignalOptions = {}): AsyncIterable<AkumaStreamSnapshot> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma stream options must be an object");
+    }
+    const unknown = Object.keys(options).find((key) => key !== "signal");
+    if (unknown !== undefined) throw new TypeError(`Akuma stream options has unknown field: ${unknown}`);
+    const signal = signalOption(options.signal);
+    return this.owner(true).stream(signal === undefined ? {} : { signal });
   }
 
   async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
