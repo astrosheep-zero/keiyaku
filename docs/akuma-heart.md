@@ -41,7 +41,10 @@ Activity is bounded retained provider narration, not a raw payload log or a
 recovery authority. Where a native adapter admitted a bounded preview of a
 generic tool's structured invocation arguments, Heart retains and projects that
 narration with the same bound, and older name-only activity decoding and
-presentation remain unchanged. Compaction retains open work, pending tells, and
+presentation remain unchanged. A tool narration's native invocation identity is
+retained and projected alongside it, scoped to its Turn, so the same work stays
+correlatable across its start and its later witnessed completion under the one
+durable order. Compaction retains open work, pending tells, and
 required structure, while old closed groups can become permanently unavailable. An open
 pending-Tell disposition retains its frozen Tell identities and the delivery
 structure needed to prove them, including Tells already witnessed as told.
@@ -57,7 +60,10 @@ selection, and reported changes from this one sequence. These projections never
 become facts or cursors of a second store.
 When a complete Turn's exact final non-truncated narration equals its answered
 outcome, that projector omits only that projected duplicate. Heart retains both
-source facts; renderers never decide this fold.
+source facts; renderers never decide this fold. The outcome it produces names
+the omitted narration's durable identity, so the correlation is projected
+evidence rather than a consumer's re-comparison of text, and truncated or
+differing narration is never named as that duplicate.
 
 Recent roster observations derive their activity order and bounded extent solely
 from that Heart projection. Custody metadata may conservatively bound which

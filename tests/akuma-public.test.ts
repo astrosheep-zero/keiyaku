@@ -198,6 +198,10 @@ test("history moves a tool from its active start to its witnessed completion", a
       at: "2026-08-10T00:00:02.000Z",
     });
     const active = historyPage(await born.handle.history());
+    const activeTool = active.rows.find((row) => row.kind === "tool");
+    assert.ok(activeTool?.kind === "tool");
+    assert.equal(activeTool.toolId, "bash-1");
+    assert.equal(activeTool.turnSequence, born.turn.sequence);
     assert.deepEqual(
       toolRow(active.rows).map((row) => row.sequence),
       [start],
@@ -224,6 +228,8 @@ test("history moves a tool from its active start to its witnessed completion", a
     assert.ok(completed?.kind === "tool" && completed.state !== "active" && completed.state !== "unsettled");
     assert.equal(completed.at, "2026-08-10T00:00:03.000Z");
     assert.equal(completed.durationMs, 1_000);
+    assert.equal(completed.toolId, activeTool.toolId);
+    assert.equal(completed.turnSequence, activeTool.turnSequence);
     assert.equal(tools[0] !== undefined && "state" in tools[0] && tools[0].state !== "active", true);
     assert.equal(
       page.rows.some((row) => row.kind === "tool" && row.sequence === start),
@@ -288,6 +294,8 @@ test("overlapping file tools order each Turn and reported changes by completion"
     [1, 4, 5, 6],
   );
   const view = selectSnapshot(ledger, { aperture: "monitoring" }).snapshot;
+  assert.deepEqual(activitySnapshotSchema.parse(view), view, "public snapshot schema preserves tool identity");
+  assert.deepEqual(ledger.rows.filter((row) => row.kind === "tool").map((row) => row.toolId), ["b", "a"]);
   assert.deepEqual(
     view.reportedChanges.map((change) => [change.path, change.sequence, change.at]),
     [
@@ -303,6 +311,14 @@ test("overlapping file tools order each Turn and reported changes by completion"
   const completed = pruned.rows.find((row) => row.kind === "tool" && row.sequence === 6);
   assert.ok(completed?.kind === "tool" && completed.state !== "active" && completed.state !== "unsettled");
   assert.equal(completed.durationMs, undefined);
+  assert.equal(completed.toolId, "a", "a completion without retained start keeps the producer identity");
+  const closed = projectTurns([
+    ...facts, event(7, "started", "unwitnessed", "src/open.ts"),
+    turnEndFact(8, 1, at(8), { kind: "failed", diagnostic: "stopped" }),
+  ]);
+  const unsettled = closed.rows.find((row) => row.kind === "tool" && row.state === "unsettled");
+  assert.ok(unsettled?.kind === "tool");
+  assert.equal(unsettled.toolId, "unwitnessed");
 });
 
 test("forward history reports a pruned interval after its cursor", async () => {
@@ -1146,6 +1162,32 @@ test("reported file changes keep the newest five independently of ordinary omiss
   assert.deepEqual(snapshotSequences(view), ["gap:5"]);
 });
 
+test("outcome folding carries the exact omitted final said identity through public schemas", () => {
+  const at = "2026-10-15T00:00:00.000Z";
+  const facts: TimelineFact[] = [
+    { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at },
+    activityFact(2, 1, at, { type: "assistant", text: "same answer" }),
+    activityFact(3, 1, at, { type: "assistant", text: "same answer" }),
+  ];
+  assert.equal(projectTurns(facts).rows.filter((row) => row.kind === "said").length, 2);
+  const ledger = projectTurns([...facts, turnEndFact(4, 1, at, {
+    kind: "answered", answer: "same answer", session: { sessionId: "session" },
+  })]);
+  assert.deepEqual(ledger.rows.map((row) => [row.kind, row.sequence]), [["turn", 1], ["said", 2], ["outcome", 4]]);
+  const outcome = ledger.latestOutcome?.outcome;
+  assert.ok(outcome?.kind === "answered");
+  assert.equal(outcome.foldedSaidSequence, 3, "only the producer's final narration is the linked duplicate");
+  const view = selectSnapshot(ledger, { aperture: "monitoring" }).snapshot;
+  assert.deepEqual(activitySnapshotSchema.parse(view), view, "public schema preserves answered fold identity");
+  const unequal = projectTurns([...facts, turnEndFact(4, 1, at, {
+    kind: "answered", answer: "different answer", session: { sessionId: "session" },
+  })]);
+  assert.equal(unequal.rows.filter((row) => row.kind === "said").length, 2, "unequal narration is retained");
+  const unequalOutcome = unequal.latestOutcome?.outcome;
+  assert.ok(unequalOutcome?.kind === "answered");
+  assert.equal(unequalOutcome.foldedSaidSequence, undefined, "unequal narration receives no folded identity");
+});
+
 test("outcome folding preserves a truncated final voice equal to the answer", () => {
   const ledger = projectTurns([
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: "2026-08-10T00:00:01.000Z" },
@@ -1165,6 +1207,8 @@ test("outcome folding preserves a truncated final voice equal to the answer", ()
     selectHistory(ledger, { limit: 50 }).rows.map((row) => row.kind),
     ["turn", "said", "outcome"],
   );
+  assert.ok(ledger.latestOutcome?.outcome.kind === "answered");
+  assert.equal(ledger.latestOutcome.outcome.foldedSaidSequence, undefined, "unfolded narration has no replacement identity");
 });
 
 test("wait timeout returns the same running status carrier", async (context) => {

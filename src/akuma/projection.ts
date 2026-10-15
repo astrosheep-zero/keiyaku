@@ -80,7 +80,14 @@ export const tellRowSchema = z
   })
   .strict() satisfies z.ZodType<TellRow>;
 const outcomeSchema = z.union([
-  z.object({ kind: z.literal("answered"), historyId: nonblankTextSchema, answer: z.string() }).strict(),
+  z
+    .object({
+      kind: z.literal("answered"),
+      historyId: nonblankTextSchema,
+      answer: z.string(),
+      foldedSaidSequence: countSchema.optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("failed"), historyId: nonblankTextSchema, diagnostic: z.string() }).strict(),
 ]);
 const outcomeRowSchema = z
@@ -101,6 +108,7 @@ const activeToolRowSchema = z
     name: nonblankTextSchema,
     call: publicToolCallSchema,
     state: z.literal("active"),
+    toolId: z.string().optional(),
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -114,6 +122,7 @@ const completedToolRowSchema = z
     name: nonblankTextSchema,
     call: publicToolCallSchema,
     state: publicToolResultSchema,
+    toolId: z.string().optional(),
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -126,6 +135,7 @@ const unsettledToolRowSchema = z
     name: nonblankTextSchema,
     call: publicToolCallSchema,
     state: z.literal("unsettled"),
+    toolId: z.string().optional(),
     truncated: z.literal(true).optional(),
   })
   .strict();
@@ -353,6 +363,7 @@ function projectToolEvent(
       turnSequence: fact.turnSequence,
       at: fact.at,
       name: event.name,
+      toolId: event.id,
       call: event.call,
       state: phase === "open" ? "active" : "unsettled",
       ...(event.truncated === true ? { truncated: true } : {}),
@@ -368,6 +379,7 @@ function projectToolEvent(
       turnSequence: fact.turnSequence,
       at: fact.at,
       name: event.name,
+      toolId: event.id,
       call: event.call,
       state: event.result,
       ...(event.truncated === true ? { truncated: true } : {}),
@@ -382,6 +394,7 @@ function projectToolEvent(
     at: fact.at,
     ...(durationMs === undefined ? {} : { durationMs }),
     name: event.name,
+    toolId: event.id,
     call: event.call,
     state: event.result,
     ...(started.truncated === true || event.truncated === true ? { truncated: true } : {}),
@@ -412,18 +425,22 @@ function demoteActive(row: OpenTurnRow | UnsettledToolRow): ClosedTurnRow {
 function foldOutcomeVoice(
   rows: readonly (OpenTurnRow | UnsettledToolRow)[],
   outcome: OutcomeRow | undefined,
-): readonly (OpenTurnRow | UnsettledToolRow)[] {
-  if (outcome?.outcome.kind !== "answered") return rows;
+): Readonly<{ rows: readonly (OpenTurnRow | UnsettledToolRow)[]; outcome: OutcomeRow | undefined }> {
+  if (outcome?.outcome.kind !== "answered") return { rows, outcome };
   const finalVoice = rows.findLast((row): row is SaidRow => row.kind === "said");
   return finalVoice?.text === outcome.outcome.answer && finalVoice.truncated !== true
-    ? rows.filter((row) => row !== finalVoice)
-    : rows;
+    ? {
+        rows: rows.filter((row) => row !== finalVoice),
+        outcome: { ...outcome, outcome: { ...outcome.outcome, foldedSaidSequence: finalVoice.sequence } },
+      }
+    : { rows, outcome };
 }
 
 function finishTurn(turn: MutableTurn): ProjectedTurn {
-  const rows = [...foldOutcomeVoice(turn.rows, turn.outcome)].sort((left, right) => left.sequence - right.sequence);
-  if (turn.phase === "closed" && turn.outcome !== undefined) {
-    return { kind: "closed", turn: turn.turn, rows: rows.map(demoteActive), outcome: turn.outcome };
+  const folded = foldOutcomeVoice(turn.rows, turn.outcome);
+  const rows = [...folded.rows].sort((left, right) => left.sequence - right.sequence);
+  if (turn.phase === "closed" && folded.outcome !== undefined) {
+    return { kind: "closed", turn: turn.turn, rows: rows.map(demoteActive), outcome: folded.outcome };
   }
   if (rows.some((row) => row.kind === "tool" && row.state === "unsettled")) {
     throw new Error(`open Turn ${turn.turn.turnSequence} contains an unsettled tool`);

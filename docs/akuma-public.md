@@ -16,7 +16,11 @@ Status and history derive from one retained Heart timeline in durable sequence
 order. They do not join outcomes by timestamp or read a second Turn projection.
 Active tool work appears where it began; once its completion is witnessed, its
 single completed row appears where it finished in that same durable order.
-Elapsed time is derived only when the retained start remains available. History
+Every tool row carries the producer's native invocation identity scoped to its
+Turn, so a start and its later witnessed completion name the same work without
+reconstruction from arguments, position, or retained neighbours; that identity
+also survives a completion whose start is no longer retained. Elapsed time is
+derived only when the retained start remains available. History
 cursors, live observation, current-work selection, and reported changes consume
 that one completion-ordered interpretation without replaying the earlier start.
 A born status also observes the Soul's frozen action authority, so callers can
@@ -85,7 +89,11 @@ and operation-local uniqueness.
 
 History pages the same projected ledger and is the sole public execution-history
 read. It retains exact answered outcome bytes, including an empty answer, and
-the public history identity for a retained answered Turn. A fork accepts only
+the public history identity for a retained answered Turn. When that projection
+omits a final narration as its answered outcome's duplicate, the outcome also
+carries the omitted narration's durable identity, so a consumer correlates the
+two items without comparing their text; narration that is truncated or differs
+from the answer is never named as an omitted duplicate. A fork accepts only
 that exact answered point. Pruned history remains honestly unavailable; public
 snapshots do not fabricate a cursor, result, or loss marker.
 
