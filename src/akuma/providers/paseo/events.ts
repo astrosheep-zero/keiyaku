@@ -1,8 +1,43 @@
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall, type TurnResult } from "../../provider.js";
+import { stringValue } from "../decode.js";
 
-function toolCall(item: Extract<AgentTimelineItem, { type: "tool_call" }>): ToolCall {
+type ToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
+type ToolCallDetail = ToolCallItem["detail"];
+
+/**
+ * The observed result text one native detail carries. A detail that observes no
+ * text stays absent; a present empty string remains observed and empty.
+ */
+function detailOutput(detail: ToolCallDetail): string | undefined {
+  switch (detail.type) {
+    case "shell":
+      return stringValue(detail.output);
+    case "read":
+    case "search":
+      return stringValue(detail.content);
+    case "fetch":
+      return stringValue(detail.result);
+    default:
+      return undefined;
+  }
+}
+
+/** The verified unified patch a completed edit detail observed, when it supplied one. */
+function detailPatch(detail: ToolCallDetail): string | undefined {
+  return detail.type === "edit" ? stringValue(detail.unifiedDiff) : undefined;
+}
+
+/** Attach the observed patch to the one change its correlated path already named. */
+function withObservedPatch(call: ToolCall, patch: string | undefined): ToolCall {
+  if (call.kind !== "fileChange") return call;
+  const change = call.changes[0];
+  if (patch === undefined || change === undefined || call.changes.length !== 1) return call;
+  return { kind: "fileChange", changes: [{ ...change, patch }] };
+}
+
+function toolCall(item: ToolCallItem): ToolCall {
   const detail = item.detail;
   switch (detail.type) {
     case "shell":
@@ -29,18 +64,24 @@ function toolCall(item: Extract<AgentTimelineItem, { type: "tool_call" }>): Tool
 function timelineNarration(item: AgentTimelineItem, calls: Map<string, ToolCall>): AgentEvent | undefined {
   switch (item.type) {
     case "tool_call": {
-      const call = calls.get(item.callId) ?? (item.status === "running" ? toolCall(item) : otherToolCall(item.name));
+      const base = calls.get(item.callId) ?? (item.status === "running" ? toolCall(item) : otherToolCall(item.name));
+      const call = item.status === "running" ? base : withObservedPatch(base, detailPatch(item.detail));
       calls.set(item.callId, call);
-      return item.status === "running"
-        ? { type: "tool", phase: "started", id: item.callId, name: item.name, call }
-        : {
-            type: "tool",
-            phase: "completed",
-            id: item.callId,
-            name: item.name,
-            call,
-            result: { status: item.status === "completed" ? "ok" : "error" },
-          };
+      if (item.status === "running") {
+        return { type: "tool", phase: "started", id: item.callId, name: item.name, call };
+      }
+      const output = detailOutput(item.detail);
+      return {
+        type: "tool",
+        phase: "completed",
+        id: item.callId,
+        name: item.name,
+        call,
+        result: {
+          status: item.status === "completed" ? "ok" : "error",
+          ...(output === undefined ? {} : { output }),
+        },
+      };
     }
     case "error":
     case "notification":

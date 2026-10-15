@@ -1,6 +1,6 @@
 import type { SessionUpdate, ToolCallLocation } from "@agentclientprotocol/sdk";
 import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
-import { nonblank, object, positiveLine } from "../decode.js";
+import { nonblank, object, positiveLine, stringValue } from "../decode.js";
 
 type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
 
@@ -66,6 +66,24 @@ function locationFact(locations: readonly ToolCallLocation[] | null | undefined)
     return offset === undefined ? { path } : { path, offset };
   }
   return {};
+}
+
+/**
+ * The observed result text of one ACP tool update: its text content blocks in
+ * native order, otherwise a raw output that is itself a string. A raw output of
+ * any other shape is left absent rather than stringified.
+ */
+function verifiedToolOutput(update: AcpToolUpdate): string | undefined {
+  if (Array.isArray(update.content)) {
+    const blocks = update.content.flatMap((entry) => {
+      const value = object(entry);
+      if (value?.type !== "content") return [];
+      const content = object(value.content);
+      return content?.type === "text" && typeof content.text === "string" ? [content.text] : [];
+    });
+    if (blocks.length > 0) return blocks.join("");
+  }
+  return stringValue(update.rawOutput);
 }
 
 function standardCall(update: AcpToolUpdate, name: string): ToolCall {
@@ -150,6 +168,7 @@ export function mapAcpUpdate(
       const observed = observeTool(update, previous.tools.get(update.toolCallId), interpret);
       const tools = new Map(previous.tools);
       if (update.status === "completed" || update.status === "failed") {
+        const output = verifiedToolOutput(update);
         tools.delete(update.toolCallId);
         return flushAcpEvents({ ...previous, tools }, [
           {
@@ -157,7 +176,10 @@ export function mapAcpUpdate(
             phase: "completed",
             id: update.toolCallId,
             ...observed,
-            result: { status: update.status === "completed" ? "ok" : "error" },
+            result: {
+              status: update.status === "completed" ? "ok" : "error",
+              ...(output === undefined ? {} : { output }),
+            },
           },
         ]);
       }

@@ -8,6 +8,7 @@ export { AKUMA_REQUESTS_ENV, AKUMA_REQUESTS_ENTRY_ENV } from "./providers/execut
 
 const AGENT_EVENT_TEXT_LIMIT = 16_384;
 const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
+const OBSERVED_TEXT_TRUNCATION_MARKER = "\n…[truncated]";
 export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
 export { decodeAgentEvent } from "./heart/activity-schema.js";
@@ -45,14 +46,25 @@ function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated:
           (call.path !== undefined && call.path.length > AGENT_EVENT_TEXT_LIMIT) ||
           (call.glob !== undefined && call.glob.length > AGENT_EVENT_TEXT_LIMIT),
       };
-    case "fileChange":
+    case "fileChange": {
+      const bounded = call.changes.map((change) => {
+        const patch = change.patch === undefined ? undefined : boundedObservedText(change.patch);
+        return {
+          value: {
+            ...change,
+            path: boundedEventText(change.path),
+            ...(patch === undefined ? {} : { patch: patch.value }),
+          },
+          truncated: patch?.truncated === true,
+        };
+      });
       return {
-        value: {
-          kind: call.kind,
-          changes: call.changes.map((change) => ({ ...change, path: boundedEventText(change.path) })),
-        },
-        truncated: call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
+        value: { kind: call.kind, changes: bounded.map((change) => change.value) },
+        truncated:
+          bounded.some((change) => change.truncated) ||
+          call.changes.some((change) => change.path.length > AGENT_EVENT_TEXT_LIMIT),
       };
+    }
     case "other": {
       const input = call.input;
       const display = boundedEventText(call.display);
@@ -76,13 +88,16 @@ function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated:
 }
 
 function boundedToolResult(result: ToolResult): Readonly<{ value: ToolResult; truncated: boolean }> {
+  const output = result.output === undefined ? undefined : boundedObservedText(result.output);
   return {
     value: {
       status: result.status,
       ...(result.message === undefined ? {} : { message: boundedEventText(result.message) }),
+      ...(output === undefined ? {} : { output: output.value }),
       ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
     },
-    truncated: result.message !== undefined && result.message.length > AGENT_EVENT_TEXT_LIMIT,
+    truncated:
+      (result.message !== undefined && result.message.length > AGENT_EVENT_TEXT_LIMIT) || output?.truncated === true,
   };
 }
 
@@ -188,6 +203,27 @@ function boundedToolInputJson(value: string): Readonly<{ value: string; truncate
 
 function boundedEventText(value: string): string {
   return value.slice(0, AGENT_EVENT_TEXT_LIMIT);
+}
+
+/**
+ * Bound one observed result text or patch. Observed content carries its own
+ * visible truncation marker inside the same budget: a cut diff that still looks
+ * complete is worse than a marked one, and the marker is part of that bound so
+ * re-encoding an already bounded value changes nothing. The cut lands on a
+ * complete code point, never a UTF-16 surrogate half.
+ */
+function boundedObservedText(value: string): Readonly<{ value: string; truncated: boolean }> {
+  if (value.length <= AGENT_EVENT_TEXT_LIMIT) return { value, truncated: false };
+  const budget = AGENT_EVENT_TEXT_LIMIT - OBSERVED_TEXT_TRUNCATION_MARKER.length;
+  return {
+    value: `${value.slice(0, cutBeforeSurrogate(value, budget))}${OBSERVED_TEXT_TRUNCATION_MARKER}`,
+    truncated: true,
+  };
+}
+
+function cutBeforeSurrogate(value: string, budget: number): number {
+  const lastKept = value.charCodeAt(budget - 1);
+  return lastKept >= 0xd800 && lastKept <= 0xdbff ? budget - 1 : budget;
 }
 
 function boundedThoughtText(value: string): string {

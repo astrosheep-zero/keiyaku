@@ -44,7 +44,11 @@ narration with the same bound, and older name-only activity decoding and
 presentation remain unchanged. A tool narration's native invocation identity is
 retained and projected alongside it, scoped to its Turn, so the same work stays
 correlatable across its start and its later witnessed completion under the one
-durable order. Compaction retains open work, pending tells, and
+durable order. The observed result text and per-file patch content an adapter
+admitted when a call finished are retained under that same bound: a value
+observed empty stays distinct from one never observed, and a record written
+before those observations still decodes and still projects in its former shape,
+without migration or rewriting. Compaction retains open work, pending tells, and
 required structure, while old closed groups can become permanently unavailable. An open
 pending-Tell disposition retains its frozen Tell identities and the delivery
 structure needed to prove them, including Tells already witnessed as told.

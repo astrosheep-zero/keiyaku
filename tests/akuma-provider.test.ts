@@ -43,6 +43,11 @@ import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/provide
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/providers/claude/events.js";
+import {
+  codexNotificationResult,
+  type CodexTurnState,
+} from "../src/akuma/providers/codex-app-server/events.js";
+import type { LineRpcNotification } from "../src/runtime/proc/line-rpc.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
@@ -129,6 +134,72 @@ test("generic tool input admission and event codecs preserve bounded evidence", 
     }),
   );
   assert.deepEqual(decodeAgentEvent(encodeAgentEvent(truncated)), truncated);
+});
+
+test("observed tool output and patches stay bounded, code-point safe, and distinct from absence", () => {
+  const patch = ["@@ -1,2 +1,3 @@", " keep", "-old", "+new", "+extra"].join("\n");
+  const observed: AgentEvent = {
+    type: "tool",
+    phase: "completed",
+    id: "observed",
+    name: "edit",
+    call: {
+      kind: "fileChange",
+      changes: [{ op: "update", path: "src/observed.ts", diffstat: { added: 2, removed: 1 }, patch }],
+    },
+    result: { status: "ok", output: "applied 2 changes" },
+  };
+  assert.deepEqual(decodeAgentEvent(encodeAgentEvent(observed)), observed);
+
+  const empty: AgentEvent = {
+    type: "tool",
+    phase: "completed",
+    id: "empty",
+    name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/empty.ts", patch: "" }] },
+    result: { status: "ok", output: "" },
+  };
+  assert.deepEqual(
+    decodeAgentEvent(encodeAgentEvent(empty)),
+    empty,
+    "an observed empty value stays present rather than collapsing into absence",
+  );
+
+  const silent: AgentEvent = {
+    type: "tool",
+    phase: "completed",
+    id: "silent",
+    name: "read",
+    call: { kind: "read", path: "src/silent.ts" },
+    result: { status: "ok" },
+  };
+  const decodedSilent = decodeAgentEvent(encodeAgentEvent(silent));
+  assert.deepEqual(decodedSilent, silent, "a row that observed neither value stays byte-identical to today");
+
+  const oversized: AgentEvent = {
+    type: "tool",
+    phase: "completed",
+    id: "oversized",
+    name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/big.ts", patch: "😀".repeat(20_000) }] },
+    result: { status: "ok", output: "😀".repeat(20_000) },
+  };
+  const bounded = encodeAgentEvent(oversized);
+  assert.equal(bounded.type === "tool" && bounded.truncated, true, "the row keeps its coarse truncation flag");
+  if (bounded.type !== "tool" || bounded.phase !== "completed" || bounded.call.kind !== "fileChange") {
+    throw new Error("missing bounded completion");
+  }
+  const boundedPatch = bounded.call.changes[0]?.patch;
+  const boundedOutput = bounded.result.output;
+  assert.ok(boundedPatch !== undefined && boundedOutput !== undefined);
+  for (const value of [boundedPatch, boundedOutput]) {
+    assert.ok(value.length <= 16_384, "an observed value stays inside the narration bound");
+    assert.doesNotThrow(() => encodeURIComponent(value), "the cut lands on a complete code point");
+    assert.ok(value.endsWith("\n…[truncated]"), "the cut is visible where it happened");
+  }
+  const marker = "\n…[truncated]";
+  assert.equal(boundedPatch, "😀".repeat((16_384 - marker.length) / 2) + marker);
+  assert.deepEqual(encodeAgentEvent(bounded), bounded, "re-encoding an already bounded observation changes nothing");
 });
 
 /** Drain one synchronous channel's already-queued events without a live waiter. */
@@ -417,6 +488,87 @@ test("Claude keeps supplied scalar, null, empty-object, and absent Bash input di
     input: { json: "42", truncated: false },
   });
   assert.deepEqual(await claudeToolCall(undefined), { kind: "other", display: "Bash" });
+});
+
+test("Claude retains observed result text, a supplied patch, and a native hunk record", async () => {
+  const patch = ["@@ -1 +1 @@", "-before", "+after"].join("\n");
+  const run = async (toolUseResult: unknown, content: unknown) => {
+    const state: ClaudeObservationState = { tools: new Map() };
+    const channel = new AgentEventChannel();
+    emitClaudeMessage(
+      {
+        type: "assistant",
+        uuid: "assistant-edit",
+        session_id: "session-claude",
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "edit-1",
+              name: "Edit",
+              input: { file_path: "src/edited.ts", old_string: "before", new_string: "after" },
+            },
+          ],
+        },
+      } as unknown as SDKMessage,
+      channel,
+      state,
+    );
+    emitClaudeMessage(
+      {
+        type: "user",
+        session_id: "session-claude",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_result", tool_use_id: "edit-1", content }] },
+        tool_use_result: toolUseResult,
+      } as unknown as SDKMessage,
+      channel,
+      state,
+    );
+    return await drainChannel(channel);
+  };
+
+  const supplied = await run(
+    { filePath: "src/edited.ts", gitDiff: { status: "modified", additions: 1, deletions: 1, patch } },
+    [{ type: "text", text: "edited src/edited.ts" }],
+  );
+  assert.deepEqual(supplied.at(-1), {
+    type: "tool",
+    phase: "completed",
+    id: "edit-1",
+    name: "Edit",
+    call: {
+      kind: "fileChange",
+      changes: [
+        { op: "update", path: "src/edited.ts", diffstat: { added: 1, removed: 1 }, patch },
+      ],
+    },
+    result: { status: "ok", output: "edited src/edited.ts" },
+  });
+
+  const hunks = await run(
+    { filePath: "src/hunks.ts", structuredPatch: [{ oldStart: 4, oldLines: 1, newStart: 4, newLines: 2, lines: ["-old", "+new", "+extra"] }] },
+    "updated src/hunks.ts",
+  );
+  assert.deepEqual(hunks.at(-1), {
+    type: "tool",
+    phase: "completed",
+    id: "edit-1",
+    name: "Edit",
+    call: {
+      kind: "fileChange",
+      changes: [
+        {
+          op: "update",
+          path: "src/hunks.ts",
+          diffstat: { added: 2, removed: 1 },
+          patch: ["--- a/src/hunks.ts", "+++ b/src/hunks.ts", "@@ -4,1 +4,2 @@", "-old", "+new", "+extra"].join("\n"),
+        },
+      ],
+    },
+    result: { status: "ok", output: "updated src/hunks.ts" },
+  });
 });
 
 test("a correlated start's admitted preview survives empty and conflicting completion input", () => {
@@ -1517,6 +1669,10 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
     ["session", "tool", "tool", "thought", "assistant", "unknown"],
   );
   assert.equal(JSON.stringify(observed).includes("secret"), false);
+  const completedTool = observed[2];
+  assert.ok(completedTool?.type === "tool" && completedTool.phase === "completed");
+  assert.deepEqual(completedTool.call, { kind: "run", command: "npm test" });
+  assert.deepEqual(completedTool.result, { status: "ok", output: "ok" }, "the completed state's output survives");
   assert.equal(fake.closed(), 1);
   assert.equal(fake.executions[0]!.env?.[AKUMA_REQUESTS_ENV], "/tmp/requests");
 });
@@ -2139,8 +2295,8 @@ test("Pi retires its native subscription when session setup fails", async () => 
   assert.equal(fake.seen.disposed, 1);
 });
 
-test("Pi retains write targets as conservative file changes without inventing diffstat", async () => {
-  const patch = ["@@ -1,2 +1,3 @@", " keep", "-old", "+new", "+extra"].join("\n");
+test("Pi retains observed tool text and edit patches as conservative file changes", async () => {
+  const patch = ["@@ -1,2 +1,3 @@", " keep", "-old", "+new", "+extra", "@@ -10,1 +11,1 @@", "-x", "+y"].join("\n");
   const nativeCalls = [
     {
       id: "write-create",
@@ -2197,7 +2353,7 @@ test("Pi retains write targets as conservative file changes without inventing di
         id: "write-create",
         name: "write",
         call: write("src/created.ts"),
-        result: { status: "ok" },
+        result: { status: "ok", output: "Successfully wrote to src/created.ts" },
       },
       { type: "tool", phase: "started", id: "write-overwrite", name: "write", call: write("src/overwritten.ts") },
       {
@@ -2206,7 +2362,7 @@ test("Pi retains write targets as conservative file changes without inventing di
         id: "write-overwrite",
         name: "write",
         call: write("src/overwritten.ts"),
-        result: { status: "ok" },
+        result: { status: "ok", output: "Successfully wrote to src/overwritten.ts" },
       },
       { type: "tool", phase: "started", id: "write-failed", name: "write", call: write("src/failed.ts") },
       {
@@ -2215,7 +2371,7 @@ test("Pi retains write targets as conservative file changes without inventing di
         id: "write-failed",
         name: "write",
         call: write("src/failed.ts"),
-        result: { status: "error" },
+        result: { status: "error", output: "EPERM: operation not permitted" },
       },
       { type: "tool", phase: "started", id: "edit-one", name: "edit", call: write("src/edited.ts") },
       {
@@ -2225,7 +2381,7 @@ test("Pi retains write targets as conservative file changes without inventing di
         name: "edit",
         call: {
           kind: "fileChange",
-          changes: [{ op: "update", path: "src/edited.ts", diffstat: { added: 2, removed: 1 } }],
+          changes: [{ op: "update", path: "src/edited.ts", diffstat: { added: 3, removed: 2 }, patch }],
         },
         result: { status: "ok" },
       },
@@ -2855,7 +3011,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
       id: "tool-1",
       name: "Bash",
       call: { kind: "run", command: "secret" },
-      result: { status: "ok" },
+      result: { status: "ok", output: "secret result body" },
     },
     { type: "note", text: "Retrying request 2/4" },
   ]);
@@ -2867,7 +3023,8 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
     { type: "unknown", kind: "future_type" },
     { type: "unknown", kind: "future_subtype" },
   ]);
-  assert.equal(JSON.stringify(events).includes("secret result body"), false);
+  assert.equal(JSON.stringify(events).includes("partial"), false, "a native stream delta never escapes");
+  assert.equal(JSON.stringify(events).includes("must not escape"), false);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
 });
 
@@ -3127,7 +3284,7 @@ test("Codex leaves sandbox policy to native configuration", async (context) => {
   assert.equal(Object.hasOwn(turn, "sandboxPolicy"), false);
 });
 
-test("Codex maps observations without leaking output or unknown payloads", async (context) => {
+test("Codex maps observations preserving aggregated output without leaking deltas or unknown payloads", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-codex-observations-");
   const provider = createCodexAppServerProvider(fakeCodex(root, "observations").executable);
   const drive = await provider.start(freshInput("observe", { cwd: root })).result;
@@ -3148,7 +3305,7 @@ test("Codex maps observations without leaking output or unknown payloads", async
       id: "command-1",
       name: "commandExecution",
       call: { kind: "run", command: "npm test" },
-      result: { status: "ok", exitCode: 0 },
+      result: { status: "ok", exitCode: 0, output: "secret output" },
     },
     { type: "note", text: "Plan updated: Verify the adapter" },
     { type: "note", text: "Retrying after error: temporary outage" },
@@ -3161,9 +3318,157 @@ test("Codex maps observations without leaking output or unknown payloads", async
     answer: "second answer",
     historyId: "turn-1",
   });
-  assert.equal(JSON.stringify(events).includes("secret output"), false);
   assert.equal(JSON.stringify(events).includes("must not escape"), false);
   assert.equal(JSON.stringify(events).includes("999"), false);
+});
+
+test("Codex retains a command's aggregated output and every file change's patch", async () => {
+  const events = new AgentEventChannel();
+  const state: CodexTurnState = { settled: false, tools: new Map() };
+  const completed = (item: unknown) =>
+    ({
+      method: "item/completed",
+      params: { item },
+    }) as unknown as LineRpcNotification;
+  const patchA = ["@@ -1 +1 @@", "-a", "+A"].join("\n");
+  const patchB = ["@@ -0,0 +1 @@", "+b"].join("\n");
+
+  codexNotificationResult(
+    completed({
+      id: "command-1",
+      type: "commandExecution",
+      command: "npm test",
+      status: "failed",
+      exitCode: 1,
+      aggregatedOutput: "1 failing",
+    }),
+    state,
+    events,
+  );
+  codexNotificationResult(
+    completed({
+      id: "files-1",
+      type: "fileChange",
+      changes: [
+        { path: "src/a.ts", kind: { type: "update" }, diff: patchA },
+        { path: "src/b.ts", kind: { type: "add" }, diff: patchB },
+      ],
+    }),
+    state,
+    events,
+  );
+
+  assert.deepEqual(await drainChannel(events), [
+    {
+      type: "tool",
+      phase: "completed",
+      id: "command-1",
+      name: "commandExecution",
+      call: { kind: "run", command: "npm test" },
+      result: { status: "error", output: "1 failing", exitCode: 1 },
+    },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "files-1",
+      name: "fileChange",
+      call: {
+        kind: "fileChange",
+        changes: [
+          { op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 1 }, patch: patchA },
+          { op: "add", path: "src/b.ts", diffstat: { added: 1, removed: 0 }, patch: patchB },
+        ],
+      },
+      result: { status: "ok" },
+    },
+  ]);
+});
+
+test("OpenCode keeps observed tool output and never claims an unverified filediff patch", () => {
+  const state = createEventState("session-1");
+  const events: AgentEvent[] = [];
+  const emitter = { emit: (event: AgentEvent) => void events.push(event) };
+  mapEvent(
+    {
+      type: "message.part.updated",
+      properties: {
+        part: {
+          type: "tool",
+          callID: "oc-edit",
+          tool: "edit",
+          sessionID: "session-1",
+          state: {
+            status: "completed",
+            input: { filePath: "src/edited.ts" },
+            output: "edited src/edited.ts",
+            metadata: { filediff: { additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-before\n+after" } },
+          },
+        },
+      },
+    },
+    emitter,
+    state,
+  );
+  const call = {
+    kind: "fileChange" as const,
+    changes: [{ op: "update" as const, path: "src/edited.ts", diffstat: { added: 1, removed: 1 } }],
+  };
+  assert.deepEqual(events, [
+    { type: "tool", phase: "started", id: "oc-edit", name: "edit", call },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "oc-edit",
+      name: "edit",
+      call,
+      result: { status: "ok", output: "edited src/edited.ts" },
+    },
+  ]);
+  assert.equal(JSON.stringify(events).includes("patch"), false, "filediff.patch is not claimed without producer evidence");
+});
+
+test("ACP retains verified text output and leaves an unverified raw output absent", async () => {
+  const start = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1"), EMPTY_ACP_EVENT_STATE);
+  const completed = (update: Partial<acp.ToolCallUpdate>) =>
+    mapAcpUpdate(
+      { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed", ...update } as acp.SessionUpdate,
+      start.state,
+    ).events.at(-1);
+
+  assert.deepEqual(
+    completed({
+      content: [
+        { type: "content", content: { type: "text", text: "line one " } },
+        { type: "diff", path: "src/a.ts", newText: "proposed" },
+        { type: "content", content: { type: "text", text: "line two" } },
+      ],
+    }),
+    {
+      type: "tool",
+      phase: "completed",
+      id: "acp-1",
+      name: "future_tool",
+      call: { kind: "other", display: "future_tool" },
+      result: { status: "ok", output: "line one line two" },
+    },
+    "the verified text blocks join in native order and a proposed diff is never an applied patch",
+  );
+  assert.deepEqual(completed({ rawOutput: "raw text" }), {
+    type: "tool",
+    phase: "completed",
+    id: "acp-1",
+    name: "future_tool",
+    call: { kind: "other", display: "future_tool" },
+    result: { status: "ok", output: "raw text" },
+  });
+  assert.deepEqual(completed({ rawOutput: { text: "must not be stringified" } }), {
+    type: "tool",
+    phase: "completed",
+    id: "acp-1",
+    name: "future_tool",
+    call: { kind: "other", display: "future_tool" },
+    result: { status: "ok" },
+  });
 });
 
 test("Codex ignores notifications from a spawned child thread", async (context) => {
@@ -3258,6 +3563,29 @@ test("Heart activity write and read share historical shape acceptance and exact 
   const status: "ok" | "error" = decoded.result.status;
   assert.equal(status, "ok");
   assert.deepEqual(decoded.call, { kind: "other", display: "future" });
+  assert.deepEqual(
+    decoded.result,
+    { status: "ok" },
+    "a row stored before the observed fields keeps its exact former meaning",
+  );
+  const observed = {
+    type: "tool",
+    phase: "completed",
+    id: "edit",
+    name: "edit",
+    call: {
+      kind: "fileChange",
+      changes: [
+        { op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 1 }, patch: "@@ -1 +1 @@\n-a\n+A" },
+      ],
+    },
+    result: { status: "ok", output: "applied" },
+  };
+  assert.deepEqual(
+    decodeActivityRow({ ...row, event_json: JSON.stringify(observed) }).event,
+    observed,
+    "a stored observed output and patch decode without migration",
+  );
   const corrupt = { ...completed, result: undefined };
   assert.throws(() => encodeActivityEvent(corrupt));
   assert.throws(() => decodeActivityRow({ ...row, event_json: JSON.stringify(corrupt) }));

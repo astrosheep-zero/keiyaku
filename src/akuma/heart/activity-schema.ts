@@ -15,6 +15,7 @@ export const fileChangeSchema = z.object({
   op: z.enum(["add", "update", "delete", "unspecified"]),
   path: text,
   diffstat: diffstatSchema.optional(),
+  patch: text.optional(),
 });
 export const toolCallSchema = z.union([
   z.object({ kind: z.literal("run"), command: text }),
@@ -38,6 +39,7 @@ export const toolCallSchema = z.union([
 export const toolResultSchema = z.object({
   status: z.enum(["ok", "error"]),
   message: text.optional(),
+  output: text.optional(),
   exitCode: z.number().int().safe().optional(),
 });
 

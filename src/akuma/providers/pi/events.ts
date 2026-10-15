@@ -1,6 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
-import { nonblank, positiveLine, searchToolCall } from "../decode.js";
+import { nonblank, observedTextContent, positiveLine, searchToolCall } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 type Disposition = "drop" | "message" | "note" | "tool-end" | "tool-start";
@@ -38,25 +38,11 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
 }
 
 function textContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block) => {
-      const value = record(block);
-      return value?.type === "text" && typeof value.text === "string" ? value.text : "";
-    })
-    .join("");
+  return observedTextContent(content) ?? "";
 }
 
 function hasTextContent(content: unknown): boolean {
-  if (typeof content === "string") return true;
-  return (
-    Array.isArray(content) &&
-    content.some((block) => {
-      const value = record(block);
-      return value?.type === "text" && typeof value.text === "string";
-    })
-  );
+  return observedTextContent(content) !== undefined;
 }
 
 function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
@@ -95,11 +81,12 @@ function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>):
 function refineEditCall(call: ToolCall, result: unknown): ToolCall {
   if (call.kind !== "fileChange") return call;
   const details = record(record(result)?.details);
-  if (typeof details?.patch !== "string") return call;
-  const diffstat = diffstatFromUnifiedPatch(details.patch);
+  const patch = typeof details?.patch === "string" ? details.patch : undefined;
+  if (patch === undefined) return call;
+  const diffstat = diffstatFromUnifiedPatch(patch);
   const change = call.changes[0];
-  if (diffstat === undefined || change === undefined) return call;
-  return { kind: "fileChange", changes: [{ ...change, diffstat }] };
+  if (change === undefined) return call;
+  return { kind: "fileChange", changes: [{ ...change, ...(diffstat === undefined ? {} : { diffstat }), patch }] };
 }
 
 function toolCall(name: string, args: unknown): ToolCall {
@@ -147,6 +134,7 @@ function translateToolEnd(
   state.tools.delete(event.toolCallId);
   const name = started?.name ?? event.toolName;
   const call = started?.call ?? otherToolCall(name);
+  const output = observedTextContent(record(event.result)?.content);
   return [
     {
       type: "tool",
@@ -154,7 +142,10 @@ function translateToolEnd(
       id: event.toolCallId,
       name,
       call: event.isError ? call : refineEditCall(call, event.result),
-      result: { status: event.isError ? "error" : "ok" },
+      result: {
+        status: event.isError ? "error" : "ok",
+        ...(output === undefined ? {} : { output }),
+      },
     },
   ];
 }

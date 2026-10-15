@@ -1,6 +1,6 @@
 import { noteEvent, otherToolCall, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
-import { nonnegativeCount, object, positiveLine, text } from "../decode.js";
+import { nonnegativeCount, object, positiveLine, stringValue, text } from "../decode.js";
 
 type Emitter = { emit(event: AgentEvent): void };
 type ObservedTool = Readonly<{ name: string; call: ToolCall }>;
@@ -198,15 +198,18 @@ function mapTextPart(part: Part, events: Emitter, state: State, thought: boolean
 function resultFor(state: Part, failed: boolean): ToolResult {
   const exit = object(state.metadata)?.exit;
   const exitCode = typeof exit === "number" && Number.isInteger(exit) ? exit : undefined;
+  const output = stringValue(state.output);
   if (failed) {
     return {
       status: "error",
       message: text(state.error) ?? "OpenCode tool failed",
+      ...(output === undefined ? {} : { output }),
       ...(exitCode === undefined ? {} : { exitCode }),
     };
   }
   return {
     status: exitCode !== undefined && exitCode !== 0 ? "error" : "ok",
+    ...(output === undefined ? {} : { output }),
     ...(exitCode === undefined ? {} : { exitCode }),
   };
 }

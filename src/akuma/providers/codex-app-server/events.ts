@@ -7,6 +7,7 @@ import {
   type ToolResult,
   type TurnResult,
 } from "../../provider.js";
+import { stringValue } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 export type CodexTurnState = {
@@ -180,12 +181,14 @@ function itemChanges(item: Readonly<Record<string, unknown>>): Extract<ToolCall,
     const path = codexText(change?.path);
     const op = fileChangeOp(change?.kind);
     if (path === undefined || op === undefined) return [];
-    const diffstat = typeof change?.diff === "string" ? diffstatFromUnifiedPatch(change.diff) : undefined;
+    const patch = stringValue(change?.diff);
+    const diffstat = patch === undefined ? undefined : diffstatFromUnifiedPatch(patch);
     return [
       {
         op,
         path,
         ...(diffstat === undefined ? {} : { diffstat }),
+        ...(patch === undefined ? {} : { patch }),
       },
     ];
   });
@@ -229,10 +232,12 @@ function itemToolResult(item: Readonly<Record<string, unknown>>): ToolResult {
   const status = codexText(item.status);
   const failed = error !== undefined || status === "failed" || status === "error";
   const detail = codexText(error?.message) ?? codexText(error?.additionalDetails);
+  const output = stringValue(item.aggregatedOutput);
   const exitCode = typeof item.exitCode === "number" && Number.isSafeInteger(item.exitCode) ? item.exitCode : undefined;
   return {
     status: failed || (exitCode !== undefined && exitCode !== 0) ? "error" : "ok",
     ...(detail === undefined ? {} : { message: detail }),
+    ...(output === undefined ? {} : { output }),
     ...(exitCode === undefined ? {} : { exitCode }),
   };
 }

@@ -1,6 +1,15 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { AgentEventChannel, noteEvent, otherToolCall, unknownEvent, type ToolCall } from "../../provider.js";
-import { finiteNumber, object, positiveLine, searchToolCall, trimmed } from "../decode.js";
+import {
+  finiteNumber,
+  object,
+  observedTextContent,
+  positiveLine,
+  searchToolCall,
+  stringValue,
+  trimmed,
+} from "../decode.js";
+import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 type ClaudeMessageType = SDKMessage["type"];
 type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
@@ -148,15 +157,62 @@ function nonnegativeInt(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function fileChange(op: "add" | "update", path: string, gitDiff: unknown): Extract<ToolCall, { kind: "fileChange" }> {
-  const diff = object(gitDiff);
+function fileChange(
+  op: "add" | "update",
+  path: string,
+  result: Readonly<Record<string, unknown>>,
+): Extract<ToolCall, { kind: "fileChange" }> {
+  const diff = object(result.gitDiff);
   const added = nonnegativeInt(diff?.additions);
   const removed = nonnegativeInt(diff?.deletions);
-  const diffstat = added === undefined || removed === undefined ? undefined : { added, removed };
+  const patch = stringValue(diff?.patch) ?? structuredPatchText(path, result.structuredPatch);
+  const diffstat =
+    added === undefined || removed === undefined
+      ? patch === undefined
+        ? undefined
+        : diffstatFromUnifiedPatch(patch)
+      : { added, removed };
   return {
     kind: "fileChange",
-    changes: [{ op, path, ...(diffstat === undefined ? {} : { diffstat }) }],
+    changes: [
+      {
+        op,
+        path,
+        ...(diffstat === undefined ? {} : { diffstat }),
+        ...(patch === undefined ? {} : { patch }),
+      },
+    ],
   };
+}
+
+/**
+ * Render the native hunk record as unified diff text when the provider supplied
+ * no patch of its own. Every figure comes from that record; nothing is
+ * reconstructed from the working tree or from proposed old and new strings.
+ */
+function structuredPatchText(path: string, value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const hunks: string[] = [];
+  for (const entry of value) {
+    const hunk = object(entry);
+    const oldStart = finiteNumber(hunk?.oldStart);
+    const oldLines = finiteNumber(hunk?.oldLines);
+    const newStart = finiteNumber(hunk?.newStart);
+    const newLines = finiteNumber(hunk?.newLines);
+    const lines = hunk?.lines;
+    if (
+      oldStart === undefined ||
+      oldLines === undefined ||
+      newStart === undefined ||
+      newLines === undefined ||
+      !Array.isArray(lines) ||
+      lines.some((line) => typeof line !== "string")
+    ) {
+      return undefined;
+    }
+    hunks.push(`@@ -${oldStart},${oldLines} +${newStart},${newLines} @@`, ...(lines as readonly string[]));
+  }
+  return [`--- a/${path}`, `+++ b/${path}`, ...hunks].join("\n");
 }
 
 function writeResult(result: unknown): ToolCall | undefined {
@@ -164,8 +220,7 @@ function writeResult(result: unknown): ToolCall | undefined {
   if (value === undefined || (value.type !== "create" && value.type !== "update")) return undefined;
   const path = trimmed(value.filePath);
   if (path === undefined) return undefined;
-  const op = value.type === "create" ? "add" : "update";
-  return fileChange(op, path, value.gitDiff);
+  return fileChange(value.type === "create" ? "add" : "update", path, value);
 }
 
 function editResult(result: unknown): ToolCall | undefined {
@@ -174,7 +229,7 @@ function editResult(result: unknown): ToolCall | undefined {
   const path = trimmed(value.filePath);
   if (path === undefined) return undefined;
   const status = object(value.gitDiff)?.status;
-  return fileChange(status === "added" ? "add" : "update", path, value.gitDiff);
+  return fileChange(status === "added" ? "add" : "update", path, value);
 }
 
 function notebookResult(result: unknown): ToolCall | undefined {
@@ -243,13 +298,17 @@ function toolResultEvents(
     state.tools.delete(id);
     const failed = value.is_error === true;
     const structured = failed ? undefined : structuredFileChange(observed.name, message.tool_use_result);
+    const output = observedTextContent(value.content);
     events.emit({
       type: "tool",
       phase: "completed",
       id,
       name: observed.name,
       call: structured ?? observed.call,
-      result: { status: failed ? "error" : "ok" },
+      result: {
+        status: failed ? "error" : "ok",
+        ...(output === undefined ? {} : { output }),
+      },
     });
   }
 }

@@ -485,7 +485,7 @@ test("Paseo cancellation retires setup and cancels current native execution with
   await assert.rejects(broken.closed, /native client retirement failed/u);
 });
 
-test("Paseo loses incomplete observation honestly and normalizes tool narration without raw output", async () => {
+test("Paseo loses incomplete observation honestly and normalizes observed tool output", async () => {
   const fake = new NativeFixture();
   const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
   const session = await attempt.result;
@@ -535,11 +535,10 @@ test("Paseo loses incomplete observation honestly and normalizes tool narration 
         id: "shell",
         name: "bash",
         call: { kind: "run", command: "pwd" },
-        result: { status: "ok" },
+        result: { status: "ok", output: "secret-output" },
       },
     ],
   );
-  assert.equal(JSON.stringify(events).includes("secret-output"), false);
   assert.equal(
     events.some((event) => event.type === "assistant"),
     false,
@@ -551,6 +550,91 @@ test("Paseo loses incomplete observation honestly and normalizes tool narration 
   await assert.rejects(lostSession.completion, /Paseo connection lost/u);
   await assert.rejects(lostAttempt.closed, /native cancel connection unavailable/u);
   assert.equal(lost.closed, true);
+});
+
+test("Paseo carries a completed edit's unified patch and never treats write content as a patch", async () => {
+  const fake = new NativeFixture();
+  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
+  const session = await attempt.result;
+  const patch = ["@@ -1 +1 @@", "-before", "+after"].join("\n");
+  fake.event(
+    {
+      type: "timeline",
+      provider: "claude",
+      turnId: "own-turn",
+      item: {
+        type: "tool_call",
+        callId: "edit-1",
+        name: "edit",
+        status: "running",
+        error: null,
+        detail: { type: "edit", filePath: "src/edited.ts" },
+      },
+    },
+    10,
+  );
+  fake.event(
+    {
+      type: "timeline",
+      provider: "claude",
+      turnId: "own-turn",
+      item: {
+        type: "tool_call",
+        callId: "edit-1",
+        name: "edit",
+        status: "completed",
+        error: null,
+        detail: { type: "edit", filePath: "src/edited.ts", unifiedDiff: patch },
+      },
+    },
+    11,
+  );
+  fake.event(
+    {
+      type: "timeline",
+      provider: "claude",
+      turnId: "own-turn",
+      item: {
+        type: "tool_call",
+        callId: "write-1",
+        name: "write",
+        status: "completed",
+        error: null,
+        detail: { type: "write", filePath: "src/written.ts", content: "written file body" },
+      },
+    },
+    12,
+  );
+  assistant(fake, "done", "answer-b", fake.turnId, 13);
+  complete(fake);
+  assert.deepEqual(await session.completion, { kind: "answered", answer: "done", historyId: "own-turn" });
+  await attempt.closed;
+
+  const events = await narration(session.events);
+  const edit = { kind: "fileChange" as const, changes: [{ op: "unspecified" as const, path: "src/edited.ts" }] };
+  assert.deepEqual(
+    events.filter((event) => event.type === "tool"),
+    [
+      { type: "tool", phase: "started", id: "edit-1", name: "edit", call: edit },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "edit-1",
+        name: "edit",
+        call: { kind: "fileChange", changes: [{ op: "unspecified", path: "src/edited.ts", patch }] },
+        result: { status: "ok" },
+      },
+      {
+        type: "tool",
+        phase: "completed",
+        id: "write-1",
+        name: "write",
+        call: { kind: "other", display: "write" },
+        result: { status: "ok" },
+      },
+    ],
+  );
+  assert.equal(JSON.stringify(events).includes("written file body"), false, "a write body is not a patch");
 });
 
 test("Paseo registration stays local and refuses unsupported execution shapes", async () => {

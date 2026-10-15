@@ -30,6 +30,27 @@ export function text(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+/** Any string, including the empty one; absence stays absence. */
+export function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * The observed text of one native result value: a plain string, or its text
+ * blocks joined in native order. A value carrying no text block observed no
+ * text, while a present empty string is observed and empty.
+ */
+export function observedTextContent(content: unknown): string | undefined {
+  const single = stringValue(content);
+  if (single !== undefined) return single;
+  if (!Array.isArray(content)) return undefined;
+  const blocks = content.flatMap((block) => {
+    const value = object(block);
+    return value?.type === "text" && typeof value.text === "string" ? [value.text] : [];
+  });
+  return blocks.length === 0 ? undefined : blocks.join("");
+}
+
 /** A one-based line number. */
 export function positiveLine(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;

@@ -64,8 +64,11 @@ The ordinary current-work window is the open Turn's call and provider activity
 along with its retained settled delivered Tells, all in durable sequence order.
 Every settled say in that current Turn is protected from the ordinary status
 budget. File-change activity follows the same bounded selection as other tools;
-when selected it retains its typed operation and available path and diffstat.
-Only the selected opening input and the existing active, pending, and
+when selected it retains its typed operation and available path and diffstat. A
+settled tool row also carries the observed result text and, for every file it
+reported, any observed patch content; the reported-change summary stays a
+read-time aggregation of operation, path, and known diffstat alone, and never a
+second copy of that content. Only the selected opening input and the existing active, pending, and
 receipt-specific evidence add their own pins; a later or unrelated settled Tell
 gains no global status privilege. Its omission gaps therefore describe only
 that current window, never an earlier Turn or unrelated Tell.

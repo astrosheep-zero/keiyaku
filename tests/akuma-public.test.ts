@@ -265,7 +265,9 @@ test("overlapping file tools order each Turn and reported changes by completion"
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const file = (path: string): ToolCall => ({
     kind: "fileChange",
-    changes: [{ op: "update", path, diffstat: { added: 1, removed: 0 } }],
+    changes: [
+      { op: "update", path, diffstat: { added: 1, removed: 0 }, patch: [`@@ -1 +1 @@`, `-${path}`, `+${path}`].join("\n") },
+    ],
   });
   const event = (sequence: number, phase: "started" | "completed", id: string, path: string) =>
     activityFact(
@@ -273,7 +275,14 @@ test("overlapping file tools order each Turn and reported changes by completion"
       1,
       at(sequence),
       phase === "completed"
-        ? { type: "tool", phase: "completed", id, name: "edit", call: file(path), result: { status: "ok" as const } }
+        ? {
+            type: "tool",
+            phase: "completed",
+            id,
+            name: "edit",
+            call: file(path),
+            result: { status: "ok" as const, output: `${path} applied` },
+          }
         : { type: "tool", phase: "started", id, name: "edit", call: file(path) },
     );
   const facts: readonly TimelineFact[] = [
@@ -297,12 +306,33 @@ test("overlapping file tools order each Turn and reported changes by completion"
   assert.deepEqual(activitySnapshotSchema.parse(view), view, "public snapshot schema preserves tool identity");
   assert.deepEqual(ledger.rows.filter((row) => row.kind === "tool").map((row) => row.toolId), ["b", "a"]);
   assert.deepEqual(
-    view.reportedChanges.map((change) => [change.path, change.sequence, change.at]),
+    view.reportedChanges,
     [
-      ["src/b.ts", 4, at(4)],
-      ["src/a.ts", 6, at(6)],
+      { sequence: 4, at: at(4), op: "update", path: "src/b.ts", diffstat: { added: 1, removed: 0 } },
+      { sequence: 6, at: at(6), op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 0 } },
     ],
+    "reported changes stay a diffstat-only summary without observed content",
   );
+  const published = activitySnapshotSchema.parse(view);
+  assert.deepEqual(
+    published.entries.flatMap((entry) =>
+      entry.kind === "row" && entry.row.kind === "tool" ? [entry.row.sequence] : [],
+    ),
+    [4, 6],
+    "the strict public snapshot admits rows carrying observed output and a patch",
+  );
+  const completedA = published.entries.find(
+    (entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.sequence === 6,
+  );
+  assert.ok(completedA?.kind === "row" && completedA.row.kind === "tool");
+  assert.deepEqual(completedA.row.call, file("src/a.ts"));
+  assert.deepEqual(completedA.row.state, { status: "ok", output: "src/a.ts applied" });
+  const historyRow = selectHistory(ledger, { since: 4, limit: 20 }).rows.find(
+    (row) => row.kind === "tool" && row.sequence === 6,
+  );
+  assert.ok(historyRow?.kind === "tool" && historyRow.state !== "active" && historyRow.state !== "unsettled");
+  assert.deepEqual(historyRow.call, file("src/a.ts"));
+  assert.deepEqual(historyRow.state, { status: "ok", output: "src/a.ts applied" });
   assert.deepEqual(
     selectHistory(ledger, { since: 4, limit: 20 }).rows.map((row) => row.sequence),
     [5, 6],

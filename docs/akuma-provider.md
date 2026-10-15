@@ -104,7 +104,6 @@ preserve unknown kinds as bounded unknown narration. Activity is execution
 history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
-
 A generic native tool invocation may contribute one bounded compact preview of
 the structured arguments it actually supplied. That preview is narration, not
 execution authority: it never carries tool output, results, deltas, or a raw
@@ -117,6 +116,19 @@ event reuses the preview its correlated start admitted; an adapter whose native
 protocol supplies no structured invocation arguments keeps a name-only
 fallback. Existing known structural tool normalization is unchanged, and old
 name-only narration keeps its former presentation.
+
+Known structural tool normalization additionally preserves what the native
+surface actually observed when a call finished: its result text and the patch
+content of each file change it reported. That observation is narration, never
+execution authority. It carries no raw native envelope and no delta stream, and
+nothing reconstructs it from the working tree, from Git, or from proposed old and
+new text; a native field without verified producer evidence stays absent and is
+never synthesized. Observed content that exceeds the narration bound keeps an
+explicit visible truncation fact cut at a complete code-point boundary, so a cut
+diff cannot render as a complete one, and a value that was observed empty remains
+distinguishable from one the native surface never supplied. Observed result text
+is never the diagnostic clause a settled tool reports, and never enters the
+compact board presentation that clause feeds.
 
 Provider context compaction is retained as bounded narration when the native
 adapter reports it. Compaction is execution housekeeping, not a Turn failure,
