@@ -22,9 +22,9 @@ function receipt(text: string, id: string, launch?: number, failed = false) {
     wake: failed ? { kind: "failed", diagnostic: "test wake failed" } : { kind: launch === undefined ? "held" : "told" },
   } }) };
 }
-async function harness(command: CommandRunner) {
+async function harness(command: CommandRunner, initialRows: Row[] = []) {
   const root = await mkdtemp(join(tmpdir(), "paseo-best-effort-consumer-"));
-  let rows: Row[] = [];
+  let rows: Row[] = initialRows;
   const calls: string[][] = [];
   const bridge = createProvider(async () => rows, async (...args) => { calls.push(args[1]); return command(...args); });
   let beforePrompt: (() => Promise<void>) | undefined;
@@ -65,6 +65,37 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   assert.equal(h.events.some((event) => event.type === "timeline" && event.item.type === "notification" && /delivery pending/u.test(event.item.message)), false);
   assert.equal(warnings.mock.callCount(), failed ? 1 : 0, "a failed wake retains its diagnostic without failing the recorded message");
   h.setRows([turn(2), answer(2, 3)]); await h.refresh();
+});
+
+test("opening skip retains consumer association for the open Turn without replaying historical items", async (t) => {
+  const snapshot = [
+    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const },
+    turn(11), answer(11, 12, "old answer"), turn(13),
+  ];
+  const h = await harness(async () => { throw new Error("unexpected mutation"); }, snapshot);
+  t.after(() => h.close());
+  const history = async () => {
+    const events: AgentStreamEvent[] = [];
+    for await (const event of h.agent.session!.streamHistory()) events.push(event);
+    return events;
+  };
+  const opening = await history();
+  await h.refresh();
+  assert.deepEqual(await history(), opening, "the identical opening snapshot remains deduplicated");
+  // The manager subscribes after opening; its idle-on-open limitation is not repaired here.
+  h.setRows([...snapshot, answer(13, 14, "new answer")]); await h.refresh();
+  assert.deepEqual(h.events.flatMap((event) => {
+    if (event.type === "timeline" && event.item.type === "assistant_message")
+      return [[event.item.text, event.turnId]];
+    if (event.type === "turn_completed") return [[event.type, event.turnId]];
+    return [];
+  }), [["new answer", "turn/13"], ["turn_completed", "turn/13"]]);
+  assert.deepEqual(opening.map((event) => [event.type, "turnId" in event ? event.turnId : undefined]),
+    [["turn_started", "turn/13"]], "skip publishes only the current execution state, not historical starts or timeline");
+  const settled = await history();
+  await h.refresh();
+  assert.deepEqual(await history(), settled, "the new outcome is retained once");
+  assert.deepEqual(h.calls, [], "opening and refresh never control the Akuma");
 });
 
 test("one refresh preserves completed and short Turn output before their terminals and the next open Turn", async (t) => {

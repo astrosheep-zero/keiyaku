@@ -28,6 +28,17 @@ export function createMirror(sessionId: string, emit: Emit) {
       ...(clientMessageId === undefined ? {} : { clientMessageId }) }, row.at);
   };
   const mirror = {
+    seed(rows: Row[]) {
+      covered = { high: Math.max(0, ...rows.map((row) => row.sequence)),
+        signatures: new Map(rows.map((row) => [row.sequence, JSON.stringify(row)])) };
+      for (const row of rows) if (row.kind === "tell") displayedTells.set(row.tellId, row.sequence);
+      const latest = rows.filter((row) => row.kind === "turn").sort((a, b) => a.sequence - b.sequence).at(-1);
+      if (latest?.kind === "turn") {
+        turn = { sequence: latest.turnSequence,
+          closed: rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.turnSequence) };
+        if (!turn.closed) emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state: "started" });
+      }
+    },
     hold() {
       submissions++;
       return (publish = true) => {

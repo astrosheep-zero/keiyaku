@@ -85,6 +85,70 @@ test("open, event-only refresh, reply mapping, and persisted replay through the 
     "retained short turns publish their real start and terminal on replay");
 });
 
+test("skip seeds retained history once, then publishes new activity and leaves replay unchanged", async (t) => {
+  let rows: Row[] = [turn(14, 2), tell(13, "pending"), answer(12), turn(11), tell(10)];
+  const h = await harness(async () => rows);
+  t.after(() => h.close());
+  await h.open({ history: "skip" });
+  assert.deepEqual(h.events.map((event) => event.type), ["session.opened", "session.turn", "session.ready"],
+    "opening skip emits current execution state but no retained items or window notices");
+  await h.refresh(); await tick();
+  assert.deepEqual(items(h.events), []);
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"]]);
+  rows = rows.map((row) => row.kind === "tell" ? { ...row, state: "told" } : row);
+  await h.refresh(); await tick();
+  assert.deepEqual(items(h.events), [], "changed Tell signatures still retain opening Tell deduplication");
+  rows = [...rows, tell(15), answer(16, 2)];
+  await h.refresh(); await tick();
+  await h.refresh(); await tick();
+  assert.deepEqual(items(h.events).map((event) => [event.item.id, event.item.type]), [
+    ["keiyaku:tell/tell/15", "user_message"], ["keiyaku:turn/2", "assistant_message"],
+  ], "new activity is published exactly once, not hidden by a permanent skip mode");
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"], ["turn/2", "completed"]],
+    "the observed open Turn still takes its new outcome");
+  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
+  h.events.length = 0;
+  await h.open({ history: "replay" });
+  assert.deepEqual(items(h.events).map((event) => event.item.id), [
+    "keiyaku:window/10", "keiyaku:tell/tell/10", "keiyaku:turn/1", "keiyaku:tell/tell/13",
+    "keiyaku:tell/tell/15", "keiyaku:turn/2",
+  ], "replay still exposes retained history and its retention notice");
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
+    ["turn/1", "started"], ["turn/1", "completed"], ["turn/2", "started"], ["turn/2", "completed"],
+  ], "replay publishes ordered historical start/terminal pairs");
+  assert.deepEqual(h.calls, [], "opening, refreshing and closing remain observation-only");
+});
+
+test("skip retains open and closed Turn state for Steer and Stop without historical starts", async (t) => {
+  let rows: Row[] = [tell(1), turn(2, 7)];
+  const receipt = messageReceipt("live");
+  const h = await harness(async () => rows, async (_world, args) => {
+    if (args[0] === "kill") return killed("killed");
+    rows = [...rows, receipt.tell.row];
+    return { code: 0, stdout: JSON.stringify(receipt), stderr: "" };
+  });
+  t.after(() => h.close());
+  await h.open({ history: "skip" });
+  await h.connection.send(promptInput());
+  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/7" }]);
+  assert.deepEqual(items(h.events).map((event) => event.item), [
+    { type: "user_message", id: "keiyaku:tell/new-tell", text: "change direction", clientMessageId: "client-1" },
+  ]);
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  await h.refresh(); await tick();
+  assert.deepEqual(h.calls.map((call) => call.args[0]), ["tell", "kill"]);
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/7", "started"], ["turn/7", "canceled"]],
+    "Stop captures the observed Turn and identical refresh never restarts it");
+  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
+  rows = [...rows, answer(4, 7)];
+  h.events.length = 0;
+  await h.open({ history: "skip" });
+  await assert.rejects(h.connection.send(promptInput()), /No observed Paseo Turn/u);
+  assert.equal(h.calls.length, 2, "a seeded completed Turn is not steerable");
+  assert.deepEqual(items(h.events), []);
+  assert.deepEqual(turns(h.events), []);
+});
+
 test("in-flight hints coalesce and RPC returns without waiting for reads", async (t) => {
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => { release = resolve; });

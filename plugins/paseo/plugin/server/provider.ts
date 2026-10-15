@@ -34,6 +34,7 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
             const world = await realpath(target.world);
             const mirror = createMirror(input.sessionId, emit);
             const cancellation = new AbortController();
+            let opening = true;
             let pending = false;
             let running: Promise<void> | undefined;
             const submissions = new Set<Promise<void>>();
@@ -48,9 +49,14 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
                     pending = false;
                     try {
                       const rows = await reader(world, target.akuId, cancellation.signal);
-                      if (!cancellation.signal.aborted) mirror.publish(rows);
+                      if (!cancellation.signal.aborted) {
+                        if (opening && input.history === "skip") mirror.seed(rows);
+                        else mirror.publish(rows);
+                      }
                     } catch {
                       if (!cancellation.signal.aborted) mirror.unreadable();
+                    } finally {
+                      opening = false;
                     }
                   }
                 })().finally(() => { running = undefined; });
