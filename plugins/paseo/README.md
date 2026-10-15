@@ -20,7 +20,8 @@ host IDs refuse as ambiguous instead of guessing. With no native ID, the existin
 `KEIYAKU_EXTERNAL_CALLER` fallback remains supported.
 
 A born signal carries that frozen caller to Paseo. The bridge enumerates public
-agent snapshots, including background and archived records, matching only
+agent snapshots with the supported `includeArchived` filter, never an active-only
+scope, matching only
 `persistence.provider` plus `persistence.sessionId` (never Pi's file-path handle).
 It refreshes the sole candidate and attaches only if its identity is unchanged
 and it is not archived. Missing, multiple, archived, or stale mappings diagnose
@@ -28,10 +29,12 @@ non-attachment without affecting Keiyaku creation. Stored `paseo` callers retain
 the direct Paseo-ID lookup for compatibility.
 
 Child creation reuses daemon idempotency for the Akuma's canonical World and
-identity, not an identity registry or duplicate worker. Completed replay does not
-reattach a detached child or revive an archived child. Unknown, unsupported, and
-nested-Akuma callers create no automatic mirror. Attachment is best effort, with
-no polling, backfill, or retry queue; a missed birth can remain unattached. After
+identity, not an identity registry or duplicate worker. Its creation title is the
+bare full AkuId, so an alias move never changes the creation fingerprint.
+Completed creation replay does not reattach a detached child or revive an
+archived child. Unknown, unsupported, and nested-Akuma callers create no automatic
+mirror. Attachment is best effort, with no polling, backfill, or retry
+queue; a missed birth can remain unattached. After
 successful SDK creation, attachment synchronizes matching open mirror sessions
 once: it reads fresh history, publishes normal changes, and reannounces only a
 still-open Turn. This compensates for Paseo registering its manager subscription
@@ -56,11 +59,47 @@ model settings):
 }
 ```
 
-The provider reads `keiyaku -C <world> history <akuId> --json --limit 200` and
-submits plain text through `keiyaku -C <world> tell <akuId> --json -`, with the
-text on stdin. Both use the existing identity-cleaned environment: inherited
-harness, Square and Keiyaku caller identities are stripped, not replaced. The
-same World and Akuma identity reopen on refresh/resume.
+The provider observes through the public SDK's one pull-backed stream in a
+dedicated identity-clean worker: every frame is a complete latest bounded
+window carrying the producer's own coverage metadata, and the next frame is
+pulled only after the previous one settles, so slow consumption bounds what the
+mirror holds instead of growing a queue. An incomplete bounded window is
+distinct from history the producer reports outside retention; projected
+sequence holes are not retention evidence; neither notice nor read failure
+cancels a Turn. The same worker can still page public history in overlapping
+200-row pages for a caller that asks for one; the mirror's own publication comes
+only from its stream.
+Tell and Stop use the same public SDK, not CLI arguments or stdout receipts.
+The worker locates the installed package through `keiyaku` on PATH and loads
+its declared public entry once. Inherited harness, Square and Keiyaku caller
+identities are stripped, not replaced; the host environment is never mutated.
+The same World and Akuma identity reopen on refresh/resume.
+
+Opening also reads public status and publishes the admitted model through
+Paseo's session configuration, with its provider in the model label. This is
+read-only display, not model switching. An unspecified model stays unknown;
+a failed status read reports a notice without blocking history. The global
+catalog remains the mirror attachment entry, not a catalogue of native models.
+
+Tool records map to native `tool_call` items with actual call, result, available
+output when supplied by the producer, exit status, duration and truncation.
+This does not restore missing provider output: the current Pi and Claude
+adapters omit tool-result bodies, and Codex retains only limited diagnostics.
+Tool identity is the public
+producer's `toolId` scoped by its Turn, so starts and results update one native
+item even for identical concurrent calls. An unwitnessed result ends only that
+tool's presentation as canceled, with the original `unsettled` state retained;
+it never cancels the Turn or invents a tool result. An installed producer that
+reports no `toolId` shows an observation notice while the tool is active and a
+settled record, without guessed pairing. Thoughts map to reasoning and notes to
+notifications. No
+pairing by names, arguments or timestamps is used. Intermediate speech maps to
+native assistant messages. An answered outcome that exactly replaces the final
+narration carries the producer-owned `foldedSaidSequence`; the mirror then reuses
+that live speech identity, and Paseo suppresses the identical final upsert. The
+adapter never repeats the producer's text comparison. An installed producer that
+reports no such linkage publishes the outcome under its own identity instead of
+guessing which speech it replaces, so that final text appears a second time.
 
 Messages submitted in the app's Steer mode use one ordinary Tell and never
 request an interrupt. Confirmed durable Tell admission is a successful send,
@@ -70,12 +109,12 @@ uses the observed Paseo Turn captured before submission as presentation
 correlation, not a new Keiyaku delivery or Turn-binding fact. Publication of racing
 history waits until admission is correlated to the optimistic message.
 
-For an idle send, the provider refreshes history once while publication is held.
-A receipt or refreshed history that names a real running Turn can associate the
-host request with that Turn. Otherwise Paseo may start and complete its own
+For an idle send, the provider reopens its observation once while publication is
+held. A receipt or freshly observed window that names a real running Turn can
+associate the host request with that Turn. Otherwise Paseo may start and complete its own
 `command-<clientMessageId>` send-command lifecycle. This only completes the send
 command: it does not mean the Akuma answered, completed, or stopped. Later Akuma
-starts and outcomes still come from Keiyaku history. A wake failure retains its
+starts and outcomes still come from observed Keiyaku windows. A wake failure retains its
 diagnostic without turning the recorded message into failure or adding a pending
 message UI. Initial retention notices are unchanged.
 
@@ -86,8 +125,11 @@ history item even when refresh races with submission. Correlation is in memory
 only; reopening reads history and never resends. Missing or invalid admission
 receipts, cancellation and timeout preserve an uncertain-outcome diagnostic and
 reject that prompt operation to prevent host fallback and automatic resubmission.
-Each owned CLI process is bounded to 30 seconds; closing observation aborts and
-awaits it without killing the Akuma. Provider-side archive is unsupported.
+Each ordinary SDK request is bounded to 30 seconds; an idle stream frame has no
+bound. Cancellation stops waiting and drops
+late responses without terminating other sessions' requests. Public reads that
+lack cancellation may finish in the worker; closing a mirror does not kill the
+Akuma. Plugin teardown retires the worker. Provider-side archive is unsupported.
 
 The app defaults to Steer. User-selected Interrupt is explicit replacement and
 is outside ordinary message semantics. Service callers that omit the send mode
@@ -96,25 +138,53 @@ can still make Paseo reject the presentation correlation after the Tell was
 recorded; the tested transition reports the host error without killing or
 resubmitting. This integration makes no absolute race-free UI promise.
 
-An explicit Stop runs `keiyaku -C <world> kill <akuId> --json` through the same
-bounded, identity-cleaned executor. Only a proven stopped receipt ends its captured
+An explicit Stop calls the public SDK's kill operation through the same
+bounded, identity-cleaned worker. Only a proven stopped receipt ends its captured
 observed Turn as canceled; refusal or uncertainty retains its diagnostic. A natural
 outcome, including one held during Tell correlation, keeps its own terminal event.
 Overlapping Stops share one attempt, and each request receives its own response.
 Stop preserves identity, history and session for later Tell. Refresh, close and
 plugin unload remain observation-only and never initiate kill.
 
-Opening reads once. Turn-start, turn-outcome and Body-end signals send refresh
+Opening observes once. Turn-start, turn-outcome and Body-end signals send refresh
 hints over one lazy authenticated local Paseo client. Body-end releases that
 client. Only TCP daemon listeners are supported. A failed hop is a single host
 plugin diagnostic, not a Keiyaku failure or a retry queue.
 
-No polling repairs lost hints. A mirror remains stale until another hint or
-Paseo refresh. Retention gaps and read failures appear as timeline notices;
-read failure retains the previous mirror.
+A session owns one live observation for its whole life, idle included: the
+public stream, pulled one frame at a time. The opening frame of a skipped
+history seeds retained state instead of announcing it; every other frame
+publishes through the same mirror semantics, including mid-turn records and a
+Turn that starts after an idle stretch. There is no interval, no timer and no
+idle expiration; an idle frame simply waits for the next change. Session or
+plugin teardown releases the subscription, settles the frame in flight and
+discards a late one, while ordinary history, Tell, Stop and status requests
+proceed beside it. A signal, an explicit refresh, a Tell and a proven Stop all
+reopen that one observation and await its current frame, so hints coalesce,
+publication stays serial, and a late window can never overwrite a newer one. A
+failed or ended observation keeps the previous display, reports the read surface
+as unavailable, and is never retried on a timer: only the next explicit refresh
+opens a fresh one. Which observation the bridge can open is the installed
+package's own capability, exactly like the surface it already probes; a package
+without the public stream reports the unavailable read surface rather than
+inventing one. Retention gaps and read failures appear as timeline notices, and
+a producer record without its own identity is reported as observation and never
+paired by guesswork.
 
-Focused tests use mocked reads/transports and a fake public CLI executable, not a
-live daemon/UI. Isolated native-host evidence and its limits are retained in
+Focused tests use mocked transports and stream frames, a fake public SDK package
+serving the worker protocol (frames, Tell, Stop, status and paging), the real
+built public package for history, Tell and Stop, the installed Paseo compiler
+and evaluator running the real plugin bundle through production PATH discovery,
+and installed native consumer tests. A package that declares `Akuma.stream` is
+exercised through that stream end to end: the real open Turn, a mid-turn record
+and a later Turn after an idle stretch, all with no timer in the session.
+`KEIYAKU_PUBLIC_PACKAGE` points those same tests at another built package, which
+is how a lane whose own build predates their prerequisite proves the streaming
+path for real instead of reporting the surface it could not open. The embedded
+worker type-checks against the installed declarations, including the streaming
+shape whenever the package declares it. They do not update or use
+the live daemon/UI. Isolated
+native-host evidence and its limits are retained in
 `plans/paseo-native-subagent-evidence.md`; Claude 2.1.299's native Bash export was
 verified without a model or exporter hook. Tests do not restart the user's Paseo.
 Live experiments, if

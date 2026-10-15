@@ -19,7 +19,7 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
     const candidates: string[] = [];
     let cursor: string | undefined;
     do {
-      const filter = { includeArchived: true, includeBackground: true };
+      const filter = { includeArchived: true };
       const page = await paseo.agents.list({ filter, page: { limit: 200, ...(cursor ? { cursor } : {}) } });
       for (const { agent } of page.entries) if (matches(agent)) candidates.push(agent.id);
       if (candidates.length > 1) return skip(`ambiguous ${caller.integration} session ${caller.id}: multiple parents`);
@@ -38,6 +38,8 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
   if (parent.agent.archivedAt) return skip(`parent ${parentId} is archived`);
   if (native && !matches(parent.agent)) return skip(`parent ${parentId} changed native identity`);
   const world = await realpath(input.world);
+  // Keep the creation fingerprint immutable: aliases belong to the forwarder's
+  // rename path, not this idempotent request (including retries after rename).
   await paseo.agents.create({ parent: parentId, cwd: parent.agent.cwd, title: input.akuId,
     config: { provider: "keiyaku/mirror", options: { world, akuId: input.akuId } },
     idempotencyKey: `keiyaku:${world}:${input.akuId}`,
