@@ -41,18 +41,6 @@ export type AuditInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; 
 export type BindResult = BindOutcome;
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
-type Admission<Value, Refusal> =
-  | Readonly<{ kind: "accepted"; accepted: AcceptedIntent<Value> }>
-  | Readonly<{ kind: "refused"; refusal: Refusal }>
-  | Readonly<{ kind: "retry"; reason: IntentRetry }>;
-
-export function admissionOf<Value, Refusal>(outcome: IntentOutcome<Value, Refusal>): Admission<Value, Refusal> {
-  if (outcome.kind === "accepted") return { kind: "accepted", accepted: outcome };
-  return outcome.kind === "refused"
-    ? { kind: "refused", refusal: outcome.refusal }
-    : { kind: "retry", reason: outcome.reason };
-}
-
 /** The refused/retry arms are value-agnostic, so every operation can return them unchanged. */
 type ExpectedProjection<Refusal> =
   | Readonly<{ kind: "refused"; contract?: ContractId; refusal: Refusal }>
@@ -60,7 +48,7 @@ type ExpectedProjection<Refusal> =
 
 export function expected<Refusal>(
   contract: ContractId | undefined,
-  admission: Exclude<Admission<unknown, Refusal>, { kind: "accepted" }>,
+  admission: Exclude<IntentOutcome<unknown, Refusal>, { kind: "accepted" }>,
 ): ExpectedProjection<Refusal> {
   return admission.kind === "refused"
     ? {
@@ -83,17 +71,12 @@ export function acceptedOutcome<Operation extends ContractVerb, Value>(
   return { kind: "accepted", contract, head, value };
 }
 
-export function conclusions(value: object): Readonly<Record<string, unknown>> {
-  return value as Readonly<Record<string, unknown>>;
-}
-
 export function retainAdmission<Value>(
   accumulator: InvocationAccumulator,
   contract: ContractId,
   leading: AcceptedIntent<Value>,
-  verificationResidueRecorded: boolean,
 ): void {
   accumulator.recordPublication(contract, leading.head, leading.facts);
   accumulator.recordResidue(contract, leading);
-  if (!verificationResidueRecorded) accumulator.recordVerification(contract, undefined, leading);
+  accumulator.recordVerification(contract, undefined, leading);
 }

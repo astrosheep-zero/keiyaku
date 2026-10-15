@@ -82,7 +82,7 @@ export class Keiyaku {
   }
 
   async state(): Promise<ContractState | null> {
-    return await this.read(() =>
+    return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         stateOperation({ scope: this.scope, channel, contractId: this.id }),
       ),
@@ -90,7 +90,7 @@ export class Keiyaku {
   }
 
   async history(): Promise<ContractHistory | null> {
-    return await this.read(() =>
+    return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         withGitReadObservation(this.scope, channel, async (observation) => {
           const [journals, dispatches] = await Promise.all([
@@ -131,7 +131,7 @@ export class Keiyaku {
   }
 
   async guidance(): Promise<string | null> {
-    return await this.read(() =>
+    return await readContractValue(() =>
       withGitDecodeChannel(this.scope, async (channel) => {
         const observed = await contractObservationOperation({ scope: this.scope, channel, contractId: this.id });
         if (observed.kind === "missing") return null;
@@ -142,7 +142,7 @@ export class Keiyaku {
   }
 
   async delivery(): Promise<Delivery | null> {
-    const delivery = await this.read(() =>
+    const delivery = await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         deliveryOperation({ scope: this.scope, channel, contractId: this.id }),
       ),
@@ -173,15 +173,8 @@ export class Keiyaku {
   async audit(input?: AuditInput, options?: MutationObservation): Promise<AuditOutcome> {
     return await this.operations.audit(input, options);
   }
-
-  /**
-   * Reads answer with a value or `null` for legitimate absence. Corrupt authority stays exceptional
-   * and keeps its original native cause instead of being disguised as a raw native exception.
-   */
-  private async read<Value>(operation: () => Promise<Value>): Promise<Value> {
-    return await readContractValue(operation);
-  }
 }
+
 /** Internal constructor capability; callers select a Contract through Keiyaku.with. */
 export function createKeiyakuHandle(
   id: ContractId,

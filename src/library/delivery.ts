@@ -65,24 +65,6 @@ export const Delivery: HandleType<DeliveryHandle> = Object.freeze({
   [Symbol.hasInstance]: (value: unknown) => value instanceof DeliveryHandle,
 });
 
-export function deliveryHandle(
-  delivery: DeliveryValue,
-  readDiff: () => Promise<string | null>,
-): Delivery & DeliveryValue;
-export function deliveryHandle(
-  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> & Partial<DeliveryValue>,
-  readDiff: () => Promise<string | null>,
-): Delivery;
-export function deliveryHandle(
-  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
-    Partial<
-      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
-    >,
-  readDiff: () => Promise<string | null>,
-): Delivery {
-  return new DeliveryHandle(delivery, readDiff, delivery);
-}
-
 export function deliveryForContract(scope: RepositoryScope, delivery: DeliveryValue): Delivery & DeliveryValue;
 export function deliveryForContract(
   scope: RepositoryScope,
@@ -90,13 +72,19 @@ export function deliveryForContract(
 ): Delivery;
 export function deliveryForContract(
   scope: RepositoryScope,
-  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
+  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
+    Partial<
+      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
+    >,
 ): Delivery {
-  return deliveryHandle(delivery, () =>
-    deliveryDiffOperation({
-      scope,
-      integrationPredecessor: delivery.integration.predecessor,
-      integrationSnapshot: delivery.integration.snapshot,
-    }),
+  return new DeliveryHandle(
+    delivery,
+    () =>
+      deliveryDiffOperation({
+        scope,
+        integrationPredecessor: delivery.integration.predecessor,
+        integrationSnapshot: delivery.integration.snapshot,
+      }),
+    delivery,
   );
 }

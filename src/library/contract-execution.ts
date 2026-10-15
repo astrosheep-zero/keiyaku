@@ -43,7 +43,7 @@ import type {
   MutationObservation,
   ReviewOutcome,
 } from "./contract-outcomes.js";
-import { acceptedOutcome, admissionOf, conclusions, expected, retainAdmission } from "./contract-outcomes.js";
+import { acceptedOutcome, expected, retainAdmission } from "./contract-outcomes.js";
 import {
   derivedContractPolicy,
   derivedGates,
@@ -130,54 +130,50 @@ export class ContractExecution {
         channel,
         scope,
       ): Promise<OutcomeProjection<"amend", AmendValue, OperationRefusals["amend"]>> => {
-        const admission = admissionOf(
-          await amendOperation({
-            scope,
-            channel,
-            contractId: this.id,
-            progress: accumulator,
-            ...(actor === undefined ? {} : { actor }),
-            deriveAmendment: (source) => {
-              const current = persistedDocument(source.document.bytes);
-              const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
-              changedSections = amendment?.changedSections;
-              const amended =
-                amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
-              const terms =
-                markdown === undefined
-                  ? {
-                      document: source.document,
-                      segments: source.segments,
-                      gates: gates ?? source.gates,
-                      after: prerequisites ?? source.after,
-                    }
-                  : contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
-              return { terms, verification: documentDerivation(amended, terms.gates, this.id).verification };
-            },
-          }),
-        );
+        const admission = await amendOperation({
+          scope,
+          channel,
+          contractId: this.id,
+          progress: accumulator,
+          ...(actor === undefined ? {} : { actor }),
+          deriveAmendment: (source) => {
+            const current = persistedDocument(source.document.bytes);
+            const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
+            changedSections = amendment?.changedSections;
+            const amended =
+              amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
+            const terms =
+              markdown === undefined
+                ? {
+                    document: source.document,
+                    segments: source.segments,
+                    gates: gates ?? source.gates,
+                    after: prerequisites ?? source.after,
+                  }
+                : contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
+            return { terms, verification: documentDerivation(amended, terms.gates, this.id).verification };
+          },
+        });
         if (admission.kind !== "accepted") return expected(this.id, admission);
-        const accepted = admission.accepted;
-        const changes = changedAmendTerms(accepted.value.source, accepted.value.terms);
+        const changes = changedAmendTerms(admission.value.source, admission.value.terms);
         const diff = documentDiff(
           "before",
           "after",
-          accepted.value.source.document.bytes,
-          accepted.value.terms.document.bytes,
+          admission.value.source.document.bytes,
+          admission.value.terms.document.bytes,
         );
         accumulator.extendConclusions(this.id, { documentDiff: diff, changes });
         const region = await observeChangedRegion(
           scope,
           this.id,
           changedSections,
-          decodeContractDocument(accepted.value.terms.document.bytes).region,
+          decodeContractDocument(admission.value.terms.document.bytes).region,
         );
         const value = await this.conclude(accumulator, {
           scope,
           channel,
-          leading: accepted,
+          leading: admission,
           hooks,
-          verificationResidueRecorded: false,
           value: (): AmendValue => ({
             documentDiff: diff,
             changes,
@@ -366,32 +362,29 @@ export class ContractExecution {
         channel,
         scope,
       ): Promise<OutcomeProjection<"abandon", void, OperationRefusals["abandon"]>> => {
-        const admission = admissionOf(
-          (
-            await releaseTaskHolderWithFence(scope, channel, this.id, () =>
-              abandonOperation({
-                scope,
-                channel,
-                contractId: this.id,
-                ...actor,
-                ...(note === undefined ? {} : { note }),
-                observationSelection: taskHolderObservationSelection(),
-                progress: accumulator,
-                decorateOffer: async ({ observation, contractId: owner }) => {
-                  const companion = await releaseTaskHolder(channel, observation, owner);
-                  return companion === null ? [] : [companion];
-                },
-              }),
-            )
-          ).result,
-        );
+        const admission = (
+          await releaseTaskHolderWithFence(scope, channel, this.id, () =>
+            abandonOperation({
+              scope,
+              channel,
+              contractId: this.id,
+              ...actor,
+              ...(note === undefined ? {} : { note }),
+              observationSelection: taskHolderObservationSelection(),
+              progress: accumulator,
+              decorateOffer: async ({ observation, contractId: owner }) => {
+                const companion = await releaseTaskHolder(channel, observation, owner);
+                return companion === null ? [] : [companion];
+              },
+            }),
+          )
+        ).result;
         if (admission.kind !== "accepted") return expected(this.id, admission);
         await this.conclude(accumulator, {
           scope,
           channel,
-          leading: admission.accepted,
+          leading: admission,
           hooks,
-          verificationResidueRecorded: false,
           value: () => ({}),
         });
         return acceptedOutcome("abandon", this.id, accumulator, undefined);
@@ -411,23 +404,20 @@ export class ContractExecution {
     return await this.local(
       "arc",
       async (accumulator, channel, scope): Promise<OutcomeProjection<"arc", void, OperationRefusals["arc"]>> => {
-        const admission = admissionOf(
-          await arcOperation({
-            scope,
-            channel,
-            contractId: this.id,
-            ...actor,
-            chapter,
-            progress: accumulator,
-          }),
-        );
+        const admission = await arcOperation({
+          scope,
+          channel,
+          contractId: this.id,
+          ...actor,
+          chapter,
+          progress: accumulator,
+        });
         if (admission.kind !== "accepted") return expected(this.id, admission);
         await this.conclude(accumulator, {
           scope,
           channel,
-          leading: admission.accepted,
+          leading: admission,
           hooks,
-          verificationResidueRecorded: false,
           value: () => ({}),
         });
         return acceptedOutcome("arc", this.id, accumulator, undefined);
@@ -466,27 +456,24 @@ export class ContractExecution {
         localChannel,
         scope,
       ): Promise<OutcomeProjection<"audit", AuditReport, OperationRefusals["audit"]>> => {
-        const admission = admissionOf(
-          await auditOperation({
-            scope,
-            channel: localChannel,
-            progress: accumulator,
-            contractId: this.id,
-            deriveDocument: derivedDocument,
-            includeDirty,
-            showDiff,
-            requireBranchesToBeUpToDate,
-            ...(signal === undefined ? {} : { signal }),
-            ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
-          }),
-        );
+        const admission = await auditOperation({
+          scope,
+          channel: localChannel,
+          progress: accumulator,
+          contractId: this.id,
+          deriveDocument: derivedDocument,
+          includeDirty,
+          showDiff,
+          requireBranchesToBeUpToDate,
+          ...(signal === undefined ? {} : { signal }),
+          ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
+        });
         if (admission.kind !== "accepted") return expected(this.id, admission);
         const report = await this.conclude(accumulator, {
           scope,
           channel: localChannel,
-          leading: admission.accepted,
+          leading: admission,
           hooks,
-          verificationResidueRecorded: false,
           value: (value: AuditReport) => value,
         });
         return acceptedOutcome("audit", this.id, accumulator, report);
@@ -542,13 +529,12 @@ export class ContractExecution {
       channel: GitDecodeChannel;
       leading: AcceptedIntent<Value>;
       hooks: WorktreeHooks;
-      verificationResidueRecorded: boolean;
       value: (value: Value) => Public;
     }>,
   ): Promise<Public> {
-    retainAdmission(accumulator, this.id, input.leading, input.verificationResidueRecorded);
+    retainAdmission(accumulator, this.id, input.leading);
     const value = input.value(input.leading.value);
-    accumulator.extendConclusions(this.id, conclusions(value));
+    accumulator.extendConclusions(this.id, value as Readonly<Record<string, unknown>>);
     await reconcileAffectedContracts(accumulator, this.id, input.scope, input.channel, input.hooks);
     return value;
   }

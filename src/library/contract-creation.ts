@@ -8,10 +8,10 @@ import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observa
 import type { BindTargetSelection } from "../protocol/bind.js";
 import type { IntentOutcome, RepositoryScope } from "../protocol/operations.js";
 import { executionStop, isOperationalFailure, isOperationalStop } from "../protocol/progress.js";
-import { readManagedWorktreeAppointment, type ContractWorkspaceLocation } from "../workspace-place.js";
+import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
 import type { BindOutcome, BindValue } from "./contract-outcomes.js";
-import { acceptedOutcome, conclusions, expected, retainAdmission } from "./contract-outcomes.js";
+import { acceptedOutcome, expected, retainAdmission } from "./contract-outcomes.js";
 import {
   captureLocalContractComposition,
   derivedGates,
@@ -140,21 +140,12 @@ export async function bindKeiyaku(
   return projected.outcome as BindOutcome;
 }
 
-function bindValue(
-  keiyaku: Keiyaku,
-  region: RegionObservation,
-  warnings: readonly string[],
-  workspace?: ContractWorkspaceLocation,
-  appointmentLag?: readonly { path: string; diagnostic: string }[],
-): BindValue {
-  const base = {
+function bindValue(keiyaku: Keiyaku, region: RegionObservation, warnings: readonly string[]): BindValue {
+  return {
     keiyaku,
-    ...(workspace === undefined ? {} : { workspace }),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...region,
   };
-  void appointmentLag;
-  return base;
 }
 
 // eslint-disable-next-line max-params -- Keep this local operation's custody, admission, and policy witnesses explicit.
@@ -167,7 +158,7 @@ async function bindComplete<Value>(
   hooks: WorktreeHooks,
   value: () => Promise<BindValue>,
 ): Promise<BindValue> {
-  retainAdmission(accumulator, id, leading, false);
+  retainAdmission(accumulator, id, leading);
   await reconcileAffectedContracts(accumulator, id, scope, channel, hooks);
   try {
     const appointment = await readManagedWorktreeAppointment(scope, id);
@@ -180,7 +171,7 @@ async function bindComplete<Value>(
     accumulator.recordStop(executionStop(id, "reconciliation", error, scope.signal));
   }
   const built = { ...(await value()), ...accumulator.conclusions(id) } as BindValue;
-  accumulator.extendConclusions(id, conclusions(built));
+  accumulator.extendConclusions(id, built);
   return built;
 }
 
