@@ -34,10 +34,11 @@ async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | nu
     },
     async createAgent(options: unknown) { created.push(options); return { id: "child", cwd: world }; },
   } as unknown as DaemonClient);
+  const create = t.mock.method(paseo.agents, "create");
   t.after(() => paseo.dispose());
   const run = (integration: string, id = "native-session") => attach({ world, akuId: "aku/test/1234abcd",
     caller: { kind: "external", integration, id } }, { paseo });
-  return { world, run, listed, fetched, created };
+  return { world, run, listed, fetched, created, create };
 }
 
 test("native parents match exact persistence provider/sessionId across every directory page, then refresh", async t => {
@@ -52,10 +53,12 @@ test("native parents match exact persistence provider/sessionId across every dir
     assert.deepEqual(h.fetched, ["parent"]);
     const world = await realpath(h.world);
     assert.deepEqual(h.created, [{
-      config: { provider: "keiyaku", model: "mirror", cwd: "/parent/cwd",
+      config: { provider: "keiyaku", model: "mirror", cwd: "/parent/cwd", title: "aku/test/1234abcd",
         providerOptions: { world, akuId: "aku/test/1234abcd" } },
       callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:aku/test/1234abcd`,
     }]);
+    assert.equal(h.create.mock.calls[0]?.arguments[0]?.title, "aku/test/1234abcd",
+      "the public SDK call carries the full Akuma identity as its title");
   });
 });
 

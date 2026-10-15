@@ -502,10 +502,11 @@ test("native born attach, SDK creation and identity retries share the registered
   const caller = await akumaCallerFromEnvironment({ CODEX_THREAD_ID: "native-codex" });
   assert.deepEqual(caller, { kind: "external", integration: "codex", id: "native-codex" });
   await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" }, caller });
-  assert.deepEqual(create.mock.calls[0]?.arguments[0], { parent: "parent", cwd: root,
+  assert.deepEqual(create.mock.calls[0]?.arguments[0], { parent: "parent", cwd: root, title: akuId,
     config: { provider: "keiyaku/mirror", options: { world, akuId } }, idempotencyKey: `keiyaku:${world}:${akuId}` });
   assert.equal(created.size, 1);
-  assert.deepEqual(wire[0], { config: { provider: "keiyaku", model: "mirror", cwd: root, providerOptions: { world, akuId } },
+  assert.deepEqual(wire[0], { config: { provider: "keiyaku", model: "mirror", cwd: root, title: akuId,
+      providerOptions: { world, akuId } },
     callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:${akuId}` });
   assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
   assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");

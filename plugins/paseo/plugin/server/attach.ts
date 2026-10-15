@@ -37,7 +37,7 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
   if (parent.agent.archivedAt) return skip(`parent ${parentId} is archived`);
   if (native && !matches(parent.agent)) return skip(`parent ${parentId} changed native identity`);
   const world = await realpath(input.world);
-  await paseo.agents.create({ parent: parentId, cwd: parent.agent.cwd,
+  await paseo.agents.create({ parent: parentId, cwd: parent.agent.cwd, title: input.akuId,
     config: { provider: "keiyaku/mirror", options: { world, akuId: input.akuId } },
     idempotencyKey: `keiyaku:${world}:${input.akuId}`,
   });
