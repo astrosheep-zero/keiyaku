@@ -12,11 +12,24 @@ Two plugins form one bridge:
 A present `plugins` namespace is the explicit plugin set. Include a Square entry
 as well if that observer should remain enabled.
 
-Create a Paseo agent with provider `keiyaku`, a working directory, and these
-opaque `providerOptions` (not model settings):
+Every Paseo session is tagged with its agent's Keiyaku external-caller identity.
+A born signal attributed to that Paseo agent automatically creates a child mirror,
+using daemon idempotency for the Akuma's canonical World and identity. Unknown,
+non-Paseo, nested-Akuma, or missing-parent callers create no automatic mirror.
+Attachment is best effort, with no backfill; manual creation remains available.
+
+Create a Paseo agent with `config.provider: "keiyaku/mirror"`, a working directory,
+and `config.options` (translated by the client to opaque `providerOptions`, not
+model settings):
 
 ```json
-{ "world": "/absolute/path/to/world", "akuId": "aku/archetype/id" }
+{
+  "cwd": "/absolute/path/to/workdir",
+  "config": {
+    "provider": "keiyaku/mirror",
+    "options": { "world": "/absolute/path/to/world", "akuId": "aku/archetype/id" }
+  }
+}
 ```
 
 The provider only executes `keiyaku -C <world> history <akuId> --json --limit 200`.

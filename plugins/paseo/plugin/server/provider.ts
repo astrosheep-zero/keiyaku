@@ -22,7 +22,9 @@ export function createProvider(reader: Reader = readKeiyaku) {
         async send(input) {
           if (closed) throw new Error("Provider connection is closed");
           if (input.type === "catalog") {
-            emit({ type: "catalog", requestId: input.requestId, catalog: { models: [], modes: [] } });
+            emit({ type: "catalog", requestId: input.requestId, catalog: {
+              models: [{ id: "mirror", label: "Akuma mirror（只读）" }], defaultModel: "mirror", modes: [],
+            } });
           } else if (input.type === "session.open") {
             if (local.has(input.sessionId)) throw new Error("Session already open");
             if (input.persistence && input.persistence.version !== 1) throw new Error("Unsupported persistence version");

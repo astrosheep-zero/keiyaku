@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ProviderEvent, ProviderInput, ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
+import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { createPaseoApi } from "@getpaseo/client";
+import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { PluginContext } from "../src/plugin/public.js";
+import { createForwarder } from "../plugins/paseo/forwarder/index.js";
 import contribute from "../plugins/paseo/plugin/index.server.js";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import { identityKeys, readKeiyaku, type Reader, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
@@ -39,6 +44,10 @@ test("open, event-only refresh, reply mapping, and persisted replay through the 
   const h = await harness(async () => { reads++; return rows; });
   t.after(() => h.close());
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  await h.connection.send({ type: "catalog", requestId: "catalog" });
+  assert.deepEqual(h.events.find((e) => e.type === "catalog")?.catalog, {
+    models: [{ id: "mirror", label: "Akuma mirror（只读）" }], defaultModel: "mirror", modes: [],
+  });
   await h.open();
   assert.equal(reads, 1);
   assert.deepEqual(h.connection.capabilities, ["session.persistence"]);
@@ -151,18 +160,71 @@ test("close during a read aborts the pump and discards its pending wake", async 
   assert.deepEqual(h.events.map((e) => e.type), ["session.opened", "session.closed", "request.completed"]);
 });
 
-test("entry registers refresh RPC and provider together", () => {
-  let rpcName = "", providerId = "";
+test("session env, born attach, SDK creation and identity retries share the registered plugin seam", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "paseo-attach-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const alias = join(root, "alias"); await symlink(root, alias);
+  const world = await realpath(root), akuId = "aku/test/1";
+  const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
+  const created = new Map<string, { id: string; cwd: string }>();
+  const paseo = createPaseoApi({
+    async fetchAgent({ agentId }: { agentId: string }) {
+      return agentId === "parent" ? { agent: { id: agentId, cwd: root }, project: null } : null;
+    },
+    async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
+      wire.push(options);
+      assert.ok(options.idempotencyKey);
+      if (!created.has(options.idempotencyKey)) created.set(options.idempotencyKey, { id: "child", cwd: root });
+      return created.get(options.idempotencyKey)!;
+    },
+  } as unknown as DaemonClient);
+  t.after(() => paseo.dispose());
+  const create = t.mock.method(paseo.agents, "create");
+  const before = t.mock.fn<PluginServerContext["before"]>(() => () => {});
+  const handlers = new Map<string, (input: unknown) => unknown>();
+  let providerId = "";
   const cleanup = contribute({
     registerProvider(provider) { providerId = provider.id; },
-    handle(contract) { rpcName = contract.name; },
+    handle(contract, handler) { handlers.set(contract.name, (input) => handler(contract.input.parse(input), { paseo })); },
     registerSettings() { throw new Error("unused"); },
     registerUsageSource() { throw new Error("unused"); },
-    on() { throw new Error("unused"); },
-    before() { throw new Error("unused"); },
+    on() { throw new Error("unused"); }, before,
   });
-  assert.equal(providerId, "keiyaku"); assert.equal(rpcName, "refresh");
-  return cleanup();
+  t.after(async () => { await cleanup(); });
+  assert.equal(providerId, "keiyaku");
+  assert.deepEqual([...handlers.keys()], ["refresh", "attach"]);
+  const [name, hook] = before.mock.calls[0]!.arguments;
+  assert.equal(name, "agent.session_open");
+  for (const provider of ["codex", "keiyaku"]) {
+    const request = { agentId: "parent", workspaceId: null, provider, cwd: root,
+      reason: "create" as const, purpose: "interactive" as const, env: { KEEP: "yes", KEIYAKU_EXTERNAL_CALLER: "stale" } };
+    assert.deepEqual(await hook({ request }, { paseo, signal: new AbortController().signal }), {
+      ...request, env: { KEEP: "yes", KEIYAKU_EXTERNAL_CALLER: "paseo:parent" },
+    });
+  }
+  const forwarder = createForwarder(async () => ({
+    async invokePluginRpc(_plugin, method, input) { return await handlers.get(method)!(input); }, async close() {},
+  }));
+  const { signals } = await forwarder.activate({ world: alias as PluginContext["world"], config: undefined,
+    writablePath() { throw new Error("no writes"); } });
+  const caller = { kind: "external" as const, integration: "paseo", id: "parent" };
+  await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" }, caller });
+  assert.deepEqual(create.mock.calls[0]?.arguments[0], { parent: "parent", cwd: root,
+    config: { provider: "keiyaku/mirror", options: { world, akuId } }, idempotencyKey: `keiyaku:${world}:${akuId}` });
+  assert.equal(created.size, 1);
+  assert.deepEqual(wire[0], { config: { provider: "keiyaku", model: "mirror", cwd: root, providerOptions: { world, akuId } },
+    callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:${akuId}` });
+  assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
+  assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");
+  assert.equal(wire[1]?.idempotencyKey, wire[0]?.idempotencyKey);
+  const diagnostics = t.mock.method(console, "warn", () => {});
+  for (const other of [undefined, { kind: "unknown" }, { kind: "akuma", world, akuId },
+    { ...caller, integration: "other" }, { ...caller, id: "gone" }]) {
+    const before = diagnostics.mock.callCount();
+    assert.deepEqual(await handlers.get("attach")!({ world, akuId, caller: other }), { attached: false });
+    assert.equal(diagnostics.mock.callCount(), before + 1);
+  }
+  assert.equal(create.mock.callCount(), 2, "only the initial attach and its retry reach create");
 });
 
 test("reader spawns only bounded history, strips inherited identities, and rejects bad/nonzero reads", async (t) => {

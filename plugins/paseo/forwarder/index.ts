@@ -11,6 +11,14 @@ const refreshRpc = defineRpc({ name: "refresh",
   input: z.object({ world: z.string(), akuId: z.string() }),
   output: z.object({ woken: z.number().int().nonnegative() }),
 });
+const attachRpc = defineRpc({ name: "attach",
+  input: z.object({ world: z.string(), akuId: z.string(), caller: z.union([
+    z.object({ kind: z.literal("akuma"), world: z.string(), akuId: z.string() }),
+    z.object({ kind: z.literal("external"), integration: z.string(), id: z.string() }),
+    z.object({ kind: z.literal("unknown") }),
+  ]).optional() }),
+  output: z.object({ attached: z.boolean() }),
+});
 type Client = Pick<DaemonClient, "invokePluginRpc" | "close">;
 async function connect(signal: AbortSignal): Promise<Client> {
   const home = resolvePaseoHome({ PASEO_HOME: process.env.PASEO_HOME });
@@ -35,7 +43,7 @@ export function createForwarder(openClient: (signal: AbortSignal) => Promise<Cli
     async activate(context) {
       const world = await realpath(context.world);
       let client: Promise<Client> | undefined;
-      const hint = async (event: { akumaId: string }, cancellation?: AbortSignal): Promise<void> => {
+      const hint = async (rpc: typeof refreshRpc | typeof attachRpc, input: unknown, cancellation?: AbortSignal): Promise<void> => {
         const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
         signal.throwIfAborted();
         const pending = client ??= openClient(signal);
@@ -45,8 +53,7 @@ export function createForwarder(openClient: (signal: AbortSignal) => Promise<Cli
             (async () => {
               const connected = await pending;
               signal.throwIfAborted();
-              refreshRpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", refreshRpc.name,
-                refreshRpc.input.parse({ world, akuId: event.akumaId })));
+              rpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", rpc.name, rpc.input.parse(input)));
             })(),
             new Promise<never>((_, reject) => {
               abort = () => reject(signal.reason);
@@ -60,9 +67,12 @@ export function createForwarder(openClient: (signal: AbortSignal) => Promise<Cli
           throw error;
         } finally { signal.removeEventListener("abort", abort); }
       };
-      return { signals: { "akuma.turn-started": hint, "akuma.turn-outcome": hint,
+      const refresh = (event: { akumaId: string }, cancellation?: AbortSignal) =>
+        hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+      return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
+        "akuma.born": (event, cancellation) => hint(attachRpc, { world, akuId: event.akumaId, caller: event.caller }, cancellation),
         async "akuma.body-ended"(event, cancellation) {
-          try { await hint(event, cancellation); }
+          try { await refresh(event, cancellation); }
           finally {
             const previous = client; client = undefined;
             await previous?.then((connected) => connected.close()).catch(() => {});
