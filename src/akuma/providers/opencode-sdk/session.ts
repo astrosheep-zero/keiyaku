@@ -6,6 +6,7 @@ import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
 import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
+import { isRecord } from "../decode.js";
 
 export type OpencodeSdkSession = Pick<
   OpencodeClient["session"],
@@ -101,10 +102,6 @@ const HEADLESS_PERMISSION_BASE: Readonly<Record<string, string>> = Object.freeze
   read: "allow",
   question: "deny",
 });
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * Compose the config handed to a headless opencode server. The permission base

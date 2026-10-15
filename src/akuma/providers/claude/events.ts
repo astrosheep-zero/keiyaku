@@ -1,5 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { AgentEventChannel, noteEvent, otherToolCall, unknownEvent, type ToolCall } from "../../provider.js";
+import { finiteNumber, object, positiveLine, searchToolCall, trimmed } from "../decode.js";
 
 type ClaudeMessageType = SDKMessage["type"];
 type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
@@ -52,24 +53,6 @@ export const CLAUDE_SYSTEM_DISPOSITIONS = {
   worker_shutting_down: "note",
 } as const satisfies Record<ClaudeSystemSubtype, SystemDisposition>;
 
-function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
-}
-
-function nonblank(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function number(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
-}
-
 function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?: number; limit?: number }> {
   const offset = positiveLine(value.offset);
   const limit = positiveLine(value.limit);
@@ -79,22 +62,10 @@ function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?
   };
 }
 
-function contentSearch(value: Readonly<Record<string, unknown>>, query: string): Extract<ToolCall, { kind: "search" }> {
-  const path = nonblank(value.path);
-  const glob = nonblank(value.glob);
-  return {
-    kind: "search",
-    query,
-    scope: "content",
-    ...(path === undefined ? {} : { path }),
-    ...(glob === undefined ? {} : { glob }),
-  };
-}
-
 const CLAUDE_SYSTEM_NOTES = {
   api_retry: (message) => {
-    const attempt = number(message.attempt);
-    const maximum = number(message.max_retries);
+    const attempt = finiteNumber(message.attempt);
+    const maximum = finiteNumber(message.max_retries);
     return attempt === undefined || maximum === undefined
       ? "Retrying request"
       : `Retrying request ${attempt}/${maximum}`;
@@ -106,30 +77,30 @@ const CLAUDE_SYSTEM_NOTES = {
     const failed = Array.isArray(message.failed) ? message.failed.length : 0;
     return failed === 0 ? `Persisted ${files} files` : `Persisted ${files} files; ${failed} failed`;
   },
-  informational: (message) => nonblank(message.content) ?? "Informational notice",
+  informational: (message) => trimmed(message.content) ?? "Informational notice",
   mirror_error: (message) =>
-    `Transcript mirror warning: ${nonblank(message.error) ?? nonblank(message.message) ?? "unknown error"}`,
+    `Transcript mirror warning: ${trimmed(message.error) ?? trimmed(message.message) ?? "unknown error"}`,
   model_refusal_fallback: () => "Model refusal; using fallback",
   model_refusal_no_fallback: () => "Model refusal; no fallback available",
-  notification: (message) => nonblank(message.message) ?? nonblank(message.content) ?? "Notification",
+  notification: (message) => trimmed(message.message) ?? trimmed(message.content) ?? "Notification",
   permission_denied: (message) =>
-    `Permission refused${nonblank(message.message) === undefined ? "" : `: ${nonblank(message.message)}`}`,
+    `Permission refused${trimmed(message.message) === undefined ? "" : `: ${trimmed(message.message)}`}`,
   plugin_install: (message) =>
-    `Plugin install ${nonblank(message.status) ?? "updated"}${nonblank(message.name) === undefined ? "" : `: ${nonblank(message.name)}`}`,
+    `Plugin install ${trimmed(message.status) ?? "updated"}${trimmed(message.name) === undefined ? "" : `: ${trimmed(message.name)}`}`,
   status: (message) =>
-    `Status: ${nonblank(message.status) ?? "idle"}${nonblank(message.error) === undefined ? "" : ` (${nonblank(message.error)})`}`,
+    `Status: ${trimmed(message.status) ?? "idle"}${trimmed(message.error) === undefined ? "" : ` (${trimmed(message.error)})`}`,
   task_notification: (message) =>
-    `Task ${nonblank(message.task_id) ?? "unknown"} ${nonblank(message.status) ?? "updated"}`,
+    `Task ${trimmed(message.task_id) ?? "unknown"} ${trimmed(message.status) ?? "updated"}`,
   task_progress: (message) =>
-    nonblank(message.description) ?? `Task ${nonblank(message.task_id) ?? "unknown"} progressed`,
-  task_started: (message) => nonblank(message.description) ?? `Task ${nonblank(message.task_id) ?? "unknown"} started`,
-  task_updated: (message) => `Task ${nonblank(message.task_id) ?? "unknown"} updated`,
-  worker_shutting_down: (message) => `Worker stopping: ${nonblank(message.reason) ?? "unknown reason"}`,
+    trimmed(message.description) ?? `Task ${trimmed(message.task_id) ?? "unknown"} progressed`,
+  task_started: (message) => trimmed(message.description) ?? `Task ${trimmed(message.task_id) ?? "unknown"} started`,
+  task_updated: (message) => `Task ${trimmed(message.task_id) ?? "unknown"} updated`,
+  worker_shutting_down: (message) => `Worker stopping: ${trimmed(message.reason) ?? "unknown reason"}`,
 } satisfies Partial<Record<ClaudeSystemSubtype, (message: Readonly<Record<string, unknown>>) => string>>;
 
 function runCall(name: string, value: Readonly<Record<string, unknown>>, input: unknown): ToolCall | undefined {
   if (name !== "Bash") return undefined;
-  const command = nonblank(value.command);
+  const command = trimmed(value.command);
   return command === undefined ? otherToolCall(name, input) : { kind: "run", command };
 }
 
@@ -143,19 +114,18 @@ function readCall(
 
 function searchCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
   if (name === "Grep") {
-    const query = nonblank(value.pattern) ?? nonblank(value.query);
-    return query === undefined ? undefined : contentSearch(value, query);
-  }
-  if (name === "Glob") {
-    const query = nonblank(value.pattern);
-    const globPath = nonblank(value.path);
+    const query = trimmed(value.pattern) ?? trimmed(value.query);
     return query === undefined
       ? undefined
-      : { kind: "search", query, scope: "files", ...(globPath === undefined ? {} : { path: globPath }) };
+      : searchToolCall(query, "content", { path: trimmed(value.path), glob: trimmed(value.glob) });
+  }
+  if (name === "Glob") {
+    const query = trimmed(value.pattern);
+    return query === undefined ? undefined : searchToolCall(query, "files", { path: trimmed(value.path) });
   }
   if (name === "WebSearch") {
-    const query = nonblank(value.query);
-    return query === undefined ? undefined : { kind: "search", query, scope: "web" };
+    const query = trimmed(value.query);
+    return query === undefined ? undefined : searchToolCall(query, "web");
   }
   return undefined;
 }
@@ -170,8 +140,8 @@ function fileChangeCall(name: string, path: string | undefined): ToolCall | unde
 }
 
 function startedPath(name: string, value: Readonly<Record<string, unknown>>): string | undefined {
-  if (name === "NotebookEdit") return nonblank(value.notebook_path);
-  return nonblank(value.file_path) ?? (name === "Read" ? nonblank(value.path) : undefined);
+  if (name === "NotebookEdit") return trimmed(value.notebook_path);
+  return trimmed(value.file_path) ?? (name === "Read" ? trimmed(value.path) : undefined);
 }
 
 function nonnegativeInt(value: unknown): number | undefined {
@@ -192,7 +162,7 @@ function fileChange(op: "add" | "update", path: string, gitDiff: unknown): Extra
 function writeResult(result: unknown): ToolCall | undefined {
   const value = object(result);
   if (value === undefined || (value.type !== "create" && value.type !== "update")) return undefined;
-  const path = nonblank(value.filePath);
+  const path = trimmed(value.filePath);
   if (path === undefined) return undefined;
   const op = value.type === "create" ? "add" : "update";
   return fileChange(op, path, value.gitDiff);
@@ -201,14 +171,14 @@ function writeResult(result: unknown): ToolCall | undefined {
 function editResult(result: unknown): ToolCall | undefined {
   const value = object(result);
   if (value === undefined || value.type === "create" || value.type === "update") return undefined;
-  const path = nonblank(value.filePath);
+  const path = trimmed(value.filePath);
   if (path === undefined) return undefined;
   const status = object(value.gitDiff)?.status;
   return fileChange(status === "added" ? "add" : "update", path, value.gitDiff);
 }
 
 function notebookResult(result: unknown): ToolCall | undefined {
-  const path = nonblank(object(result)?.notebook_path);
+  const path = trimmed(object(result)?.notebook_path);
   return path === undefined ? undefined : { kind: "fileChange", changes: [{ op: "update", path }] };
 }
 
@@ -266,7 +236,7 @@ function toolResultEvents(
   for (const block of content) {
     const value = object(block);
     if (value?.type !== "tool_result") continue;
-    const id = nonblank(value.tool_use_id);
+    const id = trimmed(value.tool_use_id);
     if (id === undefined) continue;
     const observed = state.tools.get(id);
     if (observed === undefined) continue;
@@ -285,15 +255,15 @@ function toolResultEvents(
 }
 
 function hookResponseNote(value: Readonly<Record<string, unknown>>): string | undefined {
-  const outcome = nonblank(value.outcome);
+  const outcome = trimmed(value.outcome);
   if (outcome !== "error" && outcome !== "cancelled") return undefined;
-  const hook = nonblank(value.hook_name) ?? "unknown";
-  const exitCode = number(value.exit_code);
+  const hook = trimmed(value.hook_name) ?? "unknown";
+  const exitCode = finiteNumber(value.exit_code);
   return `Hook ${hook} ${outcome}${exitCode === undefined ? "" : ` (exit ${exitCode})`}`;
 }
 
 function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: AgentEventChannel): void {
-  const subtype = nonblank(value?.subtype) ?? "unknown";
+  const subtype = trimmed(value?.subtype) ?? "unknown";
   if (!Object.hasOwn(CLAUDE_SYSTEM_DISPOSITIONS, subtype)) {
     events.emit(unknownEvent(subtype));
     return;
@@ -312,7 +282,7 @@ function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: Age
 
 export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, state: ClaudeObservationState): void {
   const value = object(message) ?? {};
-  const kind = nonblank(value.type) ?? "unknown";
+  const kind = trimmed(value.type) ?? "unknown";
   if (!Object.hasOwn(CLAUDE_MESSAGE_DISPOSITIONS, kind)) return events.emit(unknownEvent(kind));
   const disposition = CLAUDE_MESSAGE_DISPOSITIONS[kind as ClaudeMessageType];
   if (disposition === "assistant") {
@@ -320,7 +290,7 @@ export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel
   } else if (disposition === "tool-results") {
     toolResultEvents(message as Extract<SDKMessage, { type: "user" }>, events, state);
   } else if (disposition === "auth") {
-    const error = nonblank(value.error);
+    const error = trimmed(value.error);
     if (error !== undefined) events.emit(noteEvent(`Authentication warning: ${error}`));
   } else if (disposition === "note") {
     events.emit(noteEvent("Conversation reset"));

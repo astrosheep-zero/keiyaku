@@ -1,5 +1,6 @@
 import type { SessionUpdate, ToolCallLocation } from "@agentclientprotocol/sdk";
 import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { nonblank, object, positiveLine } from "../decode.js";
 
 type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
 
@@ -53,24 +54,6 @@ function appendBlock(
   };
 }
 
-function nonblank(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
-}
-
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
-}
-
-function otherCall(name: string, input?: unknown): ToolCall {
-  return otherToolCall(name, input);
-}
-
 function locationFact(locations: readonly ToolCallLocation[] | null | undefined): {
   path?: string;
   offset?: number;
@@ -89,7 +72,7 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
   const location = locationFact(update.locations);
   if (update.kind === "read") {
     return location.path === undefined
-      ? otherCall(name, update.rawInput)
+      ? otherToolCall(name, update.rawInput)
       : {
           kind: "read",
           path: location.path,
@@ -99,11 +82,11 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
   const input = object(update.rawInput);
   if (update.kind === "execute") {
     const command = nonblank(input?.command);
-    return command === undefined ? otherCall(name, update.rawInput) : { kind: "run", command };
+    return command === undefined ? otherToolCall(name, update.rawInput) : { kind: "run", command };
   }
   if (update.kind === "search") {
     const query = nonblank(input?.query);
-    if (query === undefined) return otherCall(name, update.rawInput);
+    if (query === undefined) return otherToolCall(name, update.rawInput);
     const path = nonblank(input?.path);
     const glob = nonblank(input?.glob);
     const scope = input?.scope;
@@ -116,7 +99,7 @@ function standardCall(update: AcpToolUpdate, name: string): ToolCall {
       ...(glob === undefined ? {} : { glob }),
     };
   }
-  return otherCall(name, update.rawInput);
+  return otherToolCall(name, update.rawInput);
 }
 
 function strongest(previous: ToolCall | undefined, next: ToolCall): ToolCall {

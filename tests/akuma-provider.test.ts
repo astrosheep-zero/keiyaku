@@ -39,7 +39,7 @@ import {
 } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
-import { createGrokBuildProvider } from "../src/akuma/providers/grok-build/index.js";
+import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/providers/claude/events.js";
@@ -277,6 +277,116 @@ test("native adapters admit structured unknown arguments into one bounded generi
     ],
     "an OpenCode completion without input inherits its correlated start",
   );
+});
+
+test("shared search construction keeps each adapter's predicate and omitted metadata", async () => {
+  const claudeCall = async (name: string, input: unknown) => {
+    const state: ClaudeObservationState = { tools: new Map() };
+    const channel = new AgentEventChannel();
+    emitClaudeMessage(
+      {
+        type: "assistant",
+        uuid: "assistant-1",
+        session_id: "session-claude",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", id: "tool-1", name, input }] },
+      } as unknown as SDKMessage,
+      channel,
+      state,
+    );
+    const [event] = await drainChannel(channel);
+    return event?.type === "tool" ? event.call : undefined;
+  };
+  const piCall = (toolName: string, args: unknown) => {
+    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+    const [event] = translatePiEvent(
+      { type: "tool_execution_start", toolCallId: "pi-1", toolName, args } as never,
+      state,
+    );
+    return event?.type === "tool" ? event.call : undefined;
+  };
+  const grokCall = (name: string, rawInput: unknown) =>
+    interpretGrokTool({
+      sessionUpdate: "tool_call",
+      toolCallId: "grok-1",
+      name,
+      kind: "other",
+      status: "in_progress",
+      rawInput,
+    } as never);
+  const acpCall = (rawInput: unknown) => {
+    const mapped = mapAcpUpdate(
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "acp-1",
+        name: "search",
+        kind: "search",
+        status: "in_progress",
+        rawInput,
+      } as unknown as acp.SessionUpdate,
+      EMPTY_ACP_EVENT_STATE,
+    );
+    const [event] = mapped.events;
+    return event?.type === "tool" ? event.call : undefined;
+  };
+
+  // ACP retains supplied whitespace, drops an unrecognized scope, and omits absent bounds.
+  assert.deepEqual(acpCall({ query: "  needle  ", path: " src ", glob: " *.ts ", scope: "content" }), {
+    kind: "search",
+    query: "  needle  ",
+    scope: "content",
+    path: " src ",
+    glob: " *.ts ",
+  });
+  assert.deepEqual(acpCall({ query: "only", scope: "dialect" }), { kind: "search", query: "only" });
+
+  // Claude trims every search scalar; Glob carries no glob and WebSearch carries no bounds.
+  assert.deepEqual(await claudeCall("Grep", { pattern: "  needle  ", path: " src ", glob: " *.ts " }), {
+    kind: "search",
+    query: "needle",
+    scope: "content",
+    path: "src",
+    glob: "*.ts",
+  });
+  assert.deepEqual(await claudeCall("Grep", { pattern: "  only  " }), {
+    kind: "search",
+    query: "only",
+    scope: "content",
+  });
+  assert.deepEqual(await claudeCall("Glob", { pattern: " *.ts ", path: " src " }), {
+    kind: "search",
+    query: "*.ts",
+    scope: "files",
+    path: "src",
+  });
+  assert.deepEqual(await claudeCall("WebSearch", { query: " how " }), {
+    kind: "search",
+    query: "how",
+    scope: "web",
+  });
+
+  // Pi and Grok retain supplied whitespace, and only grep carries a glob.
+  assert.deepEqual(piCall("grep", { pattern: "  needle  ", path: " src ", glob: " *.ts " }), {
+    kind: "search",
+    query: "  needle  ",
+    scope: "content",
+    path: " src ",
+    glob: " *.ts ",
+  });
+  assert.deepEqual(piCall("find", { pattern: "  needle  ", path: " src ", glob: " *.ts " }), {
+    kind: "search",
+    query: "  needle  ",
+    scope: "files",
+    path: " src ",
+  });
+  assert.deepEqual(grokCall("grep", { pattern: "  needle  ", path: " src ", glob: " *.ts " }), {
+    kind: "search",
+    query: "  needle  ",
+    scope: "content",
+    path: " src ",
+    glob: " *.ts ",
+  });
+  assert.deepEqual(grokCall("hashline_grep", { pattern: "only" }), { kind: "search", query: "only", scope: "content" });
 });
 
 test("Claude keeps supplied scalar, null, empty-object, and absent Bash input distinct", async () => {

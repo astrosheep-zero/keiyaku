@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { nonblank, positiveLine, searchToolCall } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
 type Disposition = "drop" | "message" | "note" | "tool-end" | "tool-start";
@@ -58,14 +59,6 @@ function hasTextContent(content: unknown): boolean {
   );
 }
 
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
-}
-
-function optionalText(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
 function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
   return name === "bash" && typeof value.command === "string" ? { kind: "run", command: value.command } : undefined;
 }
@@ -86,15 +79,10 @@ function searchCall(name: string, value: Readonly<Record<string, unknown>>): Too
   if (name !== "grep" && name !== "find") return undefined;
   const query = value.pattern ?? value.query;
   if (typeof query !== "string") return undefined;
-  const path = optionalText(value.path);
-  const glob = optionalText(value.glob);
-  return {
-    kind: "search",
-    query,
-    scope: name === "find" ? "files" : "content",
-    ...(path === undefined ? {} : { path }),
-    ...(name === "grep" && glob !== undefined ? { glob } : {}),
-  };
+  return searchToolCall(query, name === "find" ? "files" : "content", {
+    path: nonblank(value.path),
+    glob: name === "grep" ? nonblank(value.glob) : undefined,
+  });
 }
 
 function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {

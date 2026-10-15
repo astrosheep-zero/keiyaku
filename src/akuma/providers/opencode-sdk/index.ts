@@ -8,6 +8,7 @@ import {
 } from "../../provider.js";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { nonblank, object } from "../decode.js";
 import { providerLifecycle } from "../lifecycle.js";
 import { ownEventStream, type OwnedEventStream } from "./event-stream.js";
 import { createEventState, mapEvent } from "./events.js";
@@ -23,18 +24,10 @@ import {
 type Input = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 export type OpencodeProviderTestOptions = Readonly<{ loader?: OpencodeSdkLoader }>;
 
-function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-function text(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
 function diagnostic(error: unknown): string {
   const value = object(error);
   const nested = object(value?.data);
-  return text(nested?.message) ?? text(value?.message) ?? String(error);
+  return nonblank(nested?.message) ?? nonblank(value?.message) ?? String(error);
 }
 function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
   if (!("sessionId" in coordinateValue) || coordinateValue.sessionId === undefined) {
@@ -81,7 +74,7 @@ function promptBody(
   };
 }
 
-type MessageRow = Readonly<{ info: Record<string, unknown>; parts: readonly unknown[] }>;
+type MessageRow = Readonly<{ info: Readonly<Record<string, unknown>>; parts: readonly unknown[] }>;
 function messageRows(value: unknown, sessionId: string): MessageRow[] {
   const response = object(value);
   const rows = Array.isArray(response?.data) ? response.data : Array.isArray(value) ? value : [];
@@ -119,11 +112,11 @@ async function readTurnResult(
     const user = rows.find((row) => row.info.role === "user" && row.info.id === input.messageID);
     if (user === undefined)
       return { kind: "failed", diagnostic: "OpenCode completed without the admitted user message" };
-    const userId = text(user.info.id);
+    const userId = nonblank(user.info.id);
     const assistant = newest(
       rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId && row.info.summary !== true),
     );
-    const historyId = text(assistant?.info.id);
+    const historyId = nonblank(assistant?.info.id);
     if (input.state.failure !== undefined) return { kind: "failed", diagnostic: input.state.failure };
     if (assistant === undefined)
       return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" };
@@ -142,11 +135,11 @@ async function readTurnResult(
 function nativeSessionId(value: unknown): string | undefined {
   const event = object(value);
   const properties = object(event?.properties);
-  const direct = text(properties?.sessionID);
+  const direct = nonblank(properties?.sessionID);
   if (direct !== undefined) return direct;
   const info = object(properties?.info);
   const part = object(properties?.part);
-  return text(info?.sessionID) ?? text(part?.sessionID);
+  return nonblank(info?.sessionID) ?? nonblank(part?.sessionID);
 }
 function scopedProperties(value: unknown, sessionId: string): Record<string, unknown> | undefined {
   const properties = object(object(value)?.properties);
@@ -410,7 +403,7 @@ async function openDriveSession(
     : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }));
   signal.throwIfAborted();
   const info = object(object(response)?.data) ?? object(response);
-  const sessionId = text(info?.id) ?? resumeSessionId;
+  const sessionId = nonblank(info?.id) ?? resumeSessionId;
   if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
   return { session, sessionId };
 }
@@ -608,7 +601,7 @@ export function createOpencodeProvider(
             body: { messageID: input.at },
           });
           const info = object(object(result)?.data) ?? object(result);
-          const id = text(info?.id);
+          const id = nonblank(info?.id);
           if (id === undefined || id === sessionId) throw new Error("OpenCode fork returned an invalid session id");
           return { session: coordinate(id) };
         } finally {

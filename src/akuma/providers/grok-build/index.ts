@@ -1,5 +1,6 @@
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
+import { nonblank, object, searchToolCall } from "../decode.js";
 import { providerLifecycle } from "../lifecycle.js";
 import {
   startAcpSession,
@@ -19,16 +20,6 @@ type InterjectParams = Readonly<{
   interjectionId: string;
 }>;
 
-function nonblank(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function object(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
-}
-
 function nativeName(update: AcpToolUpdate): string | undefined {
   const wire = update as AcpToolUpdate & { toolName?: unknown };
   return nonblank(update.name) ?? nonblank(update.title) ?? nonblank(wire.toolName);
@@ -45,16 +36,9 @@ function readCall(name: string, input: Readonly<Record<string, unknown>>): ToolC
 function contentSearchCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
   if (name !== "grep" && name !== "hashline_grep") return undefined;
   const query = nonblank(input.pattern);
-  if (query === undefined) return undefined;
-  const path = nonblank(input.path);
-  const glob = nonblank(input.glob);
-  return {
-    kind: "search",
-    query,
-    scope: "content",
-    ...(path === undefined ? {} : { path }),
-    ...(glob === undefined ? {} : { glob }),
-  };
+  return query === undefined
+    ? undefined
+    : searchToolCall(query, "content", { path: nonblank(input.path), glob: nonblank(input.glob) });
 }
 
 function runCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {

@@ -1,5 +1,6 @@
 import { noteEvent, otherToolCall, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
+import { nonnegativeCount, object, positiveLine, text } from "../decode.js";
 
 type Emitter = { emit(event: AgentEvent): void };
 type ObservedTool = Readonly<{ name: string; call: ToolCall }>;
@@ -61,27 +62,13 @@ const RUNTIME_DROPPED_EVENT_KINDS = new Set([
   "message.part.delta",
 ]);
 
-function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-function text(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
 function diagnostic(value: unknown): string {
   const data = object(value);
   const nested = object(data?.data);
   return text(nested?.message) ?? text(data?.message) ?? "OpenCode session failed";
 }
-function positiveLine(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
-}
-function nonnegativeCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
 type FileChangeCall = Extract<ToolCall, { kind: "fileChange" }>;
-function diffstat(value: Record<string, unknown> | undefined): FileChangeCall["changes"][number]["diffstat"] {
+function diffstat(value: Readonly<Record<string, unknown>> | undefined): FileChangeCall["changes"][number]["diffstat"] {
   if (value === undefined) return undefined;
   const added = nonnegativeCount(value.additions);
   const removed = nonnegativeCount(value.deletions);
