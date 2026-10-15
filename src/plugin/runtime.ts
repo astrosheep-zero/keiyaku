@@ -291,6 +291,7 @@ const SIGNAL_KINDS: Readonly<Record<keyof PluginSignalMap, true>> = Object.freez
   "akuma.initiating": true,
   "akuma.born": true,
   "akuma.outcome-observed": true,
+  "akuma.turn-started": true,
   "akuma.turn-outcome": true,
   "akuma.body-ended": true,
 });

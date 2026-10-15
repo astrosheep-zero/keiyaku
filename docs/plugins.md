@@ -127,6 +127,15 @@ of provider startup, and cannot roll back birth. This deliberately replaces
 `akuma.called` without an alias or dual emission; the plugin contract version
 stays unchanged for this coordinated replacement.
 
+A started Akuma Turn emits `akuma.turn-started` once its start fact and Tell
+bindings are durable and before provider work begins. The signal identifies the
+Akuma and Turn sequence and carries the Turn's optional initiator, so a
+consumer can align it with the outcome that later names the same Turn. A Turn
+that later fails still has a start; a Turn whose start never commits emits
+nothing. Because this occurs on the Body's critical path, a producer waits one
+bounded delivery exactly as it does for that Turn's outcome, so consumers stay
+fast.
+
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
 Akuma and Turn sequence and carries the committed answered or failed outcome

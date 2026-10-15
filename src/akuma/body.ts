@@ -332,6 +332,7 @@ type BodyExecution = Readonly<{
   bodySequence: number;
   supervisor: BodySupervisor;
   runtime: BodyRuntime;
+  turnStarted: TurnStartedEmitter;
   turnOutcome: TurnOutcomeEmitter;
 }>;
 
@@ -407,9 +408,38 @@ async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
   return false;
 }
 
+type TurnStartedEmitter = Readonly<{
+  emit(turnSequence: number): Promise<void>;
+}>;
+
 type TurnOutcomeEmitter = Readonly<{
   emit(turnSequence: number, outcome: CommittedOutcome): Promise<void>;
 }>;
+
+function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnStartedEmitter {
+  const reportDiagnostic = (message: string): void => {
+    void recordPluginDiagnostic(launch.paths, "turn started", message);
+  };
+  return {
+    async emit(turnSequence: number): Promise<void> {
+      try {
+        const turn = await readTurn(launch.paths, turnSequence);
+        if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
+        await emitPluginSignal(
+          { world, reportDiagnostic },
+          {
+            kind: "akuma.turn-started",
+            akumaId: soul.id,
+            turnSequence,
+            ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+          },
+        );
+      } catch (error) {
+        await recordPluginDiagnostic(launch.paths, "turn started", error);
+      }
+    },
+  };
+}
 
 function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnOutcomeEmitter {
   const reportDiagnostic = (message: string): void => {
@@ -504,7 +534,7 @@ async function admitInitialCallTell(
 }
 
 async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
-  const { launch, soul, adapter, bodySequence, supervisor, runtime, turnOutcome } = input;
+  const { launch, soul, adapter, bodySequence, supervisor, runtime, turnStarted, turnOutcome } = input;
   let initial = launch.initialBody;
   for (;;) {
     const launchTells = drainPendingTells(
@@ -541,6 +571,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       world: runtime.world,
       externalCommands: runtime.externalCommands,
       now: runtime.now,
+      turnStarted,
     });
     if (result.kind === "hung") {
       await failOpenBoundTurnsIfPresent(launch.paths, bodySequence, "Body hung with open bound Turns", runtime.now());
@@ -725,11 +756,13 @@ export async function driveAkumaBody(
   let pendingTellDisposition: BodyTurnEnd = undefined;
   let bodySequence: number | undefined;
   let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
+  let emitTurnStarted: TurnStartedEmitter | undefined;
   let emitTurnOutcome: TurnOutcomeEmitter | undefined;
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
     if (prepared === null) return;
     emitBodyEnd = bodyEndEmitter(launch, prepared.soul, world);
+    emitTurnStarted = turnStartedEmitter(launch, prepared.soul, world);
     emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul, world);
     const body = await leash.recordBody(launch.paths, { leashTakenAt: runtime.now() });
     bodySequence = body.sequence;
@@ -759,6 +792,7 @@ export async function driveAkumaBody(
       bodySequence: body.sequence,
       supervisor,
       runtime,
+      turnStarted: emitTurnStarted,
       turnOutcome: emitTurnOutcome,
     });
   } catch (error) {

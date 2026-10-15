@@ -93,6 +93,7 @@ export type DriveTurnInput = Readonly<{
   admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
   world: import("../world.js").WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
+  turnStarted: Readonly<{ emit(turnSequence: number): Promise<void> }>;
   now(): string;
 }>;
 
@@ -184,6 +185,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       boundAt: input.now(),
     });
   }
+  await input.turnStarted.emit(turn.sequence);
   const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands, admitInitialTell } = input;
   const commands = composeRequestCommands(
     akumaCallRequestCommands({ world, paths, parent, spawn, admitInitialTell }),

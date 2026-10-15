@@ -88,8 +88,11 @@ function configureTurnOutcomePlugins(root: string): void {
       "export default {",
       '  manifest: { id: "observer", apiVersion: 1 },',
       "  activate() {",
-      "    globalThis.__keiyakuTurnOutcomePluginRecorder.activations += 1;",
-      '    return { signals: { "akuma.turn-outcome": (signal) => globalThis.__keiyakuTurnOutcomePluginRecorder.observe(signal) } };',
+      "    if (globalThis.__keiyakuTurnOutcomePluginRecorder) globalThis.__keiyakuTurnOutcomePluginRecorder.activations += 1;",
+      "    return { signals: {",
+      '      "akuma.turn-outcome": (signal) => { globalThis.__keiyakuTurnSignalRecorder?.push(signal); return globalThis.__keiyakuTurnOutcomePluginRecorder?.observe(signal); },',
+      '      "akuma.turn-started": (signal) => { globalThis.__keiyakuTurnSignalRecorder?.push(signal); return globalThis.__keiyakuHangingStartedHandler ? new Promise(() => {}) : undefined; },',
+      "    } };",
       "  },",
       "};",
     ].join("\n"),
@@ -99,7 +102,7 @@ function configureTurnOutcomePlugins(root: string): void {
     [
       "export default {",
       '  manifest: { id: "broken", apiVersion: 1 },',
-      '  activate() { return { signals: { "akuma.turn-outcome": () => { throw new Error("observer failure"); } } }; },',
+      '  activate() { return { signals: { "akuma.turn-started": () => { throw new Error("started observer failure"); }, "akuma.turn-outcome": () => { throw new Error("observer failure"); } } }; },',
       "};",
     ].join("\n"),
   );
@@ -257,6 +260,17 @@ async function outcomes(paths: Parameters<typeof activitySlice>[0]) {
 
 async function committedTurnSequences(paths: Parameters<typeof activitySlice>[0]): Promise<readonly number[]> {
   return (await activitySlice(paths)).rows.filter((fact) => fact.kind === "turn-end").map((fact) => fact.turnSequence);
+}
+
+const turnSignalPluginGlobal = globalThis as typeof globalThis & { __keiyakuTurnSignalRecorder?: PluginSignal[] };
+
+const hangingStartedPluginGlobal = globalThis as typeof globalThis & { __keiyakuHangingStartedHandler?: boolean };
+
+/** Record turn-started beside turn-outcome in producer order, so the order itself is evidence. */
+function installTurnSignalRecorder(): PluginSignal[] {
+  const signals: PluginSignal[] = [];
+  turnSignalPluginGlobal.__keiyakuTurnSignalRecorder = signals;
+  return signals;
 }
 
 /** Install one turn-outcome recorder that snapshots the scenario Heart on every observation. */
@@ -719,6 +733,70 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
     ]);
   } finally {
     delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("turn-started plugins observe one start per Turn of one Body before each outcome", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-plugin-turn-started-");
+  try {
+    const allocated = await allocatedHeart(root, "claude", "1234abd0");
+    configureTurnOutcomePlugins(root);
+    const signals = installTurnSignalRecorder();
+    hangingStartedPluginGlobal.__keiyakuHangingStartedHandler = true;
+    await pluginRuntime({ world: await World.at(root) });
+    const { promise: released, resolve: release } = promiseBarrier<void>();
+    let started = false;
+    let refused = false;
+    let first = true;
+    const session = async () => {
+      const wasFirst = first;
+      first = false;
+      return {
+        admission: { fence: "started-turn" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            started = true;
+            yield { type: "session", coordinate: { sessionId: "started-same-body" } } satisfies AgentEvent;
+            if (wasFirst) await released;
+          },
+        },
+        completion: wasFirst
+          ? released.then(() => ({ kind: "answered" as const, answer: "one" }))
+          : Promise.resolve({ kind: "failed" as const, diagnostic: "provider failed" }),
+        async tell() {
+          refused = true;
+          return { kind: "turn-ended" as const };
+        },
+        async abort() {},
+      };
+    };
+    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "build it", { initiator: "Alice" }), scenarioProvider(session, { resume: session }), {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    await awaitProviderSession(() => started, body, "the provider session to start after the bounded signal wait");
+    hangingStartedPluginGlobal.__keiyakuHangingStartedHandler = false;
+    await recordTell(allocated.paths, { id: "started-live-tell", body: "steer", recordedAt: "2026-08-08T00:00:01.000Z" });
+    await waitForCondition("the refused live Tell", () => refused, {
+      terminalState: settlementProbe(body, () => "the Body settled before the live Tell was refused"),
+    });
+    release();
+    await body;
+    const sequences = await committedTurnSequences(allocated.paths);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "broke-off");
+    await eventually(() => signals.length === 4);
+    assert.deepEqual(signals, [
+      { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[0], initiator: "Alice" },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[0], initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
+      { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[1] },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[1], outcome: { kind: "failed", reason: "provider failed" } },
+    ]);
+    /* The first Turn's started handler hung and the second Turn's threw; both Turns still began and ended. */
+    await eventually(() => readFileSync(allocated.paths.log, "utf8").includes("timed out after 5000ms") && readFileSync(allocated.paths.log, "utf8").includes("started observer failure"), 15_000);
+  } finally {
+    delete hangingStartedPluginGlobal.__keiyakuHangingStartedHandler;
+    delete turnSignalPluginGlobal.__keiyakuTurnSignalRecorder;
     rmSync(root, { recursive: true, force: true });
   }
 });
