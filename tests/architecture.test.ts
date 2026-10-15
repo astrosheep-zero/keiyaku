@@ -46,7 +46,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["akuma/akuma-observe.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], false],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "pluginRuntime"], false],
-  ["cli/commands/bind.ts", ["core/verbs/bind.ts", "decideBind"], false],
+  ["cli/commands/contract.ts", ["core/verbs/bind.ts", "decideBind"], false],
   ["library/audit.ts", ["git/target-placement.ts", "observeTargetPlacement"], false],
   ["core/facts/fold.ts", ["git/repository.ts", "repositoryAt"], false],
   ["library/contract.ts", ["git/repository.ts", "repositoryAt"], false],

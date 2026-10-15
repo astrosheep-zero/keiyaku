@@ -47,8 +47,6 @@ import type { CliRuntime } from "../runtime.js";
 import { canonicalContractSelector, contractFromInput, resolveContractId } from "../selectors.js";
 import { displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
-import { amendFromCommand } from "./amend.js";
-import { bindFromCommand } from "./bind.js";
 import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.js";
 
 // ---------------------------------------------------------------------------
@@ -107,16 +105,6 @@ function draftWarning(error: unknown): Readonly<{ warning: string }> {
   return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
 }
 
-/** Preserve a refused bind draft at the invocation cwd; coordinates are not yet available. */
-async function bindDraftReceiptAtCwd(input: Readonly<{ processCwd?: string; cwd?: string }>, markdown: string) {
-  try {
-    return await preserveBindDraft(await resolveInvocationCwd(input), markdown);
-  } catch (error) {
-    if (error instanceof Error && "executionReceipt" in error) throw error;
-    return draftWarning(error);
-  }
-}
-
 /**
  * The one bind-document admission that runs before coordinate resolution, so a malformed document
  * refuses as a draft-bearing refusal instead of a later Repo/Git failure. Reads the memoized stdin.
@@ -131,11 +119,11 @@ export async function admitBindMarkdown(
     if (error instanceof Error && "executionReceipt" in error) throw error;
     if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
       throw error;
-    throw new BindDraftError(error, await bindDraftReceiptAtCwd(input, input.markdown));
+    throw new BindDraftError(error, await bindDraftReceipt(() => resolveInvocationCwd(input), input.markdown));
   }
 }
 
-async function bindDraftReceipt(world: () => Promise<WorldRoot>, markdown: string) {
+async function bindDraftReceipt(world: () => Promise<string>, markdown: string) {
   try {
     return await preserveBindDraft(await world(), markdown);
   } catch (error) {
@@ -244,30 +232,25 @@ async function runBind(
   const repo = requiredRepo(coordinates);
   const actor = actorFromEdge(command.actor, runtime.environment);
   if (command.forkOf !== undefined) {
-    const answer = await bindFromCommand({
-      command,
+    const answer = await library.bind({
       repo,
-      library,
+      forkOf: contractFromInput(repo, command.forkOf).id,
+      ...(command.target === undefined ? {} : { target: command.target }),
       ...(actor === undefined ? {} : { actor }),
     });
     return await finishContractAnswer(answer, command.output);
   }
   const markdown = await runtime.readStdin();
-  if (isBlankInput(markdown)) throw new CliUsageError("bind requires a nonblank stdin document");
   try {
-    validateContractMarkdown(markdown);
-  } catch (error) {
-    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
-      throw error;
-    throw new BindDraftError(error, await bindDraftReceipt(coordinates.establishWorld, markdown));
-  }
-  try {
-    const answer = await bindFromCommand({
-      command,
+    const after = command.after?.map((id) => contractFromInput(repo, id).id);
+    const answer = await library.bind({
       repo,
-      library,
       markdown,
+      ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),
+      ...(command.target === undefined ? {} : { target: command.target }),
       ...(actor === undefined ? {} : { actor }),
+      ...(after === undefined ? {} : { after }),
+      ...(command.gates === undefined ? {} : { gates: command.gates }),
     });
     if (answer.kind !== "refused") return await finishContractAnswer(answer, command.output);
     const draft = await bindDraftReceipt(coordinates.establishWorld, markdown);
@@ -293,13 +276,13 @@ async function runAmend(
   const markdown = command.stdin === true ? await runtime.readStdin() : undefined;
   if (markdown !== undefined && isBlankInput(markdown))
     throw new CliUsageError("amend requires a nonblank stdin document");
-  const answer = await amendFromCommand({
-    command,
-    repo: requiredRepo(coordinates),
-    contract: seat.contract,
+  const repo = requiredRepo(coordinates);
+  const after = command.clearAfter === true ? [] : command.after?.map((id) => contractFromInput(repo, id).id);
+  const answer = await seat.contract.amend({
     ...(markdown === undefined ? {} : { markdown }),
-    ...(command.gates === undefined ? {} : { gates: command.gates }),
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+    ...(after === undefined ? {} : { after }),
+    ...(command.gates === undefined ? {} : { gates: command.gates }),
   });
   return await finishContractAnswer(answer, command.output);
 }
