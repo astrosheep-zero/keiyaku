@@ -13,7 +13,7 @@ import type { CommandRunner, Row } from "../plugins/paseo/plugin/server/keiyaku.
 const logger = pino({ level: "silent" });
 const at = "2026-10-15T00:00:00.000Z";
 const turn = (n: number): Row => ({ kind: "turn", sequence: n, turnSequence: n, at });
-const answer = (n: number, sequence: number): Row => ({ kind: "outcome", sequence, turnSequence: n, at, outcome: { kind: "answered", answer: "done" } });
+const answer = (n: number, sequence: number, text = "done"): Row => ({ kind: "outcome", sequence, turnSequence: n, at, outcome: { kind: "answered", answer: text } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function receipt(text: string, id: string, launch?: number, failed = false) {
   return { code: failed ? 2 : 0, stderr: "", stdout: JSON.stringify({ akuma: "aku/test/best-effort", tell: {
@@ -65,6 +65,42 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   assert.equal(h.events.some((event) => event.type === "timeline" && event.item.type === "notification" && /delivery pending/u.test(event.item.message)), false);
   assert.equal(warnings.mock.callCount(), failed ? 1 : 0, "a failed wake retains its diagnostic without failing the recorded message");
   h.setRows([turn(2), answer(2, 3)]); await h.refresh();
+});
+
+test("one refresh preserves completed and short Turn output before their terminals and the next open Turn", async (t) => {
+  const h = await harness(async () => { throw new Error("unexpected mutation"); });
+  t.after(() => h.close());
+  h.setRows([turn(2)]); await h.refresh();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
+  const snapshot = [turn(2), answer(2, 3, "old answer"), turn(4), answer(4, 5, "short answer"), turn(6)];
+  h.setRows(snapshot); await h.refresh();
+  assert.deepEqual(h.events.flatMap((event) => {
+    if (event.type === "timeline" && event.item.type === "assistant_message")
+      return [["answer", event.turnId]];
+    if (event.type === "turn_started" || event.type === "turn_completed")
+      return [[event.type, event.turnId]];
+    return [];
+  }), [
+    ["turn_started", "turn/2"], ["answer", "turn/2"], ["turn_completed", "turn/2"],
+    ["turn_started", "turn/4"], ["answer", "turn/4"], ["turn_completed", "turn/4"],
+    ["turn_started", "turn/6"],
+  ]);
+  const history = async () => {
+    const events: AgentStreamEvent[] = [];
+    for await (const event of h.agent.session!.streamHistory()) events.push(event);
+    return events;
+  };
+  const retained = await history();
+  assert.deepEqual(retained.flatMap((event) => event.type === "timeline" && event.item.type === "assistant_message"
+    ? [[event.item.text, event.turnId]] : []), [["old answer", "turn/2"], ["short answer", "turn/4"]]);
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/6");
+  const count = h.events.length;
+  await h.refresh();
+  assert.equal(h.events.length, count, "an identical snapshot publishes no duplicate frames");
+  assert.deepEqual(await history(), retained);
+  assert.deepEqual(h.calls, [], "refresh is observation only");
+  h.setRows([...snapshot, answer(6, 7)]); await h.refresh();
 });
 
 test("a Turn transition during Tell keeps its captured acknowledgement and does not fall back", async (t) => {

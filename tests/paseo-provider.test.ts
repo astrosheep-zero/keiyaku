@@ -81,7 +81,8 @@ test("open, event-only refresh, reply mapping, and persisted replay through the 
   h.events.length = 0;
   await h.open({ persistence: opened.persistence, config: { ...h.config, providerOptions: {} } });
   assert.deepEqual(items(h.events).map((e) => e.item.id), ["keiyaku:tell/tell/1", "keiyaku:turn/1"], "resume replays in sequence order");
-  assert.equal(turns(h.events).length, 0, "already ended short turns never start");
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]],
+    "retained short turns publish their real start and terminal on replay");
 });
 
 test("in-flight hints coalesce and RPC returns without waiting for reads", async (t) => {
@@ -175,6 +176,12 @@ test("Stop kills the controlled Akuma, refreshes, and ends only the observed tur
   rows = [turn(2), turn(4, 2)];
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/1", "turn/1", "turn/2"], "a later turn still arrives");
+  const sealed = turns(h.events).filter((e) => e.turnId === "turn/1");
+  rows = [turn(2), answer(3), turn(4, 2)];
+  await h.refresh(); await tick();
+  assert.deepEqual(turns(h.events).filter((e) => e.turnId === "turn/1"), sealed,
+    "late natural output cannot reopen or re-terminate the canceled Turn");
+  assert.equal(turns(h.events).at(-1)?.turnId, "turn/2");
 });
 
 test("a refused Stop reports the CLI diagnostic and leaves the observed turn running", async (t) => {
