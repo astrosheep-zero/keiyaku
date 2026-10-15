@@ -5,9 +5,10 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { SettingsError, type Settings } from "../src/settings.js";
 import { ALLOWED_ACTIONS, DEFAULT_ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { loadArchetype } from "../src/akuma/archetype.js";
+import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
+import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
@@ -29,12 +30,17 @@ function fixture() {
 
 type SettingsFixture = ReturnType<typeof fixture>;
 
+/** Load one archetype through the same preparation and provider-admission composition publication uses. */
 async function loadNamed(value: SettingsFixture, name: string) {
-  return loadArchetype({
+  const archetype = await loadPreparedArchetype({
     name,
     home: value.home,
     settings: await settings({ root: value.project, home: value.home }),
   });
+  const { adapter } = await resolveProviderExecution(archetype.provider);
+  const admission = adapter.admitOptions(archetype.options);
+  if (admission.kind === "refused") throw new TypeError(admission.diagnostic);
+  return { ...archetype, options: admission.options };
 }
 
 function contractGates(context: TestContext) {

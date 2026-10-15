@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { AkumaArchetypeError, loadArchetype } from "../src/akuma/archetype.js";
+import { AkumaArchetypeError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import {
   akumaCallRequestCommands,
   type AkumaCallRequestChildLaunch,
@@ -1187,19 +1187,19 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
   writeFileSync(join(home, "akuma", "empty.md"), "---\n{}\n---\n");
   const settingsValue = await settings({ home });
   await assert.rejects(
-    loadArchetype({ name: "missing", home, settings: settingsValue }),
+    loadPreparedArchetype({ name: "missing", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
   );
   await assert.rejects(
-    loadArchetype({ name: "malformed", home, settings: settingsValue }),
+    loadPreparedArchetype({ name: "malformed", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("Akuma name"),
   );
   await assert.rejects(
-    loadArchetype({ name: "a", home, settings: settingsValue }),
+    loadPreparedArchetype({ name: "a", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("a -> b -> a"),
   );
   await assert.rejects(
-    loadArchetype({ name: "noprov", home, settings: settingsValue }),
+    loadPreparedArchetype({ name: "noprov", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
   );
 });
@@ -1220,7 +1220,7 @@ test("Archetype and call allowed inputs refuse malformed values before allocatio
   ] as const) {
     const yaml = allowed.map((action) => `  - ${action}\n`).join("");
     writeFileSync(join(home, "akuma", "invalid.md"), `---\nprovider: claude\nallowed:\n${yaml}---\nWork.\n`);
-    await assert.rejects(loadArchetype({ name: "invalid", home, settings: value }), expected);
+    await assert.rejects(loadPreparedArchetype({ name: "invalid", home, settings: value }), expected);
     await assert.rejects(runtime.call({ archetype: "worker", body: "invalid", allowed: allowed as never }), expected);
   }
   assert.deepEqual((await runtime.list()).rows, []);

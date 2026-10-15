@@ -23,7 +23,7 @@ import {
   type ActivityHistory,
   type TurnLedger,
 } from "../src/akuma/projection.js";
-import { loadArchetype } from "../src/akuma/archetype.js";
+import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
@@ -1684,14 +1684,14 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     });
     assert.deepEqual(cli.value, { rows: catalog.rows, hasMore: false });
 
-    const shared = await loadArchetype({ name: "shared", project: root, home, settings: settingsValue });
+    const shared = await loadPreparedArchetype({ name: "shared", project: root, home, settings: settingsValue });
     assert.equal(shared.path, join(root, ".keiyaku", "akuma", "shared.md"));
     assert.equal(shared.description, "Project");
-    const fallback = await loadArchetype({ name: "home-only", project: root, home, settings: settingsValue });
+    const fallback = await loadPreparedArchetype({ name: "home-only", project: root, home, settings: settingsValue });
     assert.equal(fallback.path, join(home, "akuma", "home-only.md"));
 
     await assert.rejects(
-      loadArchetype({ name: "missing", project: root, home, settings: settingsValue }),
+      loadPreparedArchetype({ name: "missing", project: root, home, settings: settingsValue }),
       (error: unknown) =>
         error instanceof AkumaArchetypeError &&
         error.searched.join("\n") ===
@@ -1717,7 +1717,7 @@ test("dotted archetype file stems join the catalogue as canonical names", async 
     assert.deepEqual(catalog, { rows: [{ name: "review.v2" }], hasMore: false });
 
     const settingsValue = await settings({ root, home });
-    const dotted = await loadArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
+    const dotted = await loadPreparedArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
     assert.equal(dotted.path, join(home, "akuma", "review.v2.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1743,7 +1743,7 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     });
 
     const settingsValue = await settings({ root, home });
-    const hidden = await loadArchetype({ name: "secret", project: root, home, settings: settingsValue });
+    const hidden = await loadPreparedArchetype({ name: "secret", project: root, home, settings: settingsValue });
     assert.equal(hidden.path, join(home, "akuma", "secret.md"));
 
     writeFileSync(join(home, "akuma", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');

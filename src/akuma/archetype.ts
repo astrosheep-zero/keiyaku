@@ -5,14 +5,12 @@ import { parseDocument } from "yaml";
 import { boundedListLimit, type BoundedList } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import type { ProviderAdapter } from "./provider.js";
 import {
   decodeProviderOptions,
   decodeProviderRecipe,
   type ProviderExecution,
   type ProviderOptions,
 } from "./provider-recipe.js";
-import { resolveProviderExecution } from "./providers/index.js";
 import { DEFAULT_ALLOWED_ACTIONS, decodeAllowedActions, type AllowedActions } from "./allowed.js";
 
 type LocalArchetype = Readonly<{
@@ -51,12 +49,6 @@ export type ArchetypeCatalogInput = Readonly<{
   home?: string;
   limit?: number;
 }>;
-
-type ArchetypeDefinition = DecodedArchetype & Readonly<{ adapter: ProviderAdapter }>;
-type AdmittedArchetype = Omit<ArchetypeDefinition, "provider"> &
-  Readonly<{
-    provider: ProviderExecution;
-  }>;
 
 /** One loaded archetype whose provider owner has decoded its execution but not yet admitted its options. */
 type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
@@ -488,29 +480,6 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-async function admitArchetype(archetype: PreparedArchetype): Promise<AdmittedArchetype> {
-  let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
-  try {
-    selected = await resolveProviderExecution(archetype.provider);
-  } catch (error) {
-    if (error instanceof TypeError)
-      throw new AkumaArchetypeError(archetype.name, [archetype.path], `uses ${error.message}`);
-    throw error;
-  }
-  const execution = selected.execution;
-  const adapter = selected.adapter;
-  const admission = adapter.admitOptions(archetype.options);
-  if (admission.kind === "refused") {
-    throw new AkumaArchetypeError(archetype.name, [archetype.path], `is unsupported: ${admission.diagnostic}`);
-  }
-  return Object.freeze({
-    ...archetype,
-    provider: execution,
-    adapter,
-    options: admission.options,
-  });
-}
-
 /** Resolve one archetype and decode its provider execution, leaving option admission to the caller. */
 export async function loadPreparedArchetype(
   input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
@@ -526,10 +495,4 @@ export async function loadPreparedArchetype(
     throw error;
   }
   return Object.freeze({ ...definition, provider });
-}
-
-export async function loadArchetype(
-  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
-): Promise<AdmittedArchetype> {
-  return await admitArchetype(await loadPreparedArchetype(input));
 }
