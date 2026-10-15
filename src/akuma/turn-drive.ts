@@ -345,10 +345,6 @@ function observeFailure(settlement: Promise<unknown>): Promise<never> {
   );
 }
 
-function observeReceiptFailure(receiptPump: Promise<void>): Promise<never> {
-  return observeFailure(receiptPump);
-}
-
 function observeCompletionFailure(drive: Session): Promise<Readonly<{ kind: "completion-failed"; error: unknown }>> {
   return drive.completion.then(
     () => new Promise<never>(() => {}),
@@ -502,7 +498,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   let writesOpen = true;
   const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;
   const writers: TurnWriters = { input, turnSequence, drive, writeWitness, mayWrite };
-  const receiptFailure = observeReceiptFailure(pumpReceipts(writers));
+  const receiptFailure = observeFailure(pumpReceipts(writers));
   const completionFailure = observeCompletionFailure(drive);
   const iterator = drive.events[Symbol.asyncIterator]();
   let liveTells = true;

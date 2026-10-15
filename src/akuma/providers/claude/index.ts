@@ -17,8 +17,6 @@ import { emitClaudeMessage, type ClaudeObservationState } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
 import type { ResumeCoordinate } from "../../provider.js";
 
-export { CLAUDE_MESSAGE_DISPOSITIONS, CLAUDE_SYSTEM_DISPOSITIONS } from "./events.js";
-
 type ClaudeExecution = Readonly<{
   executable?: string;
   config?: Readonly<Record<string, unknown>>;
@@ -28,7 +26,7 @@ type ClaudeDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<Non
 type ReceiptWaiter = Readonly<{ resolve(value: IteratorResult<TellReceipt>): void }>;
 type AcceptedTell = { id: string; afterCheckpoint: number; visible: boolean };
 
-export type ClaudeSdk = Readonly<{
+type ClaudeSdk = Readonly<{
   query(input: Readonly<{ prompt: string | AsyncIterable<SDKUserMessage>; options?: Options }>): Query;
   forkSession?(
     sessionId: string,

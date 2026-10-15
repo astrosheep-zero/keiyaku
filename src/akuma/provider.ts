@@ -3,16 +3,15 @@ import type { ProviderOptions } from "./provider-recipe.js";
 
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
-export { decodeResumeCoordinate, encodeResumeCoordinate } from "./coordinate.js";
 
 export { AKUMA_REQUESTS_ENV, AKUMA_REQUESTS_ENTRY_ENV } from "./providers/execution-environment.js";
 
-export const AGENT_EVENT_TEXT_LIMIT = 16_384;
-export const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
+const AGENT_EVENT_TEXT_LIMIT = 16_384;
+const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
-export { agentEventSchema, decodeAgentEvent } from "./heart/activity-schema.js";
-export type { AgentEvent, SearchScope, ToolCall, ToolEvent, ToolInput, ToolResult } from "./heart/activity-schema.js";
+export { decodeAgentEvent } from "./heart/activity-schema.js";
+export type { AgentEvent, SearchScope, ToolCall, ToolResult } from "./heart/activity-schema.js";
 import type { AgentEvent, ToolCall, ToolResult, ToolInput } from "./heart/activity-schema.js";
 
 function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
@@ -187,11 +186,11 @@ function boundedToolInputJson(value: string): Readonly<{ value: string; truncate
   return { value: prefix, truncated: true };
 }
 
-export function boundedEventText(value: string): string {
+function boundedEventText(value: string): string {
   return value.slice(0, AGENT_EVENT_TEXT_LIMIT);
 }
 
-export function boundedThoughtText(value: string): string {
+function boundedThoughtText(value: string): string {
   return value.slice(0, AGENT_THOUGHT_TEXT_LIMIT);
 }
 
@@ -292,7 +291,7 @@ export type TurnResult =
   | Readonly<{ kind: "answered"; answer: string; historyId?: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
 
-export type ProviderFence = string;
+type ProviderFence = string;
 export type TellReceipt =
   | Readonly<{ evidence: "exact"; tellId: string; kind: string }>
   | Readonly<{ evidence: "fence"; fence: ProviderFence; kind: string }>;
@@ -321,7 +320,7 @@ export type ProviderAttempt<Result> = Readonly<{
   forceDispose(): Promise<void>;
 }>;
 
-export type AttemptResource = Readonly<{
+type AttemptResource = Readonly<{
   /** Resolves only when this physical resource has retired. */
   closed: Promise<void>;
   abort?(): Promise<void>;
