@@ -21,9 +21,15 @@ const tell = (sequence: number, state: "pending" | "told" = "told"): Row =>
 const answer = (sequence: number, n = 1, failed = false): Row => ({ kind: "outcome", sequence, turnSequence: n, at,
   outcome: failed ? { kind: "failed", diagnostic: "provider broke" } : { kind: "answered", answer: "hello" } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+const killed = (evidence: string) =>
+  ({ code: 0, stdout: JSON.stringify({ results: [{ id: "aku/test/1", evidence }] }), stderr: "" });
 async function harness(reader: Reader, command: CommandRunner = async () => { throw new Error("unexpected mutation"); }) {
   const root = await mkdtemp(join(tmpdir(), "paseo-provider-"));
-  const bridge = createProvider(reader, command);
+  const calls: { world: string; args: string[]; stdin?: string }[] = [];
+  const bridge = createProvider(reader, async (world, args, signal, stdin) => {
+    calls.push({ world, args, ...(stdin === undefined ? {} : { stdin }) });
+    return command(world, args, signal, stdin);
+  });
   const connection = await bridge.provider.connect({ versions: [1], capabilities: ["session.persistence", "prompt.message", "prompt.steer", "session.archive"] });
   const events: ProviderEvent[] = [];
   connection.onEvent((event) => events.push(event));
@@ -32,7 +38,7 @@ async function harness(reader: Reader, command: CommandRunner = async () => { th
   const open = (extra: Partial<Extract<ProviderInput, { type: "session.open" }>> = {}) => connection.send({
     type: "session.open", requestId: "open", sessionId: "session", config, history: "replay", ...extra,
   });
-  return { bridge, connection, events, root, config, open,
+  return { bridge, connection, events, calls, root, config, open,
     refresh: () => bridge.refresh({ world: root, akuId: "aku/test/1" }),
     async close() { await connection.close(); await bridge.close(); await rm(root, { recursive: true, force: true }); } };
 }
@@ -92,10 +98,14 @@ test("in-flight hints coalesce and RPC returns without waiting for reads", async
   assert.equal(calls, 2); assert.equal(peak, 1);
 });
 
-test("changed told rows, gaps, read failure recovery, interrupt and close remain read-only", async (t) => {
+test("changed told rows, gaps, read failure recovery, Stop control and observation-only close", async (t) => {
   let rows: Row[] = [tell(1, "pending"), turn(2)];
   let broken = false, reads = 0;
-  const h = await harness(async () => { reads++; if (broken) throw new Error("unavailable"); return rows; });
+  const commands: string[][] = [];
+  const h = await harness(async () => { reads++; if (broken) throw new Error("unavailable"); return rows; }, async (_world, args) => {
+    commands.push(args);
+    return { code: 0, stdout: JSON.stringify({ results: [{ id: "aku/test/1", evidence: "killed" }] }), stderr: "" };
+  });
   t.after(() => h.close());
   await h.open();
   assert.equal(items(h.events).length, 1, "pending history remains visible as input, not delivery proof");
@@ -124,7 +134,8 @@ test("changed told rows, gaps, read failure recovery, interrupt and close remain
   rows = [...rows, turn(13, 3)];
   await h.refresh(); await tick();
   await h.connection.send({ type: "session.interrupt", requestId: "interrupt", sessionId: "session" });
-  assert.match(turns(h.events).at(-1)?.error?.message ?? "", /Akuma was not interrupted/u);
+  assert.match(turns(h.events).at(-1)?.error?.message ?? "", /stopped from Paseo/u);
+  assert.deepEqual(commands, [["kill", "aku/test/1", "--json"]]);
   await h.refresh(); await tick();
   assert.equal(turns(h.events).filter((e) => e.turnId === "turn/3").length, 2, "sealed turn never restarts");
   await h.connection.send({ type: "session.archive", requestId: "archive", persistence: { version: 1, data: {} } });
@@ -135,11 +146,221 @@ test("changed told rows, gaps, read failure recovery, interrupt and close remain
   await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
   assert.deepEqual(await h.refresh(), { woken: 0 });
   assert.equal(reads, before);
+  assert.equal(commands.length, 1, "observation close never kills");
   assert.equal(turns(h.events).filter((e) => e.turnId === "turn/3").length, 2);
   assert.deepEqual(await import("node:fs/promises").then((fs) => fs.readdir(h.root)), [], "no World writes");
   broken = true;
   await h.open();
   assert.equal(items(h.events).filter((e) => e.item.id.startsWith("keiyaku:unreadable/")).length, 3);
+});
+
+test("Stop kills the controlled Akuma, refreshes, and ends only the observed turn", async (t) => {
+  let rows: Row[] = [turn(2)];
+  let reads = 0;
+  const h = await harness(async () => { reads++; return rows; }, async () => killed("killed"));
+  t.after(() => h.close());
+  await h.open();
+  assert.equal(h.calls.length, 0, "opening never controls the Akuma");
+  const before = reads;
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(h.calls.map((call) => [call.world, ...call.args]),
+    [[await realpath(h.root), "kill", "aku/test/1", "--json"]], "kill runs through the bounded public CLI");
+  assert.equal(h.calls[0]?.stdin, undefined, "kill carries no stdin");
+  assert.equal(reads, before + 1, "a proven stop refreshes authoritative history");
+  assert.deepEqual(h.events.filter((e) => e.type === "request.completed" || e.type === "request.failed"),
+    [{ type: "request.completed", requestId: "stop" }]);
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "canceled"]]);
+  assert.match(turns(h.events).at(-1)?.error?.message ?? "", /stopped from Paseo/u);
+  assert.equal(h.events.some((e) => e.type === "session.closed"), false, "the mirror stays open for a later Tell");
+  rows = [turn(2), turn(4, 2)];
+  await h.refresh(); await tick();
+  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/1", "turn/1", "turn/2"], "a later turn still arrives");
+});
+
+test("a refused Stop reports the CLI diagnostic and leaves the observed turn running", async (t) => {
+  const h = await harness(async () => [turn(2)],
+    async () => ({ code: 1, stdout: "", stderr: "Akuma aku/test/1 is not born\n" }));
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(h.events.filter((e) => e.type === "request.failed"),
+    [{ type: "request.failed", requestId: "stop", error: { message: "Akuma aku/test/1 is not born" } }]);
+  assert.equal(h.events.some((e) => e.type === "request.completed"), false);
+  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "an unproven stop never cancels the turn");
+});
+
+test("a hung or untidy Body reports the receipt's own evidence instead of a stop", async (t) => {
+  const h = await harness(async () => [turn(2)], async () => ({ code: 1, stdout: JSON.stringify(
+    { results: [{ id: "aku/test/1", evidence: "hung" }] }), stderr: "" }));
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(h.events.filter((e) => e.type === "request.failed"),
+    [{ type: "request.failed", requestId: "stop", error: { message: "Keiyaku reported hung for aku/test/1" } }]);
+  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "held custody is not a stopped turn");
+});
+
+test("an unprovable Stop reports uncertainty instead of an outcome", async (t) => {
+  let reads = 0;
+  const h = await harness(async () => { reads++; return [turn(2)]; },
+    async () => { throw new Error("Keiyaku command outcome is uncertain: signal timed out"); });
+  t.after(() => h.close());
+  await h.open();
+  const before = reads;
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  const failed = h.events.find((e) => e.type === "request.failed");
+  assert.match(failed?.error.message ?? "", /could not prove the stop/u);
+  assert.match(failed?.error.message ?? "", /timed out/u);
+  assert.equal(reads, before + 1, "a thrown failure still refreshes authoritative history");
+  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"]);
+});
+
+test("a Stop nobody proves still answers every request and never stops in the dark", async (t) => {
+  const h = await harness(async () => [turn(2)], async () => ({ code: 0, stdout: "", stderr: "" }));
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(h.events.filter((e) => e.type === "request.completed" || e.type === "request.failed"),
+    [{ type: "request.failed", requestId: "stop", error: { message: "Keiyaku reported no stop receipt" } }]);
+  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"]);
+});
+
+test("overlapping Stops share one kill attempt and each request receives one receipt", async (t) => {
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  let kills = 0;
+  const h = await harness(async () => [turn(2)], async () => {
+    kills++;
+    await blocked;
+    return killed("already-stopped");
+  });
+  t.after(() => h.close());
+  await h.open();
+  const first = h.connection.send({ type: "session.interrupt", requestId: "stop-1", sessionId: "session" });
+  const second = h.connection.send({ type: "session.interrupt", requestId: "stop-2", sessionId: "session" });
+  assert.equal(kills, 1, "a Stop already in flight is reused");
+  release();
+  await Promise.all([first, second]);
+  assert.equal(kills, 1);
+  assert.deepEqual(h.events.filter((e) => e.type === "request.completed").map((e) => e.requestId),
+    ["stop-1", "stop-2"]);
+  assert.equal(turns(h.events).filter((e) => e.state === "canceled").length, 1, "one terminal event for one turn");
+});
+
+test("a natural completion racing the Stop keeps its own outcome and one terminal event", async (t) => {
+  let rows: Row[] = [turn(2)];
+  const h = await harness(async () => rows, async () => {
+    rows = [turn(2), answer(3)];
+    return killed("already-stopped");
+  });
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]]);
+  assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
+});
+
+test("a CLI-produced put-down failure remains the only terminal event after a proven Stop", async (t) => {
+  let rows: Row[] = [turn(2)];
+  const h = await harness(async () => rows, async () => {
+    rows = [turn(2), answer(4, 1, true)];
+    return killed("killed");
+  });
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "failed"]]);
+  assert.deepEqual(h.events.filter((e) => e.type === "request.completed"), [{ type: "request.completed", requestId: "stop" }]);
+});
+
+test("a natural outcome held by Tell correlation is not overwritten by concurrent Stop", async (t) => {
+  let rows: Row[] = [turn(2)];
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const h = await harness(async () => rows, async (_world, args) => {
+    if (args[0] === "kill") return killed("already-stopped");
+    await blocked;
+    return { code: 0, stdout: JSON.stringify(messageReceipt(undefined, { kind: "held" })), stderr: "" };
+  });
+  t.after(() => h.close());
+  await h.open();
+  const submitting = h.connection.send(promptInput());
+  rows = [turn(2), answer(4)];
+  await h.refresh(); await tick();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "the natural outcome is still held, not canceled");
+  release(); await submitting;
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]]);
+  assert.deepEqual(h.calls.map((call) => call.args[0]), ["tell", "kill"]);
+});
+
+test("a proven Stop settles the turn it captured even after a newer Turn replaced it", async (t) => {
+  let rows: Row[] = [turn(2)];
+  const h = await harness(async () => rows, async () => {
+    rows = [turn(2), turn(4, 2)];
+    return killed("killed");
+  });
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]),
+    [["turn/1", "started"], ["turn/2", "started"], ["turn/1", "canceled"]],
+    "the captured turn settles once instead of being dropped");
+  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/2" && e.state === "canceled").length, 0,
+    "a newer Turn is never closed by an older Stop");
+  assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
+});
+
+test("a captured turn still takes its own outcome after a newer Turn replaced it", async (t) => {
+  let rows: Row[] = [turn(2)];
+  const h = await harness(async () => rows, async () => {
+    rows = [turn(2), turn(4, 2)];
+    return { code: 1, stdout: "", stderr: "Akuma aku/test/1 is not born\n" };
+  });
+  t.after(() => h.close());
+  await h.open();
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/1", "turn/2"], "a refusal leaves the turn running");
+  rows = [turn(2), answer(3, 1), turn(4, 2)];
+  await h.refresh(); await tick();
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]),
+    [["turn/1", "started"], ["turn/2", "started"], ["turn/1", "completed"]],
+    "the captured turn closes from its own outcome, never from the Stop");
+});
+
+test("close during an in-flight Stop retires the owned kill before the session closes", async (t) => {
+  let began!: () => void;
+  const started = new Promise<void>((resolve) => { began = resolve; });
+  let kills = 0, retired = false;
+  const h = await harness(async () => [turn(2)], async (_world, _args, signal) => {
+    kills++;
+    began();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    retired = true;
+    throw new Error("Keiyaku command outcome is uncertain: signal aborted");
+  });
+  t.after(() => h.close());
+  await h.open();
+  const stopping = h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+  await started;
+  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
+  await stopping;
+  assert.equal(kills, 1, "close never starts a second kill");
+  assert.equal(retired, true, "the owned kill retired before the session closed");
+  assert.match(h.events.find((e) => e.type === "request.failed")?.error.message ?? "", /could not prove the stop/u);
+  assert.ok(
+    h.events.findIndex((e) => e.type === "request.failed") < h.events.findIndex((e) => e.type === "session.closed"),
+    "the Stop answers before the session reports itself closed",
+  );
+});
+
+test("a Stop for a session that is not open fails without controlling anything", async (t) => {
+  const h = await harness(async () => []);
+  t.after(() => h.close());
+  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "absent" });
+  assert.deepEqual(h.events, [{ type: "request.failed", requestId: "stop",
+    error: { message: "Keiyaku mirror session is not open" } }]);
+  assert.equal(h.calls.length, 0);
 });
 
 test("close during a read aborts the pump and discards its pending wake", async (t) => {

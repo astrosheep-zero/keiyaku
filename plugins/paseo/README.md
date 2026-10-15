@@ -86,9 +86,15 @@ is outside ordinary message semantics. Service callers that omit the send mode
 may default to Interrupt. A Turn transition before the plugin receives the prompt
 can still make Paseo reject the presentation correlation after the Tell was
 recorded; the tested transition reports the host error without killing or
-resubmitting. This integration makes no absolute race-free UI promise. Until the
-independently delivered Stop change is integrated, interrupt only cancels
-observation; it does not stop Akuma execution.
+resubmitting. This integration makes no absolute race-free UI promise.
+
+An explicit Stop runs `keiyaku -C <world> kill <akuId> --json` through the same
+bounded, identity-cleaned executor. Only a proven stopped receipt ends its captured
+observed Turn as canceled; refusal or uncertainty retains its diagnostic. A natural
+outcome, including one held during Tell correlation, keeps its own terminal event.
+Overlapping Stops share one attempt, and each request receives its own response.
+Stop preserves identity, history and session for later Tell. Refresh, close and
+plugin unload remain observation-only and never initiate kill.
 
 Opening reads once. Turn-start, turn-outcome and Body-end signals send refresh
 hints over one lazy authenticated local Paseo client. Body-end releases that

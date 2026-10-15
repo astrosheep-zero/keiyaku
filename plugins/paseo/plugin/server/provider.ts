@@ -4,6 +4,7 @@ import { negotiateProviderCapabilities, type ProviderConnection, type ProviderEv
 import { readKeiyaku, runKeiyaku, type CommandRunner, type Reader } from "./keiyaku.js";
 import { messageText, sendMessage } from "./message.js";
 import { createMirror } from "./mirror.js";
+import { decodeStop, type StopAttempt } from "./stop.js";
 
 const identity = z.object({ world: z.string().min(1), akuId: z.string().regex(/^aku\//u) });
 export function createProvider(reader: Reader = readKeiyaku, command: CommandRunner = runKeiyaku) {
@@ -14,7 +15,7 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
       if (!request.versions.includes(1)) throw new Error("Provider protocol version 1 is required");
       const capabilities = negotiateProviderCapabilities(request.capabilities, ["session.persistence", "prompt.message", "prompt.steer"]);
       const listeners = new Set<(event: ProviderEvent) => void>();
-      const local = new Map<string, { stop(): Promise<void>; cancel(reason: string): void; prompt(prompt: ProviderPrompt): Promise<void> }>();
+      const local = new Map<string, { stop(): Promise<void>; stopExecution(requestId: string): Promise<void>; prompt(prompt: ProviderPrompt): Promise<void> }>();
       let closed = false;
       const emit = (event: ProviderEvent) => { if (!closed) for (const listener of listeners) listener(event); };
       return {
@@ -36,6 +37,7 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
             let pending = false;
             let running: Promise<void> | undefined;
             const submissions = new Set<Promise<void>>();
+            let stopping: Promise<StopAttempt> | undefined;
             const session = {
               world, akuId: target.akuId,
               wake(): Promise<void> {
@@ -104,11 +106,34 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
                 sessions.delete(session);
                 local.delete(input.sessionId);
                 await Promise.allSettled([...submissions]);
+                await stopping;
                 await running;
                 emit({ type: "session.closed", sessionId: input.sessionId });
               },
-              cancel: mirror.cancel,
+              stopExecution,
             };
+            async function attemptStop(): Promise<StopAttempt> {
+              if (cancellation.signal.aborted)
+                return { kind: "uncertain", message: "Keiyaku could not prove the stop: the mirror closed before it was attempted" };
+              const observed = mirror.observedTurn();
+              let attempt: StopAttempt;
+              try {
+                const result = await command(world, ["kill", target.akuId, "--json"], cancellation.signal);
+                attempt = decodeStop(result, target.akuId);
+              } catch (error) {
+                attempt = { kind: "uncertain", message: `Keiyaku could not prove the stop: ${error instanceof Error ? error.message : String(error)}` };
+              }
+              await session.wake();
+              if (attempt.kind === "stopped")
+                observed?.cancel("Akuma execution was stopped from Paseo; the Akuma is preserved for a later Tell");
+              return attempt;
+            }
+            async function stopExecution(requestId: string): Promise<void> {
+              stopping ??= attemptStop().finally(() => { stopping = undefined; });
+              const attempt = await stopping;
+              if (attempt.kind === "stopped") emit({ type: "request.completed", requestId });
+              else emit({ type: "request.failed", requestId, error: { message: attempt.message } });
+            }
             sessions.add(session);
             local.set(input.sessionId, session);
             emit({ type: "session.opened", requestId: input.requestId, sessionId: input.sessionId,
@@ -118,9 +143,13 @@ export function createProvider(reader: Reader = readKeiyaku, command: CommandRun
             if (!cancellation.signal.aborted) emit({ type: "session.ready", requestId: input.requestId, sessionId: input.sessionId });
           } else if (input.type === "session.interrupt" || input.type === "session.close") {
             const session = local.get(input.sessionId);
-            if (input.type === "session.close") await session?.stop();
-            else session?.cancel("Observation canceled; Akuma was not interrupted");
-            emit({ type: "request.completed", requestId: input.requestId });
+            if (input.type === "session.close") {
+              await session?.stop();
+              emit({ type: "request.completed", requestId: input.requestId });
+            } else if (session === undefined) {
+              emit({ type: "request.failed", requestId: input.requestId,
+                error: { message: "Keiyaku mirror session is not open" } });
+            } else await session.stopExecution(input.requestId);
           } else if (input.type === "session.prompt") {
             const session = local.get(input.sessionId);
             if (session) await session.prompt(input.prompt);

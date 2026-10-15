@@ -134,6 +134,27 @@ test("idle admission with an already observed native start must not let command 
   h.setRows([turn(2), answer(2, 3)]); await h.refresh();
 });
 
+test("combined best-effort Steer, explicit Stop, and later Tell preserve the same Akuma identity", async (t) => {
+  let n = 0;
+  const h = await harness(async (_world, args, _signal, text) => {
+    if (args[0] === "kill") return { code: 0, stdout: JSON.stringify({ results: [{ id: "aku/test/best-effort", evidence: "killed" }] }), stderr: "" };
+    n++;
+    if (n === 1) { h.setRows([turn(2)]); return receipt(text!, "initial", 2); }
+    if (n === 2) return receipt(text!, "accepted");
+    h.setRows([turn(2), turn(4)]); return receipt(text!, "after-stop", 4);
+  });
+  t.after(() => h.close());
+  await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
+  assert.deepEqual(await h.send("accepted", "accepted"), { disposition: "steered" });
+  assert.deepEqual(h.calls.map((args) => args[0]), ["tell", "tell"]);
+  assert.deepEqual(await h.manager.cancelAgentRun(h.agent.id), { status: "settled" });
+  await h.send("after stop", "after-stop"); await h.manager.waitForAgentRunStart(h.agent.id);
+  assert.deepEqual(h.calls.map((args) => [args[0], args[1]]), [["tell", "aku/test/best-effort"], ["tell", "aku/test/best-effort"], ["kill", "aku/test/best-effort"], ["tell", "aku/test/best-effort"]]);
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/4");
+  assert.equal(h.events.filter((event) => event.type === "turn_canceled" && event.turnId === "turn/2").length, 1);
+  h.setRows([turn(2), turn(4), answer(4, 5)]); await h.refresh();
+});
+
 test("uncertain steer fails honestly without host replacement, retry, or touching the existing Turn", async (t) => {
   let n = 0;
   const h = await harness(async (_world, _args, _signal, text) => {

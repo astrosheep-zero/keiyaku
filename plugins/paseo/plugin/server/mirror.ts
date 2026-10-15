@@ -3,9 +3,11 @@ import type { Row } from "./keiyaku.js";
 import type { AdmittedMessage } from "./message.js";
 
 type Emit = (event: ProviderEvent) => void;
+type Turn = { sequence: number; closed: boolean };
 export function createMirror(sessionId: string, emit: Emit) {
   let covered: { high: number; signatures: Map<number, string> } | undefined;
-  let turn: { sequence: number; closed: boolean } | undefined;
+  let turn: Turn | undefined;
+  let captured: Turn | undefined;
   let unhealthy = false;
   let submissions = 0;
   let deferred: Row[] | undefined;
@@ -13,11 +15,16 @@ export function createMirror(sessionId: string, emit: Emit) {
   const item = (value: ProviderTimelineItem, timestamp?: string) => emit({
     type: "timeline.item", sessionId, item: value, ...(timestamp === undefined ? {} : { timestamp }),
   });
-  const finish = (state: "completed" | "failed" | "canceled", message?: string) => {
-    if (!turn || turn.closed) return;
-    turn.closed = true;
-    emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state,
+  const finish = (target: Turn | undefined, state: "completed" | "failed" | "canceled", message?: string) => {
+    if (!target || target.closed) return;
+    target.closed = true;
+    emit({ type: "session.turn", sessionId, turnId: `turn/${target.sequence}`, state,
       ...(message === undefined ? {} : { error: { message } }) });
+  };
+  const closeOutcome = (open: Turn | undefined, rows: Row[]) => {
+    const outcome = open === undefined ? undefined : rows.find((row) => row.kind === "outcome" && row.turnSequence === open.sequence);
+    if (outcome?.kind === "outcome") finish(open, outcome.outcome.kind === "answered" ? "completed" : "failed",
+      outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined);
   };
   const userMessage = (row: Extract<Row, { kind: "tell" }>, clientMessageId?: string) => {
     if (displayedTells.has(row.tellId)) return;
@@ -48,7 +55,16 @@ export function createMirror(sessionId: string, emit: Emit) {
     admit(row: AdmittedMessage, clientMessageId: string) {
       userMessage(row, clientMessageId);
     },
-    cancel: (reason: string) => finish("canceled", reason),
+    cancel: (reason: string) => finish(turn, "canceled", reason),
+    observedTurn(): Readonly<{ cancel(reason: string): void }> | undefined {
+      if (!turn || turn.closed) return undefined;
+      const observed = turn;
+      captured = observed;
+      return { cancel(reason: string) {
+        if (deferred?.some((row) => row.kind === "outcome" && row.turnSequence === observed.sequence)) return;
+        finish(observed, "canceled", reason);
+      } };
+    },
     unreadable() {
       if (!unhealthy) item({ type: "notification", level: "warning",
         id: `keiyaku:unreadable/${covered ? Math.min(...covered.signatures.keys()) : 0}`,
@@ -76,10 +92,9 @@ export function createMirror(sessionId: string, emit: Emit) {
             : { type: "error", id: `keiyaku:turn/${row.turnSequence}`, message: row.outcome.diagnostic }, row.at);
         }
       }
-      if (gap) finish("canceled", `coverage gap ${(covered?.high ?? 0) + 1}-${lowest - 1}`);
-      const outcome = rows.find((row) => row.kind === "outcome" && row.turnSequence === turn?.sequence);
-      if (outcome?.kind === "outcome") finish(outcome.outcome.kind === "answered" ? "completed" : "failed",
-        outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined);
+      if (gap) finish(turn, "canceled", `coverage gap ${(covered?.high ?? 0) + 1}-${lowest - 1}`);
+      closeOutcome(turn, rows);
+      if (captured !== turn) closeOutcome(captured, rows);
       const latest = rows.filter((row) => row.kind === "turn").at(-1);
       if (latest?.kind === "turn" && (!turn || latest.turnSequence > turn.sequence)) {
         const ended = rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.turnSequence);
