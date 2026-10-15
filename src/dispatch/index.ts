@@ -30,7 +30,7 @@ import {
   withGitTargetedReadObservation,
   type GitReadObservation,
 } from "../git/read-observation.js";
-import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "./association.js";
+import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "../akuma/dispatch-association.js";
 
 const DISPATCH_ROOT = "dispatch";
 const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
@@ -46,7 +46,7 @@ export type DispatchFailure =
   | Readonly<{ kind: "conflict"; current: Dispatch }>
   | Readonly<{ kind: "publication-failed"; diagnostic: string }>;
 
-export type DispatchPublication =
+type DispatchPublication =
   | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
   | Readonly<{ kind: "failed"; failure: DispatchFailure }>;
 
@@ -246,13 +246,6 @@ export async function publishDispatch(
     }),
   );
 }
-
-export {
-  dispatchAssociationSchema,
-  NO_DISPATCH_ASSOCIATION,
-  parseDispatchAssociation,
-  type DispatchAssociation,
-} from "./association.js";
 
 /** Read selected associations in one targeted observation, isolating per-identity decoding failures. */
 export async function observeDispatchAssociations(

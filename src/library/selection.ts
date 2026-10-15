@@ -36,7 +36,8 @@ import {
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
 import { readAliases } from "../alias/index.js";
-import { observeDispatchAssociations, type DispatchAssociation } from "../dispatch/index.js";
+import type { DispatchAssociation } from "../akuma/dispatch-association.js";
+import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { AkumaAlias } from "../identity/selector.js";

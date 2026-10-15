@@ -5,7 +5,7 @@ import { readAkumaRoster } from "../akuma/akuma.js";
 import type { TellResult, TellWake } from "../akuma/body.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
-import type { DispatchAssociation } from "../dispatch/association.js";
+import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { CreatedTaskObservation } from "../task/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
