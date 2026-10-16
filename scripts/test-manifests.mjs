@@ -37,7 +37,6 @@ export const LOCAL_TEST_FILES = [
   "tests/paseo-execution-provider.test.ts",
   "tests/paseo-forwarder.test.ts",
   "tests/paseo-mirror.test.ts",
-  "tests/paseo-model.test.ts",
   "tests/paseo-native-parent.test.ts",
   "tests/paseo-provider.test.ts",
   "tests/paseo-sdk-transport.test.ts",

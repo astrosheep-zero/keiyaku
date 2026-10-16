@@ -394,18 +394,7 @@ test("cancellation settles only its own request, and close is the only thing tha
     /transport is closed/u);
 });
 
-test("a subscription serves one frame at a time, never two in flight", async (t) => {
-  const { transport, set } = await fakeWorker(t);
-  await set({ streamHistory: frame(1), streamDelayMs: 300 });
-  const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
-  assert.deepEqual(pulled(await stream.next()), [1], "the opening pull establishes the subscription");
-  const inFlight = stream.next();
-  await assert.rejects(stream.next(), /already has a frame in flight/u,
-    "a second pull is refused instead of putting two frames in flight");
-  assert.deepEqual(pulled(await inFlight), [1], "the frame that was already in flight still settles");
-});
-
-test("a stream opens with the current frame, pulls one frame per request, and releases only its own subscription", async (t) => {
+test("a subscription pulls one window at a time, opens on the current frame, and releases only its own observation", async (t) => {
   const { transport, set } = await fakeWorker(t);
   const released = new AbortController();
   const sibling = new AbortController();
@@ -417,10 +406,18 @@ test("a stream opens with the current frame, pulls one frame per request, and re
   await set({ streamHistory: frame(2) });
   assert.deepEqual(pulled(await stream.next()), [2], "each pull carries one complete window");
 
+  // One frame at a time: a second pull while a frame is in flight is refused,
+  // and the frame already in flight still settles.
+  await set({ streamHistory: frame(3), streamDelayMs: 300 });
+  const inFlight = stream.next();
+  await assert.rejects(stream.next(), /already has a frame in flight/u,
+    "a second pull is refused instead of putting two frames in flight");
+  assert.deepEqual(pulled(await inFlight), [3], "the frame that was already in flight still settles");
+
   // A second observation is independent: releasing one settles only its own pull.
   const other = transport.stream("/world", "aku/other/1", sibling.signal)[Symbol.asyncIterator]();
-  await set({ streamHistory: frame(3), streamDelayMs: 20 });
-  assert.deepEqual(pulled(await other.next()), [3], "an unrelated subscription opens on its own subscription");
+  await set({ streamHistory: frame(4), streamDelayMs: 20 });
+  assert.deepEqual(pulled(await other.next()), [4], "an unrelated subscription opens on its own subscription");
   const pending = stream.next();
   released.abort(new Error("observation released"));
   await assert.rejects(pending, /observation released/u, "abandoning a subscription settles its own pull");
@@ -428,8 +425,8 @@ test("a stream opens with the current frame, pulls one frame per request, and re
   await set({ status: { provider: "pi" } });
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "ordinary requests proceed while an observation waits");
-  await set({ streamHistory: frame(4) });
-  assert.deepEqual(pulled(await other.next()), [4],
+  await set({ streamHistory: frame(5) });
+  assert.deepEqual(pulled(await other.next()), [5],
     "the unrelated subscription keeps pulling after its neighbour is released");
 });
 
