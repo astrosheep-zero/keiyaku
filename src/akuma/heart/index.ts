@@ -1,5 +1,6 @@
 import type { AkumaPaths } from "../identity.js";
 import { parsePublicHistoryId } from "../identity.js";
+import { decodeRuntimeModel, withoutModel } from "../provider-recipe.js";
 import type {
   BodyEnd,
   BodyFact,
@@ -78,7 +79,7 @@ import {
   withHeartTransaction,
   withReadOnlyHeart,
 } from "./storage.js";
-import { soulFact } from "./soul.js";
+import { setSoulModel, soulFact } from "./soul.js";
 import { AkumaBusyError, HeartAuthorityCorruptionError } from "./facts.js";
 export {
   HeartAbsentError,
@@ -165,6 +166,28 @@ export async function appendActivity(
 
 type ActivitySlice = ActivityFactSlice;
 export type { TimelineFact } from "./timeline.js";
+
+export type CurrentModelUpdate = "recorded" | "unchanged" | "not-current-body";
+
+/**
+ * Admit one runtime-model observation from the Body that is actually running.
+ * The model is the one mutable member of an otherwise frozen recipe, so only
+ * the exact latest Running Body may move it: evidence that arrives after that
+ * Body settled, or from a superseded Body, is refused rather than applied.
+ */
+export async function recordCurrentModel(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; model: string | undefined }>,
+): Promise<CurrentModelUpdate> {
+  const model = decodeRuntimeModel(input.model);
+  return await withHeartTransaction(paths, (heart) => {
+    const body = latestBodyFact(heart);
+    if (body === null || body.sequence !== input.bodySequence || body.end !== undefined || body.hung !== undefined) {
+      return "not-current-body";
+    }
+    return setSoulModel(heart, model) ? "recorded" : "unchanged";
+  });
+}
 
 export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
   return await withReadOnlyHeart(paths, (heart) => activityFactSlice(heart));
@@ -594,12 +617,15 @@ export async function readForkPoint(paths: AkumaPaths, historyId: string): Promi
       if (outcome?.kind !== "answered" || outcome.historyId === undefined) return null;
       const recipe = sessionFactForCoordinate(heart, outcome.session);
       if (recipe === null) throw new Error(`Akuma fork point ${historyId} has no session recipe`);
+      // The source's current model is the admitted child selection. The session
+      // row's obsolete copy is dropped, and an absent current model stays absent.
+      const current = soulFact(heart)?.options.model;
       return {
         historyId: outcome.historyId,
         session: outcome.session,
         provider: recipe.provider,
         cwd: recipe.cwd,
-        options: recipe.options,
+        options: { ...withoutModel(recipe.options), ...(current === undefined ? {} : { model: current }) },
       };
     });
   } catch (error) {

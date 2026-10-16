@@ -202,6 +202,11 @@ export async function bornLiveStatus(
       birth: projectAkumaBirth(soul),
       life: currentLife,
       cwd: soul.cwd,
+      // The execution adapter and its one current model are what this Akuma
+      // actually runs; a birth request the Soul still only seeded is not a
+      // claim that a native runtime ever used it.
+      provider: soul.provider.name,
+      ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
       allowed: soul.allowed,
       ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
       timeline: selected.snapshot,

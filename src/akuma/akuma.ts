@@ -57,6 +57,8 @@ export const akumaStatusSchema = z
     birth: akumaBirthSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
     cwd: z.string().optional(),
+    provider: z.string().optional(),
+    model: z.string().optional(),
     allowed: allowedActionsSchema,
     timeline: activitySnapshotSchema,
     strandedReason: z.literal("resume-unsupported").optional(),

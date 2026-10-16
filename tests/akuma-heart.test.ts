@@ -34,6 +34,7 @@ import {
   readTell,
   readRequest,
   readTurnParticipants,
+  recordCurrentModel,
   recordSession,
   recordTell as heartRecordTell,
   recordTellDeliveries,
@@ -1229,6 +1230,166 @@ test("normal body completion refuses while a tell remains pending", async () => 
   }
 });
 
+test("the current runtime model is one Soul member, moved only by the exact running Body", async () => {
+  const value = await fixture();
+  try {
+    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await claim.birth(value.allocated.paths, value.soul);
+    const body = await claim.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    const stored = async (): Promise<Soul> => (await readHeart(value.allocated.paths)).soul!;
+
+    assert.equal((await stored()).options.model, "claude-sonnet-4-5", "birth seeds the one current model");
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-sonnet-4-5" }),
+      "unchanged",
+    );
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-native" }),
+      "recorded",
+    );
+
+    const moved = await stored();
+    assert.equal(moved.options.model, "claude-native");
+    assert.deepEqual(
+      { ...moved, options: { ...moved.options, model: "claude-sonnet-4-5" } },
+      value.soul,
+      "every other Soul member is untouched",
+    );
+
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: undefined }),
+      "recorded",
+    );
+    assert.equal((await stored()).options.model, undefined, "an unnamed replacement clears the selection");
+
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence + 1, model: "claude-late" }),
+      "not-current-body",
+      "a superseded Body cannot move the model",
+    );
+    assert.equal((await stored()).options.model, undefined);
+
+    await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-native" });
+    await breakBody(value.allocated.paths, {
+      sequence: body.sequence,
+      end: "broke-off",
+      at: "2026-08-08T00:00:01.000Z",
+    });
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-after" }),
+      "not-current-body",
+      "evidence from a settled Body is refused, never applied",
+    );
+    assert.equal((await stored()).options.model, "claude-native");
+    claim.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("a model update preserves unrelated raw Soul members instead of re-encoding them", async () => {
+  const value = await fixture();
+  try {
+    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await claim.birth(value.allocated.paths, value.soul);
+    const body = await claim.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    // An older Soul: no `allowed` member at all, plus members this build does
+    // not model. The codec normalizes and freezes all of these, so a decoded
+    // read-modify-write would rewrite them; the narrow update must not.
+    const raw = {
+      id: value.soul.id,
+      archetype: "claude",
+      description: "Claude fixture",
+      provider: { name: "claude", kind: "claude-agent-sdk" },
+      options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise.", legacyKnob: true },
+      cwd: value.root,
+      origin: { kind: "direct" },
+      createdAt: value.soul.createdAt,
+      legacyMember: [1, 2],
+    };
+    const database = new DatabaseSync(value.allocated.paths.heart);
+    try {
+      database.prepare("UPDATE soul SET soul_json = ? WHERE singleton = 1").run(JSON.stringify(raw));
+    } finally {
+      database.close();
+    }
+
+    assert.equal(
+      await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-native" }),
+      "recorded",
+    );
+    const after = new DatabaseSync(value.allocated.paths.heart);
+    try {
+      const row = after.prepare("SELECT soul_json FROM soul WHERE singleton = 1").get() as { soul_json: string };
+      assert.deepEqual(JSON.parse(row.soul_json), {
+        ...raw,
+        options: { ...raw.options, model: "claude-native" },
+      });
+    } finally {
+      after.close();
+    }
+    claim.release();
+  } finally {
+    value.close();
+  }
+});
+
+test("a session keeps no model copy and an obsolete one never regains authority", async () => {
+  const value = await fixture();
+  try {
+    const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    await claim.birth(value.allocated.paths, value.soul);
+    const body = await claim.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    await recordSession(value.allocated.paths, {
+      provider: "claude",
+      options: value.soul.options,
+      coordinate: { sessionId: "native-session" },
+      cwd: value.root,
+      admittedAt: value.soul.createdAt,
+    });
+    const database = new DatabaseSync(value.allocated.paths.heart);
+    try {
+      const row = database.prepare("SELECT options_json FROM sessions ORDER BY sequence DESC LIMIT 1").get() as {
+        options_json: string;
+      };
+      assert.deepEqual(JSON.parse(row.options_json), { systemPrompt: "Be precise." }, "a new session stores no model");
+      // A row written before the model became one Soul member.
+      database
+        .prepare("UPDATE sessions SET options_json = ? WHERE sequence = (SELECT MAX(sequence) FROM sessions)")
+        .run(JSON.stringify({ model: "claude-obsolete", systemPrompt: "Be precise." }));
+    } finally {
+      database.close();
+    }
+    assert.equal((await readHeart(value.allocated.paths)).latestSession?.options.model, undefined);
+
+    await recordCurrentModel(value.allocated.paths, { bodySequence: body.sequence, model: "claude-native" });
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: body.sequence,
+      startedAt: value.soul.createdAt,
+    });
+    await endTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      outcome: {
+        kind: "answered",
+        historyId: "turn-1",
+        session: { sessionId: "native-session" },
+        answer: "done",
+      },
+      completedAt: "2026-08-08T00:00:01.000Z",
+    });
+    assert.deepEqual(await readForkPoint(value.allocated.paths, `turn/${turn.sequence}`), {
+      historyId: "turn-1",
+      session: { sessionId: "native-session" },
+      provider: "claude",
+      cwd: value.root,
+      options: { systemPrompt: "Be precise.", model: "claude-native" },
+    });
+    claim.release();
+  } finally {
+    value.close();
+  }
+});
+
 test("fork birth admits the child session in the soul birth transaction", async () => {
   const value = await fixture();
   try {
@@ -1248,7 +1409,9 @@ test("fork birth admits the child session in the soul birth transaction", async 
       provider: "claude",
       coordinate: { sessionId: "fork-child" },
       cwd: value.root,
-      options: value.soul.options,
+      // A session admits a coordinate, never a model: the Soul owns the one
+      // current model and composes it freshly into every Turn.
+      options: { systemPrompt: "Be precise." },
       admittedAt: "2026-08-08T00:00:00.000Z",
     });
     body.release();

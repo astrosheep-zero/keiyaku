@@ -1,4 +1,11 @@
-import { noteEvent, otherToolCall, type AgentEvent, type ToolCall, type ToolResult } from "../../provider.js";
+import {
+  modelEvent,
+  noteEvent,
+  otherToolCall,
+  type AgentEvent,
+  type ToolCall,
+  type ToolResult,
+} from "../../provider.js";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { nonnegativeCount, object, positiveLine, stringValue, text } from "../decode.js";
 
@@ -181,6 +188,18 @@ function callFor(name: string, input: unknown, metadata?: unknown): ToolCall | u
   if (lower === "apply_patch") return applyPatchCall(meta) ?? otherToolCall(name, input);
   return otherToolCall(name, input);
 }
+/**
+ * An assistant message records the model that produced it as
+ * `<providerID>/<modelID>`, the same convention this adapter's model option
+ * uses. The user message's model is the request, not evidence of what ran.
+ */
+function assistantModel(info: Record<string, unknown> | undefined): string | undefined {
+  if (info?.role !== "assistant") return undefined;
+  const provider = text(info.providerID);
+  const model = text(info.modelID);
+  return provider === undefined || model === undefined ? undefined : `${provider}/${model}`;
+}
+
 function belongs(part: Part, state: State): boolean {
   return state.sessionId === undefined || part.sessionID === state.sessionId;
 }
@@ -290,13 +309,10 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   }
   if (event.type === "message.updated") {
     const info = object(properties.info);
-    if (
-      info !== undefined &&
-      info.sessionID === state.sessionId &&
-      info.role === "assistant" &&
-      info.error !== undefined
-    ) {
-      state.failure = diagnostic(info.error);
+    if (info !== undefined && info.sessionID === state.sessionId && info.role === "assistant") {
+      const model = assistantModel(info);
+      if (model !== undefined) events.emit(modelEvent(model));
+      if (info.error !== undefined) state.failure = diagnostic(info.error);
     }
     return;
   }

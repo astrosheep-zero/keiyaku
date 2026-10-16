@@ -1,7 +1,18 @@
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
-import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
+import type { AgentRuntimeInfo, AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall, type TurnResult } from "../../provider.js";
 import { stringValue } from "../decode.js";
+
+/**
+ * The runtime's own confirmation at establishment, reported as a native
+ * provider model id. The installed Paseo wire carries no mid-attempt model
+ * change on this timeline subscription, so a later re-selection is not
+ * observable here and is never invented.
+ */
+export function paseoRuntimeModel(info: AgentRuntimeInfo | undefined): string | undefined {
+  const model = info?.model;
+  return typeof model === "string" && model.trim().length > 0 ? model : undefined;
+}
 
 type ToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
 type ToolCallDetail = ToolCallItem["detail"];

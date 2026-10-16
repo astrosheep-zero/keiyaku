@@ -11,11 +11,13 @@ import {
   beginTurn,
   breakBody,
   endTurn,
+  recordCurrentModel,
   recordTellDeliveries,
   recordTellReceipt,
   readStatusFacts,
 } from "../src/akuma/heart/index.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
+import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
 import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
@@ -24,6 +26,67 @@ import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/e
 async function fixture() {
   return await soulFixture("keiyaku-akuma-observation-");
 }
+
+test("status reports the one current model and follows confirmed native changes", async () => {
+  const value = await fixture();
+  const { paths } = value.allocated;
+  const input = { aperture: "monitoring" as const };
+  const status = async () => (await bornStatus(paths, value.soul.id, input)).status;
+  const modelRows = async (): Promise<number> => {
+    const database = new DatabaseSync(paths.heart);
+    try {
+      const row = database
+        .prepare("SELECT COUNT(*) AS count FROM activity WHERE json_extract(event_json, '$.type') = 'model'")
+        .get() as { count: number };
+      return row.count;
+    } finally {
+      database.close();
+    }
+  };
+  const claim = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await claim.birth(paths, value.soul);
+    assert.equal(value.soul.options.model, "claude-sonnet-4-5");
+    assert.equal((await status()).provider, "claude", "status names the execution adapter");
+    assert.equal((await status()).model, "claude-sonnet-4-5", "a fresh birth seeds the one current model");
+
+    const body = await claim.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    assert.equal(await recordCurrentModel(paths, { bodySequence: body.sequence, model: "claude-native" }), "recorded");
+    assert.equal((await status()).model, "claude-native", "status follows confirmed native evidence");
+
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    for (let index = 0; index < 12; index += 1) {
+      await appendActivity(paths, {
+        turnSequence: turn.sequence,
+        event: { type: "note", text: `filler ${index}` },
+        at: "2026-08-08T00:00:01.000Z",
+      });
+    }
+    await endTurn(paths, {
+      turnSequence: turn.sequence,
+      outcome: { kind: "failed", diagnostic: "fixture turn" },
+      completedAt: "2026-08-08T00:00:02.000Z",
+    });
+    const database = new DatabaseSync(paths.heart);
+    try {
+      database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
+      pruneActivityFacts(database, 1, true);
+      database.exec("COMMIT");
+    } finally {
+      database.close();
+    }
+    assert.equal((await status()).model, "claude-native", "compaction cannot reach a model that is not activity");
+    assert.equal(await modelRows(), 0, "no model is ever retained as activity");
+
+    assert.equal(await recordCurrentModel(paths, { bodySequence: body.sequence, model: undefined }), "recorded");
+    const unknown = await status();
+    assert.equal(unknown.model, undefined, "an unnamed replacement reports unknown, never a guess");
+    assert.equal(unknown.provider, "claude");
+    claim.release();
+  } finally {
+    value.close();
+  }
+});
 
 test("shared observation returns one final deadline snapshot and propagates caller abort", async () => {
   let reads = 0;

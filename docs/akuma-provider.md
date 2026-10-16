@@ -104,6 +104,22 @@ preserve unknown kinds as bounded unknown narration. Activity is execution
 history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
+
+One runtime-model observation is provider-neutral and typed: the model an
+attempt's own native evidence proves it is actually running. An adapter reports
+the effective model its startup selected, the model named on a native response,
+and an explicit switch or reroute when the native surface identifies the
+replacement; a change whose replacement is unnamed reports that the attempt's
+selection is no longer confirmed. Requested options, configured defaults, free
+text, and any surface without a model identity are never treated as
+confirmation. An adapter whose installed native protocol reports no model
+identity leaves the runtime model unknown, and that unsupported reporting is a
+precise limitation rather than a guess. Adapters only produce that observation:
+Body admits it through Heart, where only the exact latest running Body may move
+the Soul's one current model that every later Turn, resume, and fork reads. The
+observation is never retained as activity and never becomes a second model
+record.
+
 A generic native tool invocation may contribute one bounded compact preview of
 the structured arguments it actually supplied. That preview is narration, not
 execution authority: it never carries tool output, results, deltas, or a raw

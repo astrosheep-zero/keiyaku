@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { providerOptionsSchema } from "../provider-recipe.js";
+import { providerOptionsSchema, withoutModel } from "../provider-recipe.js";
 import { resumeCoordinateSchema } from "../coordinate.js";
 import type { DatabaseSync } from "node:sqlite";
 import type {
@@ -112,7 +112,7 @@ export function encodeSessionRow(
     session.provider,
     encodeResumeCoordinate(session.coordinate),
     session.cwd,
-    json(session.options),
+    json(withoutModel(session.options)),
     session.admittedAt,
   ];
 }
@@ -127,7 +127,9 @@ export function decodeSessionRow(row: SessionRow): SessionFact {
     provider: row.provider,
     coordinate: resumeCoordinate(parsed<unknown>(row.coordinate_json)),
     cwd: row.cwd,
-    options: parsed<ProviderOptions>(row.options_json),
+    // A session's own model copy is obsolete: the Soul owns the one current
+    // model, so an old row never re-admits the model it happened to start with.
+    options: withoutModel(parsed<ProviderOptions>(row.options_json)),
     admittedAt: row.admitted_at,
   };
 }

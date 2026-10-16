@@ -1,6 +1,7 @@
 import type { LineRpcNotification } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
+  modelEvent,
   noteEvent,
   unknownEvent,
   type ToolCall,
@@ -359,6 +360,14 @@ function hookCompletionNote(params: Readonly<Record<string, unknown>>): string |
   return `Hook ${eventName} ${label}${diagnostic === undefined ? "" : `: ${diagnostic}`}`;
 }
 
+/**
+ * A reroute names the model that now serves this thread, so it is runtime-model
+ * evidence as well as narration. Other notifications carry no model identity.
+ */
+function notificationModel(method: string, params: Readonly<Record<string, unknown>>): string | undefined {
+  return method === "model/rerouted" ? codexText(params.toModel) : undefined;
+}
+
 function observeError(
   params: Readonly<Record<string, unknown>>,
   state: CodexTurnState,
@@ -397,6 +406,8 @@ export function codexNotificationResult(
     return undefined;
   }
   const disposition = CODEX_NOTIFICATION_DISPOSITIONS[method as keyof typeof CODEX_NOTIFICATION_DISPOSITIONS];
+  const rerouted = notificationModel(method, params);
+  if (rerouted !== undefined) events.emit(modelEvent(rerouted));
   switch (disposition) {
     case "drop":
       return undefined;

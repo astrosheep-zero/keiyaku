@@ -14,6 +14,7 @@ import { abortable } from "../../abort.js";
 import {
   type AttemptCustody,
   type DriveInput,
+  modelEvent,
   type ProviderAdapter,
   type ProviderOptionAdmission,
   type Session,
@@ -22,7 +23,7 @@ import {
 import type { ResumeCoordinate } from "../../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { AKUMA_REQUESTS_ENTRY_ENV, akumaExecutionEnvironment } from "../execution-environment.js";
-import { PaseoTurn } from "./events.js";
+import { PaseoTurn, paseoRuntimeModel } from "./events.js";
 import { providerLifecycle } from "../lifecycle.js";
 
 const configSchema = z
@@ -194,7 +195,7 @@ async function applyOptions(
   agent: AgentSnapshotPayload,
   input: DriveInput,
   config: PaseoConfig,
-): Promise<void> {
+): Promise<string | undefined> {
   usable(agent, input, config);
   const model = await offeredModel(client, agent, input, config);
   const { effort } = input.options;
@@ -215,6 +216,11 @@ async function applyOptions(
   ) {
     throw new Error(`Paseo effort selection was not confirmed: ${effort}`);
   }
+  // The runtime's own answer names the model this agent will run, whether or
+  // not the caller requested one. The snapshot's top-level model may be a
+  // configured fallback rather than what the runtime loaded, so it is never
+  // runtime evidence; an unnamed runtime stays unknown and clears nothing.
+  return paseoRuntimeModel(observed.agent.runtimeInfo);
 }
 
 class PaseoDrive {
@@ -266,11 +272,12 @@ class PaseoDrive {
           )
         : await this.existingAgent(coordinate, input.signal);
     this.agentId = agent.id;
-    await applyOptions(this.client, agent, input, config);
+    const startupModel = await applyOptions(this.client, agent, input, config);
     input.signal.throwIfAborted();
     const subscription = this.client.subscribeAgentTimeline(agent.id, (message) => this.receive(message));
     await abortable(subscription.ready, input.signal);
     this.turn.events.emit({ type: "session", coordinate: { sessionId: agent.id } });
+    if (startupModel !== undefined) this.turn.events.emit(modelEvent(startupModel));
     // Native steer may still replace work if a human wins the check/send race.
     input.signal.throwIfAborted();
     const parts = [input.body, ...input.launchTells.map((tell) => tell.text)];

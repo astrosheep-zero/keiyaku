@@ -86,3 +86,28 @@ export function soulFact(database: DatabaseSync): Soul | null {
 export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
   database.prepare("INSERT INTO soul(singleton, soul_json) VALUES (1, ?)").run(...encodeSoulRow(soul));
 }
+
+/**
+ * Replace only the current-model member of the singleton Soul and report
+ * whether the stored value actually moved. Every other raw member is carried
+ * through byte-identically: the codec normalizes recipe options, origin and
+ * allowed, so decoding and re-encoding a whole Soul here would silently
+ * rewrite fields this update never touched. A Soul this build cannot read is
+ * refused rather than mutated.
+ */
+export function setSoulModel(database: DatabaseSync, model: string | undefined): boolean {
+  const row = database.prepare("SELECT soul_json FROM soul WHERE singleton = 1").get() as SoulRow | undefined;
+  if (row === undefined) throw new Error("Akuma soul is absent");
+  const raw = JSON.parse(row.soul_json) as unknown;
+  decodeSoul(raw);
+  const soul = record(raw)!;
+  const options = record(soul.options);
+  if (options === null) throw new Error("Akuma soul options must be an object");
+  const current = options.model;
+  if (model === undefined ? current === undefined : current === model) return false;
+  const next: Record<string, unknown> = { ...options };
+  if (model === undefined) delete next.model;
+  else next.model = model;
+  database.prepare("UPDATE soul SET soul_json = ? WHERE singleton = 1").run(JSON.stringify({ ...soul, options: next }));
+  return true;
+}

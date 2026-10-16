@@ -29,7 +29,14 @@ configuration or private custody. It also reports the Akuma's frozen execution
 workdir, so a caller sees where its process runs without inferring that from
 Contract association. Status also projects frozen birth origin and caller
 from that same Soul observation. Missing caller attribution is reported as
-unknown, never persisted or inferred from later execution or lineage.
+unknown, never persisted or inferred from later execution or lineage. Status
+also names the provider identifying the execution adapter and reports the
+Akuma's one current model: the selection its birth admitted until the running
+Body's own native evidence replaces it, and that evidence afterwards. The
+admitted selection is configured intent, not proof that a native runtime used
+it. An absent model is unknown, never a configured default, a stale session
+copy, or a previous attempt's answer; an explicit change whose native
+replacement is unnamed returns the model to unknown.
 A status snapshot shows current actionable work: the open Turn when present,
 active tools, pending tells, and otherwise the latest outcome. Bounded ordinary
 detail can become typed gaps, but active work and actionable tells remain

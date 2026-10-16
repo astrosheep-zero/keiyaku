@@ -2,6 +2,7 @@ import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
   createProviderAttempt,
+  modelEvent,
   type AttemptCustody,
   type Session,
   type ProviderAdapter,
@@ -46,6 +47,12 @@ function turnId(result: unknown): string {
   return id;
 }
 
+/** Thread admission answers with the model the server actually loaded. */
+function emitAdmittedModel(result: unknown, events: AgentEventChannel): void {
+  const model = codexText(codexObject(result)?.model);
+  if (model !== undefined) events.emit(modelEvent(model));
+}
+
 async function steerTurn(
   server: LineRpcProcess,
   state: CodexTurnState,
@@ -86,15 +93,14 @@ async function admitTurn(
         : { developerInstructions: input.options.systemPrompt }),
   };
   if (input.session.kind === "fresh") {
-    state.threadId = threadId(await server.request("thread/start", threadParams));
+    const admitted = await server.request("thread/start", threadParams);
+    state.threadId = threadId(admitted);
+    emitAdmittedModel(admitted, events);
   } else {
-    state.threadId = threadId(
-      await server.request("thread/resume", {
-        threadId: input.session.coordinate.sessionId,
-        ...threadParams,
-      }),
-      input.session.coordinate.sessionId,
-    );
+    const resumed = input.session.coordinate.sessionId;
+    const admitted = await server.request("thread/resume", { threadId: resumed, ...threadParams });
+    state.threadId = threadId(admitted, resumed);
+    emitAdmittedModel(admitted, events);
   }
   events.emit({ type: "session", coordinate: { sessionId: state.threadId } });
   state.turnId = turnId(

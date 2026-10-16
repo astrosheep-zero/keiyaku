@@ -1,5 +1,12 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { AgentEventChannel, noteEvent, otherToolCall, unknownEvent, type ToolCall } from "../../provider.js";
+import {
+  AgentEventChannel,
+  modelEvent,
+  noteEvent,
+  otherToolCall,
+  unknownEvent,
+  type ToolCall,
+} from "../../provider.js";
 import {
   finiteNumber,
   object,
@@ -258,6 +265,10 @@ function assistantEvents(
   events: AgentEventChannel,
   state: ClaudeObservationState,
 ): void {
+  // Every complete response names the model that produced it; the native model
+  // identity is reported as-is.
+  const model = trimmed(object(message.message)?.model);
+  if (model !== undefined) events.emit(modelEvent(model));
   if (message.aborted === true) return;
   if (message.error !== undefined) {
     events.emit(noteEvent(`Assistant error: ${message.error}`));
@@ -321,12 +332,27 @@ function hookResponseNote(value: Readonly<Record<string, unknown>>): string | un
   return `Hook ${hook} ${outcome}${exitCode === undefined ? "" : ` (exit ${exitCode})`}`;
 }
 
+/**
+ * Native system notices that prove which model the session is actually using.
+ * `init` reports the startup selection. A refusal fallback reports the model
+ * that serves the retried request; only a session-scoped fallback swaps the
+ * session model, and `local` leaves it unchanged. The two no-longer-emitted
+ * directions stay in the native enum and are never treated as evidence.
+ */
+function systemModelEvidence(subtype: string, value: Readonly<Record<string, unknown>>): string | undefined {
+  if (subtype === "init") return trimmed(value.model);
+  if (subtype !== "model_refusal_fallback" || value.scope === "local") return undefined;
+  return value.direction === "revert" || value.direction === "sticky" ? undefined : trimmed(value.fallback_model);
+}
+
 function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: AgentEventChannel): void {
   const subtype = trimmed(value?.subtype) ?? "unknown";
   if (!Object.hasOwn(CLAUDE_SYSTEM_DISPOSITIONS, subtype)) {
     events.emit(unknownEvent(subtype));
     return;
   }
+  const evidence = systemModelEvidence(subtype, value);
+  if (evidence !== undefined) events.emit(modelEvent(evidence));
   const systemDisposition = CLAUDE_SYSTEM_DISPOSITIONS[subtype as ClaudeSystemSubtype];
   if (systemDisposition === "drop") return;
   if (systemDisposition === "hook-response") {

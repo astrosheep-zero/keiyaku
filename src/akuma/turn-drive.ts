@@ -8,6 +8,7 @@ import {
   drainPendingTells,
   heartExists,
   readHeart,
+  recordCurrentModel,
   recordSession,
   recordTellDeliveries,
   recordTellReceipt,
@@ -17,6 +18,7 @@ import {
   type TellFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
+import { withoutModel } from "./provider-recipe.js";
 import type { CallInitialTellAdmission } from "./call-initial-tell.js";
 import type { InitialTellAdmissionRequest } from "./call-request.js";
 import {
@@ -64,12 +66,20 @@ export async function turnRecipe(
   paths: AkumaPaths,
   soul: Soul,
 ): Promise<Readonly<{ cwd: string; options: Soul["options"]; session?: ResumeCoordinate }>> {
-  const latest = (await readHeart(paths)).latestSession;
+  const heart = await readHeart(paths);
+  const latest = heart.latestSession;
   const admitted = latest?.provider === soul.provider.name ? latest : undefined;
   const session = admitted?.coordinate;
+  // The current model is the one mutable member of the recipe and lives only
+  // in the Soul, so every Turn reads it freshly and no session copy, cached
+  // birth Soul, or stale option can re-admit a model that already moved.
+  const current = heart.soul?.options.model;
   return {
     cwd: soul.cwd,
-    options: admitted?.options ?? soul.options,
+    options: {
+      ...withoutModel(admitted?.options ?? soul.options),
+      ...(current === undefined ? {} : { model: current }),
+    },
     ...(session === undefined ? {} : { session }),
   };
 }
@@ -150,7 +160,19 @@ async function failedTurnSetup(
   return { kind: "failed", turnSequence, diagnostic: error instanceof Error ? error.message : String(error) };
 }
 
-async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, event: AgentEvent): Promise<void> {
+/**
+ * The runtime model one attempt has already observed. Equal observations
+ * coalesce inside the attempt; a successor attempt starts empty, so its own
+ * first observation always reaches the Soul.
+ */
+type ModelWitness = { written: boolean; model: string | undefined };
+
+async function writeProviderEvent(
+  input: DriveTurnInput,
+  active: ActiveTurn,
+  event: AgentEvent,
+  witness: ModelWitness,
+): Promise<void> {
   if (input.supervisor.signal.aborted) return;
   const at = input.now();
   if (event.type === "session") {
@@ -161,6 +183,15 @@ async function writeProviderEvent(input: DriveTurnInput, active: ActiveTurn, eve
       options: active.options,
       admittedAt: at,
     });
+  }
+  if (event.type === "model") {
+    // Native model evidence is authoritative current state, not narration: it
+    // moves the Soul's one model and is never appended to activity.
+    if (witness.written && witness.model === event.model) return;
+    witness.written = true;
+    witness.model = event.model;
+    await recordCurrentModel(input.paths, { bodySequence: input.bodySequence, model: event.model });
+    return;
   }
   await appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
 }
@@ -503,6 +534,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const receiptFailure = observeFailure(pumpReceipts(writers));
   const completionFailure = observeCompletionFailure(drive);
   const iterator = drive.events[Symbol.asyncIterator]();
+  const witness: ModelWitness = { written: false, model: undefined };
   let liveTells = true;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
   const wakeups = createTurnWakeups((after) => input.supervisor.next(after));
@@ -545,7 +577,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         continue;
       }
       if (next.event.done) break;
-      await writeProviderEvent(input, active, next.event.value);
+      await writeProviderEvent(input, active, next.event.value, witness);
       if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
       wakeups.event(iterator.next());
     }

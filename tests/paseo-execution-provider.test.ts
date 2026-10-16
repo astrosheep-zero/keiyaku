@@ -291,6 +291,54 @@ function complete(fake: NativeFixture, turnId = fake.turnId): void {
   fake.event({ type: "turn_completed", provider: "claude", turnId });
 }
 
+test("Paseo reports the runtime model its own confirmation names and stays unknown without one", async () => {
+  const named = new NativeFixture();
+  const attempt = provider(named).start({ ...drive(), options: {}, session: { kind: "fresh" } });
+  const session = await attempt.result;
+  assistant(named, "done");
+  complete(named);
+  assert.deepEqual(await session.completion, { kind: "answered", answer: "done", historyId: "own-turn" });
+  await attempt.closed;
+  assert.deepEqual(
+    (await narration(session.events)).filter((event) => event.type === "model"),
+    [{ type: "model", model: "original-model" }],
+  );
+
+  const unnamed = new NativeFixture();
+  unnamed.agent.model = null;
+  unnamed.agent.runtimeInfo!.model = null;
+  const second = provider(unnamed).start({ ...drive(), options: {}, session: { kind: "fresh" } });
+  const plain = await second.result;
+  assistant(unnamed, "done");
+  complete(unnamed);
+  await plain.completion;
+  await second.closed;
+  assert.deepEqual(
+    (await narration(plain.events)).filter((event) => event.type === "model"),
+    [],
+    "an unnamed runtime model is unknown, never inferred",
+  );
+
+  // A snapshot's top-level model can be a configured fallback rather than what
+  // the runtime loaded, so it is not evidence. An observation would have to be
+  // unnamed to say "not confirmed" here, and that would clear the current
+  // selection; no evidence must leave it alone.
+  const configured = new NativeFixture();
+  configured.agent.runtimeInfo!.model = null;
+  assert.equal(configured.agent.model, "original-model");
+  const third = provider(configured).start({ ...drive(), options: {}, session: { kind: "fresh" } });
+  const fallback = await third.result;
+  assistant(configured, "done");
+  complete(configured);
+  await fallback.completion;
+  await third.closed;
+  assert.deepEqual(
+    (await narration(fallback.events)).filter((event) => event.type === "model"),
+    [],
+    "a configured fallback is not native evidence",
+  );
+});
+
 test("Paseo start and resume retain native id, pin stable entry, and complete only admitted turn", async () => {
   const fake = new NativeFixture();
   fake.echo = false;
@@ -368,6 +416,7 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
   await attempt.closed;
   assert.deepEqual(await narration(session.events), [
     { type: "session", coordinate: { sessionId: "native-agent" } },
+    { type: "model", model: "native-model" },
     { type: "assistant", text: "hello world" },
     { type: "assistant", text: "second" },
   ]);

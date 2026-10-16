@@ -85,6 +85,14 @@ restraint, and permissions. Absent caller attribution is valid and remains
 absent without migration or backfill; malformed present attribution is corrupt
 rather than unknown. Caller admission and durable decoding share one validation
 meaning. Attribution introduces no cross-World lookup or second identity store.
+One recipe member stays mutable: the current runtime model, the single model
+this Akuma is admitted to run. Birth seeds it from the admitted selection, which
+is configured intent rather than proof of native use; afterwards only the exact
+latest running Body may replace it from that attempt's own native evidence, and
+evidence whose replacement is unnamed clears it again. Nothing writes a model
+anywhere else, so activity compaction can neither lose nor resurrect one, and a
+session admits a resume coordinate rather than a model: an obsolete copy reads
+as absent and never overrides the current value.
 Body facts name lifecycle custody but persist no process coordinate or
 reconstructable signal authority: a launch runtime is a live coordinate of the
 waking process, never durable Heart authority. A seal shares the leash's atomic

@@ -17,13 +17,14 @@ import { akumaExecutionEnvironment } from "../execution-environment.js";
 import {
   AgentEventChannel,
   createProviderAttempt,
+  modelEvent,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
   type TellSubmission,
   type TurnResult,
 } from "../../provider.js";
-import { piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
+import { piSessionModel, piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
 export type PiSdk = Readonly<{
   createAgentSessionFromServices: typeof createAgentSessionFromServices;
@@ -308,6 +309,8 @@ async function drivePi(
   await abortable(binding, signal);
   signal.throwIfAborted();
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
+  const sessionModel = piSessionModel(native.model);
+  if (sessionModel !== undefined) events.emit(modelEvent(sessionModel));
   void runPiPrompt(native, input, eventState, state, (result) => {
     void settle(result).catch(() => undefined);
   });

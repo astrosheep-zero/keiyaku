@@ -2145,3 +2145,88 @@ test("Body launch validates the real argv value without minting World or process
     assert.equal(bodyLaunchSchema.safeParse({ paths: launch.paths }).success, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("a confirmed native model is the one selection every later Turn resumes with", async () => {
+  const root = bodyTestDirectory("keiyaku-runtime-model-turn-");
+  try {
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c42");
+    const launch = claudeBodyLaunch(allocated, root, "first");
+    const starts: Parameters<typeof adapter>[0]["starts"] = [];
+    await driveAkumaBody(
+      { ...launch, seed: { ...launch.seed!, options: { model: "claude-requested" } } },
+      adapter({
+        starts,
+        events: [
+          { type: "session", coordinate: { sessionId: "model-session" } },
+          { type: "model", model: "claude-native" },
+        ],
+        result: { kind: "answered", answer: "one", historyId: "model-history" },
+      }),
+      { now: () => "2026-08-08T00:00:00.000Z" },
+    );
+    assert.equal(starts[0]?.options.model, "claude-requested", "birth admits the requested selection");
+    const born = await readHeart(allocated.paths);
+    assert.equal(born.soul?.options.model, "claude-native", "native evidence replaces the seed");
+    assert.equal(born.latestSession?.options.model, undefined, "a session row keeps no model copy");
+    assert.equal(
+      (await activitySlice(allocated.paths)).rows.some(
+        (fact) => fact.kind === "activity" && fact.event.type === "model",
+      ),
+      false,
+      "model evidence is never retained as activity",
+    );
+
+    await recordTell(allocated.paths, { id: "model-tell", body: "again", recordedAt: "2026-08-08T00:00:01.000Z" });
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts,
+        events: [{ type: "session", coordinate: { sessionId: "model-session" } }],
+        result: { kind: "answered", answer: "two", historyId: "model-history-2" },
+      }),
+      { now: () => "2026-08-08T00:00:02.000Z" },
+    );
+    assert.equal(starts[1]?.session, "model-session", "the later Turn resumes the admitted session");
+    assert.equal(starts[1]?.options.model, "claude-native", "it runs the confirmed model, not the birth request");
+
+    await recordTell(allocated.paths, { id: "unknown-tell", body: "changed", recordedAt: "2026-08-08T00:00:03.000Z" });
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts,
+        events: [{ type: "session", coordinate: { sessionId: "model-session" } }, { type: "model" }],
+        result: { kind: "answered", answer: "three", historyId: "model-history-3" },
+      }),
+      { now: () => "2026-08-08T00:00:04.000Z" },
+    );
+    assert.equal(
+      (await readHeart(allocated.paths)).soul?.options.model,
+      undefined,
+      "an unnamed replacement clears the current selection",
+    );
+
+    // A Turn composes its options at setup, so this Turn already ran the model
+    // it was admitted with; the cleared value is what the next Turn must see.
+    await recordTell(allocated.paths, {
+      id: "after-unknown-tell",
+      body: "plain",
+      recordedAt: "2026-08-08T00:00:05.000Z",
+    });
+    await driveAkumaBody(
+      { paths: allocated.paths },
+      adapter({
+        starts,
+        events: [{ type: "session", coordinate: { sessionId: "model-session" } }],
+        result: { kind: "answered", answer: "four", historyId: "model-history-4" },
+      }),
+      { now: () => "2026-08-08T00:00:06.000Z" },
+    );
+    assert.equal(
+      starts[3]?.options.model,
+      undefined,
+      "an absent current model removes the stale option instead of replaying it",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

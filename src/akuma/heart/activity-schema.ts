@@ -51,6 +51,10 @@ const toolEventSchema = z.union([
 
 export const agentEventSchema = z.union([
   z.object({ type: z.literal("session"), coordinate: resumeCoordinateSchema }),
+  // One provider-neutral runtime-model observation in the shared agent-event
+  // vocabulary. Body admits it into the Soul's single current model; it is
+  // never appended to activity, so compaction cannot lose or resurrect it.
+  z.object({ type: z.literal("model"), model: text.optional() }),
   z.object({ type: z.literal("assistant"), text, truncated }),
   z.object({ type: z.literal("thought"), text, truncated }),
   toolEventSchema,

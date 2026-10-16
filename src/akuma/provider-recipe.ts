@@ -63,6 +63,30 @@ export const providerRecipeSchema = z
   );
 export type ProviderExecution = z.infer<typeof providerRecipeSchema>;
 
+/**
+ * One observed runtime model, admitted under the same identity rules a birth
+ * selection obeys: a nonblank native identifier, or an explicit unknown whose
+ * replacement the native surface did not name.
+ */
+export function decodeRuntimeModel(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = modelText.safeParse(value);
+  if (!parsed.success)
+    throw new TypeError(parsed.error.issues[0]?.message ?? "provider option model must be a nonblank string", {
+      cause: parsed.error,
+    });
+  return parsed.data;
+}
+
+/**
+ * Recipe members without the current-model member, which an otherwise frozen
+ * recipe does not own: it lives once, as the Soul's mutable current selection.
+ */
+export function withoutModel(options: ProviderOptions): ProviderOptions {
+  const { model: _current, ...rest } = options;
+  return rest;
+}
+
 export function decodeProviderOptions(value: unknown): ProviderOptions {
   const parsed = providerOptionsSchema.safeParse(value);
   if (!parsed.success)

@@ -48,7 +48,7 @@ import {
   type CodexTurnState,
 } from "../src/akuma/providers/codex-app-server/events.js";
 import type { LineRpcNotification } from "../src/runtime/proc/line-rpc.js";
-import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
+import { translatePiEvent, piSessionModel, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
 import type { StdioProcess } from "../src/runtime/proc/stdio.js";
 import { waitForCondition, waitForFixtureFile } from "./support/process.js";
@@ -2672,6 +2672,7 @@ function fakeCodex(
     | "exit-before-completion"
     | "exit-before-admit"
     | "foreign-thread"
+    | "model-evidence"
     | "rpc-reject"
     | "missing-turn-id"
     | "steer-hung-terminal" = "complete",
@@ -2711,7 +2712,7 @@ function fakeCodex(
       "  if(message.method==='initialized') return;",
       "  if(message.method==='thread/start'){",
       "    if(mode==='exit-before-admit') process.exit(7);",
-      "    return reply(message,{thread:{id:'thread-fresh'}});",
+      "    return reply(message,{thread:{id:'thread-fresh'},...(mode==='model-evidence'?{model:'gpt-5-codex'}:{})});",
       "  }",
       "  if(message.method==='thread/resume') return reply(message,{thread:{id:message.params.threadId}});",
       "  if(message.method==='thread/fork') return reply(message,{thread:{id:'thread-child'}});",
@@ -2719,7 +2720,8 @@ function fakeCodex(
       "    if(mode==='rpc-reject') return send({id:message.id,error:{message:'turn start refused'}});",
       "    if(mode==='missing-turn-id') return reply(message,{turn:{}});",
       "    reply(message,{turn:{id:'turn-1'}});",
-      "    if(mode==='complete'){",
+      "    if(mode==='model-evidence') send({method:'model/rerouted',params:{threadId:message.params.threadId,turnId:'turn-1',fromModel:'gpt-5-codex',toModel:'gpt-5-codex-mini',reason:'capacity'}});",
+      "    if(mode==='complete'||mode==='model-evidence'){",
       "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
       "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
       "    }",
@@ -3219,6 +3221,142 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     approvalPolicy: "never",
   });
   assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
+});
+
+test("native adapters report only the runtime model their own payloads name", async (context) => {
+  const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  assert.deepEqual(
+    translatePiEvent(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          provider: "anthropic",
+          model: "claude-x",
+          content: [],
+          stopReason: "endTurn",
+        },
+      } as never,
+      piState,
+    ).filter((event) => event.type === "model"),
+    [{ type: "model", model: "anthropic/claude-x" }],
+  );
+  assert.equal(piSessionModel({ provider: "anthropic", id: "claude-x" }), "anthropic/claude-x");
+  assert.equal(piSessionModel({ id: "claude-x" }), undefined, "a half-named selection is not evidence");
+
+  const claudeChannel = new AgentEventChannel();
+  const claudeState: ClaudeObservationState = { tools: new Map() };
+  emitClaudeMessage({ type: "system", subtype: "init", model: "claude-startup" } as never, claudeChannel, claudeState);
+  emitClaudeMessage(
+    { type: "assistant", message: { model: "claude-response", content: [] } } as never,
+    claudeChannel,
+    claudeState,
+  );
+  emitClaudeMessage(
+    {
+      type: "system",
+      subtype: "model_refusal_fallback",
+      scope: "local",
+      direction: "retry",
+      original_model: "claude-startup",
+      fallback_model: "claude-local-only",
+    } as never,
+    claudeChannel,
+    claudeState,
+  );
+  emitClaudeMessage(
+    {
+      type: "system",
+      subtype: "model_refusal_fallback",
+      scope: "session",
+      direction: "retry",
+      original_model: "claude-response",
+      fallback_model: "claude-fallback",
+    } as never,
+    claudeChannel,
+    claudeState,
+  );
+  assert.deepEqual(
+    (await drainChannel(claudeChannel)).filter((event) => event.type === "model"),
+    [
+      { type: "model", model: "claude-startup" },
+      { type: "model", model: "claude-response" },
+      { type: "model", model: "claude-fallback" },
+    ],
+    "a local fallback leaves the session model unchanged",
+  );
+
+  const opencodeEvents: AgentEvent[] = [];
+  mapEvent(
+    {
+      type: "message.updated",
+      properties: { info: { sessionID: "session-1", role: "assistant", providerID: "anthropic", modelID: "claude-y" } },
+    },
+    { emit: (event) => opencodeEvents.push(event) },
+    createEventState("session-1"),
+  );
+  mapEvent(
+    {
+      type: "message.updated",
+      properties: {
+        info: { sessionID: "session-1", role: "user", model: { providerID: "anthropic", modelID: "requested" } },
+      },
+    },
+    { emit: (event) => opencodeEvents.push(event) },
+    createEventState("session-1"),
+  );
+  assert.deepEqual(
+    opencodeEvents.filter((event) => event.type === "model"),
+    [{ type: "model", model: "anthropic/claude-y" }],
+    "a requested model is not evidence of what ran",
+  );
+
+  const codexChannel = new AgentEventChannel();
+  const codexState: CodexTurnState = { settled: false, tools: new Map() };
+  codexNotificationResult(
+    {
+      method: "model/rerouted",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        fromModel: "gpt-5-codex",
+        toModel: "gpt-5-codex-mini",
+        reason: "capacity",
+      },
+    },
+    codexState,
+    codexChannel,
+  );
+  const codexEvents = await drainChannel(codexChannel);
+  assert.deepEqual(
+    codexEvents.filter((event) => event.type === "model"),
+    [{ type: "model", model: "gpt-5-codex-mini" }],
+  );
+
+  const root = temporaryDirectory(context, "keiyaku-codex-model-");
+  const fake = fakeCodex(root, "model-evidence");
+  const drive = await createCodexAppServerProvider({
+    name: "configured",
+    kind: "codex-app-server",
+    executable: fake.executable,
+  }).start({
+    ...DRIVE_DEFAULTS,
+    body: "build",
+    launchTells: [],
+    cwd: root,
+    options: {},
+    session: { kind: "fresh" },
+  }).result;
+  const events = await collectEvents(drive.events);
+  await drive.completion;
+  assert.deepEqual(
+    events.filter((event) => event.type === "model"),
+    [
+      { type: "model", model: "gpt-5-codex" },
+      { type: "model", model: "gpt-5-codex-mini" },
+    ],
+    "thread admission names the loaded model; a reroute names its replacement",
+  );
 });
 
 test("Codex native fork receives an isolated child environment", async () => {

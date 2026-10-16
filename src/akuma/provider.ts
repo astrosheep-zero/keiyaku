@@ -114,6 +114,10 @@ export function encodeAgentEvent(event: AgentEvent): AgentEvent {
           : { sessionId: event.coordinate.sessionId };
       return { type: event.type, coordinate };
     }
+    case "model":
+      return event.model === undefined
+        ? { type: event.type }
+        : { type: event.type, model: boundedEventText(event.model) };
     case "assistant":
       return marked(
         { type: event.type, text: boundedEventText(event.text) },
@@ -228,6 +232,15 @@ function cutBeforeSurrogate(value: string, budget: number): number {
 
 function boundedThoughtText(value: string): string {
   return value.slice(0, AGENT_THOUGHT_TEXT_LIMIT);
+}
+
+/**
+ * One provider-neutral runtime-model observation. Adapters emit it only from
+ * native evidence that names an actual model; `undefined` reports a known
+ * model change whose replacement the native surface did not identify.
+ */
+export function modelEvent(model?: string): Extract<AgentEvent, { type: "model" }> {
+  return model === undefined ? { type: "model" } : { type: "model", model: boundedEventText(model) };
 }
 
 export function noteEvent(note: string): Extract<AgentEvent, { type: "note" }> {

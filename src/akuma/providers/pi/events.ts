@@ -1,5 +1,5 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { modelEvent, noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
 import { nonblank, observedTextContent, positiveLine, searchToolCall } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
@@ -43,6 +43,23 @@ function textContent(content: unknown): string {
 
 function hasTextContent(content: unknown): boolean {
   return observedTextContent(content) !== undefined;
+}
+
+/**
+ * Pi identifies a model as `<provider>/<id>`, the same convention its model
+ * option uses. The selected model and every recorded response carry both
+ * halves; a response without them names no model and stays unknown.
+ */
+function piModel(provider: unknown, id: unknown): string | undefined {
+  const owner = nonblank(provider);
+  const name = nonblank(id);
+  return owner === undefined || name === undefined ? undefined : `${owner}/${name}`;
+}
+
+/** The model this native session will run, from its own selection. */
+export function piSessionModel(selected: unknown): string | undefined {
+  const value = record(selected);
+  return piModel(value?.provider, value?.id);
 }
 
 function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
@@ -157,6 +174,8 @@ function translateMessage(
   const message = record(event.message);
   if (message?.role !== "assistant") return [];
   const translated: AgentEvent[] = [];
+  const model = piModel(message.provider, message.model);
+  if (model !== undefined) translated.push(modelEvent(model));
   if (Array.isArray(message.content)) {
     for (const block of message.content) {
       const value = record(block);
