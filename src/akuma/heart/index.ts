@@ -74,6 +74,7 @@ import {
 import {
   createHeartReader,
   isHeartAbsent,
+  type HeartRead,
   readSealFromLeash,
   recordPendingTell,
   withHeartTransaction,
@@ -259,28 +260,34 @@ function sameStatusBatch(left: ReturnType<typeof readStatusBatch>, right: Return
   );
 }
 
-/** One live observation's successful raw input and decoded frontier, never a connection. */
+/** One observer owns its connection and successful decoded frontier. */
 export function createStatusFactReader(paths: AkumaPaths) {
+  const reader = createHeartReader(paths);
   let memo: Readonly<{ batch: ReturnType<typeof readStatusBatch>; facts: ActivitySlice["rows"] }> | undefined;
   return {
+    life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
+    tellOutcome: (id: string, signal?: AbortSignal) =>
+      reader.read((heart) => {
+        const tell = tellFact(heart, id);
+        const end = tell?.binding === undefined ? undefined : turnFact(heart, tell.binding.turnSequence)?.end;
+        return { tell, end };
+      }, signal),
     clear(): void {
+      reader.clear();
       memo = undefined;
     },
     async read(input: StatusFactInput, signal?: AbortSignal): Promise<ActivitySlice["rows"]> {
       try {
-        const next = await withReadOnlyHeart(
-          paths,
-          (heart) => {
-            const batch = readStatusBatch(heart, input);
-            if (memo !== undefined && sameStatusBatch(batch, memo.batch)) return memo;
-            return { batch, facts: decodeTimelineBatch(batch) };
-          },
-          signal,
-        );
+        const next = await reader.read((heart) => {
+          const batch = readStatusBatch(heart, input);
+          if (memo !== undefined && sameStatusBatch(batch, memo.batch)) return memo;
+          return { batch, facts: decodeTimelineBatch(batch) };
+        }, signal);
         // Publication follows COMMIT, so failed reads can never supply a fallback.
         memo = next;
         return next.facts;
       } catch (error) {
+        reader.clear();
         memo = undefined;
         throw error;
       }
@@ -292,10 +299,13 @@ type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" 
   Readonly<{ hasPendingTell: boolean }>;
 
 /** Lifecycle probes do not load narration, Tell bodies, or delivery histories. */
-export async function readLifeSnapshot(paths: AkumaPaths, signal?: AbortSignal): Promise<LifeSnapshot> {
+export async function readLifeSnapshot(
+  paths: AkumaPaths,
+  signal?: AbortSignal,
+  read: HeartRead = (body, signal) => withReadOnlyHeart(paths, body, signal),
+): Promise<LifeSnapshot> {
   try {
-    return await withReadOnlyHeart(
-      paths,
+    return await read(
       (heart) => ({
         soul: soulFact(heart),
         latestBody: latestBodyFact(heart),
@@ -572,6 +582,28 @@ export async function finishBodyIfIdle(
     finishBodyFact(heart, input);
     return { kind: "finished" };
   });
+}
+
+export type BodyControlSnapshot = Pick<HeartSnapshot, "soul" | "pending" | "stop" | "pause">;
+
+export function createBodyHeartReader(paths: AkumaPaths) {
+  const reader = createHeartReader(paths);
+  return {
+    clear: reader.clear,
+    async read(): Promise<BodyControlSnapshot> {
+      try {
+        return await reader.read((heart) => ({
+          soul: soulFact(heart),
+          pending: pendingTellFacts(heart),
+          stop: stopFact(heart),
+          pause: pauseFact(heart),
+        }));
+      } catch (error) {
+        if (isHeartAbsent(error)) return { soul: null, pending: [], stop: null, pause: null };
+        throw error;
+      }
+    },
+  };
 }
 
 export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {

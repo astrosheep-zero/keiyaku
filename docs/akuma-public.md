@@ -36,7 +36,8 @@ Body's own native evidence replaces it, and that evidence afterwards. The
 admitted selection is configured intent, not proof that a native runtime used
 it. An absent model is unknown, never a configured default, a stale session
 copy, or a previous attempt's answer; an explicit change whose native
-replacement is unnamed returns the model to unknown.
+replacement is unnamed returns the model to unknown. Provider environment,
+opaque configuration, and system prompts remain outside this public description.
 A status snapshot shows current actionable work: the open Turn when present,
 active tools, pending tells, and otherwise the latest outcome. Bounded ordinary
 detail can become typed gaps, but active work and actionable tells remain
@@ -150,10 +151,10 @@ one set-observation owner serves both: frozen caller order, any/all completion,
 a shared ordinary-detail budget, transient unreadable peers, and honest final
 observed/unobserved evidence. The standalone face is the same algorithm
 projected to one association-free identity, not an unrelated loop or an upper
-facade call. An observation with no live row callbacks may use the owner's
-lightweight completion probe to skip expensive running snapshots, and an
-internal custom completion judge always observes fully and never uses that
-probe; a live observer always observes rounds, so it cannot skip activity.
+facade call. Wait returns status snapshots, never a live activity stream. It may
+use the owner's lightweight completion probe to skip expensive running
+snapshots; an internal custom completion judge always observes fully. Final
+observations use the same status projection as ordinary status reads.
 Every return still carries its final status and says whether it completed or
 reached the deadline; completion wins when the final deadline-edge observation
 satisfies the judgment. A deadline

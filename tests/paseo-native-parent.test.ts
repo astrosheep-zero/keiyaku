@@ -19,7 +19,7 @@ async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | nu
   const paseo = createPaseoApi({
     async fetchAgents(options: { filter: unknown; page: { limit: number; cursor?: string }; scope?: string }) {
       listed.push(options);
-      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
+      assert.deepEqual(options.filter, { includeArchived: true });
       assert.equal(options.scope, undefined, "do not narrow to active agents");
       assert.equal(options.page.limit, 200);
       const index = options.page.cursor ? Number(options.page.cursor) : 0;

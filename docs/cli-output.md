@@ -167,8 +167,8 @@ discriminant with decoration.
 An Akuma activity frame separates identity from its timeline: the frame boundary
 opens directly onto activity, and the shared life or input conclusion closes that
 timeline without an intervening section. Status uses the same completion judgment
-as wait, including a sleeping Akuma with an outstanding Tell. Only observing a
-wait can justify elapsed-duration text. Read-only reference facts follow the
+as wait, including a sleeping Akuma with an outstanding Tell. Only an observed
+input wait can justify elapsed-duration text. Read-only reference facts follow the
 conclusion, with reported changes before diagnostics and the execution directory
 last; an unknown change size remains unknown rather than implying additions or
 removals. Across observations, including Contract testimony and Akuma snapshot, history,
@@ -204,7 +204,7 @@ interval never claims that a command is hung or alive. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt
 rather than replacing it with an early exit.
 
-An observing call, an ask, and a wait share one input-wait
+An observing call and an ask share one input-wait
 presentation discipline, defined once: an identity frame opens on the progress
 channel, eligible timeline rows stream once each in retained order, active
 activity stays in the redrawable frame until it settles, and one truthful
@@ -224,14 +224,15 @@ when first observed: it prints or joins an omission count, and no timestamped
 row is held for a later observation. After each spoken update or Tell, the
 first three settled tools print; later tools until the next such checkpoint
 fold into one untimed omission marker, released before that source's next
-visible row or at closing. A failed tool always prints. One observation across
-several sources merges by row time while each source keeps its own order, so a
-held row never resurfaces behind newer output. A plural observation attributes
-every semantic row to a stable compact source tag resolved from the
-observation seam. Its say rows retain the bounded two-line payload budget
-while other attributed rows stay compact. The observation closes with an
-attributed scoreboard in the same order;
-a failure fact for an unobserved member keeps that member's complete identity.
+visible row or at closing. A failed tool always prints.
+
+A wait is not a stream. It observes each selected Akuma to its completion
+judgment or the caller deadline and then renders one status projection per
+observed member — the same projection an ordinary status read uses — on stdout,
+followed by one failure fact per member it could not read, which keeps that
+member's complete identity. It opens no live frame, redraws no progress, and
+extracts no separate answer: an answer is visible only as the snapshot's own
+outcome row.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report; it groups by related Contract and renders

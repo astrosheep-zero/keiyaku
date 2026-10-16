@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import {
-  bornLiveStatus,
+  createLiveStatusReader,
   bornStatus,
   defaultWaitComplete,
   observeOutcomeRows,
@@ -35,7 +35,6 @@ import {
   readLastAnsweredTurn,
   readSoul,
   readTell,
-  readTurn,
   recordTell,
   requestPause,
   requestStop,
@@ -353,40 +352,36 @@ export class AkumaOwner {
       observe?: (observation: LiveStatusObservation) => void | Promise<void>;
     }> = {},
   ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null }>> {
-    const waited = await waitForObservation({
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      observe: async () => {
-        const tell = await readTell(this.paths, tellId);
-        if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-        const outcome = await this.boundTellOutcome(tell);
-        if (outcome.historyId !== undefined) await this.outcomeObserved?.(this.id, [outcome.historyId]);
-        if (options.observe !== undefined) {
-          await options.observe(
-            await bornLiveStatus(this.paths, this.id, { aperture: "monitoring", admittedTellId: tellId }),
-          );
-        }
-        return { ...outcome, terminalWithoutTurn: tell.state === "told" && tell.binding === undefined };
-      },
-      complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
-    });
-    return {
-      reason: waited.reason,
-      outcome: waited.value.outcome,
-      completedAt: waited.value.completedAt,
-    };
-  }
-
-  private async boundTellOutcome(
-    tell: TellFact,
-  ): Promise<Readonly<{ outcome: TurnOutcome | null; completedAt: string | null; historyId?: string }>> {
-    if (tell.binding === undefined) return { outcome: null, completedAt: null };
-    const end = (await readTurn(this.paths, tell.binding.turnSequence))?.end;
-    return {
-      outcome: end?.outcome ?? null,
-      completedAt: end?.completedAt ?? null,
-      ...(end === undefined ? {} : { historyId: `turn/${tell.binding.turnSequence}` }),
-    };
+    const reader = createLiveStatusReader(this.paths, this.id);
+    try {
+      const waited = await waitForObservation({
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        observe: async () => {
+          const { tell, end } = await reader.tellOutcome(tellId, options.signal);
+          if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
+          if (end !== undefined) await this.outcomeObserved?.(this.id, [`turn/${end.turnSequence}`]);
+          if (options.observe !== undefined) {
+            await options.observe(
+              await reader.read({ aperture: "monitoring", admittedTellId: tellId }, options.signal),
+            );
+          }
+          return {
+            outcome: end?.outcome ?? null,
+            completedAt: end?.completedAt ?? null,
+            terminalWithoutTurn: tell.state === "told" && tell.binding === undefined,
+          };
+        },
+        complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,
+      });
+      return {
+        reason: waited.reason,
+        outcome: waited.value.outcome,
+        completedAt: waited.value.completedAt,
+      };
+    } finally {
+      reader.clear();
+    }
   }
 
   async interrupt(

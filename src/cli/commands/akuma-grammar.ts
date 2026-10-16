@@ -105,10 +105,9 @@ const AKUMA_COMMAND_SPECS = {
     details: [
       "The default mode is any; --all waits until every selected Akuma completes.",
       "An already completed member counts immediately, so repeating a selection can return at once.",
-      "Akuma names, completed activity, and the final result stream on stderr.",
-      "A streamed plural wait leaves stdout empty, and so does a single wait with no answer.",
-      "Only a single selected Akuma that answered writes to stdout, exactly its answer.",
-      "With --json nothing streams and stdout carries the result document.",
+      "Text prints each selected Akuma's status snapshot, then one failure fact for any Akuma it could not read.",
+      "An answer is part of that snapshot; wait writes no separate copy of it to stdout.",
+      "With --json stdout carries the result document.",
     ].join("\n"),
   },
   tell: {

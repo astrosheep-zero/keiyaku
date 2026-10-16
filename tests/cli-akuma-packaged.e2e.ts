@@ -30,14 +30,14 @@ function fakeAgentSource(): string {
     `import * as acp from ${JSON.stringify(acpSdk)};`,
     'const mode = process.env.OBS_MODE ?? "notes";',
     'const app = acp.agent({ name: "fake-acp" })',
-    '  .onRequest(acp.methods.agent.initialize, ({ params }) => ({ protocolVersion: params.protocolVersion, agentCapabilities: { loadSession: true } }))',
+    "  .onRequest(acp.methods.agent.initialize, ({ params }) => ({ protocolVersion: params.protocolVersion, agentCapabilities: { loadSession: true } }))",
     '  .onRequest(acp.methods.agent.session.new, () => ({ sessionId: "observing-session" }))',
-    '  .onRequest(acp.methods.agent.session.load, () => ({}))',
-    '  .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {',
+    "  .onRequest(acp.methods.agent.session.load, () => ({}))",
+    "  .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {",
     '    const chunk = (sessionUpdate, text) => client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate, content: { type: "text", text } } });',
     '    if (mode === "notes") {',
     "      for (let index = 1; ; index += 1) {",
-    '        await new Promise((resolve) => setTimeout(resolve, 250));',
+    "        await new Promise((resolve) => setTimeout(resolve, 250));",
     '        await chunk("agent_thought_chunk", "retry note " + index);',
     '        await chunk("agent_message_chunk", "attempt " + index);',
     "      }",
@@ -47,39 +47,42 @@ function fakeAgentSource(): string {
     "      // appear through the close flush; the repeated said marker keeps the waiter observing.",
     '      await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "hold", title: "hold", kind: "execute", rawInput: { command: "hold" }, status: "in_progress" } });',
     "      for (let index = 1; ; index += 1) {",
-    '        await new Promise((resolve) => setTimeout(resolve, 300));',
+    "        await new Promise((resolve) => setTimeout(resolve, 300));",
     '        await chunk("agent_message_chunk", "attempt " + index);',
     '        await chunk("agent_thought_chunk", "retry note " + index);',
     "      }",
     "    }",
     '    if (mode === "slow") {',
     "      for (let index = 1; index <= 10; index += 1) {",
-    '        await new Promise((resolve) => setTimeout(resolve, 250));',
+    "        await new Promise((resolve) => setTimeout(resolve, 250));",
     '        await chunk("agent_thought_chunk", "retry note " + index);',
     '        await chunk("agent_message_chunk", "attempt " + index);',
     "      }",
     "    }",
     '    if (mode === "tools") {',
     "      for (let index = 1; index <= 9; index += 1) {",
-    '        await new Promise((resolve) => setTimeout(resolve, 180));',
+    "        await new Promise((resolve) => setTimeout(resolve, 180));",
     '        await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-" + index, title: "tool " + index, kind: "execute", rawInput: { command: "tool-" + index }, status: "in_progress" } });',
     '        await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-" + index, status: "completed" } });',
     "      }",
     '      await client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: "plan", entries: [{ content: "terminal boundary", priority: "low", status: "completed" }] } });',
-    '      // Keep the completed boundary observable through at least one polling turn before ending the session.',
-    '      await new Promise((resolve) => setTimeout(resolve, 1000));',
+    "      // Keep the completed boundary observable through at least one polling turn before ending the session.",
+    "      await new Promise((resolve) => setTimeout(resolve, 1000));",
     "    }",
     '    if (mode === "answer" || mode === "slow") await chunk("agent_message_chunk", "the answer");',
     '    return { stopReason: "end_turn" };',
     "  })",
-    '  .onNotification(acp.methods.agent.session.cancel, () => {});',
+    "  .onNotification(acp.methods.agent.session.cancel, () => {});",
     "app.connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));",
     "",
   ].join("\n");
 }
 
 /** One fake ACP provider recipe whose agent runs the given mode. */
-function acpRecipe(agent: string, mode: "notes" | "holding" | "slow" | "tools" | "answer" | "empty"): Readonly<Record<string, unknown>> {
+function acpRecipe(
+  agent: string,
+  mode: "notes" | "holding" | "slow" | "tools" | "answer" | "empty",
+): Readonly<Record<string, unknown>> {
   return {
     kind: "acp",
     executable: process.execPath,
@@ -118,6 +121,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
     join(world, ".keiyaku", "settings.json"),
     `${JSON.stringify(
       {
+        plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } },
         providers: {
           "fake-notes": acpRecipe(agent, "notes"),
           "fake-holding": acpRecipe(agent, "holding"),
@@ -142,80 +146,10 @@ function ruleFor(...headLines: readonly string[]): string {
   return "─".repeat(headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0));
 }
 
-/** Assert one plural wait's aggregate frame maps caller-ordered aliases to identity tags. */
-function assertAggregateHead(stderr: string, aliases: readonly [string, string]): readonly [string, string] {
-  const lines = stderr.split("\n");
-  const head = lines.slice(0, aliases.length);
-  const tags = head.map((line, index) => {
-    const match = /^([0-9a-f]{4,}) (.+)$/u.exec(line);
-    assert.notEqual(match, null, `an aggregate head line maps a tag to its source:\n${stderr}`);
-    assert.equal(match![2], aliases[index], `the aggregate head names the selected set in caller order:\n${stderr}`);
-    return match![1]!;
-  });
-  assert.equal(new Set(tags).size, tags.length, `each selected target has a distinct tag:\n${stderr}`);
-  const rule = ruleFor(...head);
-  assert.equal(lines[aliases.length], rule, `one rule closes the aggregate head:\n${stderr}`);
-  assert.equal(
-    stderr.match(new RegExp(`^${rule}$`, "gmu"))?.length,
-    1,
-    `exactly one aggregate frame rule:\n${stderr}`,
-  );
-  return [tags[0]!, tags[1]!];
-}
-
-/** The display column at which the first occurrence of one mark starts. */
-function markColumn(line: string, mark: string): number {
-  const index = line.indexOf(mark);
-  assert.notEqual(index, -1, `expected ${mark} in ${line}`);
-  return displayColumns(line.slice(0, index));
-}
-
-/** Ascending message numbers rendered in one attributed source's rows. */
-function attributedAttemptNumbers(stderr: string, tag: string): readonly number[] {
-  return [...stderr.matchAll(new RegExp(`^.*${tag} +\\S+ +say +“attempt (\\d+)`, "gmu"))].map((match) =>
-    Number(match[1]!),
-  );
-}
-
-function assertAttributedInputAndLiveSays(stderr: string, tag: string, score: string, mode: string): void {
-  const queuedPrompt = new RegExp(`^.*${tag} +│ told +"prompt"$`, "gmu");
-  assert.equal(
-    stderr.match(queuedPrompt)?.length,
-    1,
-    `${mode} streamed the queued input once for its source:\n${stderr}`,
-  );
-  assert.match(
-    stderr,
-    new RegExp(`^.*${tag} +│ say +“attempt \\d+`, "mu"),
-    `${mode} streamed in-flight say evidence for its source:\n${stderr}`,
-  );
-
-  const rowMarker = new RegExp(`^.*${tag} +(✓|●|│|⧗|!|\\?|×|⋮) `, "u");
-  const rows = stderr.split("\n").filter((line) => rowMarker.test(line));
-  assert.ok(rows.length >= 2, `${mode} streamed attributed activity rows:\n${stderr}`);
-  for (const row of rows) {
-    const marker = rowMarker.exec(row)?.[1];
-    assert.notEqual(marker, undefined, `an attributed row has a mark:\n${row}`);
-    assert.equal(
-      markColumn(row, marker!),
-      markColumn(score, "●"),
-      `${mode} rows align with the scoreboard:\n${stderr}`,
-    );
-  }
-
-  const attempts = attributedAttemptNumbers(stderr, tag);
-  assert.ok(attempts.length >= 1, `${mode} streamed attributed messages:\n${stderr}`);
-  assert.equal(new Set(attempts).size, attempts.length, `${mode} never streams one message twice`);
-  assert.deepEqual(
-    attempts,
-    [...attempts].sort((left, right) => left - right),
-    `${mode} streams messages in order`,
-  );
-}
-
 async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
   const killed = await Akumas.of(world).kill({
-    akuma: [selector] });
+    akuma: [selector],
+  });
   assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
   const member = killed.results[0]!;
   assert.ok(
@@ -224,7 +158,9 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
   );
 
   const waited = await Akumas.of(world).wait({
-    akuma: [selector], timeoutMs: 10_000 });
+    akuma: [selector],
+    timeoutMs: 10_000,
+  });
   assert.equal(waited.reason, "completed", `public wait confirms ${selector} settled after kill`);
   assert.equal(waited.observations.length, 1, `public wait observes ${selector} once`);
   assert.equal(waited.observations[0]!.status.id, member.id);
@@ -249,113 +185,133 @@ test("packaged prompt-free call births without admitting a Tell", { timeout: 120
   }
 });
 
-test("packaged observing calls stream one framed session and one conclusion per outcome", { timeout: 120_000 }, async () => {
-  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
-  const { root, world, env } = observingWorld();
-  try {
-    const unfinished = await runPackagedCli(
-      ["-C", world, "call", "worker", "--wait", "10s", "--alias", "@notes", "prompt"],
-      { cwd: world, env },
-    );
-    assert.equal(unfinished.code, 0, unfinished.stderr);
-    assert.equal(unfinished.stdout, "", "an unfinished observing call writes no stdout");
-    const lines = unfinished.stderr.split("\n");
-    assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
-    assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
-    assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
-    assert.equal(unfinished.stderr.match(/● running — waited /gu)?.length, 1, "one input-bound conclusion states the observed life");
-    const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
-    assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
-    assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
-    assert.equal(new Set(attempts).size, attempts.length, "no settled message streams twice");
-    assert.deepEqual(attempts, [...attempts].sort((left, right) => left - right), "messages stream after their predecessors");
-
-    const single = await runPackagedCli(["-C", world, "wait", "@notes", "--timeout", "1s"], { cwd: world, env });
-    assert.equal(single.code, 0, single.stderr);
-    assert.equal(single.stdout, "", "an unfinished single wait writes no stdout");
-    assert.doesNotMatch(single.stderr, /retry note/u, "single waits omit thought narration");
-    assert.match(single.stderr, /attempt \d+/u, `a single wait still streams eligible activity:\n${single.stderr}`);
-    await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
-
-    let detachedStarted = false;
+test(
+  "packaged observing calls stream one framed session and one conclusion per outcome",
+  { timeout: 120_000 },
+  async () => {
+    assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
+    const { root, world, env } = observingWorld();
     try {
-      const detached = await runPackagedCli(["-C", world, "call", "worker", "--alias", "@detached", "prompt"], {
-        cwd: world, env,
-      });
-      assert.equal(detached.code, 0, detached.stderr);
-      detachedStarted = true;
-      const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--timeout", "1s"], {
-        cwd: world, env,
-      });
-      assert.equal(afterExit.code, 0, afterExit.stderr);
-      assert.match(afterExit.stderr, /attempt \d+/u, "detached input still drives its Body after the caller exits");
-    } finally {
-      if (detachedStarted) await killAndAwaitPluralTarget(await World.at(world), "@detached");
-    }
-
-    const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {
-      cwd: world,
-      env,
-    });
-    assert.equal(answered.code, 0, answered.stderr);
-    assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
-    assert.match(answered.stderr, /✓ answered — \d+s/u);
-    // The final narration may be observed while its Turn is still open. Closing must account for
-    // that in-flight row with `?`, even when the later Heart projection folds it into the answer.
-    const answerNarration = answered.stderr.split("\n").filter((line) => line.includes("the answer"));
-    assert.ok(answerNarration.length <= 1, `the stream never repeats answer narration:\n${answered.stderr}`);
-    for (const row of answerNarration)
-      assert.match(
-        row,
-        /^(?:\d{2}:\d{2}| {5}) \? say +“the answer”$/u,
-        "only unresolved narration may contain answer text",
+      const unfinished = await runPackagedCli(
+        ["-C", world, "call", "worker", "--wait", "10s", "--alias", "@notes", "prompt"],
+        { cwd: world, env },
       );
-    assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");
-    const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
-    assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
-    const tell = await runPackagedCli(["-C", world, "ask", finisherId!, "--wait", "20s", "continue"], {
-      cwd: world, env,
-    });
-    assert.equal(tell.code, 0, tell.stderr);
-    assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
-    assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
-    assert.equal(tell.stderr.match(/tell +"continue"/gu)?.length, 1, "the admission row appears once");
-    assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
-    assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
+      assert.equal(unfinished.code, 0, unfinished.stderr);
+      assert.equal(unfinished.stdout, "", "an unfinished observing call writes no stdout");
+      const lines = unfinished.stderr.split("\n");
+      assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
+      assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
+      assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
+      assert.equal(
+        unfinished.stderr.match(/● running — waited /gu)?.length,
+        1,
+        "one input-bound conclusion states the observed life",
+      );
+      const attempts = [...unfinished.stderr.matchAll(/attempt (\d+)/gu)].map((match) => Number(match[1]!));
+      assert.doesNotMatch(unfinished.stderr, /retry note/u, "thought narration stays out of default live progress");
+      assert.ok(attempts.length >= 1, `a settled message streams while the call waits:\n${unfinished.stderr}`);
+      assert.equal(new Set(attempts).size, attempts.length, "no settled message streams twice");
+      assert.deepEqual(
+        attempts,
+        [...attempts].sort((left, right) => left - right),
+        "messages stream after their predecessors",
+      );
 
-    const silent = await runPackagedCli(["-C", world, "call", "silent", "--wait", "20s", "prompt"], {
-      cwd: world,
-      env,
-    });
-    assert.equal(silent.code, 0, silent.stderr);
-    assert.equal(silent.stdout, "", "a valid empty answer writes zero stdout bytes");
-    assert.match(silent.stderr, /✓ answered — \d+s/u, "the conclusion distinguishes an empty answer from silence");
-  } finally {
-    await removeTempDirectory(root);
-  }
-});
+      const single = await runPackagedCli(["-C", world, "wait", "@notes", "--timeout", "1s"], { cwd: world, env });
+      assert.equal(single.code, 0, single.stderr);
+      assert.notEqual(single.stdout, "", "an unfinished single wait writes its status snapshot to stdout");
+      assert.equal(single.stderr, "", "snapshot-only wait writes no live progress to stderr");
+      assert.match(single.stdout, /aku\/(?:worker|finisher)\/[0-9a-f]{8}/u, "the snapshot names the selected Akuma");
+      assert.doesNotMatch(single.stdout, /retry note/u, "single waits omit thought narration");
+      await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
+
+      let detachedStarted = false;
+      try {
+        const detached = await runPackagedCli(["-C", world, "call", "worker", "--alias", "@detached", "prompt"], {
+          cwd: world,
+          env,
+        });
+        assert.equal(detached.code, 0, detached.stderr);
+        detachedStarted = true;
+        const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--timeout", "1s"], {
+          cwd: world,
+          env,
+        });
+        assert.equal(afterExit.code, 0, afterExit.stderr);
+        assert.notEqual(afterExit.stdout, "", "detached wait returns its status snapshot");
+        assert.equal(afterExit.stderr, "", "detached snapshot wait writes no live progress");
+        assert.match(afterExit.stdout, /aku\/worker\/[0-9a-f]{8}/u, "detached snapshot names the Akuma");
+      } finally {
+        if (detachedStarted) await killAndAwaitPluralTarget(await World.at(world), "@detached");
+      }
+
+      const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {
+        cwd: world,
+        env,
+      });
+      assert.equal(answered.code, 0, answered.stderr);
+      assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
+      assert.match(answered.stderr, /✓ answered — \d+s/u);
+      // The final narration may be observed while its Turn is still open. Closing must account for
+      // that in-flight row with `?`, even when the later Heart projection folds it into the answer.
+      const answerNarration = answered.stderr.split("\n").filter((line) => line.includes("the answer"));
+      assert.ok(answerNarration.length <= 1, `the stream never repeats answer narration:\n${answered.stderr}`);
+      for (const row of answerNarration)
+        assert.match(
+          row,
+          /^(?:\d{2}:\d{2}| {5}) \? say +“the answer”$/u,
+          "only unresolved narration may contain answer text",
+        );
+      assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");
+      const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
+      assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
+      const tell = await runPackagedCli(["-C", world, "ask", finisherId!, "--wait", "20s", "continue"], {
+        cwd: world,
+        env,
+      });
+      assert.equal(tell.code, 0, tell.stderr);
+      assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
+      assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
+      assert.equal(tell.stderr.match(/tell +"continue"/gu)?.length, 1, "the admission row appears once");
+      assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
+      assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
+
+      const silent = await runPackagedCli(["-C", world, "call", "silent", "--wait", "20s", "prompt"], {
+        cwd: world,
+        env,
+      });
+      assert.equal(silent.code, 0, silent.stderr);
+      assert.equal(silent.stdout, "", "a valid empty answer writes zero stdout bytes");
+      assert.match(silent.stderr, /✓ answered — \d+s/u, "the conclusion distinguishes an empty answer from silence");
+    } finally {
+      await removeTempDirectory(root);
+    }
+  },
+);
 
 test("packaged observing call bounds nine eligible tools across polling callbacks", { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--wait", "20s", "prompt"], { cwd: world, env });
+    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--wait", "20s", "prompt"], {
+      cwd: world,
+      env,
+    });
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.stdout, "", "an empty answer leaves stdout empty");
     const tools = [...result.stderr.matchAll(/\$ tool-(\d+)/gu)].map((match) => Number(match[1]!));
     // The terminal plan note advances the open frontier; its preceding nine completed tools are
     // eligible during the following polling turn, while the current frontier itself is not rendered.
-    assert.deepEqual(tools, [1, 2, 3, 8, 9], `one command keeps only its opening and final tools:\n${result.stderr}`);
-    assert.equal(result.stderr.match(/⋮ 4 omitted/gu)?.length, 1, result.stderr);
-    assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("⋮ 4 omitted"));
-    assert.ok(result.stderr.indexOf("⋮ 4 omitted") < result.stderr.indexOf("$ tool-8"));
+    assert.deepEqual(tools, [1, 2, 3], `one command prints the first three settled tools:\n${result.stderr}`);
+    assert.equal(result.stderr.match(/⋮ 6 omitted/gu)?.length, 1, result.stderr);
+    assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("⋮ 6 omitted"));
     assert.match(result.stderr, /✓ answered — \d+s/u, "the final conclusion remains on stderr");
   } finally {
     await removeTempDirectory(root);
   }
 });
 
-test("packaged plural waits attribute activity and close every target", { timeout: 120_000 }, async (t) => {
+test("packaged plural waits return each target's status snapshot", { timeout: 120_000 }, async (t) => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   const worldRoot = await World.at(world);
@@ -379,39 +335,17 @@ test("packaged plural waits attribute activity and close every target", { timeou
     cleanupAliases.push("@slow");
     assert.equal(slow.code, 0, slow.stderr);
 
-    // `--any` streams rounds until the slow target answers, then closes every target.
+    // --any returns snapshots when a selected target completes.
     const any = await runPackagedCli(["-C", world, "wait", "@notes", "@slow", "--any", "--timeout", "6s"], {
       cwd: world,
       env,
     });
     assert.equal(any.code, 0, any.stderr);
-    assert.equal(any.stdout, "", "an --any plural wait writes no stdout");
-    const [anyNotesTag, anySlowTag] = assertAggregateHead(any.stderr, ["@notes", "@slow"]);
-    assert.doesNotMatch(
-      any.stderr,
-      /aku\/(?:worker|slowcoach)\/[0-9a-f]{8} \(@/u,
-      `no per-target identity frame follows the aggregate head:\n${any.stderr}`,
-    );
-    assert.doesNotMatch(any.stderr, /retry note/u, "--any omits thought narration");
-    assert.match(any.stderr, new RegExp(`${anySlowTag} +✓ answered — `, "mu"), "--any scored the answered target");
-    assert.match(
-      any.stderr,
-      new RegExp(`${anyNotesTag} +● running — waited \\d+s`, "mu"),
-      "--any scored the running target",
-    );
-    const anyLines = any.stderr.split("\n");
-    const anyScore =
-      anyLines.find((line) => new RegExp(`${anyNotesTag} +● running — waited `, "u").test(line)) ??
-      assert.fail(`--any has its running conclusion:\n${any.stderr}`);
-    assertAttributedInputAndLiveSays(any.stderr, anyNotesTag, anyScore, "--any");
-    const anyAttempts = attributedAttemptNumbers(any.stderr, anySlowTag);
-    assert.ok(anyAttempts.length >= 1, `--any streamed messages for its source:\n${any.stderr}`);
-    assert.equal(new Set(anyAttempts).size, anyAttempts.length, "no settled message streams twice");
-    assert.deepEqual(
-      anyAttempts,
-      [...anyAttempts].sort((left, right) => left - right),
-      "messages stream in order",
-    );
+    assert.notEqual(any.stdout, "", "an --any plural wait writes status snapshots to stdout");
+    assert.equal(any.stderr, "", "an --any snapshot wait writes no live progress");
+    assert.match(any.stdout, /aku\/worker\/[0-9a-f]{8}/u, "--any includes the worker snapshot");
+    assert.match(any.stdout, /aku\/slowcoach\/[0-9a-f]{8}/u, "--any includes the slowcoach snapshot");
+    assert.doesNotMatch(any.stdout, /retry note/u, "--any omits thought narration");
 
     // `--all` outlives the running target: the already settled and the running one both close.
     const all = await runPackagedCli(["-C", world, "wait", "@notes", "@done", "--all", "--timeout", "2s"], {
@@ -419,30 +353,11 @@ test("packaged plural waits attribute activity and close every target", { timeou
       env,
     });
     assert.equal(all.code, 0, all.stderr);
-    assert.equal(all.stdout, "", "an --all plural wait writes no stdout");
-    const [allNotesTag, allDoneTag] = assertAggregateHead(all.stderr, ["@notes", "@done"]);
-    assert.doesNotMatch(
-      all.stderr,
-      /aku\/(?:worker|finisher)\/[0-9a-f]{8} \(@/u,
-      `no per-target identity frame follows the aggregate head:\n${all.stderr}`,
-    );
-    assert.doesNotMatch(all.stderr, /retry note/u, "--all omits thought narration");
-    assert.match(
-      all.stderr,
-      new RegExp(`${allDoneTag} +✓ answered$`, "mu"),
-      "--all scored the already settled target without inventing a duration",
-    );
-    assert.match(
-      all.stderr,
-      new RegExp(`${allNotesTag} +● running — waited 2s`, "mu"),
-      "--all scored the running target",
-    );
-    const allLines = all.stderr.split("\n");
-    const allScore =
-      allLines.find((line) => new RegExp(`${allNotesTag} +● running — waited `, "u").test(line)) ??
-      assert.fail(`--all has its running conclusion:\n${all.stderr}`);
-    assertAttributedInputAndLiveSays(all.stderr, allNotesTag, allScore, "--all");
-    assert.equal(all.stderr.match(/✓ answered/gu)?.length, 1, "every target closes exactly once");
+    assert.notEqual(all.stdout, "", "an --all plural wait writes status snapshots to stdout");
+    assert.equal(all.stderr, "", "an --all snapshot wait writes no live progress");
+    assert.match(all.stdout, /aku\/worker\/[0-9a-f]{8}/u, "--all includes the worker snapshot");
+    assert.match(all.stdout, /aku\/finisher\/[0-9a-f]{8}/u, "--all includes the finisher snapshot");
+    assert.doesNotMatch(all.stdout, /retry note/u, "--all omits thought narration");
   } finally {
     let cleanupFailure: unknown;
     for (const alias of cleanupAliases) {
@@ -457,147 +372,6 @@ test("packaged plural waits attribute activity and close every target", { timeou
     if (cleanupFailure !== undefined) throw cleanupFailure;
   }
 });
-
-/**
- * One real cancellation witness: a waiter interrupted while its target is genuinely live must close
- * its frame with the unresolved live row and exit on the truthful owner rejection, fabricating no
- * answer and no conclusion. The `holder` provider opens one tool and never completes it, so that row
- * stays active (live) forever while repeated said/retry updates keep the waiter observing. The active
- * tool never streams during observation, so its unresolved `? run $ hold` row can only appear through
- * the close flush.
- */
-test(`packaged wait interrupted mid-observation closes unresolved and fabricates nothing (${process.platform === "win32" ? "IPC signal event" : "native SIGINT"})`, { timeout: 120_000 }, async () => {
-  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
-  const { root, world, env } = observingWorld();
-  try {
-    const born = await runPackagedCli(["-C", world, "call", "holder", "--alias", "@held", "prompt"], { cwd: world, env });
-    assert.equal(born.code, 0, born.stderr);
-    const interrupted = await runPackagedCliInterrupted(
-      ["-C", world, "wait", "@held", "--timeout", "60s"],
-      { cwd: world, env },
-      (stderr) => /attempt \d+/u.test(stderr),
-      "SIGINT",
-    );
-    assert.equal(
-      interrupted.signalCode,
-      null,
-      `the waiter handled the signal rather than dying to it:\n${interrupted.stderr}`,
-    );
-    assert.equal(interrupted.code, 3, `an interrupted wait reports the owner rejection:\n${interrupted.stderr}`);
-    assert.equal(interrupted.stdout, "", "an interrupted wait writes no fabricated answer");
-    assert.match(interrupted.stderr, /\? +run +\$ +hold/u, `the retained live tool closes unresolved:\n${interrupted.stderr}`);
-    assert.match(
-      interrupted.stderr,
-      /× wait failed\n  reason  CLI cancellation requested/u,
-      "the close reports the real cancellation cause",
-    );
-    assert.doesNotMatch(interrupted.stderr, /— waited |✓ answered/u, "a cancelled wait prints no conclusion");
-  } finally {
-    try {
-      await killAndAwaitPluralTarget(await World.at(world), "@held");
-    } finally {
-      await removeTempDirectory(root);
-    }
-  }
-});
-
-/**
- * Run one packaged CLI observation and interrupt it as soon as a real settled row proves the waiter
- * is observing. The bounded readiness await refuses a command that never observes; it never waits for
- * a row that only the close flush can produce.
- */
-function runPackagedCliInterrupted(
-  args: readonly string[],
-  input: Readonly<{ cwd: string; env?: NodeJS.ProcessEnv; stdin?: string }>,
-  ready: (stderr: string) => boolean,
-  interrupt: NodeJS.Signals,
-): Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null; stdout: string; stderr: string }>> {
-  // On Windows child.kill("SIGINT") terminates unconditionally; it never delivers a console
-  // interrupt to Node's listener. Relay the event over IPC so the real packaged cancellation
-  // handler is exercised there, retaining native OS signal delivery on POSIX.
-  const relayInterrupt = process.platform === "win32";
-  const signalRelay = `data:text/javascript,${encodeURIComponent(
-    [
-      'process.once("message", (signal) => { process.emit(signal); process.disconnect(); });',
-      "process.channel.unref();",
-    ].join("\n"),
-  )}`;
-  const child = spawn(
-    process.execPath,
-    [
-      "--disable-warning=ExperimentalWarning",
-      ...(relayInterrupt ? ["--import", signalRelay] : []),
-      packagedCli,
-      ...args,
-    ],
-    {
-      cwd: input.cwd,
-      env: input.env ?? process.env,
-      stdio: relayInterrupt ? ["pipe", "pipe", "pipe", "ipc"] : ["pipe", "pipe", "pipe"],
-    },
-  );
-  assert.ok(child.stdin && child.stdout && child.stderr, "the observing CLI has three piped streams");
-  let stdout = "";
-  let stderr = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
-    stdout += String(chunk);
-  });
-  child.stderr.on("data", (chunk: Buffer | string) => {
-    stderr += String(chunk);
-  });
-  let exitState: Readonly<{ code: number; signalCode: NodeJS.Signals | null }> | undefined;
-  let spawnFailure: unknown;
-  const closed = new Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null }>>((resolve, reject) => {
-    child.on("error", (error) => {
-      spawnFailure = error;
-      reject(error);
-    });
-    child.on("close", (code, signal) => {
-      exitState = { code: code ?? 1, signalCode: signal };
-      resolve(exitState);
-    });
-  });
-  void closed.catch(() => undefined);
-  child.stdin.end(input.stdin ?? "");
-  const closeWithin = async (
-    timeoutMs: number,
-  ): Promise<Readonly<{ code: number; signalCode: NodeJS.Signals | null }>> => {
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<true>((resolve) => {
-      timer = setTimeout(() => resolve(true), timeoutMs);
-    });
-    const outcome = await Promise.race([closed.then((state) => ({ state })), timedOut]);
-    if (outcome === true) {
-      child.kill("SIGKILL");
-      return await closed;
-    }
-    clearTimeout(timer);
-    return outcome.state;
-  };
-  const readinessDeadline = Date.now() + 30_000;
-  return (async () => {
-    while (!ready(stderr)) {
-      if (spawnFailure !== undefined) throw spawnFailure;
-      if (exitState !== undefined)
-        throw new Error(
-          `the observing waiter closed (code ${exitState.code}, signal ${exitState.signalCode}) before streaming a settled row; stderr:\n${stderr}`,
-        );
-      if (Date.now() > readinessDeadline) {
-        child.kill("SIGKILL");
-        await closeWithin(30_000);
-        throw new Error(`the observing waiter never streamed a settled row; stderr:\n${stderr}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    if (relayInterrupt) {
-      await new Promise<void>((resolve, reject) => {
-        child.send(interrupt, (error) => (error === null ? resolve() : reject(error)));
-      });
-    } else child.kill(interrupt);
-    const { code, signalCode } = await closeWithin(30_000);
-    return { code, signalCode, stdout, stderr };
-  })();
-}
 
 function runPackagedCli(
   args: readonly string[],
@@ -627,6 +401,11 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const root = (await World.resolve(mkdtempSync(join(tmpdir(), "keiyaku-packaged-akuma-")))).candidate!;
   const world = await World.prove(root);
+  mkdirSync(join(root, ".keiyaku"), { recursive: true });
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
+  );
   const home = join(root, ".home");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
@@ -728,7 +507,9 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
 
     const wait = await runPackagedCli(["-C", root, "wait", child, "--timeout", "0ms"], { cwd: root, env: localEnv });
     assert.equal(wait.code, 0, wait.stderr);
-    assert.equal(wait.stdout, "finished");
+    assert.notEqual(wait.stdout, "", "snapshot wait returns the selected status");
+    assert.equal(wait.stderr, "", "snapshot wait writes no live progress");
+    assert.match(wait.stdout, /aku\/worker\/[0-9a-f]{8}/u, "snapshot wait names the child");
 
     const history = await runPackagedCli(["-C", root, "history", child, "--last", "--json"], {
       cwd: root,

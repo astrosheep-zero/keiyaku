@@ -32,7 +32,7 @@ type ServeClaim = (
       signal: AbortSignal;
       admissionOpen(): boolean;
     }>,
-) => Promise<boolean>;
+) => Promise<void>;
 
 const POLL_MS = 100;
 
@@ -42,7 +42,6 @@ export class BodyRequestPump {
   readonly failure: Promise<never>;
   private readonly closeSignal = new AbortController();
   private readonly executionSignal = new AbortController();
-  private readonly handled = new Set<string>();
   private readonly running: Promise<void>;
   private readonly cancelBody: () => void;
   private admissionClosed = false;
@@ -85,7 +84,6 @@ export class BodyRequestPump {
       for (const name of await requestFiles(this.directory)) {
         if (this.closeSignal.signal.aborted) return;
         const transportId = name.slice(0, -".request.json".length);
-        if (this.handled.has(transportId)) continue;
         const path = join(this.directory, name);
         let serialized: string;
         try {
@@ -97,11 +95,10 @@ export class BodyRequestPump {
         const claim = decodeEnvelope(serialized, transportId);
         if (claim === null) {
           await rm(path, { force: true });
-          this.handled.add(transportId);
           continue;
         }
         if (!this.admissionClosed) {
-          const served = await this.serveClaim({
+          await this.serveClaim({
             directory: this.directory,
             transportId,
             claim,
@@ -109,9 +106,8 @@ export class BodyRequestPump {
             signal: this.executionSignal.signal,
             admissionOpen: () => !this.admissionClosed,
           });
-          if (!served) await rm(path, { force: true });
         }
-        this.handled.add(transportId);
+        await rm(path, { force: true });
       }
       try {
         await abortableDelay(POLL_MS, this.closeSignal.signal);

@@ -32,7 +32,6 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
-import { type WaitObservedAkuma, type WaitSelectedAkuma } from "../src/library/akumas.js";
 import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectTaskBoardObservation } from "../src/task/board.js";
@@ -209,6 +208,23 @@ test("facade ask refuses path selection and invalid timeout before addressing", 
     /Akumas\.ask input has unknown field: extra/u,
   );
 });
+
+test("facade wait refuses the retired live observer input before addressing", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-wait-refusal-");
+  await assert.rejects(
+    () =>
+      Akumas.of(root).wait({
+        akuma: ["aku/worker/00000001"],
+        observe: { observe: () => undefined },
+      } as never),
+    /Akumas\.wait input has unknown field: observe/u,
+  );
+  await assert.rejects(
+    () => Akumas.of(root).wait({ akuma: ["aku/worker/00000001"], observed: () => undefined } as never),
+    /Akumas\.wait input has unknown field: observed/u,
+  );
+});
+
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-selection-");
   const worker = await answered(root, "worker", "00000002");
@@ -235,42 +251,6 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     killed.results.map((member) => member.evidence),
     ["already-stopped", "already-stopped"],
   );
-});
-
-test("a wait's live observation carries each observed Akuma's alias and Dispatch association", async (t) => {
-  const repository = fixtureRepository(t);
-  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const world = await World.at(repository.path);
-  const worker = await answered(world, "worker", "dddddddd");
-  const owner = contractId("kei/observed");
-  assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(world), akuId: worker.id, contractId: owner })).kind,
-    "dispatched",
-  );
-  await moveAlias({ world, alias: parseAkumaAlias("@observed"), akuId: worker.id });
-  const rounds: (readonly WaitObservedAkuma[])[] = [];
-  const selected: (readonly WaitSelectedAkuma[])[] = [];
-  const result = await Akumas.of(world).wait({
-    akuma: [worker.id],
-    repo: await Repo.at({ path: world }),
-    completion: "all",
-    timeoutMs: 0,
-    observe: {
-      selected: (members) => selected.push(members),
-      observe: (observed) => rounds.push(observed),
-    },
-  });
-  assert.equal(selected.length, 1);
-  assert.deepEqual(selected[0], [
-    { id: worker.id, alias: "@observed", contract: { kind: "associated", contractId: owner } },
-  ]);
-  assert.equal(rounds.length, 1);
-  const [single] = rounds[0]!;
-  assert.equal(single?.status.id, worker.id);
-  assert.ok(single?.rows !== undefined && single.rows.length > 0, "the live callback receives its complete activity companion");
-  assert.equal(single?.alias, "@observed");
-  assert.deepEqual(single?.contract, { kind: "associated", contractId: owner });
-  assert.equal("rows" in result.observations[0]!, false, "the final public wait result discards the live companion");
 });
 
 const WAIT_AT = "2026-08-11T00:00:00.000Z";
@@ -319,29 +299,20 @@ function waitStatementCounter() {
   };
 }
 
-test("a silent plural wait completes from the selected set's real life", async (t) => {
+test("a plural wait completes from the selected set's real life", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-life-");
   const finished = await answered(root, "worker", "00000011");
   const running = await retainedRunningWorker(root, "00000012", WAIT_AT);
   try {
     const ids = [running.id, finished.id];
-    // Compare the returned evidence with the existing full-round path.
-    const watched = await executeWaitAkuma({
-      path: root,
-      ids,
-      completion: "any",
-      timeoutMs: 0,
-      observe: () => undefined,
-    });
     const any = await executeWaitAkuma({ path: root, ids, completion: "any", timeoutMs: 5_000 });
     assert.equal(any.reason, "completed");
     assert.deepEqual(
       any.observations.map((status) => status.id),
       ids,
-      "a silent wait keeps the caller's order",
+      "a snapshot wait keeps the caller's order",
     );
     assert.deepEqual(any.unobserved, []);
-    assert.deepEqual(any, watched, "the silent wait returns exactly the live round's evidence");
     assert.equal(defaultWaitComplete(any.observations[0]!), false);
     assert.equal(defaultWaitComplete(any.observations[1]!), true);
 
@@ -392,7 +363,7 @@ test("a silent plural wait completes from the selected set's real life", async (
   }
 });
 
-test("a silent plural wait skips running projection without lengthening its cadence", async (t) => {
+test("a plural wait polls lifecycle while skipping running projection", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-probe-");
   const first = await retainedRunningWorker(root, "00000021", WAIT_AT, 40);
   const second = await retainedRunningWorker(root, "00000022", WAIT_AT, 40);
@@ -403,59 +374,43 @@ test("a silent plural wait skips running projection without lengthening its cade
     const startedAt = performance.now();
     const silent = await counter.measure(async () => await executeWaitAkuma({ ...window }));
     const silentElapsed = performance.now() - startedAt;
-    const selectedOnly = await counter.measure(
-      async () => await executeWaitAkuma({ ...window, onSelected: () => undefined }),
-    );
     const baseline = await counter.measure(async () => await executeWaitAkuma({ ...window, predicate: defaultWaitComplete }));
-    let liveRounds = 0;
-    const watched = await counter.measure(async () => await executeWaitAkuma({ ...window, observe: () => { liveRounds += 1; } }));
     const judged = await counter.measure(async () => await executeWaitAkuma({ ...window, predicate: () => true }));
     const oneRound = ids.length;
 
     assert.equal(silent.value.reason, "deadline");
     assert.equal(silent.projections, oneRound, "only the final deadline round projects while both peers run");
     assert.ok(
-      silent.lifeReads >= oneRound * 3,
-      `the probe kept polling every ordinary round (${silent.lifeReads} lifecycle reads)`,
+      silent.lifeReads >= oneRound * 2,
+      `the probe kept polling because neither peer was complete (${silent.lifeReads} lifecycle reads)`,
     );
-    assert.ok(silentElapsed >= 200, `the silent wait still polled to its deadline (${silentElapsed}ms)`);
+    assert.ok(silentElapsed >= 200, `the polling wait still ran to its deadline (${silentElapsed}ms)`);
 
-    assert.equal(selectedOnly.projections, oneRound, "an onSelected callback alone is not a live row viewer");
-    assert.ok(
-      selectedOnly.lifeReads >= oneRound * 3,
-      `onSelected alone still probes every round (${selectedOnly.lifeReads})`,
-    );
-
-    assert.ok(liveRounds >= 2, "a live viewer still observes every round");
-    assert.equal(watched.lifeReads, liveRounds * oneRound, "a live viewer reads life once per member each round");
-    assert.equal(watched.projections, watched.lifeReads, "live rounds still read current frontier evidence before reuse");
     assert.equal(baseline.lifeReads, baseline.projections, "the full-round baseline never uses the probe");
     assert.ok(
       silent.projections < baseline.projections,
-      `the silent wait projected ${silent.projections} to the full-round baseline's ${baseline.projections}`,
+      `the polling wait projected ${silent.projections} to the full-round baseline's ${baseline.projections}`,
     );
 
     assert.equal(judged.lifeReads, judged.projections, "a custom judge only reads life within full rounds");
     assert.equal(judged.value.reason, "completed");
     assert.equal(judged.projections, oneRound);
 
-    assert.deepEqual(watched.value.observations.map((status) => status.id), ids, "caller order survives the baseline");
     assert.deepEqual(
       silent.value,
       baseline.value,
-      "the silent wait returns exactly the full-round baseline's final statuses and budget outcome",
+      "the polling wait returns exactly the full-round baseline's final statuses and budget outcome",
     );
-    assert.deepEqual(silent.value, watched.value, "live projection reuse preserves the same final evidence");
     for (const status of silent.value.observations) {
       assert.ok(status.timeline.entries.some((entry) => entry.kind === "gap"), "retained detail exceeds the shared budget");
       assert.ok(status.timeline.entries.some((entry) => entry.kind === "row" && entry.row.kind === "call"), "each opening input remains pinned");
     }
-    t.diagnostic(`250ms two-worker wait: silent ${silent.projections} projections / ${silent.statements} SQL statements / ${silent.lifeReads} member rounds; baseline ${baseline.projections} projections / ${baseline.statements} SQL statements / ${baseline.lifeReads} member rounds; live ${watched.projections} projections / ${watched.statements} SQL statements / ${liveRounds} rounds; elapsed ${Math.round(silentElapsed)}ms`);
+    t.diagnostic(`250ms two-worker wait: polling ${silent.projections} projections / ${silent.statements} SQL statements / ${silent.lifeReads} member rounds; baseline ${baseline.projections} projections / ${baseline.statements} SQL statements / ${baseline.lifeReads} member rounds; elapsed ${Math.round(silentElapsed)}ms`);
     // Independent wall-clock windows can finish different round counts under load.
     // Compare SQL per member round; cadence and projection savings are checked above.
     assert.ok(
       silent.statements / silent.lifeReads < baseline.statements / baseline.lifeReads,
-      "silent rounds reduce SQL work per member round against the full-round baseline",
+      "polling rounds reduce SQL work per member round against the full-round baseline",
     );
     assert.deepEqual(silent.value.unobserved, []);
   } finally {
@@ -632,7 +587,7 @@ test("a missing Soul remains a hard failure behind a running plural peer", async
     await running.end();
   }
 });
-test("live wait reselects an unchanged later Heart when an earlier member releases the shared budget", async (t) => {
+test("wait reselects an unchanged later Heart when an earlier member releases the shared budget", async (t) => {
   const root = fixtureRoot(t, "keiyaku-live-wait-budget-");
   const members: (Awaited<ReturnType<typeof bornDirectAkuma>> & { turn: Awaited<ReturnType<typeof beginTurn>> })[] = [];
   const at = "2026-10-01T00:00:00.000Z";
@@ -669,28 +624,31 @@ test("live wait reselects an unchanged later Heart when an earlier member releas
   reader.clear();
   const controller = new AbortController();
   const reason = new Error("budget change witnessed");
-  let rounds = 0;
+  let judgements = 0;
   let closing: Promise<unknown> | undefined;
   const selectedCounts: number[] = [];
+  // A custom judge forces full rounds without a live viewer; each round judges every observed member.
   await assert.rejects(
     executeWaitAkuma({
       path: root,
       ids: members.map((member) => member.id),
       completion: "all",
       signal: controller.signal,
-      observe(observed) {
-        rounds += 1;
-        const view = observed.find((view) => view.status.id === later.id)!;
-        selectedCounts.push(
-          view.status.timeline.entries.filter((entry) => entry.kind === "row" && entry.row.kind === "thought").length,
-        );
-        if (rounds === 1)
+      predicate(status) {
+        if (status.id === later.id) {
+          selectedCounts.push(
+            status.timeline.entries.filter((entry) => entry.kind === "row" && entry.row.kind === "thought").length,
+          );
+        }
+        judgements += 1;
+        if (judgements === members.length)
           closing = endTurn(members[0]!.paths, {
             turnSequence: members[0]!.turn.sequence,
             outcome: { kind: "failed", diagnostic: "done" },
             completedAt: at,
           });
-        if (rounds === 3) controller.abort(reason);
+        if (judgements === members.length * 3) controller.abort(reason);
+        return false;
       },
     }),
     (error) => error === reason,
@@ -699,7 +657,7 @@ test("live wait reselects an unchanged later Heart when an earlier member releas
   assert.deepEqual(selectedCounts, [0, 6, 6]);
 });
 
-test("one and ten selected identities use one Dispatch batch per live and final wait stage", async (t) => {
+test("one and ten selected identities use one Dispatch batch at final wait attachment", async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
@@ -725,31 +683,21 @@ test("one and ten selected identities use one Dispatch batch per live and final 
           repo,
           completion: "all",
           timeoutMs: 0,
-          observe: {
-            selected(members) {
-              assert.deepEqual(
-                members.map((member) => member.id),
-                selected,
-              );
-              assert.ok(members.every((member) => member.contract.kind === "none"));
-              assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\n");
-            },
-          },
         });
         assert.deepEqual(
           result.observations.map((observation) => observation.status.id),
           selected,
         );
         assert.ok(result.observations.every((observation) => observation.contract.kind === "none"));
-        assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\nrev-parse\ncat-file\n");
-        t.diagnostic(`${selected.length} IDs: live attachment 2 Git spawns; final attachment 2 Git spawns`);
+        assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\n");
+        t.diagnostic(`${selected.length} IDs: one final attachment batch, 2 Git spawns`);
       }
     },
   );
 });
 
 test(
-  "wait closes live Dispatch reads before waiting and observes a later publication at final attachment",
+  "wait observes a Dispatch published during polling at final attachment",
   { timeout: 15_000 },
   async (t) => {
     const repository = fixtureRepository(t);
@@ -805,44 +753,46 @@ test(
         ].join("\n"),
         { KEIYAKU_CHANNEL_LOG: log },
         async (gitPath) => {
+          const originalTry = HeldAkumaLeash.try;
+          let waiting = false;
+          let hooked = false;
+          let logWhilePolling: string | undefined;
           let publication: ReturnType<typeof publishDispatch> | undefined;
-          const selected: (readonly WaitSelectedAkuma[])[] = [];
-          const result = await Akumas.of(world).wait({
-            akuma: [allocated.id, peer.id, allocated.id],
-            repo: await Repo.at({ path: world, gitPath }),
-            completion: "all",
-            signal: t.signal,
-            observe: {
-              selected(members) {
-                selected.push(members);
-                assert.equal(
-                  readFileSync(log, "utf8"),
-                  "opened\nclosed\n",
-                  "the one live batch has retired before the viewer can wait",
-                );
-                publication = publishDispatch({ repository: git, akuId: allocated.id, contractId: owner });
-                void publication.finally(() => finish.resolve());
-              },
-            },
+          // The first lifecycle probe after the wait starts is the deterministic seam: polling has
+          // begun, no Dispatch channel is open yet, and a later publication must still be attached.
+          t.mock.method(HeldAkumaLeash, "try", async (paths: Parameters<typeof originalTry>[0]) => {
+            if (waiting && !hooked && paths.heart === allocated.paths.heart) {
+              hooked = true;
+              logWhilePolling = readFileSync(log, "utf8");
+              publication = publishDispatch({ repository: git, akuId: allocated.id, contractId: owner });
+              void publication.finally(() => finish.resolve());
+            }
+            return await originalTry(paths);
           });
-          assert.equal((await publication)?.kind, "dispatched");
-          assert.deepEqual(selected, [
-            [
-              { id: allocated.id, contract: { kind: "none" } },
-              { id: peer.id, contract: { kind: "none" } },
-            ],
-          ]);
-          assert.equal(result.reason, "completed");
-          assert.deepEqual(
-            result.observations.map((observation) => [observation.status.id, observation.contract]),
-            [
-              [allocated.id, { kind: "associated", contractId: owner }],
-              [peer.id, { kind: "none" }],
-            ],
-          );
-          const channels = readFileSync(log, "utf8").trim().split("\n");
-          assert.ok(channels.length >= 4, "final attachment opens a fresh channel");
-          assert.deepEqual(channels, Array.from({ length: channels.length / 2 }, () => ["opened", "closed"]).flat());
+          try {
+            waiting = true;
+            const result = await Akumas.of(world).wait({
+              akuma: [allocated.id, peer.id, allocated.id],
+              repo: await Repo.at({ path: world, gitPath }),
+              completion: "all",
+              signal: t.signal,
+            });
+            assert.equal(logWhilePolling, "", "the polling wait opens no Dispatch channel");
+            assert.equal((await publication)?.kind, "dispatched");
+            assert.equal(result.reason, "completed");
+            assert.deepEqual(
+              result.observations.map((observation) => [observation.status.id, observation.contract]),
+              [
+                [allocated.id, { kind: "associated", contractId: owner }],
+                [peer.id, { kind: "none" }],
+              ],
+            );
+            const channels = readFileSync(log, "utf8").trim().split("\n");
+            assert.ok(channels.length >= 2, "final attachment opens a fresh channel");
+            assert.deepEqual(channels, Array.from({ length: channels.length / 2 }, () => ["opened", "closed"]).flat());
+          } finally {
+            t.mock.restoreAll();
+          }
         },
       );
     } finally {

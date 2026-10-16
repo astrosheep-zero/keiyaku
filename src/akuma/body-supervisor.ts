@@ -1,5 +1,6 @@
 import { abortableDelay } from "./abort.js";
-import { heartExists, readHeart, type HeartSnapshot, type HeldAkumaLeash } from "./heart/index.js";
+import { isDeepStrictEqual } from "node:util";
+import { createBodyHeartReader, type BodyControlSnapshot, type HeldAkumaLeash } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 
 const BODY_CONTROL_OBSERVATION_MS = 100;
@@ -10,15 +11,16 @@ export class BodySupervisor {
   private readonly controller = new AbortController();
   private readonly finished = new AbortController();
   private readonly observer: Promise<void>;
-  private waiter: ((snapshot: HeartSnapshot) => void) | undefined;
-  private observation: HeartSnapshot;
+  private waiter: ((snapshot: BodyControlSnapshot) => void) | undefined;
+  private observation: BodyControlSnapshot;
   private stopping?: "control" | "heart-gone";
 
   private constructor(
     private readonly paths: AkumaPaths,
     private readonly bodySequence: number,
     private readonly leash: HeldAkumaLeash,
-    observation: HeartSnapshot,
+    private readonly reader: ReturnType<typeof createBodyHeartReader>,
+    observation: BodyControlSnapshot,
   ) {
     this.signal = this.controller.signal;
     this.observation = observation;
@@ -26,13 +28,14 @@ export class BodySupervisor {
   }
 
   static async open(paths: AkumaPaths, bodySequence: number, leash: HeldAkumaLeash): Promise<BodySupervisor> {
-    return new BodySupervisor(paths, bodySequence, leash, await readHeart(paths));
+    const reader = createBodyHeartReader(paths);
+    return new BodySupervisor(paths, bodySequence, leash, reader, await reader.read());
   }
 
   get reason(): "control" | "heart-gone" | undefined {
     return this.stopping;
   }
-  current(): HeartSnapshot {
+  current(): BodyControlSnapshot {
     return this.observation;
   }
 
@@ -40,12 +43,17 @@ export class BodySupervisor {
     await this.leash.recordBodyHung(this.paths, { sequence: this.bodySequence, diagnostic, at });
   }
 
-  async refresh(): Promise<HeartSnapshot> {
-    this.publish(await readHeart(this.paths));
+  async refresh(): Promise<BodyControlSnapshot> {
+    const snapshot = await this.reader.read();
+    if (!isDeepStrictEqual(snapshot, this.observation)) {
+      this.observation = snapshot;
+      this.waiter?.(snapshot);
+      this.waiter = undefined;
+    }
     return this.observation;
   }
 
-  next(after: HeartSnapshot): Promise<HeartSnapshot> {
+  next(after: BodyControlSnapshot): Promise<BodyControlSnapshot> {
     if (this.observation !== after) return Promise.resolve(this.observation);
     return new Promise((resolve) => {
       this.waiter = resolve;
@@ -64,20 +72,18 @@ export class BodySupervisor {
 
   async close(): Promise<void> {
     this.finished.abort();
-    await this.observer;
-    this.waiter = undefined;
-  }
-
-  private publish(snapshot: HeartSnapshot): void {
-    this.observation = snapshot;
-    this.waiter?.(snapshot);
-    this.waiter = undefined;
+    try {
+      await this.observer;
+    } finally {
+      this.reader.clear();
+      this.waiter = undefined;
+    }
   }
 
   private async observe(): Promise<void> {
     for (;;) {
       const snapshot = this.observation;
-      if (!(await heartExists(this.paths))) return this.cancel("heart-gone");
+      if (snapshot.soul === null) return this.cancel("heart-gone");
       if (snapshot.stop?.bodySequence === this.bodySequence || snapshot.pause?.bodySequence === this.bodySequence) {
         return this.cancel("control");
       }
@@ -86,12 +92,7 @@ export class BodySupervisor {
       } catch {
         return;
       }
-      try {
-        await this.refresh();
-      } catch (error) {
-        if (await heartExists(this.paths)) throw error;
-        return this.cancel("heart-gone");
-      }
+      await this.refresh();
     }
   }
 }

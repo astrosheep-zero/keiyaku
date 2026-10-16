@@ -89,8 +89,11 @@ servicing its old bytes. Confirmed World reset includes this recognized transpor
 custody before removing Heart, refusing nonregular custody and preserving unknown
 bytes under [world.md](world.md).
 
-Receipt projection follows durable
-settlement; a missing caller cannot reverse it. Caller cancellation before
+Consumed transport claims are discarded; durable request identity alone judges
+a repeated claim. Discarding a claim never discards its receipt or Heart fact.
+Receipt projection follows durable settlement and cannot re-enter owner failure
+settlement; a missing caller cannot reverse it. Missing receipt transport and an
+owner failure reporting a missing resource remain distinct outcomes. Caller cancellation before
 request publication remains cancellation. Cancellation after durable
 publication, or losing the ephemeral channel before a receipt, is a
 transport-only unknown outcome carrying the same logical identity for diagnosis

@@ -29,11 +29,60 @@ non-attachment without affecting Keiyaku creation. Stored `paseo` callers retain
 the direct Paseo-ID lookup for compatibility.
 
 Child creation reuses daemon idempotency for the Akuma's canonical World and
-identity, not an identity registry or duplicate worker. Its creation title is the
-bare full AkuId, so an alias move never changes the creation fingerprint.
+identity, not an identity registry or duplicate worker. Its creation title stays
+the bare full AkuId so alias moves never change the creation fingerprint. After
+successful attachment only, the forwarder makes one awaited, bounded title
+attempt on a separately owned local client. It renames matching mirrors to
+`aku/elite/abcd (reviewer)` or, with multiple aliases,
+`aku/elite/abcd (audit, reviewer)`. With no aliases the title is the bare full ID.
+Ordinary Turn-start, Turn-outcome and Body-end refresh hints do no alias reads,
+directory scans, or renames. A failed title attempt logs a warning and closes its
+own client, without failing a successful attachment or closing the cached runtime
+refresh client. No title work is queued or detached.
+
+Aliases come from the complete public `observeKanshi(...).aliases` observation,
+not a bounded roster or decoded storage. The installed package has no narrower
+complete public alias query; bounded `Akumas.list` cannot prove an older mirror's
+bindings absent. Alias read failure retains the prior title rather than treating
+unavailable bindings as empty.
+
+Mirror matching uses the public Paseo snapshot's Keiyaku provider persistence
+metadata and its canonical World plus AkuId, never the title or an opaque session
+ID. Titles are bridge-owned presentation, including previously customized titles.
+A rename neither creates a child nor reattaches, resumes, or unarchives it.
+Directory enumeration completes before renames, so title changes cannot reorder
+the bridge's own in-flight pagination. Existing mirrors, including archived
+entries, can be backfilled without replaying birth or creation. The installed
+Paseo agent filter accepts `includeArchived`, not `includeBackground`; enumeration
+uses the supported filter without an active-only scope.
+
+The flagship must run this one-shot backfill when deploying the title fix:
+
+```sh
+cd /Users/astrosheep/Developer/keiyaku-v4
+node plugins/paseo/forwarder/backfill-titles.mjs /Users/astrosheep/Developer/keiyaku-v4
+```
+
+The script uses the existing local connection setup: `PASEO_HOME` (or Paseo's
+local default), daemon readiness, and the stored local credential. It prints only
+the rename count or an error, never the credential. No daemon restart, plugin
+reload, or agent creation is performed. It owns and closes its connection and
+bounds the operation to 30 seconds. Append one full AkuId to limit the backfill:
+
+```sh
+node plugins/paseo/forwarder/backfill-titles.mjs /Users/astrosheep/Developer/keiyaku-v4 aku/elite/abcd
+```
+
+The operation only lists and renames existing matching agents; it is safe to
+repeat and skips already-correct titles. Partial rename failure may leave some
+titles updated; rerunning converges without duplicate creation. An alias move
+alone emits no title update. Existing or inactive mirrors need an explicit
+backfill, or another successful attachment, to reflect changed aliases. Ordinary
+refresh hints and the provider's timeline refresh do not update titles.
+
 Completed creation replay does not reattach a detached child or revive an
 archived child. Unknown, unsupported, and nested-Akuma callers create no automatic
-mirror. Attachment is best effort, with no polling, backfill, or retry
+mirror. Attachment is best effort, with no polling, creation backfill, or retry
 queue; a missed birth can remain unattached. After
 successful SDK creation, attachment synchronizes matching open mirror sessions
 once: it reads fresh history, publishes normal changes, and reannounces only a

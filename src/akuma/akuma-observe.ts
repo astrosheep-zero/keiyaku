@@ -127,7 +127,6 @@ type StatusObservationInput = Readonly<{
   ordinaryBudget?: number;
   admittedTellId?: string;
 }>;
-type StatusProjection = Readonly<{ ledger: TurnLedger; selected: ReturnType<typeof selectSnapshot> }>;
 
 function snapshotSelection(input: StatusObservationInput) {
   return {
@@ -154,23 +153,58 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
   };
   return {
     clear,
+    tellOutcome: reader.tellOutcome,
+    async complete(signal?: AbortSignal): Promise<boolean> {
+      try {
+        const observed = await bornObservation(paths, expected, () => reader.life(signal));
+        return complete(observed.currentLife, observed.snapshot.hasPendingTell);
+      } catch (error) {
+        clear();
+        throw error;
+      }
+    },
     async read(input: StatusObservationInput, signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
-        return await bornLiveStatus(paths, expected, input, signal, async () => {
-          const facts = await reader.read(input, signal);
-          const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
-          const options = snapshotSelection(input);
-          const selected =
-            memo?.ledger === ledger &&
-            memo.options.aperture === options.aperture &&
-            memo.options.admittedTellId === options.admittedTellId &&
-            memo.options.budget.tail === options.budget.tail &&
-            memo.options.budget.voice === options.budget.voice
-              ? memo.selected
-              : selectSnapshot(ledger, options);
-          memo = { facts, ledger, options, selected };
-          return { ledger, selected };
-        });
+        if (
+          input.ordinaryBudget !== undefined &&
+          (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0)
+        )
+          throw new TypeError("ordinary budget must be a nonnegative safe integer");
+        const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.life(signal));
+        const resumeUnsupported =
+          currentLife === "stranded" &&
+          snapshot.latestSession?.provider === soul.provider.name &&
+          (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
+        const facts = await reader.read(input, signal);
+        const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
+        const options = snapshotSelection(input);
+        const selected =
+          memo?.ledger === ledger &&
+          memo.options.aperture === options.aperture &&
+          memo.options.admittedTellId === options.admittedTellId &&
+          memo.options.budget.tail === options.budget.tail &&
+          memo.options.budget.voice === options.budget.voice
+            ? memo.selected
+            : selectSnapshot(ledger, options);
+        memo = { facts, ledger, options, selected };
+        return {
+          status: {
+            id: soul.id,
+            birth: projectAkumaBirth(soul),
+            life: currentLife,
+            cwd: soul.cwd,
+            // The execution adapter and its one current model are what this Akuma
+            // actually runs; a birth request the Soul still only seeded is not a
+            // claim that a native runtime ever used it.
+            provider: soul.provider.name,
+            ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
+            allowed: soul.allowed,
+            ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
+            timeline: selected.snapshot,
+          },
+          ordinarySelected: selected.ordinaryCount,
+          rows: ledger.rows,
+        };
       } catch (error) {
         clear();
         throw error;
@@ -179,54 +213,19 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
   };
 }
 
-/** Internal live companion for an observation loop; it is not a public result. */
+/** One-shot observations use the same reader and always release it. */
 export async function bornLiveStatus(
   paths: AkumaPaths,
   expected: AkuId,
   input: StatusObservationInput,
   signal?: AbortSignal,
-  readProjection?: () => Promise<StatusProjection>,
 ): Promise<LiveStatusObservation> {
-  if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
-    throw new TypeError("ordinary budget must be a nonnegative safe integer");
-  const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => readLifeSnapshot(paths, signal));
-  const resumeUnsupported =
-    currentLife === "stranded" &&
-    snapshot.latestSession?.provider === soul.provider.name &&
-    (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
-  const { ledger, selected } =
-    readProjection === undefined ? await readStatusProjection(paths, input, signal) : await readProjection();
-  return {
-    status: {
-      id: soul.id,
-      birth: projectAkumaBirth(soul),
-      life: currentLife,
-      cwd: soul.cwd,
-      // The execution adapter and its one current model are what this Akuma
-      // actually runs; a birth request the Soul still only seeded is not a
-      // claim that a native runtime ever used it.
-      provider: soul.provider.name,
-      ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
-      allowed: soul.allowed,
-      ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-      timeline: selected.snapshot,
-    },
-    ordinarySelected: selected.ordinaryCount,
-    rows: ledger.rows,
-  };
-}
-
-async function readStatusProjection(
-  paths: AkumaPaths,
-  input: StatusObservationInput,
-  signal?: AbortSignal,
-): Promise<StatusProjection> {
-  const facts = await readStatusFacts(paths, input, signal);
-  const ledger = projectTurns(facts);
-  return {
-    ledger,
-    selected: selectSnapshot(ledger, snapshotSelection(input)),
-  };
+  const reader = createLiveStatusReader(paths, expected);
+  try {
+    return await reader.read(input, signal);
+  } finally {
+    reader.clear();
+  }
 }
 
 export async function bornStatus(
@@ -266,14 +265,20 @@ export async function readWaitComplete(
   ids: readonly AkuId[],
   completion: "any" | "all",
   signal?: AbortSignal,
+  probe?: (id: AkuId) => Promise<boolean>,
 ): Promise<boolean> {
   let completed = 0;
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
       const paths = pathsForAkuId(worldPath, id);
-      const observed = await bornObservation(paths, id, () => readLifeSnapshot(paths, signal));
-      if (complete(observed.currentLife, observed.snapshot.hasPendingTell)) {
+      const ready =
+        probe === undefined
+          ? await bornObservation(paths, id, () => readLifeSnapshot(paths, signal)).then((observed) =>
+              complete(observed.currentLife, observed.snapshot.hasPendingTell),
+            )
+          : await probe(id);
+      if (ready) {
         if (completion === "any") return true;
         completed += 1;
       }
@@ -296,6 +301,7 @@ export const OBSERVATION_POLL_MS = 100;
 export async function waitForObservation<T>(
   input: Readonly<{
     timeoutMs?: number;
+    pollMs?: number;
     signal?: AbortSignal;
     probe?(): Promise<boolean>;
     observe(): Promise<T>;
@@ -308,24 +314,17 @@ export async function waitForObservation<T>(
     input.signal?.throwIfAborted();
     const ready = input.probe === undefined || (await input.probe());
     input.signal?.throwIfAborted();
-    if (!ready && (deadline === undefined || performance.now() < deadline)) {
-      await abortableDelay(
-        deadline === undefined
-          ? OBSERVATION_POLL_MS
-          : Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
-        input.signal,
-      );
-      continue;
+    if (ready || (deadline !== undefined && performance.now() >= deadline)) {
+      const value = await input.observe();
+      input.signal?.throwIfAborted();
+      await input.onObserve?.(value);
+      if (input.complete(value)) return { reason: "completed", value };
+      if (deadline !== undefined && performance.now() >= deadline) return { reason: "deadline", value };
     }
-    const value = await input.observe();
-    input.signal?.throwIfAborted();
-    await input.onObserve?.(value);
-    if (input.complete(value)) return { reason: "completed", value };
-    if (deadline !== undefined && performance.now() >= deadline) return { reason: "deadline", value };
     await abortableDelay(
       deadline === undefined
-        ? OBSERVATION_POLL_MS
-        : Math.min(OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
+        ? (input.pollMs ?? OBSERVATION_POLL_MS)
+        : Math.min(input.pollMs ?? OBSERVATION_POLL_MS, Math.max(0, deadline - performance.now())),
       input.signal,
     );
   }

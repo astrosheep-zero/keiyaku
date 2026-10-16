@@ -420,7 +420,10 @@ test("a failed Heart refresh releases the observation's free leash claim", async
     return claim;
   });
   try {
-    await assert.rejects(value.handle.status(), /not a database/u);
+    // The observation keeps its Heart connection while the file's identity is unchanged, so
+    // the truncated file is a malformed image to that live connection; only a fresh open
+    // reports that it is not a database at all.
+    await assert.rejects(value.handle.status(), /not a database|database disk image is malformed/u);
     mockedTry.mock.restore();
     assert.equal(await probeLeash(value.allocated.paths), "free");
   } finally {

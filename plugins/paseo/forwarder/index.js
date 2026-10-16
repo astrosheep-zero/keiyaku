@@ -5,6 +5,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import WebSocket from "ws";
+import { observeKanshi, World } from "@astrosheep/keiyaku";
 const refreshRpc = defineRpc({ name: "refresh",
     input: z.object({ world: z.string(), akuId: z.string() }),
     output: z.object({ woken: z.number().int().nonnegative() }),
@@ -17,6 +18,59 @@ const attachRpc = defineRpc({ name: "attach",
         ]).optional() }),
     output: z.object({ attached: z.boolean() }),
 });
+const mirrorPersistence = z.object({ version: z.literal(1),
+    data: z.object({ world: z.string(), akuId: z.string() }) });
+// Rename only: this is also the one-shot backfill path for existing mirrors.
+export async function syncMirrorTitles(client, path, akuId, signal) {
+    const world = await World.prove(await realpath(path));
+    signal?.throwIfAborted();
+    const { aliases } = await observeKanshi({ world });
+    if (aliases.kind !== "present")
+        throw new Error(`Keiyaku aliases unavailable: ${aliases.kind === "failed" ? aliases.failure.message : "absent"}`);
+    const names = new Map();
+    for (const binding of aliases.value) {
+        const current = names.get(binding.akuId) ?? [];
+        current.push(binding.alias.replace(/^@/u, ""));
+        names.set(binding.akuId, current);
+    }
+    const updates = [];
+    let cursor;
+    do {
+        signal?.throwIfAborted();
+        const filter = { includeArchived: true };
+        const page = await client.fetchAgents({ filter, ...(signal ? { signal } : {}),
+            page: { limit: 200, ...(cursor ? { cursor } : {}) } });
+        for (const { agent } of page.entries) {
+            if (agent.provider !== "keiyaku" || agent.persistence?.provider !== "keiyaku")
+                continue;
+            // Paseo exposes our provider's versioned persistence in public snapshot metadata.
+            // Do not decode opaque session IDs or inspect the daemon's storage.
+            const parsed = mirrorPersistence.safeParse(agent.persistence.metadata?.pluginProviderPersistence);
+            if (!parsed.success || (akuId !== undefined && parsed.data.data.akuId !== akuId))
+                continue;
+            const target = parsed.data.data;
+            if (target.world !== world)
+                continue;
+            const bound = names.get(target.akuId);
+            const title = bound?.length ? `${target.akuId} (${bound.join(", ")})` : target.akuId;
+            if (agent.title === title)
+                continue;
+            updates.push({ id: agent.id, name: title });
+        }
+        if (!page.pageInfo.hasMore)
+            break;
+        const next = page.pageInfo.nextCursor;
+        if (!next || next === cursor)
+            throw new Error("Incomplete mirror directory pagination");
+        cursor = next;
+    } while (cursor);
+    // Finish directory pagination before renames can reorder its entries.
+    for (const update of updates) {
+        signal?.throwIfAborted();
+        await client.updateAgent(update.id, { name: update.name });
+    }
+    return updates.length;
+}
 async function connect(signal) {
     const home = resolvePaseoHome({ PASEO_HOME: process.env.PASEO_HOME });
     const { listen } = await waitForDaemonReady(home, { timeoutMs: 1000, signal });
@@ -43,6 +97,23 @@ async function connect(signal) {
         signal.removeEventListener("abort", abort);
     }
 }
+// A title attempt owns its short-lived connection, so canceling it cannot retire
+// the successful runtime RPC connection. Close and all in-flight work are awaited.
+export async function backfillMirrorTitles(path, akuId, signal = AbortSignal.timeout(30_000), openClient = connect) {
+    const connected = await openClient(signal);
+    let closing;
+    const close = () => closing ??= connected.close();
+    const abort = () => { void close().catch(() => { }); };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+        signal.throwIfAborted();
+        return await syncMirrorTitles(connected, path, akuId, signal);
+    }
+    finally {
+        signal.removeEventListener("abort", abort);
+        await close();
+    }
+}
 export function createForwarder(openClient = connect) {
     return {
         manifest: { id: "paseo", apiVersion: 1 },
@@ -55,11 +126,11 @@ export function createForwarder(openClient = connect) {
                 const pending = client ??= openClient(signal);
                 let abort;
                 try {
-                    await Promise.race([
+                    return await Promise.race([
                         (async () => {
                             const connected = await pending;
                             signal.throwIfAborted();
-                            rpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", rpc.name, rpc.input.parse(input)));
+                            return rpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", rpc.name, rpc.input.parse(input)));
                         })(),
                         new Promise((_, reject) => {
                             abort = () => reject(signal.reason);
@@ -78,9 +149,22 @@ export function createForwarder(openClient = connect) {
                     signal.removeEventListener("abort", abort);
                 }
             };
-            const refresh = (event, cancellation) => hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+            const refresh = async (event, cancellation) => {
+                await hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+            };
             return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
-                    "akuma.born": (event, cancellation) => hint(attachRpc, { world, akuId: event.akumaId, caller: event.caller }, cancellation),
+                    async "akuma.born"(event, cancellation) {
+                        const result = await hint(attachRpc, { world, akuId: event.akumaId, caller: event.caller }, cancellation);
+                        if (!("attached" in result) || !result.attached)
+                            return;
+                        const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
+                        try {
+                            await backfillMirrorTitles(world, event.akumaId, signal, openClient);
+                        }
+                        catch (error) {
+                            console.warn(`Keiyaku mirror attached, but title synchronization failed: ${error instanceof Error ? error.message : String(error)}`);
+                        }
+                    },
                     async "akuma.body-ended"(event, cancellation) {
                         try {
                             await refresh(event, cancellation);

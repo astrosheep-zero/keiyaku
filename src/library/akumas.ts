@@ -62,7 +62,6 @@ export type {
   TellWake,
 };
 /** The existing native wait-observation seam, exposed type-only for CLI composition. */
-export type { WaitObservedAkuma, WaitObserver, WaitSelectedAkuma } from "../akuma/akuma-wait.js";
 
 export type Akumas = AkumasHandle;
 

@@ -1,12 +1,9 @@
-import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
   defaultWaitComplete,
-  readLiveStatus,
   readWaitComplete,
-  observeOutcomeRows,
   observeStatusOutcome,
   waitForObservation,
   type OutcomeObserver,
@@ -15,28 +12,7 @@ import {
 } from "./akuma-observe.js";
 import { pathsForAkuId } from "./identity.js";
 import type { AkumaStatus } from "./akuma.js";
-import type { DispatchAssociation } from "./dispatch-association.js";
-import type { ActivityRow } from "./projection.js";
 import type { AkumaUnobserved } from "./selection-observation.js";
-
-export type WaitIdentityFacts = Readonly<{
-  /** The alias currently addressing this Akuma in its world, when one is bound to it. */
-  alias?: AkumaAlias;
-  /** This Akuma's Dispatch association, read from the observing repository. */
-  contract: DispatchAssociation;
-}>;
-
-/** One observed Akuma as a live wait viewer sees it: its status plus its identity facts. */
-export type WaitObservedAkuma = Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }> & WaitIdentityFacts;
-
-/** One selected Akuma's frozen identity, resolved before the first observation round. */
-export type WaitSelectedAkuma = Readonly<{ id: AkumaStatus["id"] }> & WaitIdentityFacts;
-
-/** A live wait viewer: the frozen selected set, then every observation round. */
-export type WaitObserver = Readonly<{
-  selected?: (selected: readonly WaitSelectedAkuma[]) => void;
-  observe?: (observed: readonly WaitObservedAkuma[]) => void;
-}>;
 
 type WaitExecutionInput = Readonly<{
   path: WorldRoot;
@@ -47,14 +23,6 @@ type WaitExecutionInput = Readonly<{
   /** Internal custom completion judge over the full final observation where supplied. */
   predicate?: (status: AkumaStatus) => boolean;
   outcomeObserved?: OutcomeObserver;
-  /** Resolves one Akuma's identity facts; consulted once per Akuma a viewer first sees. */
-  identity?: (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts>;
-  /** The selected set in the caller's order; a viewer's head and scoreboard follow it. */
-  selectionOrder?: readonly AkumaStatus["id"][];
-  /** Reports the frozen selected set before the first round, so a viewer can fix its layout. */
-  onSelected?: (selected: readonly WaitSelectedAkuma[]) => void;
-  /** Reports every observation round to a live viewer. */
-  observe?: (observed: readonly WaitObservedAkuma[]) => void;
 }>;
 
 /** One wait's association-free native evidence; upper composition attaches cross-product context. */
@@ -73,21 +41,12 @@ type WaitRound = Readonly<{
 const SHARED_ORDINARY_BUDGET = 30;
 
 async function observeWaitRound(
-  path: WorldRoot,
   ids: readonly AkumaStatus["id"][],
+  readerFor: (id: AkumaStatus["id"]) => ReturnType<typeof createLiveStatusReader>,
   signal?: AbortSignal,
-  readers?: Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>,
 ): Promise<WaitRound> {
-  const read = async (id: AkumaStatus["id"], ordinaryBudget?: number): Promise<LiveStatusObservation> => {
-    const options = { aperture: "monitoring" as const, ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) };
-    if (readers === undefined) return await readLiveStatus(path, id, options, signal);
-    let reader = readers.get(id);
-    if (reader === undefined) {
-      reader = createLiveStatusReader(pathsForAkuId(path, id), id);
-      readers.set(id, reader);
-    }
-    return await reader.read(options, signal);
-  };
+  const read = (id: AkumaStatus["id"], ordinaryBudget?: number) =>
+    readerFor(id).read({ aperture: "monitoring", ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) }, signal);
   signal?.throwIfAborted();
   if (ids.length <= 1) {
     const observations = await Promise.all(ids.map(async (id) => await read(id)));
@@ -103,8 +62,6 @@ async function observeWaitRound(
       observations.push(observed);
       remaining -= observed.ordinarySelected;
     } catch (error) {
-      readers?.get(id)?.clear();
-      readers?.delete(id);
       if (error instanceof AkumaNotBornError) throw error;
       unobserved.push({ id, diagnostic: diagnostic(error) });
     }
@@ -125,89 +82,35 @@ function roundComplete(
   );
 }
 
-/** Canonical ids in the caller's selection order, appending any id the caller never named. */
-function selectionOrderedIds(
-  ids: readonly AkumaStatus["id"][],
-  order: readonly AkumaStatus["id"][],
-): readonly AkumaStatus["id"][] {
-  const present = new Set(ids);
-  const seen = new Set<AkumaStatus["id"]>();
-  const ordered: AkumaStatus["id"][] = [];
-  for (const id of order) {
-    if (present.has(id) && !seen.has(id)) {
-      seen.add(id);
-      ordered.push(id);
-    }
-  }
-  for (const id of ids) {
-    if (!seen.has(id)) {
-      seen.add(id);
-      ordered.push(id);
-    }
-  }
-  return ordered;
-}
-
-/**
- * The one lower set-observation owner for Akuma wait completion. It serves the
- * standalone one-ID association-free face and the plural any/all face with one
- * ordered round algorithm, one shared ordinary-detail budget, transient
- * unreadable peers, and an honest final deadline edge. A silent observation —
- * no live row callback and no custom judge — decides which running rounds to
- * skip with the owner's lightweight completion probe over the selected set; a
- * live viewer or a custom judge always observes full rounds.
- */
+/** Wait observes completion and returns final status snapshots, never a live stream. */
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
-  const readers =
-    input.observe === undefined ? undefined : new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
-  try {
-    // Identity facts are read once per observed Akuma, not once per 100ms round.
-    const facts = new Map<AkumaStatus["id"], WaitIdentityFacts>();
-    if (input.onSelected !== undefined) {
-      for (const id of input.ids) {
-        input.signal?.throwIfAborted();
-        const known = input.identity === undefined ? undefined : await input.identity(id);
-        facts.set(id, known ?? { contract: { kind: "none" } });
-      }
-      const ordered =
-        input.selectionOrder === undefined ? input.ids : selectionOrderedIds(input.ids, input.selectionOrder);
-      input.onSelected(ordered.map((id) => ({ id, ...facts.get(id)! })));
+  const readers = new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
+  const readerFor = (id: AkumaStatus["id"]) => {
+    let reader = readers.get(id);
+    if (reader === undefined) {
+      reader = createLiveStatusReader(pathsForAkuId(input.path, id), id);
+      readers.set(id, reader);
     }
-    const observeRound = async (round: WaitRound): Promise<void> => {
-      await Promise.all(
-        round.observations.map(({ status, rows }) =>
-          input.observe === undefined
-            ? observeStatusOutcome(status, input.outcomeObserved)
-            : observeOutcomeRows(status.id, rows, input.outcomeObserved),
-        ),
-      );
-      if (input.observe === undefined) return;
-      const observed: WaitObservedAkuma[] = [];
-      for (const observation of round.observations) {
-        input.signal?.throwIfAborted();
-        const { status, rows } = observation;
-        let known = facts.get(status.id);
-        if (known === undefined && input.identity !== undefined) {
-          known = await input.identity(status.id);
-          facts.set(status.id, known);
-        }
-        if (known === undefined) {
-          observed.push({ status, rows, contract: { kind: "none" } });
-          continue;
-        }
-        observed.push({ status, rows, ...known });
-      }
-      input.observe(structuredClone(observed));
-    };
+    return reader;
+  };
+  try {
     const waited = await waitForObservation({
+      pollMs: 250,
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.predicate === undefined && input.observe === undefined
-        ? { probe: async () => await readWaitComplete(input.path, input.ids, input.completion, input.signal) }
+      ...(input.predicate === undefined
+        ? {
+            probe: async () =>
+              await readWaitComplete(input.path, input.ids, input.completion, input.signal, (id) =>
+                readerFor(id).complete(input.signal),
+              ),
+          }
         : {}),
-      observe: async () => await observeWaitRound(input.path, input.ids, input.signal, readers),
+      observe: async () => await observeWaitRound(input.ids, readerFor, input.signal),
       complete: (round) => roundComplete(round, input.completion, input.predicate),
-      onObserve: async (round) => await observeRound(round),
+      onObserve: async (round) => {
+        await Promise.all(round.observations.map(({ status }) => observeStatusOutcome(status, input.outcomeObserved)));
+      },
     });
     return {
       mode: input.completion,
@@ -216,8 +119,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
       unobserved: waited.value.unobserved,
     };
   } finally {
-    for (const reader of readers?.values() ?? []) reader.clear();
-    readers?.clear();
+    for (const reader of readers.values()) reader.clear();
   }
 }
 

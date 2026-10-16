@@ -10,7 +10,6 @@ import type {
 } from "../../akuma/selection-observation.js";
 import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
 import type { CallObservation, CallResult } from "../../library/akuma-creation.js";
-import type { WaitObservedAkuma } from "../../library/akumas.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import { taskDispositionMark } from "./marks.js";
@@ -73,11 +72,6 @@ export function snapshotHeading(
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
   const head = [identity(id, alias), ...(contractId === undefined ? [] : [`└─ ${contractId}`])];
   return [...head, frameRule(head)];
-}
-
-function answeredHeading(id: string, alias: string | undefined): readonly string[] {
-  const heading = `✓ answered ${identity(id, alias)}`;
-  return [heading, frameRule([heading])];
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -180,9 +174,7 @@ function continuationPrefix(): string {
 }
 
 /**
- * The one place row prefixes live: time, optional source, mark, verb, content.
- * A plain layout is the single-target grammar; a source layout adds the frozen
- * source column a plural wait aligns across its selected set.
+ * The one place row prefixes live: time, mark, verb, content.
  */
 type RowLayout = Readonly<{
   head: (time: string | undefined, glyph: string, verb: string, columns: number) => string;
@@ -190,12 +182,10 @@ type RowLayout = Readonly<{
   marker: (count: number) => string;
   history?: true;
   compactRun?: true;
-  /** Plural wait keeps ordinary rows on one line; speech can use its two-line budget. */
+  /** A one-row receipt keeps that row on one line; speech can use its two-line budget. */
   singleLine?: true;
   /** World-board answer previews keep the conclusion at the tail. */
   tailAnswer?: true;
-  /** A plural wait shares one minute clock across all of its attributed rows. */
-  clock?: { previous?: string };
 }>;
 
 function timelineMarker(text: string): string {
@@ -216,22 +206,6 @@ function compactLayout(): RowLayout {
 
 function historyLayout(): RowLayout {
   return { ...compactLayout(), history: true };
-}
-
-function sourceLayout(source: string, width: () => number, clock: { previous?: string }): RowLayout {
-  const gutter = (): string => `${" ".repeat(TIME_WIDTH)} ${padToDisplay(source, width())} `;
-  return {
-    head: (time, glyph, verb, columns) =>
-      actionCell(
-        `${time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH)} ${padToDisplay(source, width())} ${glyph}`,
-        verb,
-        columns,
-      ),
-    continuation: () => `${" ".repeat(TIME_WIDTH)} ${" ".repeat(width())} │ ${" ".repeat(VERB_WIDTH)} `,
-    marker: (count) => `${gutter()}⋮ ${count} omitted`,
-    clock,
-    singleLine: true,
-  };
 }
 
 function quotedBody(row: RenderRow): boolean {
@@ -519,23 +493,16 @@ export function snapshotActivityLines(
 /** One command's append-only activity view, with a baseline and a final tail flush. */
 export type ActivityStream = ((activity: RenderedActivity) => readonly string[]) &
   Readonly<{
-    /** Establish a wait baseline without spending the command's live tool budget. */
+    /** Establish a live baseline without spending the command's live tool budget. */
     seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly string[];
     /** Current live rows for the redrawable frame; never part of append-only output. */
     frame: () => readonly string[];
     /** Emit the pending omission count and unsettled rows once before the command's conclusion. */
     flush: () => readonly string[];
-    /** The same decisions undrawn, so concurrent streams can merge before rendering. */
-    emissions: Readonly<{
-      observe: (activity: RenderedActivity) => readonly StreamEmission[];
-      seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly StreamEmission[];
-      flush: () => readonly StreamEmission[];
-    }>;
-    render: (emissions: readonly StreamEmission[]) => readonly string[];
   }>;
 
 /** One decided piece of append-only output: a settled row, or an untimed omission count. */
-export type StreamEmission =
+type StreamEmission =
   | Readonly<{ kind: "gap"; count: number }>
   | Readonly<{ kind: "row"; row: RenderRow; inFlightSay?: boolean; unsettled?: boolean }>;
 
@@ -607,16 +574,14 @@ function renderStreamRow(
 ): void {
   const { context, layout, inFlightSay = false, unsettled = false } = options;
   const at = clock(row.at);
-  const previousClock = layout.clock?.previous ?? state.previousClock;
-  const changed = previousClock === undefined || at !== previousClock;
+  const changed = state.previousClock === undefined || at !== state.previousClock;
   lines.push(
     ...renderTimelineRow(row, context, layout, changed ? at : undefined, {
       inFlightSay,
       unsettled,
     }),
   );
-  if (layout.clock !== undefined) layout.clock.previous = at;
-  else state.previousClock = at;
+  state.previousClock = at;
 }
 
 /**
@@ -814,42 +779,8 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
       render(seed(activity, alreadyRenderedSequence)),
     frame,
     flush: () => render(flush()),
-    emissions: {
-      observe: (activity: RenderedActivity) => observeActivitySnapshot(state, activity),
-      seed,
-      flush,
-    },
-    render,
   });
 }
-
-/** What a wait conclusion renders over: its observed and unobserved members. */
-export type WaitConclusionResult = Readonly<{
-  reason: "completed" | "deadline";
-  observations: readonly AkumaObservation[];
-  unobserved: readonly Readonly<{ id: string; diagnostic: string }>[];
-}>;
-
-/** One selected Akuma's frozen identity, resolved before the first observation round. */
-export type WaitSelectedIdentity = Readonly<{
-  id: string;
-  alias?: string;
-  contract?: DispatchAssociation;
-}>;
-
-export type WaitObservationStream = Readonly<{
-  /** Freeze the selected set's identities so the source column is stable before the first row. */
-  select: (selected: readonly WaitSelectedIdentity[]) => void;
-  /** One observation round; returns the head frames and newly settled rows to print. */
-  observe: (observed: readonly WaitObservedAkuma[]) => readonly string[];
-  /** Current live rows from all selected streams; never part of append-only output. */
-  frame: () => readonly string[];
-  /** In-flight rows with their unresolved marks, emitted by a close that never concluded. */
-  flush: () => readonly string[];
-  /** The wait's closing scoreboard, or the empty string when there is nothing to print. */
-  conclude: (result: WaitConclusionResult) => string;
-  streamed: () => boolean;
-}>;
 
 function conclusionMarkVerb(
   status: AkumaObservation["status"] | undefined,
@@ -871,18 +802,6 @@ function conclusionMarkVerb(
   return { mark: "!", verb: "stranded" };
 }
 
-/**
- * The durable moment an Akuma settled, read from the outcome row its own timeline
- * retained. Absent for an ending that leaves no outcome row, so the caller falls
- * back to the observation that noticed it.
- */
-function settleMoment(status: AkumaObservation["status"]): number | undefined {
-  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
-  if (outcome === undefined) return undefined;
-  const at = new Date(outcome.at).getTime();
-  return Number.isFinite(at) ? at : undefined;
-}
-
 function clockFromMs(at: number): string {
   return clock(new Date(at).toISOString());
 }
@@ -891,187 +810,6 @@ function durationText(durationMs: number): string {
   const seconds = Math.max(0, Math.round(durationMs / 1000));
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m${String(seconds % 60)}s`;
-}
-
-type WaitObservationStreamState = {
-  streams: Map<string, ActivityStream>;
-  /** Full frozen source labels are used only in the aggregate head. */
-  sources: Map<string, string>;
-  /** Compact identity tags attribute plural rows, diagnostics, and conclusions. */
-  tags: Map<string, string>;
-  contracts: Map<string, DispatchAssociation>;
-  settledAt: Map<string, number>;
-  sourceWidth: number;
-  /** The plural stream's timestamp blanking spans every source. */
-  clock: { previous?: string };
-  /** Whether this wait observes a plural selected set; undefined until a selection or first round fixes it. */
-  plural: boolean | undefined;
-  headerEmitted: boolean;
-  observed: boolean;
-};
-
-function createWaitObservationState(): WaitObservationStreamState {
-  return {
-    streams: new Map<string, ActivityStream>(),
-    sources: new Map<string, string>(),
-    tags: new Map<string, string>(),
-    contracts: new Map<string, DispatchAssociation>(),
-    settledAt: new Map<string, number>(),
-    sourceWidth: 0,
-    clock: {},
-    plural: undefined,
-    headerEmitted: false,
-    observed: false,
-  };
-}
-
-function shortestUniquePrefix(value: string, values: readonly string[]): string | undefined {
-  for (let length = 4; length <= value.length; length += 1) {
-    const tag = value.slice(0, length);
-    if (values.filter((candidate) => candidate.slice(0, length) === tag).length === 1) return tag;
-  }
-  return undefined;
-}
-
-function shortestUniqueSegmentSuffix(id: string, ids: readonly string[]): string | undefined {
-  const segments = id.split("/");
-  for (let start = segments.length - 2; start >= 0; start -= 1) {
-    const tag = segments.slice(start).join("/");
-    if (ids.filter((candidate) => candidate.endsWith(`/${tag}`) || candidate === tag).length === 1) return tag;
-  }
-  return undefined;
-}
-
-function waitIdentityTag(id: string, ids: readonly string[]): string {
-  const finals = ids.map((candidate) => candidate.slice(candidate.lastIndexOf("/") + 1));
-  const index = ids.indexOf(id);
-  const own = finals[index];
-  if (own === undefined) return id;
-  return (
-    shortestUniquePrefix(own, finals) ?? shortestUniqueSegmentSuffix(id, ids) ?? shortestUniquePrefix(id, ids) ?? id
-  );
-}
-
-/** The selected set fixes identity tags before its first attributed row. */
-function freezeWaitTags(state: WaitObservationStreamState): void {
-  const ids = [...state.sources.keys()];
-  state.tags = new Map(ids.map((id) => [id, waitIdentityTag(id, ids)]));
-  state.sourceWidth = Math.max(0, ...Array.from(state.tags.values(), displayColumns));
-}
-
-function sourceTag(state: WaitObservationStreamState, id: string): string {
-  return state.tags.get(id) ?? waitIdentityTag(id, [...state.sources.keys()]);
-}
-
-/** Register one selected or newly observed source; the set freezes the column before the first row. */
-function registerWaitSource(
-  state: WaitObservationStreamState,
-  id: string,
-  alias: string | undefined,
-  contract?: DispatchAssociation,
-): void {
-  if (state.sources.has(id)) return;
-  const label = alias ?? id;
-  state.sources.set(id, label);
-  if (contract !== undefined) state.contracts.set(id, contract);
-}
-
-/**
- * The one aggregate head a plural wait prints before any activity row: the
- * selected set read as a list, each target on its own line named by the alias
- * addressing it, otherwise its complete identity, with its `· kei/<contract>`
- * association inline when one exists, all closed by the frame's single rule.
- */
-function aggregateHeading(state: WaitObservationStreamState): readonly string[] {
-  const head = [...state.sources].map(([id, label]) => {
-    const contractId = associatedContractId(state.contracts.get(id) ?? { kind: "none" });
-    const named = `${sourceTag(state, id)} ${label}`;
-    return contractId === undefined ? named : `${named} · ${contractId}`;
-  });
-  return [...head, frameRule(head)];
-}
-
-function observeWaitRound(
-  state: WaitObservationStreamState,
-  round: readonly WaitObservedAkuma[],
-  context: TextRenderContext,
-  now: () => number,
-): readonly string[] {
-  state.observed = true;
-  // Establish the whole round's sources before any row so widths stay aligned within it.
-  for (const member of round) registerWaitSource(state, member.status.id, member.alias, member.contract);
-  if (!state.headerEmitted) freezeWaitTags(state);
-  const lines: string[] = [];
-  // The observation subject opens once: an aggregate head for a plural set, the observed
-  // identity frame for a single target. Every later round only appends attributed rows.
-  if (!state.headerEmitted && round.length > 0) {
-    state.headerEmitted = true;
-    state.plural ??= state.sources.size > 1;
-    if (state.plural) {
-      lines.push(...aggregateHeading(state));
-    } else {
-      const sole = round[0]!;
-      lines.push(...snapshotHeading(sole.status.id, sole.alias, sole.contract));
-    }
-  }
-  const parts: { stream: ActivityStream; emissions: readonly StreamEmission[] }[] = [];
-  for (const { status, rows } of round) {
-    const known = state.streams.get(status.id);
-    if (known !== undefined) {
-      parts.push({ stream: known, emissions: known.emissions.observe({ snapshot: status.timeline, rows }) });
-    } else {
-      // Only a plural wait attributes its rows; a single-target stream keeps the plain row grammar.
-      const stream = activityStream(
-        context,
-        state.plural === true
-          ? sourceLayout(sourceTag(state, status.id), () => state.sourceWidth, state.clock)
-          : plainLayout(),
-      );
-      state.streams.set(status.id, stream);
-      // Seed marks skipped retained evidence without spending this command's live tool budget.
-      parts.push({ stream, emissions: stream.emissions.seed({ snapshot: status.timeline, rows }) });
-    }
-    if (!state.settledAt.has(status.id) && defaultWaitComplete(status))
-      state.settledAt.set(status.id, settleMoment(status) ?? now());
-  }
-  lines.push(...mergeStreamEmissions(parts));
-  return lines;
-}
-
-/**
- * Merge one observation's decided output across sources by row time. Each
- * source keeps its own order; an omission count travels with the row after it,
- * or with the row before it when it trails. Ties keep selection order.
- */
-function mergeStreamEmissions(
-  parts: readonly Readonly<{ stream: ActivityStream; emissions: readonly StreamEmission[] }>[],
-): readonly string[] {
-  type Unit = { at: number; emissions: StreamEmission[] };
-  const queues = parts.map(({ stream, emissions }) => {
-    const units: Unit[] = [];
-    let pending: StreamEmission[] = [];
-    for (const emission of emissions) {
-      pending.push(emission);
-      if (emission.kind !== "row") continue;
-      const at = Date.parse(emission.row.at);
-      units.push({ at: Number.isFinite(at) ? at : (units.at(-1)?.at ?? Number.NEGATIVE_INFINITY), emissions: pending });
-      pending = [];
-    }
-    if (pending.length > 0) {
-      const last = units.at(-1);
-      if (last === undefined) units.push({ at: Number.NEGATIVE_INFINITY, emissions: pending });
-      else last.emissions.push(...pending);
-    }
-    return { stream, units };
-  });
-  const lines: string[] = [];
-  for (;;) {
-    let next: (typeof queues)[number] | undefined;
-    for (const queue of queues)
-      if (queue.units.length > 0 && (next === undefined || queue.units[0]!.at < next.units[0]!.at)) next = queue;
-    if (next === undefined) return lines;
-    lines.push(...next.stream.render(next.units.shift()!.emissions));
-  }
 }
 
 /**
@@ -1131,108 +869,6 @@ export function inputWaitConclusion(
       ? [`! error ${safeText(observation.diagnostic)}`]
       : []),
   ];
-}
-
-/** Present ids in frozen selection order, then any result member the selection never named. */
-function orderedWaitIds(state: WaitObservationStreamState, result: WaitConclusionResult): readonly string[] {
-  const ids = [...state.sources.keys()];
-  const known = new Set(ids);
-  for (const observation of result.observations) {
-    if (!known.has(observation.status.id)) {
-      known.add(observation.status.id);
-      ids.push(observation.status.id);
-    }
-  }
-  for (const member of result.unobserved) {
-    if (!known.has(member.id)) {
-      known.add(member.id);
-      ids.push(member.id);
-    }
-  }
-  return ids;
-}
-
-function flushWaitStreams(state: WaitObservationStreamState): readonly string[] {
-  return mergeStreamEmissions(
-    [...state.streams.values()].map((stream) => ({ stream, emissions: stream.emissions.flush() })),
-  );
-}
-
-function concludeWaitStream(
-  state: WaitObservationStreamState,
-  result: WaitConclusionResult,
-  startedAt: number,
-  now: () => number,
-): string {
-  const tail = flushWaitStreams(state);
-
-  const end = now();
-  for (const observation of result.observations)
-    registerWaitSource(state, observation.status.id, undefined, observation.contract);
-  for (const member of result.unobserved) registerWaitSource(state, member.id, undefined);
-  if (!state.headerEmitted) freezeWaitTags(state);
-  const order = orderedWaitIds(state, result);
-  const multi = order.length > 1;
-  const observationById = new Map<string, AkumaObservation>(
-    result.observations.map((observation) => [observation.status.id, observation]),
-  );
-  const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
-    result.unobserved.map((member) => [member.id, member]),
-  );
-  // A failure fact keeps the complete identity even where the scoreboard attributes a target by its identity tag.
-  const unobservedLines = order
-    .filter((id) => unobservedById.has(id))
-    .map((id) => unobservedText(id, unobservedById.get(id)!.diagnostic));
-  const conclusions = order.flatMap((id) => {
-    const observation = observationById.get(id);
-    if (observation === undefined) return [];
-    const status = observation.status;
-    const complete = defaultWaitComplete(status);
-    const at = complete ? (state.settledAt.get(id) ?? end) : end;
-    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined ? "answered" : "life");
-    const target = multi ? ` ${padToDisplay(sourceTag(state, id), state.sourceWidth)}` : "";
-    return [waitConclusionRow({ at, startedAt, complete, end, mark, verb, target })];
-  });
-  const answeredSingle =
-    !multi && result.observations.length === 1 && statusAnswer(result.observations[0]!) !== undefined;
-  const blocks = [
-    ...(conclusions.length > 0 ? [conclusions.join("\n")] : []),
-    ...(unobservedLines.length > 0 ? [unobservedLines.join("\n")] : []),
-  ];
-  const body = [...tail, ...blocks].join("\n");
-  // One blank line keeps the bare stdout answer visually separate from the stream.
-  return answeredSingle ? `${body}\n\n` : body;
-}
-
-/**
- * Live view over a wait's successive observation rounds, one append-only
- * stream per selected Akuma. A plural wait opens one aggregate frame naming
- * its selected set before any activity row and never opens a per-target frame
- * during observation; a single-target wait opens that Akuma's own identity
- * frame — the identity and Contract association the observed facts carry —
- * and an already settled Akuma prints that frame while replaying no backlog
- * rows. `conclude` renders the closing rows once the wait ends: one row per
- * observed Akuma in `<clock> <mark> <verb> — <duration>` grammar, with a target
- * named for a multi-target scoreboard and no activity replay.
- */
-export function waitObservationStream(
-  context: TextRenderContext,
-  options: Readonly<{ now?: () => number }> = {},
-): WaitObservationStream {
-  const now = options.now ?? ((): number => Date.now());
-  const startedAt = now();
-  const state = createWaitObservationState();
-  const select = (selected: readonly WaitSelectedIdentity[]): void => {
-    for (const member of selected) registerWaitSource(state, member.id, member.alias, member.contract);
-    state.plural ??= selected.length > 1;
-    freezeWaitTags(state);
-  };
-  const observe = (round: readonly WaitObservedAkuma[]): readonly string[] =>
-    observeWaitRound(state, round, context, now);
-  const frame = (): readonly string[] => [...state.streams.values()].flatMap((stream) => stream.frame());
-  const flush = (): readonly string[] => flushWaitStreams(state);
-  const conclude = (result: WaitConclusionResult): string => concludeWaitStream(state, result, startedAt, now);
-  return { select, observe, frame, flush, conclude, streamed: () => state.observed };
 }
 
 /** The identity a streamed observing call's head frame renders from its resolved birth. */
@@ -1407,26 +1043,6 @@ function renderTaskContextLines(created: CreatedTaskObservation | undefined, col
   return [`tasks ${created.rows.length}`, ...created.rows.flatMap((row) => renderTaskRow(row, columns))];
 }
 
-function answerContextLines(observation: AkumaObservation, columns: number): readonly string[] {
-  return [
-    ...renderTaskContextLines(observation.createdTasks, columns),
-    ...renderReportedChangeLines(observation.status.timeline),
-  ];
-}
-
-function answeredBlock(
-  observation: AkumaObservation,
-  answer: string,
-  alias: string | undefined,
-  columns: number,
-): string {
-  const frame = answeredHeading(observation.status.id, alias).join("\n");
-  const context = answerContextLines(observation, columns).join("\n");
-  if (context.length === 0) return `${frame}\n${answer}`;
-  const separator = answer.endsWith("\n") ? "\n" : "\n\n";
-  return `${frame}\n${answer}${separator}${context}`;
-}
-
 type SnapshotView = Readonly<{
   status: AkumaObservation["status"];
   contract: DispatchAssociation;
@@ -1497,14 +1113,6 @@ export function killResultText(id: string, evidence: KillEvidence, alias?: strin
   return [...snapshotHeading(id, alias, undefined), "", killResultLabel(evidence)].join("\n");
 }
 
-export function statusAnswer(view: Readonly<{ status: AkumaObservation["status"] }>): string | undefined {
-  if (!defaultWaitComplete(view.status)) return undefined;
-  if (view.status.life !== "asleep") return undefined;
-  const timeline = view.status.timeline;
-  if (timeline.kind !== "idle" || timeline.outcome?.outcome.kind !== "answered") return undefined;
-  return timeline.outcome.outcome.answer;
-}
-
 function answerBytes(answer: unknown, structured: boolean): string | undefined {
   return !structured && typeof answer === "string" ? answer : JSON.stringify(answer);
 }
@@ -1512,10 +1120,6 @@ function answerBytes(answer: unknown, structured: boolean): string | undefined {
 /** Presentation-only state for one akuma invocation; it never reaches JSON. */
 type AkumaPresentation = Readonly<{
   alias?: string;
-  streamed?: boolean;
-  structured?: boolean;
-  startedAt?: number;
-  selection?: readonly WaitSelectedIdentity[];
 }>;
 
 export function askRawAnswer(result: AkumaAskResult, structured: boolean | undefined): string | undefined {
@@ -1530,85 +1134,25 @@ export function callRawAnswer(result: CallResult, streamed: boolean): string | u
   return answerBytes(observation.observation.answer, result.structured === true);
 }
 
-export function waitRawAnswer(result: AkumaWaitResult, streamed: boolean): string | undefined {
-  const total = result.observations.length + result.unobserved.length;
-  if (streamed) {
-    // Plural waits leave stdout empty so one answer can never be mistaken for the whole result.
-    if (total !== 1) return "";
-    const single = result.observations[0];
-    return single === undefined ? "" : (statusAnswer(single) ?? "");
-  }
-  if (total !== 1) return undefined;
-  return statusAnswer(result.observations[0]!);
-}
-
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
   if (historyId === undefined || result.kind !== "exact") return undefined;
   const outcome = result.outcome.outcome;
   return outcome.kind === "answered" ? outcome.answer : outcome.diagnostic;
 }
 
+/**
+ * One wait's final text: each observed Akuma's own status snapshot, then one
+ * failure fact per member the wait could not read. A wait observes to its
+ * completion judgment and streams nothing, so an answer is visible only as the
+ * snapshot's own outcome row.
+ */
 export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation, context: TextRenderContext): string {
-  const alias = presentation.alias;
-  const observations = result.observations;
-  const unobserved = result.unobserved;
-  const total = observations.length + unobserved.length;
-  if (total <= 1) {
-    const single = [
-      ...observations.map((observation) => {
-        const answer = statusAnswer(observation);
-        if (answer !== undefined) return answeredBlock(observation, answer, alias, context.columns);
-        return snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) });
-      }),
-      ...unobserved.map((member) => unobservedText(member.id, member.diagnostic)),
-    ];
-    return single.join("\n\n");
-  }
-  const end = Date.now();
-  const startedAt = presentation.startedAt ?? end;
-  const order: string[] = [];
-  const remember = (id: string): void => {
-    if (!order.includes(id)) order.push(id);
-  };
-  for (const member of presentation.selection ?? []) remember(member.id);
-  for (const observation of observations) remember(observation.status.id);
-  for (const member of unobserved) remember(member.id);
-  const observationById = new Map<string, AkumaObservation>(
-    observations.map((observation) => [observation.status.id, observation]),
+  const alias = result.observations.length === 1 && result.unobserved.length === 0 ? presentation.alias : undefined;
+  const blocks = result.observations.map((observation) =>
+    snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) }),
   );
-  const unobservedById = new Map<string, Readonly<{ id: string; diagnostic: string }>>(
-    unobserved.map((member) => [member.id, member]),
-  );
-  const sourceWidth = Math.max(0, ...order.map((id) => displayColumns(waitIdentityTag(id, order))));
-  const blocks = [
-    ...order.flatMap((id) => {
-      const observation = observationById.get(id);
-      if (observation === undefined) return [];
-      const answer = statusAnswer(observation);
-      if (answer !== undefined) return [answeredBlock(observation, answer, undefined, context.columns)];
-      return [snapshotText(observation, context)];
-    }),
-    ...(unobserved.length > 0
-      ? [
-          order
-            .filter((id) => unobservedById.has(id))
-            .map((id) => unobservedText(id, unobservedById.get(id)!.diagnostic))
-            .join("\n"),
-        ]
-      : []),
-  ];
-  const rows = order.flatMap((id) => {
-    const observation = observationById.get(id);
-    if (observation === undefined) return [];
-    const status = observation.status;
-    const complete = defaultWaitComplete(status);
-    const at = complete ? (settleMoment(status) ?? end) : end;
-    const { mark, verb } = conclusionMarkVerb(status, statusAnswer(observation) !== undefined ? "answered" : "life");
-    return [
-      `${clockFromMs(at)} ${padToDisplay(waitIdentityTag(id, order), sourceWidth)} ${mark} ${verb}${conclusionClause(at, startedAt, complete, end)}`,
-    ];
-  });
-  return rows.length > 0 ? [...blocks, rows.join("\n")].join("\n\n") : blocks.join("\n\n");
+  const unobserved = result.unobserved.map((member) => unobservedText(member.id, member.diagnostic));
+  return [...blocks, ...(unobserved.length === 0 ? [] : [unobserved.join("\n")])].join("\n\n");
 }
 
 export function historyText(

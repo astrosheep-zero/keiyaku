@@ -15,7 +15,7 @@ import {
   resolvePendingTellDisposition,
 } from "../src/akuma/heart/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
-import { createLiveStatusReader } from "../src/akuma/akuma-observe.js";
+import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { DatabaseSync } from "node:sqlite";
 import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
@@ -584,9 +584,8 @@ function seedWaitNarration(
   }
 }
 
-test("unchanged live wait rounds decode and project once, clone callbacks, and end their scope", async (context) => {
+test("unchanged scoped reads decode and project once and end their scope at clear", async (context) => {
   const {
-    root,
     members: [member],
   } = await liveWaitFixture(context);
   assert.ok(member);
@@ -597,46 +596,25 @@ test("unchanged live wait rounds decode and project once, clone callbacks, and e
     if (text.includes('"text":"reuse-wait-')) decodes += 1;
     return Reflect.apply(parse, JSON, [text, ...args]);
   });
-  const clone = globalThis.structuredClone;
-  const frontiers = new Set<unknown>();
-  const selections = new Set<unknown>();
-  context.mock.method(globalThis, "structuredClone", (value: unknown) => {
-    const round = value as { rows: unknown; status: { timeline: unknown } }[];
-    frontiers.add(round[0]!.rows);
-    selections.add(round[0]!.status.timeline);
-    return clone(value);
-  });
-  const controller = new AbortController();
-  const stop = new Error("four rounds observed");
-  let rounds = 0;
-  await assert.rejects(
-    executeWaitAkuma({
-      path: root,
-      ids: [member.id],
-      completion: "all",
-      signal: controller.signal,
-      observe(observed) {
-        rounds += 1;
-        const view = observed[0]!;
-        assert.equal(view.status.life, "running");
-        assert.equal(view.rows.length, 14);
-        assert.ok(view.rows.some((row) => row.kind === "thought" && row.text === "reuse-wait-0"));
-        // A viewer may retain or mutate its payload, including nested pins and life.
-        (view.rows as unknown[]).length = 0;
-        (view.status as { life: string }).life = "asleep";
-        (view.status.timeline.entries as unknown[]).length = 0;
-        if (rounds === 4) controller.abort(stop);
-      },
-    }),
-    (error) => error === stop,
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const input = { aperture: "monitoring" as const };
+  const rounds = [];
+  for (let round = 0; round < 4; round += 1) rounds.push(await reader.read(input));
+  assert.equal(decodes, 12, "four unchanged reads decode the frontier once");
+  assert.equal(new Set(rounds.map((round) => round.rows)).size, 1, "one projectTurns frontier across unchanged rounds");
+  assert.equal(
+    new Set(rounds.map((round) => round.status.timeline)).size,
+    1,
+    "one selection across normalized-equivalent rounds",
   );
-  assert.equal(rounds, 4);
-  assert.equal(decodes, 12);
-  assert.equal(frontiers.size, 1, "one projectTurns frontier across unchanged rounds");
-  assert.equal(selections.size, 1, "one selection across normalized-equivalent rounds");
-  await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0, observe() {} });
-  assert.equal(decodes, 24, "another wait decodes anew");
-  assert.equal(frontiers.size, 2);
+  assert.ok(rounds.every((round) => round.status.life === "running"));
+  assert.equal(rounds[0]!.rows.length, 14);
+  assert.ok(rounds[0]!.rows.some((row) => row.kind === "thought" && row.text === "reuse-wait-0"));
+  reader.clear();
+  const fresh = await reader.read(input);
+  assert.equal(decodes, 24, "a cleared reader decodes anew");
+  assert.equal(new Set([...rounds, fresh].map((round) => round.rows)).size, 2, "clear drops the retained frontier");
 });
 
 test("scoped status invalidates Tell binding, delivery, and receipt without timeline growth", async (context) => {
@@ -697,17 +675,17 @@ test("a cached frontier rebuilds on Turn closure and preserves final rows idle s
   } = await liveWaitFixture(context);
   assert.ok(member);
   seedWaitNarration(member, 12);
-  let rounds = 0;
+  let judgements = 0;
   let closing: Promise<void> | undefined;
   const result = await executeWaitAkuma({
     path: root,
     ids: [member.id],
     completion: "all",
     timeoutMs: 5_000,
-    observe(observed) {
-      rounds += 1;
-      const view = observed[0]!;
-      if (rounds === 1) {
+    // A custom judge forces full rounds without a live viewer and keeps default completion semantics.
+    predicate(status) {
+      judgements += 1;
+      if (judgements === 1) {
         closing = (async () => {
           await endTurn(member.paths, {
             turnSequence: member.turn.sequence,
@@ -718,18 +696,21 @@ test("a cached frontier rebuilds on Turn closure and preserves final rows idle s
           member.leash.release();
         })();
       }
-      if (view.status.life === "asleep") {
-        assert.equal(view.status.timeline.kind, "idle");
-        assert.equal(view.status.timeline.entries.length, 0);
-        assert.equal(view.rows.filter((row) => row.kind === "thought").length, 12);
-        assert.equal(view.rows.at(-1)?.kind, "outcome");
-      }
+      return defaultWaitComplete(status);
     },
   });
   await closing;
   assert.equal(result.reason, "completed");
-  assert.ok(rounds >= 2);
+  assert.ok(judgements >= 2);
   assert.equal(result.observations[0]?.life, "asleep");
+  const reader = createLiveStatusReader(member.paths, member.id);
+  context.after(reader.clear);
+  const final = await reader.read({ aperture: "monitoring" });
+  assert.equal(final.status.life, "asleep");
+  assert.equal(final.status.timeline.kind, "idle");
+  assert.equal(final.status.timeline.entries.length, 0);
+  assert.equal(final.rows.filter((row) => row.kind === "thought").length, 12);
+  assert.equal(final.rows.at(-1)?.kind, "outcome");
 });
 
 test("a scoped reader discards failed read, decode, schema, and commit attempts", async (context) => {
@@ -790,7 +771,7 @@ test("a scoped reader discards failed read, decode, schema, and commit attempts"
   }
 });
 
-test("live wait cancellation during Heart admission and callback failure close the observation", async (context) => {
+test("wait cancellation during Heart admission closes the observation without admitting a round", async (context) => {
   const {
     root,
     members: [member],
@@ -806,40 +787,12 @@ test("live wait cancellation during Heart admission and callback failure close t
     ids: [member.id],
     completion: "all",
     signal: controller.signal,
-    observe() {
-      assert.fail("no admitted round");
-    },
   });
   const rejected = assert.rejects(waiting, (error) => error === reason);
   const timer = setTimeout(() => controller.abort(reason), 20);
   await rejected;
   clearTimeout(timer);
   blocker.close();
-  const callbackFailure = new Error("viewer failed");
-  await assert.rejects(
-    executeWaitAkuma({
-      path: root,
-      ids: [member.id],
-      completion: "all",
-      observe() {
-        throw callbackFailure;
-      },
-    }),
-    (error) => error === callbackFailure,
-  );
-  const identityFailure = new Error("identity failed");
-  await assert.rejects(
-    executeWaitAkuma({
-      path: root,
-      ids: [member.id],
-      completion: "all",
-      identity: async () => {
-        throw identityFailure;
-      },
-      observe() {},
-    }),
-    (error) => error === identityFailure,
-  );
   await finishBodyIfIdle(member.paths, { sequence: member.body.sequence, at: LIVE_WAIT_AT });
   member.leash.release();
   const result = await executeWaitAkuma({
@@ -847,7 +800,6 @@ test("live wait cancellation during Heart admission and callback failure close t
     ids: [member.id],
     completion: "all",
     timeoutMs: 0,
-    observe() {},
   });
   assert.equal(result.reason, "completed");
   const claim = await HeldAkumaLeash.try(member.paths);
@@ -855,7 +807,7 @@ test("live wait cancellation during Heart admission and callback failure close t
   claim.release();
 });
 
-test("live reuse refreshes life across Body end, free-seat races, and succession", async (context) => {
+test("scoped reader reuse refreshes life across Body end, free-seat races, and succession", async (context) => {
   const {
     root,
     members: [member],
@@ -892,7 +844,7 @@ test("live reuse refreshes life across Body end, free-seat races, and succession
   await breakBody(member.paths, { sequence: body.sequence, end: "put-down", at: LIVE_WAIT_AT });
   successor.release();
   assert.equal((await reader.read(input)).status.life, "stranded");
-  const final = await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0, observe() {} });
+  const final = await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0 });
   assert.equal(final.reason, "completed", "completion precedes a passed deadline");
 });
 
@@ -943,19 +895,27 @@ test("releasing retention protection removes evidence from the memo without time
   after.close();
 });
 
-test("plural live wait drops an unreadable member memo and decodes anew when it recovers", async (context) => {
+test("plural wait drops an unreadable member memo and decodes anew when it recovers", async (context) => {
   const { root, members } = await liveWaitFixture(context, 2);
   const first = members[0]!;
   const second = members[1]!;
   seedWaitNarration(first, 1);
   seedWaitNarration(second, 1);
   const prepare = DatabaseSync.prototype.prepare;
-  let failRead = false;
+  let failNextRead = false;
   let reads = 0;
+  const controller = new AbortController();
+  const reason = new Error("recovery witnessed");
   context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
     if (sql.startsWith("WITH selected")) {
       reads += 1;
-      if (failRead && reads % 2 === 1) throw new Error("transient selected read failure");
+      // The second round's first member is unreadable; the third round reads both again.
+      if (failNextRead) {
+        failNextRead = false;
+        throw new Error("transient selected read failure");
+      }
+      if (reads === 2) failNextRead = true;
+      if (reads === 6) controller.abort(reason);
     }
     return prepare.call(this, sql);
   });
@@ -965,33 +925,14 @@ test("plural live wait drops an unreadable member memo and decodes anew when it 
     if (text.includes('"text":"reuse-wait-')) decodes += 1;
     return Reflect.apply(parse, JSON, [text, ...args]);
   });
-  const controller = new AbortController();
-  const reason = new Error("recovery witnessed");
-  let rounds = 0;
+  // A custom judge forces full rounds without a live viewer, so the unreadable round is a real round.
   await assert.rejects(
     executeWaitAkuma({
       path: root,
       ids: members.map((member) => member.id),
       completion: "all",
       signal: controller.signal,
-      observe(views) {
-        rounds += 1;
-        if (rounds === 1) failRead = true;
-        if (rounds === 2) {
-          assert.deepEqual(
-            views.map((view) => view.status.id),
-            [second.id],
-          );
-          failRead = false;
-        }
-        if (rounds === 3) {
-          assert.deepEqual(
-            views.map((view) => view.status.id),
-            [first.id, second.id],
-          );
-          controller.abort(reason);
-        }
-      },
+      predicate: () => false,
     }),
     (error) => error === reason,
   );

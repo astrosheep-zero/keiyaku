@@ -223,7 +223,7 @@ test("history page, exact and last use the identity of the actual retained resul
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence), signal(value.allocated.id, failed.sequence)]);
 });
 
-test("live all-wait observes an outcome before completion and deduplicates repeated rounds", { timeout: 10_000 }, async (t) => {
+test("all-wait observes final snapshot outcomes once per operation", { timeout: 10_000 }, async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-wait-"));
   const recorded = recordingPlugin(world);
   const first = await bornBody(world, "0b500004", AT);
@@ -231,19 +231,10 @@ test("live all-wait observes an outcome before completion and deduplicates repea
   t.after(() => { first.holder.release(); peer.holder.release(); });
   const turn = await outcome(first, "already committed");
   await finish(first);
-  let rounds = 0;
-  let finishing: Promise<void> | undefined;
   const result = await Akumas.of(world).wait({
-    akuma: [first.allocated.id, peer.allocated.id], completion: "all", signal: t.signal,
-    observe: { observe: () => {
-      rounds += 1;
-      assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
-      if (rounds === 3) finishing = finish(peer);
-    } },
+    akuma: [first.allocated.id, peer.allocated.id], completion: "all", timeoutMs: 0, signal: t.signal,
   });
-  await finishing;
-  assert.equal(result.reason, "completed");
-  assert.ok(rounds >= 3, "the observed result did not terminate the all-wait");
+  assert.equal(result.reason, "deadline");
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
   recorded.reset();
   await Akuma.select(world, first.allocated.id).idle({ timeoutMs: 0 });

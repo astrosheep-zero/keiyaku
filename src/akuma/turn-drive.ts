@@ -12,7 +12,7 @@ import {
   recordSession,
   recordTellDeliveries,
   recordTellReceipt,
-  type HeartSnapshot,
+  type BodyControlSnapshot,
   type ResumeCoordinate,
   type Soul,
   type TellFact,
@@ -451,7 +451,7 @@ async function settleCompletion(
 
 type TurnWakeup =
   | Readonly<{ kind: "event"; event: IteratorResult<AgentEvent> }>
-  | Readonly<{ kind: "heart"; observation: HeartSnapshot }>
+  | Readonly<{ kind: "heart"; observation: BodyControlSnapshot }>
   | Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>
   | Readonly<{ kind: "completion-failed"; error: unknown }>
   | Readonly<{ kind: "failed"; error: unknown }>;
@@ -468,7 +468,7 @@ type TurnWakeup =
  * waiter; later notifications are ignored rather than written, though the one reaction already
  * registered on a source that never settled stays attached until that source settles.
  */
-function createTurnWakeups(observeHeart: (after: HeartSnapshot) => Promise<HeartSnapshot>) {
+function createTurnWakeups(observeHeart: (after: BodyControlSnapshot) => Promise<BodyControlSnapshot>) {
   const queue: TurnWakeup[] = [];
   let waiter: ((wakeup: TurnWakeup) => void) | undefined;
   let stopped = false;
@@ -486,7 +486,7 @@ function createTurnWakeups(observeHeart: (after: HeartSnapshot) => Promise<Heart
         (error: unknown) => publish({ kind: "failed", error }),
       );
     },
-    heart: (after: HeartSnapshot): void => {
+    heart: (after: BodyControlSnapshot): void => {
       void observeHeart(after).then(
         (observation) => publish({ kind: "heart", observation }),
         (error: unknown) => publish({ kind: "failed", error }),

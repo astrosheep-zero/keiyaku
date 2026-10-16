@@ -9,14 +9,7 @@ import {
   executeTellAkuma,
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
-import {
-  executeWaitAkuma,
-  type NativeWaitResult,
-  type WaitIdentityFacts,
-  type WaitObservedAkuma,
-  type WaitObserver,
-  type WaitSelectedAkuma,
-} from "../akuma/akuma-wait.js";
+import { executeWaitAkuma, type NativeWaitResult } from "../akuma/akuma-wait.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
 import { parsePublicHistoryId } from "../akuma/identity.js";
 import { type ActivityHistory, type OutcomeRow } from "../akuma/projection.js";
@@ -35,12 +28,10 @@ import {
   requestForwardedSelectionTell,
   requestForwardedSelectionWait,
 } from "../akuma/selection-request.js";
-import { readAliases } from "../alias/index.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import type { AkumaAlias } from "../identity/selector.js";
 import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
@@ -76,7 +67,7 @@ type SelectionWaitMode = Readonly<{
 export type SelectionSeam = Readonly<{
   addressOne(input: UncheckedSelectionAddress): Promise<AddressedAkuma>;
   addressSet(input: UncheckedSelectionAddress): Promise<AddressedAkumaSet>;
-  wait(addressed: AddressedAkumaSet, mode: SelectionWaitMode, observer?: WaitObserver): Promise<AkumaWaitResult>;
+  wait(addressed: AddressedAkumaSet, mode: SelectionWaitMode): Promise<AkumaWaitResult>;
   kill(addressed: AddressedAkumaSet, signal?: AbortSignal): Promise<AkumaKillResult>;
   tell(addressed: AddressedAkuma, input: AkumaTellInput, signal?: AbortSignal): Promise<AkumaTellResult>;
   ask<T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, signal?: AbortSignal): Promise<AkumaAskResult<T>>;
@@ -134,8 +125,7 @@ function localSelection(reportDiagnostic: (message: string) => void): SelectionS
   return {
     addressOne: addressAkuma,
     addressSet: addressAkumaSet,
-    wait: async (addressed, mode, observer) =>
-      await localWait(addressed, { ...mode, ...(observer === undefined ? {} : { observer }) }, reportDiagnostic),
+    wait: async (addressed, mode) => await localWait(addressed, mode, reportDiagnostic),
     kill: async (addressed, abort) =>
       await executeKillAkuma({
         path: addressed.path,
@@ -178,8 +168,6 @@ export type AkumaWaitInput = AkumaSetAddressInput &
     completion?: "any" | "all";
     timeoutMs?: number;
     signal?: AbortSignal;
-    /** The existing optional live-observation seam, validated here like Ask's. */
-    observe?: WaitObserver;
   }>;
 
 export type AkumaTellInput = AkumaAddressInput &
@@ -286,34 +274,6 @@ async function createdTasksFor(
     path,
     statuses.map((status) => status.id),
   );
-}
-
-/**
- * One wait's identity-fact resolver: the alias bound to an Akuma in its world and
- * its Dispatch association. The alias index is read once, on the first observed
- * Akuma, and each Akuma's alias is the first binding the canonical order offers.
- * Alias bindings and selected Dispatch associations are read once for this live
- * stage. Final result composition owns a separate, fresh Dispatch observation.
- */
-function waitIdentityFacts(
-  path: WorldRoot,
-  repo: Repo | undefined,
-  selected: readonly AkumaStatus["id"][],
-): (id: AkumaStatus["id"]) => Promise<WaitIdentityFacts> {
-  let aliases: ReadonlyMap<AkumaStatus["id"], AkumaAlias> | undefined;
-  let contracts: ReadonlyMap<AkumaStatus["id"], DispatchAssociation> | undefined;
-  return async (id) => {
-    if (aliases === undefined) {
-      const bound = new Map<AkumaStatus["id"], AkumaAlias>();
-      for (const binding of await readAliases(path)) {
-        if (!bound.has(binding.akuId)) bound.set(binding.akuId, binding.alias);
-      }
-      aliases = bound;
-    }
-    contracts ??= await dispatchAssociations(repo, selected);
-    const alias = aliases.get(id);
-    return { ...(alias === undefined ? {} : { alias }), contract: contracts.get(id)! };
-  };
 }
 
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
@@ -470,7 +430,6 @@ async function localWait(
     timeoutMs?: number;
     signal?: AbortSignal;
     repo?: Repo;
-    observer?: WaitObserver;
   }>,
   reportDiagnostic: (message: string) => void,
 ): Promise<AkumaWaitResult> {
@@ -485,10 +444,6 @@ async function localWait(
         outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
-        identity: waitIdentityFacts(addressed.path, input.repo, addressed.orderedIds),
-        selectionOrder: addressed.orderedIds,
-        ...(input.observer?.selected === undefined ? {} : { onSelected: input.observer.selected }),
-        ...(input.observer?.observe === undefined ? {} : { observe: input.observer.observe }),
       }),
     );
   } catch (error) {
@@ -497,52 +452,27 @@ async function localWait(
   }
 }
 
-function waitObserver(value: unknown): WaitObserver | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new TypeError("observe must be a WaitObserver");
-  const record = value as Record<string, unknown>;
-  for (const key of Object.keys(record)) {
-    if (key !== "selected" && key !== "observe") throw new TypeError(`observe has unknown field: ${key}`);
-    if (record[key] !== undefined && typeof record[key] !== "function")
-      throw new TypeError(`observe.${key} must be a function`);
-  }
-  return {
-    ...(record.selected === undefined
-      ? {}
-      : { selected: record.selected as (selected: readonly WaitSelectedAkuma[]) => void }),
-    ...(record.observe === undefined
-      ? {}
-      : { observe: record.observe as (observed: readonly WaitObservedAkuma[]) => void }),
-  };
-}
-
 export async function waitAkumaOn(
   seam: SelectionSeam,
   input: AkumaWaitInput & Readonly<{ path: WorldRoot }>,
 ): Promise<AkumaWaitResult> {
   const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal", "observe"].includes(key)) {
+    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
       throw new TypeError(`Akumas.wait input has unknown field: ${key}`);
     }
   }
-  const observer = waitObserver(values.observe);
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
   const repo = values.repo as Repo | undefined;
   const addressed = await seam.addressSet(setAddress(values));
-  return await seam.wait(
-    addressed,
-    {
-      completion: selected,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
-      ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-      ...(repo === undefined ? {} : { repo }),
-    },
-    observer,
-  );
+  return await seam.wait(addressed, {
+    completion: selected,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(callerSignal === undefined ? {} : { signal: callerSignal }),
+    ...(repo === undefined ? {} : { repo }),
+  });
 }
 
 export async function killAkumaOn(

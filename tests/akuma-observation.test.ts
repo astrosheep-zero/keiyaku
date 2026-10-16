@@ -213,13 +213,36 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
       return statement;
     });
     const result = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs: 250 });
-    assert.ok(probes > 4, "returned without another probe after the final status invalidated completion");
+    assert.equal(result.reason, "deadline", "new pending work invalidates the completed probe");
     assert.equal(defaultWaitComplete(result.observations[0]!), false);
     assert.ok(
       result.observations[0]!.timeline.entries.some(
         (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
       ),
     );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("public status exposes frozen provider selection without private recipe or invented model", async () => {
+  const { Akuma } = await import("../src/index.js");
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, {
+      ...value.soul,
+      provider: { ...value.soul.provider, env: { SECRET: "private-token" }, config: { private: "private-config" } },
+      options: { systemPrompt: "private-prompt" },
+    });
+    const status = await Akuma.select(value.root, id).status();
+    assert.equal(status.provider, "claude");
+    assert.equal(Object.hasOwn(status, "model"), false);
+    const json = JSON.stringify(status);
+    for (const secret of ["private-token", "private-config", "private-prompt"])
+      assert.equal(json.includes(secret), false);
   } finally {
     leash.release();
     value.close();
@@ -238,6 +261,8 @@ test("a live status observation pairs its bounded status with the same complete 
     const observed = await readLiveStatus(value.root, id, input);
     const facts = await readStatusFacts(paths, input);
     const ledger = projectTurns(facts);
+    assert.equal(observed.status.provider, "claude");
+    assert.equal(observed.status.model, "claude-sonnet-4-5");
     assert.deepEqual(observed.status.timeline, selectSnapshot(ledger, input).snapshot, "status keeps its bounded public shape");
     assert.deepEqual(observed.rows, ledger.rows, "the callback companion is the complete projection of that frontier");
     assert.equal("rows" in observed.status, false, "the public status itself carries no companion field");

@@ -18,19 +18,13 @@ import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
 import { displayContext, emit, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
-import {
-  callObservationStream,
-  inputWaitStream,
-  waitObservationStream,
-  type WaitSelectedIdentity,
-} from "../render/akuma-activity.js";
+import { callObservationStream, inputWaitStream } from "../render/akuma-activity.js";
 import {
   askRawAnswer,
   callRawAnswer,
   historyRawAnswer,
   historyText,
   tellText,
-  waitRawAnswer,
   waitText,
 } from "../render/akuma-activity.js";
 import {
@@ -101,22 +95,6 @@ async function promptBody(
   const bytes = await input.readStdin();
   if (isBlankInput(bytes)) throw new CliUsageError(`${action} requires a nonblank prompt`);
   return bytes;
-}
-
-function waitObserver(
-  stream: ReturnType<typeof waitObservationStream>,
-  driver: ActivityDriver,
-  onSelected?: (selected: readonly WaitSelectedIdentity[]) => void,
-): import("../../library/akumas.js").WaitObserver {
-  return {
-    selected: (selected) => {
-      onSelected?.(selected);
-      stream.select(selected);
-    },
-    observe: (observed) => {
-      driver.settle(stream.observe(observed), stream.frame());
-    },
-  };
 }
 
 async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
@@ -229,43 +207,19 @@ async function runWait(
   input: InvokeInput,
 ): Promise<number> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
-  const stream = command.output === "text" ? waitObservationStream(resultContext()) : undefined;
-  const driver = new ActivityDriver(process.stderr);
-  const startedAt = Date.now();
-  let selection: readonly WaitSelectedIdentity[] | undefined;
-  const observer =
-    stream === undefined
-      ? undefined
-      : waitObserver(stream, driver, (selected) => {
-          selection = selected;
-        });
-  try {
-    const result = await akumas(input).wait({
-      akuma: command.akuma,
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(command.completion === undefined ? {} : { completion: command.completion }),
-      ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(observer === undefined ? {} : { observe: observer }),
-    });
-    const streamed = stream !== undefined && stream.streamed();
-    if (stream !== undefined && streamed) driver.conclude(stream.conclude(result));
-    const presentation = {
-      ...(alias === undefined ? {} : { alias }),
-      ...(selection === undefined ? {} : { selection }),
-      startedAt,
-    };
-    if (command.output === "json") {
-      writeJson(result);
-      return 0;
-    }
-    const raw = waitRawAnswer(result, streamed);
-    if (raw === undefined) emitAnswer(waitText(result, presentation, displayContext()), false);
-    else emitAnswer(raw, true);
+  const result = await akumas(input).wait({
+    akuma: command.akuma,
+    ...(input.repo === undefined ? {} : { repo: input.repo }),
+    ...(command.completion === undefined ? {} : { completion: command.completion }),
+    ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (command.output === "json") {
+    writeJson(result);
     return 0;
-  } finally {
-    driver.close(stream?.flush() ?? []);
   }
+  emitAnswer(waitText(result, { ...(alias === undefined ? {} : { alias }) }, displayContext()), false);
+  return 0;
 }
 
 async function runTell(

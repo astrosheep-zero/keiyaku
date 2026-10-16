@@ -385,17 +385,6 @@ test("selection request permissions stay separated by action", () => {
   assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
 });
 
-async function readTransportClaim(directory: string, id: string): Promise<Readonly<{ payload: unknown }>> {
-  for (const name of (await readdir(directory)).filter((value) => value.endsWith(".request.json"))) {
-    const claim = JSON.parse(await readFile(join(directory, name), "utf8")) as Readonly<{
-      id?: unknown;
-      payload?: unknown;
-    }>;
-    if (claim.id === id) return { payload: claim.payload };
-  }
-  throw new Error(`transport claim ${id} was not found`);
-}
-
 type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>;
 type FixtureReviewResult = Awaited<ReturnType<ContractRequestPort["review"]>>;
 
@@ -1104,8 +1093,9 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
       acceptedContract("delivery-result", "deliver", contractId),
     );
     assert.equal(calls, 1);
-    const claim = await readTransportClaim(pump.directory, id);
-    assert.deepEqual(claim.payload, {
+    const admitted = await readRequest(parent.paths, id);
+    assert.ok(admitted);
+    assert.deepEqual(JSON.parse(admitted.payloadJson), {
       repoRoot: root,
       contractId,
       message: "ship it",
@@ -2187,8 +2177,9 @@ test("forwarded materialization retains and replays its handoff evidence", async
       },
     );
     assert.equal(calls, 1);
-    const claim = await readTransportClaim(pump.directory, id);
-    assert.deepEqual(claim.payload, {
+    const admitted = await readRequest(parent.paths, id);
+    assert.ok(admitted);
+    assert.deepEqual(JSON.parse(admitted.payloadJson), {
       repoRoot: root,
       contractId: "kei/conflicted",
       includeDirty: false,
@@ -2367,10 +2358,10 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
     assert.ok((await result.value.diff())?.includes("candidate.txt"));
     assert.ok(observations.includes("admitted"));
     assert.equal(Object.hasOwn(JSON.parse(JSON.stringify(result.value)), "readDiff"), false);
-    const claims = (await readdir(pump.directory)).filter((name) => name.endsWith(".request.json"));
-    assert.equal(claims.length, 1);
-    const claim = JSON.parse(await readFile(join(pump.directory, claims[0]!), "utf8")) as { id: string };
-    assert.equal((await readRequest(parent.paths, claim.id))?.state, "served");
+    const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
+    assert.equal(receipts.length, 1);
+    const receipt = JSON.parse(await readFile(join(pump.directory, receipts[0]!), "utf8")) as { id: string };
+    assert.equal((await readRequest(parent.paths, receipt.id))?.state, "served");
   } finally {
     await pump.close();
   }
@@ -2428,10 +2419,10 @@ test("forwarded native review preserves the owner outcome and stores the address
       (fact) => fact.contract === bound.contract && fact.kind === "attestation" && fact.data.gate === "reviewed",
     );
     assert.equal(reviewed.length, 1);
-    const claims = (await readdir(pump.directory)).filter((name) => name.endsWith(".request.json"));
-    assert.equal(claims.length, 1);
-    const claim = JSON.parse(await readFile(join(pump.directory, claims[0]!), "utf8")) as { id: string };
-    const stored = await readRequest(parent.paths, claim.id);
+    const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
+    assert.equal(receipts.length, 1);
+    const receipt = JSON.parse(await readFile(join(pump.directory, receipts[0]!), "utf8")) as { id: string };
+    const stored = await readRequest(parent.paths, receipt.id);
     assert.deepEqual(stored?.state === "served" && "serviceJson" in stored ? JSON.parse(stored.serviceJson) : null, {
       kind: "accepted-reference",
       repoRoot: repository.path,

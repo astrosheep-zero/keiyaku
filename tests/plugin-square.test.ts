@@ -337,10 +337,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
       assert.match(queued[0]?.at(-1) ?? "", /attention: act\/\d+ for Alice from aku\/answered/u);
-      const evidence = readFileSync(join(root, "square-ledger", "evidence.ndjsonl"), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as { kind: string; outcome: string; participant: string });
+      const evidence = await createHostLedgerPort({ rootPath: join(root, "square-ledger") }).listWakeAttempts();
       assert.equal(
         evidence.filter((row) => row.kind === "wake" && row.outcome === "accepted" && ["Alice", "Bob"].includes(row.participant))
           .length,
@@ -438,8 +435,8 @@ test("outcome observation catches exact notices only for the explicit observer",
         assert.equal(snapshot.delivered("Bob", notice.id), [first.id, failed.id].includes(notice.id));
       }
       const pending = await createSquareApplication({ cwd: ".", squarePath: square.location, participant: "Bob", env: {} }).catch();
-      assert.ok(pending.activities.some((item) => item.body?.startsWith("incidental")));
-      assert.ok(pending.activities.some((item) => item.actor === "aku/other"));
+      assert.ok(pending.data.activities.some((item) => item.body?.startsWith("incidental")));
+      assert.ok(pending.data.activities.some((item) => item.actor === "aku/other"));
     });
   });
 });

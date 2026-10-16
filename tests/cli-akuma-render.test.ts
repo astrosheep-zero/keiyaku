@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
-import { type ActivityRow, type IdleSnapshotRow, type OpenSnapshotRow } from "../src/akuma/projection.js";
+import { type ActivityRow, type OpenSnapshotRow } from "../src/akuma/projection.js";
 import {
   activityStream,
   callObservationStream,
@@ -11,7 +11,6 @@ import {
   snapshotActivityLines,
   snapshotText,
   tellText,
-  waitObservationStream,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import { askProgressStream, waitedTellProgress } from "../src/cli/render/akuma.js";
@@ -19,7 +18,6 @@ import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { displayColumns, padToDisplay } from "../src/cli/render/terminal.js";
-import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
   activeTool,
   completedTool,
@@ -41,21 +39,6 @@ function running(id: string, rows: readonly OpenSnapshotRow[]) {
   });
 }
 
-function settled(id: string, rows: readonly IdleSnapshotRow[]) {
-  return akumaStatusSchema.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "asleep",
-    allowed: [],
-    timeline: idleAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
-  });
-}
-
-function observed(status: AkumaStatus, rows: readonly ActivityRow[]) {
-  return { status, rows, contract: { kind: "none" as const } };
-}
-
-/** A synthetic live observation; these render fixtures never exercise the observation budget. */
 function liveObservation(status: AkumaStatus, rows: readonly ActivityRow[]) {
   return { status, rows, ordinarySelected: 0 };
 }
@@ -420,83 +403,6 @@ test("Akuma life mark covers the full life vocabulary from one definition site",
   }
 });
 
-test("plural wait tags selected identities and keeps rows compact at 80 columns", () => {
-  const first = "aku/worker/deadbeef";
-  const second = "aku/worker/facefeed";
-  const firstBase = activeTool(1, "bash", { kind: "run", command: "open" });
-  const secondBase = activeTool(1, "bash", { kind: "run", command: "other-open" });
-  const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
-  stream.select([
-    { id: first, alias: parseAkumaAlias("@first") },
-    { id: second, alias: parseAkumaAlias("@second") },
-  ]);
-  const opening = stream.observe([
-    observed(running(first, [firstBase]), [firstBase]),
-    observed(running(second, [secondBase]), [secondBase]),
-  ]);
-  assert.deepEqual(opening.slice(0, 2), ["dead @first", "face @second"]);
-  assert.equal(opening.at(-1), "─".repeat(Math.max(displayColumns("dead @first"), displayColumns("face @second"))));
-
-  const longSay: OpenSnapshotRow = {
-    kind: "said",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "a long streamed answer ".repeat(8),
-  };
-  const sameMinuteNote: OpenSnapshotRow = {
-    kind: "note",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "same minute",
-  };
-  const rows = stream.observe([
-    observed(running(first, [firstBase, longSay]), [firstBase, longSay]),
-    observed(running(second, [secondBase, sameMinuteNote]), [secondBase, sameMinuteNote]),
-  ]);
-  assert.equal(rows.length, 1, "live rows stay in the redrawable frame");
-  const frame = stream.frame();
-  const liveSayIndex = frame.findIndex((row) => row.includes(" say    "));
-  assert.match(frame[liveSayIndex]!, /^\s*dead ● say    “/u);
-  assert.equal(frame[liveSayIndex + 1]!.endsWith("…"), true, "an in-flight say uses two lines and stays open");
-  assert.match(frame[liveSayIndex + 1]!, /^\s+│\s+\S/u, "the continuation aligns under the speech body");
-  assert.equal((frame.join("\n").match(/“/gu) ?? []).length, 1);
-  assert.equal((frame.join("\n").match(/”/gu) ?? []).length, 0);
-  assert.match(
-    rows[0]!,
-    /^\d{2}:\d{2} face │ note   same minute$/u,
-    "the stream-global minute keeps its blank time column",
-  );
-  for (const row of rows) assert.ok(displayColumns(row) <= 80, row);
-});
-
-test("plural wait falls back to a distinguishing identity suffix for equal final segments", () => {
-  const first = "aku/one/deadbeef";
-  const second = "aku/two/deadbeef";
-  const firstBase = activeTool(1, "bash", { kind: "run", command: "open" });
-  const secondBase = activeTool(1, "bash", { kind: "run", command: "other-open" });
-  const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
-  stream.select([
-    { id: first, alias: parseAkumaAlias("@first") },
-    { id: second, alias: parseAkumaAlias("@second") },
-  ]);
-  const opening = stream.observe([
-    observed(running(first, [firstBase]), [firstBase]),
-    observed(running(second, [secondBase]), [secondBase]),
-  ]);
-  assert.deepEqual(opening.slice(0, 2), ["one/deadbeef @first", "two/deadbeef @second"]);
-
-  const firstNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first" };
-  const secondNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "second" };
-  const rows = stream.observe([
-    observed(running(first, [firstBase, firstNote]), [firstBase, firstNote]),
-    observed(running(second, [secondBase, secondNote]), [secondBase, secondNote]),
-  ]);
-  assert.match(rows[0]!, /^\d{2}:\d{2} one\/deadbeef │ note   first$/u);
-  assert.match(rows[1]!, /^      two\/deadbeef │ note   second$/u);
-});
-
 test("an open turn settles old says on the rail and only its trailing say flushes unresolved", () => {
   const oldSay: OpenSnapshotRow = {
     kind: "said",
@@ -553,85 +459,6 @@ test("display-width padding measures cells, so a wide emoji alias cannot skew it
     displayColumns(column("ab")),
     "a wide emoji and a two-cell name open the next column at the same place",
   );
-});
-
-test("plural wait closes settled said rows but leaves in-flight said rows open", () => {
-  const first = "aku/worker/deadbeef";
-  const second = "aku/worker/facefeed";
-  const firstBase = activeTool(1, "bash", { kind: "run", command: "open" });
-  const secondBase = activeTool(1, "bash", { kind: "run", command: "other-open" });
-  const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
-  stream.select([{ id: first }, { id: second }]);
-  stream.observe([
-    observed(running(first, [firstBase]), [firstBase]),
-    observed(running(second, [secondBase]), [secondBase]),
-  ]);
-
-  const inFlight: IdleSnapshotRow = {
-    kind: "said",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "in-flight ".repeat(30),
-  };
-  const complete: IdleSnapshotRow = {
-    kind: "said",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "settled ".repeat(30),
-  };
-  const rows = stream.observe([
-    observed(running(first, [firstBase, inFlight]), [firstBase, inFlight]),
-    observed(settled(second, [complete]), [complete]),
-  ]);
-  const frame = stream.frame();
-  const liveSayIndex = frame.findIndex((row) => row.includes(" say    "));
-  assert.match(frame[liveSayIndex]!, /^\s*dead ● say    “/u);
-  assert.equal(frame[liveSayIndex + 1]!.endsWith("…"), true, "an in-flight say uses two lines without closing");
-  assert.match(rows[0]!, /^\d{2}:\d{2} face │ say    “/u);
-  assert.equal(rows.length, 2, "a settled say uses its two-line budget");
-  assert.equal(rows[1]!.endsWith("…”"), true, "a settled say closes its quote after truncation");
-  for (const row of rows) assert.ok(displayColumns(row) <= 80, row);
-});
-
-test("plural wait attributes omitted spans and the scoreboard by identity tag", () => {
-  const first = "aku/worker/deadbeef";
-  const second = "aku/worker/facefeed";
-  const firstBase = activeTool(1, "bash", { kind: "run", command: "open" });
-  const secondBase = activeTool(1, "bash", { kind: "run", command: "other-open" });
-  const stream = waitObservationStream({ columns: 80, color: false }, { now: () => 0 });
-  stream.select([{ id: first }, { id: second }]);
-  stream.observe([
-    observed(running(first, [firstBase]), [firstBase]),
-    observed(running(second, [secondBase]), [secondBase]),
-  ]);
-  const tools = Array.from({ length: 9 }, (_, index) =>
-    completedTool(index + 2, "bash", { kind: "run", command: `tool-${index + 1}` }),
-  );
-  stream.observe([
-    observed(running(first, [firstBase, ...tools]), [firstBase, ...tools]),
-    observed(running(second, [secondBase]), [secondBase]),
-  ]);
-  const conclusion = stream.conclude({
-    reason: "deadline",
-    observations: [
-      {
-        status: running(first, [firstBase, ...tools]),
-        contract: { kind: "none" as const },
-        createdTasks: { kind: "present" as const, rows: [] },
-      },
-      {
-        status: running(second, [secondBase]),
-        contract: { kind: "none" as const },
-        createdTasks: { kind: "present" as const, rows: [] },
-      },
-    ],
-    unobserved: [],
-  });
-  assert.match(conclusion, /^      dead ⋮ 6 omitted$/mu);
-  assert.match(conclusion, /^\d{2}:\d{2} dead ● running/mu);
-  assert.match(conclusion, /^\d{2}:\d{2} face ● running/mu);
 });
 
 test("changes section renders unknown diffstat as ~ and known as +a -r", () => {

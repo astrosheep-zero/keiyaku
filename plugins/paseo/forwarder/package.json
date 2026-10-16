@@ -2,7 +2,7 @@
   "name": "@astrosheep/keiyaku-plugin-paseo",
   "version": "0.1.0",
   "type": "module",
-  "files": ["index.js", "index.d.ts"],
+  "files": ["index.js", "index.d.ts", "backfill-titles.mjs"],
   "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
   "scripts": { "build": "tsc -p tsconfig.json", "prepack": "npm run build" },
   "peerDependencies": { "@astrosheep/keiyaku": "^4.6.8" },

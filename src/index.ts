@@ -143,9 +143,6 @@ export type {
   ForkResult,
   TellResult,
   TellWake,
-  WaitObservedAkuma,
-  WaitObserver,
-  WaitSelectedAkuma,
 } from "./library/akumas.js";
 export type { ContinuationReport } from "./library/continuation.js";
 export type { KeiyakuLibrary, ReconcileInput } from "./library/contract-composition.js";

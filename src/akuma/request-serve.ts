@@ -76,34 +76,23 @@ async function projectCommandReceipt(
   outcome?: Readonly<{ kind: "returned"; result: unknown }>,
   failure?: unknown,
 ): Promise<void> {
+  const identity = { id: fact.id, action: fact.action };
   const receipt =
     fact.state === "refused"
-      ? { id: fact.id, action: fact.action, state: "refused" as const, diagnostic: fact.diagnostic }
-      : fact.state === "voided"
+      ? { ...identity, state: fact.state, diagnostic: fact.diagnostic }
+      : fact.state === "voided" || fact.state === "unproven"
         ? {
-            id: fact.id,
-            action: fact.action,
-            state: "voided" as const,
+            ...identity,
+            state: fact.state,
             evidence: fact.evidence,
             ...(failure === undefined ? {} : { failure }),
-            ...(outcome === undefined ? {} : { outcome: outcome.result }),
+            ...(fact.state === "voided" && outcome !== undefined ? { outcome: outcome.result } : {}),
           }
-        : fact.state === "unproven"
-          ? {
-              id: fact.id,
-              action: fact.action,
-              state: "unproven" as const,
-              evidence: fact.evidence,
-              ...(failure === undefined ? {} : { failure }),
-            }
-          : outcome === undefined
-            ? {
-                id: fact.id,
-                action: fact.action,
-                state: "served" as const,
-                reference: replayReference(fact, command),
-              }
-            : { id: fact.id, action: fact.action, state: "served" as const, outcome };
+        : {
+            ...identity,
+            state: "served",
+            ...(outcome === undefined ? { reference: replayReference(fact, command) } : { outcome }),
+          };
   try {
     await atomicJson(receiptPath(input.directory, input.transportId), receipt);
   } catch (error) {
@@ -116,7 +105,7 @@ async function serveResolvedCommand(
   command: ErasedRequestCommand,
   request: ResolvedRequest,
   execute: ExecuteRequest,
-): Promise<boolean> {
+): Promise<void> {
   let fact = await admitRequest(input.paths, {
     id: input.claim.id,
     action: input.claim.action,
@@ -124,56 +113,45 @@ async function serveResolvedCommand(
     admittedAt: input.now(),
     permitted: request.isPermitted(input.allowed),
   });
+  if (fact.state === "admitted" && !input.admissionOpen()) {
+    fact = await voidRequest(input.paths, fact.id, "body closed request admission");
+  }
   if (fact.state !== "admitted") {
     await projectCommandReceipt(input, fact, command);
-    return true;
+    return;
   }
-  if (!input.admissionOpen()) {
-    fact = await voidRequest(input.paths, fact.id, "body closed request admission");
-    await projectCommandReceipt(input, fact, command);
-    return true;
-  }
+  const observation = {
+    directory: input.directory,
+    transportId: input.transportId,
+    id: fact.id,
+    action: fact.action,
+  };
+  const progress = publishRequestProgress(observation);
+  const cancellation =
+    command.completion === "service" && request.supportsCancellation
+      ? observeRequestCancellation(observation)
+      : undefined;
+  let outcome: ExecutedRequest["outcome"] | undefined;
+  let failure: unknown;
   try {
-    const progress = publishRequestProgress({
-      directory: input.directory,
-      transportId: input.transportId,
-      id: fact.id,
-      action: fact.action,
-    });
-    const cancellation =
-      command.completion === "service" && request.supportsCancellation
-        ? observeRequestCancellation({
-            directory: input.directory,
-            transportId: input.transportId,
-            id: fact.id,
-            action: fact.action,
-          })
-        : undefined;
-    const facts: ExecutionFacts = {
+    const served = await execute(fact, {
       id: fact.id,
       admittedAt: fact.admittedAt,
       requester: fact.requester,
       signal: cancellation === undefined ? input.signal : AbortSignal.any([input.signal, cancellation.signal]),
       admissionOpen: input.admissionOpen,
       progress: progress.progress,
-    };
-    try {
-      const served = await execute(fact, facts);
-      fact = served.fact;
-      await progress.flush();
-      await projectCommandReceipt(input, fact, command, served.outcome);
-    } finally {
-      await progress.close();
-      await cancellation?.close();
-    }
+    });
+    fact = served.fact;
+    outcome = served.outcome;
   } catch (error) {
-    const failure = encodedFailure(request, error);
+    failure = encodedFailure(request, error);
     const current = await readRequest(input.paths, fact.id);
     if (current === null) throw error;
     if (current.state === "reserved") {
       const parent = (await readHeart(input.paths)).soul;
       if (parent === null) throw new Error("reserved request settlement requires a born parent Soul");
-      if (!(await settleReserved(input.paths, parent, current, input.now, input.signal))) return true;
+      if (!(await settleReserved(input.paths, parent, current, input.now, input.signal))) return;
       fact = (await readRequest(input.paths, fact.id)) ?? current;
     } else {
       fact =
@@ -185,55 +163,43 @@ async function serveResolvedCommand(
               : await unproveRequest(input.paths, fact.id, diagnostic(error))
             : current;
     }
-    await projectCommandReceipt(input, fact, command, undefined, failure);
+  } finally {
+    try {
+      await progress.close();
+    } finally {
+      await cancellation?.close();
+    }
   }
-  return true;
+  // Transport failure cannot re-enter execution settlement.
+  await projectCommandReceipt(input, fact, command, outcome, failure);
 }
 
-async function serveChildCommand(
-  input: ServeInput,
-  command: Extract<ErasedRequestCommand, { completion: "child" }>,
-): Promise<boolean> {
-  const request = command.resolve(input.claim.payload);
+async function serveCommand(input: ServeInput, command: ErasedRequestCommand): Promise<void> {
+  const { completion, request } =
+    command.completion === "child"
+      ? { completion: "child" as const, request: command.resolve(input.claim.payload) }
+      : { completion: "service" as const, request: command.resolve(input.claim.payload) };
   if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
   return await serveResolvedCommand(input, command, request, async (fact, facts) => {
-    const served = await request.execute(facts);
-    return {
-      fact: await serveChildRequest(input.paths, fact.id, served.child),
-      outcome: { kind: "returned", result: served.result },
-    };
-  });
-}
-
-async function serveServiceCommand(
-  input: ServeInput,
-  command: Extract<ErasedRequestCommand, { completion: "service" }>,
-): Promise<boolean> {
-  const request = command.resolve(input.claim.payload);
-  if (request === null) throw new Error(`registered request action ${input.claim.action} rejected its payload`);
-  return await serveResolvedCommand(input, command, request, async (fact, facts) => {
-    await beginRequest(input.paths, fact.id);
-    const served = await request.execute(facts);
-    if (served.kind === "voided") {
+    if (completion === "child") {
+      const served = await request.execute(facts);
       return {
-        fact: await voidRequest(input.paths, fact.id, "returned owner outcome was voided"),
-        outcome: { kind: "returned", result: served.outcome },
+        fact: await serveChildRequest(input.paths, fact.id, served.child),
+        outcome: { kind: "returned", result: served.result },
       };
     }
-    return {
-      fact: await serveUpstreamRequest(input.paths, fact.id, served.serviceJson),
-      outcome: { kind: "returned", result: served.result },
-    };
+    await beginRequest(input.paths, fact.id);
+    const served = await request.execute(facts);
+    return served.kind === "voided"
+      ? {
+          fact: await voidRequest(input.paths, fact.id, "returned owner outcome was voided"),
+          outcome: { kind: "returned", result: served.outcome },
+        }
+      : {
+          fact: await serveUpstreamRequest(input.paths, fact.id, served.serviceJson),
+          outcome: { kind: "returned", result: served.result },
+        };
   });
-}
-
-async function serveCommand(input: ServeInput, command: ErasedRequestCommand): Promise<boolean> {
-  switch (command.completion) {
-    case "child":
-      return await serveChildCommand(input, command);
-    case "service":
-      return await serveServiceCommand(input, command);
-  }
 }
 
 function diagnostic(error: unknown): string {
@@ -256,40 +222,30 @@ function provesNoProductEffect(failure: unknown): boolean {
   return failure !== null && typeof failure === "object" && (failure as { kind?: unknown }).kind === "refused";
 }
 
-export async function serveRequest(input: ServeInput): Promise<boolean> {
+export async function serveRequest(input: ServeInput): Promise<void> {
   const command = input.commands[input.claim.action];
-  if (command === undefined) {
-    await atomicJson(receiptPath(input.directory, input.transportId), {
-      id: input.claim.id,
-      action: input.claim.action,
-      state: "refused",
-      diagnostic: `request action ${input.claim.action} is not registered`,
-    });
-    return true;
+  let diagnostic = `request action ${input.claim.action} is not registered`;
+  if (command !== undefined) {
+    try {
+      return await serveCommand(input, command);
+    } catch (error) {
+      if (!isRequestInputConflict(error)) throw error;
+      diagnostic = error.message;
+    }
   }
-  return await serveCommand(input, command);
-}
-
-async function serveTransportClaim(input: ServeInput): Promise<boolean> {
-  try {
-    return await serveRequest(input);
-  } catch (error) {
-    if (!isRequestInputConflict(error)) throw error;
-    await atomicJson(receiptPath(input.directory, input.transportId), {
-      id: input.claim.id,
-      action: input.claim.action,
-      state: "refused",
-      diagnostic: error.message,
-    });
-    return true;
-  }
+  await atomicJson(receiptPath(input.directory, input.transportId), {
+    id: input.claim.id,
+    action: input.claim.action,
+    state: "refused",
+    diagnostic,
+  });
 }
 
 export class BodyRequestPump extends LifecycleBodyRequestPump {
   static async open(input: PumpInput): Promise<BodyRequestPump> {
     return (await LifecycleBodyRequestPump.openWithService(
       input as LifecyclePumpInput,
-      async (claim) => await serveTransportClaim({ ...claim, commands: input.commands }),
+      async (claim) => await serveRequest({ ...claim, commands: input.commands }),
     )) as BodyRequestPump;
   }
 }

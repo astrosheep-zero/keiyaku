@@ -24,33 +24,6 @@ export class AkumaBodyRequestError extends Error {
   }
 }
 
-function throwVoidedRequestFailure(
-  action: string,
-  evidence: string,
-  failure: unknown | undefined,
-  decodeFailure: ((failure: unknown) => Error | null) | undefined,
-  requestId: string,
-): never {
-  const ownerFailure = decodeOwnerFailure(failure, decodeFailure);
-  if (ownerFailure !== null) throw withRequestMetadata(ownerFailure, requestId, action);
-  throw new AkumaBodyRequestError(action, "voided", evidence, requestId);
-}
-
-function throwUnprovenRequestFailure(
-  action: string,
-  evidence: string,
-  requestId: string,
-  ownerFailure: Error | null,
-): never {
-  throw new AkumaBodyRequestError(
-    action,
-    "unproven",
-    evidence,
-    requestId,
-    ownerFailure === null ? undefined : { cause: ownerFailure },
-  );
-}
-
 function decodeOwnerFailure(
   failure: unknown | undefined,
   decodeFailure: ((failure: unknown) => Error | null) | undefined,
@@ -94,70 +67,62 @@ async function readRequestReceipt<Input, Output, Reference>(
   path: string,
   id: string,
 ): Promise<RequestResponse<Output, Reference> | undefined> {
+  let bytes: string;
   try {
-    const receipt = decodeReceiptEnvelope(await readFile(path, "utf8"), id, input.command.action);
-    if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
-    if (receipt.state === "refused") {
-      throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic, receipt.id);
-    }
-    if (receipt.state === "voided" && receipt.outcome !== undefined) {
-      let result: Output;
-      try {
-        result = input.command.decodeResult(receipt.outcome);
-      } catch (error) {
-        throw new Error(
-          `transport integrity: invalid voided live result: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
-    }
-
-    if (receipt.state === "voided") {
-      throwVoidedRequestFailure(
-        receipt.action,
-        receipt.evidence,
-        receipt.failure,
-        input.command.decodeFailure,
-        receipt.id,
-      );
-    }
-    if (receipt.state === "unproven") {
-      throwUnprovenRequestFailure(
-        receipt.action,
-        receipt.evidence,
-        receipt.id,
-        decodeOwnerFailure(receipt.failure, input.command.decodeFailure),
-      );
-    }
-    if ("reference" in receipt) {
-      let reference: Reference;
-      try {
-        reference = input.command.decodeReference(receipt.reference);
-      } catch (error) {
-        const diagnostic = error instanceof Error ? error.message : String(error);
-        throw new Error(
-          `transport integrity: request ${id} action ${input.command.action} returned an invalid durable reference: ${diagnostic}`,
-        );
-      }
-      return withRequestMetadata({ kind: "reference" as const, reference }, id, input.command.action);
-    }
-    if (receipt.outcome.kind === "failed") {
-      const failure = receipt.outcome.failure;
-      throw new Error(failure.kind === "failed" ? failure.diagnostic : `Akuma ${failure.id} was not born`);
-    }
-    let result: Output;
-    try {
-      result = input.command.decodeResult(receipt.outcome.result);
-    } catch (error) {
-      const diagnostic = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `transport integrity: request ${id} action ${input.command.action} returned an invalid live result: ${diagnostic}`,
-      );
-    }
-    return withRequestMetadata({ kind: "returned" as const, result }, id, input.command.action);
+    bytes = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
+  }
+  return decodeRequestReceipt(input.command, bytes, id);
+}
+
+function decodeRequestReceipt<Input, Output, Reference>(
+  command: RequestProtocol<Input, Output, Reference>,
+  bytes: string,
+  id: string,
+): RequestResponse<Output, Reference> {
+  const receipt = decodeReceiptEnvelope(bytes, id, command.action);
+  if (receipt === null) throw new Error(`Akuma body request ${id} has an invalid receipt`);
+  if (receipt.state === "refused") {
+    throw new AkumaBodyRequestError(receipt.action, "refused", receipt.diagnostic, receipt.id);
+  }
+  if (receipt.state === "unproven" || (receipt.state === "voided" && receipt.outcome === undefined)) {
+    const failure = decodeOwnerFailure(receipt.failure, command.decodeFailure);
+    if (receipt.state === "voided" && failure !== null) throw withRequestMetadata(failure, id, command.action);
+    throw new AkumaBodyRequestError(
+      command.action,
+      receipt.state,
+      receipt.evidence,
+      id,
+      failure === null ? undefined : { cause: failure },
+    );
+  }
+  if (receipt.state === "served" && "outcome" in receipt && receipt.outcome.kind === "failed") {
+    const failure = receipt.outcome.failure;
+    throw new Error(failure.kind === "failed" ? failure.diagnostic : `Akuma ${failure.id} was not born`);
+  }
+  const label =
+    "reference" in receipt ? "durable reference" : receipt.state === "voided" ? "voided live result" : "live result";
+  try {
+    if ("reference" in receipt) {
+      return withRequestMetadata(
+        { kind: "reference" as const, reference: command.decodeReference(receipt.reference) },
+        id,
+        command.action,
+      );
+    }
+    const value =
+      receipt.state === "voided"
+        ? receipt.outcome
+        : receipt.outcome.kind === "returned"
+          ? receipt.outcome.result
+          : undefined;
+    return withRequestMetadata({ kind: "returned" as const, result: command.decodeResult(value) }, id, command.action);
+  } catch (error) {
+    throw new Error(
+      `transport integrity: request ${id} action ${command.action} returned an invalid ${label}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -201,6 +166,7 @@ async function observePublishedRequest<Input, Output, Reference>(
 ): Promise<RequestResponse<Output, Reference>> {
   let observedSequence = 0;
   const consumeProgress = async (): Promise<void> => {
+    if (input.onProgress === undefined && input.onProgressGap === undefined) return;
     const snapshot = await readRequestProgress({
       directory: input.directory,
       transportId,
