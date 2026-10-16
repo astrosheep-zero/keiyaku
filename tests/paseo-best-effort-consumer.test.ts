@@ -49,10 +49,9 @@ async function harness(mock: MockTransport = {}, initialRows: Row[] = []) {
     const value = await (mock.window ?? (async () => rows))(world, akuId, signal);
     return Array.isArray(value) ? page(value) : value;
   };
+  // The mirror observes through its one stream; paging history beside it would
+  // double the producers it trusts and is never a correct stand-in here.
   const bridge = createProvider({
-    // The mirror observes through its one stream; paging history beside it would
-    // double the producers it trusts and is never a correct stand-in here.
-    history: async () => { throw new Error("the mirror must observe through its stream, not paginate history"); },
     stream: (world, akuId, signal) => ({
       [Symbol.asyncIterator]: () => {
         let opened = false;

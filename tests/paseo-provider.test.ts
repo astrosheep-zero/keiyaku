@@ -16,10 +16,9 @@ import { createForwarder } from "../plugins/paseo/forwarder/index.js";
 import contribute from "../plugins/paseo/plugin/index.server.js";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import type { Tell, TellAdmission } from "../plugins/paseo/plugin/server/message.js";
-import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { stopAttempt, type Stop } from "../plugins/paseo/plugin/server/stop.js";
 import type { AkumaTransport, StatusReader } from "../plugins/paseo/plugin/server/transport.js";
-import { pagedReader, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 
 const at = "2026-10-15T00:00:00.000Z";
 const turn = (sequence: number, n = 1): Row => ({ kind: "turn", sequence, turnSequence: n, at });
@@ -63,10 +62,9 @@ async function harness(mock: MockTransport = {}) {
     const value = await (mock.window ?? (async () => []))(world, akuId, signal);
     return Array.isArray(value) ? page(value) : value;
   };
+  // A mirror observes through its one stream; paging history beside it would
+  // double the producers it trusts and is never a correct stand-in here.
   const transport: AkumaTransport = {
-    // A mirror observes through its one stream; paging history beside it would
-    // double the producers it trusts and is never a correct stand-in here.
-    history: async () => { throw new Error("the mirror must observe through its stream, not paginate history"); },
     stream: (world, akuId, signal) => ({
       [Symbol.asyncIterator]: () => {
         let opened = false;
@@ -754,20 +752,35 @@ test("close retires an owned Tell without kill, automatic retry, or late history
 });
 
 
-test("real public SDK history pages a long open Turn without inventing cancellation or loss", async (t) => {
-  const transport = createSdkTransport({ entry: resolve("build/src/index.js") });
-  let snapshot: History = page([]);
-  const h = await harness({ window: async () => snapshot });
-  const value = await soulFixture("paseo-history-cli-");
+test("the real public stream carries a long open Turn into the mirror without inventing cancellation or loss", async (t) => {
+  const value = await soulFixture("paseo-stream-cli-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-  t.after(async () => { await h.close(); await transport.close(); leash.release(); value.close(); });
+  const root = await realpath(value.root);
+  const controller = new AbortController();
+  let latest: History = page([]);
+  // The real public package's one observation path, read exactly as the test
+  // needs it: a subscription's first frame is the whole current bounded window,
+  // and closing that iterator releases its reader, so every read below is one
+  // deterministic pull with no background pump and no deadline of its own.
+  const openWindow = async (): Promise<History> => {
+    const sdk = await import(resolve("build/src/index.js")) as {
+      Akuma: { select: (world: string, akuId: string) => {
+        stream(options: { signal?: AbortSignal }): AsyncIterable<History> } } };
+    for await (const frame of sdk.Akuma.select(root, value.allocated.id).stream({ signal: controller.signal })) return frame;
+    throw new Error("the real public stream opened without a window");
+  };
+  const h = await harness({ window: async () => latest });
+  t.after(async () => { await h.close(); controller.abort(); leash.release(); value.close(); });
   await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   await leash.birth(value.allocated.paths, value.soul);
   const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
   const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "printf hello" } } });
-  snapshot = await transport.history(value.root, value.allocated.id, new AbortController().signal);
+  latest = await openWindow();
+  const running = latest.rows.find((row) => row.kind === "tool");
+  assert.ok(running?.kind === "tool");
+  assert.equal(running.state, "active", "the opened window reports the call while its Turn is still open");
   await h.open();
   for (let index = 0; index < 245; index++) await appendActivity(value.allocated.paths, {
     turnSequence: started.sequence, at,
@@ -775,16 +788,18 @@ test("real public SDK history pages a long open Turn without inventing cancellat
       call: { kind: "run", command: "printf hello" }, result: { status: "ok", message: "hello", exitCode: 0 } }
       : { type: "thought", text: `working ${index}` },
   });
-  snapshot = await transport.history(value.root, value.allocated.id, new AbortController().signal, snapshot.highest ?? undefined);
-  assert.equal(snapshot.rows.filter((row) => row.kind === "thought").length, 244,
-    "more than one bounded page of projected records is recovered through public paging");
-  assert.equal(snapshot.historyLost, false, "projection holes and pagination are not guessed retention loss");
-  assert.equal(snapshot.hasEarlier, false);
-  assert.ok(snapshot.rows.some((row) => row.kind === "turn" && row.turnSequence === started.sequence));
-  const tool = snapshot.rows.find((row) => row.kind === "tool");
+  latest = await openWindow();
+  assert.equal(latest.rows.filter((row) => row.kind === "thought").length, 244,
+    "one bounded stream window carries the whole retained work of a long open Turn");
+  assert.equal(latest.historyLost, false, "projection holes and pagination are not guessed retention loss");
+  assert.equal(latest.hasEarlier, false);
+  assert.ok(latest.rows.some((row) => row.kind === "turn" && row.turnSequence === started.sequence));
+  const tool = latest.rows.find((row) => row.kind === "tool");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
-  assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0 });
+  assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0 },
+    "a later frame reports the settled state of the call the opened window saw running");
+  assert.equal(tool.toolId, running.toolId, "the settled call keeps the identity the opened window reported");
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started"], "long ongoing work stays running");
   // The producer's own identity reaches the mirror as the installed package
@@ -807,14 +822,14 @@ test("real public SDK history pages a long open Turn without inventing cancellat
   for (const event of h.events) ProviderEventSchema.parse(event);
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "assistant", text: "done" } });
-  snapshot = await transport.history(value.root, value.allocated.id, new AbortController().signal, snapshot.highest ?? undefined);
+  latest = await openWindow();
   await h.refresh(); await tick();
-  const said = snapshot.rows.find((row) => row.kind === "said");
+  const said = latest.rows.find((row) => row.kind === "said");
   assert.ok(said?.kind === "said");
   await endTurn(value.allocated.paths, { turnSequence: started.sequence, completedAt: at,
     outcome: { kind: "answered", answer: "done", session: { sessionId: "test-session" } } });
-  snapshot = await transport.history(value.root, value.allocated.id, new AbortController().signal, snapshot.highest ?? undefined);
-  const outcome = snapshot.rows.find((row) => row.kind === "outcome");
+  latest = await openWindow();
+  const outcome = latest.rows.find((row) => row.kind === "outcome");
   assert.ok(outcome?.kind === "outcome" && outcome.outcome.kind === "answered");
   // The mirror reuses the producer's own narration identity and never invents
   // one; folding the exact final narration needs the identity the producer
@@ -910,20 +925,6 @@ test("session close releases the live observation and discards its in-flight rea
     [["turn/1", "started"], ["turn/1", "canceled"]],
     "closing the mirror cancels its own presentation and never the Akuma");
   assert.deepEqual(h.calls, [], "observation never submits execution or interrupt");
-});
-
-test("history paging has a hard read budget and keeps omitted metadata honest", async () => {
-  let reads = 0;
-  const reader = pagedReader(async (_world, _akuId, _signal, before) => {
-    reads++;
-    return page([turn(before === undefined ? 2000 : before - 200)],
-      { hasEarlier: true, omitted: 1900 - reads, lowestRetained: 1, highest: 2000 });
-  });
-  const snapshot = await reader("/world", "aku/test/1", new AbortController().signal);
-  assert.equal(reads, 5);
-  assert.equal(snapshot.hasEarlier, true);
-  assert.equal(snapshot.historyLost, false);
-  assert.equal(snapshot.omitted, 1895);
 });
 
 test("an open session reports the observed Akuma model and degrades to a notice without failing", async (t) => {

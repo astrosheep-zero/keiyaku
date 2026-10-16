@@ -151,10 +151,6 @@ function messageOf(error) {
  */
 async function operate(request, sdk, controller) {
   const akuma = sdk.Akuma.select(request.world, request.aku);
-  if (request.op === "history") {
-    const limit = typeof request.limit === "number" ? request.limit : 200;
-    return await akuma.history(request.before === undefined ? { limit } : { limit, before: request.before });
-  }
   if (request.op === "tell") return await akuma.tell(request.text, { signal: controller.signal });
   if (request.op === "stop") return { evidence: await akuma.kill({ signal: controller.signal }) };
   if (request.op === "status") return modelConfiguration(await akuma.status());

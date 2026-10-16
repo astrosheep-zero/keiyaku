@@ -66,9 +66,7 @@ pulled only after the previous one settles, so slow consumption bounds what the
 mirror holds instead of growing a queue. An incomplete bounded window is
 distinct from history the producer reports outside retention; projected
 sequence holes are not retention evidence; neither notice nor read failure
-cancels a Turn. The same worker can still page public history in overlapping
-200-row pages for a caller that asks for one; the mirror's own publication comes
-only from its stream.
+cancels a Turn. The mirror's own publication comes only from its stream.
 Tell and Stop use the same public SDK, not CLI arguments or stdout receipts.
 The worker locates the installed package through `keiyaku` on PATH and loads
 its declared public entry once. Inherited harness, Square and Keiyaku caller
@@ -179,8 +177,8 @@ a producer record without its own identity is reported as observation and never
 paired by guesswork.
 
 Focused tests use mocked transports and stream frames, a fake public SDK package
-serving the worker protocol (frames, Tell, Stop, status and paging), the real
-built public package for history, Tell and Stop, the installed Paseo compiler
+serving the worker protocol (frames, Tell, Stop and status), the real
+built public package for its stream, Tell and Stop, the installed Paseo compiler
 and evaluator running the real plugin bundle through production PATH discovery,
 and installed native consumer tests. A package that declares `Akuma.stream` is
 exercised through that stream end to end: the real open Turn, a mid-turn record

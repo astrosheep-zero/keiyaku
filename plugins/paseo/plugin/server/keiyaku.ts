@@ -42,27 +42,3 @@ export const historySchema = z.object({ rows: z.array(row), omitted: count,
   lowestRetained: count.nullable(), highest: count.nullable() });
 export type Row = z.infer<typeof row>;
 export type History = z.infer<typeof historySchema>;
-export type Reader = (world: string, akuId: string, signal: AbortSignal, coveredThrough?: number) => Promise<History>;
-/** One retained history page, newest first, bounded before the given sequence when supplied. */
-export type HistoryPage = (world: string, akuId: string, signal: AbortSignal, before?: number) => Promise<History>;
-// A bounded overlapping tail also catches mutable Tell rows. Page older retained
-// rows on demand, never infer retention loss from holes in projected sequences.
-export function pagedReader(page: HistoryPage): Reader {
-  return async (world, akuId, signal, coveredThrough) => {
-    let current: History | undefined;
-    let newest: History | undefined;
-    const rows = new Map<number, Row>();
-    for (let pages = 0; pages < 5; pages++) {
-      const before = current?.rows[0]?.sequence;
-      current = await page(world, akuId, signal, before);
-      newest ??= current;
-      for (const row of current.rows) rows.set(row.sequence, row);
-      const lowest = current.rows[0]?.sequence;
-      if (!current.hasEarlier || lowest === undefined || (coveredThrough !== undefined && lowest <= coveredThrough)) break;
-      if (before !== undefined && lowest >= before) throw new Error("Keiyaku history page did not advance");
-    }
-    return { ...newest!, rows: [...rows.values()].sort((a, b) => a.sequence - b.sequence),
-      omitted: current!.omitted, hasEarlier: current!.hasEarlier,
-      historyLost: current!.historyLost || newest!.historyLost };
-  };
-}

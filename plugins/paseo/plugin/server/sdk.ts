@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { z } from "zod";
-import { historySchema, identityKeys, pagedReader, type History } from "./keiyaku.js";
+import { historySchema, identityKeys, type History } from "./keiyaku.js";
 import { tellReceiptSchema } from "./message.js";
 import { WORKER_SOURCE } from "./sdk-worker.js";
 import { stopAttempt } from "./stop.js";
@@ -188,11 +188,6 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
     worker.stdin.write(JSON.stringify({ id: nextId++, op: "stream-cancel", target }) + "\n", () => {});
   }
 
-  const history: AkumaTransport["history"] = pagedReader(async (world, akuId, signal, before) => {
-    const value = await request("history", { world, aku: akuId, limit: 200, ...(before === undefined ? {} : { before }) }, signal);
-    return historySchema.parse(value);
-  });
-
   const tell: AkumaTransport["tell"] = async (world, akuId, signal, text) => {
     const value = await request("tell", { world, aku: akuId, text }, signal);
     const decoded = tellReceiptSchema.parse(value);
@@ -290,5 +285,5 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
     });
   }
 
-  return Object.freeze({ history, stream, tell, stop, status, close });
+  return Object.freeze({ stream, tell, stop, status, close });
 }

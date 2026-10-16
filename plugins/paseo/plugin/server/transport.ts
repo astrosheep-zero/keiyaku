@@ -1,4 +1,4 @@
-import type { History, Reader } from "./keiyaku.js";
+import type { History } from "./keiyaku.js";
 import type { Tell } from "./message.js";
 import type { Stop } from "./stop.js";
 
@@ -27,7 +27,6 @@ export type Stream = (world: string, akuId: string, signal: AbortSignal) => Asyn
  * cancellation must never terminate unrelated work.
  */
 export type AkumaTransport = Readonly<{
-  history: Reader;
   stream: Stream;
   tell: Tell;
   stop: Stop;

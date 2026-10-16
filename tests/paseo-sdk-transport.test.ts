@@ -151,7 +151,7 @@ test("the embedded worker type-checks as JavaScript against the installed public
   assert.deepEqual(errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")), []);
 });
 
-test("the dedicated worker serves the real public package for history, status, and stop", async (t) => {
+test("the dedicated worker serves the real public package's own stream, status, and stop", async (t) => {
   const value = await soulFixture("paseo-sdk-worker-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   let released = false;
@@ -163,18 +163,38 @@ test("the dedicated worker serves the real public package for history, status, a
   const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "printf hello" } } });
+  // The worker's own row validation must not silently drop the observed result
+  // text and per-file patch the public projection carries.
+  const patch = "@@ -1 +1 @@\n-old\n+new\n";
+  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
+    event: { type: "tool", phase: "completed", id: "shell", name: "bash",
+      call: { kind: "run", command: "printf hello" },
+      result: { status: "ok", message: "hello", exitCode: 0, output: "hello" } } });
+  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
+    event: { type: "tool", phase: "started", id: "edit", name: "edit",
+      call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] } } });
   const transport = createSdkTransport({ entry: PUBLIC_ENTRY });
   t.after(() => transport.close());
   const root = await realpath(value.root);
 
-  const history = await transport.history(root, value.allocated.id, new AbortController().signal);
-  const turn = history.rows.find((row) => row.kind === "turn" && row.turnSequence === started.sequence);
-  assert.ok(turn?.kind === "turn", "the real public history page keeps the open Turn");
-  const tool = history.rows.find((row) => row.kind === "tool");
+  const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
+  const frame = await stream.next();
+  assert.ok(!frame.done, "the worker serves the real package's own bounded window");
+  const rows = frame.value.rows;
+  const turn = rows.find((row) => row.kind === "turn" && row.turnSequence === started.sequence);
+  assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
+  const tool = rows.find((row) => row.kind === "tool" && row.name === "bash");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool, await producerRow(root, value.allocated.id, tool.sequence),
     "the worker boundary is transparent to the producer's own record, identity included");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
+  assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0, output: "hello" },
+    "the worker boundary keeps the observed result text");
+  const carried = rows.flatMap((row) => row.kind === "tool" && row.name === "edit" ? [row] : []);
+  assert.equal(carried.length, 1, "the bounded window carries the observed edit record");
+  assert.deepEqual(carried[0]?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] },
+    "the worker boundary keeps an observed per-file patch");
+  await stream.return?.();
 
   assert.deepEqual(await transport.status(root, value.allocated.id, new AbortController().signal),
     await producerModel(root, value.allocated.id),
@@ -186,25 +206,6 @@ test("the dedicated worker serves the real public package for history, status, a
   const stop = await transport.stop(root, value.allocated.id, new AbortController().signal);
   assert.ok(stop.kind === "stopped" || (stop.kind === "not-stopped" && /^Keiyaku reported \w+ for aku\//u.test(stop.message)),
     JSON.stringify(stop));
-
-  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
-    event: { type: "tool", phase: "completed", id: "shell", name: "bash",
-      call: { kind: "run", command: "printf hello" }, result: { status: "ok", message: "hello", exitCode: 0 } } });
-  const later = await transport.history(root, value.allocated.id, new AbortController().signal, history.highest ?? undefined);
-  assert.deepEqual(later.rows.find((row) => row.kind === "tool")?.state, { status: "ok", message: "hello", exitCode: 0 },
-    "coverage-bounded paging also observes mutable tool rows");
-
-  // The worker's own row validation must not silently drop the observed result
-  // text and per-file patch the public projection carries.
-  const patch = "@@ -1 +1 @@\n-old\n+new\n";
-  await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
-    event: { type: "tool", phase: "started", id: "edit", name: "edit",
-      call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] } } });
-  const carried = (await transport.history(root, value.allocated.id, new AbortController().signal))
-    .rows.flatMap((row) => row.kind === "tool" && row.name === "edit" ? [row] : []);
-  assert.equal(carried.length, 1, "the bounded read returns the observed edit record");
-  assert.deepEqual(carried[0]?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] },
-    "the worker boundary keeps an observed per-file patch");
 });
 
 /**
@@ -261,16 +262,6 @@ const wait = async (milliseconds, signal) => await new Promise((settle, fail) =>
 export const Akuma = {
   select(_world, aku) {
     return {
-      async history(options) {
-        const values = await control();
-        if (values.historyDelayMs !== undefined) await new Promise((settle) => setTimeout(settle, values.historyDelayMs));
-        if (values.paged !== true) return values.history ?? empty;
-        return options.before === undefined
-          ? { rows: [{ kind: "said", sequence: 300, turnSequence: 3, at: "t", text: "newer" }],
-              omitted: 10, hasEarlier: true, hasLater: false, historyLost: false, lowestRetained: 200, highest: 300 }
-          : { rows: [{ kind: "said", sequence: 100, turnSequence: 1, at: "t", text: "older" }],
-              omitted: 10, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: 100, highest: 300 };
-      },
       async tell(text, options) {
         const values = await control();
         if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
@@ -287,11 +278,11 @@ export const Akuma = {
           async next() {
             const values = await control();
             if (values.streamExit === true) process.exit(0);
-            if (!opened) { opened = true; return { done: false, value: values.streamHistory ?? values.history ?? empty }; }
+            if (!opened) { opened = true; return { done: false, value: values.streamHistory ?? empty }; }
             await wait(values.streamDelayMs ?? 0, options?.signal);
             if (values.streamDone === true) return { done: true, value: undefined };
             if (values.streamFail === true) throw new Error("stream read failed");
-            return { done: false, value: values.streamHistory ?? values.history ?? empty };
+            return { done: false, value: values.streamHistory ?? empty };
           },
           async return() { return { done: true, value: undefined }; },
         }) };
@@ -330,15 +321,10 @@ const RECEIPT = { akuma: "aku/test/1", tell: { admission: { fact: "recorded", te
     deliveries: [{ route: "live", turnSequence: 7, deliveredAt: at, receipt: "required" }] },
   wake: { kind: "told" } } };
 
-test("the transport carries typed Tell admission, Stop evidence, status, and paged history", async (t) => {
+test("the transport carries typed Tell admission, Stop evidence, and status", async (t) => {
   const { transport, set } = await fakeWorker(t);
-  await set({ paged: true, status: { provider: "pi", model: "kimi-coding/k3-256k" }, tell: RECEIPT });
+  await set({ status: { provider: "pi", model: "kimi-coding/k3-256k" }, tell: RECEIPT });
   const signal = new AbortController().signal;
-
-  const history = await transport.history("/world", "aku/test/1", signal);
-  assert.deepEqual(history.rows.map((row) => row.sequence), [100, 300], "older retained rows page in behind the newest page");
-  assert.equal(history.hasEarlier, false, "the last page owns the retained-window metadata");
-  assert.equal(history.highest, 300);
 
   const admitted = await transport.tell("/world", "aku/test/1", signal, "change direction");
   assert.equal(admitted.row.tellId, "tell/7");
@@ -379,9 +365,10 @@ test("a Tell receipt that does not name the submitted Tell is an uncertain outco
 
 test("cancellation settles only its own request, and close is the only thing that retires the worker", async (t) => {
   const { transport, set } = await fakeWorker(t);
-  await set({ historyDelayMs: 5_000 });
+  await set({ tellDelayMs: 5_000 });
   const controller = new AbortController();
-  const abandoned = transport.history("/world", "aku/test/1", controller.signal).then(() => "resolved", (error: Error) => error.message);
+  const abandoned = transport.tell("/world", "aku/test/1", controller.signal, "change direction")
+    .then(() => "resolved", (error: Error) => error.message);
   controller.abort(new Error("observation closed"));
   assert.equal(await abandoned, "observation closed", "the cancelled read rejects with the caller's own reason");
 
@@ -389,8 +376,9 @@ test("cancellation settles only its own request, and close is the only thing tha
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "one request's cancellation never terminates unrelated work");
 
-  await set({ historyDelayMs: 5_000 });
-  const inFlight = transport.history("/world", "aku/test/1", new AbortController().signal).then(() => "resolved", (error: Error) => error.message);
+  await set({ tellDelayMs: 5_000 });
+  const inFlight = transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction")
+    .then(() => "resolved", (error: Error) => error.message);
   await set({ streamHistory: frame(1), streamDelayMs: 5_000 });
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
   assert.deepEqual(pulled(await stream.next()), [1], "the transport serves a stream to the same worker");
@@ -402,7 +390,8 @@ test("cancellation settles only its own request, and close is the only thing tha
   assert.equal((await stream.next()).done, true, "a closed transport serves no further frame");
   await assert.rejects(transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]().next(),
     /transport is closed/u);
-  await assert.rejects(transport.history("/world", "aku/test/1", new AbortController().signal), /transport is closed/u);
+  await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
+    /transport is closed/u);
 });
 
 test("a subscription serves one frame at a time, never two in flight", async (t) => {
@@ -452,8 +441,9 @@ test("an idle frame is never bounded by the ordinary request timeout", async (t)
   await set({ streamHistory: frame(2), streamDelayMs: 1_200 });
   assert.deepEqual(pulled(await stream.next()), [2],
     "waiting for the next change is the observation's job, never a bounded request");
-  await set({ historyDelayMs: 1_200 });
-  await assert.rejects(transport.history("/world", "aku/test/1", new AbortController().signal), /timed out after 400ms/u,
+  await set({ tellDelayMs: 1_200 });
+  await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
+    /timed out after 400ms/u,
     "an ordinary request still carries its own bound");
 });
 
@@ -664,8 +654,11 @@ test("the real public package admits one Tell through the worker while custody i
   assert.deepEqual(tellReceiptSchema.parse({ akuma: value.allocated.id, tell: admitted }).tell, admitted,
     "the worker's admission is the public receipt verbatim");
 
-  const history = await transport.history(root, value.allocated.id, new AbortController().signal);
-  const recorded = history.rows.find((row) => row.kind === "tell");
+  const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
+  const frame = await stream.next();
+  assert.ok(!frame.done, "the worker serves the real package's own bounded window");
+  const recorded = frame.value.rows.find((row) => row.kind === "tell");
+  await stream.return?.();
   assert.ok(recorded?.kind === "tell");
   assert.equal(recorded.tellId, admitted.row.tellId, "the admitted Tell is durably recorded, not merely acknowledged");
   assert.equal(recorded.text, "change direction");
