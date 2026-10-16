@@ -158,18 +158,38 @@ test("audit maps only --show-diff to the existing display choice", () => {
   );
 });
 
-test("status --guidance parses exactly one Contract selector and JSON output", () => {
-  assert.deepEqual(parseArgv(["status", "--guidance", "kei/example", "--json"]), {
-    command: { command: "status", contract: "kei/example", guidance: true, output: "json" },
+test("show parses a standalone Contract guidance read with root coordinates", () => {
+  assert.deepEqual(parseArgv(["show"]), { command: { command: "show", output: "text" } });
+  for (const selector of ["kei/example", "@example"]) {
+    assert.deepEqual(parseArgv(["-C", "/invocation", "--repo", "/repository", "show", selector, "--json"]), {
+      cwd: "/invocation",
+      repo: "/repository",
+      command: { command: "show", contract: selector, output: "json" },
+    });
+  }
+  for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
+    assert.throws(() => parseArgv(["show", selector]), CliUsageError);
+  }
+  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one contract/u);
+  assert.throws(() => parseArgv(["show", "--guidance"]), /not valid for show/u);
+  assert.throws(() => parseArgv(["show", "--limit", "2"]), /not valid for show/u);
+  assert.throws(() => parseArgv(["show", "-"]), /show reads no stdin/u);
+});
+
+test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
+  assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
+    command: { command: "show", contract: "kei/example", output: "json" },
   });
-  assert.deepEqual(parseArgv(["status", "--guidance", "@example"]), {
-    command: { command: "status", contract: "@example", guidance: true, output: "text" },
+  assert.deepEqual(parseArgv(["show", "@example"]), {
+    command: { command: "show", contract: "@example", output: "text" },
   });
-  assert.deepEqual(parseArgv(["status", "--guidance"]), {
-    command: { command: "status", guidance: true, output: "text" },
-  });
-  assert.throws(() => parseArgv(["status", "--guidance", "kei/one", "kei/two"]), /at most one Contract selector/u);
-  assert.throws(() => parseArgv(["status", "--guidance", "aku/x/*"]), /cannot select an Akuma/u);
+  assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
+  for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {
+    assert.throws(
+      () => parseArgv(["status", "--guidance", ...selectors]),
+      /option --guidance is not valid for status/u,
+    );
+  }
 });
 
 test("bare ls requires a selector rather than opening help", () => {

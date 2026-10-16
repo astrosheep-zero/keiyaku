@@ -75,6 +75,7 @@ export type ParsedAbandon = Output &
     contract?: string;
     note?: string;
   }>;
+export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
 export type ParsedStatus = Output &
   (
     | Readonly<{
@@ -82,11 +83,10 @@ export type ParsedStatus = Output &
         contract?: string;
         selectors?: readonly string[];
         akuma?: never;
-        guidance?: true;
         category?: never;
         limit?: never;
       }>
-    | Readonly<{ command: "status"; contract: string; akuma: true; guidance?: never; category?: never; limit?: never }>
+    | Readonly<{ command: "status"; contract: string; akuma: true; category?: never; limit?: never }>
     | Readonly<{
         command: "status";
         category: StatusCategory;
@@ -94,7 +94,6 @@ export type ParsedStatus = Output &
         contract?: never;
         selectors?: never;
         akuma?: never;
-        guidance?: never;
       }>
   );
 export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
@@ -131,6 +130,7 @@ export type ParsedContractCommand =
   | ParsedReview
   | ParsedArc
   | ParsedAbandon
+  | ParsedShow
   | ParsedStatus
   | ParsedLs
   | ParsedAudit
@@ -285,26 +285,19 @@ function rejectStatusGlobs(positionals: readonly string[]): void {
   }
 }
 
-function parseStatusGuidance(parts: ParsedContractParts, limit: number | undefined): ParsedStatus {
-  if (limit !== undefined) refuse("status", "--limit is not valid with --guidance");
+function showSelector(parts: ParsedContractParts): string | undefined {
   const selected = parts.positionals[0];
   if (selected !== undefined && STATUS_CATEGORY_SELECTORS.has(selected))
-    refuse("status", "--guidance cannot select a category");
-  if (parts.positionals.length > 1) refuse("status", "--guidance accepts at most one Contract selector");
-  if (selected?.startsWith("aku/") === true) refuse("status", "--guidance cannot select an Akuma");
+    refuse("show", "show cannot select a category");
+  if (parts.positionals.length > 1) refuse("show", "show accepts at most one Contract selector");
+  if (selected?.startsWith("aku/") === true) refuse("show", "show cannot select an Akuma");
   if (selected !== undefined && !selected.startsWith("@") && /[*?\[\]]/u.test(selected))
-    refuse("status", `unsupported status glob: ${selected}`);
-  return {
-    command: "status",
-    ...(selected === undefined ? {} : { contract: selected }),
-    guidance: true,
-    output: parts.output,
-  };
+    refuse("show", `unsupported show glob: ${selected}`);
+  return selected;
 }
 
 function parseStatus(parts: ParsedContractParts): ParsedStatus {
   const limit = listLimit(parts, "status");
-  if (parts.flags.guidance === true) return parseStatusGuidance(parts, limit);
   rejectStatusGlobs(parts.positionals);
   if (parts.positionals.length > 1) {
     if (limit !== undefined) refuse("status", "--limit is valid only for one category selector");
@@ -411,6 +404,10 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
         ...(parts.actor === undefined ? {} : { actor: parts.actor }),
         output: parts.output,
       };
+    }
+    case "show": {
+      const contract = showSelector(parts);
+      return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
     }
     case "status":
       return parseStatus(parts);

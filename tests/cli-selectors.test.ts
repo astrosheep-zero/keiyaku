@@ -86,7 +86,7 @@ test("missing Contract selectors refuse uniformly across read and reconcile verb
   }
 });
 
-test("status category grammar stays separate from exact, plural, guidance and ls", () => {
+test("status category grammar stays separate from exact, plural, show and ls", () => {
   for (const [category, selectors] of [
     ["akuma", ["aku", "aku/", "aku/*"]],
     ["contract", ["kei", "kei/", "kei/*"]],
@@ -98,7 +98,7 @@ test("status category grammar stays separate from exact, plural, guidance and ls
       assert.deepEqual(parseArgv(["status", selector, "--limit", "501", "--json"]), {
         command: { command: "status", category, limit: 501, output: "json" },
       });
-      assert.throws(() => parseArgv(["status", selector, "--guidance"]), /cannot select a category/u);
+      assert.throws(() => parseArgv(["show", selector]), /cannot select a category/u);
       assert.throws(() => parseArgv(["status", selector, "kei/exact"]), /cannot combine/u);
     }
   }
@@ -118,12 +118,12 @@ test("status category grammar stays separate from exact, plural, guidance and ls
   assert.deepEqual(parseArgv(["status", "kei/a", "aku/worker/1234abcd"]), {
     command: { command: "status", selectors: ["kei/a", "aku/worker/1234abcd"], output: "text" },
   });
-  assert.throws(() => parseArgv(["status", "kei/a", "--guidance", "--limit", "2"]), /not valid with --guidance/u);
+  assert.throws(() => parseArgv(["show", "kei/a", "--limit", "2"]), /not valid for show/u);
   assert.deepEqual(parseArgv(["status", "aku/worker/1234abcd"]), {
     command: { command: "status", contract: "aku/worker/1234abcd", akuma: true, output: "text" },
   });
-  assert.deepEqual(parseArgv(["status", "--guidance", "kei/a"]), {
-    command: { command: "status", contract: "kei/a", guidance: true, output: "text" },
+  assert.deepEqual(parseArgv(["show", "kei/a"]), {
+    command: { command: "show", contract: "kei/a", output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku"]), {
     command: { command: "ls", query: { kind: "archetypes" }, output: "text" },

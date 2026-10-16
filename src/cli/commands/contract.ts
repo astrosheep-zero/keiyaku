@@ -527,8 +527,8 @@ async function namedStatus(
   return await readContractStatus(address.id, coordinates, named);
 }
 
-async function runStatusGuidance(
-  command: Extract<ParsedContractCommand, { command: "status" }>,
+async function runShow(
+  command: Extract<ParsedContractCommand, { command: "show" }>,
   coordinates: CliCoordinates,
 ): Promise<number> {
   const repo = coordinates.repo;
@@ -536,7 +536,7 @@ async function runStatusGuidance(
   const selected = await selectedContract(repo, command.contract, coordinates.cwd);
   const guidance = await selected.contract.guidance();
   if (guidance === null) {
-    const refusal = statusRefusal("status", selected.id);
+    const refusal = statusRefusal(command.command, selected.id);
     return emit(command.output, null, () => renderRefusal(refusal, undefined, displayContext()), 1);
   }
   return emit(command.output, guidance, () => guidance, 0);
@@ -626,7 +626,6 @@ async function runStatus(
   command: Extract<ParsedContractCommand, { command: "status" }>,
   coordinates: CliCoordinates,
 ): Promise<number> {
-  if (command.guidance === true) return await runStatusGuidance(command, coordinates);
   if (command.category !== undefined) return await runStatusCategory(command, coordinates);
   if ("selectors" in command && command.selectors !== undefined)
     return await runStatusSelection({ ...command, selectors: command.selectors }, coordinates);
@@ -740,6 +739,8 @@ export async function runContractCommand(
       return await runNuke(command, coordinates);
     case "ls":
       return await runLs(command, coordinates, home);
+    case "show":
+      return await runShow(command, coordinates);
     case "status":
       return await runStatus(command, coordinates);
     case "region":

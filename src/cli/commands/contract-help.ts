@@ -161,12 +161,25 @@ export const CONTRACT_COMMAND_SPECS = {
     usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>]",
     purpose: "End work on a Contract without delivering it; optionally record why.",
   },
+  show: {
+    positional: "optional",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "show [<contract>|@<contract>]",
+    purpose: "Read one Contract's guidance.",
+    details: [
+      "Accepts a complete Contract identity or exact @<contract> short selector.",
+      "Omitted selection uses the exact managed worktree's installed Contract context.",
+      "Akuma, category, and plural selections are refused before reading guidance.",
+      "Text returns guidance directly; --json serializes the same native value.",
+    ].join("\n"),
+  },
   status: {
     positional: "optional",
     stdin: "none",
-    flags: { guidance: "boolean", limit: "value", json: "boolean" },
+    flags: { limit: "value", json: "boolean" },
     usage:
-      "status [<contract>|@name|<aku/...>]...\nstatus (aku|aku/|aku/*) [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]\nstatus --guidance [<contract>|@<contract>]",
+      "status [<contract>|@name|<aku/...>]...\nstatus (aku|aku/|aku/*) [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]",
     purpose: "Show the world overview or selected Contract and Akuma status.",
     details: [
       "Akuma entries show the directory each Akuma was started in.",
@@ -174,10 +187,6 @@ export const CONTRACT_COMMAND_SPECS = {
       "aku, aku/, and aku/* show the recent Akuma board; kei, kei/, and kei/* show the",
       "recent active Contract board. --limit bounds the board to that many recent rows",
       "(default 10). The Contract category requires a Repo; the Akuma category does not.",
-      "",
-      "--guidance reads one Contract's guidance instead of status. It accepts one Contract",
-      "selector or the installed Contract selection context, and refuses an Akuma, plural,",
-      "or world selection before the read.",
     ].join("\n"),
   },
   ls: {

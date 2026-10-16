@@ -47,12 +47,17 @@ test("namespace and leaf help identify an executable command", () => {
     renderAkumaHelp("call"),
     /keiyaku ls aku\/ to find visible Akuma names; hidden definitions can still be called by name/u,
   );
+  const showHelp = renderContractHelp("show");
+  assert.match(renderRootHelp(), /show\s+Read one Contract's guidance/u);
+  assert.match(showHelp, /usage  keiyaku show \[<contract>\|@<contract>\]/u);
+  assert.match(showHelp, /--json/u);
+  assert.doesNotMatch(showHelp, /status --guidance/u);
   const statusHelp = renderContractHelp("status");
   assert.match(statusHelp, /status \(aku\|aku\/\|aku\/\*\) \[--limit <count>\]/u);
   assert.match(statusHelp, /status \(kei\|kei\/\|kei\/\*\) \[--limit <count>\]/u);
   assert.match(statusHelp, /default 10/u);
   assert.match(statusHelp, /Contract category requires a Repo/u);
-  assert.match(statusHelp, /--guidance reads one Contract's guidance/u);
+  assert.doesNotMatch(statusHelp, /guidance/u);
   assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
   const settingsHelp = renderContractHelp("settings");
@@ -92,6 +97,13 @@ test("help is stdout zero and does not enter an absent world", async () => {
   assert.match(stdout, /^usage  keiyaku task <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
+});
+
+test("show help needs neither World nor plugins", async () => {
+  const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "show", "--help"]));
+  assert.equal(result.exit, 0);
+  assert.match(result.stdout, /usage  keiyaku show/u);
+  assert.equal(result.stderr, "");
 });
 
 test("version is stdout zero and does not enter an absent world", () => {

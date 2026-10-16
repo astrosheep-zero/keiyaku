@@ -160,6 +160,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
     case "audit":
     case "reconcile":
     case "region":
+    case "show":
       return { use: "required", acceptsExplicit: true };
     case "ls":
       return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };

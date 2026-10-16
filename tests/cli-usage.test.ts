@@ -262,7 +262,6 @@ test("a local status on an absent complete id reports one caller-facing fact", (
       "  accepts  keiyaku status [<contract>|@name|<aku/...>]...",
       "           keiyaku status (aku|aku/|aku/*) [--limit <count>]",
       "           keiyaku status (kei|kei/|kei/*) [--limit <count>]",
-      "           keiyaku status --guidance [<contract>|@<contract>]",
       "  help  keiyaku status --help",
       "",
     ].join("\n"),
@@ -388,8 +387,7 @@ test("unmatched Contract selectors keep the text refusal and preserve the native
         ),
         "-C",
         repo.path,
-        "status",
-        "--guidance",
+        "show",
         "kei/missing",
         ...args,
       ],
@@ -401,7 +399,7 @@ test("unmatched Contract selectors keep the text refusal and preserve the native
     assert.equal(text.stderr, "");
     assert.equal(
       text.stdout,
-      ["× status refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
+      ["× show refused", "  contract  kei/missing", "  reason  contract missing"].join("\n") + "\n",
     );
     const json = run(["--json"]);
     assert.equal(json.status, 1);

@@ -54,6 +54,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, abandon, audit, reconcile | Request the named lifecycle, evidence, inspection, or repair judgment; refuse an absent or ambiguous Contract selector. | Return the owning lifecycle, audit, or reconciliation result unchanged. |
 | status, ls | Read one requested Contract, Akuma, archetype, Task, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
+| show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
@@ -85,12 +86,12 @@ empty success. Task command intent and Task presentation are owned by
 [cli-task.md](cli-task.md). Literal help rows, flags, positional forms, stdin
 rules, and parser recovery are executable interface detail, not CLI law.
 
-`status` reads a Contract's guidance only when the caller explicitly opts in
-for one selected Contract; an ordinary world, Contract, Akuma, or plural status
-incurs no guidance read and adds no guidance output, and an Akuma, plural, or
-world selection is refused before that read. The returned guidance bytes are the
-owner's own value, rendered directly in text and serialized directly in JSON.
-There is no separate guidance-reading verb.
+`show` alone reads one selected Contract's guidance, using the existing exact
+Contract selection context when selection is omitted. It refuses Akuma, plural,
+and world selection before reading. The returned guidance bytes are the owner's
+own value, rendered directly in text and serialized directly in JSON. `status`
+only observes status: world, Contract, Akuma, category, and plural observations
+incur no guidance read and add no guidance output.
 
 `status` can request a bounded recent category independently of the World overview.
 The edge selects the category before observation and keeps category bounds out of
