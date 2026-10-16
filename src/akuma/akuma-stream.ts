@@ -3,7 +3,6 @@ import { abortableDelay } from "./abort.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import { OBSERVATION_POLL_MS, type OutcomeObserver } from "./akuma-observe.js";
 import { createTimelineReader } from "./heart/index.js";
-import type { ActivityFactSlice } from "./heart/timeline.js";
 import type { AkuId, AkumaPaths } from "./identity.js";
 import { projectTurns, selectHistory, type ActivityHistory, type ActivityRow } from "./projection.js";
 
@@ -19,21 +18,6 @@ const STREAM_WINDOW = 500;
  * the caller's own failure.
  */
 const STREAM_RETURN = Symbol("akuma-stream-return");
-
-function windowOf(slice: ActivityFactSlice): AkumaStreamSnapshot {
-  return selectHistory(projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest }), {
-    limit: STREAM_WINDOW,
-  });
-}
-
-/** The window to emit, or nothing when the observation still carries the same meaning. */
-function changedWindow(
-  previous: AkumaStreamSnapshot | undefined,
-  slice: ActivityFactSlice,
-): AkumaStreamSnapshot | undefined {
-  const snapshot = windowOf(slice);
-  return previous === undefined || !isDeepStrictEqual(snapshot, previous) ? snapshot : undefined;
-}
 
 /**
  * Announce each retained outcome identity once per observation, keeping only
@@ -82,8 +66,9 @@ async function* observeTimeline(
       signal.throwIfAborted();
       if (read.changed) {
         if (!read.born) throw new AkumaNotBornError(id);
-        const snapshot = changedWindow(previous, read.slice);
-        if (snapshot !== undefined) {
+        const { rows, lowestRetained, highest } = read.slice;
+        const snapshot = selectHistory(projectTurns(rows, { lowestRetained, highest }), { limit: STREAM_WINDOW });
+        if (previous === undefined || !isDeepStrictEqual(snapshot, previous)) {
           observedOutcomes = await announceOutcomes(id, snapshot.rows, observedOutcomes, observe);
           previous = snapshot;
           yield snapshot;
@@ -105,9 +90,11 @@ async function* observeTimeline(
  * cannot honour an end request while a pull is pending: `return()` would queue
  * behind a pull that an idle timeline never settles, and the observation would
  * hold its reader and its polling timer forever. The wrapper owns an internal
- * controller instead. `return` ends observation by aborting that controller,
- * which settles the pending poll and lets the loop release its reader in the
- * same turn, while a caller's own abort keeps its own failure.
+ * controller instead, and the observation watches the caller's cancellation
+ * composed with it. `return` aborts that controller, which settles the pending
+ * poll and lets the loop release its reader in the same turn; because a
+ * composed signal keeps the reason of whichever source aborted first, an end
+ * request reads as completion while a caller's own abort keeps its own failure.
  */
 export function createAkumaStream(
   paths: AkumaPaths,
@@ -117,45 +104,20 @@ export function createAkumaStream(
 ): AsyncIterableIterator<AkumaStreamSnapshot> {
   const caller = options.signal;
   const control = new AbortController();
-  const observation = observeTimeline(paths, id, control.signal, observe);
-  let wired = false;
-  let unwire: (() => void) | undefined;
+  const signal = caller === undefined ? control.signal : AbortSignal.any([caller, control.signal]);
+  const observation = observeTimeline(paths, id, signal, observe);
   let returning: Promise<IteratorResult<AkumaStreamSnapshot>> | undefined;
-  const detach = (): void => {
-    unwire?.();
-    unwire = undefined;
-  };
-  const wire = (): void => {
-    if (wired) return;
-    wired = true;
-    if (caller === undefined) return;
-    const abort = (): void => control.abort(caller.reason);
-    if (caller.aborted) {
-      abort();
-      return;
+  const next = async (): Promise<IteratorResult<AkumaStreamSnapshot>> => {
+    if (returning !== undefined) return { done: true, value: undefined };
+    try {
+      return await observation.next();
+    } catch (error: unknown) {
+      // An end request is completion, not the caller's failure to see.
+      if (signal.reason === STREAM_RETURN) return { done: true, value: undefined };
+      throw error;
     }
-    caller.addEventListener("abort", abort, { once: true });
-    unwire = () => caller.removeEventListener("abort", abort);
-  };
-  const next = (): Promise<IteratorResult<AkumaStreamSnapshot>> => {
-    wire();
-    if (returning !== undefined) return Promise.resolve({ done: true, value: undefined });
-    return observation.next().then(
-      (result) => {
-        if (result.done === true) detach();
-        return result;
-      },
-      (error: unknown) => {
-        detach();
-        // An end request is completion, not the caller's failure to see.
-        if (control.signal.reason === STREAM_RETURN) return { done: true, value: undefined };
-        throw error;
-      },
-    );
   };
   const end = (value?: unknown): Promise<IteratorResult<AkumaStreamSnapshot>> => {
-    wire();
-    detach();
     if (returning === undefined) {
       control.abort(STREAM_RETURN);
       returning = observation.return(value).then((result) => ({ done: true, value: result.value }));

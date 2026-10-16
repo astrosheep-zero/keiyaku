@@ -333,7 +333,11 @@ test("abort while waiting for a change rejects the pending pull and releases", a
     await new Promise((resolve) => setTimeout(resolve, 30));
     const reason = new Error("caller stopped while waiting");
     controller.abort(reason);
+    // An end request in the same turn is completion, never an overwrite of the
+    // caller's own failure: the first abort reason stays authoritative.
+    const ended = iterator.return!();
     await assert.rejects(pending, (error: unknown) => error === reason);
+    assert.equal((await settle(ended, "the return after the caller's abort")).done, true);
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(closes(), 1);
   } finally {
