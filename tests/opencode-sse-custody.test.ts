@@ -1,724 +1,263 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import http from "node:http";
+import type { Socket } from "node:net";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import test from "node:test";
-import { createOpencodeClient } from "@opencode-ai/sdk";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { driveAkumaBody as runAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { CONTROL_RESPONSE_MS } from "../src/akuma/body-supervisor.js";
+import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
 import { readHeart, requestPause } from "../src/akuma/heart/index.js";
-import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
-import {
-  opencodeEventPort,
-  type OpencodeEventSubscriptionRequest,
-  type OpencodeSdkLoader,
-  type OpencodeSdkSession,
-} from "../src/akuma/providers/opencode-sdk/session.js";
 import { allocatedHeart } from "./support/akuma-fixtures.js";
-import { expectBodySettles, waitForCondition, waitForProcessExit } from "./support/process.js";
+import { temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
+import test from "node:test";
+import { createNativeClient } from "../src/akuma/providers/opencode-sdk/native-http.js";
+import { waitReady } from "../src/akuma/providers/opencode-sdk/session.js";
+import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
+import { opencodeFixture, until } from "./support/opencode-v2.js";
 
-const SESSION_ID = "session-1";
-const RETRY_DELAY_MS = 3_000;
-
-/** Minimal native session whose only assistant answer follows the admitted launch message. */
-function fixtureSession(): Readonly<{ session: OpencodeSdkSession; prompts: string[] }> {
-  const prompts: string[] = [];
-  const session = {
-    async create() {
-      return { data: { id: SESSION_ID } };
-    },
-    async get() {
-      return { data: { id: SESSION_ID } };
-    },
-    async promptAsync(value: { body: { messageID: string } }) {
-      prompts.push(value.body.messageID);
-      return { data: undefined };
-    },
-    async messages() {
-      const user = prompts[0] ?? "msg_unknown";
-      return {
-        data: [
-          { info: { id: user, sessionID: SESSION_ID, role: "user", time: { created: 1 } }, parts: [] },
-          {
-            info: { id: "assistant-1", sessionID: SESSION_ID, parentID: user, role: "assistant", time: { created: 2 } },
-            parts: [{ type: "text", text: "answer" }],
-          },
-        ],
-      };
-    },
-    async abort() {
-      return { data: true };
-    },
-  } as unknown as OpencodeSdkSession;
-  return { session, prompts };
-}
-
-function driveInput() {
-  return {
-    body: "work",
-    launchTells: [],
-    cwd: "/tmp",
-    options: {},
-    signal: new AbortController().signal,
-    requests: { dir: "/tmp/requests" },
-    session: { kind: "fresh" as const },
-  };
-}
-
-/** The real installed SDK client, adapted through the adapter's own one SDK seam. */
-function realSdkLoader(
-  input: Readonly<{
-    session: OpencodeSdkSession;
-    observeSubscribe?(request: OpencodeEventSubscriptionRequest): OpencodeEventSubscriptionRequest;
-    onClose?(): void;
-  }>,
-): OpencodeSdkLoader {
-  return async () => {
-    const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:9", directory: "/tmp" });
-    const port = opencodeEventPort(client.event);
-    return {
-      client: {
-        session: input.session,
-        event: {
-          subscribe: (request) =>
-            port.subscribe(input.observeSubscribe === undefined ? request : input.observeSubscribe(request)),
-        },
-      },
-      close: () => input.onClose?.(),
-    };
-  };
-}
-
-/** A controlled SSE body the test feeds; cancellation is observable. */
-function controlledBody() {
-  const encoder = new TextEncoder();
-  let controller!: ReadableStreamDefaultController<Uint8Array>;
-  let cancelled = false;
-  const stream = new ReadableStream<Uint8Array>({
-    start(value) {
-      controller = value;
-    },
-    cancel() {
-      cancelled = true;
-    },
+async function server(handler: http.RequestListener) {
+  const sockets = new Set<Socket>();
+  const native = http.createServer(handler);
+  native.on("connection", (socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
   });
+  await new Promise<void>((resolve) => native.listen(0, "127.0.0.1", resolve));
+  const address = native.address();
+  assert.ok(address !== null && typeof address !== "string");
   return {
-    response: () => new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }),
-    send: (event: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)),
-    cancelled: () => cancelled,
-  };
-}
-
-/** Observe whether a settlement occurred within a short bound, without forcing it. */
-function settledOutcome(settlement: Promise<unknown>): () => Promise<"settled" | "pending"> {
-  let state: "settled" | "pending" = "pending";
-  void settlement.then(
-    () => {
-      state = "settled";
-    },
-    () => {
-      state = "settled";
-    },
-  );
-  return async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    return state;
-  };
-}
-
-/** Count referenced timers, so a leaked retry backoff is visible in-process. */
-function activeTimers(): number {
-  return process.getActiveResourcesInfo().filter((resource) => resource === "Timeout").length;
-}
-
-async function withInjectedFetch(fetchImpl: typeof fetch, run: () => Promise<void>): Promise<void> {
-  const original = globalThis.fetch;
-  globalThis.fetch = fetchImpl;
-  try {
-    await run();
-  } finally {
-    globalThis.fetch = original;
-  }
-}
-
-test("OpenCode retires real-SDK fetch, reader, and retry waiting before attempt closure", async () => {
-  let fetches = 0;
-  const sleeps: number[] = [];
-  let closeCalls = 0;
-  await withInjectedFetch(
-    async () => {
-      fetches += 1;
-      throw new Error("connect ECONNREFUSED 127.0.0.1:9");
-    },
-    async () => {
-      const { session } = fixtureSession();
-      const provider = createOpencodeProvider({
-        loader: realSdkLoader({
-          session,
-          observeSubscribe: (request) => ({
-            ...request,
-            sleep: async (milliseconds) => {
-              sleeps.push(milliseconds);
-              await request.sleep(milliseconds);
-            },
-          }),
-          onClose: () => {
-            closeCalls += 1;
-          },
-        }),
-      });
-      const attempt = provider.start(driveInput());
-      await attempt.result;
-      await waitForCondition("the first SSE fetch", () => fetches === 1, { budgetMs: 5_000 });
-      const timersBefore = activeTimers();
-      const retiring = performance.now();
-      await attempt.abort();
-      await attempt.closed;
-      const elapsed = performance.now() - retiring;
-      assert.deepEqual(sleeps, [RETRY_DELAY_MS], "the real SDK waited inside the adapter's cancellable sleep");
-      assert.ok(elapsed < CONTROL_RESPONSE_MS, `retirement took ${Math.round(elapsed)}ms`);
-      assert.ok(
-        activeTimers() <= timersBefore,
-        `a referenced retry timer outlived closure (${activeTimers()} > ${timersBefore})`,
+    base: `http://127.0.0.1:${address.port}`,
+    sockets,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve, reject) =>
+        native.close((error) => (error === undefined ? resolve() : reject(error))),
       );
-      const settled = fetches;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(fetches, settled, "no further fetch runs after closure");
-      assert.equal(closeCalls, 1, "the owned server retired once");
     },
-  );
-});
-
-test("OpenCode answered Turn cancels the real SSE reader before whole closure", async () => {
-  const body = controlledBody();
-  let closeCalls = 0;
-  await withInjectedFetch(
-    async () => body.response(),
-    async () => {
-      const { session, prompts } = fixtureSession();
-      const provider = createOpencodeProvider({ loader: realSdkLoader({ session, onClose: () => (closeCalls += 1) }) });
-      const attempt = provider.start(driveInput());
-      const drive = await attempt.result;
-      const messageId = prompts[0]!;
-      body.send({
-        type: "message.updated",
-        properties: { info: { id: messageId, sessionID: SESSION_ID, role: "user" } },
-      });
-      body.send({ type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "busy" } } });
-      body.send({ type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "idle" } } });
-      assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "assistant-1" });
-      await attempt.closed;
-      assert.equal(body.cancelled(), true, "a normal answer cancelled its SSE reader");
-      assert.equal(closeCalls, 1);
-    },
-  );
-});
-
-test("OpenCode forced disposal during production backoff retires once inside control policy", async () => {
-  let fetches = 0;
-  let closeCalls = 0;
-  await withInjectedFetch(
-    async () => {
-      fetches += 1;
-      throw new Error("connect ECONNREFUSED 127.0.0.1:9");
-    },
-    async () => {
-      const { session } = fixtureSession();
-      const provider = createOpencodeProvider({ loader: realSdkLoader({ session, onClose: () => (closeCalls += 1) }) });
-      const attempt = provider.start(driveInput());
-      await attempt.result;
-      await waitForCondition("the first SSE fetch", () => fetches === 1, { budgetMs: 5_000 });
-      const retiring = performance.now();
-      await Promise.all([attempt.forceDispose(), attempt.forceDispose()]);
-      await attempt.closed;
-      assert.ok(performance.now() - retiring < CONTROL_RESPONSE_MS);
-      const settled = fetches;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(fetches, settled, "forced disposal leaves no retry behind");
-      assert.equal(closeCalls, 1, "idempotent whole-close retires the server once");
-    },
-  );
-});
-
-test("OpenCode owns a late-arriving subscription before setup can await", async () => {
-  let fetches = 0;
-  let subscribeCalls = 0;
-  let closeCalls = 0;
-  let releaseSubscribe!: (value: Readonly<{ stream: AsyncIterable<unknown> }>) => void;
-  const arriving = new Promise<Readonly<{ stream: AsyncIterable<unknown> }>>((resolve) => (releaseSubscribe = resolve));
-  await withInjectedFetch(
-    async () => {
-      fetches += 1;
-      throw new Error("no fetch may start after cancellation");
-    },
-    async () => {
-      const { session } = fixtureSession();
-      const provider = createOpencodeProvider({
-        loader: async () => ({
-          client: {
-            session,
-            event: {
-              subscribe: async () => {
-                subscribeCalls += 1;
-                return await arriving;
-              },
-            },
-          },
-          close: () => {
-            closeCalls += 1;
-          },
-        }),
-      });
-      const attempt = provider.start(driveInput());
-      await waitForCondition("subscription setup", () => subscribeCalls === 1, { budgetMs: 5_000 });
-      const retiring = performance.now();
-      const disposal = attempt.forceDispose();
-      releaseSubscribe({ stream: (async function* () {})() });
-      await disposal;
-      await attempt.closed;
-      assert.ok(performance.now() - retiring < CONTROL_RESPONSE_MS);
-      assert.equal(fetches, 0, "a subscription arriving after cancellation never fetches");
-      assert.equal(closeCalls, 1);
-    },
-  );
-});
-
-test("OpenCode preserves subscription setup failure while resources retire", async () => {
-  let closeCalls = 0;
-  const { session } = fixtureSession();
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          subscribe: async () => {
-            throw new Error("native subscription refused");
-          },
-        },
-      },
-      close: () => {
-        closeCalls += 1;
-      },
-    }),
-  });
-  const attempt = provider.start(driveInput());
-  await assert.rejects(attempt.result, /native subscription refused/u);
-  await attempt.closed;
-  assert.equal(closeCalls, 1, "setup failure still closed the owned server");
-});
-
-test("OpenCode surfaces reader teardown rejection through attempt custody", async () => {
-  let closeCalls = 0;
-  const { session } = fixtureSession();
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-            stream: {
-              [Symbol.asyncIterator]: () => ({
-                next: () =>
-                  new Promise<IteratorResult<unknown>>((resolve) => {
-                    if (request.signal.aborted) resolve({ done: true, value: undefined });
-                    else
-                      request.signal.addEventListener("abort", () => resolve({ done: true, value: undefined }), {
-                        once: true,
-                      });
-                  }),
-                return: async () => {
-                  throw new Error("event reader teardown refused");
-                },
-              }),
-            },
-          }),
-        },
-      },
-      close: () => {
-        closeCalls += 1;
-      },
-    }),
-  });
-  const attempt = provider.start(driveInput());
-  const drive = await attempt.result;
-  const completion = settledOutcome(drive.completion);
-  await assert.rejects(attempt.abort(), /event reader teardown refused/u);
-  await assert.rejects(attempt.closed, /event reader teardown refused/u);
-  assert.equal(await completion(), "pending", "a refused whole closure never publishes the Turn");
-  assert.equal(closeCalls, 1, "the server retired even though the reader teardown failed");
-});
-
-test("OpenCode never marks closure when the reader cannot prove retirement", async () => {
-  let closeCalls = 0;
-  const { session } = fixtureSession();
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-            stream: {
-              [Symbol.asyncIterator]: () => ({
-                next: () =>
-                  new Promise<IteratorResult<unknown>>((resolve) => {
-                    if (request.signal.aborted) resolve({ done: true, value: undefined });
-                    else
-                      request.signal.addEventListener("abort", () => resolve({ done: true, value: undefined }), {
-                        once: true,
-                      });
-                  }),
-                return: () => new Promise<IteratorResult<unknown>>(() => undefined),
-              }),
-            },
-          }),
-        },
-      },
-      close: () => {
-        closeCalls += 1;
-      },
-    }),
-  });
-  const attempt = provider.start(driveInput());
-  const drive = await attempt.result;
-  const disposal = attempt.forceDispose().then(
-    () => "settled" as const,
-    () => "rejected" as const,
-  );
-  const outcome = await Promise.race([
-    disposal,
-    new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), CONTROL_RESPONSE_MS + 100)),
-  ]);
-  assert.equal(outcome, "pending", "an unprovable retirement leaves closure pending, never marked closed");
-  assert.equal(closeCalls, 1, "the owned server still retired");
-  assert.equal(await settledOutcome(drive.completion)(), "pending", "an unproven closure never publishes the Turn");
-});
-
-test("OpenCode whole closure is idempotent after a normal answer", async () => {
-  const body = controlledBody();
-  let closeCalls = 0;
-  await withInjectedFetch(
-    async () => body.response(),
-    async () => {
-      const { session, prompts } = fixtureSession();
-      const provider = createOpencodeProvider({ loader: realSdkLoader({ session, onClose: () => (closeCalls += 1) }) });
-      const attempt = provider.start(driveInput());
-      const drive = await attempt.result;
-      const messageId = prompts[0]!;
-      body.send({
-        type: "message.updated",
-        properties: { info: { id: messageId, sessionID: SESSION_ID, role: "user" } },
-      });
-      body.send({ type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "busy" } } });
-      body.send({ type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "idle" } } });
-      assert.equal((await drive.completion).kind, "answered");
-      await Promise.all([drive.forceDispose(), drive.forceDispose()]);
-      await attempt.closed;
-      assert.equal(closeCalls, 1, "a settled whole-close never retires twice");
-      assert.equal(body.cancelled(), true);
-    },
-  );
-});
-
-/** A Body launch whose seed names this adapter; cwd and Heart come from the fixture. */
-function opencodeBodyLaunch(allocated: Awaited<ReturnType<typeof allocatedHeart>>, cwd: string): BodyLaunch {
-  return {
-    paths: allocated.paths,
-    seed: {
-      id: allocated.id,
-      archetype: "claude",
-      provider: { name: "opencode-sdk", kind: "opencode-sdk" },
-      options: {},
-      origin: { kind: "direct" },
-      allowed: ALLOWED_ACTIONS,
-      cwd,
-    },
-    initialBody: "work",
   };
 }
 
-/**
- * The native iterator's one-shot return-phase barrier. `returned` becomes true
- * only when the adapter actually invokes the fixture iterator's `return`; that
- * invocation is the moment whole closure has entered unproven retirement. A
- * Body recorded in Heart, a submitted prompt, and elapsed time all happen
- * earlier and cannot substitute for this evidence.
- */
-type UnprovenRetirementPhase = { returned: boolean };
-
-/**
- * A native event stream that answers once and then cannot prove retirement:
- * `next` settles only on abort, while `return` never settles. Whole closure
- * therefore stays pending, which is exactly the unproven case the Body must
- * survive without parking. Invoking `return` publishes `phase`.
- */
-function terminalThenUnclosable(
-  session: Readonly<{ prompts: string[] }>,
-  request: OpencodeEventSubscriptionRequest,
-  phase: UnprovenRetirementPhase,
-): AsyncIterable<unknown> {
-  const queued: unknown[] = [];
-  let index = 0;
-  let seeded = false;
-  return {
-    [Symbol.asyncIterator]: () => ({
-      next: async (): Promise<IteratorResult<unknown>> => {
-        while (queued.length === index) {
-          if (request.signal.aborted) return { done: true, value: undefined };
-          if (!seeded && session.prompts.length > 0) {
-            const messageId = session.prompts[0]!;
-            queued.push(
-              {
-                type: "message.updated",
-                properties: { info: { id: messageId, sessionID: SESSION_ID, role: "user" } },
-              },
-              { type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "busy" } } },
-              { type: "session.status", properties: { sessionID: SESSION_ID, status: { type: "idle" } } },
-            );
-            seeded = true;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 1));
-        }
-        return { done: false, value: queued[index++] };
-      },
-      return: () => {
-        phase.returned = true;
-        return new Promise<IteratorResult<unknown>>(() => undefined);
-      },
-    }),
-  };
-}
-
-/** Bounded wait for the fixture proof that native retirement was actually entered. */
-async function awaitUnprovenRetirement(phase: UnprovenRetirementPhase): Promise<void> {
-  await waitForCondition("the native iterator return phase (unproven retirement)", () => phase.returned, {
-    budgetMs: 5_000,
+test("OpenCode v2 HTML and foreign JSON cannot satisfy native readiness", async () => {
+  const native = await server((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" });
+    response.end("<html>app</html>");
   });
-}
-
-/** Distinguishes a bounded Body settlement from a park, without forcing either. */
-async function boundedOutcome(body: Promise<unknown>, timeoutMs: number): Promise<string> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const client = createNativeClient(native.base, "test-password");
   try {
-    return await Promise.race([
-      body.then(
-        () => "settled",
-        (error: unknown) => `rejected:${error instanceof Error ? error.name : String(error)}`,
-      ),
-      new Promise<string>((resolve) => {
-        timer = setTimeout(() => resolve("parked"), timeoutMs);
-      }),
-    ]);
+    await assert.rejects(client.sdk.server.info(), /UnsupportedContentType/u);
+    const controller = new AbortController();
+    let reads = 0;
+    const ready = waitReady(async () => {
+      reads += 1;
+      if (reads === 2) controller.abort(new Error("not ready"));
+      return { data: [] };
+    }, controller.signal);
+    await assert.rejects(ready, /not ready/u);
+    assert.equal(reads, 2);
+    await waitReady(
+      async () => ({ version: "2.0.20", pid: 1, urls: [], paths: { tmp: "/tmp" } }),
+      new AbortController().signal,
+    );
   } finally {
-    clearTimeout(timer);
+    await client.close();
+    await native.close();
   }
-}
+});
 
-test("OpenCode Body supervises control stop while stream closure is unproven", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-opencode-body-stop-"));
+test("OpenCode v2 SSE cancellation proves physical socket closure without retries", async () => {
+  let requests = 0;
+  const native = await server((request, response) => {
+    requests += 1;
+    assert.equal(request.url, "/api/event");
+    assert.equal(request.headers.authorization, `Basic ${Buffer.from("opencode:test-password").toString("base64")}`);
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write('data: {"type":"server.connected","data":{}}\r\n\r\n');
+  });
+  const client = createNativeClient(native.base, "test-password");
+  const controller = new AbortController();
   try {
-    // Measure custody retirement, not optional Body-end observer delivery.
+    const subscribed = await client.subscribe(controller.signal);
+    const iterator = subscribed.stream[Symbol.asyncIterator]();
+    const reading = iterator.next();
+    controller.abort();
+    await reading.catch(() => undefined);
+    await iterator.return?.();
+    await Promise.all([client.close(), client.close()]);
+    await until(() => native.sockets.size === 0);
+    assert.equal(requests, 1);
+  } finally {
+    await client.close();
+    await native.close();
+  }
+});
+
+test("OpenCode v2 native feed loss is not replayed and effect stream failure is visible", async () => {
+  for (const terminal of ["eof", "failure"] as const) {
+    let requests = 0;
+    const native = await server((_request, response) => {
+      requests += 1;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('data: {"type":"server.connected","data":{}}\n\n');
+      if (terminal === "failure") response.write("event: effect/httpapi/stream/failure\ndata: []\n\n");
+      response.end();
+    });
+    const client = createNativeClient(native.base, "test-password");
+    try {
+      const subscription = await client.subscribe(new AbortController().signal);
+      const next = subscription.stream[Symbol.asyncIterator]().next();
+      if (terminal === "failure") await assert.rejects(next, /native event feed failed/u);
+      else assert.equal((await next).done, true);
+      assert.equal(requests, 1);
+    } finally {
+      await client.close();
+      await native.close();
+    }
+  }
+});
+
+test("OpenCode v2 cancellation during subscription setup retires the connection", async () => {
+  let connected = false;
+  const native = await server(() => {
+    connected = true;
+  });
+  const client = createNativeClient(native.base, "test-password");
+  try {
+    const subscription = client.subscribe(new AbortController().signal);
+    const refused = assert.rejects(subscription, /abort/u);
+    await until(() => connected);
+    await client.close();
+    await refused;
+    await until(() => native.sockets.size === 0);
+  } finally {
+    await client.close();
+    await native.close();
+  }
+});
+
+test("OpenCode v2 Body remains supervised while whole closure is unproven", async (context) => {
+  for (const control of ["stop", "heart-loss"] as const) {
+    const root = temporaryDirectory(context, `keiyaku-opencode-${control}-`);
     mkdirSync(join(root, ".keiyaku"), { recursive: true });
     writeFileSync(
       join(root, ".keiyaku", "settings.json"),
-      JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
-    );
-    const allocated = await allocatedHeart(root, "claude", "feed0001");
-    const { session, prompts } = fixtureSession();
-    const phase: UnprovenRetirementPhase = { returned: false };
-    const provider = createOpencodeProvider({
-      loader: async () => ({
-        client: {
-          session,
-          event: {
-            subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-              stream: terminalThenUnclosable({ prompts }, request, phase),
-            }),
-          },
+      JSON.stringify({
+        plugins: {
+          square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+          paseo: { package: "@astrosheep/keiyaku-plugin-paseo", enabled: false },
         },
-        close: () => undefined,
       }),
-    });
-    const body = runAkumaBody(opencodeBodyLaunch(allocated, root), provider, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
-    // Control stop acts only after the native iterator's own `return` proves the
-    // attempt entered real unproven retirement; the recorded Body precedes it.
-    await awaitUnprovenRetirement(phase);
-    const requested = await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
-    assert.equal(requested.kind, "requested");
-    await expectBodySettles(body, "the Body did not reach bounded hung handling", 6_000);
-    const heart = await readHeart(allocated.paths);
-    assert.match(
-      heart.latestBody?.hung?.diagnostic ?? "",
-      /provider custody remained live after 1000ms/u,
-      "the unproven stream closure is recorded as hung, not parked",
     );
-    assert.equal(heart.latestBody?.end, "broke-off");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("OpenCode Body supervises Heart loss while stream closure is unproven", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-opencode-body-heart-gone-"));
-  try {
-    const allocated = await allocatedHeart(root, "claude", "feed0002");
-    const { session, prompts } = fixtureSession();
-    const phase: UnprovenRetirementPhase = { returned: false };
+    const allocated = await allocatedHeart(root, "claude", control === "stop" ? "feed0001" : "feed0002");
+    const fixture = opencodeFixture();
+    let returning = false;
     const provider = createOpencodeProvider({
-      loader: async () => ({
-        client: {
-          session,
-          event: {
-            subscribe: async (request: OpencodeEventSubscriptionRequest) => ({
-              stream: terminalThenUnclosable({ prompts }, request, phase),
-            }),
+      loader: async (...args) => {
+        const loaded = await fixture.loader(...args);
+        return {
+          ...loaded,
+          client: {
+            session: {
+              ...loaded.client.session,
+              async prompt(input) {
+                const result = await fixture.session.prompt(input);
+                fixture.admitted(input.body.id);
+                fixture.delivered(input.body.id);
+                fixture.step();
+                fixture.complete();
+                return result;
+              },
+            },
+            event: {
+              async subscribe(request) {
+                const subscription = await loaded.client.event.subscribe(request);
+                const iterator = subscription.stream[Symbol.asyncIterator]();
+                return {
+                  stream: {
+                    [Symbol.asyncIterator]: () => ({
+                      next: () => iterator.next(),
+                      return: () => {
+                        returning = true;
+                        return new Promise<IteratorResult<unknown>>(() => undefined);
+                      },
+                    }),
+                  },
+                };
+              },
+            },
           },
-        },
-        close: () => undefined,
-      }),
-    });
-    const body = runAkumaBody(opencodeBodyLaunch(allocated, root), provider, {
-      now: () => "2026-08-08T00:00:00.000Z",
-    });
-    // Heart loss must land mid-turn, while closure is still unproven: the native
-    // iterator's own `return` proves that phase; a submitted prompt does not.
-    await awaitUnprovenRetirement(phase);
-    rmSync(allocated.paths.heart, { force: true });
-    // Before the whole-close ordering fix the driver was parked at a pending
-    // completion here and never woke. It must now leave the Heart/control race
-    // and retire bounded; the absent-Heart `breakBody` edge it then meets is
-    // pre-existing Body behaviour outside this adapter, not a park.
-    const started = performance.now();
-    const outcome = await boundedOutcome(body, 8_000);
-    const elapsed = performance.now() - started;
-    assert.notEqual(outcome, "parked", "Heart loss must not park the Body on unproven closure");
-    assert.match(outcome, /^(?:settled|rejected:HeartAbsentError)$/u, `unexpected Heart-loss outcome ${outcome}`);
-    assert.ok(elapsed < 8_000, `Heart loss settled in ${Math.round(elapsed)}ms`);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-function childScript(sdkEntry: string, adapterEntry: string, seamEntry: string): string {
-  return `
-import { createOpencodeClient } from ${JSON.stringify(sdkEntry)};
-import { createOpencodeProvider } from ${JSON.stringify(adapterEntry)};
-import { opencodeEventPort } from ${JSON.stringify(seamEntry)};
-
-const watchdog = setTimeout(() => {
-  console.error("unproven closure: the attempt did not retire every owned resource");
-  process.exit(3);
-}, 1500);
-watchdog.unref();
-
-let fetches = 0;
-globalThis.fetch = async () => {
-  fetches += 1;
-  throw new Error("connect ECONNREFUSED 127.0.0.1:9");
-};
-
-const session = {
-  create: async () => ({ data: { id: "session-1" } }),
-  promptAsync: async () => ({ data: undefined }),
-  messages: async () => ({ data: [] }),
-  abort: async () => ({ data: true }),
-};
-let closeCalls = 0;
-const provider = createOpencodeProvider({
-  loader: async () => {
-    const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:9", directory: process.cwd() });
-    return {
-      client: { session, event: opencodeEventPort(client.event) },
-      close: () => {
-        closeCalls += 1;
+        };
       },
+    });
+    const launch: BodyLaunch = {
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: { name: "opencode-sdk", kind: "opencode-sdk" },
+        options: {},
+        origin: { kind: "direct" },
+        allowed: ALLOWED_ACTIONS,
+        cwd: root,
+      },
+      initialBody: "work",
     };
-  },
-});
-
-const attempt = provider.start({
-  body: "work",
-  launchTells: [],
-  cwd: process.cwd(),
-  options: {},
-  signal: new AbortController().signal,
-  requests: { dir: process.cwd() },
-  session: { kind: "fresh" },
-});
-await attempt.result;
-for (let index = 0; index < 4000 && fetches === 0; index += 1) {
-  await new Promise((resolve) => setTimeout(resolve, 1));
-}
-if (fetches !== 1) {
-  console.error(\`expected one SSE fetch, saw \${fetches}\`);
-  process.exit(4);
-}
-await attempt.abort();
-await attempt.closed;
-if (closeCalls !== 1) {
-  console.error(\`expected one server close, saw \${closeCalls}\`);
-  process.exit(5);
-}
-console.log("closed");
-`;
-}
-
-async function superviseChild(
-  child: ChildProcess,
-  timeoutMs: number,
-): Promise<Readonly<{ code: number | null; stdout: string; stderr: string }>> {
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.setEncoding("utf8");
-  child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (chunk: string) => (stdout += chunk));
-  child.stderr?.on("data", (chunk: string) => (stderr += chunk));
-  return await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new Error(`diagnostic child did not exit naturally: stdout=${stdout} stderr=${stderr}`));
-    }, timeoutMs);
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr });
-    });
-  });
-}
-
-test("OpenCode diagnostic child exits naturally after real-SDK retry closure", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "opencode-sse-child-"));
-  const script = join(directory, "child.mjs");
-  writeFileSync(
-    script,
-    childScript(
-      import.meta.resolve("@opencode-ai/sdk"),
-      new URL("../src/akuma/providers/opencode-sdk/index.js", import.meta.url).href,
-      new URL("../src/akuma/providers/opencode-sdk/session.js", import.meta.url).href,
-    ),
-  );
-  const loader = import.meta.url.endsWith(".js") ? [] : ["--import", "tsx"];
-  const child = spawn(process.execPath, [...loader, script], {
-    cwd: process.cwd(),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  try {
-    const outcome = await superviseChild(child, 20_000);
-    assert.equal(outcome.stderr, "");
-    assert.equal(outcome.stdout.trim(), "closed");
-    assert.equal(outcome.code, 0, "the child exited naturally, without a forced or timed exit");
-  } finally {
-    if (child.pid !== undefined) {
-      child.kill("SIGKILL");
-      await waitForProcessExit(child.pid).catch(() => undefined);
+    const body = driveAkumaBody(launch, provider, { now: () => "2026-08-08T00:00:00.000Z" });
+    // Iterator return, not elapsed time or prompt submission, proves this exact phase.
+    await waitForCondition("whole closure entered unproven iterator return", () => returning, { budgetMs: 5_000 });
+    if (control === "stop") {
+      assert.equal((await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z")).kind, "requested");
+      await expectBodySettles(body, "Body parked outside custody supervision", 6_000);
+      const heart = await readHeart(allocated.paths);
+      assert.match(heart.latestBody?.hung?.diagnostic ?? "", /provider custody remained live/u);
+      assert.equal(heart.latestBody?.end, "broke-off");
+    } else {
+      rmSync(allocated.paths.heart);
+      await expectBodySettles(
+        body.catch((error: unknown) => {
+          assert.equal((error as Error).name, "HeartAbsentError");
+        }),
+        "Heart loss parked outside custody supervision",
+        8_000,
+      );
     }
-    rmSync(directory, { recursive: true, force: true });
+    assert.equal(fixture.closed(), 1);
   }
+});
+
+test("OpenCode v2 preserves reader teardown failure independently of the Turn", async () => {
+  const native = opencodeFixture();
+  const provider = createOpencodeProvider({
+    loader: async (...args) => {
+      const loaded = await native.loader(...args);
+      return {
+        ...loaded,
+        client: {
+          ...loaded.client,
+          event: {
+            async subscribe({ signal }) {
+              return {
+                stream: {
+                  [Symbol.asyncIterator]: () => ({
+                    next: () =>
+                      new Promise<IteratorResult<unknown>>((resolve) => {
+                        const done = () => resolve({ done: true, value: undefined });
+                        if (signal.aborted) done();
+                        else signal.addEventListener("abort", done, { once: true });
+                      }),
+                    return: async () => {
+                      throw new Error("reader teardown refused");
+                    },
+                  }),
+                },
+              };
+            },
+          },
+        },
+      };
+    },
+  });
+  const attempt = provider.start(native.input);
+  await attempt.result;
+  await assert.rejects(attempt.forceDispose(), /reader teardown refused/u);
+  await assert.rejects(attempt.closed, /reader teardown refused/u);
+  assert.equal(native.closed(), 1);
 });

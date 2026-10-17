@@ -3,8 +3,8 @@ import type { OpencodeEventSubscriptionRequest } from "./session.js";
 
 /**
  * One adapter-private owner for every resource an OpenCode event subscription
- * creates: the native subscription, its fetch and reader, the pending read, and
- * the SDK's retry waiting. `closed` resolves only after those resources really
+ * creates: the native subscription, its fetch and reader, and the pending read.
+ * `closed` resolves only after those resources really
  * retired; a teardown rejection escapes through it, and an unprovable
  * retirement leaves it pending so existing custody reports the attempt hung.
  */
@@ -15,32 +15,9 @@ export type OwnedEventStream = Readonly<{
   next(): Promise<IteratorResult<unknown>>;
   /** Aborts the owned signal, settles any pending read, then awaits real iterator retirement. */
   retire(): Promise<void>;
-  /** Resolves only when subscription, reader, and retry waiting actually ended. */
+  /** Resolves only when subscription and reader actually ended. */
   closed: Promise<void>;
 }>;
-
-/**
- * A backoff sleep that resolves when the owned signal aborts and always clears
- * its timer. Cancellation before the sleep starts completes immediately, and a
- * simultaneous timeout and abort still settles once and drops the listener.
- */
-function cancellableSleep(signal: AbortSignal): (milliseconds: number) => Promise<void> {
-  return (milliseconds) =>
-    new Promise<void>((resolve) => {
-      if (signal.aborted) {
-        resolve();
-        return;
-      }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const finish = (): void => {
-        if (timer !== undefined) clearTimeout(timer);
-        signal.removeEventListener("abort", finish);
-        resolve();
-      };
-      timer = setTimeout(finish, milliseconds);
-      signal.addEventListener("abort", finish, { once: true });
-    });
-}
 
 export function ownEventStream(
   input: Readonly<{
@@ -78,8 +55,8 @@ export function ownEventStream(
   const retire = (): Promise<void> => {
     if (settling !== undefined) return settling;
     settling = (async (): Promise<void> => {
-      // Abort first: it interrupts the SDK's fetch, reader, and backoff and
-      // settles a pending read, before iterator return can be waited on.
+      // Abort first: it interrupts the SDK's fetch and reader and settles a
+      // pending read before iterator return can be waited on.
       if (!controller.signal.aborted) controller.abort(new Error("OpenCode event stream retired"));
       input.signal.removeEventListener("abort", follow);
       await subscribing;
@@ -100,7 +77,6 @@ export function ownEventStream(
     const subscription = await input.subscribe({
       directory: input.directory,
       signal: controller.signal,
-      sleep: cancellableSleep(controller.signal),
     });
     iterator = subscription.stream[Symbol.asyncIterator]();
   })();

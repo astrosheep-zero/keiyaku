@@ -1,298 +1,192 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
-import type { OpencodeSdkLoader, OpencodeSdkSession } from "../src/akuma/providers/opencode-sdk/session.js";
+import { opencodeFixture, until } from "./support/opencode-v2.js";
 
-function fixture() {
-  const queued: unknown[] = [];
-  let wake: (() => void) | undefined;
-  const prompts: {
-    body: { messageID: string; parts: { text: string }[]; model?: unknown; variant?: string; system?: string };
-  }[] = [];
-  const rows: { info: Record<string, unknown>; parts: unknown[] }[] = [];
-  const held = new Map<string, { resolve(): void; reject(error: Error): void }>();
-  let closed = 0;
-  const push = (event: unknown) => {
-    queued.push(event);
-    wake?.();
-    wake = undefined;
-  };
-  const user = (id: string, sessionID = "session-1") =>
-    push({ type: "message.updated", properties: { info: { id, sessionID, role: "user" } } });
-  const busy = () => push({ type: "session.status", properties: { sessionID: "session-1", status: { type: "busy" } } });
-  const idle = () => push({ type: "session.status", properties: { sessionID: "session-1", status: { type: "idle" } } });
-  const fail = () =>
-    push({ type: "session.error", properties: { sessionID: "session-1", error: { message: "launch failed" } } });
-  const session = {
-    async create() {
-      return { data: { id: "session-1" } };
-    },
-    async get() {
-      return { data: { id: "session-1" } };
-    },
-    async promptAsync(value: (typeof prompts)[number]) {
-      prompts.push(value);
-      rows.push({
-        info: { id: value.body.messageID, sessionID: "session-1", role: "user", time: { created: Date.now() } },
-        parts: [],
-      });
-      if (prompts.length > 1)
-        await new Promise<void>((resolve, reject) => held.set(value.body.messageID, { resolve, reject }));
-      return { data: undefined };
-    },
-    async messages() {
-      return { data: rows };
-    },
-    async abort() {
-      return { data: true };
-    },
-  } as unknown as OpencodeSdkSession;
-  const loader: OpencodeSdkLoader = async () => ({
-    client: {
-      session,
-      event: {
-        // The adapter's port carries a cancellation signal; a native event
-        // stream honors it, so this fixture models an abortable pending read.
-        async subscribe(request: { signal: AbortSignal }) {
-          const cancelled = () =>
-            new Promise<void>((resolve) => {
-              if (request.signal.aborted) resolve();
-              else request.signal.addEventListener("abort", () => resolve(), { once: true });
-            });
-          return {
-            stream: (async function* () {
-              for (;;) {
-                if (queued.length === 0) await Promise.race([cancelled(), new Promise<void>((r) => (wake = r))]);
-                if (request.signal.aborted) return;
-                while (queued.length > 0) yield queued.shift();
-              }
-            })(),
-          };
-        },
-      } as never,
-    },
-    close: () => {
-      closed += 1;
-    },
+test("OpenCode v2 correlates native enqueue, delivery, assistant and terminal boundary", async () => {
+  const native = opencodeFixture();
+  const provider = createOpencodeProvider({ loader: native.loader });
+  const attempt = provider.start({ ...native.input, options: { model: "vendor/model", effort: "high" } });
+  const drive = await attempt.result;
+  const first = native.prompts[0]!.body.id;
+  assert.equal(drive.admission.fence, first);
+  assert.deepEqual(native.calls[0], {
+    method: "create",
+    value: { body: { location: { directory: "/tmp" }, model: { providerID: "vendor", id: "model", variant: "high" } } },
   });
-  const input = {
-    body: "launch",
-    launchTells: [],
-    cwd: "/tmp",
-    options: { model: "vendor/model", effort: "high", systemPrompt: "rules" },
-    signal: new AbortController().signal,
-    requests: { dir: "/tmp/requests" },
-    session: { kind: "fresh" as const },
-  };
-  const answer = (parentID: string, text: string, summary = false) =>
-    rows.push({
-      info: {
-        id: `msg-answer-${rows.length}`,
-        sessionID: "session-1",
-        role: "assistant",
-        parentID,
-        summary,
-        time: { created: Date.now() },
-      },
-      parts: [{ type: "text", text }],
-    });
-  return { loader, input, prompts, held, user, busy, idle, fail, answer, closed: () => closed };
-}
-
-async function until(check: () => boolean) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (check()) return;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
-  assert.fail("native event was not observed");
-}
-
-test("OpenCode matches only own session user admission and attributes final answer to latest Tell", async () => {
-  const native = fixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  const launch = native.prompts[0]!.body.messageID;
-  native.user(launch);
-  native.busy();
-  native.answer(launch, "old answer");
-  const first = drive.tell!({ id: "tell-1", text: "same text" });
+  native.admitted(first);
+  native.delivered(first);
+  native.step("msg_opening");
+  const tell = drive.tell!({ id: "tell", text: "steer" });
   await until(() => native.prompts.length === 2);
-  const id = native.prompts[1]!.body.messageID;
-  assert.ok(id > launch, "native IDs sort after the launch message");
-  assert.deepEqual(native.prompts[1]!.body.parts, [{ type: "text", text: "same text" }]);
-  assert.deepEqual(
-    {
-      model: native.prompts[1]!.body.model,
-      variant: native.prompts[1]!.body.variant,
-      system: native.prompts[1]!.body.system,
-    },
-    { model: { providerID: "vendor", modelID: "model" }, variant: "high", system: "rules" },
-  );
-  native.user(id, "wrong-session");
-  native.user("other");
-  let settled = false;
-  void first.then(() => {
-    settled = true;
+  const next = native.prompts[1]!.body.id;
+  assert.notEqual(next, first);
+  assert.equal(native.prompts[1]!.body.text, "steer");
+  let accepted = false;
+  void tell.then(() => {
+    accepted = true;
   });
+  native.push("session.inbox.enqueued", { sessionID: "ses_other", inboxID: next, item: { type: "user" } });
+  native.admitted("msg_other");
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-  native.user(id);
-  assert.deepEqual(await first, { kind: "accepted", fence: id });
-  native.answer(id, "new answer");
-  native.idle();
-  assert.deepEqual((await drive.completion).kind, "answered");
-  assert.equal(((await drive.completion) as { kind: string; answer: string }).answer, "new answer");
+  assert.equal(accepted, false, "HTTP acknowledgement and unrelated admissions are not receipts");
+  native.admitted(next);
+  assert.deepEqual(await tell, { kind: "accepted", fence: next });
+  native.delivered(next);
+  native.step();
+  native.complete("OK");
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "OK", historyId: "msg_terminal" });
+  await attempt.closed;
   assert.equal(native.closed(), 1);
-  native.held.get(id)?.resolve();
+  assert.deepEqual(
+    await provider.fork!({ session: { sessionId: native.id }, at: "msg_terminal", cwd: "/tmp" }).result,
+    { session: { sessionId: "ses_child" } },
+  );
+  assert.deepEqual(native.calls.at(-1), { method: "fork", value: { id: native.id, before: "msg_terminal" } });
 });
 
-test("OpenCode terminal before admission settles pending Tells without accepting old answers", async () => {
-  const native = fixture();
+test("OpenCode v2 refuses to attribute another writer's consumed input", async () => {
+  const native = opencodeFixture();
   const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  const launch = native.prompts[0]!.body.messageID;
-  native.user(launch);
-  native.busy();
-  native.answer(launch, "old answer");
-  const pending = drive.tell!({ id: "tell", text: "new" });
-  await until(() => native.prompts.length === 2);
-  native.idle();
-  assert.deepEqual(await pending, { kind: "turn-ended" });
-  assert.equal((await drive.completion).kind, "answered");
-  native.held.get(native.prompts[1]!.body.messageID)?.resolve();
+  native.admitted(native.prompts[0]!.body.id);
+  native.delivered("msg_human");
+  native.step();
+  native.complete("human answer");
+  assert.match(((await drive.completion) as { diagnostic: string }).diagnostic, /another writer/u);
 });
 
-test("OpenCode admission before idle requires its own assistant; abort closes outstanding waits", async () => {
-  const native = fixture();
+test("OpenCode v2 cannot complete from unrelated idle or an assistant before the latest Tell", async () => {
+  const native = opencodeFixture();
   const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  native.user(native.prompts[0]!.body.messageID);
-  native.busy();
-  const pending = drive.tell!({ id: "tell", text: "new" });
+  native.push("session.execution.succeeded");
+  const first = native.prompts[0]!.body.id;
+  native.admitted(first);
+  native.delivered(first);
+  native.step("msg_old");
+  const tell = drive.tell!({ id: "tell", text: "new" });
   await until(() => native.prompts.length === 2);
-  const id = native.prompts[1]!.body.messageID;
-  native.user(id);
-  native.idle();
-  assert.deepEqual(await pending, { kind: "accepted", fence: id });
+  const next = native.prompts[1]!.body.id;
+  native.admitted(next);
+  await tell;
+  native.delivered(next);
+  native.complete("old", "msg_old");
   assert.deepEqual(await drive.completion, {
     kind: "failed",
-    diagnostic: "OpenCode completed without a native assistant answer",
+    diagnostic: "OpenCode completed without an assistant for the admitted input",
   });
-  native.held.get(id)?.resolve();
-
-  const second = fixture();
-  const interrupted = await createOpencodeProvider({ loader: second.loader }).start(second.input).result;
-  second.user(second.prompts[0]!.body.messageID);
-  const wait = interrupted.tell!({ id: "tell", text: "new" });
-  await until(() => second.prompts.length === 2);
-  await interrupted.abort();
-  assert.deepEqual(await wait, { kind: "turn-ended" });
-  assert.equal((await interrupted.completion).kind, "failed");
-  second.held.get(second.prompts[1]!.body.messageID)?.resolve();
 });
 
-test("OpenCode HTTP response alone cannot receipt; equal text is ordered by distinct native IDs", async () => {
-  const native = fixture();
+test("OpenCode v2 terminal errors and feed loss fail honestly", async () => {
+  const native = opencodeFixture();
   const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  native.user(native.prompts[0]!.body.messageID);
-  native.busy();
-  const first = drive.tell!({ id: "one", text: "same text" });
-  const second = drive.tell!({ id: "two", text: "same text" });
-  await until(() => native.prompts.length === 2);
-  const firstId = native.prompts[1]!.body.messageID;
-  native.held.get(firstId)!.resolve();
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(native.prompts.length, 2, "the next submission waits for exact native admission");
-  let firstSettled = false;
-  void first.then(() => {
-    firstSettled = true;
+  native.admitted(native.prompts[0]!.body.id);
+  native.push("session.execution.failed", { error: { message: "model unavailable" } });
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "model unavailable" });
+  const lost = opencodeFixture();
+  const loader: typeof lost.loader = async (...args) => {
+    const loaded = await lost.loader(...args);
+    return {
+      ...loaded,
+      client: {
+        ...loaded.client,
+        event: {
+          async subscribe() {
+            return { stream: (async function* () {})() };
+          },
+        },
+      },
+    };
+  };
+  const broken = await createOpencodeProvider({ loader }).start(lost.input).result;
+  assert.deepEqual(await broken.completion, {
+    kind: "failed",
+    diagnostic: "OpenCode event stream ended before Turn completion",
   });
-  assert.equal(firstSettled, false, "HTTP acknowledgement does not settle the Tell");
-  native.user(firstId);
-  assert.deepEqual(await first, { kind: "accepted", fence: firstId });
-  await until(() => native.prompts.length === 3);
-  const secondId = native.prompts[2]!.body.messageID;
-  assert.notEqual(firstId, secondId);
-  native.user(firstId);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  let secondSettled = false;
-  void second.then(() => {
-    secondSettled = true;
-  });
-  assert.equal(secondSettled, false, "duplicate first ID cannot receipt second equal-text Tell");
-  native.user(secondId);
-  assert.deepEqual(await second, { kind: "accepted", fence: secondId });
-  native.user(firstId);
-  native.answer(firstId, "stale");
-  native.answer(secondId, "latest");
-  native.idle();
-  assert.deepEqual(((await drive.completion) as { kind: string; answer: string }).answer, "latest");
-  native.held.get(secondId)?.resolve();
 });
 
-test("OpenCode transport rejection without admission is not a receipt", async () => {
-  const native = fixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  native.user(native.prompts[0]!.body.messageID);
-  native.busy();
-  const failed = drive.tell!({ id: "failed", text: "first" });
-  await until(() => native.prompts.length === 2);
-  native.held.get(native.prompts[1]!.body.messageID)!.reject(new Error("native request rejected"));
-  await assert.rejects(failed, /native request rejected/u);
-  native.answer(native.prompts[0]!.body.messageID, "launch answer");
-  native.idle();
-  assert.deepEqual(((await drive.completion) as { kind: string; answer: string }).answer, "launch answer");
-});
-
-test("OpenCode force disposal ends pending Tell and prevents post-terminal submission", async () => {
-  const native = fixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  native.user(native.prompts[0]!.body.messageID);
-  const pending = drive.tell!({ id: "pending", text: "new" });
-  await until(() => native.prompts.length === 2);
-  await drive.forceDispose();
+test("OpenCode v2 cancellation interrupts once and retires queued live admissions", async () => {
+  const native = opencodeFixture();
+  const attempt = createOpencodeProvider({ loader: native.loader }).start(native.input);
+  const drive = await attempt.result;
+  const pending = drive.tell!({ id: "tell", text: "queued" });
+  await drive.abort();
+  await attempt.closed;
   assert.deepEqual(await pending, { kind: "turn-ended" });
-  assert.deepEqual(await drive.tell!({ id: "late", text: "late" }), { kind: "turn-ended" });
-  assert.equal(native.prompts.length, 2);
+  assert.deepEqual(native.calls.at(-1), { method: "interrupt", value: { id: native.id } });
   assert.equal(native.closed(), 1);
-  native.held.get(native.prompts[1]!.body.messageID)?.resolve();
+  assert.equal((await drive.completion).kind, "failed");
 });
 
-test("OpenCode waits for exact opening admission before submitting the first live Tell", async () => {
-  const native = fixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-  const launch = native.prompts[0]!.body.messageID;
-  const pending = drive.tell!({ id: "first", text: "steer" });
-  native.user(launch, "other-session");
-  native.user("other-message");
-  native.busy();
-  native.idle();
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(native.prompts.length, 1, "HTTP launch acknowledgement and unrelated events cannot release submission");
-  native.user(launch);
-  native.busy();
-  await until(() => native.prompts.length === 2);
-  const id = native.prompts[1]!.body.messageID;
-  native.user(id);
-  assert.deepEqual(await pending, { kind: "accepted", fence: id });
-  native.user(launch);
-  native.answer(id, "steered answer");
-  native.idle();
-  assert.equal(((await drive.completion) as { answer: string }).answer, "steered answer");
-  native.held.get(id)?.resolve();
+test("OpenCode v2 resume selects the model before its first prompt, never freshens a native promise", async () => {
+  const native = opencodeFixture();
+  const attempt = createOpencodeProvider({ loader: native.loader }).resume!({
+    ...native.input,
+    session: { kind: "resume", coordinate: { sessionId: native.id } },
+    options: { model: "vendor/model", effort: "high", systemPrompt: "follow these rules" },
+  });
+  const drive = await attempt.result;
+  assert.deepEqual(native.calls.slice(0, 3), [
+    { method: "get", value: { id: native.id } },
+    { method: "switchModel", value: { id: native.id, model: { providerID: "vendor", id: "model", variant: "high" } } },
+    { method: "get", value: { id: native.id } },
+  ]);
+  assert.deepEqual(native.calls[3], { method: "instructions", value: { id: native.id, text: "follow these rules" } });
+  await drive.forceDispose();
+  await attempt.closed;
 });
 
-test("OpenCode ends queued live Tells when the opening message is never admitted", async () => {
-  for (const terminal of ["failure", "abort", "dispose"] as const) {
-    const native = fixture();
-    const drive = await createOpencodeProvider({ loader: native.loader }).start(native.input).result;
-    const first = drive.tell!({ id: "first", text: "steer" });
-    const second = drive.tell!({ id: "second", text: "steer again" });
-    if (terminal === "failure") native.fail();
-    else if (terminal === "abort") await drive.abort();
-    else await drive.forceDispose();
-    assert.deepEqual(await first, { kind: "turn-ended" });
-    assert.deepEqual(await second, { kind: "turn-ended" });
-    assert.equal((await drive.completion).kind, "failed");
-    native.user(native.prompts[0]!.body.messageID);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    assert.equal(native.prompts.length, 1, "terminal settlement never releases a native live submission");
-  }
+test("OpenCode v2 refuses observed busy sessions before native submission", async () => {
+  const native = opencodeFixture();
+  const provider = createOpencodeProvider({
+    loader: async (...args) => {
+      const loaded = await native.loader(...args);
+      return {
+        ...loaded,
+        client: {
+          ...loaded.client,
+          session: {
+            ...loaded.client.session,
+            active: async () => ({ data: { [native.id]: { type: "running" } } }),
+          },
+        },
+      };
+    },
+  });
+  const attempt = provider.resume!({
+    ...native.input,
+    session: { kind: "resume", coordinate: { sessionId: native.id } },
+  });
+  await assert.rejects(attempt.result, /already busy/u);
+  await attempt.closed;
+  assert.equal(native.prompts.length, 0);
+  assert.equal(native.closed(), 1);
+});
+
+test("OpenCode v2 never forks before an assistant and silently drops its answer", async () => {
+  const native = opencodeFixture();
+  native.messages.set("msg_old", { id: "msg_old", type: "assistant" });
+  const attempt = createOpencodeProvider({ loader: native.loader }).fork!({
+    session: { sessionId: native.id },
+    at: "msg_old",
+    cwd: "/tmp",
+  });
+  await assert.rejects(attempt.result, /successful native terminal boundary/u);
+  await attempt.closed;
+  assert.equal(
+    native.calls.some((call) => call.method === "fork"),
+    false,
+  );
+});
+
+test("OpenCode v2 refuses unsupported native options instead of dropping them", async () => {
+  const native = opencodeFixture();
+  const provider = createOpencodeProvider({ loader: native.loader });
+  assert.equal(provider.admitOptions({ systemPrompt: "rules", systemPromptMode: "replace" }).kind, "refused");
+  assert.equal(provider.admitOptions({ systemPrompt: "rules", systemPromptMode: "append" }).kind, "admitted");
+  assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
+  assert.equal(provider.admitOptions({ effort: "high" }).kind, "refused");
+  const attempt = provider.start({ ...native.input, schemaJson: "{}" });
+  await assert.rejects(attempt.result, /structured answer/u);
+  await attempt.closed;
+  assert.equal(native.calls.length, 0);
 });

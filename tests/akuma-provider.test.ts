@@ -1,3 +1,4 @@
+import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -35,7 +36,6 @@ import {
   loadOpencode,
   OPENCODE_SDK_PROVIDER,
   type OpencodeSdkLoader,
-  type OpencodeSdkSession,
 } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
@@ -232,19 +232,12 @@ function acpToolUpdate(
   } as acp.SessionUpdate;
 }
 
-function opencodeToolPart(status: string, input?: unknown) {
-  return {
-    type: "message.part.updated",
-    properties: {
-      part: {
-        type: "tool",
-        callID: "oc-1",
-        tool: "future_tool",
-        sessionID: "session-1",
-        state: { status, ...(input === undefined ? {} : { input }) },
-      },
-    },
-  };
+function mapOpencodeTool(status: string, input: unknown, emitter: Parameters<typeof mapEvent>[1], state: ReturnType<typeof createEventState>) {
+  const data = { sessionID: "session-1", assistantMessageID: "msg_assistant", id: "oc-1" };
+  if (status === "running") {
+    mapEvent({ type: "session.tool.input.started", data: { ...data, name: "future_tool" } }, emitter, state);
+    if (input !== undefined) mapEvent({ type: "session.tool.called", data: { ...data, input, executed: false } }, emitter, state);
+  } else mapEvent({ type: "session.tool.success", data: { ...data, content: [{ type: "text", text: "" }], executed: false } }, emitter, state);
 }
 
 function toolPreview(events: readonly AgentEvent[]) {
@@ -338,13 +331,13 @@ test("native adapters admit structured unknown arguments into one bounded generi
   const opencodeState = createEventState("session-1");
   const opencodeEvents: AgentEvent[] = [];
   const emitter = { emit: (mapped: AgentEvent): void => void opencodeEvents.push(mapped) };
-  mapEvent(opencodeToolPart("running", { alpha: 1 }), emitter, opencodeState);
-  mapEvent(opencodeToolPart("completed"), emitter, opencodeState);
+  mapOpencodeTool("running", { alpha: 1 }, emitter, opencodeState);
+  mapOpencodeTool("completed", undefined, emitter, opencodeState);
   assert.deepEqual(
     opencodeEvents,
     [
       { type: "tool", phase: "started", id: "oc-1", name: "future_tool", call },
-      { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call, result: { status: "ok" } },
+      { type: "tool", phase: "completed", id: "oc-1", name: "future_tool", call, result: { status: "ok", output: "" } },
     ],
     "an OpenCode completion without input inherits its correlated start",
   );
@@ -596,8 +589,8 @@ test("a correlated start's admitted preview survives empty and conflicting compl
     const state = createEventState("session-1");
     const events: AgentEvent[] = [];
     const emitter = { emit: (event: AgentEvent) => void events.push(event) };
-    mapEvent(opencodeToolPart("running", startInput), emitter, state);
-    mapEvent(opencodeToolPart("completed", completionInput), emitter, state);
+    mapOpencodeTool("running", startInput, emitter, state);
+    mapOpencodeTool("completed", completionInput, emitter, state);
     return toolPreview(events);
   };
   for (const completionInput of [{}, { beta: 2 }, undefined])
@@ -608,8 +601,8 @@ test("a correlated start's admitted preview survives empty and conflicting compl
     );
   assert.deepEqual(
     opencodePreview(undefined, { gamma: 3 }),
-    { json: '{"gamma":3}', truncated: false },
-    "OpenCode adopts the first supplied evidence",
+    undefined,
+    "OpenCode v2 terminal events do not supply invocation arguments",
   );
 });
 
@@ -758,121 +751,33 @@ test("ProviderAttempt rejects ownership after establishment settles", async () =
 });
 
 function fakeOpencode() {
-  let closed = 0;
-  const prompts: unknown[] = [];
+  const native = opencodeFixture();
   const executions: ProviderExecution[] = [];
-  let activeSession = "session-fresh";
-  let activeMessage = "msg_unset";
-  const { promise: admitted, resolve: admit } = promiseBarrier<void>();
-  // prettier-ignore
-  const events = [
-    { type: "session.status", properties: { sessionID: "session-fresh", status: { type: "busy" } } },
-    { type: "message.part.updated", properties: { part: { id: "part-tool", sessionID: "session-fresh", messageID: "message-1", type: "tool", callID: "tool-1", tool: "shell", state: { status: "running", input: { command: "npm test" }, time: { start: 1 } } } } },
-    { type: "message.part.updated", properties: { part: { id: "part-tool", sessionID: "session-fresh", messageID: "message-1", type: "tool", callID: "tool-1", tool: "shell", state: { status: "completed", input: { command: "npm test" }, output: "ok", title: "test", metadata: {}, time: { start: 1, end: 2 } } } } },
-    { type: "message.part.updated", properties: { part: { id: "part-thought", sessionID: "session-fresh", messageID: "message-1", type: "reasoning", text: "checked", time: { start: 1, end: 2 } } } },
-    { type: "message.part.updated", properties: { part: { id: "part-answer", sessionID: "session-fresh", messageID: "message-1", type: "text", text: "answer", time: { start: 1, end: 2 } } } },
-    { type: "session.future", properties: { secret: "drop" } },
-    { type: "session.status", properties: { sessionID: "session-fresh", status: { type: "idle" } } },
-  ];
-  const stream = async function* (): AsyncGenerator<unknown> {
-    await admitted;
-    yield {
-      type: "message.updated",
-      properties: { info: { id: activeMessage, sessionID: activeSession, role: "user" } },
-    };
-    for (const event of events) {
-      yield JSON.parse(JSON.stringify(event).replaceAll("session-fresh", activeSession)) as unknown;
-    }
-  };
-  const session = {
-    async create() {
-      activeSession = "session-fresh";
-      return { data: { id: activeSession } };
-    },
-    async get() {
-      activeSession = "session-resume";
-      return { data: { id: activeSession } };
-    },
-    async promptAsync(input: unknown) {
-      prompts.push(input);
-      activeMessage = String((input as { body?: { messageID?: unknown } }).body?.messageID);
-      admit();
-      return { data: undefined };
-    },
-    async messages() {
-      return {
-        data: [
-          { info: { id: activeMessage, sessionID: activeSession, role: "user", time: { created: 1 } }, parts: [] },
-          {
-            info: {
-              id: "message-1",
-              sessionID: activeSession,
-              parentID: activeMessage,
-              role: "assistant",
-              time: { created: 2 },
-            },
-            parts: [
-              {
-                id: "part-tool",
-                sessionID: "session-fresh",
-                messageID: "message-1",
-                type: "tool",
-                callID: "tool-1",
-                tool: "shell",
-                state: {
-                  status: "completed",
-                  input: { command: "npm test" },
-                  output: "ok",
-                  title: "test",
-                  metadata: {},
-                  time: { start: 1, end: 2 },
-                },
-              },
-              {
-                id: "part-thought",
-                sessionID: "session-fresh",
-                messageID: "message-1",
-                type: "reasoning",
-                text: "checked",
-                time: { start: 1, end: 2 },
-              },
-              {
-                id: "part-answer",
-                sessionID: "session-fresh",
-                messageID: "message-1",
-                type: "text",
-                text: "answer",
-                time: { start: 1, end: 2 },
-              },
-            ],
-          },
-        ],
-      };
-    },
-    async fork() {
-      return { data: { id: "session-child" } };
-    },
-    async abort() {
-      return { data: true };
-    },
-  } as unknown as OpencodeSdkSession;
-  const loader: OpencodeSdkLoader = async (_cwd, execution) => {
+  const prompt = native.session.prompt;
+  const loader: OpencodeSdkLoader = async (cwd, execution, signal) => {
     executions.push(execution);
+    const loaded = await native.loader(cwd, execution, signal);
     return {
+      ...loaded,
       client: {
-        session,
-        event: {
-          async subscribe() {
-            return { stream: stream() };
-          },
-        } as never,
-      },
-      close: () => {
-        closed += 1;
+        ...loaded.client,
+        session: { ...loaded.client.session, async prompt(input) {
+          const response = await prompt(input);
+          native.admitted(input.body.id);
+          native.delivered(input.body.id);
+          native.step();
+          native.push("session.tool.input.started", { assistantMessageID: "msg_assistant", id: "tool-1", name: "shell" });
+          native.push("session.tool.called", { assistantMessageID: "msg_assistant", id: "tool-1", input: { command: "npm test" }, executed: false });
+          native.push("session.tool.success", { assistantMessageID: "msg_assistant", id: "tool-1", content: [{ type: "text", text: "ok" }], executed: false });
+          native.push("session.reasoning.ended", { assistantMessageID: "msg_assistant", ordinal: 0, text: "checked" });
+          native.push("session.future", { secret: "drop" });
+          native.complete();
+          return response;
+        } },
       },
     };
   };
-  return { loader, closed: () => closed, executions, prompts };
+  return { loader, closed: native.closed, executions, prompts: native.prompts };
 }
 
 test("provider answered results may omit an exact fork point", () => {
@@ -1654,22 +1559,22 @@ function fakePiSdk(
   };
 }
 
-test("OpenCode V1 adapter admits with promptAsync and completes from terminal events", async () => {
+test("OpenCode v2 adapter admits and completes from native execution evidence", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
     freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }], requests: { dir: "/tmp/requests" } }),
   ).result;
-  assert.equal(drive.admission.fence, "session-fresh");
+  assert.equal(drive.admission.fence, fake.prompts[0]!.body.id);
   const observed = await collectEvents(drive.events);
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "message-1" });
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "msg_terminal" });
   assert.deepEqual(
     observed.map((event) => event.type),
-    ["session", "tool", "tool", "thought", "assistant", "unknown"],
+    ["session", "model", "tool", "tool", "thought", "unknown", "assistant"],
   );
   assert.equal(JSON.stringify(observed).includes("secret"), false);
-  const completedTool = observed[2];
+  const completedTool = observed[3];
   assert.ok(completedTool?.type === "tool" && completedTool.phase === "completed");
   assert.deepEqual(completedTool.call, { kind: "run", command: "npm test" });
   assert.deepEqual(completedTool.result, { status: "ok", output: "ok" }, "the completed state's output survives");
@@ -1677,30 +1582,23 @@ test("OpenCode V1 adapter admits with promptAsync and completes from terminal ev
   assert.equal(fake.executions[0]!.env?.[AKUMA_REQUESTS_ENV], "/tmp/requests");
 });
 
-test("OpenCode composes the headless permission base layer beneath caller config", () => {
-  assert.deepEqual(composeHeadlessPermissionConfig(), {
-    permission: { external_directory: "allow", doom_loop: "allow", read: "allow", question: "deny" },
+test("OpenCode v2 composes headless permission rules below caller actions", () => {
+  const base = composeHeadlessPermissionConfig();
+  assert.deepEqual(base, { permissions: [
+    { action: "external_directory", resource: "*", effect: "allow" },
+    { action: "read", resource: "*", effect: "allow" },
+    { action: "question", resource: "*", effect: "deny" },
+  ] });
+  const caller = { model: "vendor/model", permissions: [{ action: "question", resource: "*", effect: "allow" }] };
+  assert.deepEqual(composeHeadlessPermissionConfig(caller), {
+    model: "vendor/model", permissions: [
+      { action: "external_directory", resource: "*", effect: "allow" },
+      { action: "read", resource: "*", effect: "allow" },
+      ...caller.permissions,
+    ],
   });
-  assert.deepEqual(
-    composeHeadlessPermissionConfig({
-      model: "provider/model",
-      permission: { external_directory: { "/narrow/**": "allow" }, question: "allow", edit: "deny" },
-    }),
-    {
-      model: "provider/model",
-      permission: {
-        external_directory: { "/narrow/**": "allow" },
-        doom_loop: "allow",
-        read: "allow",
-        question: "allow",
-        edit: "deny",
-      },
-    },
-  );
-  assert.deepEqual(composeHeadlessPermissionConfig({ permission: "allow" }), { permission: "allow" });
-  const caller = { permission: { question: "allow" } };
-  composeHeadlessPermissionConfig(caller);
-  assert.deepEqual(caller, { permission: { question: "allow" } });
+  assert.equal(caller.permissions.length, 1);
+  assert.throws(() => composeHeadlessPermissionConfig({ permissions: "allow" }), /ruleset/u);
 });
 
 test("OpenCode always carries the headless permission base layer into the spawned server environment", async (context) => {
@@ -1737,10 +1635,8 @@ test("OpenCode always carries the headless permission base layer into the spawne
   };
 
   const base = await spawnedEnvironment();
-  assert.deepEqual(JSON.parse(base.OPENCODE_CONFIG_CONTENT ?? "null"), {
-    permission: { external_directory: "allow", doom_loop: "allow", read: "allow", question: "deny" },
-  });
-  const literal = '{"permission":{"question":"allow"}}';
+  assert.deepEqual(JSON.parse(base.OPENCODE_CONFIG_CONTENT ?? "null"), composeHeadlessPermissionConfig());
+  const literal = '{"permissions":[{"action":"question","resource":"*","effect":"allow"}]}';
   const overridden = await spawnedEnvironment({ OPENCODE_CONFIG_CONTENT: literal });
   assert.equal(overridden.OPENCODE_CONFIG_CONTENT, literal);
 });
@@ -1779,7 +1675,7 @@ test("OpenCode start and resume reject closed when readiness cleanup fails", asy
   }
 });
 
-test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact point", async () => {
+test("OpenCode v2 adapter resumes the supplied coordinate and forks the exact point", async () => {
   const fake = fakeOpencode();
   const provider = createOpencodeProvider({ loader: fake.loader });
   const drive = await provider.resume!({
@@ -1788,13 +1684,13 @@ test("OpenCode V1 adapter resumes the supplied coordinate and forks the exact po
     launchTells: [],
     cwd: "/tmp",
     options: {},
-    session: { kind: "resume", coordinate: { sessionId: "session-resume" } },
+    session: { kind: "resume", coordinate: { sessionId: "ses_fixture" } },
   }).result;
   assert.equal((await drive.completion).kind, "answered");
   assert.deepEqual(
-    await provider.fork!({ session: { sessionId: "session-resume" }, at: "message-1", cwd: "/tmp" }).result,
+    await provider.fork!({ session: { sessionId: "ses_fixture" }, at: "msg_terminal", cwd: "/tmp" }).result,
     {
-      session: { sessionId: "session-child" },
+      session: { sessionId: "ses_child" },
     },
   );
 });
@@ -1830,7 +1726,7 @@ test("OpenCode fork force-disposes a runtime held at readiness before publishing
   assert.equal(forked, 0);
 });
 
-test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", async () => {
+test("OpenCode v2 refuses a Pi coordinate before loading its native runtime", async () => {
   let loaded = false;
   const provider = createOpencodeProvider({
     loader: async () => {
@@ -1858,132 +1754,32 @@ test("OpenCode V1 refuses a Pi coordinate before loading its native runtime", as
   assert.equal(loaded, false);
 });
 
-test("OpenCode V1 rejects failed prompt admission and cleans up", async () => {
-  let closed = 0;
-  const session = {
-    async create() {
-      return { data: { id: "session-rejected" } };
-    },
-    async promptAsync() {
-      throw new Error("prompt rejected");
-    },
-  } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          async subscribe() {
-            return {
-              stream: (async function* () {
-                yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "busy" } } };
-                yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "idle" } } };
-              })(),
-            };
-          },
-        } as never,
-      },
-      close: () => {
-        closed += 1;
-      },
-    }),
-  });
-  await assert.rejects(attemptResult(provider.start(freshInput("fail"))), /prompt rejected/u);
-  assert.equal(closed, 1);
+test("OpenCode v2 rejects failed prompt admission and cleans up", async () => {
+  const native = opencodeFixture();
+  native.rejectPrompt(new Error("prompt rejected"));
+  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("fail"));
+  await assert.rejects(attempt.result, /prompt rejected/u);
+  await attempt.closed;
+  assert.equal(native.closed(), 1);
 });
 
-test("OpenCode V1 fails terminal observation without native assistant evidence", async () => {
-  let closed = 0;
-  let messageID = "msg_unset";
-  const { promise: prompted, resolve: prompt } = promiseBarrier<void>();
-  const session = {
-    async create() {
-      return { data: { id: "session-empty" } };
-    },
-    async promptAsync(input: unknown) {
-      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
-      prompt();
-      return { data: undefined };
-    },
-    async messages() {
-      return {
-        data: [{ info: { id: messageID, sessionID: "session-empty", role: "user", time: { created: 1 } }, parts: [] }],
-      };
-    },
-  } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          async subscribe() {
-            return {
-              stream: (async function* () {
-                await prompted;
-                yield {
-                  type: "message.updated",
-                  properties: { info: { id: messageID, sessionID: "session-empty", role: "user" } },
-                };
-                yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "busy" } } };
-                yield { type: "session.status", properties: { sessionID: "session-empty", status: { type: "idle" } } };
-              })(),
-            };
-          },
-        } as never,
-      },
-      close: () => {
-        closed += 1;
-      },
-    }),
-  });
-  const drive = await provider.start(freshInput("idle")).result;
+test("OpenCode v2 fails terminal observation without native assistant evidence", async () => {
+  const native = opencodeFixture();
+  const drive = await createOpencodeProvider({ loader: native.loader }).start(freshInput("idle")).result;
+  native.admitted(native.prompts[0]!.body.id);
+  native.delivered(native.prompts[0]!.body.id);
+  native.push("session.execution.succeeded");
   assert.deepEqual(await drive.completion, {
-    kind: "failed",
-    diagnostic: "OpenCode completed without a native assistant answer",
+    kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input",
   });
-  assert.equal(closed, 1);
+  assert.equal(native.closed(), 1);
 });
 
-test("OpenCode V1 isolates other sessions and accepts the current Turn error", async () => {
-  let messageID = "msg_unset";
-  const { promise: prompted, resolve: prompt } = promiseBarrier<void>();
-  const session = {
-    async create() {
-      return { data: { id: "session-error" } };
-    },
-    async promptAsync(input: unknown) {
-      messageID = String((input as { body?: { messageID?: unknown } }).body?.messageID);
-      prompt();
-      return { data: undefined };
-    },
-  } as unknown as OpencodeSdkSession;
-  const provider = createOpencodeProvider({
-    loader: async () => ({
-      client: {
-        session,
-        event: {
-          async subscribe() {
-            return {
-              stream: (async function* () {
-                await prompted;
-                yield {
-                  type: "message.updated",
-                  properties: { info: { id: messageID, sessionID: "session-error", role: "user" } },
-                };
-                yield { type: "session.status", properties: { sessionID: "session-other", status: { type: "busy" } } };
-                yield { type: "session.status", properties: { sessionID: "session-other", status: { type: "idle" } } };
-                yield {
-                  type: "session.error",
-                  properties: { sessionID: "session-error", error: { message: "native failed" } },
-                };
-              })(),
-            };
-          },
-        } as never,
-      },
-    }),
-  });
-  const drive = await provider.start(freshInput("fail")).result;
+test("OpenCode v2 isolates other sessions and accepts the current execution error", async () => {
+  const native = opencodeFixture();
+  const drive = await createOpencodeProvider({ loader: native.loader }).start(freshInput("fail")).result;
+  native.push("session.execution.failed", { sessionID: "ses_other", error: { message: "unrelated" } });
+  native.push("session.execution.failed", { error: { message: "native failed" } });
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native failed" });
 });
 
@@ -3289,18 +3085,16 @@ test("native adapters report only the runtime model their own payloads name", as
   const opencodeEvents: AgentEvent[] = [];
   mapEvent(
     {
-      type: "message.updated",
-      properties: { info: { sessionID: "session-1", role: "assistant", providerID: "anthropic", modelID: "claude-y" } },
+      type: "session.step.started",
+      data: { sessionID: "session-1", assistantMessageID: "msg_assistant", model: { providerID: "anthropic", id: "claude-y" } },
     },
     { emit: (event) => opencodeEvents.push(event) },
     createEventState("session-1"),
   );
   mapEvent(
     {
-      type: "message.updated",
-      properties: {
-        info: { sessionID: "session-1", role: "user", model: { providerID: "anthropic", modelID: "requested" } },
-      },
+      type: "session.model.selected",
+      data: { sessionID: "session-1", model: { providerID: "anthropic", id: "requested" } },
     },
     { emit: (event) => opencodeEvents.push(event) },
     createEventState("session-1"),
@@ -3526,30 +3320,16 @@ test("OpenCode keeps observed tool output and never claims an unverified filedif
   const state = createEventState("session-1");
   const events: AgentEvent[] = [];
   const emitter = { emit: (event: AgentEvent) => void events.push(event) };
-  mapEvent(
-    {
-      type: "message.part.updated",
-      properties: {
-        part: {
-          type: "tool",
-          callID: "oc-edit",
-          tool: "edit",
-          sessionID: "session-1",
-          state: {
-            status: "completed",
-            input: { filePath: "src/edited.ts" },
-            output: "edited src/edited.ts",
-            metadata: { filediff: { additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-before\n+after" } },
-          },
-        },
-      },
-    },
-    emitter,
-    state,
-  );
+  const data = { sessionID: "session-1", assistantMessageID: "msg_assistant", id: "oc-edit" };
+  mapEvent({ type: "session.tool.input.started", data: { ...data, name: "edit" } }, emitter, state);
+  mapEvent({ type: "session.tool.called", data: { ...data, input: { path: "src/edited.ts" }, executed: false } }, emitter, state);
+  mapEvent({ type: "session.tool.success", data: {
+    ...data, content: [{ type: "text", text: "edited src/edited.ts" }], executed: false,
+    metadata: { filediff: { additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-before\n+after" } },
+  } }, emitter, state);
   const call = {
     kind: "fileChange" as const,
-    changes: [{ op: "update" as const, path: "src/edited.ts", diffstat: { added: 1, removed: 1 } }],
+    changes: [{ op: "update" as const, path: "src/edited.ts" }],
   };
   assert.deepEqual(events, [
     { type: "tool", phase: "started", id: "oc-edit", name: "edit", call },
@@ -3563,6 +3343,25 @@ test("OpenCode keeps observed tool output and never claims an unverified filedif
     },
   ]);
   assert.equal(JSON.stringify(events).includes("patch"), false, "filediff.patch is not claimed without producer evidence");
+});
+
+test("OpenCode v2 records only producer-verified completed file patches", () => {
+  const state = createEventState("session-1");
+  const events: AgentEvent[] = [];
+  const emitter = { emit: (event: AgentEvent) => void events.push(event) };
+  const data = { sessionID: "session-1", assistantMessageID: "msg_assistant", id: "edit-1" };
+  mapEvent({ type: "session.tool.input.started", data: { ...data, name: "edit" } }, emitter, state);
+  mapEvent({ type: "session.tool.called", data: { ...data, input: { path: "a.ts", oldString: "before", newString: "after" }, executed: false } }, emitter, state);
+  const patch = "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-before\n+after\n";
+  mapEvent({ type: "session.tool.success", data: {
+    ...data, content: [{ type: "text", text: "Edited a.ts" }], executed: false,
+    metadata: { files: [{ file: "a.ts", status: "modified", additions: 1, deletions: 1, patch }] },
+  } }, emitter, state);
+  assert.deepEqual(events.at(-1), {
+    type: "tool", phase: "completed", id: "edit-1", name: "edit",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "a.ts", diffstat: { added: 1, removed: 1 }, patch }] },
+    result: { status: "ok", output: "Edited a.ts" },
+  });
 });
 
 test("ACP retains verified text output and leaves an unverified raw output absent", async () => {

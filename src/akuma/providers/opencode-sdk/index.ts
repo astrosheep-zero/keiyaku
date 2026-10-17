@@ -11,274 +11,69 @@ import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.j
 import { nonblank, object } from "../decode.js";
 import { providerLifecycle } from "../lifecycle.js";
 import { ownEventStream, type OwnedEventStream } from "./event-stream.js";
-import { createEventState, mapEvent } from "./events.js";
+import { createEventState, diagnostic, mapEvent } from "./events.js";
 import {
   coordinate,
   loadOpencode,
   messageId,
   OPENCODE_SDK_PROVIDER,
   parseModel,
+  type OpencodeRuntime,
   type OpencodeSdkLoader,
 } from "./session.js";
 
 type Input = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 export type OpencodeProviderTestOptions = Readonly<{ loader?: OpencodeSdkLoader }>;
-
-function diagnostic(error: unknown): string {
-  const value = object(error);
-  const nested = object(value?.data);
-  return nonblank(nested?.message) ?? nonblank(value?.message) ?? String(error);
-}
-function opencodeSessionId(coordinateValue: ResumeCoordinate): string {
-  if (!("sessionId" in coordinateValue) || coordinateValue.sessionId === undefined) {
-    throw new Error("OpenCode resume requires sessionId");
-  }
-  return coordinateValue.sessionId;
+function sessionId(value: ResumeCoordinate): string {
+  if (!("sessionId" in value) || value.sessionId === undefined) throw new Error("OpenCode resume requires sessionId");
+  return value.sessionId;
 }
 function admit(options: ProviderOptions): void {
   if (options.network !== undefined) throw new Error("OpenCode does not support explicit network");
-  if (options.systemPromptMode === "replace") {
-    throw new Error("OpenCode V1 does not support replacing the native system prompt");
-  }
+  if (options.systemPromptMode === "replace")
+    throw new Error("OpenCode v2 does not support replacing the native system prompt per Turn");
   if (options.model !== undefined) parseModel(options.model);
+  if (options.effort !== undefined && options.model === undefined)
+    throw new Error("OpenCode effort requires an explicit model");
 }
-function eventValue(value: unknown): unknown {
-  if (typeof value !== "string") return value;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return { type: value };
-  }
-}
-
-function promptBody(
-  input: Input,
-  messageID: string,
-): Readonly<{
-  messageID: string;
-  model?: { providerID: string; modelID: string };
-  variant?: string;
-  system?: string;
-  parts: [{ type: "text"; text: string }];
-}> {
-  const model = input.options.model === undefined ? undefined : parseModel(input.options.model);
-  const promptText = [input.body, ...input.launchTells.map((tell) => tell.text)]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
-  return {
-    messageID,
-    ...(model === undefined ? {} : { model }),
-    ...(input.options.effort === undefined ? {} : { variant: input.options.effort }),
-    ...(input.options.systemPrompt === undefined ? {} : { system: input.options.systemPrompt }),
-    parts: [{ type: "text", text: promptText }],
-  };
-}
-
-type MessageRow = Readonly<{ info: Readonly<Record<string, unknown>>; parts: readonly unknown[] }>;
-function messageRows(value: unknown, sessionId: string): MessageRow[] {
-  const response = object(value);
-  const rows = Array.isArray(response?.data) ? response.data : Array.isArray(value) ? value : [];
-  return rows.flatMap((row) => {
-    const entry = object(row);
-    const info = object(entry?.info);
-    if (info?.sessionID !== sessionId) return [];
-    return [{ info, parts: Array.isArray(entry?.parts) ? entry.parts : [] }];
+function ownRuntime(custody: AttemptCustody, runtime: OpencodeRuntime): () => Promise<void> {
+  let closing: Promise<void> | undefined;
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const closed = new Promise<void>((yes, no) => {
+    resolve = yes;
+    reject = no;
   });
-}
-function newest(rows: readonly MessageRow[]): MessageRow | undefined {
-  return rows.reduce<MessageRow | undefined>((latest, row) => {
-    if (latest === undefined) return row;
-    const at = Number(object(row.info.time)?.created ?? 0);
-    const latestAt = Number(object(latest.info.time)?.created ?? 0);
-    return at > latestAt || (at === latestAt && String(row.info.id) > String(latest.info.id)) ? row : latest;
-  }, undefined);
-}
-async function readTurnResult(
-  input: Readonly<{
-    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
-    sessionId: string;
-    cwd: string;
-    messageID: string;
-    state: ReturnType<typeof createEventState>;
-  }>,
-): Promise<TurnResult> {
-  try {
-    const response = await input.session.messages({
-      path: { id: input.sessionId },
-      query: { directory: input.cwd },
-      throwOnError: true,
-    });
-    const rows = messageRows(response, input.sessionId);
-    const user = rows.find((row) => row.info.role === "user" && row.info.id === input.messageID);
-    if (user === undefined)
-      return { kind: "failed", diagnostic: "OpenCode completed without the admitted user message" };
-    const userId = nonblank(user.info.id);
-    const assistant = newest(
-      rows.filter((row) => row.info.role === "assistant" && row.info.parentID === userId && row.info.summary !== true),
-    );
-    const historyId = nonblank(assistant?.info.id);
-    if (input.state.failure !== undefined) return { kind: "failed", diagnostic: input.state.failure };
-    if (assistant === undefined)
-      return { kind: "failed", diagnostic: "OpenCode completed without a native assistant answer" };
-    if (assistant.info.error !== undefined) return { kind: "failed", diagnostic: diagnostic(assistant.info.error) };
-    const answer = assistant.parts
-      .map((part) => object(part))
-      .filter((part) => part?.type === "text")
-      .map((part) => part?.text)
-      .filter((part): part is string => typeof part === "string")
-      .join("\n\n");
-    return historyId === undefined ? { kind: "answered", answer } : { kind: "answered", answer, historyId };
-  } catch (error) {
-    return { kind: "failed", diagnostic: diagnostic(error) };
-  }
-}
-function nativeSessionId(value: unknown): string | undefined {
-  const event = object(value);
-  const properties = object(event?.properties);
-  const direct = nonblank(properties?.sessionID);
-  if (direct !== undefined) return direct;
-  const info = object(properties?.info);
-  const part = object(properties?.part);
-  return nonblank(info?.sessionID) ?? nonblank(part?.sessionID);
-}
-function scopedProperties(value: unknown, sessionId: string): Record<string, unknown> | undefined {
-  const properties = object(object(value)?.properties);
-  return nativeSessionId(value) === sessionId ? properties : undefined;
-}
-type NativeProgress = Readonly<{ busy: boolean; terminal: boolean }>;
-function nativeProgress(type: unknown, properties: Record<string, unknown>, busy: boolean): NativeProgress {
-  if (type === "session.idle") return { busy, terminal: busy };
-  if (type !== "session.status") return { busy, terminal: false };
-  const status = object(properties.status)?.type;
-  const nextBusy = busy || status === "busy";
-  return { busy: nextBusy, terminal: status === "idle" && nextBusy };
-}
-function startsTurn(value: unknown, sessionId: string, messageID: string): boolean {
-  const event = object(value);
-  const info = object(object(event?.properties)?.info);
-  return (
-    event?.type === "message.updated" && info?.sessionID === sessionId && info.role === "user" && info.id === messageID
-  );
-}
-function recognizeAdmission(value: unknown, sessionId: string, admission: ReturnType<typeof liveAdmission>): void {
-  const event = object(value);
-  const properties = object(event?.properties);
-  const info = object(properties?.info);
-  if (
-    event?.type === "message.updated" &&
-    info?.sessionID === sessionId &&
-    info.role === "user" &&
-    typeof info.id === "string"
-  ) {
-    admission.admit(info.id);
-  }
-}
-
-type ObservedEvent = Readonly<{ active: boolean; busy: boolean; terminal: boolean; result?: TurnResult }>;
-function observeEvent(
-  input: Readonly<{
-    value: unknown;
-    sessionId: string;
-    messageID: string;
-    active: boolean;
-    busy: boolean;
-    admission: ReturnType<typeof liveAdmission>;
-    events: AgentEventChannel;
-    state: ReturnType<typeof createEventState>;
-    submissionState: { started: boolean };
-  }>,
-): ObservedEvent {
-  const observedSessionId = nativeSessionId(input.value);
-  if (observedSessionId !== undefined && observedSessionId !== input.sessionId) {
-    return { active: input.active, busy: input.busy, terminal: false };
-  }
-  const event = object(input.value);
-  const properties = scopedProperties(input.value, input.sessionId);
-  if (properties === undefined) {
-    if (input.active) mapEvent(input.value, input.events, input.state);
-    return { active: input.active, busy: input.busy, terminal: false };
-  }
-  const starts = !input.active && startsTurn(input.value, input.sessionId, input.messageID);
-  const active = input.active || starts;
-  const busy = starts ? false : input.busy;
-  recognizeAdmission(input.value, input.sessionId, input.admission);
-  const submittedError = event?.type === "session.error" && input.submissionState.started;
-  if (!active && !submittedError) return { active, busy, terminal: false };
-  mapEvent(input.value, input.events, input.state);
-  if (event?.type === "session.error") {
-    input.admission.end();
-    return {
-      active,
-      busy,
-      terminal: true,
-      result: { kind: "failed", diagnostic: input.state.failure ?? diagnostic(properties.error) },
-    };
-  }
-  const progress = nativeProgress(event?.type, properties, busy);
-  return { active, busy: progress.busy, terminal: progress.terminal };
-}
-
-async function observeTurn(
-  input: Readonly<{
-    stream: OwnedEventStream;
-    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
-    sessionId: string;
-    cwd: string;
-    messageID: string;
-    admission: ReturnType<typeof liveAdmission>;
-    events: AgentEventChannel;
-    state: ReturnType<typeof createEventState>;
-    submissionState: { started: boolean };
-  }>,
-): Promise<TurnResult> {
-  let active = false;
-  let busy = false;
-  try {
-    for (;;) {
-      const next = await input.stream.next();
-      if (next.done) return { kind: "failed", diagnostic: "OpenCode event stream ended before Turn completion" };
-      const observed = observeEvent({
-        value: eventValue(next.value),
-        sessionId: input.sessionId,
-        messageID: input.messageID,
-        active,
-        busy,
-        admission: input.admission,
-        events: input.events,
-        state: input.state,
-        submissionState: input.submissionState,
-      });
-      active = observed.active;
-      busy = observed.busy;
-      if (observed.result !== undefined) return observed.result;
-      if (!observed.terminal) continue;
-      input.admission.end();
-      return await readTurnResult({ ...input, messageID: input.admission.latest() });
+  const close = () => {
+    if (closing === undefined) {
+      closing = runtime.close();
+      void closing.then(resolve, reject);
     }
-  } catch (error) {
-    return { kind: "failed", diagnostic: `OpenCode event stream failed: ${diagnostic(error)}` };
-  } finally {
-    input.admission.end();
-  }
+    return closing;
+  };
+  custody.own({ closed, abort: close, forceDispose: close });
+  return close;
 }
-
 function liveAdmission(initial: string) {
   let latest = initial;
   let ended = false;
+  const submitted = new Set([initial]);
   const pending = new Map<
     string,
     { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
   >();
   const wait = (id: string) => {
     if (ended) return Promise.resolve({ kind: "turn-ended" } as const);
-    return new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-    });
+    submitted.add(id);
+    return new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) =>
+      pending.set(id, { resolve, reject }),
+    );
   };
   return {
     initial: wait(initial),
     latest: () => latest,
     open: () => !ended,
+    owns: (id: string) => submitted.has(id),
     wait,
     admit(id: string) {
       const waiter = pending.get(id);
@@ -299,277 +94,266 @@ function liveAdmission(initial: string) {
     },
   };
 }
-
-function terminalSettlement(
-  events: AgentEventChannel,
-  close: () => Promise<void>,
-): Readonly<{ completion: Promise<TurnResult>; finish: (result: TurnResult) => Promise<void> }> {
-  let finish!: (result: TurnResult) => Promise<void>;
-  const completion = new Promise<TurnResult>((resolve) => {
-    let settlement: Promise<void> | undefined;
-    finish = (result): Promise<void> => {
-      settlement ??= (async () => {
-        // Whole closure is proved before narration ends. The driver therefore
-        // stays inside its Heart/control observation race while retirement is
-        // outstanding, so a rejected or unprovable closure still reaches attempt
-        // custody's bounded hung handling instead of parking on a pending
-        // completion. Ending narration first would move that await outside the
-        // driver's race and make the Body unresponsive to stop or Heart loss.
-        await close();
-        events.end();
-        resolve(result);
-      })();
-      return settlement;
-    };
-  });
-  return { completion, finish };
-}
-
-/**
- * One memoized whole-close: stream retirement and existing server retirement
- * start together on every terminal path, so a live socket can never outwait the
- * server's death.
- */
-function wholeClosure(retireStream: () => Promise<void>, closeServer: () => Promise<void>): () => Promise<void> {
-  let closing: Promise<void> | undefined;
-  return () => {
-    closing ??= Promise.all([retireStream(), closeServer()]).then(() => undefined);
-    return closing;
-  };
-}
-
-async function forceDisposeOpencode(
-  abortController: AbortController,
-  close: () => Promise<void>,
-  finish: (result: TurnResult) => Promise<void>,
-): Promise<void> {
-  abortController.abort();
-  await close();
-  await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
-}
-
-type OpencodeRuntime = Awaited<ReturnType<typeof loadOpencode>>;
-
-async function loadDriveRuntime(
-  execution: ProviderExecution,
-  input: Input,
-  signal: AbortSignal,
-  loader?: OpencodeSdkLoader,
-  onRuntime?: (runtime: OpencodeRuntime) => void,
-): Promise<OpencodeRuntime> {
-  const runtime = await loadOpencode({
-    execution,
-    cwd: input.cwd,
-    signal,
-    ...(loader === undefined ? {} : { loader }),
-    ...(onRuntime === undefined ? {} : { onRuntime }),
-    ...(input.requests === undefined ? {} : { requests: input.requests.dir }),
-  });
-  if (signal.aborted) {
-    await runtime.close();
-    signal.throwIfAborted();
-  }
-  return runtime;
-}
-
-function ownRuntime(custody: AttemptCustody | undefined, runtime: OpencodeRuntime): () => Promise<void> {
-  let closing: Promise<void> | undefined;
-  let settleRuntimeClosed!: () => void;
-  let rejectRuntimeClosed!: (reason?: unknown) => void;
-  const runtimeClosed = new Promise<void>((resolve, reject) => {
-    settleRuntimeClosed = resolve;
-    rejectRuntimeClosed = reject;
-  });
-  const close = (): Promise<void> => {
-    if (closing === undefined) {
-      closing = runtime.close();
-      void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
-    }
-    return closing;
-  };
-  custody?.own({ closed: runtimeClosed, abort: close, forceDispose: close });
-  return close;
-}
-
-async function openDriveSession(
+async function answer(
   runtime: OpencodeRuntime,
-  input: Input,
-  resumeSessionId: string | undefined,
-  signal: AbortSignal,
-): Promise<Readonly<{ session: OpencodeRuntime["client"]["session"]; sessionId: string }>> {
-  const session = runtime.client.session;
-  const response = await (input.session.kind === "fresh"
-    ? session.create({ query: { directory: input.cwd }, throwOnError: true })
-    : session.get({ path: { id: resumeSessionId! }, query: { directory: input.cwd }, throwOnError: true }));
-  signal.throwIfAborted();
-  const info = object(object(response)?.data) ?? object(response);
-  const sessionId = nonblank(info?.id) ?? resumeSessionId;
-  if (sessionId === undefined) throw new Error("OpenCode did not return a session id");
-  return { session, sessionId };
+  id: string,
+  assistantID: string,
+  terminalID: string,
+): Promise<TurnResult> {
+  const response = object(await runtime.client.session.message({ id, messageID: assistantID }));
+  const message = object(response?.data);
+  if (message?.id !== assistantID || message.type !== "assistant" || object(message.time)?.completed === undefined) {
+    return { kind: "failed", diagnostic: "OpenCode completed without its exact completed assistant message" };
+  }
+  if (message.error !== undefined) return { kind: "failed", diagnostic: diagnostic(message.error) };
+  if (!Array.isArray(message.content)) return { kind: "failed", diagnostic: "OpenCode assistant content missing" };
+  const text = message.content
+    .flatMap((item) => {
+      const part = object(item);
+      return part?.type === "text" && typeof part.text === "string" ? [part.text] : [];
+    })
+    .join("\n\n");
+  // v2's terminal event projects a real idle message with this exact ID. Forking
+  // BEFORE that message includes the answer, without copying later native work.
+  const boundary = terminalID.replace(/^evt_/u, "msg_");
+  const projected = object(object(await runtime.client.session.message({ id, messageID: boundary }))?.data);
+  if (projected?.id !== boundary || projected.type !== "idle" || projected.outcome !== "succeeded") {
+    return { kind: "failed", diagnostic: "OpenCode terminal fork boundary was not projected" };
+  }
+  return { kind: "answered", answer: text, historyId: boundary };
 }
-
-function createLiveSession(
+async function observe(
   input: Readonly<{
-    session: Awaited<ReturnType<typeof loadOpencode>>["client"]["session"];
-    sessionId: string;
-    cwd: string;
-    promptBody(messageID: string, text: string): ReturnType<typeof promptBody>;
+    runtime: OpencodeRuntime;
+    stream: OwnedEventStream;
+    id: string;
     admission: ReturnType<typeof liveAdmission>;
-    nextMessageId(): string;
     events: AgentEventChannel;
-    completion: Promise<TurnResult>;
-    abortController: AbortController;
-    close: () => Promise<void>;
-    finish(result: TurnResult): Promise<void>;
   }>,
-): Session {
-  let submissions: Promise<void> = input.admission.initial.then(() => undefined);
-  const submit = (tell: Readonly<{ id: string; text: string }>) => {
-    const submission = async () => {
-      if (!input.admission.open()) return { kind: "turn-ended" } as const;
-      const receipt = input.admission.wait(tell.id);
-      void input.session
-        .promptAsync({
-          path: { id: input.sessionId },
-          query: { directory: input.cwd },
-          body: input.promptBody(tell.id, tell.text),
-          throwOnError: true,
-        })
-        .catch((error: unknown) => input.admission.fail(tell.id, error));
-      return await receipt;
-    };
-    const next = submissions.then(submission);
-    submissions = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  };
-  return {
-    admission: { fence: input.sessionId },
-    events: input.events,
-    completion: input.completion,
-    tell: (tell) => submit({ ...tell, id: input.nextMessageId() }),
-    abort: async () => {
-      input.admission.end();
-      input.abortController.abort();
-      void input.session
-        .abort({ path: { id: input.sessionId }, query: { directory: input.cwd }, throwOnError: true })
-        .catch(() => undefined);
-      await input.finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
-    },
-    forceDispose: () => {
-      input.admission.end();
-      return forceDisposeOpencode(input.abortController, input.close, input.finish);
-    },
-  };
+): Promise<TurnResult> {
+  const state = createEventState(input.id);
+  let delivered: string | undefined;
+  let step: { id: string; input: string; ended: boolean } | undefined;
+  try {
+    for (;;) {
+      const next = await input.stream.next();
+      if (next.done) return { kind: "failed", diagnostic: "OpenCode event stream ended before Turn completion" };
+      const event = object(next.value);
+      const data = object(event?.data);
+      if (data?.sessionID !== input.id) continue;
+      const type = event?.type;
+      if (type === "session.inbox.enqueued" && typeof data.inboxID === "string" && object(data.item)?.type === "user") {
+        input.admission.admit(data.inboxID);
+      }
+      if (type === "session.inbox.delivered" && typeof data.inboxID === "string") {
+        if (!input.admission.owns(data.inboxID)) {
+          return {
+            kind: "failed",
+            diagnostic: "OpenCode consumed another writer's input; exact answer attribution unavailable",
+          };
+        }
+        input.admission.admit(data.inboxID);
+        delivered = data.inboxID;
+      }
+      if (type === "session.step.started" && delivered !== undefined && typeof data.assistantMessageID === "string") {
+        step = { id: data.assistantMessageID, input: delivered, ended: false };
+      }
+      if (data.assistantMessageID !== undefined && data.assistantMessageID !== step?.id) continue;
+      if (delivered !== undefined) mapEvent(event, input.events, state);
+      if (type === "session.step.ended" && step !== undefined) step.ended = true;
+      if (type === "session.step.failed" || type === "session.execution.failed") {
+        return { kind: "failed", diagnostic: diagnostic(data.error) };
+      }
+      if (type === "session.execution.interrupted")
+        return { kind: "failed", diagnostic: "OpenCode native execution interrupted" };
+      if (type !== "session.execution.succeeded" || delivered === undefined) continue;
+      if (step === undefined || !step.ended || step.input !== input.admission.latest()) {
+        return { kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input" };
+      }
+      const terminalID = nonblank(event?.id);
+      if (terminalID === undefined || !terminalID.startsWith("evt_"))
+        return { kind: "failed", diagnostic: "OpenCode terminal identity missing" };
+      return await answer(input.runtime, input.id, step.id, terminalID);
+    }
+  } catch (error) {
+    return { kind: "failed", diagnostic: `OpenCode observation failed: ${diagnostic(error)}` };
+  } finally {
+    input.admission.end();
+  }
 }
-
+async function openSession(runtime: OpencodeRuntime, input: Input): Promise<string> {
+  const model =
+    input.options.model === undefined
+      ? undefined
+      : {
+          ...parseModel(input.options.model),
+          ...(input.options.effort === undefined ? {} : { variant: input.options.effort }),
+        };
+  const session = runtime.client.session;
+  const response =
+    input.session.kind === "fresh"
+      ? await session.create({
+          body: { location: { directory: input.cwd }, ...(model === undefined ? {} : { model }) },
+        })
+      : await session.get({ id: sessionId(input.session.coordinate) });
+  const info = object(object(response)?.data);
+  const id = nonblank(info?.id);
+  if (id === undefined) throw new Error("OpenCode did not return a session id");
+  const active = object(object(await session.active())?.data);
+  if (active === undefined) throw new Error("OpenCode active execution response missing");
+  if (active[id] !== undefined) throw new Error("OpenCode native session is already busy");
+  let selected = object(info?.model);
+  if (input.session.kind === "resume" && model !== undefined) {
+    await session.switchModel({ id, model });
+    selected = object(object(object(await session.get({ id }))?.data)?.model);
+  }
+  if (
+    model !== undefined &&
+    (selected?.providerID !== model.providerID ||
+      selected.id !== model.id ||
+      (selected.variant ?? "default") !== (input.options.effort ?? "default"))
+  ) {
+    throw new Error("OpenCode did not select the requested model");
+  }
+  if (input.options.systemPrompt !== undefined) {
+    // Native instruction entries join the system transcript and survive resume
+    // and fork. Updating the same entry announces an upstream instruction change.
+    await session.instructions({ id, text: input.options.systemPrompt });
+  }
+  return id;
+}
 async function drive(
   execution: ProviderExecution,
   input: Input,
-  loader?: OpencodeSdkLoader,
-  custody?: AttemptCustody,
+  loader: OpencodeSdkLoader | undefined,
+  custody: AttemptCustody,
 ): Promise<Session> {
   admit(input.options);
-  const signal = input.signal ?? new AbortController().signal;
-  const resumeSessionId = input.session.kind === "resume" ? opencodeSessionId(input.session.coordinate) : undefined;
-  const abortController = new AbortController();
-  const abortSetup = () => abortController.abort(signal.reason);
-  signal.addEventListener("abort", abortSetup, { once: true });
-  signal.throwIfAborted();
-  let closeOnce!: () => Promise<void>;
-  const runtime = await loadDriveRuntime(execution, input, abortController.signal, loader, (ready) => {
-    closeOnce = ownRuntime(custody, ready);
+  if (input.schemaJson !== undefined) throw new Error("OpenCode v2 does not expose native structured answer schemas");
+  if (input.session.kind === "resume") sessionId(input.session.coordinate);
+  let closeRuntime!: () => Promise<void>;
+  const runtime = await loadOpencode({
+    execution,
+    cwd: input.cwd,
+    signal: custody.signal,
+    ...(loader === undefined ? {} : { loader }),
+    onRuntime: (ready) => {
+      closeRuntime = ownRuntime(custody, ready);
+    },
+    ...(input.requests === undefined ? {} : { requests: input.requests.dir }),
   });
   const stream = ownEventStream({
     directory: input.cwd,
-    signal: abortController.signal,
-    ...(custody === undefined ? {} : { custody }),
-    subscribe: (request) => runtime.client.event.subscribe(request),
+    signal: custody.signal,
+    custody,
+    subscribe: runtime.client.event.subscribe,
   });
-  const wholeClose = wholeClosure(
-    () => stream.retire(),
-    () => closeOnce(),
-  );
+  let closing: Promise<void> | undefined;
+  const close = () => (closing ??= Promise.all([stream.retire(), closeRuntime()]).then(() => undefined));
   try {
-    const { session, sessionId } = await openDriveSession(runtime, input, resumeSessionId, abortController.signal);
-
-    const events = new AgentEventChannel();
-    const state = createEventState(sessionId);
-    const messageSequence = { value: 0 };
-    const nextMessageId = () => messageId(messageSequence.value++);
-    const messageID = nextMessageId();
-    const admission = liveAdmission(messageID);
-    const submissionState = { started: false };
-    events.emit({ type: "session", coordinate: coordinate(sessionId) });
+    const id = await openSession(runtime, input);
     await stream.ready;
-    if (abortController.signal.aborted) abortController.signal.throwIfAborted();
-    const { completion, finish } = terminalSettlement(events, wholeClose);
-    const observation = observeTurn({
-      stream,
-      session,
-      sessionId,
-      cwd: input.cwd,
-      messageID,
-      admission,
-      events,
-      state,
-      submissionState,
+    custody.signal.throwIfAborted();
+    const events = new AgentEventChannel();
+    events.emit({ type: "session", coordinate: coordinate(id) });
+    let sequence = 0;
+    const initial = messageId(sequence++);
+    const admission = liveAdmission(initial);
+    let control: Promise<unknown> | undefined;
+    let finishing = false;
+    let finish!: (result: TurnResult) => Promise<void>;
+    const completion = new Promise<TurnResult>((resolve) => {
+      let settlement: Promise<void> | undefined;
+      finish = (result) => {
+        finishing = true;
+        return (settlement ??= (async () => {
+          await close();
+          events.end();
+          resolve(result);
+        })());
+      };
     });
-    submissionState.started = true;
-    await session.promptAsync({
-      path: { id: sessionId },
-      query: { directory: input.cwd },
-      body: promptBody(input, messageID),
-      throwOnError: true,
-    });
-    abortController.signal.throwIfAborted();
-    // The observer never awaits its own completion: finishing retires the whole
-    // stream, but the observer that invoked finish stays outside that wait. Its
-    // rejection is owned by attempt custody, not by an unobserved promise.
-    void observation.then(finish).catch(() => undefined);
-    return createLiveSession({
-      session,
-      sessionId,
-      cwd: input.cwd,
-      promptBody: (messageID, text) => promptBody({ ...input, body: text, launchTells: [] }, messageID),
-      admission,
-      nextMessageId,
+    const observed = observe({ runtime, stream, id, admission, events });
+    // Start observation before submission: admission broadcasts can precede HTTP completion.
+    void observed
+      .then(async (result) => {
+        // Explicit interrupt owns its response too: a terminal broadcast can be
+        // published before that response, and must not close its connection early.
+        if (control !== undefined) await control;
+        await finish(result);
+      })
+      .catch(() => undefined);
+    const prompt = async (nativeID: string, text: string) => {
+      const response = object(object(await runtime.client.session.prompt({ id, body: { id: nativeID, text } }))?.data);
+      if (response?.id !== nativeID || response.sessionID !== id || response.type !== "user") {
+        throw new Error("OpenCode returned no exact native inbox admission");
+      }
+    };
+    await prompt(initial, [input.body, ...input.launchTells.map((tell) => tell.text)].filter(Boolean).join("\n\n"));
+    custody.signal.throwIfAborted();
+    let submissions: Promise<void> = admission.initial.then(() => undefined);
+    return {
+      admission: { fence: initial },
       events,
       completion,
-      abortController,
-      close: wholeClose,
-      finish,
-    });
+      tell(tell) {
+        const submit = async () => {
+          if (!admission.open()) return { kind: "turn-ended" } as const;
+          const nativeID = messageId(sequence++);
+          const receipt = admission.wait(nativeID);
+          void prompt(nativeID, tell.text).catch((error: unknown) => admission.fail(nativeID, error));
+          return await receipt;
+        };
+        const next = submissions.then(submit);
+        submissions = next.then(
+          () => undefined,
+          () => undefined,
+        );
+        return next;
+      },
+      abort: async () => {
+        admission.end();
+        if (finishing) {
+          await close();
+          return;
+        }
+        // The v2 interrupt response follows execution settlement. Do not hide its
+        // refusal; server and connection retirement must still run on failure.
+        control ??= runtime.client.session.interrupt({ id });
+        try {
+          await control;
+        } finally {
+          await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
+        }
+      },
+      forceDispose: async () => {
+        admission.end();
+        await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
+      },
+    };
   } catch (error) {
-    signal.removeEventListener("abort", abortSetup);
-    await wholeClose();
+    await close();
     throw error;
   }
 }
-
 export function createOpencodeProvider(
   input: ProviderExecution | OpencodeProviderTestOptions = { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" },
 ): ProviderAdapter {
   const execution: ProviderExecution = "kind" in input ? input : { name: OPENCODE_SDK_PROVIDER, kind: "opencode-sdk" };
   const loader = "loader" in input ? input.loader : undefined;
   return {
-    admitOptions(options: ProviderOptions) {
+    admitOptions(options) {
       try {
         admit(options);
+        return { kind: "admitted", options: Object.freeze({ ...options }) };
       } catch (error) {
         return { kind: "refused", diagnostic: diagnostic(error) };
       }
-      return {
-        kind: "admitted",
-        options: Object.freeze({ ...options }),
-      };
     },
     ...providerLifecycle((input, custody) => drive(execution, input, loader, custody)),
-    fork: (input: { session: ResumeCoordinate; at: string; cwd: string }) =>
+    fork: (input) =>
       createProviderAttempt(new AbortController().signal, async (custody) => {
-        const sessionId = opencodeSessionId(input.session);
+        const id = sessionId(input.session);
         let close!: () => Promise<void>;
         const runtime = await loadOpencode({
           execution,
@@ -577,33 +361,29 @@ export function createOpencodeProvider(
           signal: custody.signal,
           ...(loader === undefined ? {} : { loader }),
           onRuntime: (ready) => {
-            let closing: Promise<void> | undefined;
-            let settleRuntimeClosed!: () => void;
-            let rejectRuntimeClosed!: (reason?: unknown) => void;
-            const runtimeClosed = new Promise<void>((resolve, reject) => {
-              settleRuntimeClosed = resolve;
-              rejectRuntimeClosed = reject;
-            });
-            close = (): Promise<void> => {
-              if (closing === undefined) {
-                closing = ready.close();
-                void closing.then(settleRuntimeClosed, rejectRuntimeClosed);
-              }
-              return closing;
-            };
-            custody.own({ closed: runtimeClosed, abort: close, forceDispose: close });
+            close = ownRuntime(custody, ready);
           },
         });
         try {
-          const result = await runtime.client.session.fork({
-            path: { id: sessionId },
-            query: { directory: input.cwd },
-            body: { messageID: input.at },
-          });
-          const info = object(object(result)?.data) ?? object(result);
-          const id = nonblank(info?.id);
-          if (id === undefined || id === sessionId) throw new Error("OpenCode fork returned an invalid session id");
-          return { session: coordinate(id) };
+          custody.signal.throwIfAborted();
+          const point = object(object(await runtime.client.session.message({ id, messageID: input.at }))?.data);
+          if (point?.id !== input.at || point.type !== "idle" || point.outcome !== "succeeded") {
+            throw new Error("OpenCode fork requires the retained successful native terminal boundary");
+          }
+          const response = object(object(await runtime.client.session.fork({ id, before: input.at }))?.data);
+          const child = nonblank(response?.id);
+          const fork = object(response?.fork);
+          const boundary = object(fork?.boundary);
+          if (
+            child === undefined ||
+            child === id ||
+            fork?.sessionID !== id ||
+            boundary?.type !== "before" ||
+            boundary.messageID !== input.at
+          ) {
+            throw new Error("OpenCode fork did not preserve the exact native boundary");
+          }
+          return { session: coordinate(child) };
         } finally {
           await close();
         }

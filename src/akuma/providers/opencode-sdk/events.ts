@@ -6,332 +6,171 @@ import {
   type ToolCall,
   type ToolResult,
 } from "../../provider.js";
-import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { nonnegativeCount, object, positiveLine, stringValue, text } from "../decode.js";
 
 type Emitter = { emit(event: AgentEvent): void };
-type ObservedTool = Readonly<{ name: string; call: ToolCall }>;
 type State = {
   sessionId?: string;
-  assistantParts: Set<string>;
-  reasoningParts: Set<string>;
-  tools: Map<string, ObservedTool>;
-  completedTools: Set<string>;
-  failure?: string;
+  tools: Map<string, { name: string; call?: ToolCall }>;
+  completed: Set<string>;
 };
-type Part = Record<string, unknown>;
-type NativeEventKind = OpencodeEvent["type"];
 
-export const OPENCODE_EVENT_DISPOSITIONS = {
-  "server.instance.disposed": "dropped",
-  "installation.updated": "dropped",
-  "installation.update-available": "dropped",
-  "lsp.client.diagnostics": "dropped",
-  "lsp.updated": "dropped",
-  "message.updated": "mapped",
-  "message.removed": "dropped",
-  "message.part.updated": "mapped",
-  "message.part.removed": "dropped",
-  "permission.updated": "dropped",
-  "permission.replied": "dropped",
-  "session.status": "dropped",
-  "session.idle": "dropped",
-  "session.compacted": "note",
-  "file.edited": "dropped",
-  "todo.updated": "mapped",
-  "command.executed": "dropped",
-  "session.created": "dropped",
-  "session.updated": "dropped",
-  "session.deleted": "dropped",
-  "session.diff": "dropped",
-  "session.error": "mapped",
-  "file.watcher.updated": "dropped",
-  "vcs.branch.updated": "dropped",
-  "tui.prompt.append": "dropped",
-  "tui.command.execute": "dropped",
-  "tui.toast.show": "dropped",
-  "pty.created": "dropped",
-  "pty.updated": "dropped",
-  "pty.exited": "dropped",
-  "pty.deleted": "dropped",
-  "server.connected": "dropped",
-} as const satisfies Record<NativeEventKind, "mapped" | "dropped" | "note">;
-
-// OpenCode may emit these server-side metadata events before the generated
-// SDK union catches up. They are all non-narrative and therefore remain drop
-// dispositions; genuinely new execution events still use the unknown arm.
-const RUNTIME_DROPPED_EVENT_KINDS = new Set([
-  "plugin.added",
-  "catalog.updated",
-  "reference.updated",
-  "integration.updated",
-  "server.heartbeat",
-  "message.part.delta",
-]);
-
-function diagnostic(value: unknown): string {
+export function diagnostic(value: unknown): string {
   const data = object(value);
-  const nested = object(data?.data);
-  return text(nested?.message) ?? text(data?.message) ?? "OpenCode session failed";
+  return text(data?.message) ?? text(object(data?.data)?.message) ?? "OpenCode execution failed";
 }
-type FileChangeCall = Extract<ToolCall, { kind: "fileChange" }>;
-function diffstat(value: Readonly<Record<string, unknown>> | undefined): FileChangeCall["changes"][number]["diffstat"] {
-  if (value === undefined) return undefined;
-  const added = nonnegativeCount(value.additions);
-  const removed = nonnegativeCount(value.deletions);
-  return added === undefined || removed === undefined ? undefined : { added, removed };
-}
-function fileChange(changes: FileChangeCall["changes"]): FileChangeCall | undefined {
-  return changes.length === 0 ? undefined : { kind: "fileChange", changes };
-}
-function change(
-  op: FileChangeCall["changes"][number]["op"],
-  path: string,
-  stats: FileChangeCall["changes"][number]["diffstat"],
-): FileChangeCall["changes"][number] {
-  return stats === undefined ? { op, path } : { op, path, diffstat: stats };
-}
-function editCall(
-  input: Record<string, unknown> | undefined,
-  metadata: Record<string, unknown> | undefined,
-): ToolCall | undefined {
-  const path = text(input?.filePath);
-  if (path === undefined) return undefined;
-  return fileChange([change("update", path, diffstat(object(metadata?.filediff)))]);
-}
-function writeCall(
-  input: Record<string, unknown> | undefined,
-  metadata: Record<string, unknown> | undefined,
-): ToolCall | undefined {
-  const path = text(metadata?.filepath) ?? text(input?.filePath);
-  const op =
-    metadata?.exists === false ? ("add" as const) : metadata?.exists === true ? ("update" as const) : undefined;
-  return path === undefined || op === undefined ? undefined : fileChange([change(op, path, undefined)]);
-}
-function applyPatchFile(value: unknown): FileChangeCall["changes"][number] | undefined {
-  const file = object(value);
-  if (file === undefined) return undefined;
-  const type = file.type;
-  const op =
-    type === "add"
-      ? ("add" as const)
-      : type === "delete"
-        ? ("delete" as const)
-        : type === "update" || type === "modify" || type === "move"
-          ? ("update" as const)
-          : undefined;
-  const path = type === "move" ? text(file.movePath) : text(file.filePath);
-  return op === undefined || path === undefined ? undefined : change(op, path, diffstat(file));
-}
-function applyPatchCall(metadata: Record<string, unknown> | undefined): ToolCall | undefined {
-  if (!Array.isArray(metadata?.files)) return undefined;
-  return fileChange(
-    metadata.files.flatMap((value) => {
-      const next = applyPatchFile(value);
-      return next === undefined ? [] : [next];
-    }),
-  );
-}
-function strongerCall(previous: ToolCall | undefined, next: ToolCall | undefined): ToolCall | undefined {
-  if (next === undefined) return previous;
-  if (previous?.kind === "fileChange" && next.kind !== "fileChange") return previous;
-  // The correlated start's admitted preview is authority: a later update never
-  // overwrites it, empty or conflicting, while a start without one adopts supplied evidence.
-  if (next.kind === "other" && previous?.kind === "other" && previous.input !== undefined)
-    return { ...next, input: previous.input };
-  return next;
-}
-
-function runCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
-  return name === "bash" || name === "shell" ? { kind: "run", command: text(value?.command) ?? name } : undefined;
-}
-
-function readCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
-  if (name !== "read") return undefined;
-  const path = text(value?.filePath) ?? text(value?.path);
-  if (path === undefined) return undefined;
-  const offset = positiveLine(value?.offset);
-  const limit = positiveLine(value?.limit);
-  return {
-    kind: "read",
-    path,
-    ...(offset === undefined ? {} : { offset }),
-    ...(limit === undefined ? {} : { limit }),
-  };
-}
-
-function searchCall(name: string, value: Record<string, unknown> | undefined): ToolCall | undefined {
-  if (name !== "grep" && name !== "glob" && name !== "search") return undefined;
-  const query = text(value?.pattern) ?? text(value?.query);
-  if (query === undefined) return undefined;
-  const path = text(value?.path) ?? text(value?.filePath);
-  const glob = text(value?.glob);
-  const scope = name === "glob" ? ("files" as const) : ("content" as const);
-  return {
-    kind: "search",
-    query,
-    scope,
-    ...(path === undefined ? {} : { path }),
-    ...(scope === "content" && glob !== undefined ? { glob } : {}),
-  };
-}
-
-function callFor(name: string, input: unknown, metadata?: unknown): ToolCall | undefined {
+function callFor(name: string, input: unknown): ToolCall {
   const value = object(input);
-  const meta = object(metadata);
-  const lower = name.toLowerCase();
-  if (lower === "bash" || lower === "shell") return runCall(lower, value);
-  if (lower === "read") return readCall(lower, value);
-  if (lower === "grep" || lower === "glob" || lower === "search") return searchCall(lower, value);
-  if (lower === "edit") return editCall(value, meta) ?? otherToolCall(name, input);
-  if (lower === "write") return writeCall(value, meta) ?? otherToolCall(name, input);
-  if (lower === "apply_patch") return applyPatchCall(meta) ?? otherToolCall(name, input);
+  if (name === "shell") return { kind: "run", command: text(value?.command) ?? name };
+  if (name === "read") {
+    const path = text(value?.filePath) ?? text(value?.path);
+    if (path !== undefined)
+      return {
+        kind: "read",
+        path,
+        ...(positiveLine(value?.offset) === undefined ? {} : { offset: positiveLine(value?.offset)! }),
+        ...(positiveLine(value?.limit) === undefined ? {} : { limit: positiveLine(value?.limit)! }),
+      };
+  }
+  if (name === "grep" || name === "glob") {
+    const query = text(value?.pattern);
+    const path = text(value?.path);
+    if (query !== undefined)
+      return {
+        kind: "search",
+        scope: name === "glob" ? "files" : "content",
+        query,
+        ...(path === undefined ? {} : { path }),
+      };
+  }
+  if (name === "edit") {
+    const path = text(value?.path);
+    if (path !== undefined) return { kind: "fileChange", changes: [{ op: "update", path }] };
+  }
   return otherToolCall(name, input);
 }
-/**
- * An assistant message records the model that produced it as
- * `<providerID>/<modelID>`, the same convention this adapter's model option
- * uses. The user message's model is the request, not evidence of what ran.
- */
-function assistantModel(info: Record<string, unknown> | undefined): string | undefined {
-  if (info?.role !== "assistant") return undefined;
-  const provider = text(info.providerID);
-  const model = text(info.modelID);
-  return provider === undefined || model === undefined ? undefined : `${provider}/${model}`;
-}
-
-function belongs(part: Part, state: State): boolean {
-  return state.sessionId === undefined || part.sessionID === state.sessionId;
-}
-function mapTextPart(part: Part, events: Emitter, state: State, thought: boolean): void {
-  const id = text(part.id);
-  const time = object(part.time);
-  const content = text(part.text);
-  const seen = thought ? state.reasoningParts : state.assistantParts;
-  if (!belongs(part, state) || id === undefined || content === undefined || time?.end === undefined || seen.has(id))
-    return;
-  seen.add(id);
-  if (thought) events.emit({ type: "thought", text: content });
-  else events.emit({ type: "assistant", text: content });
-}
-function resultFor(state: Part, failed: boolean): ToolResult {
-  const exit = object(state.metadata)?.exit;
-  const exitCode = typeof exit === "number" && Number.isInteger(exit) ? exit : undefined;
-  const output = stringValue(state.output);
-  if (failed) {
-    return {
-      status: "error",
-      message: text(state.error) ?? "OpenCode tool failed",
-      ...(output === undefined ? {} : { output }),
-      ...(exitCode === undefined ? {} : { exitCode }),
-    };
-  }
-  return {
-    status: exitCode !== undefined && exitCode !== 0 ? "error" : "ok",
-    ...(output === undefined ? {} : { output }),
-    ...(exitCode === undefined ? {} : { exitCode }),
-  };
-}
-function mapToolPart(part: Part, events: Emitter, state: State): void {
-  if (!belongs(part, state)) return;
-  const id = text(part.callID);
-  const name = text(part.tool);
-  const toolState = object(part.state);
-  if (id === undefined || name === undefined || toolState === undefined) return;
-  const next = callFor(name, toolState.input, toolState.metadata);
-  if (
-    (toolState.status === "pending" || toolState.status === "running") &&
-    !state.tools.has(id) &&
-    !state.completedTools.has(id)
-  ) {
-    if (next === undefined) return;
-    const observed = { name, call: next };
-    state.tools.set(id, observed);
-    events.emit({ type: "tool", phase: "started", id, ...observed });
-    return;
-  }
-  if ((toolState.status !== "completed" && toolState.status !== "error") || state.completedTools.has(id)) return;
-  const started = state.tools.get(id);
-  const call = strongerCall(started?.call, next);
-  if (call === undefined) return;
-  const observed = { name: started?.name ?? name, call };
-  if (!state.tools.has(id)) {
-    state.tools.set(id, observed);
-    events.emit({ type: "tool", phase: "started", id, ...observed });
-  } else {
-    state.tools.set(id, observed);
-  }
-  state.completedTools.add(id);
-  events.emit({
-    type: "tool",
-    phase: "completed",
-    id,
-    ...observed,
-    result: resultFor(toolState, toolState.status === "error"),
+function observedChanges(metadata: unknown): Extract<ToolCall, { kind: "fileChange" }> | undefined {
+  const files = object(metadata)?.files;
+  if (!Array.isArray(files)) return undefined;
+  const changes = files.flatMap((item) => {
+    const file = object(item);
+    const path = text(file?.file);
+    const status = file?.status;
+    if (path === undefined || (status !== "added" && status !== "deleted" && status !== "modified")) return [];
+    const added = nonnegativeCount(file?.additions);
+    const removed = nonnegativeCount(file?.deletions);
+    const patch = stringValue(file?.patch);
+    return [
+      {
+        op: status === "added" ? ("add" as const) : status === "deleted" ? ("delete" as const) : ("update" as const),
+        path,
+        ...(added === undefined || removed === undefined ? {} : { diffstat: { added, removed } }),
+        ...(patch === undefined ? {} : { patch }),
+      },
+    ];
   });
+  return changes.length === 0 ? undefined : { kind: "fileChange", changes };
 }
-function mapPart(part: Part, events: Emitter, state: State): void {
-  if (part.type === "text") return mapTextPart(part, events, state, false);
-  if (part.type === "reasoning") return mapTextPart(part, events, state, true);
-  if (part.type === "tool") mapToolPart(part, events, state);
+function output(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts = content.flatMap((part) => {
+    const value = object(part);
+    const text = value?.type === "text" ? stringValue(value.text) : undefined;
+    return text === undefined ? [] : [text];
+  });
+  return parts.length === 0 ? undefined : parts.join("\n\n");
 }
-function mapSessionError(properties: Part, events: Emitter, state: State): void {
-  if (state.sessionId !== undefined && properties.sessionID !== state.sessionId) return;
-  state.failure = diagnostic(properties.error);
-  events.emit(noteEvent(state.failure));
-}
-function mapTodo(properties: Part, events: Emitter, state: State): void {
-  if (properties.sessionID !== state.sessionId || !Array.isArray(properties.todos)) return;
-  const summary = properties.todos
-    .flatMap((value) => {
-      const todo = object(value);
-      const content = text(todo?.content);
-      return content === undefined ? [] : [`${text(todo?.status) ?? "todo"}: ${content}`];
-    })
-    .join("; ");
-  if (summary.length > 0) events.emit(noteEvent(summary));
-}
-function ignoredEvent(type: unknown): boolean {
-  return (
-    typeof type === "string" &&
-    (OPENCODE_EVENT_DISPOSITIONS[type as NativeEventKind] === "dropped" || RUNTIME_DROPPED_EVENT_KINDS.has(type))
-  );
-}
+const DROPPED = new Set([
+  "server.connected",
+  "server.heartbeat",
+  "session.created",
+  "session.forked",
+  "session.deleted",
+  "session.inbox.enqueued",
+  "session.inbox.delivered",
+  "session.inbox.cancelled",
+  "session.inbox.delivery.changed",
+  "session.execution.started",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "session.model.selected",
+  "session.agent.selected",
+  "session.instructions.updated",
+  "session.permissions",
+  "session.step.streamed",
+  "session.step.ended",
+  "session.usage.updated",
+  "session.usage.recorded",
+  "session.text.started",
+  "session.text.delta",
+  "session.reasoning.started",
+  "session.reasoning.delta",
+  "session.tool.input.delta",
+  "session.tool.input.ended",
+  "session.tool.progress",
+  "session.retry.scheduled",
+]);
 
+/** Only complete native values enter narration. The caller enforces submission/step correlation. */
 export function mapEvent(value: unknown, events: Emitter, state: State): void {
   const event = object(value);
-  if (event === undefined) return;
-  const properties = object(event.properties) ?? {};
-  if (event.type === "message.part.updated") {
-    const part = object(properties.part);
-    if (part !== undefined) mapPart(part, events, state);
+  if (event === undefined || typeof event.type !== "string") return;
+  const data = object(event.data) ?? {};
+  if (state.sessionId !== undefined && data.sessionID !== state.sessionId) return;
+  const type = event.type;
+  if (type === "session.step.started") {
+    const model = object(data.model);
+    const provider = text(model?.providerID);
+    const id = text(model?.id);
+    if (provider !== undefined && id !== undefined) events.emit(modelEvent(`${provider}/${id}`));
     return;
   }
-  if (event.type === "message.updated") {
-    const info = object(properties.info);
-    if (info !== undefined && info.sessionID === state.sessionId && info.role === "assistant") {
-      const model = assistantModel(info);
-      if (model !== undefined) events.emit(modelEvent(model));
-      if (info.error !== undefined) state.failure = diagnostic(info.error);
+  if (type === "session.text.ended" || type === "session.reasoning.ended") {
+    if (typeof data.text === "string")
+      events.emit({ type: type === "session.text.ended" ? "assistant" : "thought", text: data.text });
+    return;
+  }
+  if (type === "session.tool.input.started") {
+    if (typeof data.id === "string" && typeof data.name === "string") state.tools.set(data.id, { name: data.name });
+    return;
+  }
+  if (type === "session.tool.called" || type === "session.tool.success" || type === "session.tool.failed") {
+    const id = text(data.id);
+    const started = id === undefined ? undefined : state.tools.get(id);
+    if (id === undefined || started === undefined || state.completed.has(id)) return;
+    if (started.call === undefined) {
+      started.call = callFor(started.name, data.input);
+      events.emit({ type: "tool", phase: "started", id, name: started.name, call: started.call });
     }
+    if (type === "session.tool.called") return;
+    if (started.name === "edit" || started.name === "patch" || started.name === "write") {
+      started.call = observedChanges(data.metadata) ?? started.call;
+    }
+    const observed = output(data.content);
+    const nativeExit = object(data.metadata)?.exit;
+    const exit = typeof nativeExit === "number" && Number.isInteger(nativeExit) ? nativeExit : undefined;
+    const result: ToolResult = {
+      status: type === "session.tool.failed" || (exit !== undefined && exit !== 0) ? "error" : "ok",
+      ...(type === "session.tool.failed" ? { message: diagnostic(data.error) } : {}),
+      ...(observed === undefined ? {} : { output: observed }),
+      ...(exit === undefined ? {} : { exitCode: exit }),
+    };
+    state.completed.add(id);
+    events.emit({ type: "tool", phase: "completed", id, name: started.name, call: started.call, result });
     return;
   }
-  if (event.type === "session.error") return mapSessionError(properties, events, state);
-  if (event.type === "session.compacted") {
+  if (type === "session.compaction.ended") {
     events.emit(noteEvent("Context compacted"));
     return;
   }
-  if (event.type === "todo.updated") return mapTodo(properties, events, state);
-  if (ignoredEvent(event.type)) return;
-  events.emit({ type: "unknown", kind: typeof event.type === "string" ? event.type : "unknown" });
+  if (type === "session.compaction.failed") {
+    events.emit(noteEvent(diagnostic(data.error)));
+    return;
+  }
+  if (type === "session.compaction.started" || type === "session.compaction.delta" || DROPPED.has(type)) return;
+  events.emit({ type: "unknown", kind: type });
 }
-
 export function createEventState(sessionId?: string): State {
-  return {
-    ...(sessionId === undefined ? {} : { sessionId }),
-    assistantParts: new Set(),
-    reasoningParts: new Set(),
-    tools: new Map(),
-    completedTools: new Set(),
-  };
+  return { ...(sessionId === undefined ? {} : { sessionId }), tools: new Map(), completed: new Set() };
 }

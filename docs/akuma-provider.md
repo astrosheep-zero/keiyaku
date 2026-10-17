@@ -77,23 +77,41 @@ Turn never resolves. Every spawn therefore composes a base permission layer
 before the native server starts, making a human-reply wait impossible by
 construction rather than by caller-configuration luck.
 
-The baseline resolves to allow every action permission whose native default can
-ask for a human decision — external-directory access outside the worktree,
-continuation after repeated identical failures, and reads the native defaults
-gate behind an ask — and refuses the question tool, whose Turn then fails fast
-instead of waiting for an answer that cannot come. The class list is evidence
-from the installed opencode version, not a stored schema: in 1.18.33 the primary
-agents begin from an allow-all rule with `external_directory` and `doom_loop`
-set to ask, `read` set to ask for env files, and `question` allowed by the
-tool's awaiting semantics; every other class matches the allow-all rule and
-cannot await. A provider version bump re-opens the list.
+The baseline allows external-directory access and environment-file reads that
+native defaults otherwise gate behind a human decision. It refuses the question
+tool, which must fail rather than wait for an answer that cannot come. The list
+is verified against the installed native producer; a provider version change
+re-opens that verification rather than inheriting an older version's defaults.
 
-Explicit settings keep per-key precedence: a caller permission key replaces the
-baseline class it names, so a project may narrow — a project-root whitelist, or
-re-enabling the question tool — through its own settings. The baseline only
-fills classes the caller leaves unspecified, and non-permission configuration
-passes through untouched. An execution environment layer may replace the whole
-composed config variable; that remains the documented escape hatch.
+Caller rules keep precedence by action: an explicit caller policy for an action
+replaces that action's baseline, while unspecified actions retain the headless
+baseline. Non-permission configuration passes through untouched. A caller may
+intentionally narrow access or re-enable a human-reply tool; the resulting wait
+is then its explicit policy rather than an adapter default. An execution
+environment layer may replace the composed configuration, preserving the same
+escape hatch.
+
+## Native Continuity And Options
+
+The OpenCode adapter uses the matching native client and checks native readiness,
+not a successful response from the server's web application. Its live event feed
+is volatile: disconnect or stream failure ends observation honestly without
+reconnection, prompt replay, or an inferred answer. An observed foreign input
+consumed during the same execution makes exact attribution unavailable; the
+adapter fails rather than adopting that writer's answer.
+
+A completed answer retains the exact native boundary immediately after that
+answer for historical fork. This is a native coordinate, not a reconstructed
+history: a later fork excludes that boundary and therefore includes the answer
+without copying subsequent native work. The adapter verifies the native
+boundary and refuses a changed or missing one rather than falling back to the
+latest session.
+
+Additional system instructions use native durable instruction context and remain
+part of native resume and fork. The adapter does not pretend that this facility
+replaces the native system prompt. A requested replacement or native structured
+answer facility that the installed protocol cannot supply refuses explicitly;
+no option is silently discarded or translated into an invented native promise.
 
 ## Narration And Admission
 

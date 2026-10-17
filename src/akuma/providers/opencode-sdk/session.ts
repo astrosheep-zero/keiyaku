@@ -1,32 +1,28 @@
+import type { SessionCreateInput, SessionSwitchModelInput } from "@opencode/client";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
 import { abortable } from "../../abort.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { spawnDetachedProcess } from "../../../runtime/proc/run.js";
-import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { ResumeCoordinate } from "../../heart/index.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
-import { isRecord } from "../decode.js";
+import { object } from "../decode.js";
+import { createNativeClient } from "./native-http.js";
 
-export type OpencodeSdkSession = Pick<
-  OpencodeClient["session"],
-  "create" | "get" | "fork" | "abort" | "promptAsync" | "messages"
->;
-/**
- * The adapter's own event subscription port. It carries the cancellation signal
- * and the cancellable retry backoff the installed client honors at runtime,
- * without naming the SDK's generated request type at the call site.
- */
-export type OpencodeEventSubscriptionRequest = Readonly<{
-  directory: string;
-  /** Cancels the subscription's fetch, reader, and retry waiting. */
-  signal: AbortSignal;
-  /** Resolves without rejecting when `signal` aborts, and always clears its timer. */
-  sleep(milliseconds: number): Promise<void>;
+export type OpencodeSdkSession = Readonly<{
+  create(input: { body: SessionCreateInput }): Promise<unknown>;
+  get(input: { id: string }): Promise<unknown>;
+  switchModel(input: { id: string; model: SessionSwitchModelInput["model"] }): Promise<unknown>;
+  instructions(input: { id: string; text: string }): Promise<unknown>;
+  active(): Promise<unknown>;
+  fork(input: { id: string; before: string }): Promise<unknown>;
+  interrupt(input: { id: string }): Promise<unknown>;
+  prompt(input: { id: string; body: { id: string; text: string } }): Promise<unknown>;
+  message(input: { id: string; messageID: string }): Promise<unknown>;
 }>;
-type OpencodeEventSubscription = Readonly<{ stream: AsyncIterable<unknown> }>;
+export type OpencodeEventSubscriptionRequest = Readonly<{ directory: string; signal: AbortSignal }>;
 export type OpencodeSdkEvent = Readonly<{
-  subscribe(request: OpencodeEventSubscriptionRequest): Promise<OpencodeEventSubscription>;
+  subscribe(request: OpencodeEventSubscriptionRequest): Promise<Readonly<{ stream: AsyncIterable<unknown> }>>;
 }>;
 export type OpencodeSdkLoader = (
   cwd: string,
@@ -39,101 +35,65 @@ export type OpencodeSdkLoader = (
     ready?: Promise<void>;
   }>
 >;
-
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
 
-type OpencodeEventSubscribeOptions = NonNullable<Parameters<OpencodeClient["event"]["subscribe"]>[0]>;
-
-/**
- * Adapt the installed client's generated event endpoint to the adapter's
- * subscription port.
- *
- * The generated per-endpoint `Options` type omits the SDK's runtime
- * `sseSleepFn` option even though the client forwards every per-request key
- * into `createSseClient`, so a caller cannot express a cancellable backoff
- * through the published type. Declaring the port here keeps that one typing gap
- * and its single adaptation at the SDK seam: no other module repeats a cast,
- * the SDK's own parser and retry policy stay untouched, and an injected loader
- * supplies the same port shape.
- */
-export function opencodeEventPort(event: OpencodeClient["event"]): OpencodeSdkEvent {
-  return {
-    subscribe: (request) => {
-      const adapted: OpencodeEventSubscribeOptions = {
-        query: { directory: request.directory },
-        signal: request.signal,
-      };
-      // Runtime-only key omitted from the generated Options type; the installed
-      // client forwards it to createSseClient unchanged.
-      (adapted as { sseSleepFn?: (milliseconds: number) => Promise<void> }).sseSleepFn = request.sleep;
-      return event.subscribe(adapted);
-    },
-  };
-}
-
 export function messageId(sequence = 0): string {
-  const timestamp = BigInt(new Date().getTime()) * 0x1000n + BigInt(sequence);
-  const bytes = Buffer.alloc(6);
-  bytes.writeUIntBE(Number(timestamp & 0xffffffffffffn), 0, 6);
-  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  const suffix = [...randomBytes(14)].map((byte) => alphabet[byte % alphabet.length]).join("");
-  return `msg_${bytes.toString("hex")}${suffix}`;
+  const timestamp = BigInt(Date.now()) * 0x1000n + BigInt(sequence);
+  return `msg_${timestamp.toString(16)}${randomBytes(14).toString("hex")}`;
 }
-
-export function parseModel(model: string): Readonly<{ providerID: string; modelID: string }> {
+export function parseModel(model: string): Readonly<{ providerID: string; id: string }> {
   const slash = model.indexOf("/");
   if (slash <= 0 || slash === model.length - 1) throw new Error("OpenCode model must be <provider>/<model>");
-  return { providerID: model.slice(0, slash), modelID: model.slice(slash + 1) };
+  return { providerID: model.slice(0, slash), id: model.slice(slash + 1) };
 }
 
-/**
- * Permission classes whose upstream defaults can await a human reply. A headless
- * server has no reply channel, so such a pending ask never settles.
- *
- * Verified against the installed opencode 1.18.33 agent permission ruleset: the
- * primary agents start from `{"*":"allow"}` with `external_directory` and
- * `doom_loop` set to ask, `read` set to ask for `.env` files, and `question`
- * allowed (the question tool awaits an answer by semantics). Every other class
- * matches the allow-all rule and cannot await.
- */
-const HEADLESS_PERMISSION_BASE: Readonly<Record<string, string>> = Object.freeze({
-  external_directory: "allow",
-  doom_loop: "allow",
-  read: "allow",
-  question: "deny",
-});
-
-/**
- * Compose the config handed to a headless opencode server. The permission base
- * layer fills only the classes the caller leaves unspecified: an explicit caller
- * permission key wins per key and every non-permission key passes through
- * untouched. A caller that supplies a non-object `permission` shorthand states
- * the whole policy and keeps it.
- */
+// v2.0.20 Agent.Info.default asks only for external_directory and env reads;
+// question separately requests permission before awaiting its form reply.
+const HEADLESS_PERMISSION_BASE = [
+  { action: "external_directory", resource: "*", effect: "allow" },
+  { action: "read", resource: "*", effect: "allow" },
+  { action: "question", resource: "*", effect: "deny" },
+] as const;
 export function composeHeadlessPermissionConfig(config?: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  const permission = config?.permission;
-  if (permission !== undefined && !isRecord(permission)) return { ...config };
-  return { ...config, permission: { ...HEADLESS_PERMISSION_BASE, ...permission } };
+  const permissions = config?.permissions;
+  if (permissions !== undefined && !Array.isArray(permissions))
+    throw new Error("OpenCode v2 permissions must be a ruleset");
+  const actions = new Set((permissions ?? []).map((rule: unknown) => object(rule)?.action));
+  return {
+    ...config,
+    permissions: [...HEADLESS_PERMISSION_BASE.filter((rule) => !actions.has(rule.action)), ...(permissions ?? [])],
+  };
 }
-
 export type OpencodeRuntime = Readonly<{
   client: { session: OpencodeSdkSession; event: OpencodeSdkEvent };
   close: () => Promise<void>;
 }>;
 
-async function waitReady(client: OpencodeClient, cwd: string, signal: AbortSignal): Promise<void> {
+/** A successful HTML fallback, or a JSON response from another API, is not readiness. */
+export async function waitReady(json: (path: string) => Promise<unknown>, signal: AbortSignal): Promise<void> {
+  let last: unknown;
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (signal.aborted) throw new Error("OpenCode startup aborted");
+    signal.throwIfAborted();
     try {
-      await abortable(client.session.list({ query: { directory: cwd }, throwOnError: true }), signal);
+      const info = object(await abortable(json("/api/info"), signal));
+      if (
+        typeof info?.version !== "string" ||
+        !info.version.startsWith("2.") ||
+        typeof info.pid !== "number" ||
+        !Array.isArray(info.urls) ||
+        typeof object(info.paths)?.tmp !== "string"
+      ) {
+        throw new Error("OpenCode readiness requires native v2 server identity");
+      }
       return;
-    } catch {
+    } catch (error) {
+      last = error;
+      signal.throwIfAborted();
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
-  throw new Error("OpenCode server did not become ready within 10000ms");
+  throw new Error(`OpenCode server did not become ready within 10000ms: ${String(last)}`);
 }
-
 async function availablePort(): Promise<number> {
   return await new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -149,7 +109,6 @@ async function availablePort(): Promise<number> {
     });
   });
 }
-
 export async function loadOpencode(
   input: Readonly<{
     execution: ProviderExecution;
@@ -161,18 +120,25 @@ export async function loadOpencode(
   }>,
 ): Promise<OpencodeRuntime> {
   const { execution, cwd, signal, loader, onRuntime, requests } = input;
-  if (loader) {
+  if (loader !== undefined) {
     const loaded = await abortable(
-      loader(cwd, { ...execution, env: akumaExecutionEnvironment(process.env, execution.env, requests) }, signal),
+      loader(
+        cwd,
+        {
+          ...execution,
+          env: akumaExecutionEnvironment(process.env, execution.env, requests),
+        },
+        signal,
+      ),
       signal,
     );
     let closing: Promise<void> | undefined;
     const runtime = {
       client: loaded.client,
-      close: async () => {
-        closing ??= Promise.resolve(loaded.close?.()).then(() => undefined);
-        await closing;
-      },
+      close: () =>
+        (closing ??= Promise.resolve()
+          .then(() => loaded.close?.())
+          .then(() => undefined)),
     };
     onRuntime?.(runtime);
     try {
@@ -185,39 +151,62 @@ export async function loadOpencode(
     }
   }
   const port = await availablePort();
+  signal.throwIfAborted();
+  const password =
+    execution.env?.OPENCODE_PASSWORD ??
+    execution.env?.OPENCODE_SERVER_PASSWORD ??
+    randomBytes(32).toString("base64url");
+  const config = composeHeadlessPermissionConfig(execution.config);
   const owned = await spawnDetachedProcess({
     argv: [execution.executable ?? "opencode", "serve", "--hostname", "127.0.0.1", "--port", String(port)],
     cwd,
     env: akumaExecutionEnvironment(
       process.env,
       {
-        OPENCODE_CONFIG_CONTENT: JSON.stringify(composeHeadlessPermissionConfig(execution.config)),
+        OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
         ...execution.env,
+        OPENCODE_PASSWORD: password,
+        OPENCODE_SERVER_PASSWORD: password,
       },
       requests,
     ),
     log: `${cwd}/.opencode.log`,
   });
-  const { createOpencodeClient } = await import("@opencode-ai/sdk");
-  const client = createOpencodeClient({ baseUrl: `http://127.0.0.1:${port}`, directory: cwd });
+  const native = createNativeClient(`http://127.0.0.1:${port}`, password);
   let closing: Promise<void> | undefined;
-  const runtime = {
-    client: { session: client.session, event: opencodeEventPort(client.event) },
-    close: async () => {
-      closing ??= owned.terminate();
-      await closing;
+  const options = { signal };
+  const runtime: OpencodeRuntime = {
+    client: {
+      session: {
+        create: async ({ body }) => ({ data: await native.sdk.session.create(body, options) }),
+        get: async ({ id }) => ({ data: await native.sdk.session.get({ sessionID: id }, options) }),
+        switchModel: ({ id, model }) => native.sdk.session.switchModel({ sessionID: id, model }, options),
+        instructions: ({ id, text }) =>
+          native.sdk.session.instructions.entry.put({ sessionID: id, key: "keiyaku.system", value: text }, options),
+        active: async () => ({ data: await native.sdk.session.active(options) }),
+        fork: async ({ id, before }) => ({ data: await native.sdk.session.fork({ sessionID: id, before }, options) }),
+        interrupt: ({ id }) => native.sdk.session.interrupt({ sessionID: id, resume: false }),
+        prompt: async ({ id, body }) => ({
+          data: await native.sdk.session.prompt({ sessionID: id, ...body }, options),
+        }),
+        message: async ({ id, messageID }) => ({
+          data: await native.sdk.session.message.get({ sessionID: id, messageID }, options),
+        }),
+      },
+      event: { subscribe: ({ signal }) => native.subscribe(signal) },
     },
+    close: () => (closing ??= Promise.all([native.close(), owned.terminate()]).then(() => undefined)),
   };
   onRuntime?.(runtime);
   try {
-    await waitReady(client, cwd, signal);
+    await waitReady(() => native.sdk.server.info({ signal }), signal);
+    signal.throwIfAborted();
+    return runtime;
   } catch (error) {
     await runtime.close();
     throw error;
   }
-  return runtime;
 }
-
 export function coordinate(sessionId: string): ResumeCoordinate {
   return { sessionId };
 }
