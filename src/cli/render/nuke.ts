@@ -11,7 +11,7 @@ export function renderNukeText(result: NukeResult): string {
       `✓ nuke  ${result.world}`,
       `  refs removed  ${result.value.removed.refs}`,
       `  worktrees removed  ${result.value.removed.worktrees}`,
-      `  task stores removed  ${result.value.removed.tasks}`,
+      `  debt stores removed  ${result.value.removed.debts}`,
       "  locks  may remain · SQLite coordination files cannot be removed safely while concurrent writers may still hold them",
       ...seatClose,
     ].join("\n");

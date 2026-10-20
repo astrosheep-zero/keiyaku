@@ -23,7 +23,7 @@ import {
   renderAkumaCatalogue,
   renderArchetypeCatalogue,
   renderContractCatalogue,
-  renderTaskCatalogue,
+  renderDebtCatalogue,
 } from "../src/cli/render/catalog.js";
 import type { CallObservation } from "../src/library/akuma-creation.js";
 import {
@@ -73,8 +73,8 @@ import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkuId } from "../src/akuma/identity.js";
-import { renderTaskList, renderTaskMutation, renderTaskShow, renderTaskUpdate } from "../src/cli/render/task.js";
-import type { TaskId, TaskPage, TaskRow } from "../src/task/index.js";
+import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate } from "../src/cli/render/debt.js";
+import type { DebtId, DebtPage, DebtRow } from "../src/debt/index.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
 import { reconcileLagScope } from "../src/library/reconcile.js";
@@ -339,11 +339,11 @@ function callObservation(
   };
 }
 
-/** One rendered Task row; scenario deltas are explicit overrides. */
-function taskRow(overrides: Partial<TaskRow> = {}): TaskRow {
+/** One rendered Debt row; scenario deltas are explicit overrides. */
+function debtRow(overrides: Partial<DebtRow> = {}): DebtRow {
   return {
-    id: "task/row" as TaskId,
-    title: "Task",
+    id: "debt/row" as DebtId,
+    title: "Debt",
     state: "open",
     priority: 2,
     disposition: "ready",
@@ -490,19 +490,19 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
   assert.match(help, /--full prints every event/u, "help documents the full mode");
 });
 
-test("a task title wraps its em-dash and title as one unit", () => {
+test("a debt title wraps its em-dash and title as one unit", () => {
   const context = { columns: 60, color: false } as const;
-  const text = renderTaskList(
+  const text = renderDebtList(
     "ls",
     "current",
     {
       kind: "accepted",
       value: {
         rows: [
-          taskRow({
-            id: "task/usability/a-very-long-task-title-that-cannot-fit-here" as never,
+          debtRow({
+            id: "debt/usability/a-very-long-debt-title-that-cannot-fit-here" as never,
             title:
-              "a very long task title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
+              "a very long debt title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
           }),
         ],
         hasMore: false,
@@ -514,9 +514,9 @@ test("a task title wraps its em-dash and title as one unit", () => {
   assert.match(text, /^  — a very long/mu, "the em-dash moves with its title to the continuation line");
 });
 
-test("task receipts report fields without projection diffs", () => {
-  const task = {
-    id: "task/alpha" as never,
+test("debt receipts report fields without projection diffs", () => {
+  const debt = {
+    id: "debt/alpha" as never,
     namespace: [],
     title: "Alpha",
     state: "open" as const,
@@ -530,21 +530,21 @@ test("task receipts report fields without projection diffs", () => {
     createdAt: "2026-08-12T00:00:00.123Z",
     updatedAt: "2026-08-12T00:01:00.456Z",
   };
-  const update = renderTaskUpdate({
+  const update = renderDebtUpdate({
     kind: "accepted",
     value: {
-      task,
-      documentDiff: "--- task/alpha.md\n+++ task/alpha.md\n+updatedAt: noise",
+      debt,
+      documentDiff: "--- debt/alpha.md\n+++ debt/alpha.md\n+updatedAt: noise",
       changedFields: [{ field: "note", action: "replaced" }],
     },
   });
-  assert.match(update, /^✓ updated  task\/alpha\n/mu);
+  assert.match(update, /^✓ updated  debt\/alpha\n/mu);
   assert.match(update, /^  note  replaced$/mu);
   assert.doesNotMatch(update, /diff|updatedAt: noise/u);
-  const added = renderTaskMutation("add", { kind: "accepted", value: task });
-  assert.match(added, /^✓ added  task\/alpha/u);
-  const shown = renderTaskShow({
-    task,
+  const added = renderDebtMutation("add", { kind: "accepted", value: debt });
+  assert.match(added, /^✓ added  debt\/alpha/u);
+  const shown = renderDebtShow({
+    debt,
     needs: [],
     blockers: [],
     blocks: [],
@@ -562,11 +562,11 @@ test("task receipts report fields without projection diffs", () => {
 
 test("catalog text renders only the selected identity layer", () => {
   assert.equal(
-    renderTaskCatalogue(
-      { rows: [taskRow({ id: "task/catalog-row" as never, title: "Catalog row" })], hasMore: true },
+    renderDebtCatalogue(
+      { rows: [debtRow({ id: "debt/catalog-row" as never, title: "Catalog row" })], hasMore: true },
       [],
     ),
-    ["TASKS // root", "○ task/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
+    ["DEBTS // root", "○ debt/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
   );
   assert.equal(
     renderArchetypeCatalogue({
@@ -632,18 +632,18 @@ test("rendered Akuma catalog header names Akuma names, never archetype", () => {
   assert.doesNotMatch(text, /archetype/iu);
 });
 
-test("root Task catalogue marks every disposition with its own state", () => {
+test("root Debt catalogue marks every disposition with its own state", () => {
   const cases = [
     ["ready", "○"],
     ["blocked", "‖"],
     ["done", "✓"],
     ["drop", "×"],
   ] as const;
-  const catalog: TaskPage<TaskRow> = {
+  const catalog: DebtPage<DebtRow> = {
     hasMore: false,
     rows: cases.map(([disposition]) =>
-      taskRow({
-        id: `task/${disposition}` as never,
+      debtRow({
+        id: `debt/${disposition}` as never,
         title: disposition,
         priority: 1,
         state: disposition === "ready" || disposition === "blocked" ? "open" : disposition,
@@ -652,12 +652,12 @@ test("root Task catalogue marks every disposition with its own state", () => {
     ),
   };
   assert.equal(
-    renderTaskCatalogue(catalog, []),
+    renderDebtCatalogue(catalog, []),
     [
-      "TASKS // root",
+      "DEBTS // root",
       ...cases.map(
         ([state, mark]) =>
-          `${mark} task/${state} · ${state === "drop" ? "dropped" : state.replaceAll("_", " ")} · P1 — ${state}`,
+          `${mark} debt/${state} · ${state === "drop" ? "dropped" : state.replaceAll("_", " ")} · P1 — ${state}`,
       ),
     ].join("\n"),
   );
@@ -674,7 +674,7 @@ test("empty World status has one explicit empty row", () => {
           kind: "present",
           value: { root: worldRoot, state: null, observedAt: "2026-08-12T00:00:00.000Z", rows: [], hasMore: false },
         },
-        tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
+        debts: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
         akuma: {
           kind: "present",
           value: { observedAt: "2026-08-12T00:00:00.000Z", searched: [], rows: [], hasMore: false },
@@ -708,7 +708,7 @@ test("category boards reuse World rows and bounded omission while naming their o
       {
         ...akumaWorldReport([]),
         contracts,
-        tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
+        debts: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
         observedAt: report.observedAt,
       },
       context,
@@ -730,7 +730,7 @@ test("category boards reuse World rows and bounded omission while naming their o
 });
 
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderTaskCatalogue({ rows: [], hasMore: false }, []), "tasks  none");
+  assert.equal(renderDebtCatalogue({ rows: [], hasMore: false }, []), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(
     renderAkumaCatalogue(
@@ -771,52 +771,52 @@ test("World roster names a bound Contract once without a bare unavailable parent
   assert.doesNotMatch(free, /·\s*$/mu);
 });
 
-test("Task family uses qualified empty frames and omits absent body facts", () => {
+test("Debt family uses qualified empty frames and omits absent body facts", () => {
   const context = { columns: 120, color: false } as const;
   const empty = { kind: "accepted" as const, value: { rows: [], hasMore: false } };
-  assert.equal(renderTaskList("ls", "current", empty, context), "tasks  none");
-  assert.equal(renderTaskList("ready", "current", empty, context), "ready  none");
-  assert.equal(renderTaskList("blocked", "current", empty, context), "blocked  none");
-  assert.equal(renderTaskList("query", "current", empty, context), "query  none");
-  const text = renderTaskList(
+  assert.equal(renderDebtList("ls", "current", empty, context), "debts  none");
+  assert.equal(renderDebtList("ready", "current", empty, context), "ready  none");
+  assert.equal(renderDebtList("blocked", "current", empty, context), "blocked  none");
+  assert.equal(renderDebtList("query", "current", empty, context), "query  none");
+  const text = renderDebtList(
     "ls",
     "current",
     {
       kind: "accepted",
       value: {
-        rows: [taskRow({ id: "task/no-body" as never, title: "No body", priority: 1 })],
+        rows: [debtRow({ id: "debt/no-body" as never, title: "No body", priority: 1 })],
         hasMore: false,
       },
     },
     context,
   );
-  assert.match(text, /^TASKS \/\/ current namespace\n/u);
+  assert.match(text, /^DEBTS \/\/ current namespace\n/u);
   assert.doesNotMatch(text, /no body/u);
 });
 
-test("Task catalogue rows omit absent body facts", () => {
-  const text = renderTaskCatalogue(
-    { rows: [taskRow({ id: "task/no-body" as never, title: "No body", priority: 1 })], hasMore: false },
+test("Debt catalogue rows omit absent body facts", () => {
+  const text = renderDebtCatalogue(
+    { rows: [debtRow({ id: "debt/no-body" as never, title: "No body", priority: 1 })], hasMore: false },
     [],
   );
   assert.doesNotMatch(text, /no body/u);
 });
 
-test("World status task rows state a Contract association only when one exists", () => {
-  const row = taskRow({
-    id: "task/standalone" as never,
-    title: "Standalone task",
+test("World status debt rows state a Contract association only when one exists", () => {
+  const row = debtRow({
+    id: "debt/standalone" as never,
+    title: "Standalone debt",
     priority: 1,
     updatedAt: "2026-01-01T09:00:00.000Z",
   });
   const text = renderKanshiText(
     {
       ...akumaWorldReport([]),
-      tasks: { kind: "present", value: { root: worldRoot, rows: [row], hasMore: false } },
+      debts: { kind: "present", value: { root: worldRoot, rows: [row], hasMore: false } },
     },
     { columns: 120, color: false },
   );
-  assert.match(text, /○ task\/standalone · ready · P1 · Standalone task$/mu);
+  assert.match(text, /○ debt\/standalone · ready · P1 · Standalone debt$/mu);
   assert.doesNotMatch(text, /bound to|unbound/u);
   assert.doesNotMatch(text, /·\s*$/mu);
 });
@@ -1267,19 +1267,19 @@ test("refusals use reason and option for missing contract and nuke confirmation"
   assert.match(nuke, /option  keiyaku nuke --confirm '\/repo'/u);
 });
 
-test("query displays dropped while the Task state remains drop", () => {
-  const row = taskRow({
-    id: "task/dropped" as never,
+test("query displays dropped while the Debt state remains drop", () => {
+  const row = debtRow({
+    id: "debt/dropped" as never,
     title: "Retired",
     priority: 1,
     state: "drop",
     disposition: "drop",
   });
-  const text = renderTaskList("query", "current", {
+  const text = renderDebtList("query", "current", {
     kind: "accepted",
     value: { rows: [row], hasMore: false },
   });
-  assert.match(text, /task\/dropped · dropped · P1/u);
+  assert.match(text, /debt\/dropped · dropped · P1/u);
   assert.equal(row.state, "drop");
 });
 
@@ -1506,16 +1506,16 @@ test("reconcile renders contract-file and settlement failures", () => {
       lags: [
         {
           kind: "settlement-failed",
-          surface: "task",
+          surface: "debt",
           contractId: contractId("kei/example"),
-          diagnostic: "task failed",
+          diagnostic: "debt failed",
         },
       ],
     },
   });
   const text = renderReconcile(result);
   assert.match(text, /! contract file unavailable  \/tmp\/wt  · \.keiyaku\/KEIYAKU\.md/u);
-  assert.match(text, /! settlement  surface task  contractId kei\/example  diagnostic task failed/u);
+  assert.match(text, /! settlement  surface debt  contractId kei\/example  diagnostic debt failed/u);
 });
 
 test("world reconcile failure renders its diagnostic", () => {
@@ -2010,10 +2010,10 @@ test("a retry placement stop renders through the delivered receipt without the f
 });
 
 test("detail facts sink behind ordered refusal facts", () => {
-  assert.deepEqual(orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "task  t"]), [
+  assert.deepEqual(orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "debt  t"]), [
     "reason  first",
     "path  /repo",
-    "task  t",
+    "debt  t",
     "detail  alpha",
     "detail  beta",
   ]);
@@ -2822,7 +2822,7 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     {
       mode: "all",
       reason: "completed",
-      observations: [{ status: sleeping, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+      observations: [{ status: sleeping, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }],
       unobserved: [],
     },
     {},
@@ -2848,7 +2848,7 @@ test("status text and JSON report the Akuma execution workdir", () => {
   const observation = {
     status,
     contract: { kind: "none" as const },
-    createdTasks: { kind: "present" as const, rows: [] },
+    createdDebts: { kind: "present" as const, rows: [] },
   };
   assert.match(snapshotText(observation, DEFAULT_CONTEXT), /^cwd {2}\/work\/tree$/mu);
   const json = JSON.parse(JSON.stringify(observation)) as { status: { cwd?: string } };
@@ -2941,7 +2941,7 @@ test("status renders selected activity evidence while preserving history and com
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(
-    { status, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+    { status, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } },
     DEFAULT_CONTEXT,
   );
   assert.doesNotMatch(statusText, /internal thought/u);
@@ -2987,7 +2987,7 @@ test("status renders selected activity evidence while preserving history and com
     timeline: outcomeSnapshot,
   });
   const outcomeText = snapshotText(
-    { status: answeredStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+    { status: answeredStatus, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } },
     DEFAULT_CONTEXT,
   );
   assert.match(outcomeText, /final outcome/u, "an answered status retains its complete outcome");
@@ -3011,7 +3011,7 @@ test("status renders selected activity evidence while preserving history and com
         timeline: idleAkumaSnapshot(outcomeSnapshot.entries, failedOutcome),
       }),
       contract: { kind: "none" },
-      createdTasks: { kind: "present", rows: [] },
+      createdDebts: { kind: "present", rows: [] },
     },
     DEFAULT_CONTEXT,
   );
@@ -3491,8 +3491,8 @@ test("a plural wait text renders every observation's status snapshot and its unr
       mode: "all",
       reason: "deadline",
       observations: [
-        { status: answered(first), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
-        { status: running(second), contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
+        { status: answered(first), contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } },
+        { status: running(second), contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } },
       ],
       unobserved: [{ id: missing, diagnostic: "window lost" }],
     },
@@ -3571,8 +3571,8 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
     ]),
   });
   const observations = [
-    { status: complete, contract: { kind: "none" as const }, createdTasks: { kind: "present" as const, rows: [] } },
-    { status: pending, contract: { kind: "none" as const }, createdTasks: { kind: "present" as const, rows: [] } },
+    { status: complete, contract: { kind: "none" as const }, createdDebts: { kind: "present" as const, rows: [] } },
+    { status: pending, contract: { kind: "none" as const }, createdDebts: { kind: "present" as const, rows: [] } },
   ];
   const text = nativeWaitText(
     { mode: "any", reason: "completed", observations, unobserved: [] },
@@ -3603,7 +3603,7 @@ test("a text wait keeps its snapshot without a completion count", () => {
     {
       mode: "all",
       reason: "deadline",
-      observations: [{ status: running, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }],
+      observations: [{ status: running, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }],
       unobserved: [],
     },
     {},

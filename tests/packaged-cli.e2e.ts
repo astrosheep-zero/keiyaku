@@ -127,7 +127,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
 
   const installedBuild = join(installed, "node_modules", "@astrosheep", "keiyaku", "build");
   for (const host of ["claude", "codex", "opencode"]) {
-    for (const skill of ["keiyaku", "keiyaku-task", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]) {
+    for (const skill of ["keiyaku", "keiyaku-debt", "keiyaku-bind", "keiyaku-workflow", "keiyaku-akuma", "keiyaku-babysit"]) {
       assert.equal(
         readFileSync(join(installedBuild, "plugins", host, "skills", skill, "SKILL.md"), "utf8"),
         readFileSync(join(installedBuild, "skills", skill, "SKILL.md"), "utf8"),

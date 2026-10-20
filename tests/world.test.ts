@@ -120,7 +120,7 @@ test("World.prove mints only an exact canonical directory without writing", asyn
 test("World refuses a symlink marker instead of following it", async () => {
   const root = temporary();
   const outside = temporary();
-  mkdirSync(join(outside, "tasks"));
+  mkdirSync(join(outside, "debts"));
   symlinkSync(outside, join(root, ".keiyaku"));
   await assert.rejects(World.locate(root), /world marker is not a directory/u);
   await assert.rejects(World.at(root), /world marker is not a directory/u);

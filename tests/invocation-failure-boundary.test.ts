@@ -314,18 +314,18 @@ test("native bind and delivery JSON retain result data without process custody",
   }
 });
 
-test("native delivery retains completed Task settlement before terminal cleanup fails", async () => {
+test("native delivery retains completed Debt settlement before terminal cleanup fails", async () => {
   const { readFileSync } = await import("node:fs");
-  const { Tasks } = await import("../src/task/index.js");
+  const { Debts } = await import("../src/debt/index.js");
   const { World } = await import("../src/world.js");
   const repository = repositoryWithMain();
   const world = await World.at(repository.path);
-  const task = await Tasks.of(world).add({ title: "Settlement before cleanup" });
-  assert.ok(task.kind === "accepted");
-  repository.run(["add", ".keiyaku/tasks"]);
-  repository.run(["commit", "--quiet", "-m", "Task authority"]);
+  const debt = await Debts.of(world).add({ title: "Settlement before cleanup" });
+  assert.ok(debt.kind === "accepted");
+  repository.run(["add", ".keiyaku/debts"]);
+  repository.run(["commit", "--quiet", "-m", "Debt authority"]);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), task: task.value.id, gates: [] }));
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), debt: debt.value.id, gates: [] }));
   const original = new TypeError("terminal cleanup program failure");
   const base = scopeForRepo(repo);
   let armed = false;
@@ -336,7 +336,7 @@ test("native delivery retains completed Task settlement before terminal cleanup 
       return base.gitPath;
     },
     onPrivateStateSeatClose: () => {
-      if (/^state: done$/mu.test(readFileSync(`${world}/.keiyaku/tasks/${task.value.id.slice(5)}.md`, "utf8")))
+      if (/^state: done$/mu.test(readFileSync(`${world}/.keiyaku/debts/${debt.value.id.slice(5)}.md`, "utf8")))
         armed = true;
     },
   };
@@ -351,13 +351,13 @@ test("native delivery retains completed Task settlement before terminal cleanup 
       error.outcome.effects.some(
         (effect) =>
           effect.kind === "settlement-action" &&
-          effect.action.kind === "task" &&
-          effect.action.taskId === task.value.id,
+          effect.action.kind === "debt" &&
+          effect.action.debtId === debt.value.id,
       ),
     );
     return true;
   });
-  assert.equal((await Tasks.of(world).task({ id: task.value.id }).read())?.task.state, "done");
+  assert.equal((await Debts.of(world).debt({ id: debt.value.id }).read())?.debt.state, "done");
 });
 
 test("fork source object missing from the requested map is a broken observation, not unavailable", async () => {

@@ -20,6 +20,7 @@ export const LOCAL_TEST_FILES = [
   "tests/contract-execution-observation.test.ts",
   "tests/contract-forwarding-result.test.ts",
   "tests/contract-guidance.test.ts",
+  "tests/debt-document.test.ts",
   "tests/dependency-currentness.test.ts",
   "tests/duration.test.ts",
   "tests/fold.test.ts",
@@ -45,7 +46,6 @@ export const LOCAL_TEST_FILES = [
   "tests/product-boundaries.test.ts",
   "tests/region.test.ts",
   "tests/settings.test.ts",
-  "tests/task-document.test.ts",
   "tests/v4-cut.test.ts",
 ];
 
@@ -78,6 +78,8 @@ export const INTEGRATION_TEST_FILES = [
   "tests/contract-completion.test.ts",
   "tests/contract-fork.test.ts",
   "tests/contract-lifecycle.test.ts",
+  "tests/debt-operations.test.ts",
+  "tests/debt-store.test.ts",
   "tests/dispatch-alias.test.ts",
   "tests/facade-selection.test.ts",
   "tests/fixture-retention.test.ts",
@@ -119,8 +121,6 @@ export const INTEGRATION_TEST_FILES = [
   "tests/sqlite-transaction-lock.test.ts",
   "tests/target-checkout-reconcile.test.ts",
   "tests/target-placement-preparation.test.ts",
-  "tests/task-operations.test.ts",
-  "tests/task-store.test.ts",
   "tests/verification-producer.test.ts",
   "tests/verification-scratch.test.ts",
   "tests/windows-akuma-process.test.ts",

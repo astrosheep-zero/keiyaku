@@ -1,15 +1,15 @@
 # Automation With The Akuma API
 
 Use this guide when the work calls for a program that coordinates agents,
-not a sequence of manual CLI calls. Start with the current task, invent an
+not a sequence of manual CLI calls. Start with the current debt, invent an
 appropriate algorithm, write it as ordinary JavaScript, and run it. Treat
 examples here as material to adapt, not a mandatory workflow or a new product
 API. Product semantics remain owned by the repository's `docs/` chapters.
 
-## Write A Harness For This Task
+## Write A Harness For This Debt
 
 A dynamic workflow is more than parallel delegation. The flagship writes a
-small, task-specific program whose variables hold intermediate answers and
+small, debt-specific program whose variables hold intermediate answers and
 whose control flow performs comparisons, branching, filtering, experiments,
 and verification. Only the useful final result needs to enter the flagship's
 context. The program itself is an inspectable, reusable artifact.
@@ -21,7 +21,7 @@ The useful combination is:
 - JavaScript holds the plan, candidate sets, budgets, and stopping conditions.
 - AkuId lets a later step reconnect to an existing worker when continuity helps.
 
-Reach for this when the task needs many independent judgments, repeated
+Reach for this when the debt needs many independent judgments, repeated
 experiments, adversarial checking, or a reusable orchestration artifact. A
 single bounded question usually needs one worker, not a panel.
 
@@ -30,7 +30,7 @@ single bounded question usually needs one worker, not a panel.
 Do not stop at "one reviewer per directory." Choose an algorithm around the
 judgment you need:
 
-| Task | Task-specific orchestration |
+| Debt | Debt-specific orchestration |
 | --- | --- |
 | Find a name or visual direction with taste | Generate candidates from deliberately different directions; anonymize them; run pairwise judging agents; retain finalists and rejection reasons; generate another round against the discovered weaknesses. |
 | Rank a large qualitative backlog | Use agents as comparators, with code maintaining buckets or tournament brackets. Repeat disputed comparisons. Do not assume subjective preferences are transitive or absolute scores calibrated. |
@@ -118,7 +118,7 @@ unknowns in the requested value; acceptance still needs a suitable judge.
 The following continues the script above. One agent determines the claim set;
 code fans out verification with bounded concurrency; only supported claims go
 to fresh skeptics. The program keeps every item's success or failure. Adapt
-the prompts, schemas, routing, and selection to the task rather than always
+the prompts, schemas, routing, and selection to the debt rather than always
 running this exact pipeline.
 
 ```js
@@ -206,7 +206,7 @@ console.log(JSON.stringify(
 
 This script has a bounded work set (12 claims), at most two item pipelines in
 flight, and at most two fresh judges per claim. Each item advances to its own
-next stage without waiting for unrelated items. A different task might need
+next stage without waiting for unrelated items. A different debt might need
 pairwise comparisons, experiment queues, or adaptive sampling instead.
 
 ## Failure, Control, And Reconnection
@@ -264,6 +264,6 @@ observations for program control, not delivery notifications as receipts.
 
 These are sources of techniques, not Keiyaku runtime guarantees:
 
-- [A harness for every task: dynamic workflows in Claude Code](https://claude.com/blog/a-harness-for-every-task-dynamic-workflows-in-claude-code)
+- [A harness for every debt: dynamic workflows in Claude Code](https://claude.com/blog/a-harness-for-every-debt-dynamic-workflows-in-claude-code)
 - [Orchestrate subagents at scale with dynamic workflows](https://platform.claude.com/cookbook/claude-agent-sdk-08-dynamic-workflows)
 - [Claude Code workflow runtime](https://code.claude.com/docs/en/workflows)

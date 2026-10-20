@@ -24,13 +24,39 @@ top was never handed over. The wheel stays yours.
 
 ---
 
+## Debt, not a todo list
+
+`keiyaku debt` records confirmed, unresolved problems and requests. Dependencies
+and the derived `ready` / `blocked` views remain; execution progress and plan
+composition do not. A debt is `open`, `done`, or `drop`. Contract acceptance can
+settle an associated debt automatically.
+
+This replaces the former `task` CLI and `Tasks` API; use `debt` and `Debts`.
+For an existing board, stop ledger writers and run the offline upgrade from a
+source checkout:
+
+```bash
+node scripts/migrate-task-board.mjs /absolute/path/to/world
+```
+
+It moves `.keiyaku/tasks` to `.keiyaku/debts`, rewrites identity and relationship
+prefixes, and returns old progress states to `open`. Local IDs, namespaces,
+testimony and timestamps are unchanged. Original bytes remain in
+`.keiyaku/tasks.pre-debt`; an existing destination or backup is refused. Reads
+of an unmigrated board fail explicitly instead of reporting an empty ledger.
+If an interrupted upgrade leaves only the backup, restore that directory to
+`.keiyaku/tasks` before retrying. Contract journals and existing holder records
+are not rewritten or orphaned. Existing Soul permissions retain their surviving
+capabilities; update any explicit Archetype `allowed` configuration to the
+`debt.*` vocabulary. Do not run old and new writers concurrently.
+
 ## What a contract looks like
 
 ```markdown
-# Ship typed Task query
+# Ship typed Debt query
 
 ## Context
-Task reads scan documents ad hoc.
+Debt reads scan documents ad hoc.
 
 ## Objective
 One typed query surface over the whole board.
@@ -40,16 +66,16 @@ A single evaluator over persisted facts.
 
 ## Region
 ```
-src/task/**
-tests/task-*.test.ts
+src/debt/**
+tests/debt-*.test.ts
 ```
 
 ## Criteria
 ### Query is typed
 The CLI parses a predicate; the evaluator never sees a raw shell string.
 
-### Reads stay Task-owned
-Query reads only Task facts. No Contract. No Akuma.
+### Reads stay Debt-owned
+Query reads only Debt facts. No Contract. No Akuma.
 
 ## Verification
 ```bash timeout=2m
@@ -71,7 +97,7 @@ keiyaku review <contract> --satisfied --summary -   # attested; main moves with 
 One real deal, read back with `keiyaku history`:
 
 ```text
-history  kei/ship-typed-task-query-b186 · accepted · 9 entries
+history  kei/ship-typed-debt-query-b186 · accepted · 9 entries
 
 2026-10-04
 
@@ -89,31 +115,31 @@ stay on the journal as bytes — `keiyaku history --json` reads them:
 ```json
 {
   "kind": "attestation",
-  "contract": "kei/ship-typed-task-query-b186",
+  "contract": "kei/ship-typed-debt-query-b186",
   "data": {
     "gate": "reviewed",
     "verdict": "unsatisfied",
-    "summary": "Query evaluator still reaches for Contract facts; reads are not Task-owned."
+    "summary": "Query evaluator still reaches for Contract facts; reads are not Debt-owned."
   }
 }
 ```
 
 ## The board
 
-`keiyaku status` is the one screen. Two Contracts and two Tasks in flight:
+`keiyaku status` is the one screen. Two Contracts and two Debts in flight:
 
 ```text
 CONTRACTS // recent
 
-⧗ kei/ship-typed-task-query-c898 · 1s · Ship typed Task query
+⧗ kei/ship-typed-debt-query-c898 · 1s · Ship typed Debt query
   [✓] delivery  [ ] review
 ⧗ kei/tighten-receipt-vocabulary-4a70 · 18s · Tighten receipt vocabulary
   [ ] delivery  [ ] review
 
-TASKS // recent
+DEBTS // recent
 
-○ task/regenerate-readme-from-real-010b · ready · P1 · Regenerate README from real output
-○ task/align-task-cli-truth-promises-3af5 · ready · P0 · Align Task CLI truth promises
+○ debt/regenerate-readme-from-real-010b · ready · P1 · Regenerate README from real output
+○ debt/align-debt-cli-truth-promises-3af5 · ready · P0 · Align Debt CLI truth promises
 ```
 
 Marks accelerate scanning; the words carry the state.

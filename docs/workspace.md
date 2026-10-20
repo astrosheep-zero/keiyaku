@@ -42,9 +42,9 @@ The workspace owner atomically creates or repairs its guidance, namespace
 context, and narrow local ignore protection after an active managed worktree
 exists. These files keep derived management material out of ordinary status and
 delivery capture without hiding project-owned data. Namespace context is the
-Contract-derived coordinate for active Task work; a valid local override remains
+Contract-derived coordinate for active Debt work; a valid local override remains
 intact. The complete Contract coordinate is split into segments, so `kei/<slug>`
-provides Task namespace `kei/<slug>` and identities under `task/kei/<slug>/...`.
+provides Debt namespace `kei/<slug>` and identities under `debt/kei/<slug>/...`.
 Terminal Contracts never receive a new active context projection. A tracked
 generated location is a failure. A recognized user-owned skill leaf remains
 untouched; static seat skills contain procedure only, while Contract and arc

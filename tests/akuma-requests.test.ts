@@ -516,7 +516,7 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       ).call({
         archetype: "worker",
         body: "grandchild",
-        allowed: ["akuma.call", "task.add"],
+        allowed: ["akuma.call", "debt.add"],
       });
       assert.deepEqual((await readSoul(pathsForAkuId(value.root, grandchild.id)))?.allowed, ["akuma.call"]);
     } finally {

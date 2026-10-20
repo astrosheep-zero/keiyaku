@@ -33,8 +33,8 @@ import {
 } from "../src/akuma/heart/index.js";
 import { executionForEnvironment, AkumaBodyRequestError } from "../src/akuma/requests.js";
 import { eraseRequestCommand } from "../src/akuma/request-wire.js";
-import { Tasks, tasksWithExecution } from "../src/task/index.js";
-import { taskMutationRequestCommand, type TaskMutationRequestPort } from "../src/task/mutation.js";
+import { Debts, debtsWithExecution } from "../src/debt/index.js";
+import { debtMutationRequestCommand, type DebtMutationRequestPort } from "../src/debt/mutation.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
 type NativeClient = ReturnType<NonNullable<PaseoDependencies["createClient"]>>;
@@ -237,7 +237,7 @@ class NativeFixture implements NativeClient {
 
 function drive(signal = new AbortController().signal): DriveInput {
   return {
-    body: "task",
+    body: "debt",
     launchTells: [{ id: "tell", text: "launch input" }],
     cwd: "/tmp/paseo-work",
     options: {},
@@ -376,7 +376,7 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
     "subscribe",
     "send",
   ]);
-  assert.equal(fake.sendInput!.text, "task\n\nlaunch input");
+  assert.equal(fake.sendInput!.text, "debt\n\nlaunch input");
   assert.equal(fake.sendInput!.options!.activeTurnBehavior, "steer");
   assert.equal(fake.createInput!.initialPrompt, undefined);
   assert.equal(fake.createInput!.autoArchive, false);
@@ -847,19 +847,19 @@ test(
     );
     const serviced: number[] = [];
     const unused = async (): Promise<never> => {
-      throw new Error("unexpected Task action");
+      throw new Error("unexpected Debt action");
     };
-    const port: TaskMutationRequestPort = {
+    const port: DebtMutationRequestPort = {
       add: async ({ world, options }) => {
         serviced.push((await readHeart(allocated.paths)).latestBody!.sequence);
-        return await Tasks.of(world).add(options);
+        return await Debts.of(world).add(options);
       },
       addDocument: unused,
       update: unused,
       lifecycle: unused,
       batch: unused,
     };
-    const externalCommands = { "task.add": eraseRequestCommand(taskMutationRequestCommand("task.add", port)) };
+    const externalCommands = { "debt.add": eraseRequestCommand(debtMutationRequestCommand("debt.add", port)) };
     const owned = (body: Promise<unknown>): OwnedProcess => ({
       pid: 0,
       exited: body.then(
@@ -890,7 +890,7 @@ test(
           options: {},
           cwd: root,
           origin: { kind: "direct" },
-          allowed: ["task.add"],
+          allowed: ["debt.add"],
         },
         initialBody: "first native turn",
       });
@@ -898,7 +898,7 @@ test(
       const retained = first.createInput!.env!;
       assert.equal(retained.AKUMA_REQUESTS, undefined);
       assert.equal(retained.KEIYAKU_EXTERNAL_CALLER, undefined);
-      const old = tasksWithExecution(root, await executionForEnvironment(retained));
+      const old = debtsWithExecution(root, await executionForEnvironment(retained));
       assert.equal((await old.add({ title: "First Body service" })).kind, "accepted");
       assistant(first, "first answer");
       complete(first);
@@ -915,7 +915,7 @@ test(
       await receipt;
       assert.equal(second.createInput, undefined);
       assert.equal(second.sendInput!.agentId, first.agent.id);
-      const fresh = tasksWithExecution(root, await executionForEnvironment(retained));
+      const fresh = debtsWithExecution(root, await executionForEnvironment(retained));
       assert.equal((await fresh.add({ title: "Successor Body service" })).kind, "accepted");
       await assert.rejects(
         old.add({ title: "Must not execute locally or replay" }),
@@ -932,7 +932,7 @@ test(
       assert.equal(third.sendInput!.agentId, first.agent.id);
       assert.equal(third.createInput, undefined);
       assert.match(third.sendInput!.text, /pending continuation/u);
-      const thirdContext = tasksWithExecution(root, await executionForEnvironment(retained));
+      const thirdContext = debtsWithExecution(root, await executionForEnvironment(retained));
       assert.equal((await thirdContext.add({ title: "Handoff Body service" })).kind, "accepted");
       assistant(third, "successor answer");
       complete(third);
@@ -943,7 +943,7 @@ test(
       assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
       assert.equal(clients.filter((client) => client.createInput !== undefined).length, 1);
       assert.deepEqual(serviced, [1, 2, 3]);
-      const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+      const board = await Debts.of(root).list({ selection: "all", scope: "world" });
       assert.equal(board.kind, "accepted");
       if (board.kind === "accepted")
         assert.deepEqual(board.value.rows.map((row) => row.title).sort(), [

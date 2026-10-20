@@ -1,12 +1,12 @@
 import type { AkumaLife } from "../../akuma/heart/index.js";
 import type { ContractRow } from "../../protocol/read/status.js";
-import type { TaskDisposition } from "../../task/board.js";
-import type { TaskState } from "../../task/document.js";
+import type { DebtDisposition } from "../../debt/board.js";
+import type { DebtState } from "../../debt/document.js";
 
-export type TaskMarkWord = TaskDisposition | TaskState | "missing";
+export type DebtMarkWord = DebtDisposition | DebtState | "missing";
 
 function unreachable(value: never): never {
-  throw new Error(`unhandled Task mark word: ${String(value)}`);
+  throw new Error(`unhandled Debt mark word: ${String(value)}`);
 }
 
 /** Akuma life marks are one vocabulary; render surfaces consume and never re-derive them. */
@@ -42,7 +42,7 @@ export function contractMark(row: ContractRow): string {
 }
 
 /** The board's derived dispositions have their own exhaustive source lock. */
-export function taskDispositionMark(disposition: TaskDisposition): string {
+export function debtDispositionMark(disposition: DebtDisposition): string {
   switch (disposition) {
     case "ready":
       return "○";
@@ -58,7 +58,7 @@ export function taskDispositionMark(disposition: TaskDisposition): string {
 }
 
 /** Document states and missing references reuse the board marks where they overlap. */
-export function taskMark(word: TaskMarkWord): string {
+export function debtMark(word: DebtMarkWord): string {
   switch (word) {
     case "open":
       return "○";
@@ -68,7 +68,7 @@ export function taskMark(word: TaskMarkWord): string {
     case "blocked":
     case "done":
     case "drop":
-      return taskDispositionMark(word);
+      return debtDispositionMark(word);
     default:
       return unreachable(word);
   }

@@ -1,0 +1,14 @@
+---
+id: debt/implement-the-opencode-v2-akuma-provider
+title: Implement the OpenCode V2 Akuma provider
+state: done
+priority: 0
+needs: []
+parent: null
+supersedes: []
+relates:
+  - debt/complete-the-provider-core-capability-model
+note: Implement one v4-native opencode-sdk ProviderAdapter. Use v4 authority for model and v3 only as proven native SDK/session/event evidence.
+createdAt: 2026-08-13T04:54:58.649Z
+updatedAt: 2026-08-13T16:49:50.866Z
+---

@@ -6,7 +6,7 @@ description: Use when reviewing Keiyaku v4: judging architecture, implementation
 # Review Keiyaku V4
 
 This is a judgment skill, not a checklist of current model names. Read
-`docs/README.md`, the owning root documents under `docs/`, the task, neighboring
+`docs/README.md`, the owning root documents under `docs/`, the debt, neighboring
 source, tests, and the complete diff before forming a verdict. The root docs are
 the authority; this skill supplies only review method.
 

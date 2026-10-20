@@ -18,7 +18,7 @@ sequence to duplicate here.
 ## Pick Work That Reveals Something
 
 Inspect the target repository and choose small, real changes with checkable
-outcomes. A test-only task can reveal whether lightweight work is economical.
+outcomes. A test-only debt can reveal whether lightweight work is economical.
 A bug fix with a reviewer can expose handoff friction. Related parallel changes
 can exercise supervision and integration. These are useful contrasts, not a
 required three-lane suite. Follow the user's question and what you learn.

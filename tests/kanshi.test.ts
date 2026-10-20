@@ -12,7 +12,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi, selectKanshi } from "../src/kanshi/index.js";
-import { Tasks } from "../src/task/index.js";
+import { Debts } from "../src/debt/index.js";
 import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
@@ -60,20 +60,20 @@ async function populatedWorld(t: TestContext) {
   const repository = fixtureRepository(t);
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const tasks = Tasks.of(await World.at(repository.path));
-  const added = await tasks.add({ title: "Render status", priority: 0 });
+  const debts = Debts.of(await World.at(repository.path));
+  const added = await debts.add({ title: "Render status", priority: 0 });
   assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
   const bound = accepted(
     await Keiyaku.with().bind({
       repo: await Repo.at({ path: repository.path }),
-      task: added.value.id,
+      debt: added.value.id,
       markdown: document(),
       workspace: "worktree",
       target: "main",
     }),
   );
   const contract = present(await bound.value.keiyaku.state());
-  const renamed = await tasks.task({ id: added.value.id }).update({ title: "Investigate status rendering" });
+  const renamed = await debts.debt({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
   const akumaId = await bornAkuma(repository.path, "a0000001");
   assert.equal(
@@ -87,12 +87,12 @@ async function populatedWorld(t: TestContext) {
     "dispatched",
   );
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
-  return { repository, contract, keiyaku: bound.value.keiyaku, taskId: added.value.id, akumaId };
+  return { repository, contract, keiyaku: bound.value.keiyaku, debtId: added.value.id, akumaId };
 }
 
-test("Task board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
+test("Debt board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
   const { repository, contract, akumaId } = await populatedWorld(t);
-  writeFileSync(join(repository.path, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
+  writeFileSync(join(repository.path, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   const report = await kanshi({
     world: await World.at(repository.path),
     repo: await Repo.at({ path: repository.path }),
@@ -100,10 +100,10 @@ test("Task board failure names the malformed document once without suppressing C
   });
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.akuma.kind, "present");
-  assert.equal(report.tasks.kind, "failed");
+  assert.equal(report.debts.kind, "failed");
   if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
   const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(row?.namespaceTasks, undefined);
+  assert.equal(row?.namespaceDebts, undefined);
   assert.equal(
     report.akuma.value.rows.some((candidate) => candidate.id === akumaId),
     true,
@@ -113,10 +113,10 @@ test("Task board failure names the malformed document once without suppressing C
     { columns: 80, color: false },
     "contract",
   );
-  assert.doesNotMatch(selected, /failed task document must begin with YAML front matter/u);
+  assert.doesNotMatch(selected, /failed debt document must begin with YAML front matter/u);
   const worldText = renderKanshiText(report, { columns: 80, color: false });
   assert.equal(
-    (worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length,
+    (worldText.match(/debt\/bad · failed debt document must begin with YAML front matter/gu) ?? []).length,
     1,
   );
 });

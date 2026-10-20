@@ -64,12 +64,12 @@ import { bodyRequestExecution, executionForEnvironment } from "../src/akuma/requ
 import { composeContractLibrary } from "../src/library/contract-composition.js";
 // File-scope: git fixture teardown binds to this file, and both repository tests share its template.
 import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
-import { Tasks, tasksWithExecution } from "../src/task/index.js";
+import { Debts, debtsWithExecution } from "../src/debt/index.js";
 import {
-  taskMutationRequestCommand,
-  taskMutationRequestProtocol,
-  type TaskMutationRequestPort,
-} from "../src/task/mutation.js";
+  debtMutationRequestCommand,
+  debtMutationRequestProtocol,
+  type DebtMutationRequestPort,
+} from "../src/debt/mutation.js";
 
 function callTell(body = ""): Readonly<{ tellId: string; body: string }> {
   return { tellId: randomUUID(), body };
@@ -136,21 +136,21 @@ const unusedContractPort: ContractRequestPort = {
   },
 };
 
-const unusedTaskPort: TaskMutationRequestPort = {
+const unusedDebtPort: DebtMutationRequestPort = {
   add: async () => {
-    throw new Error("unexpected Task request");
+    throw new Error("unexpected Debt request");
   },
   addDocument: async () => {
-    throw new Error("unexpected Task request");
+    throw new Error("unexpected Debt request");
   },
   update: async () => {
-    throw new Error("unexpected Task request");
+    throw new Error("unexpected Debt request");
   },
   lifecycle: async () => {
-    throw new Error("unexpected Task request");
+    throw new Error("unexpected Debt request");
   },
   batch: async () => {
-    throw new Error("unexpected Task request");
+    throw new Error("unexpected Debt request");
   },
 };
 
@@ -499,7 +499,7 @@ test("Selection owner codecs reject malformed live and service payloads", () => 
           timeline: { kind: "idle" as const, entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
         },
         contract: { kind: "none" as const },
-        createdTasks: { kind: "present" as const, rows: [] },
+        createdDebts: { kind: "present" as const, rows: [] },
       },
     ],
     unobserved: [],
@@ -526,20 +526,20 @@ test("Selection owner codecs reject malformed live and service payloads", () => 
   );
 });
 
-test("Task owner codecs reject malformed live and service/reference payloads", () => {
-  const protocol = taskMutationRequestProtocol("task.done");
-  const command = taskMutationRequestCommand("task.done", unusedTaskPort);
+test("Debt owner codecs reject malformed live and service/reference payloads", () => {
+  const protocol = debtMutationRequestProtocol("debt.done");
+  const command = debtMutationRequestCommand("debt.done", unusedDebtPort);
   assert.throws(
     () => protocol.decodeResult({ kind: "accepted" }),
-    /transport integrity: Task task\.done returned an invalid live result/u,
+    /transport integrity: Debt debt\.done returned an invalid live result/u,
   );
   assert.throws(
-    () => command.decodeService({ action: "task.drop" }),
-    /malformed stored Task service evidence for task\.done/u,
+    () => command.decodeService({ action: "debt.drop" }),
+    /malformed stored Debt service evidence for debt\.done/u,
   );
   assert.throws(
-    () => protocol.decodeReference({ kind: "served-reference", action: "task.drop" }),
-    /malformed Task service reference for task\.done/u,
+    () => protocol.decodeReference({ kind: "served-reference", action: "debt.drop" }),
+    /malformed Debt service reference for debt\.done/u,
   );
 });
 
@@ -1233,20 +1233,20 @@ test("review with no addressed reviewed attestation settles unproven rather than
   }
 });
 
-test("Task request recovery voids an unserved claim without replaying Task authority", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-task-recovery-"));
-  const parent = await born(root, "parent", "44444444", ["task.add"]);
+test("Debt request recovery voids an unserved claim without replaying Debt authority", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-debt-recovery-"));
+  const parent = await born(root, "parent", "44444444", ["debt.add"]);
   const id = "00000000-0000-4000-8000-000000000301";
   await admitRequest(parent.paths, {
     id,
-    action: "task.add",
+    action: "debt.add",
     payloadJson: JSON.stringify({ request: { input: { title: "Never replayed" } }, world: root }),
     admittedAt: "2026-08-18T00:00:01.000Z",
     permitted: true,
   });
   assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
   assert.equal((await readRequest(parent.paths, id))?.state, "voided");
-  const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+  const board = await Debts.of(root).list({ selection: "all", scope: "world" });
   assert.equal(board.kind, "accepted");
   if (board.kind === "accepted") {
     assert.deepEqual(board.value.rows, []);
@@ -1400,9 +1400,9 @@ test("an executor throw settles its begun request unproven", async () => {
   }
 });
 
-test("stable entry succession serves fresh Task contexts without retargeting pinned callers", async (context) => {
+test("stable entry succession serves fresh Debt contexts without retargeting pinned callers", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-request-entry-service-"));
-  const parent = await born(root, "parent", "11111111", ["task.add"]);
+  const parent = await born(root, "parent", "11111111", ["debt.add"]);
   let leash = (await HeldAkumaLeash.try(parent.paths))!;
   const served: number[] = [];
   const open = (bodySequence: number) =>
@@ -1413,12 +1413,12 @@ test("stable entry succession serves fresh Task contexts without retargeting pin
       now: () => "2026-08-18T00:00:01.000Z",
       signal: new AbortController().signal,
       commands: {
-        "task.add": eraseRequestCommand(
-          taskMutationRequestCommand("task.add", {
-            ...unusedTaskPort,
+        "debt.add": eraseRequestCommand(
+          debtMutationRequestCommand("debt.add", {
+            ...unusedDebtPort,
             add: async ({ world, options }) => {
               served.push(bodySequence);
-              return await Tasks.of(world).add(options);
+              return await Debts.of(world).add(options);
             },
           }),
         ),
@@ -1429,7 +1429,7 @@ test("stable entry succession serves fresh Task contexts without retargeting pin
   let second: BodyRequestPump | undefined;
   try {
     const environment = { [AKUMA_REQUESTS_ENTRY_ENV]: first.entry };
-    const old = tasksWithExecution(root, await executionForEnvironment(environment));
+    const old = debtsWithExecution(root, await executionForEnvironment(environment));
     assert.equal((await old.add({ title: "First Body" })).kind, "accepted");
     await first.close();
     assert.equal(existsSync(first.entry), false);
@@ -1440,14 +1440,14 @@ test("stable entry succession serves fresh Task contexts without retargeting pin
     second = await open(secondBody.sequence);
     assert.equal(second.entry, first.entry);
     await first.close();
-    const fresh = tasksWithExecution(root, await executionForEnvironment(environment));
+    const fresh = debtsWithExecution(root, await executionForEnvironment(environment));
     assert.equal((await fresh.add({ title: "Successor Body" })).kind, "accepted");
     await assert.rejects(
       old.add({ title: "Never local or replayed" }),
       (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
     );
     assert.deepEqual(served, [1, 2]);
-    const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
+    const board = await Debts.of(root).list({ selection: "all", scope: "world" });
     assert.equal(board.kind, "accepted");
     if (board.kind === "accepted")
       assert.deepEqual(board.value.rows.map((row) => row.title).sort(), ["First Body", "Successor Body"]);

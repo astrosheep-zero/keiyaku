@@ -29,7 +29,7 @@ import {
   type ContractCheckpoint,
 } from "../protocol/progress.js";
 import { admitReviewOperation } from "../protocol/review.js";
-import { releaseTaskHolder, releaseTaskHolderWithFence, taskHolderObservationSelection } from "../settlement/holder.js";
+import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
 import { continueDeliveredDependents } from "./continuation.js";
 import { requestForwardedContractLive, type ContractRequest } from "./contract-operations.js";
 import type {
@@ -363,17 +363,17 @@ export class ContractExecution {
         scope,
       ): Promise<OutcomeProjection<"abandon", void, OperationRefusals["abandon"]>> => {
         const admission = (
-          await releaseTaskHolderWithFence(scope, channel, this.id, () =>
+          await releaseDebtHolderWithFence(scope, channel, this.id, () =>
             abandonOperation({
               scope,
               channel,
               contractId: this.id,
               ...actor,
               ...(note === undefined ? {} : { note }),
-              observationSelection: taskHolderObservationSelection(),
+              observationSelection: debtHolderObservationSelection(),
               progress: accumulator,
               decorateOffer: async ({ observation, contractId: owner }) => {
-                const companion = await releaseTaskHolder(channel, observation, owner);
+                const companion = await releaseDebtHolder(channel, observation, owner);
                 return companion === null ? [] : [companion];
               },
             }),

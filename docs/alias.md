@@ -28,6 +28,6 @@ do not take that writer lock and see either a complete previous mapping or a
 complete replacement, never a partial write. The coordination mechanism carries
 no Alias fact and does not become a second in-memory or SQLite authority.
 
-Only Alias persists Alias state. Akuma, Dispatch, Contract, Task, Git, Settings,
+Only Alias persists Alias state. Akuma, Dispatch, Contract, Debt, Git, Settings,
 and CLI do not own it. Library may sequence a move after Akuma birth, but a
 later Alias failure cannot erase the born Akuma or published Dispatch.

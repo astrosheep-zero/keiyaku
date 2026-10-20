@@ -1,11 +1,11 @@
 import {
-  isTaskAction,
-  parseTaskCommand,
-  renderTaskHelp,
-  taskUsageGuide,
-  type ParsedTaskCommand,
-  type TaskAction,
-} from "./commands/task-grammar.js";
+  isDebtAction,
+  parseDebtCommand,
+  renderDebtHelp,
+  debtUsageGuide,
+  type ParsedDebtCommand,
+  type DebtAction,
+} from "./commands/debt-grammar.js";
 import {
   akumaUsageGuide,
   isAkumaAction,
@@ -58,7 +58,7 @@ const INVOCATION_PATH_OPTIONS = new Set(["-C", "--cwd", "--repo", "--workdir"]);
 export function renderRootHelp(columns?: number): string {
   return renderHelpText(
     [
-      "keiyaku — Contract, Task, and Akuma control for one repository",
+      "keiyaku — Contract, Debt, and Akuma control for one repository",
       "",
       ROOT_USAGE,
       "",
@@ -67,8 +67,8 @@ export function renderRootHelp(columns?: number): string {
         .filter(([command]) => command !== "settings")
         .map(([command, spec]) => `  ${command.padEnd(10)} ${spec.purpose}`),
       "",
-      "Task — plan memory",
-      "  task       Task coordination; see `keiyaku task --help`.",
+      "Debt — unresolved-work ledger",
+      "  debt       Debt coordination; see `keiyaku debt --help`.",
       "",
       "Akuma — contracted demons",
       ...renderAkumaRootRows(),
@@ -109,7 +109,7 @@ function renderHelpText(help: string, columns: number | undefined): string {
 
 export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
   if (command.command === "install") return commandGuide("install", INSTALL_USAGE);
-  if (command.command === "task") return taskUsageGuide(command.action);
+  if (command.command === "debt") return debtUsageGuide(command.action);
   if (isAkumaAction(command.command)) return akumaUsageGuide(command.command);
   return commandGuide(command.command, CONTRACT_COMMAND_SPECS[command.command].usage);
 }
@@ -121,8 +121,8 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
         return renderRootHelp();
       case "contract":
         return renderContractHelpForOwner(coordinate.command);
-      case "task":
-        return renderTaskHelp(coordinate.action);
+      case "debt":
+        return renderDebtHelp(coordinate.action);
       case "install":
         return renderInstallHelp();
       case "akuma":
@@ -132,12 +132,12 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
   return renderHelpText(help, columns);
 }
 
-export type ParsedCommand = ParsedContractCommand | ParsedInstallCommand | ParsedAkumaCommand | ParsedTaskCommand;
+export type ParsedCommand = ParsedContractCommand | ParsedInstallCommand | ParsedAkumaCommand | ParsedDebtCommand;
 
 type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "contract"; command: Command }>
-  | Readonly<{ kind: "task"; action?: TaskAction }>
+  | Readonly<{ kind: "debt"; action?: DebtAction }>
   | Readonly<{ kind: "install" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
@@ -186,7 +186,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
       };
     case "settings":
     case "nuke":
-    case "task":
+    case "debt":
     case "install":
       return { use: "none", acceptsExplicit: false };
   }
@@ -306,9 +306,9 @@ function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
   if (help < 0) return null;
   const words = argv.slice(0, help);
   const root = words[0];
-  if (root === "task") {
-    const action = isTaskAction(words[1]) ? words[1] : undefined;
-    return { kind: "task", ...(action === undefined ? {} : { action }) };
+  if (root === "debt") {
+    const action = isDebtAction(words[1]) ? words[1] : undefined;
+    return { kind: "debt", ...(action === undefined ? {} : { action }) };
   }
   if (root === "install") return { kind: "install" };
   if (isAkumaAction(root)) return { kind: "akuma", action: root };
@@ -324,13 +324,13 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   if (help !== null) return { help };
   // A bare invocation asks for orientation: the root help index, not a refusal.
   if (invocation.commandArgv.length === 0) return { help: { kind: "root" } };
-  if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "task") return { help: { kind: "task" } };
+  if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "debt") return { help: { kind: "debt" } };
   if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "--version") return { version: true };
-  const task = invocation.commandArgv[0] === "task" ? parseTaskCommand(invocation.commandArgv.slice(1)) : undefined;
+  const debt = invocation.commandArgv[0] === "debt" ? parseDebtCommand(invocation.commandArgv.slice(1)) : undefined;
   const install =
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
-  const command = task ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
+  const command = debt ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
   if (invocation.workdir !== undefined && command.command !== "call") {
     throw new CliUsageError(`option --workdir is not valid for ${command.command}`, usageGuideForCommand(command));
   }

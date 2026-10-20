@@ -287,11 +287,11 @@ test("Archetype omission uses the delegation baseline while explicit allowed set
       "akuma.tell",
       "contract.audit",
       "contract.deliver",
-      "task.add",
-      "task.addDocument",
-      "task.done",
-      "task.drop",
-      "task.update",
+      "debt.add",
+      "debt.addDocument",
+      "debt.done",
+      "debt.drop",
+      "debt.update",
     ]);
     writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: codex-app-server\n---\n");
     assert.deepEqual((await loadNamed(value, "worker")).allowed, DEFAULT_ALLOWED_ACTIONS);

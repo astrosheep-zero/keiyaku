@@ -47,7 +47,7 @@ exists and includes the previous and current ChangeIds.
 
 Abandonment is the sole alternate terminal outcome. It neither reads nor moves
 the target and cannot be reopened. An arc is a narrative chapter within one
-active Contract, not a task list, progress measure, or separate acceptance path.
+active Contract, not a debt list, progress measure, or separate acceptance path.
 
 ## Gates And Testimony
 

@@ -6,7 +6,7 @@ declarations, help, and executable specifications.
 
 The public caller path is `Akuma.birth`, synchronous `Akuma.select`, then `Akuma.tell` or `Akuma.ask`. Birth submits no prompt; selection performs no read. A selected Akuma exposes its identity, status, admission-only Tell, and input-bound AskResult with optional schema decoding, along with the lifecycle-only idle, history, and kill observations.
 `Akumas` owns World selection, Alias and Contract selector resolution, Dispatch
-and TaskHolder association, and plural request routing around this product;
+and DebtHolder association, and plural request routing around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
 independent of Repo and selector composition.
 

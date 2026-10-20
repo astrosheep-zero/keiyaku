@@ -130,7 +130,7 @@ test("status category grammar stays separate from exact, plural, show and ls", (
   });
 });
 
-test("Akuma categories preserve bounded recent owner rows without Repo or Task reads", async (t) => {
+test("Akuma categories preserve bounded recent owner rows without Repo or Debt reads", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-category-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const world = await World.at(root);
@@ -148,8 +148,8 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Task r
   const owner = await Akumas.of(world).list({ limit: 11 });
   assert.equal(owner.rows[0]!.id, "aku/worker/0000000a");
   await moveAlias({ world, alias: parseAkumaAlias("@recent"), akuId: owner.rows[0]!.id });
-  mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
-  writeFileSync(join(world, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
+  mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   for (const selector of ["aku", "aku/", "aku/*"]) {
     const json = await cliJson<KanshiCategoryReport>(["-C", root, "status", selector], { environment: {} });
     assert.equal(json.exit, 0, json.stderr);
@@ -158,7 +158,7 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Task r
     assert.equal(json.value.akuma.value.hasMore, true);
     assert.deepEqual(json.value.akuma.value.rows.map((row) => row.id), owner.rows.slice(0, 10).map((row) => row.id));
     assert.deepEqual(json.value.akuma.value.rows[0]!.aliases, ["@recent"]);
-    assert.equal("tasks" in json.value, false);
+    assert.equal("debts" in json.value, false);
     assert.equal("contracts" in json.value, false);
     const text = await runCli(["-C", root, "status", selector, "--limit", "2"], { environment: {} });
     assert.equal(text.exit, 0, text.stderr);
@@ -178,7 +178,7 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Task r
   assert.equal(exact.value.status.id, owner.rows[10]!.id);
 });
 
-test("Contract categories preserve active catalogue facts and readable Dispatch without Task reads", async (t) => {
+test("Contract categories preserve active catalogue facts and readable Dispatch without Debt reads", async (t) => {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -215,8 +215,8 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   born.leash.release();
   const dispatch = await publishDispatch({ repository: await repositoryAt(repository.path), akuId: born.id, contractId: owner.rows[0]!.id });
   assert.equal(dispatch.kind, "dispatched");
-  mkdirSync(join(world, ".keiyaku", "tasks"), { recursive: true });
-  writeFileSync(join(world, ".keiyaku", "tasks", "bad.md"), "not a task document\n");
+  mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   for (const selector of ["kei", "kei/", "kei/*"]) {
     const json = await cliJson<KanshiCategoryReport>(["-C", world, "status", selector], { environment: {} });
     assert.equal(json.exit, 0, json.stderr);
@@ -224,14 +224,14 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
     const rows = json.value.contracts.value.rows;
     assert.deepEqual(rows.map((row) => row.id), owner.rows.slice(0, 10).map((row) => row.id));
     assert.equal(json.value.contracts.value.hasMore, true);
-    assert.equal("tasks" in json.value, false);
+    assert.equal("debts" in json.value, false);
     assert.equal("akuma" in json.value, false);
     for (let index = 0; index < rows.length; index += 1) {
       assert.equal(rows[index]!.target, owner.rows[index]!.target);
       assert.equal(rows[index]!.worktreePath, owner.rows[index]!.worktreePath);
       assert.deepEqual(rows[index]!.workspaceObservation, owner.rows[index]!.workspaceObservation);
       assert.deepEqual(rows[index]!.gates, owner.rows[index]!.gates);
-      assert.equal(rows[index]!.namespaceTasks, undefined);
+      assert.equal(rows[index]!.namespaceDebts, undefined);
     }
     const text = await runCli(["-C", world, "status", selector, "--limit", "2"], { environment: {} });
     assert.equal(text.exit, 0, text.stderr);
@@ -256,7 +256,7 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   assert.equal(exact.exit, 0, exact.stderr);
   if (exact.value.contracts.kind !== "present") assert.fail(exact.stdout);
   assert.equal(exact.value.contracts.value.rows[0]!.phase, "abandoned");
-  assert.equal(exact.value.tasks.kind, "failed");
+  assert.equal(exact.value.debts.kind, "failed");
 });
 
 test("category empty, absent and unavailable observations remain distinct", async (t) => {

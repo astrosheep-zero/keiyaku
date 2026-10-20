@@ -113,7 +113,7 @@ complete grammar.
 ## JavaScript automation
 
 Use [Automation With The Akuma API](references/automation.md) for a
-task-specific JavaScript coordinator, structured answers, or multi-worker
+debt-specific JavaScript coordinator, structured answers, or multi-worker
 orchestration. The CLI is enough for one commission and its return. A
 prompt-free birth followed by one input-bound ask uses the same identity:
 

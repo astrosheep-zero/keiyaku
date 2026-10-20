@@ -8,9 +8,9 @@ import { mintIdentitySegment } from "../identity/mint.js";
 import { fitIdentityStemWords, normalizeIdentityStem } from "../identity/normalize.js";
 import { bindOperation, type BindTargetSelection } from "../protocol/bind.js";
 import { stateOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
-import { admitWithTaskHolderFence, claimTaskHolder } from "../settlement/holder.js";
+import { admitWithDebtHolderFence, claimDebtHolder } from "../settlement/holder.js";
 import type { ProtocolProgress } from "../protocol/progress.js";
-import type { TaskId } from "../task/identity.js";
+import type { DebtId } from "../debt/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import type { ForkSourceRefusal, OperationRefusals } from "./refusal.js";
 import { KeiyakuError } from "./outcome.js";
@@ -26,7 +26,7 @@ type BindAttemptInput = Readonly<{
   targetSelection: BindTargetSelection;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
   source?: Parameters<typeof bindOperation>[0]["source"];
-  task?: TaskId;
+  debt?: DebtId;
   progress?: ProtocolProgress;
   actor?: ActorId;
 }>;
@@ -56,10 +56,10 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     ...(input.coordinates === undefined ? {} : { coordinates: input.coordinates }),
     ...(input.source === undefined ? {} : { source: input.source }),
     contractId: id,
-    ...(input.task === undefined
+    ...(input.debt === undefined
       ? {}
       : {
-          decorateOffer: ({ contractId: owner }) => [claimTaskHolder(input.task!, owner)],
+          decorateOffer: ({ contractId: owner }) => [claimDebtHolder(input.debt!, owner)],
         }),
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.progress === undefined ? {} : { progress: input.progress }),
@@ -174,7 +174,7 @@ export async function prepareMarkdownBind(
     after: readonly ContractId[];
     workspace: "worktree";
     targetSelection: BindTargetSelection;
-    task?: TaskId;
+    debt?: DebtId;
     progress?: ProtocolProgress;
     actor?: ActorId;
   }>,
@@ -189,11 +189,11 @@ export async function prepareMarkdownBind(
       verification: documentDerivation(input.document, terms.gates).verification,
       workspace: input.workspace,
       targetSelection: input.targetSelection,
-      ...(input.task === undefined ? {} : { task: input.task }),
+      ...(input.debt === undefined ? {} : { debt: input.debt }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.progress === undefined ? {} : { progress: input.progress }),
     });
   const admission =
-    input.task === undefined ? null : await admitWithTaskHolderFence(input.scope, input.task, admitCandidate);
+    input.debt === undefined ? null : await admitWithDebtHolderFence(input.scope, input.debt, admitCandidate);
   return { admission, result: admission === null ? await admitCandidate() : admission.result };
 }

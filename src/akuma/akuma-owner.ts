@@ -166,7 +166,7 @@ export async function killAkumaWithRecovery(
  * The one lower native Akuma owner: standalone identity, plural selection and
  * the request service all consume these same single-target algorithms. It reads
  * only Heart, leash, provider and filesystem state; optional Alias, Dispatch,
- * Task and Contract associations are composed above this boundary.
+ * Debt and Contract associations are composed above this boundary.
  */
 export class AkumaOwner {
   constructor(

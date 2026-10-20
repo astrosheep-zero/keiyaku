@@ -7,7 +7,7 @@ import { localExecutionContext, type ExecutionContext } from "../akuma/requests.
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import type { AkumaAlias } from "../identity/selector.js";
-import type { CreatedTaskObservation } from "../task/created-observation.js";
+import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 import type { CallInput, CallResult, CallWaitHead, DispatchStage, ForkInput, ForkResult } from "./akuma-creation.js";
@@ -54,7 +54,7 @@ export type {
   AkumaWorldScopeRefusal,
   CallResult,
   CallWaitHead,
-  CreatedTaskObservation,
+  CreatedDebtObservation,
   DispatchAssociation,
   DispatchStage,
   ForkResult,

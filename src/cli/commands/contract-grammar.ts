@@ -1,10 +1,10 @@
 import { validateAkumaName } from "../../identity/normalize.js";
-import { parseTaskNamespaceSelector } from "../../task/catalog.js";
+import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
 type CatalogQuery =
-  | Readonly<{ kind: "tasks"; namespace?: readonly string[]; limit?: number }>
+  | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number }>
   | Readonly<{ kind: "contracts"; limit?: number }>
   | Readonly<{ kind: "archetypes"; limit?: number }>
   | Readonly<{ kind: "akuma"; archetype?: string; limit?: number }>;
@@ -28,7 +28,7 @@ export type ParsedBind = Output &
   Readonly<{
     command: "bind";
     forkOf?: string;
-    task?: string;
+    debt?: string;
     /** A literal target branch, or `null` for a deliberately targetless bind. */
     target?: string | null;
     after?: readonly string[];
@@ -181,7 +181,7 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
   const forkOf = optionalFlag(parts.flags, "fork-of");
   if (forkOf !== undefined) {
     if (parts.stdin) refuse("bind", "fork bind reads no stdin");
-    for (const option of ["task", "after", "gates"]) {
+    for (const option of ["debt", "after", "gates"]) {
       if (parts.flags[option] !== undefined) refuse("bind", `--${option} is not valid with --fork-of`);
     }
     const target = parseBindTarget(parts);
@@ -194,14 +194,14 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
     };
   }
   if (!parts.stdin) refuse("bind", "bind requires stdin");
-  const task = optionalFlag(parts.flags, "task");
+  const debt = optionalFlag(parts.flags, "debt");
   const target = parseBindTarget(parts);
   const after =
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = parseGateNames(parts, "bind");
   return {
     command: "bind",
-    ...(task === undefined ? {} : { task }),
+    ...(debt === undefined ? {} : { debt }),
     ...(target === undefined ? {} : { target }),
     ...(parts.flags.after === undefined ? {} : { after }),
     ...(gates === undefined ? {} : { gates }),
@@ -335,20 +335,20 @@ function listLimit(parts: ParsedContractParts, command: "ls" | "status" = "ls"):
   return limit === undefined ? undefined : Number(limit);
 }
 
-function taskCatalogQuery(path: string, limit: number | undefined): CatalogQuery | null {
-  if (path === "task" || path === "task/") {
-    return { kind: "tasks", namespace: [], ...(limit === undefined ? {} : { limit }) };
+function debtCatalogQuery(path: string, limit: number | undefined): CatalogQuery | null {
+  if (path === "debt" || path === "debt/") {
+    return { kind: "debts", namespace: [], ...(limit === undefined ? {} : { limit }) };
   }
-  if (!path.startsWith("task/")) return null;
-  if (!path.endsWith("/")) refuse("ls", `invalid Task namespace selector: ${path}`);
-  const body = path.slice("task/".length, -1);
+  if (!path.startsWith("debt/")) return null;
+  if (!path.endsWith("/")) refuse("ls", `invalid Debt namespace selector: ${path}`);
+  const body = path.slice("debt/".length, -1);
   if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
-    refuse("ls", `invalid Task namespace selector: ${path}`);
+    refuse("ls", `invalid Debt namespace selector: ${path}`);
   try {
-    const namespace = parseTaskNamespaceSelector(path);
-    return { kind: "tasks", namespace, ...(limit === undefined ? {} : { limit }) };
+    const namespace = parseDebtNamespaceSelector(path);
+    return { kind: "debts", namespace, ...(limit === undefined ? {} : { limit }) };
   } catch (error) {
-    refuse("ls", error instanceof Error ? error.message : `invalid Task namespace selector: ${path}`);
+    refuse("ls", error instanceof Error ? error.message : `invalid Debt namespace selector: ${path}`);
   }
 }
 
@@ -356,8 +356,8 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0];
   if (path === undefined) refuse("ls", "ls requires a selector");
   const limit = listLimit(parts);
-  const taskQuery = taskCatalogQuery(path, limit);
-  if (taskQuery !== null) return { command: "ls", query: taskQuery, output: parts.output };
+  const debtQuery = debtCatalogQuery(path, limit);
+  if (debtQuery !== null) return { command: "ls", query: debtQuery, output: parts.output };
   if (path === "kei" || path === "kei/") {
     return {
       command: "ls",

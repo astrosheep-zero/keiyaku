@@ -3,7 +3,7 @@
 `keiyaku` is the process edge. It turns an invocation and acquired caller input
 into public product operations, then gives their typed result to the shared
 renderer. It owns neither document interpretation, lifecycle judgment, Git
-adjudication, verification, reconciliation, nor Task or Akuma authority.
+adjudication, verification, reconciliation, nor Debt or Akuma authority.
 
 ## Invocation and scope
 
@@ -15,7 +15,7 @@ meaning for the receiving public surface, and rejects malformed, repeated,
 ambiguous, or unused invocation input. A parse or acquisition refusal performs
 no product operation and does not create runtime state.
 
-The invocation World remains the scope for Task, Settings, and composite
+The invocation World remains the scope for Debt, Settings, and composite
 observation. The edge loads the shared Settings resource once and hands that
 immutable value to the private Contract composition; gate bundles, worktree
 hooks, and branch freshness are then derived by the Contract operation that
@@ -53,13 +53,13 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | --- | --- | --- |
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, abandon, audit, reconcile | Request the named lifecycle, evidence, inspection, or repair judgment; refuse an absent or ambiguous Contract selector. | Return the owning lifecycle, audit, or reconciliation result unchanged. |
-| status, ls | Read one requested Contract, Akuma, archetype, Task, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
+| status, ls | Read one requested Contract, Akuma, archetype, Debt, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
 | show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
-| task | Delegate to the separate Task command surface. | Task owns Task judgment and result semantics. |
+| debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
 | call, fork, wait, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
@@ -75,15 +75,15 @@ A stable request entry is resolved asynchronously once inside the invocation's
 failure and cancellation boundary before operations begin; its actual channel
 is then pinned for the invocation under [akuma-requests.md](akuma-requests.md).
 The parent reconstructs local custody and returns the ordinary public result;
-forwarding does not create another delivery, review, audit, or Task workflow.
+forwarding does not create another delivery, review, audit, or Debt workflow.
 
 ## Boundaries
 
 The CLI may choose text or JSON projection through [cli-output.md](cli-output.md),
 but both describe the same result. It preserves explicit absence, refusal,
 retry, and unavailable observation rather than recasting any of them as an
-empty success. Task command intent and Task presentation are owned by
-[cli-task.md](cli-task.md). Literal help rows, flags, positional forms, stdin
+empty success. Debt command intent and Debt presentation are owned by
+[cli-debt.md](cli-debt.md). Literal help rows, flags, positional forms, stdin
 rules, and parser recovery are executable interface detail, not CLI law.
 
 `show` alone reads one selected Contract's guidance, using the existing exact
@@ -101,7 +101,7 @@ World without Repo.
 
 `ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and
-Tasks through `Tasks.of(world).list`. Contract-only selection, including region lookup, delegates to the public
+Debts through `Debts.of(world).list`. Contract-only selection, including region lookup, delegates to the public
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its
 typed refusal evidence as invocation diagnostics without owning candidate
 matching; a bounded display never narrows selector meaning. Complete identities

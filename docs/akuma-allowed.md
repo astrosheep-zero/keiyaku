@@ -7,7 +7,7 @@ authorization system; exact member names belong to public declarations and help.
 ## Frozen Permission
 
 An Archetype may declare a complete default set. Its omission grants the
-ordinary delegation baseline: Akuma management, every Task mutation, and
+ordinary delegation baseline: Akuma management, every Debt mutation, and
 Contract audit and delivery. Independent Contract review remains an explicit
 grant. An explicit empty set means none. Call-time additions can add to that
 default but never clear it. A nested birth clips the resulting set to its
@@ -19,8 +19,11 @@ completely.
 
 Every Soul freezes its effective set. Wake and restart retain it, and fork copies
 it exactly without an override. Historical Soul without an explicit set means
-the complete current vocabulary. Forwarded observation remains unkeyed; each
-mutable Task or Contract operation is independently keyed, so one permission
+the complete current vocabulary. A product rename preserves the meaning of
+persisted grants for surviving operations; a removed operation confers no
+replacement permission. This does not admit the retired spelling as a caller
+input or grant any new capability. Forwarded observation remains unkeyed; each
+mutable Debt or Contract operation is independently keyed, so one permission
 does not imply another or require a Contract association.
 
 ## Admission Boundary

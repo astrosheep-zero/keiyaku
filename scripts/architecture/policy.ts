@@ -34,7 +34,7 @@ const contractOwner = {
     types("protocol/execution-observation.ts"),
     any("settings.ts"),
     any("settlement/**"),
-    any("task/identity.ts"),
+    any("debt/identity.ts"),
     any("workspace-place.ts"),
   ],
   deny: [
@@ -73,7 +73,7 @@ const libraryOwner = {
     any("protocol/read/**"),
     any("settings.ts"),
     any("settlement/**"),
-    any("task/**"),
+    any("debt/**"),
     any("verification/**"),
     any("world.ts"),
     any("workspace-place.ts"),
@@ -149,7 +149,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
   compositionBoundaries: [
     {
       source: "library/**",
-      ownerPaths: ["akuma/**", "alias/**", "dispatch/**", "settlement/**", "task/**", "workspace-place.ts"],
+      ownerPaths: ["akuma/**", "alias/**", "dispatch/**", "settlement/**", "debt/**", "workspace-place.ts"],
       rootMarker: "architectureCompositionRoot",
     },
   ],
@@ -392,7 +392,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "library/**", ...libraryOwner },
     {
-      source: "task/**",
+      source: "debt/**",
       allow: [
         any("akuma/requests.ts"),
         any("akuma/request-*.ts"),
@@ -401,7 +401,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/types.ts"),
         any("identity/**"),
         any("markdown/**"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
     },
@@ -412,7 +412,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/**"),
         any("git/**"),
         any("settlement/**"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
     },
@@ -434,9 +434,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/repo.ts"),
         any("protocol/read/**"),
         any("settlement/**"),
-        any("task/index.ts"),
-        any("task/identity.ts"),
-        any("task/operations.ts"),
+        any("debt/index.ts"),
+        any("debt/identity.ts"),
+        any("debt/operations.ts"),
         any("world.ts"),
       ],
     },
@@ -454,7 +454,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/contract.ts"),
         types("library/region.ts"),
         any("protocol/read/**"),
-        any("task/index.ts"),
+        any("debt/index.ts"),
         types("world.ts"),
       ],
     },
@@ -494,7 +494,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("plugin/akuma-signals.ts", ["emitPluginSignal"]),
         any("runtime/proc/**"),
         any("settings.ts"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
       deny: [any("library/**")],
@@ -502,31 +502,31 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/dispatch-association.ts", allow: [runtime("git/identity.ts", ["contractIdSchema"])] },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
-      // Task or Contract authority; World composition attaches those above it.
+      // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
-      // Task or Contract authority; World composition attaches those above it.
+      // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-owner.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
-      // Task or Contract authority; World composition attaches those above it.
+      // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-wait.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
-      // Task or Contract authority; World composition attaches those above it.
+      // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-selection-execution.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
-      // Task or Contract authority; World composition attaches those above it.
+      // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-call.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
     },
@@ -555,7 +555,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("identity/**"),
         any("runtime/proc/**"),
         any("settings.ts"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
       deny: [any("library/**")],
@@ -597,7 +597,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("git/hooks.ts"),
         any("library/**"),
         any("settings.ts"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
     },
@@ -631,7 +631,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("protocol/read/status.ts"),
         types("settlement/settle.ts"),
         any("settings.ts"),
-        any("task/index.ts"),
+        any("debt/index.ts"),
         any("world.ts"),
         types("plugin/public.ts"),
       ],
@@ -648,7 +648,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("identity/**"),
         any("library/**"),
         any("settings.ts"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
         any("workspace-place.ts"),
       ],
@@ -669,7 +669,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("plugin/akuma-signals.ts", ["emitPluginSignal"]),
         any("runtime/proc/**"),
         any("settings.ts"),
-        any("task/**"),
+        any("debt/**"),
         any("world.ts"),
       ],
     },

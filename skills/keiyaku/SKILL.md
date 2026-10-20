@@ -10,7 +10,7 @@ description: >-
 
 ## Model
 
-Keiyaku is three independent pillars, not a bundle: **Task** records unresolved
+Keiyaku is three independent pillars, not a bundle: **Debt** records unresolved
 work and dependencies, **Contract** makes acceptance standing and auditable,
 **Akuma** invokes capability. Use any one alone; combine them only when the
 work calls for it. Behind every Contract in flight there is one holder of its
@@ -23,8 +23,8 @@ equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
 ## Quick Start
 
 ```bash
-keiyaku -C <repo> task add "title"
-keiyaku -C <repo> bind [--task <task-id>] -
+keiyaku -C <repo> debt add "title"
+keiyaku -C <repo> bind [--debt <debt-id>] -
 keiyaku -C <repo> status
 keiyaku -C <repo> deliver [<contract>|@<contract>]
 keiyaku -C <repo> review [<contract>|@<contract>] --satisfied

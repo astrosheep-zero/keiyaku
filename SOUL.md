@@ -36,13 +36,13 @@ worktree、动了哪个 ref、Git 变了什么——在命令返回里清晰但�
 
 ```
 keiyaku          契约系统    spec 化交付、隔离 worktree、验收 pipeline、mini gerrit
-keiyaku task     任务系统    full-featured、简单但强大、依赖与生命周期齐全
+keiyaku debt     债务账本    已确认未了结的问题与诉求、依赖与生命周期齐全
 keiyaku akuma    subagent    跨 harness 派工、观察、steer、fork
 ```
 
-**每一根都单独站得住。** 不用 akuma，用你自家的 subagent 工具，契约工作流照常跑。不开契约，task 系统自己就是完整的任务管理。这不是一个套餐，是三件武器。
+**每一根都单独站得住。** 不用 akuma，用你自家的 subagent 工具，契约工作流照常跑。不开契约，debt 账本自己就能记录、关联和了结欠着的事。这不是一个套餐，是三件武器。
 
-**但边可以很深。** task 可升格成契约；契约下有 namespace 隔离的 tasks；akuma 与契约、task 深度互通。集成是**边**，不是粘连——砍掉任何一根柱子，另外两根不许流血。
+**但边可以很深。** debt 可升格成契约；契约下有 namespace 隔离的 debts；akuma 与契约、debt 深度互通。集成是**边**，不是粘连——砍掉任何一根柱子，另外两根不许流血。
 
 ## Pipeline：可配置，开箱好用
 

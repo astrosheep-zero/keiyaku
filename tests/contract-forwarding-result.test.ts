@@ -105,10 +105,10 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
           contract,
           lag: settlementLagSchema.parse({
             kind: "settlement-failed",
-            surface: "task",
+            surface: "debt",
             contractId: contract,
-            taskId: "task/forwarding",
-            diagnostic: "task settlement refused",
+            debtId: "debt/forwarding",
+            diagnostic: "debt settlement refused",
           }),
         },
         {
@@ -208,7 +208,7 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
     {},
     {
       effects: [
-        { kind: "settlement-lag", contract, lag: { kind: "settlement-failed", surface: "task", diagnostic: "lag" } },
+        { kind: "settlement-lag", contract, lag: { kind: "settlement-failed", surface: "debt", diagnostic: "lag" } },
       ],
     },
   );
@@ -221,9 +221,9 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
           contract,
           lag: {
             kind: "settlement-failed",
-            surface: "task",
+            surface: "debt",
             contractId: contract,
-            taskId: "task/Forwarding",
+            debtId: "debt/Forwarding",
             diagnostic: "lag",
           },
         },

@@ -12,7 +12,7 @@ import {
   renderInstallText,
   type InstallInvocationResult,
 } from "./commands/install.js";
-import { runTaskCommand } from "./commands/task.js";
+import { runDebtCommand } from "./commands/debt.js";
 import { resolveInvocationCoordinates } from "./coordinates.js";
 import { BindDraftError } from "./draft.js";
 import {
@@ -284,7 +284,7 @@ export async function runCliCommand(invocation: ParsedCommandInvocation, input: 
       },
       environment,
     );
-    if (command.command === "task") return await runTaskCommand(command, coordinates, runtime);
+    if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);
     if (command.command === "history" && "contract" in command)
       return await runContractHistoryCommand(command, coordinates);

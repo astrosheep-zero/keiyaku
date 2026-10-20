@@ -12,6 +12,15 @@ function command(argv: readonly string[]): ParsedCommand {
   return parsed.command;
 }
 
+test("Debt replaces the old family without restoring planning or progress verbs", () => {
+  assert.throws(() => parseArgv(["task", "ls"]), CliUsageError);
+  for (const verb of ["compose", "start", "stop", "hold", "resume"]) {
+    assert.throws(() => parseArgv(["debt", verb]), { diagnostic: /unknown debt command/u });
+  }
+  assert.throws(() => parseArgv(["debt", "show", "task/example"]), { diagnostic: /debt ID must be/u });
+  assert.equal(command(["debt", "show", "debt/example"]).command, "debt");
+});
+
 test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.deepEqual(parseArgv(["nuke"]), {
     command: { command: "nuke", output: "text" },
@@ -48,9 +57,9 @@ test("persisted removed workspace bytes are authority corruption", () => {
 });
 
 test("global coordinates are independent of command position", () => {
-  assert.deepEqual(parseArgv(["task", "ls", "-C", "/repo/caller"]), {
+  assert.deepEqual(parseArgv(["debt", "ls", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { command: "task", action: "ls", output: "text", positionals: [], flags: {} },
+    command: { command: "debt", action: "ls", output: "text", positionals: [], flags: {} },
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
@@ -198,16 +207,16 @@ test("bare ls requires a selector rather than opening help", () => {
 });
 
 test("ls parses only canonical identity directories", () => {
-  for (const path of ["task", "task/"]) {
+  for (const path of ["debt", "debt/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "tasks", namespace: [] }, output: "text" },
+      command: { command: "ls", query: { kind: "debts", namespace: [] }, output: "text" },
     });
   }
-  assert.deepEqual(parseArgv(["ls", "task/feature/sub/", "--json"]), {
-    command: { command: "ls", query: { kind: "tasks", namespace: ["feature", "sub"] }, output: "json" },
+  assert.deepEqual(parseArgv(["ls", "debt/feature/sub/", "--json"]), {
+    command: { command: "ls", query: { kind: "debts", namespace: ["feature", "sub"] }, output: "json" },
   });
-  for (const path of ["task/feature", "task//", "task/feature//"]) {
-    assert.throws(() => parseArgv(["ls", path]), /Task namespace selector/);
+  for (const path of ["debt/feature", "debt//", "debt/feature//"]) {
+    assert.throws(() => parseArgv(["ls", path]), /Debt namespace selector/);
   }
   for (const path of ["kei", "kei/"]) {
     assert.deepEqual(parseArgv(["ls", path, "--json"]), {
@@ -239,7 +248,7 @@ test("ls parses only canonical identity directories", () => {
     "keiy/",
     "@review",
     "kei/review",
-    "task/namespace",
+    "debt/namespace",
     "aku//",
     "aku/worker/1234abcd",
     "aku/*/",
@@ -450,19 +459,19 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["call", " ", "-"], /call requires a nonblank value/],
     [["tell", "aku/claude/1234abcd", " \u00a0"], /tell requires a nonblank value/],
     [["fork", "aku/claude/1234abcd", "--at", "  "], /--at requires a nonblank value/],
-    [["task", "add"], /task add requires either TITLE or '-' input/],
-    [["task", "add", "Title", "-"], /task add requires either TITLE or '-' input/],
-    [["task", "add", "  "], /task add requires a nonblank value/],
-    [["task", "add", "Title", "--body", ""], /--body requires a nonblank value/],
-    [["task", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
-    [["task", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
-    [["task", "update", "task/a", "--title", " "], /--title requires a nonblank value/],
-    [["task", "done", "task/a", "--note", ""], /--note requires a nonblank value/],
+    [["debt", "add"], /debt add requires either TITLE or '-' input/],
+    [["debt", "add", "Title", "-"], /debt add requires either TITLE or '-' input/],
+    [["debt", "add", "  "], /debt add requires a nonblank value/],
+    [["debt", "add", "Title", "--body", ""], /--body requires a nonblank value/],
+    [["debt", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
+    [["debt", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
+    [["debt", "update", "debt/a", "--title", " "], /--title requires a nonblank value/],
+    [["debt", "done", "debt/a", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
     [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
     [["call", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
-    [["task", "show", " "], /task show requires a nonblank value/],
-    [["task", "add", "Title", "--needs", "task/a", "--needs", "\t"], /--needs requires a nonblank value/],
+    [["debt", "show", " "], /debt show requires a nonblank value/],
+    [["debt", "add", "Title", "--needs", "debt/a", "--needs", "\t"], /--needs requires a nonblank value/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
     [["region", "--path", "  "], /--path requires a nonblank value/],
     [["region", "--overlap"], /option --overlap is not valid for region/],
@@ -485,11 +494,11 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
   const called = command(["call", "worker", "  keep  "]);
   assert.equal(called.command, "call");
   if (called.command === "call") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
-  assert.deepEqual(command(["task", "add", "--", "--urgent task"]), {
-    command: "task",
+  assert.deepEqual(command(["debt", "add", "--", "--urgent debt"]), {
+    command: "debt",
     action: "add",
     output: "text",
-    positionals: ["--urgent task"],
+    positionals: ["--urgent debt"],
     flags: {},
   });
   assert.deepEqual(command(["call", "worker", "--", "--workdir"]), {
@@ -509,11 +518,11 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     },
   });
   assert.throws(() => parseArgv(["bind", "--gates", "--json", "-"]), /--gates requires a value/u);
-  assert.deepEqual(command(["task", "update", "task/a", "--priority", "1"]), {
-    command: "task",
+  assert.deepEqual(command(["debt", "update", "debt/a", "--priority", "1"]), {
+    command: "debt",
     action: "update",
     output: "text",
-    positionals: ["task/a"],
+    positionals: ["debt/a"],
     flags: { priority: "1" },
   });
 });
@@ -528,8 +537,8 @@ test("a deliberately targetless bind parses as an explicit absence", () => {
 });
 
 test("stdin marker is position independent for Contract commands and global coordinates", () => {
-  assert.deepEqual(parseArgv(["bind", "-", "--task", "task/example", "--json"]), {
-    command: { command: "bind", task: "task/example", output: "json" },
+  assert.deepEqual(parseArgv(["bind", "-", "--debt", "debt/example", "--json"]), {
+    command: { command: "bind", debt: "debt/example", output: "json" },
   });
   assert.deepEqual(parseArgv(["amend", "-", "kei/example", "--json"]), {
     command: { command: "amend", contract: "kei/example", stdin: true, output: "json" },

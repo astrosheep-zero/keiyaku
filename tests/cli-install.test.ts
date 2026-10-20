@@ -95,7 +95,7 @@ test("--all records failure and continues in fixed harness order", async () => {
 test("the bundled plugin contains all six skills", () => {
   for (const name of [
     "keiyaku",
-    "keiyaku-task",
+    "keiyaku-debt",
     "keiyaku-bind",
     "keiyaku-workflow",
     "keiyaku-akuma",

@@ -1,4 +1,4 @@
-import { TASK_MUTATION_ACTIONS } from "../task/mutation.js";
+import { DEBT_MUTATION_ACTIONS } from "../debt/mutation.js";
 import { z } from "zod";
 
 const AKUMA_MUTATION_ACTIONS = Object.freeze(["akuma.call", "akuma.kill", "akuma.tell"] as const);
@@ -8,7 +8,7 @@ export const ALLOWED_ACTIONS = Object.freeze([
   "contract.audit",
   "contract.deliver",
   "contract.review",
-  ...TASK_MUTATION_ACTIONS,
+  ...DEBT_MUTATION_ACTIONS,
 ] as const);
 
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
@@ -18,7 +18,7 @@ export const DEFAULT_ALLOWED_ACTIONS: AllowedActions = Object.freeze([
   ...AKUMA_MUTATION_ACTIONS,
   "contract.audit",
   "contract.deliver",
-  ...TASK_MUTATION_ACTIONS,
+  ...DEBT_MUTATION_ACTIONS,
 ]);
 
 const ALLOWED_ACTION_SET: ReadonlySet<string> = new Set(ALLOWED_ACTIONS);
@@ -49,7 +49,18 @@ export const allowedActionsSchema = z.array(z.enum(ALLOWED_ACTIONS)).transform((
 });
 
 export function historicalAllowedActions(value: unknown): AllowedActions {
-  return value === undefined ? ALLOWED_ACTIONS : decodeAllowedActions(value);
+  if (value === undefined) return ALLOWED_ACTIONS;
+  if (!Array.isArray(value)) return decodeAllowedActions(value);
+  // Persisted permissions retain the same surviving capabilities after rename;
+  // removed planning/progress operations confer no replacement permission.
+  const retired = new Set(["task.compose", "task.start", "task.stop", "task.hold", "task.resume"]);
+  return decodeAllowedActions(
+    value
+      .filter((action) => !retired.has(action))
+      .map((action) =>
+        typeof action === "string" && action.startsWith("task.") ? `debt.${action.slice("task.".length)}` : action,
+      ),
+  );
 }
 
 export function unionAllowedActions(base: AllowedActions, additions: AllowedActions): AllowedActions {

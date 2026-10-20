@@ -2,7 +2,7 @@ import type { AttestationData, ContractId, JournalEntry, SnapshotId } from "../c
 import type { Dispatch } from "../dispatch/index.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
-import type { TaskId } from "../task/identity.js";
+import type { DebtId } from "../debt/identity.js";
 import type { Repo } from "./repo.js";
 
 /** Public gate words remain ordinary strings; private policy interprets them. */
@@ -21,7 +21,7 @@ export type ContractHistory = Readonly<{
 type MarkdownBindInput = Readonly<{
   repo: Repo;
   markdown: string;
-  task?: TaskId;
+  debt?: DebtId;
   /** A literal target branch; `null` is deliberately targetless; omitted is the Repo worktree's current branch. */
   target?: string | null;
   workspace?: "worktree";

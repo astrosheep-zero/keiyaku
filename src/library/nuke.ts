@@ -5,7 +5,7 @@ import { AkumaResetStopError, stopAkuma } from "../akuma/nuke.js";
 import { GitResetStopError, nukeGit } from "../git/nuke.js";
 import type { GitRepository } from "../git/process.js";
 import { isOperationalFailure } from "../protocol/progress.js";
-import { nukeTask } from "../task/operations.js";
+import { nukeDebt } from "../debt/operations.js";
 import { World, type WorldRoot } from "../world.js";
 import { requireInput, requireMarkdown } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
@@ -77,8 +77,8 @@ export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions)
               diagnostic: result.closeLag.diagnostic,
             });
         }),
-        runOwner("task", async () => {
-          await nukeTask(world, { onRemoved: (tasks) => accumulator.recordResetRemoved({ tasks }) });
+        runOwner("debt", async () => {
+          await nukeDebt(world, { onRemoved: (debts) => accumulator.recordResetRemoved({ debts }) });
         }),
       ]);
       await runOwner("world", () => removeEmptyWorldMarker(world));

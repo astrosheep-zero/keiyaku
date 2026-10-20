@@ -23,7 +23,7 @@ import { createKeiyakuHandle } from "../../library/keiyaku.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
 import type { Repo } from "../../library/repo.js";
 import { SettingsError, settings } from "../../settings.js";
-import { Tasks } from "../../task/index.js";
+import { Debts } from "../../debt/index.js";
 import { actorFromEdge } from "../actor.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { resolveInvocationCwd } from "../coordinates.js";
@@ -33,7 +33,7 @@ import {
   renderAkumaCatalogue,
   renderArchetypeCatalogue,
   renderContractCatalogue,
-  renderTaskCatalogue,
+  renderDebtCatalogue,
 } from "../render/catalog.js";
 import { renderAccepted, renderContractHistory, renderRetry, type ContractOutcome } from "../render/contract.js";
 import { renderKanshiCategoryText, renderKanshiText } from "../render/kanshi.js";
@@ -246,7 +246,7 @@ async function runBind(
     const answer = await library.bind({
       repo,
       markdown,
-      ...(command.task === undefined ? {} : { task: command.task as `task/${string}` }),
+      ...(command.debt === undefined ? {} : { debt: command.debt as `debt/${string}` }),
       ...(command.target === undefined ? {} : { target: command.target }),
       ...(actor === undefined ? {} : { actor }),
       ...(after === undefined ? {} : { after }),
@@ -466,14 +466,14 @@ async function runLs(
     return emit(command.output, list, () => renderArchetypeCatalogue(list), 0);
   }
   if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-  if (query.kind === "tasks") {
-    const listed = await Tasks.of(coordinates.world).list({
+  if (query.kind === "debts") {
+    const listed = await Debts.of(coordinates.world).list({
       selection: "all",
       namespace: query.namespace ?? [],
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
-    if (listed.kind !== "accepted") throw new Error("Task list did not return an accepted observation");
-    return emit(command.output, listed, () => renderTaskCatalogue(listed.value, query.namespace ?? []), 0);
+    if (listed.kind !== "accepted") throw new Error("Debt list did not return an accepted observation");
+    return emit(command.output, listed, () => renderDebtCatalogue(listed.value, query.namespace ?? []), 0);
   }
   const listed = await Akumas.of(coordinates.world).list({
     ...(query.archetype === undefined ? {} : { archetype: query.archetype }),

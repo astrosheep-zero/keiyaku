@@ -73,7 +73,7 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akuma"), { recursive: true });
   writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
-  writeFileSync(join(home, "akuma", "restricted.md"), "---\nprovider: local\nallowed:\n  - task.add\n---\nWork.\n");
+  writeFileSync(join(home, "akuma", "restricted.md"), "---\nprovider: local\nallowed:\n  - debt.add\n---\nWork.\n");
   writeFileSync(join(home, "akuma", "empty.md"), "---\nprovider: local\nallowed: []\n---\nWork.\n");
   writeFileSync(
     join(home, "settings.json"),

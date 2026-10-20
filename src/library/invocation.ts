@@ -64,17 +64,17 @@ export class InvocationAccumulator implements ProtocolProgress {
   private readonly candidateConclusions = new Map<ContractId, Readonly<Record<string, unknown>>>();
   private readonly reportedResidue = new WeakSet<object>();
 
-  private resetState?: { world: WorldRoot; removed: { refs: number; worktrees: number; tasks: number } };
+  private resetState?: { world: WorldRoot; removed: { refs: number; worktrees: number; debts: number } };
 
   constructor(private readonly observer?: ExecutionObserver) {}
 
   beginReset(world: WorldRoot): void {
-    this.resetState = { world, removed: { refs: 0, worktrees: 0, tasks: 0 } };
+    this.resetState = { world, removed: { refs: 0, worktrees: 0, debts: 0 } };
   }
 
   recordResetRemoved(counts: Partial<ResetCounts>): void {
     if (this.resetState === undefined) throw new Error("reset progress requires its World");
-    for (const key of ["refs", "worktrees", "tasks"] as const) this.resetState.removed[key] += counts[key] ?? 0;
+    for (const key of ["refs", "worktrees", "debts"] as const) this.resetState.removed[key] += counts[key] ?? 0;
   }
 
   observe(event: ExecutionObservation): void {

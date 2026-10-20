@@ -56,7 +56,7 @@ test("category observation reuses owner rows and is the operation the CLI runs",
   );
   assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
   assert.equal("contracts" in report, false);
-  assert.equal("tasks" in report, false);
+  assert.equal("debts" in report, false);
 
   const cli = await cliJson<KanshiCategoryReport>(["-C", world, "status", "aku", "--limit", "2"], { environment: {} });
   assert.equal(cli.exit, 0, cli.stderr);

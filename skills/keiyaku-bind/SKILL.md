@@ -59,14 +59,14 @@ writing one broad Objective around unrelated fixes.
 
 - Use an Arc only for a chapter inside that one acceptance boundary; an Arc is
   not separately accepted and MUST NOT substitute for an independent `kei`.
-- Use a Task for confirmed unresolved work and dependencies that must outlive
+- Use a Debt for confirmed unresolved work and dependencies that must outlive
   the current conversation.
 
 A `kei` owns one independently acceptable outcome and its delivery lifecycle. A
-Task records confirmed unresolved work; it may exist without a `kei`,
+Debt records confirmed unresolved work; it may exist without a `kei`,
 and it does not create a second acceptance or lifecycle. Associate a `kei` with
-an existing Task only when that Task has real scheduling or dependency value.
-Do not create a Task just to mirror a `kei`.
+an existing Debt only when the delivery actually settles that unresolved work.
+Do not create a Debt just to mirror a `kei`.
 
 ### Parallel Work
 
@@ -74,7 +74,7 @@ Parallel work is the default.
 
 - Bind and advance independent `kei`s in parallel. Each has its own acceptance
   boundary and holder.
-- Within one `kei`, run independent Tasks or Arc chapters in parallel whenever
+- Within one `kei`, run independent Debts or Arc chapters in parallel whenever
   their work can proceed independently. They converge on the one acceptance
   boundary, which the holder owns.
 
@@ -162,10 +162,10 @@ prospective candidate. Without `verified`, no verb runs Verification and the
 section is inert document text. `reviewed` independently requires review
 evidence. Selected gates are checked at placement.
 
-For an existing Task with real scheduling or dependency value:
+For an existing Debt that this delivery settles:
 
 ```bash
-keiyaku -C <repo> bind --task <task/...> - < CONTRACT.md
+keiyaku -C <repo> bind --debt <debt/...> - < CONTRACT.md
 ```
 
 For a real logical dependency between Contracts:
@@ -204,7 +204,7 @@ waiting, the stated prerequisites remain; do not bind a duplicate Contract.
 
 The holder now owns the lifecycle:
 
-1. Start the work directly or delegate Tasks, Arc chapters, Akumas, or Contract roles.
+1. Start the work directly or delegate Debts, Arc chapters, Akumas, or Contract roles.
 2. Run independent work in parallel and let it converge on the one acceptance
    boundary.
 3. Prepare and deliver the candidate.

@@ -8,11 +8,11 @@ import type {
   AkumaTellResult,
   AkumaWaitResult,
 } from "../../akuma/selection-observation.js";
-import type { AkumaObservation, CreatedTaskObservation, DispatchAssociation } from "../../index.js";
+import type { AkumaObservation, CreatedDebtObservation, DispatchAssociation } from "../../index.js";
 import type { CallObservation, CallResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
-import { taskDispositionMark } from "./marks.js";
+import { debtDispositionMark } from "./marks.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
@@ -1006,7 +1006,7 @@ export function callObservationStream(
   };
 }
 
-type CreatedTaskRow = Extract<CreatedTaskObservation, { kind: "present" }>["rows"][number];
+type CreatedDebtRow = Extract<CreatedDebtObservation, { kind: "present" }>["rows"][number];
 
 function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
   if (snapshot.reportedChanges.length === 0 && snapshot.reportedChangesOmitted === 0) return [];
@@ -1023,8 +1023,8 @@ function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[
   ];
 }
 
-function renderTaskRow(row: CreatedTaskRow, columns: number): readonly string[] {
-  const prefix = `  ${taskDispositionMark(row.disposition)} ${row.id} · `;
+function renderDebtRow(row: CreatedDebtRow, columns: number): readonly string[] {
+  const prefix = `  ${debtDispositionMark(row.disposition)} ${row.id} · `;
   const body = `${safeText(row.title)} · ${row.disposition} · P${row.priority}`;
   const inline = `${prefix}${body}`;
   if (displayColumns(inline) <= columns) return [inline];
@@ -1036,17 +1036,17 @@ function renderTaskRow(row: CreatedTaskRow, columns: number): readonly string[] 
   });
 }
 
-function renderTaskContextLines(created: CreatedTaskObservation | undefined, columns: number): readonly string[] {
+function renderDebtContextLines(created: CreatedDebtObservation | undefined, columns: number): readonly string[] {
   if (created === undefined) return [];
-  if (created.kind === "failed") return [`! tasks failed ${safeText(created.diagnostic)}`];
+  if (created.kind === "failed") return [`! debts failed ${safeText(created.diagnostic)}`];
   if (created.rows.length === 0) return [];
-  return [`tasks ${created.rows.length}`, ...created.rows.flatMap((row) => renderTaskRow(row, columns))];
+  return [`debts ${created.rows.length}`, ...created.rows.flatMap((row) => renderDebtRow(row, columns))];
 }
 
 type SnapshotView = Readonly<{
   status: AkumaObservation["status"];
   contract: DispatchAssociation;
-  createdTasks?: CreatedTaskObservation;
+  createdDebts?: CreatedDebtObservation;
 }>;
 
 type SnapshotCoreOptions = Readonly<{
@@ -1090,12 +1090,12 @@ export function snapshotText(
   options: SnapshotCoreOptions = {},
 ): string {
   const core = snapshotCore(view, context, options);
-  const taskContext = renderTaskContextLines(view.createdTasks, context.columns);
+  const debtContext = renderDebtContextLines(view.createdDebts, context.columns);
   const conclusion = snapshotConclusion(view.status);
   return [
     ...core.lines,
     ...(conclusion.length === 0 ? [] : [conclusion]),
-    ...(taskContext.length > 0 ? ["", ...taskContext] : []),
+    ...(debtContext.length > 0 ? ["", ...debtContext] : []),
     ...(view.status.timeline.reportedChanges.length > 0 || view.status.timeline.reportedChangesOmitted > 0 ? [""] : []),
     ...renderReportedChangeLines(view.status.timeline),
     ...(core.facts.length > 0 ? ["", ...core.facts] : []),

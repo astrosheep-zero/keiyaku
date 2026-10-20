@@ -155,7 +155,7 @@ export function kanshiReport(
     observedAt: "2026-08-12T00:00:00.000Z",
     branch: null,
     contracts,
-    tasks: { kind: "absent" },
+    debts: { kind: "absent" },
     akuma: { kind: "absent" },
     ...overrides,
   };

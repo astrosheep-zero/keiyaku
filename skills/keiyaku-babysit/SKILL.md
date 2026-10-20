@@ -59,7 +59,7 @@ does not move without you.
 
 ## What Babysitting Never Owns
 
-Commands and semantics belong to task, bind, workflow, and akuma. Acceptance
+Commands and semantics belong to debt, bind, workflow, and akuma. Acceptance
 belongs to the Contract's journal and its Reviewer's testimony. The question
 belongs to whoever commissioned it. Babysitting decides only when you look and
 what you check next.

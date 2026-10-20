@@ -1,46 +1,46 @@
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { Delivery } from "./library/delivery.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { Keiyaku } from "./library/keiyaku.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { KeiyakuError } from "./library/outcome.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { NoGitWorldError, Repo } from "./library/repo.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { actorId } from "./core/facts/types.js";
 /**
- * The package root: the curated Contract, Akuma, Akumas, Task, Kanshi, World,
+ * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
@@ -114,8 +114,8 @@ export type {
   RegionDeclaration,
   RegionRead,
   Section,
-  TaskKanshiRow,
-  TaskKanshiWorld,
+  DebtKanshiRow,
+  DebtKanshiWorld,
 } from "./kanshi/index.js";
 export { AkumaAddressError, AkumaWorldScopeError, Akumas } from "./library/akumas.js";
 export type {
@@ -136,7 +136,7 @@ export type {
   CallInput,
   CallResult,
   CallWaitHead,
-  CreatedTaskObservation,
+  CreatedDebtObservation,
   DispatchAssociation,
   DispatchStage,
   ForkInput,
@@ -237,8 +237,8 @@ export type {
   SettingsScopeState,
 } from "./settings.js";
 export type { SettlementAction, SettlementLag, SettlementReport } from "./settlement/settle.js";
-export type * from "./task/index.js";
-export { TASK_RELATION_PREDICATE_FIELDS, TaskAuthorityCorruptionError, Tasks } from "./task/index.js";
+export type * from "./debt/index.js";
+export { DEBT_RELATION_PREDICATE_FIELDS, DebtAuthorityCorruptionError, Debts } from "./debt/index.js";
 export { World, WorldError } from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 

@@ -4,7 +4,7 @@ import { isBlankInput } from "./usage.js";
 export type ScanFlagKind = "boolean" | "value" | "raw-value" | "repeat";
 
 export type ScanSpec<Reader extends string = string> = Readonly<{
-  /** Names this surface in refusal text: `bind`, `call`, `task add`. */
+  /** Names this surface in refusal text: `bind`, `call`, `debt add`. */
   subject: string;
   flags: Readonly<Record<string, ScanFlagKind>>;
   /** The reader that consumes `-` input; absent makes `-` invalid here. */

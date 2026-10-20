@@ -60,9 +60,9 @@ rule and remain full in JSON; absent content identity has no row. Amend receipts
 use a verb-past title, name gate and prerequisite changes independently, and
 reserve an unchanged-terms fact for a genuinely unchanged amendment. Their
 bounded terms comparison keeps only the comparison headers, without decorative
-banners or trailing header whitespace. Task mutation receipts use verb-past
+banners or trailing header whitespace. Debt mutation receipts use verb-past
 titles and field-level changes, never projection-file
-diffs. Task show timestamps omit millisecond precision in text; JSON retains
+diffs. Debt show timestamps omit millisecond precision in text; JSON retains
 full precision. An incomplete placement keeps its candidate and content-identity
 rows and its current reason for waiting. A placement receipt has three
 registers: landed states the reference movement and closes on `accepted`,
@@ -123,8 +123,8 @@ route. A complete catalogue has no omission tail. Multi-line payloads sit
 directly under their label, bounded, and name their own truncation.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
-projection. Task owns Task facts and [cli-task.md](cli-task.md) owns their
-Task-facing presentation. Contract, Git, and Akuma renderers receive their
+projection. Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their
+Debt-facing presentation. Contract, Git, and Akuma renderers receive their
 facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
@@ -134,15 +134,15 @@ answer remains raw when that operation promises answer bytes. Recording review
 testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
 
-Roster, world-status, and task rows state each fact once in words. A Contract
+Roster, world-status, and debt rows state each fact once in words. A Contract
 association prints as the bare Contract id inline; a free row states no
 association at all; the association carries a parenthetical only when the read
 established a reason a person can act on. A row prints its activity age only
 when it differs from the state age. Activity previews keep observed source
 punctuation, apply only terminal-safe handling, whitespace folding, and
 width-aware truncation, and never rewrite what an Akuma said. Width is counted
-in terminal cells for whole grapheme clusters. Task dispositions render as
-words wherever task rows appear; the stored dropping state reads as dropped.
+in terminal cells for whole grapheme clusters. Debt dispositions render as
+words wherever debt rows appear; the stored dropping state reads as dropped.
 
 Known Akuma selection conditions render as one compact caller fact naming the
 coordinate and the useful relation; they do not expose Heart birth terminology,

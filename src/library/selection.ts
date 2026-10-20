@@ -32,7 +32,7 @@ import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import { observeCreatedTaskObservations, type CreatedTaskObservation } from "../task/created-observation.js";
+import { observeCreatedDebtObservations, type CreatedDebtObservation } from "../debt/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
 import {
@@ -266,11 +266,11 @@ async function composeObservation(
   return (await discharged(contract)) ? { ...status, timeline: withoutReportedChanges(status.timeline) } : status;
 }
 
-async function createdTasksFor(
+async function createdDebtsFor(
   path: WorldRoot,
   statuses: readonly AkumaStatus[],
-): Promise<readonly CreatedTaskObservation[]> {
-  return await observeCreatedTaskObservations(
+): Promise<readonly CreatedDebtObservation[]> {
+  return await observeCreatedDebtObservations(
     path,
     statuses.map((status) => status.id),
   );
@@ -282,7 +282,7 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
 
 /**
  * The one upper composition of association-free native status evidence into its
- * public observation shape. It reads Alias-independent Dispatch and Task
+ * public observation shape. It reads Alias-independent Dispatch and Debt
  * associations after the lower values, never before or inside them.
  */
 async function composeAkumaAssociations(
@@ -290,7 +290,7 @@ async function composeAkumaAssociations(
   path: WorldRoot,
   repo?: Repo,
 ): Promise<readonly AkumaObservation[]> {
-  const created = await createdTasksFor(path, statuses);
+  const created = await createdDebtsFor(path, statuses);
   const discharged = placementDischarged(repo);
   const contracts = await dispatchAssociations(
     repo,
@@ -302,7 +302,7 @@ async function composeAkumaAssociations(
       return {
         status: await composeObservation(status, contract, discharged),
         contract,
-        createdTasks: created[index]!,
+        createdDebts: created[index]!,
       };
     }),
   );
@@ -342,7 +342,7 @@ async function composeWaitResult(
 
 /**
  * Re-attach upper associations after a wait result crosses a forwarded
- * boundary; the serving side must observe its own Dispatch and Task state.
+ * boundary; the serving side must observe its own Dispatch and Debt state.
  */
 async function attachWaitAssociations(
   path: WorldRoot,

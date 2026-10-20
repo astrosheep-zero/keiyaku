@@ -14,7 +14,7 @@ export type CliCoordinates = Readonly<{
   repo?: Repo;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
-  taskContext: Readonly<{ directory: string; boundary: string; writeRoot: string; managed: boolean }>;
+  debtContext: Readonly<{ directory: string; boundary: string; writeRoot: string; managed: boolean }>;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
@@ -90,7 +90,7 @@ export const cliCoordinateDiscovery = {
       ...(repo === undefined ? {} : { repo }),
       world: world.root,
       candidateWorld: world.candidate,
-      taskContext: {
+      debtContext: {
         directory: cwd,
         boundary,
         writeRoot: worldRepo === undefined ? boundary : cwd,

@@ -64,7 +64,7 @@ An admitted service call durably marks begun before owner execution; voided
 proves no committed product effect, while unproven records an effect whose absence or
 success is not proven. An admitted call reserves its child before spawn and settles served only after birth. A failed reservation or publication settles voided without claiming
 cross-database atomicity. Selection requests cross only canonical resolved Akuma
-targets; Contract and Task requests invoke their same direct-parent local
+targets; Contract and Debt requests invoke their same direct-parent local
 executors, retaining only owner-minted terminal references rather than replayable
 results or caller composition authority.
 
@@ -73,7 +73,7 @@ re-executes an old request: begun service requests settle to unproven without
 re-execution; explicit pump close stops admission before aborting execution and
 waits for truthful in-flight settlement; abandoned unreserved work voids,
 while a reservation is settled only from child Soul, seal, or current leash evidence. It never spawns
-a child, reads Contract or Task authority to infer an attempt, or claims
+a child, reads Contract or Debt authority to infer an attempt, or claims
 exactly-once execution.
 
 A reserved request settles only from child Soul, Seal, or current leash evidence; a serving-path failure after reservation invokes the same adjudication recovery uses, and while evidence is incomplete the request remains reserved. No path writes a terminal state to a reserved request without that evidence.
@@ -156,7 +156,7 @@ transport. Heart retains diagnostic text, never a replayable result. A successfu
 owner supplies its existing exact service reference; a missing required reference
 is an owner failure, not proof of no committed product effect. Generic rendezvous
 transports owner values opaquely and never interprets Contract reasons or invents
-references. Task action markers and child reservation evidence retain their own
+references. Debt action markers and child reservation evidence retain their own
 meaning.
 
 An owner throw after service begins cannot prove no committed product effect and remains unproven.

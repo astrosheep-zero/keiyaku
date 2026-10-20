@@ -38,5 +38,5 @@ fact.
 
 Git carries Dispatch bytes without decoding them. Dispatch depends only on the
 identity owners and Git's private-state capability. Core, protocol, Contract,
-Task, Alias, Settings, and Akuma do not gain Dispatch storage or a generic
+Debt, Alias, Settings, and Akuma do not gain Dispatch storage or a generic
 association/event mechanism.

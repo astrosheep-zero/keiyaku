@@ -12,106 +12,114 @@ import {
   type GitReadObservation,
   type GitTreeSelection,
 } from "../git/read-observation.js";
-import { parseTaskId, type TaskId } from "../task/identity.js";
-import { acquireTaskSettlementFence } from "./fence.js";
+import { parseDebtId, type DebtId } from "../debt/identity.js";
+import { acquireDebtSettlementFence } from "./fence.js";
 
+// The private persisted spelling predates the product rename. Keep its bytes
+// and path stable so an existing held association still settles after upgrade.
 const HOLDER_ROOT = "settlement/task-holders";
 const HOLDER_PREFIX = `${HOLDER_ROOT}/`;
 const HOLDER_SUFFIX = ".json";
 
-export function taskHolderObservationSelection(): GitTreeSelection {
+export function debtHolderObservationSelection(): GitTreeSelection {
   return { subtrees: [HOLDER_ROOT] };
 }
 
-export type TaskHolder = Readonly<{
+export type DebtHolder = Readonly<{
   version: 1;
-  taskId: TaskId;
+  debtId: DebtId;
   contractId: ContractId;
   disposition: "held" | "released";
 }>;
 
-function holderPath(taskId: TaskId): string {
-  const digest = createHash("sha256").update(taskId).digest("hex");
+function storedIdentity(debtId: DebtId): string {
+  return `task/${debtId.slice("debt/".length)}`;
+}
+
+function holderPath(debtId: DebtId): string {
+  const digest = createHash("sha256").update(storedIdentity(debtId)).digest("hex");
   return `${HOLDER_PREFIX}${digest}${HOLDER_SUFFIX}`;
 }
 
-function canonicalBytes(holder: TaskHolder): Uint8Array {
-  return Buffer.from(`${JSON.stringify(holder)}\n`);
+function canonicalBytes(holder: DebtHolder): Uint8Array {
+  const { version, debtId, contractId, disposition } = holder;
+  return Buffer.from(`${JSON.stringify({ version, taskId: storedIdentity(debtId), contractId, disposition })}\n`);
 }
 
 function corruption(message: string, cause?: unknown): never {
   throw new AuthorityCorruptionError(message, cause === undefined ? {} : { cause });
 }
 
-function decodeHolder(path: string, bytes: Uint8Array): TaskHolder {
+function decodeHolder(path: string, bytes: Uint8Array): DebtHolder {
   let value: unknown;
   try {
     const text = Buffer.from(bytes).toString("utf8");
     if (!text.endsWith("\n") || text.slice(0, -1).includes("\n"))
-      corruption(`TaskHolder is not one canonical JSON line: ${path}`);
+      corruption(`DebtHolder is not one canonical JSON line: ${path}`);
     value = JSON.parse(text);
   } catch (error) {
     if (error instanceof AuthorityCorruptionError) throw error;
-    return corruption(`invalid TaskHolder JSON: ${path}`, error);
+    return corruption(`invalid DebtHolder JSON: ${path}`, error);
   }
   if (typeof value !== "object" || value === null || Array.isArray(value))
-    corruption(`TaskHolder must be an object: ${path}`);
+    corruption(`DebtHolder must be an object: ${path}`);
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
   if (keys.length !== 4 || keys.some((key) => !["version", "taskId", "contractId", "disposition"].includes(key))) {
-    corruption(`TaskHolder has invalid fields: ${path}`);
+    corruption(`DebtHolder has invalid fields: ${path}`);
   }
-  if (record.version !== 1) corruption(`TaskHolder version must be 1: ${path}`);
-  if (typeof record.taskId !== "string") corruption(`TaskHolder taskId is invalid: ${path}`);
-  if (typeof record.contractId !== "string") corruption(`TaskHolder contractId is invalid: ${path}`);
-  let taskId: TaskId;
+  if (record.version !== 1) corruption(`DebtHolder version must be 1: ${path}`);
+  if (typeof record.taskId !== "string" || !record.taskId.startsWith("task/"))
+    corruption(`DebtHolder identity is invalid: ${path}`);
+  if (typeof record.contractId !== "string") corruption(`DebtHolder contractId is invalid: ${path}`);
+  let debtId: DebtId;
   let owner: ContractId;
   try {
-    parseTaskId(record.taskId);
-    taskId = record.taskId as TaskId;
+    debtId = `debt/${record.taskId.slice("task/".length)}`;
+    parseDebtId(debtId);
     owner = contractId(record.contractId);
   } catch (error) {
-    return corruption(`TaskHolder identity is invalid: ${path}`, error);
+    return corruption(`DebtHolder identity is invalid: ${path}`, error);
   }
   if (record.disposition !== "held" && record.disposition !== "released") {
-    corruption(`TaskHolder disposition is invalid: ${path}`);
+    corruption(`DebtHolder disposition is invalid: ${path}`);
   }
-  const holder: TaskHolder = { version: 1, taskId, contractId: owner, disposition: record.disposition };
-  if (holderPath(taskId) !== path) corruption(`TaskHolder path does not match taskId: ${path}`);
+  const holder: DebtHolder = { version: 1, debtId, contractId: owner, disposition: record.disposition };
+  if (holderPath(debtId) !== path) corruption(`DebtHolder path does not match debtId: ${path}`);
   if (!Buffer.from(canonicalBytes(holder)).equals(Buffer.from(bytes)))
-    corruption(`TaskHolder bytes are not canonical: ${path}`);
+    corruption(`DebtHolder bytes are not canonical: ${path}`);
   return holder;
 }
 
-export type TaskHolderProjection = ReadonlyMap<ContractId, TaskHolder>;
+export type DebtHolderProjection = ReadonlyMap<ContractId, DebtHolder>;
 
-function projectTaskHolders(holders: readonly TaskHolder[]): TaskHolderProjection {
-  const projection = new Map<ContractId, TaskHolder>();
+function projectDebtHolders(holders: readonly DebtHolder[]): DebtHolderProjection {
+  const projection = new Map<ContractId, DebtHolder>();
   for (const holder of holders) {
     if (projection.has(holder.contractId)) {
-      corruption(`Contract has multiple current TaskHolders: ${holder.contractId}`);
+      corruption(`Contract has multiple current DebtHolders: ${holder.contractId}`);
     }
     projection.set(holder.contractId, holder);
   }
   return projection;
 }
 
-function update(holder: TaskHolder): TreeUpdate {
-  return { path: holderPath(holder.taskId), bytes: canonicalBytes(holder) };
+function update(holder: DebtHolder): TreeUpdate {
+  return { path: holderPath(holder.debtId), bytes: canonicalBytes(holder) };
 }
 
-export function claimTaskHolder(taskId: TaskId, owner: ContractId): TreeUpdate {
-  return update({ version: 1, taskId, contractId: owner, disposition: "held" });
+export function claimDebtHolder(debtId: DebtId, owner: ContractId): TreeUpdate {
+  return update({ version: 1, debtId, contractId: owner, disposition: "held" });
 }
 
 type AdmissionOutcome = Readonly<{ kind: string }>;
 
-type TaskHolderAdmission<T extends AdmissionOutcome> =
+type DebtHolderAdmission<T extends AdmissionOutcome> =
   | Readonly<{ kind: "completed"; result: T }>
   | Readonly<{
       kind: "accepted-release-failed";
       result: T;
-      taskId: TaskId;
+      debtId: DebtId;
       diagnostic: string;
     }>;
 
@@ -119,26 +127,26 @@ function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function finishTaskHolderAdmission<T extends AdmissionOutcome>(
-  taskId: TaskId,
+function finishDebtHolderAdmission<T extends AdmissionOutcome>(
+  debtId: DebtId,
   result: T,
   close: () => void,
-): TaskHolderAdmission<T> {
+): DebtHolderAdmission<T> {
   try {
     close();
     return { kind: "completed", result };
   } catch (error) {
     if (result.kind !== "accepted") throw error;
-    return { kind: "accepted-release-failed", result, taskId, diagnostic: detail(error) };
+    return { kind: "accepted-release-failed", result, debtId, diagnostic: detail(error) };
   }
 }
 
-export async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
+export async function admitWithDebtHolderFence<T extends AdmissionOutcome>(
   repository: GitRepository,
-  taskId: TaskId,
+  debtId: DebtId,
   action: () => T | Promise<T>,
-): Promise<TaskHolderAdmission<T>> {
-  const held = await acquireTaskSettlementFence(repository, taskId);
+): Promise<DebtHolderAdmission<T>> {
+  const held = await acquireDebtSettlementFence(repository, debtId);
   let result: T;
   try {
     result = await action();
@@ -150,19 +158,19 @@ export async function admitWithTaskHolderFence<T extends AdmissionOutcome>(
     }
     throw error;
   }
-  return finishTaskHolderAdmission(taskId, result, () => held.close());
+  return finishDebtHolderAdmission(debtId, result, () => held.close());
 }
 
-export async function releaseTaskHolder(
+export async function releaseDebtHolder(
   channel: GitDecodeChannel,
   observation: GitDecisionObservation,
   owner: ContractId,
 ): Promise<TreeUpdate | null> {
-  const current = (await readTaskHolderProjectionFromDecision(channel, observation)).get(owner) ?? null;
+  const current = (await readDebtHolderProjectionFromDecision(channel, observation)).get(owner) ?? null;
   return current === null || current.disposition !== "held" ? null : update({ ...current, disposition: "released" });
 }
 
-type TaskHolderReleasePublication =
+type DebtHolderReleasePublication =
   | Readonly<{ kind: "released" }>
   | Readonly<{ kind: "not-held" }>
   | Readonly<{ kind: "non-published"; diagnostic: string }>;
@@ -173,19 +181,19 @@ async function releasedHolderIsCurrent(
   owner: ContractId,
   expected: Uint8Array,
 ): Promise<boolean> {
-  const current = (await observeTaskHolderProjection(repository, channel)).get(owner) ?? null;
+  const current = (await observeDebtHolderProjection(repository, channel)).get(owner) ?? null;
   return current?.disposition === "released" && Buffer.from(canonicalBytes(current)).equals(expected);
 }
 
 /** Publish the released holder against the same frozen observation that decided the release. */
-export async function publishTaskHolderRelease(
+export async function publishDebtHolderRelease(
   repository: GitRepository,
   channel: GitDecodeChannel,
   observation: GitDecisionObservation,
   owner: ContractId,
   seat: PrivateStatePublicationSeat,
-): Promise<TaskHolderReleasePublication> {
-  const release = await releaseTaskHolder(channel, observation, owner);
+): Promise<DebtHolderReleasePublication> {
+  const release = await releaseDebtHolder(channel, observation, owner);
   if (release === null) return { kind: "not-held" };
   const tree = await updateGitTree(
     repository,
@@ -196,7 +204,7 @@ export async function publishTaskHolderRelease(
     repository,
     tree,
     parent: observation.admission.snapshot.commit,
-    message: `release held Task completion: ${owner}`,
+    message: `release held Debt completion: ${owner}`,
   });
   const publication = await updateRefsAtomically(repository, [
     {
@@ -218,14 +226,14 @@ export async function publishTaskHolderRelease(
     diagnostic:
       publication.kind === "non-published"
         ? detail(publication.error)
-        : "Task holder release publication state is unknown",
+        : "Debt holder release publication state is unknown",
   };
 }
 
-export async function readTaskHolderProjectionFromDecision(
+export async function readDebtHolderProjectionFromDecision(
   channel: GitDecodeChannel,
   observation: GitDecisionObservation,
-): Promise<TaskHolderProjection> {
+): Promise<DebtHolderProjection> {
   const read = {
     snapshot: observation.admission.snapshot,
     readBlobs: async (oids: readonly string[]) => {
@@ -234,76 +242,76 @@ export async function readTaskHolderProjectionFromDecision(
       for (const [oid, object] of objects) {
         if (object.kind === "missing") blobs.set(oid, object);
         else {
-          if (object.type !== "blob") corruption(`TaskHolder Git object is not a blob: ${oid}`);
+          if (object.type !== "blob") corruption(`DebtHolder Git object is not a blob: ${oid}`);
           blobs.set(oid, { kind: "present", bytes: object.bytes });
         }
       }
       return blobs;
     },
   } satisfies Pick<GitReadObservation, "snapshot" | "readBlobs">;
-  return projectTaskHolders(await readTaskHoldersAt(read));
+  return projectDebtHolders(await readDebtHoldersAt(read));
 }
 
-function observeTaskHolderProjection(
+function observeDebtHolderProjection(
   repository: GitRepository,
   channel: GitDecodeChannel,
-): Promise<TaskHolderProjection> {
+): Promise<DebtHolderProjection> {
   return withGitTargetedReadObservation(
     repository,
     channel,
-    taskHolderObservationSelection(),
-    readTaskHolderProjectionAt,
+    debtHolderObservationSelection(),
+    readDebtHolderProjectionAt,
   );
 }
 
-async function heldTaskForContract(
+async function heldDebtForContract(
   repository: GitRepository,
   channel: GitDecodeChannel,
   owner: ContractId,
-): Promise<TaskId | null> {
-  const holder = (await observeTaskHolderProjection(repository, channel)).get(owner) ?? null;
-  return holder?.disposition === "held" ? holder.taskId : null;
+): Promise<DebtId | null> {
+  const holder = (await observeDebtHolderProjection(repository, channel)).get(owner) ?? null;
+  return holder?.disposition === "held" ? holder.debtId : null;
 }
 
-export async function releaseTaskHolderWithFence<T extends AdmissionOutcome>(
+export async function releaseDebtHolderWithFence<T extends AdmissionOutcome>(
   repository: GitRepository,
   channel: GitDecodeChannel,
   owner: ContractId,
   action: () => T | Promise<T>,
-): Promise<TaskHolderAdmission<T>> {
-  const taskId = await heldTaskForContract(repository, channel, owner);
-  return taskId === null
+): Promise<DebtHolderAdmission<T>> {
+  const debtId = await heldDebtForContract(repository, channel, owner);
+  return debtId === null
     ? { kind: "completed", result: await action() }
-    : admitWithTaskHolderFence(repository, taskId, action);
+    : admitWithDebtHolderFence(repository, debtId, action);
 }
 
-export async function readTaskHoldersAt(
+export async function readDebtHoldersAt(
   observation: Pick<GitReadObservation, "snapshot" | "readBlobs">,
-): Promise<readonly TaskHolder[]> {
+): Promise<readonly DebtHolder[]> {
   const entries = [...observation.snapshot.paths].filter(
     ([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob",
   );
   const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
-  const holders: TaskHolder[] = [];
-  const seen = new Set<TaskId>();
+  const holders: DebtHolder[] = [];
+  const seen = new Set<DebtId>();
   for (const [path, entry] of observation.snapshot.paths) {
     if (path === HOLDER_ROOT) {
-      if (entry.type !== "tree") corruption(`TaskHolder authority root is not a tree: ${path}`);
+      if (entry.type !== "tree") corruption(`DebtHolder authority root is not a tree: ${path}`);
       continue;
     }
     if (!path.startsWith(HOLDER_PREFIX)) continue;
-    if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected TaskHolder authority path: ${path}`);
-    if (entry.type !== "blob") corruption(`TaskHolder path is not a blob: ${path}`);
+    if (!path.endsWith(HOLDER_SUFFIX)) corruption(`unexpected DebtHolder authority path: ${path}`);
+    if (entry.type !== "blob") corruption(`DebtHolder path is not a blob: ${path}`);
     const result = blobs.get(entry.oid);
-    if (result?.kind !== "present") corruption(`missing TaskHolder Git object: ${path}`);
+    if (result?.kind !== "present") corruption(`missing DebtHolder Git object: ${path}`);
     const holder = decodeHolder(path, result.bytes);
-    if (seen.has(holder.taskId)) corruption(`duplicate TaskHolder identity: ${holder.taskId}`);
-    seen.add(holder.taskId);
+    if (seen.has(holder.debtId)) corruption(`duplicate DebtHolder identity: ${holder.debtId}`);
+    seen.add(holder.debtId);
     holders.push(holder);
   }
-  return holders.sort((left, right) => Buffer.compare(Buffer.from(left.taskId), Buffer.from(right.taskId)));
+  return holders.sort((left, right) => Buffer.compare(Buffer.from(left.debtId), Buffer.from(right.debtId)));
 }
 
-export async function readTaskHolderProjectionAt(observation: GitReadObservation): Promise<TaskHolderProjection> {
-  return projectTaskHolders(await readTaskHoldersAt(observation));
+export async function readDebtHolderProjectionAt(observation: GitReadObservation): Promise<DebtHolderProjection> {
+  return projectDebtHolders(await readDebtHoldersAt(observation));
 }

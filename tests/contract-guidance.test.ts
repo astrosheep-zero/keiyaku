@@ -148,7 +148,7 @@ test("projection batches each index as generated files grow and preserves bytes 
       );
       assert.equal(
         readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"),
-        "*\n!settings.json\n!tasks/\n!tasks/**\n",
+        "*\n!settings.json\n!debts/\n!debts/**\n",
       );
       for (const [path, bytes] of generated) assert.equal(readFileSync(join(worktree, path), "utf8"), bytes);
       const retried = await projectContractWorktree(capability, current, register);

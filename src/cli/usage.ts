@@ -12,10 +12,10 @@ export const ROOT_USAGE_GUIDE: CliUsageGuide = {
   help: "keiyaku --help",
 };
 
-export const TASK_FAMILY_USAGE_GUIDE: CliUsageGuide = {
-  scope: "keiyaku task",
-  accepts: "keiyaku task <command> ...",
-  help: "keiyaku task --help",
+export const DEBT_FAMILY_USAGE_GUIDE: CliUsageGuide = {
+  scope: "keiyaku debt",
+  accepts: "keiyaku debt <command> ...",
+  help: "keiyaku debt --help",
 };
 
 export function acceptsFromUsage(usage: string): string {

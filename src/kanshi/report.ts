@@ -6,7 +6,7 @@ import type { ContractId } from "../index.js";
 import type { RegionOverlap } from "../library/region.js";
 import type { CurrentPhysicalIssue } from "../protocol/read/observation.js";
 import type { ContractBoard, ContractDisposition, ContractPhase } from "../protocol/read/status.js";
-import type { TaskId, TaskRef, TaskRow } from "../task/index.js";
+import type { DebtId, DebtRef, DebtRow } from "../debt/index.js";
 import type { WorldRoot } from "../world.js";
 
 export type { RegionOverlap };
@@ -19,7 +19,7 @@ export type Section<Value> =
 export type ContractEndpointObservation = ContractDisposition | "missing" | "unavailable";
 
 export type ContractHolderObservation =
-  | Readonly<{ kind: "held"; taskId: TaskId }>
+  | Readonly<{ kind: "held"; debtId: DebtId }>
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "unavailable" }>;
 
@@ -33,7 +33,7 @@ export type ContractKanshiRow = ContractBoard["rows"][number] &
     phase: ContractPhase;
     holder: ContractHolderObservation;
     roster: readonly ContractRosterAttachment[];
-    namespaceTasks?: Section<readonly TaskRow[]>;
+    namespaceDebts?: Section<readonly DebtRow[]>;
     issue?: CurrentPhysicalIssue;
   }>;
 
@@ -43,13 +43,13 @@ export type ContractKanshiBoard = Omit<ContractBoard, "rows"> &
     hasMore?: boolean;
   }>;
 
-export type TaskKanshiRow = TaskRow &
+export type DebtKanshiRow = DebtRow &
   Readonly<{
     contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
-    blockers?: readonly TaskRef[];
+    blockers?: readonly DebtRef[];
   }>;
 
-export type TaskKanshiWorld = BoundedList<TaskKanshiRow> & Readonly<{ root: WorldRoot }>;
+export type DebtKanshiWorld = BoundedList<DebtKanshiRow> & Readonly<{ root: WorldRoot }>;
 
 export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
   Readonly<{
@@ -87,7 +87,7 @@ export type KanshiReport = Readonly<{
   observedAt: string;
   branch: string | null;
   contracts: Section<ContractKanshiBoard>;
-  tasks: Section<TaskKanshiWorld>;
+  debts: Section<DebtKanshiWorld>;
   akuma: Section<AkumaKanshiWorld>;
   region?: Section<RegionRead>;
 }>;

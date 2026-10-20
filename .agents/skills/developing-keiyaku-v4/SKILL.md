@@ -1,6 +1,6 @@
 ---
 name: developing-keiyaku-v4
-description: Use when developing, reviewing, or coordinating work in the Keiyaku v4 repository. Follow the v4 authority law, task board, and the narrow Faye escalation rules below.
+description: Use when developing, reviewing, or coordinating work in the Keiyaku v4 repository. Follow the v4 authority law, debt board, and the narrow Faye escalation rules below.
 ---
 
 # Developing Keiyaku v4
@@ -13,7 +13,7 @@ legacy repository at `/Users/astrosheep/Developer/keiyaku`.
 ## Authority Workflow
 
 - Read the root authority registry and the owner document before touching code.
-- Keep concrete product decisions in their owning root document; skills, tasks,
+- Keep concrete product decisions in their owning root document; skills, debts,
   Square discussion, source code, and tests provide procedure or evidence only.
 - Before designing a mechanism, inspect the repository's existing dependencies
   and Keiyaku's current use of them for a primitive that already satisfies the
@@ -41,22 +41,22 @@ considering any maintainability exemption. A per-file exemption is appropriate
 only when the remaining text is genuinely irreplaceable law for that owner,
 not when a spec or code summary was left in place.
 
-## Repository and task commands
+## Repository and debt commands
 
 Always select the v4 repository explicitly:
 
 ```bash
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task ls
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task show <task-id>
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 debt ls
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 debt show <debt-id>
 ```
 
-Use the task board for confirmed unresolved work and its prerequisites, not
-plans or execution progress. A Task is optional and is never required merely
-because a bounded Contract will be delivered. Do not create a Task that only
-duplicates a Contract objective. A Task is open, done, or dropped; it is never a
-contract binding. `bind --task <task/...>` atomically installs the optional
-Settlement-owned TaskHolder. Contract acceptance settles the current held Task
-to `done`, while abandonment releases it. Otherwise bind without `--task`.
+Use the debt board for confirmed unresolved work and its prerequisites, not
+plans or execution progress. A Debt is optional and is never required merely
+because a bounded Contract will be delivered. Do not create a Debt that only
+duplicates a Contract objective. A Debt is open, done, or dropped; it is never a
+contract binding. `bind --debt <debt/...>` atomically installs the optional
+Settlement-owned DebtHolder. Contract acceptance settles the current held Debt
+to `done`, while abandonment releases it. Otherwise bind without `--debt`.
 
 Contract gate selections accept literal gates and configured bundles together.
 Use `--gates ""` for an explicit empty selection. Read `bind --help` and
@@ -88,8 +88,8 @@ candidate, include `--allowed contract.deliver` and say so in the brief.
 ### Authority-grounded briefs
 
 Every implementation brief must cite the exact current law or owning document
-that defines the behavior being implemented. A task scopes and schedules work;
-it is not design authority. Draft code, v3 precedent, Square discussion, and a
+that defines the behavior being implemented. A debt records unresolved work
+and its prerequisites; it is not a plan or design authority. Draft code, v3 precedent, Square discussion, and a
 worker's "reasonable default" do not authorize product or architecture choices.
 
 A worker may decide only truly local implementation details: equivalent private
@@ -116,15 +116,15 @@ Available roles:
 
 When a Contract's declared gates include `reviewed`:
 
-1. Send a reviewer the exact Contract worktree and wait for its
-   completed report or review receipt. If it should record the verdict itself,
-   dispatch it with `--allowed contract.review` and state both verdicts in the brief.
-2. If it reports blocking findings, fix the worktree and review the changed
-   patch again. Use `review --unsatisfied --summary <text>` only when retaining
-   that negative judgment in Contract history is useful.
-3. When a reviewer finds no blocking findings and returns no review receipt,
-   run `review --satisfied --summary <text>`. When the brief assigned that
-   mutation to the reviewer, inspect its receipt instead. If the same patch is already delivered and all other gates pass,
+1. Review the exact Contract worktree and obtain a completed report or review
+   receipt. When that review records the verdict itself, it uses
+   `review --satisfied` or `review --unsatisfied` and states both verdicts.
+2. If the review reports blocking findings, fix the worktree and review the
+   changed patch again. Use `review --unsatisfied --summary <text>` only when
+   retaining that negative judgment in Contract history is useful.
+3. When a review finds no blocking findings and returns no review receipt,
+   run `review --satisfied --summary <text>`. When that mutation was assigned
+   to the reviewer, inspect its receipt instead. If the same patch is already delivered and all other gates pass,
    the receipt shows placement and the Contract becomes `claimed`. If no
    candidate is delivered yet, the receipt keeps the review and shows the
    placement stop; delivering those same bytes can then complete placement.
@@ -206,7 +206,7 @@ owning root document in the same accepted change when it is durable architecture
 ## Delivery loop
 
 1. Read `docs/README.md`, the owning root document, and neighboring code before editing.
-2. Add or update a Task only for confirmed unresolved work;
+2. Add or update a Debt only for confirmed unresolved work;
    otherwise bind a bounded delivery directly.
 3. Write every settled design into the owning root document before implementation.
 4. Keep changes small, run focused tests first, then source-only typecheck and

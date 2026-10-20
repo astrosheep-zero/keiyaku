@@ -34,13 +34,13 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select"]);
   assert.equal("call" in contracts, false);
   assert.equal("nuke" in contracts, false);
-  assert.equal("tasks" in contracts, false);
+  assert.equal("debts" in contracts, false);
 
   const akumas = Akumas.of(world);
   assert.equal("actor" in akumas, false);
   assert.equal("hooks" in akumas, false);
   assert.equal("requireBranchesToBeUpToDate" in akumas, false);
-  assert.equal("tasks" in akumas, false);
+  assert.equal("debts" in akumas, false);
   assert.throws(
     () => akumas.status({ path: world, akuma: "aku/worker/1234abcd" } as never),
     /does not accept path; select World with Akumas\.of/u,

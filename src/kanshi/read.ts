@@ -11,10 +11,10 @@ import { readDocuments, type ContractDocumentProjection } from "../protocol/read
 import { observeCurrentPhysicalIssue } from "../protocol/read/observation.js";
 import type { ContractBoard, ContractCatalogue, ContractDisposition } from "../protocol/read/status.js";
 import { readContractBoard, readContractCatalogue, readContractPhase } from "../protocol/read/status.js";
-import { readTaskHolderProjectionAt, type TaskHolderProjection } from "../settlement/holder.js";
-import { contractNamespace } from "../task/identity.js";
-import { observeRecentTaskStatus, TaskAuthorityCorruptionError, type TaskRow } from "../task/index.js";
-import { observeTaskBoard } from "../task/operations.js";
+import { readDebtHolderProjectionAt, type DebtHolderProjection } from "../settlement/holder.js";
+import { contractNamespace } from "../debt/identity.js";
+import { observeRecentDebtStatus, DebtAuthorityCorruptionError, type DebtRow } from "../debt/index.js";
+import { observeDebtBoard } from "../debt/operations.js";
 import type { WorldRoot } from "../world.js";
 import type {
   AkumaKanshiWorld,
@@ -26,8 +26,8 @@ import type {
   RegionDeclaration,
   RegionRead,
   Section,
-  TaskKanshiRow,
-  TaskKanshiWorld,
+  DebtKanshiRow,
+  DebtKanshiWorld,
 } from "./report.js";
 import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { selectKanshi, selectRegion } from "./select.js";
@@ -177,12 +177,12 @@ async function readContracts(
   }
 }
 
-type HolderRead = Section<TaskHolderProjection>;
+type HolderRead = Section<DebtHolderProjection>;
 type DispatchRead = Exclude<Section<readonly Dispatch[]>, Readonly<{ kind: "absent" }>>;
 
 async function readHolders(observation: GitReadObservation): Promise<HolderRead> {
   try {
-    return { kind: "present", value: await readTaskHolderProjectionAt(observation) };
+    return { kind: "present", value: await readDebtHolderProjectionAt(observation) };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };
   }
@@ -214,7 +214,7 @@ function attachRoster(
 function decorateContracts(
   contracts: Section<ContractBoard | ContractCatalogue>,
   holders: HolderRead,
-  namespaceTasks?: (id: ContractBoard["rows"][number]["id"]) => Section<readonly TaskRow[]> | undefined,
+  namespaceDebts?: (id: ContractBoard["rows"][number]["id"]) => Section<readonly DebtRow[]> | undefined,
 ): Section<ContractKanshiBoard> {
   if (contracts.kind !== "present") return contracts;
   return {
@@ -222,23 +222,23 @@ function decorateContracts(
     value: {
       ...contracts.value,
       rows: contracts.value.rows.map((row) => {
-        const selected = namespaceTasks?.(row.id);
+        const selected = namespaceDebts?.(row.id);
         if (holders.kind === "failed") {
           return {
             ...row,
             holder: { kind: "unavailable" as const },
             roster: [],
-            ...(selected === undefined ? {} : { namespaceTasks: selected }),
+            ...(selected === undefined ? {} : { namespaceDebts: selected }),
           };
         }
         const holder = holders.kind === "present" ? holders.value.get(row.id) : undefined;
         return {
           ...row,
           roster: [],
-          ...(selected === undefined ? {} : { namespaceTasks: selected }),
+          ...(selected === undefined ? {} : { namespaceDebts: selected }),
           holder:
             holder?.disposition === "held"
-              ? { kind: "held" as const, taskId: holder.taskId }
+              ? { kind: "held" as const, debtId: holder.debtId }
               : { kind: "none" as const },
         };
       }),
@@ -260,16 +260,16 @@ function contractEndpointObserver(contracts: Section<ContractKanshiBoard>): Obse
   };
 }
 
-function joinTasks(
-  rows: ReadonlyArray<Awaited<ReturnType<typeof observeRecentTaskStatus>>["rows"][number]>,
+function joinDebts(
+  rows: ReadonlyArray<Awaited<ReturnType<typeof observeRecentDebtStatus>>["rows"][number]>,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
-): readonly TaskKanshiRow[] {
+): readonly DebtKanshiRow[] {
   const associations = new Map(
     holders.kind === "present"
       ? [...holders.value.values()]
           .filter((holder) => holder.disposition === "held")
-          .map((holder) => [holder.taskId, holder.contractId] as const)
+          .map((holder) => [holder.debtId, holder.contractId] as const)
       : [],
   );
   return rows.map((row) => {
@@ -279,55 +279,55 @@ function joinTasks(
   });
 }
 
-type TaskWorldRead =
+type DebtWorldRead =
   | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "present"; observation: Awaited<ReturnType<typeof observeTaskBoard>> }>
+  | Readonly<{ kind: "present"; observation: Awaited<ReturnType<typeof observeDebtBoard>> }>
   | Readonly<{ kind: "failed"; failure: Readonly<{ message: string; coordinate?: string }> }>;
 
-/** Attribute a Task board failure to the malformed document that caused it, when one is known. */
-function taskFailure(error: unknown): Readonly<{ message: string; coordinate?: string }> {
+/** Attribute a Debt board failure to the malformed document that caused it, when one is known. */
+function debtFailure(error: unknown): Readonly<{ message: string; coordinate?: string }> {
   return {
     message: diagnostic(error),
-    ...(error instanceof TaskAuthorityCorruptionError && error.coordinate !== undefined
+    ...(error instanceof DebtAuthorityCorruptionError && error.coordinate !== undefined
       ? { coordinate: error.coordinate }
       : {}),
   };
 }
 
-async function readTaskWorld(path: WorldRoot | null): Promise<TaskWorldRead> {
+async function readDebtWorld(path: WorldRoot | null): Promise<DebtWorldRead> {
   if (path === null) return { kind: "absent" };
   try {
-    return { kind: "present", observation: await observeTaskBoard(path) };
+    return { kind: "present", observation: await observeDebtBoard(path) };
   } catch (error) {
-    return { kind: "failed", failure: taskFailure(error) };
+    return { kind: "failed", failure: debtFailure(error) };
   }
 }
 
 /**
- * A selected Contract's own Task namespace view. A failed Task board is reported once by the
- * board's Task section, so the entity block omits it rather than repeating the same row.
+ * A selected Contract's own Debt namespace view. A failed Debt board is reported once by the
+ * board's Debt section, so the entity block omits it rather than repeating the same row.
  */
-function namespaceTaskSection(
-  board: TaskWorldRead,
+function namespaceDebtSection(
+  board: DebtWorldRead,
   id: ContractBoard["rows"][number]["id"],
-): Section<readonly TaskRow[]> | undefined {
+): Section<readonly DebtRow[]> | undefined {
   if (board.kind === "absent") return { kind: "absent" };
   if (board.kind === "failed") return undefined;
   return { kind: "present", value: board.observation.selectNamespace(contractNamespace(id)) };
 }
 
-async function readTasks(
+async function readDebts(
   path: WorldRoot,
   holders: HolderRead,
   observeContract: ObserveContractEndpoint,
-): Promise<Section<TaskKanshiWorld>> {
+): Promise<Section<DebtKanshiWorld>> {
   if (holders.kind === "failed") return { kind: "failed", failure: holders.failure };
-  return observeRecentTaskStatus(path, { limit: 10 }).then(
+  return observeRecentDebtStatus(path, { limit: 10 }).then(
     (recent) => ({
       kind: "present" as const,
-      value: { root: path, hasMore: recent.hasMore, rows: joinTasks(recent.rows, holders, observeContract) },
+      value: { root: path, hasMore: recent.hasMore, rows: joinDebts(recent.rows, holders, observeContract) },
     }),
-    (error: unknown) => ({ kind: "failed" as const, failure: taskFailure(error) }),
+    (error: unknown) => ({ kind: "failed" as const, failure: debtFailure(error) }),
   );
 }
 
@@ -439,7 +439,7 @@ async function observeWithoutRepo(
   const contracts = { kind: "absent" as const };
   const holders = { kind: "absent" as const };
   const observeContract = contractEndpointObserver(contracts);
-  const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
+  const debts = world === null ? { kind: "absent" as const } : await readDebts(world, holders, observeContract);
   const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
   const akuma =
     world === null
@@ -451,7 +451,7 @@ async function observeWithoutRepo(
       observedAt,
       branch,
       contracts,
-      tasks,
+      debts,
       akuma,
       ...(region === undefined ? {} : { region: { kind: "absent" as const } }),
     },
@@ -483,15 +483,15 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           contract !== undefined &&
           contractSection.kind === "present" &&
           contractSection.value.rows.some((row) => row.id === contract);
-        const board = selectedContract ? await readTaskWorld(world) : undefined;
+        const board = selectedContract ? await readDebtWorld(world) : undefined;
         const contracts = decorateContracts(
           contractSection,
           holders,
-          selectedContract ? (id) => (id === contract ? namespaceTaskSection(board!, id) : undefined) : undefined,
+          selectedContract ? (id) => (id === contract ? namespaceDebtSection(board!, id) : undefined) : undefined,
         );
         const observeContract = contractEndpointObserver(contracts);
         const aliases = world === null ? { kind: "absent" as const } : await readAliasBindings(world);
-        const tasks = world === null ? { kind: "absent" as const } : await readTasks(world, holders, observeContract);
+        const debts = world === null ? { kind: "absent" as const } : await readDebts(world, holders, observeContract);
         const claimed =
           dispatches.kind === "present"
             ? await claimedAssociatedContracts(observation, dispatches.value)
@@ -507,7 +507,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           observedAt,
           branch,
           contracts: attachRoster(contracts, akuma),
-          tasks,
+          debts,
           akuma,
           ...(regionSection === undefined ? {} : { region: regionSection }),
         } satisfies KanshiReport;
@@ -530,7 +530,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
         observedAt,
         branch,
         contracts: failure,
-        tasks: world === null ? { kind: "absent" } : failure,
+        debts: world === null ? { kind: "absent" } : failure,
         akuma: world === null ? { kind: "absent" } : failure,
         ...(region === undefined ? {} : { region: failure }),
       },
@@ -558,7 +558,7 @@ export type KanshiCategoryInput = Readonly<{
   limit?: number;
 }>;
 
-/** Category observations reuse owner rows without reading the Task board. */
+/** Category observations reuse owner rows without reading the Debt board. */
 async function observeAkumaCategory(
   world: WorldRoot | null,
   repo: ReturnType<typeof scopeForRepo> | undefined,

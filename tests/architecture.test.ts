@@ -94,7 +94,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["akuma/akuma-owner.ts", ["dispatch/index.ts", "readDispatch"], false],
   ["akuma/akuma-wait.ts", ["alias/index.ts", "readAliases"], false],
   ["akuma/akuma-call.ts", ["library/akuma-creation.ts", "callAkumas"], false],
-  ["akuma/akuma-selection-execution.ts", ["task/index.ts", "Tasks"], false],
+  ["akuma/akuma-selection-execution.ts", ["debt/index.ts", "Debts"], false],
   ["protocol/intent.ts", ["core/facts/gate.ts", "latestCurrentAttestations"], true],
   ["protocol/intent.ts", ["verification/declaration.ts", "VERIFIED"], true],
   ["protocol/intent.ts", ["core/facts/gate.ts", "gateReports"], false],
@@ -128,8 +128,8 @@ for (const owner of ["contract-execution", "continuation"]) {
 
 const marker = "/** @architectureCompositionRoot */";
 const akuma: Edge = ["akuma/akuma.ts", "runtime"];
-const tasks: Edge = ["task/index.ts", "tasks"];
-const catalog: Edge = ["task/catalog.ts", "catalog"];
+const debts: Edge = ["debt/index.ts", "debts"];
+const catalog: Edge = ["debt/catalog.ts", "catalog"];
 const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
   [
     "library/keiyaku.ts",
@@ -140,22 +140,22 @@ const compositionCases: readonly (readonly [string, readonly Edge[], string, boo
     marker,
     true,
   ],
-  ["library/akumas.ts", [akuma, tasks], marker, true],
+  ["library/akumas.ts", [akuma, debts], marker, true],
   ["library/akumas/index.ts", [akuma, catalog], marker, true],
   [
     "library/selection.js",
-    [akuma, ["dispatch/index.ts", "observeDispatch"], ["task/created-observation.ts", "observeCreatedTask"]],
+    [akuma, ["dispatch/index.ts", "observeDispatch"], ["debt/created-observation.ts", "observeCreatedDebt"]],
     marker,
     true,
   ],
-  ["library/moved-root.ts", [akuma, tasks], marker, true],
-  ["library/akumas.ts", [akuma, tasks], "", false],
-  ["library/rogue-composition.ts", [akuma, tasks], "", false],
-  ["library/rogue.ts", [akuma, tasks, ["workspace-place.ts", "appoint"]], "", false],
-  ["library/selection-extra.ts", [akuma, tasks], "", false],
+  ["library/moved-root.ts", [akuma, debts], marker, true],
+  ["library/akumas.ts", [akuma, debts], "", false],
+  ["library/rogue-composition.ts", [akuma, debts], "", false],
+  ["library/rogue.ts", [akuma, debts, ["workspace-place.ts", "appoint"]], "", false],
+  ["library/selection-extra.ts", [akuma, debts], "", false],
   [
     "library/nested-marker.ts",
-    [akuma, tasks],
+    [akuma, debts],
     `export const architectureCompositionRoot = true;\n${marker}\nexport function nested(): void {}`,
     false,
   ],

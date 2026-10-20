@@ -17,8 +17,8 @@ import { contractRequestCommands, type ContractRequestPort } from "./library/con
 import { createKeiyakuHandle } from "./library/keiyaku.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
-import { Tasks, type Task, type TaskMutationResult } from "./task/index.js";
-import { taskMutationRequestCommands, type TaskLifecycleVerb, type TaskMutationRequestPort } from "./task/mutation.js";
+import { Debts, type Debt, type DebtMutationResult } from "./debt/index.js";
+import { debtMutationRequestCommands, type DebtLifecycleVerb, type DebtMutationRequestPort } from "./debt/mutation.js";
 import { World } from "./world.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
@@ -94,32 +94,32 @@ function contractUpstream(processConfiguration: BodyProcessConfiguration): Contr
   };
 }
 
-type TaskLifecycleInput = Readonly<{ note?: string; signal?: AbortSignal }>;
+type DebtLifecycleInput = Readonly<{ note?: string; signal?: AbortSignal }>;
 
-const TASK_LIFECYCLE: Readonly<
-  Record<TaskLifecycleVerb, (handle: Task, input: TaskLifecycleInput) => Promise<TaskMutationResult>>
+const DEBT_LIFECYCLE: Readonly<
+  Record<DebtLifecycleVerb, (handle: Debt, input: DebtLifecycleInput) => Promise<DebtMutationResult>>
 > = {
   done: async (handle, input) => await handle.done(input),
   drop: async (handle, input) => await handle.drop(input),
 };
 
 /**
- * The upper Body edge composes the forced-local Tasks SDK the descriptor
+ * The upper Body edge composes the forced-local Debts SDK the descriptor
  * execution entries consume. Each ability is one ordinary local product
- * operation; no generic task(request) dispatcher is introduced here.
+ * operation; no generic debt(request) dispatcher is introduced here.
  */
-function taskMutationRequestPort(): TaskMutationRequestPort {
+function debtMutationRequestPort(): DebtMutationRequestPort {
   return {
-    add: async ({ world, options }) => await Tasks.of(world).add(options),
-    addDocument: async ({ world, document }) => await Tasks.of(world).addDocument(document),
-    update: async ({ world, id, options }) => await Tasks.of(world).task({ id }).update(options),
+    add: async ({ world, options }) => await Debts.of(world).add(options),
+    addDocument: async ({ world, document }) => await Debts.of(world).addDocument(document),
+    update: async ({ world, id, options }) => await Debts.of(world).debt({ id }).update(options),
     lifecycle: async ({ world, verb, id, note, signal }) =>
-      await TASK_LIFECYCLE[verb](Tasks.of(world).task({ id }), {
+      await DEBT_LIFECYCLE[verb](Debts.of(world).debt({ id }), {
         ...(note === undefined ? {} : { note }),
         ...(signal === undefined ? {} : { signal }),
       }),
     batch: async ({ world, verb, ids, note, signal }) =>
-      await Tasks.of(world).batch({
+      await Debts.of(world).batch({
         verb,
         ids,
         ...(note === undefined ? {} : { note }),
@@ -147,7 +147,7 @@ export async function externalRequestCommandsFor(
         }),
       ),
       contractRequestCommands(contractUpstream(processConfiguration)),
-      taskMutationRequestCommands(taskMutationRequestPort()),
+      debtMutationRequestCommands(debtMutationRequestPort()),
     ),
   };
 }

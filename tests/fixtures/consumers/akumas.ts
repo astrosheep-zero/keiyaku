@@ -71,8 +71,8 @@ Keiyaku.with().of({ repo, id: "kei/example" as never });
 Keiyaku.withExecution({ execution: {} });
 // @ts-expect-error the old mixed package-root catalog spelling is removed
 Keiyaku.with().ls({ query: { kind: "akuma" } });
-// @ts-expect-error Task operations do not enter the World-bound Akumas surface
-plural.task({ id: "task/not-an-akuma" });
+// @ts-expect-error Debt operations do not enter the World-bound Akumas surface
+plural.debt({ id: "debt/not-an-akuma" });
 // @ts-expect-error Contract selection retains an explicit Repo coordinate
 Keiyaku.with().select({ id: "kei/example" });
 // @ts-expect-error nuke is a root operation, not a Keiyaku method

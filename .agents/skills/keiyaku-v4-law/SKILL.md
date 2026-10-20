@@ -1,6 +1,6 @@
 ---
 name: keiyaku-v4-law
-description: Navigate and apply the Keiyaku v4 authority documents when changing or reviewing v4 architecture, facts, protocol, verbs, reconcile, persistence, lifecycle, identity, CLI, task, or response surfaces.
+description: Navigate and apply the Keiyaku v4 authority documents when changing or reviewing v4 architecture, facts, protocol, verbs, reconcile, persistence, lifecycle, identity, CLI, debt, or response surfaces.
 ---
 
 # Keiyaku v4 Authority Guide
@@ -31,9 +31,9 @@ Porting documents are planning evidence and never an owner chapter.
 ## Change Discipline
 
 - Treat root `docs/` as the only design authority. Do not copy a ruling into
-  this skill, a task, a worker brief, a code comment, or a second document.
+  this skill, a debt, a worker brief, a code comment, or a second document.
 - Cite the exact owner document and section in every implementation or review
-  brief. A task scopes work; it does not authorize design.
+  brief. A debt scopes work; it does not authorize design.
 - If the owner documents do not settle a choice that affects public behavior,
   persistence, authority, data flow, recovery, concurrency, complexity, or
   process topology, stop the dependent implementation and report the concrete
@@ -46,7 +46,7 @@ Porting documents are planning evidence and never an owner chapter.
 
 ## References
 
-Use [`developing-keiyaku-v4`](../developing-keiyaku-v4/SKILL.md) for task-board,
+Use [`developing-keiyaku-v4`](../developing-keiyaku-v4/SKILL.md) for debt-board,
 Akuma dispatch, observation-window, and Faye-escalation procedure. Use
 [`review-keiyaku-v4`](../review-keiyaku-v4/SKILL.md) for review
 method and test-quality judgment. Neither skill is an authority source.

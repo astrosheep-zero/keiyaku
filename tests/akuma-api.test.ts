@@ -32,7 +32,7 @@ import { cliJson } from "./support/cli-fixtures.js";
 import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
-import { taskAuthorityFile } from "./support/task.js";
+import { debtAuthorityFile } from "./support/debt.js";
 
 function freezeWalk(value: unknown): void {
   if (typeof value !== "object" || value === null) return;
@@ -151,15 +151,15 @@ test("Akuma.birth has no prompt and select is synchronous", async (context) => {
   }
 });
 
-test("standalone Akuma operations never read optional Alias or Task authority", async () => {
+test("standalone Akuma operations never read optional Alias or Debt authority", async () => {
   await withWaitedTellFixture(async ({ born }) => {
     const value = await born("51a1e001", answering("standalone answer"));
     // Corrupt every optional cross-product authority a standalone operation must never touch.
     mkdirSync(join(value.world, ".keiyaku", "akuma"), { recursive: true });
     writeFileSync(join(value.world, ".keiyaku", "akuma", "alias.json"), "not json\n");
-    const brokenTask = taskAuthorityFile(value.world, "task/corrupt-authority");
-    mkdirSync(join(value.world, ".keiyaku", "tasks"), { recursive: true });
-    writeFileSync(brokenTask, "not a task document\n");
+    const brokenDebt = debtAuthorityFile(value.world, "debt/corrupt-authority");
+    mkdirSync(join(value.world, ".keiyaku", "debts"), { recursive: true });
+    writeFileSync(brokenDebt, "not a debt document\n");
     const selected = Akuma.select(value.world, value.allocated.id);
     assert.equal((await selected.status()).id, value.allocated.id);
     assert.equal(Array.isArray((await selected.history()).rows), true);

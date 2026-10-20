@@ -6,19 +6,19 @@ import {
 } from "../coordination/sqlite-transaction-lock.js";
 import { commonGitDirectory } from "../git/repository.js";
 import type { GitRepository } from "../git/process.js";
-import type { TaskId } from "../task/identity.js";
+import type { DebtId } from "../debt/identity.js";
 
-export function settlementFencePath(repository: GitRepository, taskId: TaskId): string {
-  const locator = createHash("sha256").update(taskId).digest("hex");
+export function settlementFencePath(repository: GitRepository, debtId: DebtId): string {
+  const locator = createHash("sha256").update(debtId).digest("hex");
   return resolve(commonGitDirectory(repository), "keiyaku", "locks", "settlement", `${locator}.sqlite`);
 }
 
-export function acquireTaskSettlementFence(
+export function acquireDebtSettlementFence(
   repository: GitRepository,
-  taskId: TaskId,
+  debtId: DebtId,
 ): Promise<HeldSqliteTransactionLock> {
   return acquireSqliteTransactionLock({
-    path: settlementFencePath(repository, taskId),
+    path: settlementFencePath(repository, debtId),
     mode: "immediate",
   });
 }

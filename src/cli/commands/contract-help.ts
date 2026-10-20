@@ -16,7 +16,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "optional",
     flags: {
       actor: "value",
-      task: "value",
+      debt: "value",
       target: "value",
       "no-target": "boolean",
       after: "repeat",
@@ -25,7 +25,7 @@ export const CONTRACT_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "bind [--task <task/...>] [--target <ref> | --no-target] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] - | bind --fork-of <kei/...> [--target <ref> | --no-target] [--actor <actor>]",
+      "bind [--debt <debt/...>] [--target <ref> | --no-target] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] - | bind --fork-of <kei/...> [--target <ref> | --no-target] [--actor <actor>]",
     purpose: "Create a Contract from stdin Markdown or copy an existing Contract as a starting point.",
     details: [
       "--target names one existing local branch literally; it is never created and never",
@@ -194,8 +194,8 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean" },
     usage:
-      'ls task[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]',
-    purpose: "List tasks (ls task), contracts (ls kei), or akumas (ls aku).",
+      'ls debt[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]',
+    purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
       "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists the living Akumas under one name.",
@@ -232,7 +232,7 @@ export const CONTRACT_COMMAND_SPECS = {
     usage: "nuke [--confirm <world-directory>]",
     purpose: "Remove Keiyaku-owned data from this World.",
     details:
-      "Stops Akumas and removes this World's Tasks and Keiyaku-created worktrees and Git references. --confirm must exactly match this World's directory; source files are not deleted.",
+      "Stops Akumas and removes this World's Debts and Keiyaku-created worktrees and Git references. --confirm must exactly match this World's directory; source files are not deleted.",
   },
   settings: {
     positional: "none",

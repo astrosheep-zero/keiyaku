@@ -34,10 +34,10 @@ import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
 import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
-import { projectTaskBoardObservation } from "../src/task/board.js";
-import { serializeTaskDocument, type TaskDocument } from "../src/task/document.js";
-import { Tasks, type TaskId } from "../src/task/index.js";
-import { readBoard } from "../src/task/store.js";
+import { projectDebtBoardObservation } from "../src/debt/board.js";
+import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
+import { Debts, type DebtId } from "../src/debt/index.js";
+import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -52,10 +52,10 @@ import {
 import { Schema } from "../src/akuma/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import {
-  taskAuthorityFile,
-  taskDocument as creatorTask,
-  writeTaskAuthority as writeCreatorTask,
-} from "./support/task.js";
+  debtAuthorityFile,
+  debtDocument as creatorDebt,
+  writeDebtAuthority as writeCreatorDebt,
+} from "./support/debt.js";
 
 let fixtureHistory = 0;
 
@@ -113,7 +113,7 @@ async function initializeUnbornFixture(
   copyFileSync(template.leash, paths.leash, constants.COPYFILE_EXCL);
 }
 
-function taskCatalogDocument(id: TaskId, updatedAt: string): TaskDocument {
+function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
   return {
     id,
     title: id,
@@ -808,8 +808,8 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "keiyaku-facade-catalog-home-"));
   try {
     const source = await answered(root, "worker", "00000001");
-    const task = await Tasks.of(await World.at(root)).add({ title: "Catalog task" });
-    assert.equal(task.kind, "accepted");
+    const debt = await Debts.of(await World.at(root)).add({ title: "Catalog debt" });
+    assert.equal(debt.kind, "accepted");
     mkdirSync(join(home, "akuma"));
     writeFileSync(
       join(home, "akuma", "reviewer.md"),
@@ -823,16 +823,16 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
         "",
       ].join("\n"),
     );
-    const tasks = await Tasks.of(await World.at(root)).list({ selection: "all" });
-    assert.equal(tasks.kind, "accepted");
-    assert.deepEqual(tasks.value.rows, [
+    const debts = await Debts.of(await World.at(root)).list({ selection: "all" });
+    assert.equal(debts.kind, "accepted");
+    assert.deepEqual(debts.value.rows, [
       {
-        id: task.value.id,
-        title: "Catalog task",
+        id: debt.value.id,
+        title: "Catalog debt",
         state: "open",
         priority: 2,
         disposition: "ready",
-        updatedAt: task.value.updatedAt,
+        updatedAt: debt.value.updatedAt,
         bodyPresent: false,
       },
     ]);
@@ -1037,22 +1037,22 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
   }
 });
 
-test("recent Task catalog does not skip older-mtime malformed authority", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-task-catalog-malformed-");
-  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
+test("recent Debt catalog does not skip older-mtime malformed authority", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-facade-debt-catalog-malformed-");
+  mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
   const world = await World.at(root);
-  const older = taskAuthorityFile(world, "task/older-malformed");
-  const newer = taskCatalogDocument("task/newer-valid", "2026-08-31T00:00:00.000Z");
-  writeFileSync(older, "not a task document\n");
+  const older = debtAuthorityFile(world, "debt/older-malformed");
+  const newer = debtCatalogDocument("debt/newer-valid", "2026-08-31T00:00:00.000Z");
+  writeFileSync(older, "not a debt document\n");
   utimesSync(older, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
-  writeFileSync(taskAuthorityFile(world, newer.id), serializeTaskDocument(newer));
+  writeFileSync(debtAuthorityFile(world, newer.id), serializeDebtDocument(newer));
   utimesSync(
-    taskAuthorityFile(world, newer.id),
+    debtAuthorityFile(world, newer.id),
     new Date("2099-01-01T00:00:00.000Z"),
     new Date("2099-01-01T00:00:00.000Z"),
   );
 
-  await assert.rejects(Tasks.of(world).list({ selection: "all", limit: 1 }), /front matter/u);
+  await assert.rejects(Debts.of(world).list({ selection: "all", limit: 1 }), /front matter/u);
 });
 
 test("named Address resolution refuses a Contract short-id shared with an Alias", async (t) => {
@@ -1218,33 +1218,33 @@ test("selection status projects Dispatch association without changing Akuma core
   assert.deepEqual(waited.observations[0]!.contract, { kind: "associated", contractId: owner });
 });
 
-test("multi-member wait and kill project every member from one Task board snapshot", async (t) => {
+test("multi-member wait and kill project every member from one Debt board snapshot", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-created-set-");
   const worker = await answered(root, "worker", "00000001");
   const reviewer = await answered(root, "reviewer", "00000002");
   const world = await World.at(root);
-  writeCreatorTask(
+  writeCreatorDebt(
     world,
-    creatorTask({
-      id: "task/from-worker",
+    creatorDebt({
+      id: "debt/from-worker",
       title: "From worker",
       createdBy: worker.id,
       priority: 1,
     }),
   );
-  writeCreatorTask(
+  writeCreatorDebt(
     world,
-    creatorTask({
-      id: "task/from-reviewer",
+    creatorDebt({
+      id: "debt/from-reviewer",
       title: "From reviewer",
       createdBy: reviewer.id,
       priority: 0,
       state: "drop",
     }),
   );
-  const expected = projectTaskBoardObservation((await readBoard(world)).board);
+  const expected = projectDebtBoardObservation((await readBoard(world)).board);
   const status = await Akumas.of(root).status({ akuma: worker.id });
-  assert.deepEqual(status.createdTasks, { kind: "present", rows: expected.selectCreatedBy(worker.id) });
+  assert.deepEqual(status.createdDebts, { kind: "present", rows: expected.selectCreatedBy(worker.id) });
   const waited = await Akumas.of(root).wait({
     akuma: [worker.id, reviewer.id],
     completion: "all",
@@ -1255,7 +1255,7 @@ test("multi-member wait and kill project every member from one Task board snapsh
     [worker.id, reviewer.id],
   );
   assert.deepEqual(
-    waited.observations.map((observation) => observation.createdTasks),
+    waited.observations.map((observation) => observation.createdDebts),
     [
       { kind: "present", rows: expected.selectCreatedBy(worker.id) },
       { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
@@ -1279,22 +1279,22 @@ function fixtureRepository(t: TestContext) {
   return repository;
 }
 
-test("failed Task associations do not hide readable roster members or kill evidence", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-roster-task-failure-");
+test("failed Debt associations do not hide readable roster members or kill evidence", async (t) => {
+  const root = fixtureRoot(t, "keiyaku-roster-debt-failure-");
   const a = await answered(root, "worker", "a0000001");
   const b = await answered(root, "worker", "a0000002");
-  mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "tasks", "bad.md"), "not Task authority\n");
+  mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "debts", "bad.md"), "not Debt authority\n");
   const status = await Akumas.of(root).status({
     akuma: a.id });
   assert.equal(status.status.id, a.id);
-  assert.equal(status.createdTasks.kind, "failed");
+  assert.equal(status.createdDebts.kind, "failed");
   const waited = await Akumas.of(root).wait({
     akuma: [a.id, b.id], completion: "all", timeoutMs: 0 });
   assert.deepEqual(waited.observations.map((view) => view.status.id).sort(), [a.id, b.id]);
   assert.deepEqual(
-    waited.observations.map((view) => view.createdTasks),
-    [status.createdTasks, status.createdTasks],
+    waited.observations.map((view) => view.createdDebts),
+    [status.createdDebts, status.createdDebts],
   );
   const killed = await Akumas.of(root).kill({
     akuma: [a.id, b.id] });

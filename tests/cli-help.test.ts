@@ -9,7 +9,7 @@ import { CliUsageError, parseArgv, renderHelp, renderRootHelp } from "../src/cli
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
-import { renderTaskHelp } from "../src/cli/commands/task-grammar.js";
+import { renderDebtHelp } from "../src/cli/commands/debt-grammar.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
@@ -17,9 +17,9 @@ test("help resolves the longest legal command-word prefix before syntax scanning
   assert.deepEqual(parseArgv(["bind", "--unknown", "--help", "-"]), {
     help: { kind: "contract", command: "bind" },
   });
-  assert.deepEqual(parseArgv(["task", "unknown", "--help"]), { help: { kind: "task" } });
-  assert.deepEqual(parseArgv(["task", "show", "bad", "--help"]), {
-    help: { kind: "task", action: "show" },
+  assert.deepEqual(parseArgv(["debt", "unknown", "--help"]), { help: { kind: "debt" } });
+  assert.deepEqual(parseArgv(["debt", "show", "bad", "--help"]), {
+    help: { kind: "debt", action: "show" },
   });
   assert.deepEqual(parseArgv(["fork", "--json", "--help"]), {
     help: { kind: "akuma", action: "fork" },
@@ -35,11 +35,13 @@ test("help resolves the longest legal command-word prefix before syntax scanning
 
 test("namespace and leaf help identify an executable command", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
+  assert.match(renderRootHelp(), /Debt — unresolved-work ledger/u);
+  assert.doesNotMatch(renderRootHelp(), /plan memory|keiyaku task/u);
   assert.match(renderRootHelp(), /--workdir <path>/u);
   assert.match(renderRootHelp(), /Outcomes:  exit 0 accepted · 1 refused · 2 retry · 3 failed · 64 usage/u);
   assert.match(renderRootHelp(), /--version\s+Print the running package version\./u);
   assert.match(renderInstallHelp(), /install/u);
-  assert.match(renderTaskHelp("add"), /usage  keiyaku task add/u);
+  assert.match(renderDebtHelp("add"), /usage  keiyaku debt add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
@@ -91,10 +93,10 @@ test("help projections reflow at the requested terminal width without splitting 
 
 test("help is stdout zero and does not enter an absent world", async () => {
   const { exit, stdout, stderr } = await captureOutput(() =>
-    main(["-C", "/definitely/absent/keiyaku-world", "task", "unknown", "--json", "-", "--help"]),
+    main(["-C", "/definitely/absent/keiyaku-world", "debt", "unknown", "--json", "-", "--help"]),
   );
   assert.equal(exit, 0);
-  assert.match(stdout, /^usage  keiyaku task <command>/u);
+  assert.match(stdout, /^usage  keiyaku debt <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
 });

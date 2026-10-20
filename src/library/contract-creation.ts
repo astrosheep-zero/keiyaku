@@ -20,7 +20,7 @@ import {
   type LocalContractCompositionCapture,
 } from "./contract-settings.js";
 import type { BindInput } from "./contract-types.js";
-import { actorOption, normalizedList, requireInput, requireMarkdown, taskOption } from "./input.js";
+import { actorOption, normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
 import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
 import { project, validated, type OutcomeProjection } from "./outcome.js";
@@ -43,7 +43,7 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
     const forkOf = values.forkOf;
     const allowed =
       forkOf === undefined
-        ? ["repo", "markdown", "task", "target", "workspace", "actor", "after", "gates"]
+        ? ["repo", "markdown", "debt", "target", "workspace", "actor", "after", "gates"]
         : ["repo", "forkOf", "target", "workspace", "actor"];
     requireInput(input, "Keiyaku.bind input", allowed);
     if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
@@ -61,7 +61,7 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
       document,
       actor,
       target: values.target as string | null | undefined,
-      task: forkOf === undefined ? taskOption(values.task) : undefined,
+      debt: forkOf === undefined ? debtOption(values.debt) : undefined,
       gates: derived,
       after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
     };
@@ -185,7 +185,7 @@ async function markdownBind(
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Keiyaku,
 ): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
-  const { task, target, actor, gates, after } = prepared;
+  const { debt, target, actor, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
   const targetSelection = bindTargetSelection(target);
   const admission = await prepareMarkdownBind({
@@ -197,7 +197,7 @@ async function markdownBind(
     after,
     workspace: "worktree",
     targetSelection,
-    ...(task === undefined ? {} : { task }),
+    ...(debt === undefined ? {} : { debt }),
     ...actor,
   });
   const leading = admission.admission === null ? admission.result : admission.admission.result;

@@ -17,13 +17,13 @@ surface. Read every owner named for the surface being changed.
 | [git.md](git.md) | Git world, worktrees, refs, delivery preparation and placement, pins, and byte custody. |
 | [git-reconciliation.md](git-reconciliation.md) | Replayable Git effects, worktree hooks, reconciliation reports, and lag. |
 | [workspace.md](workspace.md) | Contract worktree appointment, guidance projection, ignored files, and terminal cleanup. |
-| [settlement.md](settlement.md) | Post-admission cross-product settlement, Task associations, context installation, and replay. |
+| [settlement.md](settlement.md) | Post-admission cross-product settlement, Debt associations, context installation, and replay. |
 | [dispatch.md](dispatch.md) | Immutable Akuma-to-Contract dispatch facts, Git persistence, publication, and reads. |
 | [alias.md](alias.md) | World-local movable Akuma aliases, file authority, locking, and durable replacement. |
 | [cli.md](cli.md) | Root invocation boundary, command intent, adaptation, and refusal direction. |
-| [cli-task.md](cli-task.md) | Task command intent, refusal direction, and Task-facing presentation. |
+| [cli-debt.md](cli-debt.md) | Debt command intent, refusal direction, and Debt-facing presentation. |
 | [cli-output.md](cli-output.md) | Help composition, shared rendering, and process outcome direction. |
-| [task.md](task.md) | Separate in-package task product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
+| [debt.md](debt.md) | Separate in-package debt product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
 | [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, and placement. |
 | [akuma-allowed.md](akuma-allowed.md) | Forwarded mutable-action vocabulary, birth-time reduction, Soul interpretation, and keyed admission. |
 | [akuma-heart.md](akuma-heart.md) | Akuma durable life evidence, custody, activity retention, and observation. |

@@ -63,17 +63,17 @@ test("category status refuses invalid combinations before reading the invocation
   }
 });
 
-test("task query defaults to active rows and opts into terminal rows", () => {
+test("debt query defaults to active rows and opts into terminal rows", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-query-"));
   try {
-    const added = runCli(root, ["task", "add", "Active", "--json"]);
+    const added = runCli(root, ["debt", "add", "Active", "--json"]);
     assert.equal(added.status, 0, added.stderr);
-    const closed = runCli(root, ["task", "add", "Closed", "--json"]);
+    const closed = runCli(root, ["debt", "add", "Closed", "--json"]);
     assert.equal(closed.status, 0, closed.stderr);
     const id = JSON.parse(closed.stdout).value.id as string;
-    assert.equal(runCli(root, ["task", "done", id]).status, 0);
+    assert.equal(runCli(root, ["debt", "done", id]).status, 0);
     const query = (flags: readonly string[]) => {
-      const result = runCli(root, ["task", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
+      const result = runCli(root, ["debt", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
       assert.equal(result.status, 0, result.stderr);
       return (JSON.parse(result.stdout).value.rows as readonly { id: string }[]).map((row) => row.id);
     };
@@ -90,10 +90,10 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   context.after(() => rmSync(root, { recursive: true, force: true }));
   // Keep the output large enough to block the pipe without exceeding the OS's
   // per-argument limit while creating the fixture.
-  const added = runCli(root, ["task", "add", "-", "--json"], `---\ntitle: Title\n---\n\n${"x".repeat(500_000)}`);
+  const added = runCli(root, ["debt", "add", "-", "--json"], `---\ntitle: Title\n---\n\n${"x".repeat(500_000)}`);
   assert.equal(added.status, 0, added.stderr ?? added.error?.message);
   const id = JSON.parse(added.stdout).value.id as string;
-  const child = spawn(process.execPath, [builtCli(), "task", "show", id, "--json"], {
+  const child = spawn(process.execPath, [builtCli(), "debt", "show", id, "--json"], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -182,9 +182,9 @@ test("reconcile failure reports exit 1 at the CLI boundary", async () => {
       lags: [
         {
           kind: "settlement-failed",
-          surface: "task" as const,
+          surface: "debt" as const,
           contractId: contractId("kei/example"),
-          diagnostic: "task failed",
+          diagnostic: "debt failed",
         },
       ],
     },
@@ -192,12 +192,12 @@ test("reconcile failure reports exit 1 at the CLI boundary", async () => {
   assert.equal(reconcileHasFailure(report), true);
 });
 
-test("task show preserves a multi-line body end to end", () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-task-"));
-  const added = runCli(root, ["task", "add", "Title", "--body", "first\nsecond", "--json"]);
+test("debt show preserves a multi-line body end to end", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-debt-"));
+  const added = runCli(root, ["debt", "add", "Title", "--body", "first\nsecond", "--json"]);
   assert.equal(added.status, 0);
   const id = JSON.parse(added.stdout).value.id as string;
-  const shown = runCli(root, ["task", "show", id]);
+  const shown = runCli(root, ["debt", "show", id]);
   assert.equal(shown.status, 0);
   assert.match(shown.stdout, /body\n  first\n  second/u);
   rmSync(root, { recursive: true, force: true });
@@ -312,18 +312,18 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
   }
 });
 
-test("unknown task command scopes minimal usage to task", () => {
+test("unknown debt command scopes minimal usage to debt", () => {
   assert.throws(
-    () => parseArgv(["task", "nonsense"]),
+    () => parseArgv(["debt", "nonsense"]),
     (error: unknown) =>
       error instanceof CliUsageError &&
-      error.diagnostic === "unknown task command: nonsense" &&
+      error.diagnostic === "unknown debt command: nonsense" &&
       error.message ===
         [
-          "× usage  keiyaku task",
+          "× usage  keiyaku debt",
           "  given  nonsense",
-          "  accepts  keiyaku task <command> ...",
-          "  help  keiyaku task --help",
+          "  accepts  keiyaku debt <command> ...",
+          "  help  keiyaku debt --help",
         ].join("\n"),
   );
 });
@@ -350,12 +350,12 @@ test("review actor usage stays leaf-scoped and help advertises the flag", () => 
 
 test("invalid args keep diagnostic with deepest leaf usage", () => {
   assert.throws(
-    () => parseArgv(["bind", "--task"]),
+    () => parseArgv(["bind", "--debt"]),
     (error: unknown) =>
       error instanceof CliUsageError &&
-      error.diagnostic === "--task requires a value" &&
+      error.diagnostic === "--debt requires a value" &&
       error.message.includes("× usage  keiyaku bind") &&
-      error.message.includes("  reason  --task requires a value") &&
+      error.message.includes("  reason  --debt requires a value") &&
       error.message.includes("  accepts  keiyaku bind ") &&
       error.message.includes("  help  keiyaku bind --help") &&
       !error.message.includes("Contract — standing acceptance"),
@@ -530,19 +530,19 @@ test("usage refusal exits 64 without touching an absent world", async () => {
   assert.doesNotMatch(result.stderr, /no Keiyaku world/u);
 });
 
-test("a worldless lifecycle request refuses every requested Task in its native shape", () => {
+test("a worldless lifecycle request refuses every requested Debt in its native shape", () => {
   const cwd = mkdtempSync(join(tmpdir(), "keiyaku-usage-worldless-"));
   try {
-    const single = runCli(cwd, ["task", "drop", "task/alpha"]);
+    const single = runCli(cwd, ["debt", "drop", "debt/alpha"]);
     assert.equal(single.status, 1);
     assert.match(single.stdout, /^× drop refused$/mu);
-    assert.match(single.stdout, /^  reason  task missing$/mu);
-    assert.match(single.stdout, /^  task  task\/alpha$/mu);
-    const plural = runCli(cwd, ["task", "done", "task/alpha", "task/beta", "--json"]);
+    assert.match(single.stdout, /^  reason  debt missing$/mu);
+    assert.match(single.stdout, /^  debt  debt\/alpha$/mu);
+    const plural = runCli(cwd, ["debt", "done", "debt/alpha", "debt/beta", "--json"]);
     assert.equal(plural.status, 1);
     assert.deepEqual(
       (JSON.parse(plural.stdout).items as readonly { id: string }[]).map((item) => item.id),
-      ["task/alpha", "task/beta"],
+      ["debt/alpha", "debt/beta"],
     );
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -558,10 +558,10 @@ test("a bare invocation prints the root help index instead of a usage refusal", 
   assert.doesNotMatch(result.stdout, /× usage/u);
 });
 
-test("a bare task family prints the task help index instead of a usage refusal", async () => {
-  const result = await captureOutput(() => main(["task"]));
+test("a bare debt family prints the debt help index instead of a usage refusal", async () => {
+  const result = await captureOutput(() => main(["debt"]));
   assert.equal(result.exit, 0);
   assert.equal(result.stderr, "");
-  assert.match(result.stdout, /task <command>/u);
+  assert.match(result.stdout, /debt <command>/u);
   assert.doesNotMatch(result.stdout, /× usage/u);
 });

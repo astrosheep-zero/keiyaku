@@ -22,7 +22,7 @@ import { commonGitDirectory, repositoryAt } from "../src/git/repository.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { appointManagedWorktrees, placeRegisterPath, readPlaceRegister } from "../src/workspace-place.js";
 import { contractId } from "../src/core/facts/types.js";
-import { Tasks } from "../src/task/index.js";
+import { Debts } from "../src/debt/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import { captureOutput, cliJson } from "./support/cli-fixtures.js";
@@ -138,8 +138,8 @@ test("confirmed nuke stops live writers and removes owned state while preserving
   const fixture = await gitNukeFixture();
   try {
     const { raw, world, managedPath, foreign } = fixture;
-    const tasks = Tasks.of(world);
-    assert.equal((await tasks.add({ title: "Remove me" })).kind, "accepted");
+    const debts = Debts.of(world);
+    assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
     const namespace = join(world, ".keiyaku", "namespace", "current");
     mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
     writeFileSync(namespace, "retained\n");
@@ -171,7 +171,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 3, worktrees: 1, tasks: 1 } },
+      value: { removed: { refs: 3, worktrees: 1, debts: 1 } },
     });
     await running.body;
     assert.equal(existsSync(running.allocated.paths.heart), false);
@@ -183,7 +183,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     assert.equal(readFileSync(recognizedLink, "utf8"), "preserve recognized unknown\n");
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "alias.json")), false);
     assert.equal(existsSync(join(world, ".keiyaku", "locks", "akuma-alias.sqlite")), true);
-    assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
+    assert.equal(existsSync(join(world, ".keiyaku", "debts", "remove-me.md")), false);
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
@@ -200,7 +200,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
@@ -227,7 +227,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
@@ -244,7 +244,7 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
   } finally {
     rmSync(world, { recursive: true, force: true });
@@ -255,8 +255,8 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
   const fixture = await gitNukeFixture();
   try {
     const { raw, world, managedPath, foreign } = fixture;
-    const tasks = Tasks.of(world);
-    assert.equal((await tasks.add({ title: "Remove me" })).kind, "accepted");
+    const debts = Debts.of(world);
+    assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "14000000" });
     const heart = new DatabaseSync(allocated.paths.heart);
     heart.exec(
@@ -292,7 +292,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 3, worktrees: 1, tasks: 1 } },
+      value: { removed: { refs: 3, worktrees: 1, debts: 1 } },
     });
     assert.equal(existsSync(allocated.paths.heart), false);
     assert.equal(existsSync(allocated.paths.leash), false);
@@ -303,7 +303,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
       false,
     );
     assert.equal(readFileSync(recognizedUnknown, "utf8"), "preserve recognized unknown\n");
-    assert.equal(existsSync(join(world, ".keiyaku", "tasks", "remove-me.md")), false);
+    assert.equal(existsSync(join(world, ".keiyaku", "debts", "remove-me.md")), false);
     assert.equal(existsSync(managedPath), false);
     assert.throws(() => raw.run(["show-ref", "--verify", "--quiet", "refs/heads/keiyaku-state"]));
     assert.equal(raw.run(["show-ref", "--verify", "--quiet", "refs/heads/business-branch"]), "");
@@ -317,7 +317,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
   } finally {
     rmSync(fixture.raw.path, { recursive: true, force: true });
@@ -386,7 +386,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.request.json")), false);
     assert.equal(existsSync(join(sequence, "41111111-1111-4111-8111-111111111111.receipt.json")), false);
@@ -413,7 +413,7 @@ test("confirmed nuke preserves unknown descendants inside the request channel", 
       world,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     });
     for (const name of ["01", "00", "9007199254740992", "9007199254740993"]) {
       assert.equal(
@@ -430,8 +430,8 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
   const fixture = await gitNukeFixture();
   const { world, raw } = fixture;
   try {
-    const task = await Tasks.of(world).add({ title: "Keep task while writer lives" });
-    assert.ok(task.kind === "accepted");
+    const debt = await Debts.of(world).add({ title: "Keep debt while writer lives" });
+    assert.ok(debt.kind === "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
     const soul: Soul = {
@@ -455,7 +455,7 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       assert.equal(result.kind, "accepted");
       assert.equal(result.value.removed.refs, 0);
       assert.equal(result.value.removed.worktrees, 0);
-      assert.equal(result.value.removed.tasks, 0);
+      assert.equal(result.value.removed.debts, 0);
       assert.deepEqual(result.effects, [
         {
           kind: "reset-owner-stopped",
@@ -468,7 +468,7 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), true);
       assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
       assert.equal(existsSync(fixture.managedPath), true);
-      assert.ok(await Tasks.of(world).task({ id: task.value.id }).read());
+      assert.ok(await Debts.of(world).debt({ id: debt.value.id }).read());
       assert.equal(existsSync(allocated.paths.heart), true);
       assert.equal(existsSync(allocated.paths.leash), true);
       assert.equal(existsSync(allocated.paths.log), true);
@@ -735,11 +735,11 @@ test("nuke receipt names confirmed removals and retained coordination locks", ()
     world: "/world" as never,
     effects: [],
     pending: [],
-    value: { removed: { refs: 3, worktrees: 1, tasks: 2 } },
+    value: { removed: { refs: 3, worktrees: 1, debts: 2 } },
   });
   assert.match(text, /refs removed  3/u);
   assert.match(text, /worktrees removed  1/u);
-  assert.match(text, /task stores removed  2/u);
+  assert.match(text, /debt stores removed  2/u);
   assert.match(text, /locks  may remain · SQLite coordination files cannot be removed safely/u);
 });
 
@@ -751,7 +751,7 @@ test("CLI nuke exit code reports owner failure", () => {
       world: "/world" as never,
       effects: [{ kind: "reset-owner-stopped", world: "/world", owner: "git", diagnostic: "busy" }],
       pending: [{ surface: "reset", required: true }],
-      value: { removed: { refs: 1, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 1, worktrees: 0, debts: 0 } },
     }),
     2,
   );
@@ -762,7 +762,7 @@ test("CLI nuke exit code reports owner failure", () => {
       world: "/world" as never,
       effects: [],
       pending: [],
-      value: { removed: { refs: 0, worktrees: 0, tasks: 0 } },
+      value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     }),
     0,
   );
@@ -787,8 +787,8 @@ test("native reset awaits independent removals and keeps their counts on an exce
   const original = new TypeError("reset owner retirement bug");
   try {
     raw.run(["update-ref", "-d", "refs/heads/keiyaku-state"]);
-    const task = await Tasks.of(world).add({ title: "Independent reset owner" });
-    assert.ok(task.kind === "accepted");
+    const debt = await Debts.of(world).add({ title: "Independent reset owner" });
+    assert.ok(debt.kind === "accepted");
     await assert.rejects(
       nukeKeiyaku(
         { world, confirm: world },
@@ -803,11 +803,11 @@ test("native reset awaits independent removals and keeps their counts on an exce
         assert.equal(error.category, "internal");
         assert.equal(error.cause, original);
         assert.ok(error.outcome?.operation === "nuke");
-        assert.deepEqual(error.outcome.value?.removed, { refs: 2, worktrees: 1, tasks: 1 });
+        assert.deepEqual(error.outcome.value?.removed, { refs: 2, worktrees: 1, debts: 1 });
         return true;
       },
     );
-    assert.equal(await Tasks.of(world).task({ id: task.value.id }).read(), null);
+    assert.equal(await Debts.of(world).debt({ id: debt.value.id }).read(), null);
     assert.equal(existsSync(fixture.managedPath), false);
     assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), false);
     assert.equal(refPresent(raw, "refs/heads/business-branch"), true);
@@ -821,14 +821,14 @@ test("native reset returns a required partial stop after confirmed deletion and 
   const fixture = await gitNukeFixture();
   const { raw, world, managedPath } = fixture;
   try {
-    const task = await Tasks.of(world).add({ title: "Independent owner despite Git stop" });
-    assert.ok(task.kind === "accepted");
+    const debt = await Debts.of(world).add({ title: "Independent owner despite Git stop" });
+    assert.ok(debt.kind === "accepted");
     raw.run(["worktree", "remove", "--force", managedPath]);
     mkdirSync(managedPath, { recursive: true });
     writeFileSync(join(managedPath, "foreign.txt"), "not owned by Git cleanup\n");
     const result = await nuke({ world, confirm: world });
     assert.ok(result.kind === "accepted");
-    assert.deepEqual(result.value.removed, { refs: 1, worktrees: 0, tasks: 1 });
+    assert.deepEqual(result.value.removed, { refs: 1, worktrees: 0, debts: 1 });
     assert.deepEqual(result.pending, [{ surface: "reset", required: true }]);
     assert.deepEqual(result.effects, [
       {
@@ -838,7 +838,7 @@ test("native reset returns a required partial stop after confirmed deletion and 
         diagnostic: `managed Place path has foreign custody: ${managedPath}`,
       },
     ]);
-    assert.equal(await Tasks.of(world).task({ id: task.value.id }).read(), null);
+    assert.equal(await Debts.of(world).debt({ id: debt.value.id }).read(), null);
     assert.equal(refPresent(raw, "refs/heads/keiyaku-state"), false);
     assert.equal(refPresent(raw, "refs/keiyaku/delivery/nuke-managed"), true);
     assert.equal(readFileSync(join(managedPath, "foreign.txt"), "utf8"), "not owned by Git cleanup\n");

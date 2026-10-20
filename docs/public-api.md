@@ -3,7 +3,7 @@
 The ESM package exposes exactly two entries: the package root and the plugin
 entry. The root exposes Keiyaku as the Contract product and native Contract
 handle, Akuma as the standalone single-Akuma product, Akumas as the World-bound
-plural Akuma composition, Task as its independent product, Kanshi as composite
+plural Akuma composition, Debt as its independent product, Kanshi as composite
 observation including its bounded category aperture, Settings, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
 alias, or generic mixed orchestration facade exists, and no private execution,
@@ -62,8 +62,8 @@ by the operation that actually consumes them. There is no Contract `of` alias or
 operation on Keiyaku.
 
 Binding accepts either caller Markdown or a fork of existing terms. It may
-associate a Task through the post-admission association owned by
-[settlement.md](settlement.md), but a Contract never makes Task lifecycle a
+associate a Debt through the post-admission association owned by
+[settlement.md](settlement.md), but a Contract never makes Debt lifecycle a
 Contract fact. Markdown is decoded only at the library edge; public callers do
 not receive a decoded document, direct journal writer, Git handle, placement
 operation, or verification runner.
@@ -170,13 +170,13 @@ operation. It retains an explicit Repo only for Contract selection or Dispatch
 association and never infers Repo from World or World from Repo. Archetype
 definitions remain an archetype-owner listing, reachable through the root as
 that owner's bounded catalogue and its native error; no public definition
-loader joins the root. The independent Task product
+loader joins the root. The independent Debt product
 likewise captures World and does not read or write Contract authority except
 through the settlement owner. Its collection offers creation, bounded list,
 readiness, blocked and query views, diagnosis, and terminal batches. Addressed
-Task handles offer reads, relationship trees, updates, completion, and dropping.
+Debt handles offer reads, relationship trees, updates, completion, and dropping.
 Board observation remains read-only. There is no planning or execution-progress
-operation; [task.md](task.md) owns the three-state ledger and its dependencies.
+operation; [debt.md](debt.md) owns the three-state ledger and its dependencies.
 
 CLI grammar, flags, help rows, and literal output are owned by the CLI chapters.
 They are deliberately not copied into this package law. Mutation outcome

@@ -1920,7 +1920,7 @@ test("Selection wire retains strict derived tool views without tightening neutra
   const at = "2026-08-08T00:00:00.000Z";
   const row = { kind: "tool", sequence: 2, turnSequence: 1, at, name: "run", call: { kind: "run", command: "x" }, state: { status: "ok" } };
   const timeline = { kind: "idle", entries: [{ kind: "row", row }], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 };
-  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } }], unobserved: [] };
+  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }], unobserved: [] };
   const protocol = selectionRequestProtocol("akuma.wait");
   assert.doesNotThrow(() => protocol.decodeResult(value));
   const withRow = (changed: unknown) => ({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, entries: [{ kind: "row", row: changed }] } } }] });

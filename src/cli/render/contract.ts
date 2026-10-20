@@ -138,7 +138,7 @@ function lagRows(
 function settlementLagRows(lag: SettlementLag, columns: number): readonly string[] {
   const lines: string[] = [];
   receiptRow(lines, "!", "settlement", [{ text: lag.surface.replaceAll("-", " ") }], columns);
-  if (lag.taskId !== undefined) receiptRow(lines, " ", "task", [{ text: lag.taskId, opaque: true }], columns);
+  if (lag.debtId !== undefined) receiptRow(lines, " ", "debt", [{ text: lag.debtId, opaque: true }], columns);
   if (lag.path !== undefined) receiptRow(lines, " ", "path", [{ text: lag.path, opaque: true }], columns);
   receiptPayload(lines, "reason", lag.diagnostic);
   return lines;

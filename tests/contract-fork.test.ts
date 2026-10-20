@@ -95,7 +95,7 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
     /not valid with --fork-of/u,
   );
   assert.throws(
-    () => parseArgv(["bind", "--fork-of", sourceId, "--task", "task/example"]),
+    () => parseArgv(["bind", "--fork-of", sourceId, "--debt", "debt/example"]),
     /not valid with --fork-of/u,
   );
 });

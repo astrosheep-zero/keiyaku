@@ -1,6 +1,6 @@
 # World
 
-World is the shared directory coordinate for Task and Akuma products and
+World is the shared directory coordinate for Debt and Akuma products and
 project-level Settings and Kanshi reads. A Git repository determines one World,
 but World owns neither Git nor product facts.
 
@@ -35,7 +35,7 @@ synthetic aggregate observation.
 
 ## Product Boundaries
 
-Task authority, Akuma runtime facts, Settings, and Kanshi each retain their own
+Debt authority, Akuma runtime facts, Settings, and Kanshi each retain their own
 owner and storage. World only supplies their shared coordinate. Git discovery
 and an explicit Contract repository are separate concerns: selecting a Contract
 repository never rewrites the invocation World, and a Contract-selected Akuma

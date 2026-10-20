@@ -16,7 +16,7 @@ function externalConsumer(context: TestContext): string {
   return directory;
 }
 
-test("built package supports branded Contract, standalone Akuma, Akumas, Task, Kanshi and plugin consumers", (context) => {
+test("built package supports branded Contract, standalone Akuma, Akumas, Debt, Kanshi and plugin consumers", (context) => {
   const directory = externalConsumer(context);
   mkdirSync(join(directory, "node_modules", "@types"), { recursive: true });
   symlinkSync(
@@ -26,7 +26,7 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Task, K
   );
   symlinkSync(join(root, "node_modules", "@types", "node"), join(directory, "node_modules", "@types", "node"), "dir");
   symlinkSync(join(root, "node_modules", "undici-types"), join(directory, "node_modules", "undici-types"), "dir");
-  const examples = ["contract", "akumas", "task", "kanshi", "plugin"].map((name) => name + ".ts");
+  const examples = ["contract", "akumas", "debt", "kanshi", "plugin"].map((name) => name + ".ts");
   for (const example of examples) {
     copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
   }
@@ -106,7 +106,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Delivery, Keiyaku, Tasks, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Delivery, Keiyaku, Debts, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
         "assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);",
         'assert.equal(typeof Keiyaku.with, "function");',
@@ -129,7 +129,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'assert.equal(typeof Akuma.birth, "function");',
         'assert.equal(typeof Akuma.select, "function");',
         'assert.equal(typeof Akumas.of, "function");',
-        'assert.equal(typeof Tasks.of, "function");',
+        'assert.equal(typeof Debts.of, "function");',
         'assert.equal(typeof kanshi, "function");',
         'assert.equal(typeof settings, "function");',
         'assert.equal(typeof nuke, "function");',
@@ -138,11 +138,11 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'assert.equal(typeof plugin.activate, "function");',
         // Only root and plugin are package entries; every retired subpath promise is gone.
         "const require = createRequire(import.meta.url);",
-        'for (const specifier of ["@astrosheep/keiyaku/task", "@astrosheep/keiyaku/kanshi", "@astrosheep/keiyaku/akuma", "@astrosheep/keiyaku/akumas"]) {',
+        'for (const specifier of ["@astrosheep/keiyaku/debt", "@astrosheep/keiyaku/kanshi", "@astrosheep/keiyaku/akuma", "@astrosheep/keiyaku/akumas"]) {',
         "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
         "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
-        'for (const name of ["bodyRequestExecution", "gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle", "akumasWithExecution", "tasksWithExecution"]) {',
+        'for (const name of ["bodyRequestExecution", "gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle", "akumasWithExecution", "debtsWithExecution"]) {',
         "  assert.equal(name in root, false, name);",
         "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

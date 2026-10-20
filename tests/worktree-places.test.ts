@@ -32,7 +32,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
-import { Tasks } from "../src/task/index.js";
+import { Debts } from "../src/debt/index.js";
 import { World } from "../src/world.js";
 import { cachedRepositoryAt, makeGitRepository, withGitShim } from "./support/git.js";
 
@@ -382,8 +382,8 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
 
   test("corrupt Place register fails mutation and isolates the Contract status section", async () => {
     const repository = repositoryWithCommit();
-    const tasks = Tasks.of(await World.at(repository.path));
-    const added = await tasks.add({ title: "Independent task", priority: 0 });
+    const debts = Debts.of(await World.at(repository.path));
+    const added = await debts.add({ title: "Independent debt", priority: 0 });
     assert.equal(added.kind, "accepted");
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keiyaku.with().bind({
@@ -399,16 +399,16 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     await assert.rejects(async () => Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     type StatusReport = Readonly<{
       contracts: Readonly<{ kind: string; failure?: Readonly<{ message: string }> }>;
-      tasks: Readonly<{ kind: string; value?: Readonly<{ rows: readonly Readonly<{ id: string }>[] }> }>;
+      debts: Readonly<{ kind: string; value?: Readonly<{ rows: readonly Readonly<{ id: string }>[] }> }>;
       akuma: Readonly<{ kind: string }>;
     }>;
     const status = await cliJson<StatusReport>(["-C", repository.path, "status"]);
     assert.equal(status.value.contracts.kind, "failed");
     assert.match(status.value.contracts.failure?.message ?? "", /Place file has invalid fields/u);
-    assert.equal(status.value.tasks.kind, "present");
-    if (status.value.tasks.kind === "present") {
+    assert.equal(status.value.debts.kind, "present");
+    if (status.value.debts.kind === "present") {
       assert.equal(
-        (status.value.tasks.value?.rows ?? []).some((row) => row.id === added.value.id),
+        (status.value.debts.value?.rows ?? []).some((row) => row.id === added.value.id),
         true,
       );
     }

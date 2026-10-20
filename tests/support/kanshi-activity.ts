@@ -98,7 +98,7 @@ export function akumaWorldReport(rows: readonly AkumaKanshiRow[]): KanshiReport 
     observedAt: AKUMA_OBSERVED_AT,
     branch: null,
     contracts: { kind: "absent" },
-    tasks: { kind: "absent" },
+    debts: { kind: "absent" },
     akuma: {
       kind: "present",
       value: { observedAt: AKUMA_ACTIVITY_AT, searched: [], hasMore: false, rows },

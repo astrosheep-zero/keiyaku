@@ -1,7 +1,7 @@
 # Kanshi
 
 Kanshi is the read-only composite observation of one World. It gives callers a
-coherent report of Contract, Task, and Akuma reality without creating a fourth
+coherent report of Contract, Debt, and Akuma reality without creating a fourth
 product authority. It owns report availability, read-time association,
 selection, and the meaning of a composite result; it owns no lifecycle,
 permission, persistence, or repair decision.
@@ -21,9 +21,9 @@ or an assertion of causality between producers. Kanshi does not reread a
 section while formatting it, synthesize history, probe provider state, or
 repair an inconsistency it encountered.
 
-The World Task section is a recent bounded catalogue. It attaches only
+The World Debt section is a recent bounded catalogue. It attaches only
 relationships already observed for those rows, while a selected Contract's
-owned Task section retains the complete owner view required to explain that
+owned Debt section retains the complete owner view required to explain that
 Contract.
 
 The bare World Contract section is likewise a recent bounded catalogue. A
@@ -46,8 +46,8 @@ other complete roster operations.
 
 A requested category retains the same recent owner order and bounded extent as
 the corresponding World section. It observes that section independently, preserving
-absence and failure, and attaches only available Alias, Dispatch, and TaskHolder
-facts without reading the Task board. The category aperture is never used to
+absence and failure, and attaches only available Alias, Dispatch, and DebtHolder
+facts without reading the Debt board. The category aperture is never used to
 resolve exact identities.
 
 That bounded category observation is part of the package root: a library consumer
@@ -61,8 +61,8 @@ failure that the owner actually produces stays that owner's evidence in the repo
 
 ## Associations and selection
 
-Kanshi may attach already observed TaskHolder and Dispatch facts to their
-corresponding Contract, Task, or Akuma rows. Those links remain the authority
+Kanshi may attach already observed DebtHolder and Dispatch facts to their
+corresponding Contract, Debt, or Akuma rows. Those links remain the authority
 of Settlement and Dispatch. Kanshi never writes an association, infers one
 from names or directories, or uses an attachment as permission to change any
 product.

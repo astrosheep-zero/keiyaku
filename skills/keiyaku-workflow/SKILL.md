@@ -33,7 +33,7 @@ to create parallel work.
 
 - Separate `kei`s have independently acceptable outcomes.
 - An Arc is a chapter of one `kei`; it is not separately accepted.
-- A Task records confirmed unresolved work and its dependencies.
+- A Debt records confirmed unresolved work and its dependencies.
 
 Use `after` only when one `kei` requires another to be accepted first. Ordinary
 overlap is not a dependency.
@@ -101,7 +101,7 @@ authority.
 | Role | Grant at birth | Return |
 | --- | --- | --- |
 | Holder | The actions the delegated loop will perform; include `contract.review` when this holder will review. Commission with the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
-| Deliverer | The ordinary baseline: every Task mutation, Contract audit and delivery, and Akuma management. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
+| Deliverer | The ordinary baseline: every Debt mutation, Contract audit and delivery, and Akuma management. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
 | Reviewer | `--allowed contract.review`: `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> --allowed contract.review -` | The verdict receipt. Without the grant, `not-allowed` refuses and no verdict is recorded. |
 
 An Archetype's explicit allowed set replaces the ordinary baseline; check

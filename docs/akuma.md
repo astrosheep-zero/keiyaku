@@ -105,7 +105,7 @@ One lower Akuma owner implements creation, admission, observation, and
 lifecycle. The standalone identity handle, plural selection, and the Body
 Request service are thin faces over those same algorithms rather than parallel
 orchestrators. That owner reads only Heart, leash, provider, Archetype,
-Settings, and filesystem state; optional Alias, Dispatch, Task, and Contract
+Settings, and filesystem state; optional Alias, Dispatch, Debt, and Contract
 associations are composed after its values by the World composition that owns
 them, so a standalone operation still works when those optional authorities are
 corrupt or unavailable. Its roster supplies native membership, semantic

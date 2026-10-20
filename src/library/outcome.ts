@@ -41,7 +41,7 @@ type OutcomeOperation = ContractVerb | "nuke";
 const reconciliationEffectSchema = z.union([reconcileEffectSchema, contractFileEffectSchema]);
 export type ReconciliationEffect = z.infer<typeof reconciliationEffectSchema>;
 export type ReconciliationLag = z.infer<typeof reconciliationLagSchema>;
-const resetOwnerSchema = z.enum(["akuma", "git", "task", "world"]);
+const resetOwnerSchema = z.enum(["akuma", "git", "debt", "world"]);
 export type ResetOwner = z.infer<typeof resetOwnerSchema>;
 const resetEffectFields = { world: z.string().min(1), owner: resetOwnerSchema, diagnostic: z.string().min(1) };
 const resetEffectSchema = z.union([
@@ -274,7 +274,7 @@ export function project<Value, Refusal>(
     const effects = snapshot.effects.filter(
       (effect): effect is ResetEffect => effect.kind === "reset-owner-stopped" || effect.kind === "reset-residue",
     );
-    const value = { removed: snapshot.reset?.removed ?? { refs: 0, worktrees: 0, tasks: 0 } };
+    const value = { removed: snapshot.reset?.removed ?? { refs: 0, worktrees: 0, debts: 0 } };
     const base = { operation, world: projection.world, effects, pending: projectPending(operation, value, effects) };
     if (projection.kind === "failed")
       return {
@@ -547,7 +547,7 @@ const resetCountsSchema = z
   .object({
     refs: z.number().int().nonnegative(),
     worktrees: z.number().int().nonnegative(),
-    tasks: z.number().int().nonnegative(),
+    debts: z.number().int().nonnegative(),
   })
   .strict();
 const resetValueSchema = z.object({ removed: resetCountsSchema }).strict();

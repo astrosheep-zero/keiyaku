@@ -1538,7 +1538,7 @@ function codecSoul(): Soul {
       parent: "aku/parent/1234abcd" as Soul["id"],
       requestId: "00000000-0000-4000-8000-000000000001",
     },
-    allowed: ["akuma.call", "task.add"],
+    allowed: ["akuma.call", "debt.add"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
@@ -1611,6 +1611,13 @@ test("Soul caller attribution shares admission validation and preserves legal ab
     assert.throws(() => decodeAkumaCaller(caller), /Invalid Akuma caller/u);
     assert.throws(() => decodeSoul({ ...codecSoul(), caller }), /Invalid Akuma caller/u);
   }
+});
+
+test("persisted ledger permissions survive the rename without adding capabilities", () => {
+  const legacy = { ...codecSoul(), allowed: ["task.add", "task.start", "task.compose", "contract.audit"] };
+  assert.deepEqual(decodeSoul(legacy).allowed, ["contract.audit", "debt.add"]);
+  assert.deepEqual(decodeSoul({ ...legacy, allowed: ["task.start"] }).allowed, []);
+  assert.throws(() => decodeSoul({ ...legacy, allowed: ["task.unknown"] }), /unknown action/u);
 });
 
 test("historical Soul omission retains the complete vocabulary", () => {

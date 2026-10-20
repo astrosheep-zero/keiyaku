@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EMPTY_CREATED_TASK_OBSERVATION, createdTaskObservationSchema } from "../task/created-observation.js";
+import { EMPTY_CREATED_DEBT_OBSERVATION, createdDebtObservationSchema } from "../debt/created-observation.js";
 import { akumaStatusSchema, type AkumaStatus } from "./akuma.js";
 import { tellResultSchema } from "./call-initial-tell.js";
 import { NO_DISPATCH_ASSOCIATION, dispatchAssociationSchema } from "./dispatch-association.js";
@@ -18,7 +18,7 @@ const akumaObservationSchema = z
   .object({
     status: akumaStatusSchema,
     contract: dispatchAssociationSchema,
-    createdTasks: createdTaskObservationSchema,
+    createdDebts: createdDebtObservationSchema,
   })
   .strict();
 const akumaUnobservedSchema = z.object({ id: akumaIdSchema, diagnostic: z.string() }).strict();
@@ -65,7 +65,7 @@ export type AkumaAskResult<T = unknown> = Omit<z.infer<typeof akumaAskResultSche
 
 /** Compose one native status into the canonical observation its crossing transports. */
 export function akumaObservationOf(status: AkumaStatus): AkumaObservation {
-  return { status, contract: NO_DISPATCH_ASSOCIATION, createdTasks: EMPTY_CREATED_TASK_OBSERVATION };
+  return { status, contract: NO_DISPATCH_ASSOCIATION, createdDebts: EMPTY_CREATED_DEBT_OBSERVATION };
 }
 
 export const selectionResultSchemas = {

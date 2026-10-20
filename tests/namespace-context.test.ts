@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/task/context.js";
+import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/debt/context.js";
 
 function temporary(): string {
   return mkdtempSync(join(tmpdir(), "keiyaku-namespace-"));

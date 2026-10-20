@@ -4,7 +4,7 @@ import { validated } from "./outcome.js";
 import { verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
 import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
-import { parseTaskId, type TaskId } from "../task/identity.js";
+import { parseDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { prepareVerificationDeclaration } from "../verification/declaration.js";
 
@@ -35,15 +35,15 @@ export function requireInput(value: unknown, label: string, allowed?: readonly s
   return value;
 }
 
-export function taskOption(value: unknown): TaskId | undefined {
+export function debtOption(value: unknown): DebtId | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string") throw new TypeError("task must be a TaskId");
+  if (typeof value !== "string") throw new TypeError("debt must be a DebtId");
   try {
-    parseTaskId(value);
+    parseDebtId(value);
   } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "task must be a TaskId");
+    throw new TypeError(error instanceof Error ? error.message : "debt must be a DebtId");
   }
-  return value as TaskId;
+  return value as DebtId;
 }
 
 export function optionalNonblank(value: unknown, label: string): string | undefined {

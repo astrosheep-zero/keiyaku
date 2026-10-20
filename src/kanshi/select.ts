@@ -40,16 +40,16 @@ export function selectKanshi(
             },
           }
         : report.contracts,
-    tasks:
-      report.tasks.kind === "present"
+    debts:
+      report.debts.kind === "present"
         ? {
             kind: "present",
             value: {
-              ...report.tasks.value,
-              rows: report.tasks.value.rows.filter((row) => row.contract?.id === contract),
+              ...report.debts.value,
+              rows: report.debts.value.rows.filter((row) => row.contract?.id === contract),
             },
           }
-        : report.tasks,
+        : report.debts,
     akuma:
       report.akuma.kind === "present"
         ? {

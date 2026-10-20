@@ -1,9 +1,9 @@
 # Public Akuma Facets
 
 This chapter owns the World-bound `Akumas` composition for creation, addressing,
-and selection operations. It composes Akuma, Alias, Dispatch, Task, and Contract
+and selection operations. It composes Akuma, Alias, Dispatch, Debt, and Contract
 owners without moving any of their authority into Library. `Akuma` remains the
-standalone product for one resolved identity; `Tasks` remains an independent
+standalone product for one resolved identity; `Debts` remains an independent
 World-bound product.
 
 ## Composition
@@ -15,7 +15,7 @@ composition creates no cached resolution, parallel writer, or background
 integration queue. Callers do not repeat World on operations. Repo stays an
 explicit separate coordinate for Contract selector and Dispatch association;
 neither coordinate is inferred from the other. Every filesystem, Alias,
-Dispatch, Task, and Heart observation is awaited before its public Promise
+Dispatch, Debt, and Heart observation is awaited before its public Promise
 settles. Contract-local actor, hook, and branch-freshness configuration does
 not enter this composition.
 
@@ -91,7 +91,7 @@ frozen expansion; it never becomes a second public catalogue.
 Selection composes public Akuma handles after address expansion. Plural
 selection resolves and freezes identities once, then fans out the same lower
 owner operations or one shared set-observation algorithm. It preserves the raw
-Akuma status and mutation evidence, adding separate read-only Dispatch and Task
+Akuma status and mutation evidence, adding separate read-only Dispatch and Debt
 associations where available; it never intersects them into Akuma state or
 re-evaluates lifecycle. Selection uses one verb per meaning on both faces: `tell` admits a Tell and returns its receipt; `ask` admits a Tell and observes the answer bound to that admission; `wait` observes existing Akuma-wide work. An ask returns one shared result with answered, failed, invalid-output, unanswered, and deadline observations. Bounds are optional and limit observation only, never admission. Schema belongs to ask, not tell. Interrupt is a flag on tell or ask that puts down the current Body before admitting the new Tell; kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
 Akuma-owned completion judgment in their respective caller contexts. Wait and
@@ -124,7 +124,7 @@ never appears in the archetype catalogue, but it resolves and answers calls by
 name exactly as a visible one, and hiddenness is the definition's own
 catalogue visibility, never inherited through `base`. There is no
 cross-product SDK catalogue or `ls` operation, and no public definition loader. The CLI's
-`ls` command adapts Contract, Akuma, archetype, and Task listing through their
+`ls` command adapts Contract, Akuma, archetype, and Debt listing through their
 respective owners — catalogue and error adaptation alike through those public
 symbols — and renderers consume those adjudicated values without
 performing their own owner lookup.

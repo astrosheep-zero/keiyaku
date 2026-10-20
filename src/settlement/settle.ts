@@ -1,6 +1,6 @@
 import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
-import { taskIdSchema } from "../task/identity.js";
+import { debtIdSchema } from "../debt/identity.js";
 import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
@@ -13,27 +13,27 @@ import type { Effect } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { settleTask, type SettledTaskResult } from "../task/operations.js";
-import { type TaskId } from "../task/identity.js";
+import { settleDebt, type SettledDebtResult } from "../debt/operations.js";
+import { type DebtId } from "../debt/identity.js";
 import {
-  publishTaskHolderRelease,
-  readTaskHolderProjectionFromDecision,
-  taskHolderObservationSelection,
-  type TaskHolder,
+  publishDebtHolderRelease,
+  readDebtHolderProjectionFromDecision,
+  debtHolderObservationSelection,
+  type DebtHolder,
 } from "./holder.js";
-import { acquireTaskSettlementFence } from "./fence.js";
+import { acquireDebtSettlementFence } from "./fence.js";
 import { World, type WorldRoot } from "../world.js";
 
 export const settlementActionSchema = z
-  .object({ kind: z.literal("task"), taskId: taskIdSchema, action: z.literal("done") })
+  .object({ kind: z.literal("debt"), debtId: debtIdSchema, action: z.literal("done") })
   .strict();
 export type SettlementAction = z.infer<typeof settlementActionSchema>;
 export const settlementLagSchema = z
   .object({
     kind: z.literal("settlement-failed"),
-    surface: z.enum(["task-holder", "task"]),
+    surface: z.enum(["debt-holder", "debt"]),
     contractId: contractIdSchema,
-    taskId: taskIdSchema.optional(),
+    debtId: debtIdSchema.optional(),
     path: z
       .string()
       .refine((value) => value.trim() !== "")
@@ -80,15 +80,15 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function taskFailure(
-  result: Exclude<Awaited<ReturnType<typeof settleTask>>, { kind: "changed" | "unchanged" }>,
+function debtFailure(
+  result: Exclude<Awaited<ReturnType<typeof settleDebt>>, { kind: "changed" | "unchanged" }>,
 ): string {
   return result.kind === "retry"
-    ? `Task settlement requires retry: ${result.reason}`
-    : `Task settlement refused: ${JSON.stringify(result.refusal)}`;
+    ? `Debt settlement requires retry: ${result.reason}`
+    : `Debt settlement refused: ${JSON.stringify(result.refusal)}`;
 }
 
-type SettleTasksInput = Readonly<{
+type SettleDebtsInput = Readonly<{
   repository: GitRepository;
   channel: GitDecodeChannel;
   candidate: ContractState;
@@ -98,12 +98,12 @@ type SettleTasksInput = Readonly<{
   progress?: SettlementProgress;
 }>;
 
-function recordLag(input: Pick<SettleTasksInput, "candidate" | "lags" | "progress">, lag: SettlementLag): void {
+function recordLag(input: Pick<SettleDebtsInput, "candidate" | "lags" | "progress">, lag: SettlementLag): void {
   input.lags.push(lag);
   input.progress?.recordSettlement(input.candidate.id, { actions: [], lags: [lag] });
 }
 function recordAction(
-  input: Pick<SettleTasksInput, "candidate" | "actions" | "progress">,
+  input: Pick<SettleDebtsInput, "candidate" | "actions" | "progress">,
   action: SettlementAction,
 ): void {
   input.actions.push(action);
@@ -111,8 +111,8 @@ function recordAction(
 }
 
 async function observeApplicableHolder(
-  input: Pick<SettleTasksInput, "repository" | "channel" | "candidate" | "lags" | "progress">,
-): Promise<TaskHolder | null> {
+  input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "progress">,
+): Promise<DebtHolder | null> {
   const { repository, channel, candidate } = input;
   let observation: GitDecisionObservation;
   try {
@@ -120,17 +120,17 @@ async function observeApplicableHolder(
       repository,
       channel,
       [candidate.id],
-      taskHolderObservationSelection(),
+      debtHolderObservationSelection(),
     );
     const state = observation.journals.get(candidate.id)?.state ?? null;
     if (state === null || state.terminal?.kind !== "claimed") return null;
-    const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+    const holder = (await readDebtHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
     return holder?.disposition === "held" ? holder : null;
   } catch (error) {
     if (!operational(error)) throw error;
     recordLag(input, {
       kind: "settlement-failed",
-      surface: "task-holder",
+      surface: "debt-holder",
       contractId: candidate.id,
       diagnostic: diagnostic(error),
     });
@@ -138,10 +138,10 @@ async function observeApplicableHolder(
   }
 }
 
-async function completeHeldTask(
-  input: Pick<SettleTasksInput, "repository" | "candidate" | "actions" | "lags" | "progress"> & { taskId: TaskId },
+async function completeHeldDebt(
+  input: Pick<SettleDebtsInput, "repository" | "candidate" | "actions" | "lags" | "progress"> & { debtId: DebtId },
 ): Promise<boolean> {
-  const { repository, candidate, taskId } = input;
+  const { repository, candidate, debtId } = input;
   let world: WorldRoot;
   try {
     world = await World.at(repository.primaryWorktree);
@@ -149,35 +149,35 @@ async function completeHeldTask(
     if (!operational(error)) throw error;
     recordLag(input, {
       kind: "settlement-failed",
-      surface: "task",
+      surface: "debt",
       contractId: candidate.id,
-      taskId,
+      debtId,
       diagnostic: diagnostic(error),
     });
     return false;
   }
-  let result: SettledTaskResult;
+  let result: SettledDebtResult;
   try {
-    result = await settleTask(world, taskId);
+    result = await settleDebt(world, debtId);
   } catch (error) {
     if (!operational(error)) throw error;
     recordLag(input, {
       kind: "settlement-failed",
-      surface: "task",
+      surface: "debt",
       contractId: candidate.id,
-      taskId,
+      debtId,
       diagnostic: diagnostic(error),
     });
     return false;
   }
-  if (result.kind === "changed") recordAction(input, { kind: "task", taskId, action: "done" });
+  if (result.kind === "changed") recordAction(input, { kind: "debt", debtId, action: "done" });
   if (result.kind === "changed" && result.cleanup !== undefined) {
     for (const detail of result.cleanup.diagnostics) {
       recordLag(input, {
         kind: "settlement-failed",
-        surface: "task",
+        surface: "debt",
         contractId: candidate.id,
-        taskId,
+        debtId,
         diagnostic: detail,
       });
     }
@@ -185,40 +185,40 @@ async function completeHeldTask(
   if (result.kind === "changed" || result.kind === "unchanged") return true;
   recordLag(input, {
     kind: "settlement-failed",
-    surface: "task",
+    surface: "debt",
     contractId: candidate.id,
-    taskId,
-    diagnostic: taskFailure(result),
+    debtId,
+    diagnostic: debtFailure(result),
   });
   return false;
 }
 
-async function releaseHeldTaskHolder(
-  input: Pick<SettleTasksInput, "repository" | "channel" | "candidate" | "lags" | "seatClose" | "progress"> & {
-    taskId: TaskId;
+async function releaseHeldDebtHolder(
+  input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "seatClose" | "progress"> & {
+    debtId: DebtId;
   },
 ): Promise<"released" | "held" | "inert"> {
-  const { repository, channel, candidate, seatClose, taskId } = input;
+  const { repository, channel, candidate, seatClose, debtId } = input;
   try {
     const outcome = await withPrivateStatePublicationSeat(repository, async (seat) => {
       const observation = await observeContractsForAdmissionAt(
         repository,
         channel,
         [candidate.id],
-        taskHolderObservationSelection(),
+        debtHolderObservationSelection(),
       );
       const state = observation.journals.get(candidate.id)?.state ?? null;
       if (state === null || state.terminal?.kind !== "claimed") return "inert" as const;
-      const holder = (await readTaskHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
-      if (holder === null || holder.disposition !== "held" || holder.taskId !== taskId) return "inert" as const;
-      const publication = await publishTaskHolderRelease(repository, channel, observation, candidate.id, seat);
+      const holder = (await readDebtHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+      if (holder === null || holder.disposition !== "held" || holder.debtId !== debtId) return "inert" as const;
+      const publication = await publishDebtHolderRelease(repository, channel, observation, candidate.id, seat);
       if (publication.kind === "non-published") {
         recordLag(input, {
           kind: "settlement-failed",
-          surface: "task-holder",
+          surface: "debt-holder",
           contractId: candidate.id,
-          taskId,
-          diagnostic: `Task holder release requires retry: ${publication.diagnostic}`,
+          debtId,
+          diagnostic: `Debt holder release requires retry: ${publication.diagnostic}`,
         });
         return "held" as const;
       }
@@ -233,47 +233,47 @@ async function releaseHeldTaskHolder(
     if (!operational(error)) throw error;
     recordLag(input, {
       kind: "settlement-failed",
-      surface: "task-holder",
+      surface: "debt-holder",
       contractId: candidate.id,
-      taskId,
+      debtId,
       diagnostic: diagnostic(error),
     });
     return "held";
   }
 }
 
-async function settleTasks(input: SettleTasksInput): Promise<boolean> {
+async function settleDebts(input: SettleDebtsInput): Promise<boolean> {
   const { repository, channel, candidate, lags, seatClose } = input;
   const hint = await observeApplicableHolder(input);
   if (hint === null) return false;
-  const taskId = hint.taskId;
+  const debtId = hint.debtId;
   let fence;
   try {
-    fence = await acquireTaskSettlementFence(repository, taskId);
+    fence = await acquireDebtSettlementFence(repository, debtId);
   } catch (error) {
     if (!operational(error)) throw error;
     recordLag(input, {
       kind: "settlement-failed",
-      surface: "task",
+      surface: "debt",
       contractId: candidate.id,
-      taskId,
+      debtId,
       diagnostic: diagnostic(error),
     });
     return true;
   }
   let failure: { error: unknown } | undefined;
-  let taskSettled = false;
+  let debtSettled = false;
   let holderDisposition: "released" | "held" | "inert" | null = null;
   try {
     const holder = await observeApplicableHolder(input);
-    if (holder === null || holder.taskId !== taskId) return false;
-    taskSettled = await completeHeldTask({ ...input, taskId });
-    if (!taskSettled) return true;
-    holderDisposition = await releaseHeldTaskHolder({
+    if (holder === null || holder.debtId !== debtId) return false;
+    debtSettled = await completeHeldDebt({ ...input, debtId });
+    if (!debtSettled) return true;
+    holderDisposition = await releaseHeldDebtHolder({
       repository,
       channel,
       candidate,
-      taskId,
+      debtId,
       lags,
       seatClose,
       ...(input.progress === undefined ? {} : { progress: input.progress }),
@@ -288,14 +288,14 @@ async function settleTasks(input: SettleTasksInput): Promise<boolean> {
     } catch (error) {
       if (!operational(error)) {
         if (failure === undefined) throw error;
-      } else if (!taskSettled && failure === undefined) throw error;
+      } else if (!debtSettled && failure === undefined) throw error;
       // Post-release fence teardown is custodial residue, not an owed holder publication.
       if (holderDisposition !== "released") {
         recordLag(input, {
           kind: "settlement-failed",
-          surface: "task-holder",
+          surface: "debt-holder",
           contractId: candidate.id,
-          taskId,
+          debtId,
           diagnostic: diagnostic(error),
         });
       }
@@ -323,7 +323,7 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
   const candidate = input.state;
   if (candidate.terminal?.kind === "claimed") {
     try {
-      await settleTasks({
+      await settleDebts({
         repository: input.repository,
         channel: input.channel,
         candidate,
@@ -338,7 +338,7 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
         { candidate, lags, ...(input.progress === undefined ? {} : { progress: input.progress }) },
         {
           kind: "settlement-failed",
-          surface: "task",
+          surface: "debt",
           contractId: candidate.id,
           diagnostic: diagnostic(error),
         },

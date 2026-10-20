@@ -5,7 +5,7 @@ import type {
   KanshiCategoryReport,
   KanshiReport,
   Section,
-  TaskKanshiWorld,
+  DebtKanshiWorld,
 } from "../../kanshi/index.js";
 import {
   abbreviateGitIds,
@@ -35,8 +35,8 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard } from "./kanshi-akuma.js";
-import { contractMark, taskDispositionMark } from "./marks.js";
-import { dispositionText } from "./task.js";
+import { contractMark, debtDispositionMark } from "./marks.js";
+import { dispositionText } from "./debt.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
 
@@ -76,7 +76,7 @@ function contractAbbreviations(section: ContractKanshiBoard): ReadonlyMap<string
 type ContractBoardFacts = Readonly<{
   observedAt: string;
   akuma?: Section<AkumaKanshiWorld>;
-  tasks?: Section<TaskKanshiWorld>;
+  debts?: Section<DebtKanshiWorld>;
 }>;
 
 function workspaceState(row: ContractKanshiRow): string {
@@ -96,12 +96,12 @@ function mergeFacts(row: ContractKanshiRow): readonly string[] {
   return summary === undefined ? [] : [summary];
 }
 
-function linkedTask(tasks: Section<TaskKanshiWorld>, taskId: string): string {
-  if (tasks.kind !== "present") return `! ${taskId} · unavailable`;
-  const task = tasks.value.rows.find((candidate) => candidate.id === taskId);
-  return task === undefined
-    ? `! ${taskId} · unavailable`
-    : `${taskDispositionMark(task.disposition)} ${task.id} · ${dispositionText(task.disposition)}`;
+function linkedDebt(debts: Section<DebtKanshiWorld>, debtId: string): string {
+  if (debts.kind !== "present") return `! ${debtId} · unavailable`;
+  const debt = debts.value.rows.find((candidate) => candidate.id === debtId);
+  return debt === undefined
+    ? `! ${debtId} · unavailable`
+    : `${debtDispositionMark(debt.disposition)} ${debt.id} · ${dispositionText(debt.disposition)}`;
 }
 
 type AkumaAttachmentRow = Extract<KanshiReport["akuma"], { kind: "present" }>["value"]["rows"][number];
@@ -145,12 +145,12 @@ function payload(label: string, text: string, context: TextRenderContext): reado
   });
 }
 
-function liveAlarms(row: ContractKanshiRow, tasks: Section<TaskKanshiWorld> | undefined): readonly string[] {
+function liveAlarms(row: ContractKanshiRow, debts: Section<DebtKanshiWorld> | undefined): readonly string[] {
   return [
     ...mergeFacts(row),
-    ...(row.holder.kind === "unavailable" ? ["task unavailable"] : []),
-    ...(row.holder.kind === "held" && tasks !== undefined && linkedTask(tasks, row.holder.taskId).startsWith("!")
-      ? ["task unavailable"]
+    ...(row.holder.kind === "unavailable" ? ["debt unavailable"] : []),
+    ...(row.holder.kind === "held" && debts !== undefined && linkedDebt(debts, row.holder.debtId).startsWith("!")
+      ? ["debt unavailable"]
       : []),
     ...(row.issue === undefined ? [] : ["pending reconciliation"]),
     ...(row.workspaceObservation.kind === "failed" || row.workspaceObservation.kind === "unavailable"
@@ -247,7 +247,7 @@ function renderSelectedContractRow(
   const akuma = linkedAkumaSummary(row, facts.akuma);
   if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
   if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
-  lines.push(...semanticBlock("alarms", liveAlarms(row, facts.tasks), context));
+  lines.push(...semanticBlock("alarms", liveAlarms(row, facts.debts), context));
   return lines;
 }
 
@@ -266,7 +266,7 @@ function renderWorldContractRow(
       : [
           progressStrip(row),
           ...(linkedAkumaSummary(row, facts.akuma) === undefined ? [] : [linkedAkumaSummary(row, facts.akuma)!]),
-          ...liveAlarms(row, facts.tasks),
+          ...liveAlarms(row, facts.debts),
         ];
   const statusTone = contractStatusTone(row, facts.observedAt);
   return entityLines({
@@ -305,7 +305,7 @@ function renderContractBoard(
 function renderContracts(report: KanshiReport, context: TextRenderContext): readonly string[] {
   return renderContractBoard(
     report.contracts,
-    { observedAt: report.observedAt, akuma: report.akuma, tasks: report.tasks },
+    { observedAt: report.observedAt, akuma: report.akuma, debts: report.debts },
     context,
     [],
   );
@@ -320,24 +320,24 @@ function renderSelectedContract(report: KanshiReport, context: TextRenderContext
     ? ["  keiyaku absent"]
     : renderSelectedContractRow(
         row,
-        { observedAt: report.observedAt, akuma: report.akuma, tasks: report.tasks },
+        { observedAt: report.observedAt, akuma: report.akuma, debts: report.debts },
         context,
         contractAbbreviations(section.value),
       );
 }
 
-function taskFailureFact(failure: Readonly<{ message: string; coordinate?: string }>): string {
+function debtFailureFact(failure: Readonly<{ message: string; coordinate?: string }>): string {
   return failure.coordinate === undefined ? failure.message : `${failure.coordinate} · failed ${failure.message}`;
 }
 
-function renderTasks(report: KanshiReport, context: TextRenderContext): readonly string[] {
-  const section = report.tasks;
-  if (section.kind === "absent") return ["TASKS // absent"];
+function renderDebts(report: KanshiReport, context: TextRenderContext): readonly string[] {
+  const section = report.debts;
+  if (section.kind === "absent") return ["DEBTS // absent"];
   if (section.kind === "failed")
     return [
-      "TASKS // unavailable",
+      "DEBTS // unavailable",
       "",
-      tone(`! ${safeText(taskFailureFact(section.failure))}`, "alert", context.color),
+      tone(`! ${safeText(debtFailureFact(section.failure))}`, "alert", context.color),
     ];
   const rows = section.value.rows;
   if (rows.length === 0) return [];
@@ -350,7 +350,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     if (context.columns > NARROW_COLUMNS) {
       return [
         identityLine(
-          taskDispositionMark(row.disposition),
+          debtDispositionMark(row.disposition),
           row.id,
           `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title}${association}`,
         ),
@@ -358,7 +358,7 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
       ];
     }
     return entityLines({
-      mark: taskDispositionMark(row.disposition),
+      mark: debtDispositionMark(row.disposition),
       identity: row.id,
       state: `${dispositionText(row.disposition)} · P${row.priority}`,
       title: row.title,
@@ -367,9 +367,9 @@ function renderTasks(report: KanshiReport, context: TextRenderContext): readonly
     });
   });
   return [
-    "TASKS // recent",
+    "DEBTS // recent",
     ...renderSectionBlock({
-      name: "TASKS",
+      name: "DEBTS",
       rows: rowLines,
     }).slice(1),
     ...(section.value.hasMore ? ["…"] : []),
@@ -382,7 +382,7 @@ export function renderKanshiText(
   selection: "world" | "contract" = "world",
 ): string {
   if (selection === "contract") return renderSelectedContract(report, context).join("\n");
-  const blocks = [renderContracts(report, context), renderAkuma(report, context), renderTasks(report, context)].filter(
+  const blocks = [renderContracts(report, context), renderAkuma(report, context), renderDebts(report, context)].filter(
     (block) => block.length > 0,
   );
   return blocks.length === 0 ? "○ world empty" : blocks.map((block) => block.join("\n")).join("\n\n");
