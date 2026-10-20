@@ -17,7 +17,9 @@ import { akumaExecutionEnvironment } from "../execution-environment.js";
 import {
   AgentEventChannel,
   createProviderAttempt,
+  launchPrompt,
   modelEvent,
+  tellRegistry,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
@@ -148,16 +150,7 @@ async function runPiPrompt(
   settle: (result: TurnResult) => void,
 ): Promise<void> {
   try {
-    const prompt = [input.body, ...input.launchTells.map((tell) => tell.text)]
-      .filter((part) => part.length > 0)
-      .join("\n\n");
-    const schemaPrompt =
-      input.schemaJson === undefined
-        ? prompt
-        : [prompt, "Respond with JSON matching this JSON Schema and no other text:", input.schemaJson]
-            .filter((part) => part.length > 0)
-            .join("\n\n");
-    await native.prompt(schemaPrompt);
+    await native.prompt(launchPrompt(input.body, input.launchTells, input.schemaJson));
     let result: TurnResult;
     if (state.aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
     else if (state.terminalFailure !== null) result = { kind: "failed", diagnostic: state.terminalFailure };
@@ -229,11 +222,7 @@ async function drivePi(
     aborting: false,
     settled: false,
   };
-  const pendingTells = new Map<PiNativeMessage, Readonly<{ id: string; resolve(submission: TellSubmission): void }>>();
-  const endPendingTells = (): void => {
-    for (const waiter of pendingTells.values()) waiter.resolve({ kind: "turn-ended" });
-    pendingTells.clear();
-  };
+  const tells = tellRegistry<PiNativeMessage>((id) => `${native.sessionId}:${id}`);
   let settleCompletion!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
     settleCompletion = resolve;
@@ -248,7 +237,7 @@ async function drivePi(
   const settle = (result: TurnResult): Promise<void> => {
     if (state.settled) return closed;
     state.settled = true;
-    endPendingTells();
+    tells.end();
     let failure: unknown;
     try {
       unsubscribe?.();
@@ -282,13 +271,7 @@ async function drivePi(
   custody?.own({ closed, abort: forceDispose, forceDispose });
   try {
     unsubscribeAgent = agent.subscribe((event) => {
-      if (event.type === "message_end") {
-        const waiter = pendingTells.get(event.message);
-        if (waiter !== undefined) {
-          pendingTells.delete(event.message);
-          waiter.resolve({ kind: "accepted", fence: `${native.sessionId}:${waiter.id}` });
-        }
-      }
+      if (event.type === "message_end") tells.accept(event.message);
     });
     unsubscribe = native.subscribe((event) => {
       if (event.type === "agent_end" && !event.willRetry) {
@@ -328,15 +311,13 @@ async function drivePi(
         content: [{ type: "text", text: tell.text }],
         timestamp: new Date().getTime(),
       };
-      return new Promise<TellSubmission>((resolve, reject) => {
-        pendingTells.set(message, { id: tell.id, resolve });
-        try {
-          agent.steer(message);
-        } catch (error) {
-          pendingTells.delete(message);
-          reject(error);
-        }
-      });
+      const submission = tells.register(message, tell.id);
+      try {
+        agent.steer(message);
+      } catch (error) {
+        tells.fail(message, error);
+      }
+      return submission;
     },
     abort: () => {
       state.abortRequest ??= (async () => {

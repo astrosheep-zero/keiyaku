@@ -1,6 +1,8 @@
 import {
   AgentEventChannel,
   createProviderAttempt,
+  launchPrompt,
+  tellRegistry,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
@@ -58,16 +60,10 @@ function liveAdmission(initial: string) {
   let latest = initial;
   let ended = false;
   const submitted = new Set([initial]);
-  const pending = new Map<
-    string,
-    { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
-  >();
+  const tells = tellRegistry<string>();
   const wait = (id: string) => {
-    if (ended) return Promise.resolve({ kind: "turn-ended" } as const);
     submitted.add(id);
-    return new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) =>
-      pending.set(id, { resolve, reject }),
-    );
+    return tells.register(id, id);
   };
   return {
     initial: wait(initial),
@@ -76,21 +72,12 @@ function liveAdmission(initial: string) {
     owns: (id: string) => submitted.has(id),
     wait,
     admit(id: string) {
-      const waiter = pending.get(id);
-      if (waiter === undefined || ended) return;
-      pending.delete(id);
-      latest = id;
-      waiter.resolve({ kind: "accepted", fence: id });
+      if (tells.accept(id)) latest = id;
     },
-    fail(id: string, error: unknown) {
-      pending.get(id)?.reject(error);
-      pending.delete(id);
-    },
-    end() {
-      if (ended) return;
+    fail: tells.fail,
+    end: () => {
       ended = true;
-      for (const waiter of pending.values()) waiter.resolve({ kind: "turn-ended" });
-      pending.clear();
+      tells.end();
     },
   };
 }
@@ -289,7 +276,7 @@ async function drive(
         throw new Error("OpenCode returned no exact native inbox admission");
       }
     };
-    await prompt(initial, [input.body, ...input.launchTells.map((tell) => tell.text)].filter(Boolean).join("\n\n"));
+    await prompt(initial, launchPrompt(input.body, input.launchTells));
     custody.signal.throwIfAborted();
     let submissions: Promise<void> = admission.initial.then(() => undefined);
     return {

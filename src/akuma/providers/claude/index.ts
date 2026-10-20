@@ -4,6 +4,7 @@ import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/c
 import {
   AgentEventChannel,
   createProviderAttempt,
+  launchPrompt,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
@@ -131,10 +132,6 @@ async function forkClaude(
   if (forked.sessionId.trim().length === 0) throw new Error("Claude fork returned an empty child session id");
   if (forked.sessionId === sessionId) throw new Error("Claude fork reused the source session id");
   return { session: { sessionId: forked.sessionId } };
-}
-
-function launchText(input: ClaudeDriveInput): string {
-  return [input.body, ...input.launchTells.map((tell) => tell.text)].filter((part) => part.length > 0).join("\n\n");
 }
 
 type Observation = Readonly<{
@@ -385,7 +382,7 @@ async function driveClaude(
   const run = randomUUID();
   const accepted: AcceptedTell[] = [];
   const driveState: ClaudeDriveState = { submission: 0, openSubmissions: 0 };
-  const launchAcknowledged = input.push(claudeUserMessage(launchText(drive)));
+  const launchAcknowledged = input.push(claudeUserMessage(launchPrompt(drive.body, drive.launchTells)));
   const query = sdk.query({
     prompt: input.iterable,
     options: claudeQueryOptions(drive, execution, abortController),

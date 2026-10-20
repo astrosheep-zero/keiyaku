@@ -346,6 +346,60 @@ export type TellReceipt =
   | Readonly<{ evidence: "fence"; fence: ProviderFence; kind: string }>;
 export type TellSubmission = Readonly<{ kind: "accepted"; fence: ProviderFence }> | Readonly<{ kind: "turn-ended" }>;
 
+type TellWaiter = Readonly<{ id: string; resolve(value: TellSubmission): void; reject(error: unknown): void }>;
+
+export type TellRegistry<Key> = Readonly<{
+  register(key: Key, id: string): Promise<TellSubmission>;
+  /** Native evidence naming the booked tell resolves its wait; false when none was booked. */
+  accept(key: Key): boolean;
+  fail(key: Key, error: unknown): void;
+  end(): void;
+}>;
+
+/**
+ * One live-tell receipt book, keyed by whatever evidence proves acceptance: a
+ * native message identity or the tell id itself, with `fenceOf` naming the
+ * receipt. Register before the text reaches the native surface. Ending the
+ * turn ends every remaining wait, and every later registration too.
+ */
+export function tellRegistry<Key>(fenceOf: (id: string) => string = (id) => id): TellRegistry<Key> {
+  const waiting = new Map<Key, TellWaiter>();
+  let ended = false;
+  const take = (key: Key): TellWaiter | undefined => {
+    const waiter = waiting.get(key);
+    if (waiter !== undefined) waiting.delete(key);
+    return waiter;
+  };
+  return {
+    register(key, id) {
+      if (ended) return Promise.resolve({ kind: "turn-ended" });
+      if (waiting.has(key)) throw new Error("duplicate live tell");
+      return new Promise<TellSubmission>((resolve, reject) => waiting.set(key, { id, resolve, reject }));
+    },
+    accept(key) {
+      const waiter = take(key);
+      waiter?.resolve({ kind: "accepted", fence: fenceOf(waiter.id) });
+      return waiter !== undefined;
+    },
+    fail(key, error) {
+      take(key)?.reject(error);
+    },
+    end() {
+      ended = true;
+      for (const waiter of waiting.values()) waiter.resolve({ kind: "turn-ended" });
+      waiting.clear();
+    },
+  };
+}
+
+/** The one launch text: the body, every launch tell, then any schema, blank-line separated. */
+const JSON_SCHEMA_PROMPT = "Respond with JSON matching this JSON Schema and no other text:";
+export function launchPrompt(body: string, tells: readonly Readonly<{ text: string }>[], schema?: string): string {
+  const parts = [body, ...tells.map((tell) => tell.text)];
+  if (schema !== undefined) parts.push(JSON_SCHEMA_PROMPT, schema);
+  return parts.filter((part) => part.length > 0).join("\n\n");
+}
+
 export type Session = Readonly<{
   admission: Readonly<{ fence: ProviderFence }>;
   events: AsyncIterable<AgentEvent>;

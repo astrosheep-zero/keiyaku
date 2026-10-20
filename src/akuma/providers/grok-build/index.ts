@@ -1,3 +1,4 @@
+import { tellRegistry, type TellRegistry } from "../../provider.js";
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { nonblank, object, searchToolCall } from "../decode.js";
@@ -116,22 +117,12 @@ function argv(execution: ProviderExecution, options: ProviderOptions): readonly 
   return values as [string, ...string[]];
 }
 
-function withInterject(
-  live: AcpLiveSession,
-  pending: Map<
-    string,
-    { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
-  >,
-): Session {
+function withInterject(live: AcpLiveSession, tells: TellRegistry<string>): Session {
   return {
     ...live.session,
     tell: (tell) => {
       if (!live.open()) return Promise.resolve({ kind: "turn-ended" } as const);
-      const existing = pending.get(tell.id);
-      if (existing !== undefined) throw new Error("Grok Build duplicate pending interjection id");
-      const receipt = new Promise<Awaited<ReturnType<NonNullable<Session["tell"]>>>>((resolve, reject) => {
-        pending.set(tell.id, { resolve, reject });
-      });
+      const receipt = tells.register(tell.id, tell.id);
       void live.agent
         .request<Readonly<{ status: "queued" }>, InterjectParams>(INTERJECT_METHOD, {
           sessionId: live.sessionId,
@@ -140,15 +131,11 @@ function withInterject(
         })
         .then(
           (response) => {
-            if (response?.status !== "queued" && pending.has(tell.id)) {
-              pending.get(tell.id)?.reject(new Error("Grok Build interject did not return queued"));
-              pending.delete(tell.id);
+            if (response?.status !== "queued") {
+              tells.fail(tell.id, new Error("Grok Build interject did not return queued"));
             }
           },
-          (error: unknown) => {
-            pending.get(tell.id)?.reject(error);
-            pending.delete(tell.id);
-          },
+          (error: unknown) => tells.fail(tell.id, error),
         );
       return receipt;
     },
@@ -161,10 +148,7 @@ export function createGrokBuildProvider(
 ): ProviderAdapter {
   if (execution.executable === undefined) throw new TypeError("Grok Build provider execution requires executable");
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
-    const pending = new Map<
-      string,
-      { resolve(value: Awaited<ReturnType<NonNullable<Session["tell"]>>>): void; reject(error: unknown): void }
-    >();
+    const tells = tellRegistry<string>();
     let live: AcpLiveSession | undefined;
     const launch = {
       argv: argv(execution, input.options),
@@ -182,24 +166,18 @@ export function createGrokBuildProvider(
             (value) => value as InterjectParams,
             ({ params }) => {
               if (params.sessionId !== live?.sessionId) return;
-              const waiter = pending.get(params.interjectionId);
-              if (waiter === undefined) return;
-              pending.delete(params.interjectionId);
-              waiter.resolve({ kind: "accepted", fence: params.interjectionId });
+              tells.accept(params.interjectionId);
             },
           );
         },
-        onTerminal: () => {
-          for (const waiter of pending.values()) waiter.resolve({ kind: "turn-ended" });
-          pending.clear();
-        },
+        onTerminal: () => tells.end(),
         interpretTool: interpretGrokTool,
         freshSessionMeta: { ...(dependencies.freshSessionMeta ?? {}), ...(sessionMeta.freshSessionMeta ?? {}) },
         loadSessionMeta: { ...(dependencies.loadSessionMeta ?? {}), ...(sessionMeta.loadSessionMeta ?? {}) },
       },
       custody,
     );
-    return withInterject(live, pending);
+    return withInterject(live, tells);
   };
   return {
     admitOptions: optionAdmission,

@@ -14,6 +14,7 @@ import { abortable } from "../../abort.js";
 import {
   type AttemptCustody,
   type DriveInput,
+  launchPrompt,
   modelEvent,
   type ProviderAdapter,
   type ProviderOptionAdmission,
@@ -280,11 +281,7 @@ class PaseoDrive {
     if (startupModel !== undefined) this.turn.events.emit(modelEvent(startupModel));
     // Native steer may still replace work if a human wins the check/send race.
     input.signal.throwIfAborted();
-    const parts = [input.body, ...input.launchTells.map((tell) => tell.text)];
-    if (input.schemaJson !== undefined) {
-      parts.push("Respond with JSON matching this JSON Schema and no other text:", input.schemaJson);
-    }
-    const prompt = parts.filter((text) => text.length > 0).join("\n\n");
+    const prompt = launchPrompt(input.body, input.launchTells, input.schemaJson);
     await setup(input.signal, () => {
       this.submitted = true;
       return this.client.sendMessage(agent.id, prompt, { messageId: this.turn.messageId, activeTurnBehavior: "steer" });

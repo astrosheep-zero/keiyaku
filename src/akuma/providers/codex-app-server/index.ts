@@ -2,6 +2,7 @@ import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import {
   AgentEventChannel,
   createProviderAttempt,
+  launchPrompt,
   modelEvent,
   type AttemptCustody,
   type Session,
@@ -109,9 +110,7 @@ async function admitTurn(
       input: [
         {
           type: "text",
-          text: [input.body, ...input.launchTells.map((tell) => tell.text)]
-            .filter((part) => part.length > 0)
-            .join("\n\n"),
+          text: launchPrompt(input.body, input.launchTells),
         },
       ],
       ...(input.options.model === undefined ? {} : { model: input.options.model }),
