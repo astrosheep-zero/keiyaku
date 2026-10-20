@@ -1,7 +1,7 @@
 ---
 id: task/usability/investigate-inconsistent-full-6096
 title: Investigate inconsistent full-suite Akuma lifecycle failures
-state: in_progress
+state: open
 priority: 1
 needs: []
 parent: task/usability/follow-up-on-the-pi-flash-d8e2

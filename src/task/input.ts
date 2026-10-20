@@ -83,7 +83,7 @@ export function sort(value: unknown): TaskQuerySort | undefined {
 
 function state(value: unknown): TaskState | undefined {
   if (value === undefined) return undefined;
-  if (value !== "open" && value !== "in_progress" && value !== "on_hold" && value !== "done" && value !== "drop") {
+  if (value !== "open" && value !== "done" && value !== "drop") {
     throw new TypeError("state is invalid");
   }
   return value;

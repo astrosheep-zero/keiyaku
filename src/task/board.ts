@@ -18,7 +18,7 @@ export const taskRowSchema = z
     title: taskNonblankTextSchema,
     state: taskStateSchema,
     priority: taskPrioritySchema,
-    disposition: z.enum(["ready", "blocked", "in_progress", "on_hold", "done", "drop"]),
+    disposition: z.enum(["ready", "blocked", "done", "drop"]),
     updatedAt: taskRowTimestampSchema,
     bodyPresent: z.boolean(),
     children: z
@@ -129,7 +129,7 @@ export function taskDisposition(board: TaskBoard, task: TaskDocument): TaskDispo
   return hasUnresolvedNeeds(board, task) ? "blocked" : "ready";
 }
 export function taskBlocked(board: TaskBoard, task: TaskDocument): boolean {
-  return (task.state === "open" || task.state === "in_progress") && hasUnresolvedNeeds(board, task);
+  return task.state === "open" && hasUnresolvedNeeds(board, task);
 }
 export function projectOwnedDetailFacts(board: TaskBoard, id: TaskId): TaskDetailFacts | null {
   const task = board.tasks.get(id);

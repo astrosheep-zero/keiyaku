@@ -48,10 +48,6 @@ export function taskDispositionMark(disposition: TaskDisposition): string {
       return "○";
     case "blocked":
       return "‖";
-    case "in_progress":
-      return "●";
-    case "on_hold":
-      return "⧗";
     case "done":
       return "✓";
     case "drop":
@@ -70,8 +66,6 @@ export function taskMark(word: TaskMarkWord): string {
       return "!";
     case "ready":
     case "blocked":
-    case "in_progress":
-    case "on_hold":
     case "done":
     case "drop":
       return taskDispositionMark(word);

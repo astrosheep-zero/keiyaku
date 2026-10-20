@@ -855,7 +855,6 @@ test(
         return await Tasks.of(world).add(options);
       },
       addDocument: unused,
-      compose: unused,
       update: unused,
       lifecycle: unused,
       batch: unused,

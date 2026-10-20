@@ -5,27 +5,21 @@ import {
   Tasks,
   tasksWithExecution,
   taskRowViewLimit,
-  type TaskBatchResult,
   type TaskDetail,
   type TaskId,
   type TaskMutationResult,
   type TaskPriority,
   type TaskQuerySort,
   type TaskState,
-  type TaskCompositionResult,
   type TaskUpdateResult,
 } from "../../task/index.js";
-import { taskCompositionNamespaceHeader } from "../../task/compose-language.js";
 import { installNamespaceContext, resolveTaskNamespaceContext } from "../../task/context.js";
-import { displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
+import { displayContext, emit, writeJson } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import type { CliCoordinates } from "../coordinates.js";
 import {
   renderDoctor,
-  renderTaskCompose,
   renderTaskContext,
-  renderTaskFailure,
-  renderTaskIncompleteDiagnostic,
   renderTaskLifecycle,
   renderTaskList,
   renderTaskMutation,
@@ -53,7 +47,6 @@ type TaskInput = Readonly<{
   actor?: string;
   current?: readonly string[];
   stdin?: string;
-  composeNamespace?: readonly string[];
 }>;
 
 function value(command: ParsedTaskCommand, name: string): string | undefined {
@@ -99,8 +92,6 @@ function taskStdinDiagnostic(command: ParsedTaskCommand): string | undefined {
   switch (command.stdin) {
     case "document":
       return "task add requires a nonblank stdin document";
-    case "compose":
-      return "task compose requires a nonblank stdin document";
     case "body":
       return "task update --body requires a nonblank value";
     case "append":
@@ -305,7 +296,7 @@ function missingWorld(command: ParsedTaskCommand): number {
     const refusal: TaskShowResult = missingTask(command.positionals[0]!);
     return emit(output, refusal, () => renderTaskShow(refusal, displayContext()), 1);
   }
-  if (isWorldObservationAction(command) || (command.action === "compose" && command.flags.plan === true)) {
+  if (isWorldObservationAction(command)) {
     return emit(output, { kind: "absent" }, () => "task world absent", 1);
   }
   if (command.action === "context") {
@@ -320,19 +311,8 @@ function missingWorld(command: ParsedTaskCommand): number {
     const result = missingTask(command.positionals[0]!);
     return emit(output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
   }
-  const singleLifecycle = ["start", "stop", "hold", "resume"].includes(command.action);
-  const batchLifecycle = ["done", "drop"].includes(command.action);
-  if (!singleLifecycle && !batchLifecycle)
+  if (command.action !== "done" && command.action !== "drop")
     throw new Error(`task action has no missing-world answer: ${command.action}`);
-  if (singleLifecycle && command.positionals.length === 1) {
-    const result = missingTask(command.positionals[0]!);
-    return emit(
-      output,
-      result,
-      () => renderTaskMutation(command.action, result, displayContext()),
-      taskExitCode(result),
-    );
-  }
   const result = {
     items: command.positionals.map((id) => ({ id: id as TaskId, outcome: missingTask(id) })),
   };
@@ -344,30 +324,11 @@ function missingWorld(command: ParsedTaskCommand): number {
   );
 }
 
-/**
- * One compose execution outcome: JSON keeps the untouched native value, while an incomplete text
- * answer recovers its draft and puts the diagnostic on stderr.
- */
-function emitCompose(output: "text" | "json", result: TaskCompositionResult): number {
-  if (output === "json") {
-    writeJson(result);
-    return taskExitCode(result);
-  }
-  if (result.kind === "incomplete") {
-    const diagnostic = renderTaskIncompleteDiagnostic(result);
-    if (diagnostic.length > 0) writeStderr(diagnostic);
-    process.stdout.write(result.draft);
-    return taskExitCode(result);
-  }
-  writeStdout(renderTaskCompose(result, displayContext()));
-  return taskExitCode(result);
-}
-
 /** One plural Task lifecycle answer: every verb shares the same batch shape and renderer. */
 async function runBatchLifecycle(
   tasks: TaskProduct,
   command: ParsedTaskCommand,
-  verb: "hold" | "done" | "drop",
+  verb: "done" | "drop",
 ): Promise<number> {
   const note = value(command, "note");
   const result = await tasks.batch({
@@ -379,7 +340,7 @@ async function runBatchLifecycle(
 }
 
 async function runMutation(input: TaskInput): Promise<number> {
-  const { tasks, command, current, stdin, composeNamespace } = input;
+  const { tasks, command, current } = input;
   if (isWorldObservationAction(command) || command.action === "tree") return await runRead(input);
   switch (command.action) {
     case "add": {
@@ -395,18 +356,6 @@ async function runMutation(input: TaskInput): Promise<number> {
       const result = await invokeUpdate(input);
       return emit(command.output, result, () => renderTaskUpdate(result, displayContext()), taskExitCode(result));
     }
-    case "start":
-    case "stop":
-    case "resume": {
-      const result = await invokeLifecycle(tasks, command.positionals, command.positionals[0]!, command.action);
-      return emit(
-        command.output,
-        result,
-        () => renderTaskLifecycle(command.action, result, displayContext()),
-        taskExitCode(result),
-      );
-    }
-    case "hold":
     case "done":
     case "drop":
       return await runBatchLifecycle(tasks, command, command.action);
@@ -428,35 +377,13 @@ async function runMutation(input: TaskInput): Promise<number> {
       };
       return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
     }
-    case "compose": {
-      const result = await tasks.compose({
-        markdown: stdin ?? "",
-        namespace: composeNamespace ?? current ?? [],
-        ...(input.actor === undefined ? {} : { actor: input.actor }),
-        ...(command.flags.plan === true ? { plan: true } : {}),
-      });
-      return emitCompose(command.output, result);
-    }
     default:
       throw new Error(`task action has no invocation: ${command.action}`);
   }
 }
 
-function invokeLifecycle(
-  tasks: TaskProduct,
-  taskIds: readonly string[],
-  firstId: string,
-  verb: "start" | "stop" | "hold" | "resume",
-): Promise<TaskMutationResult | TaskBatchResult> {
-  return taskIds.length === 1 ? tasks.task({ id: firstId })[verb]() : tasks.batch({ verb, ids: taskIds });
-}
-
 function establishesWorld(command: ParsedTaskCommand): boolean {
-  return (
-    command.action === "add" ||
-    (command.action === "compose" && command.flags.plan !== true) ||
-    (command.action === "context" && command.positionals.length > 0)
-  );
+  return command.action === "add" || (command.action === "context" && command.positionals.length > 0);
 }
 
 /**
@@ -490,13 +417,6 @@ function refuseNamespace(
       );
     case "context":
       return emit(command.output, result, () => renderTaskContext(result, displayContext()), taskExitCode(result));
-    case "compose":
-      return emit(
-        command.output,
-        result,
-        () => renderTaskFailure("compose", result, displayContext()),
-        taskExitCode(result),
-      );
     default:
       throw new Error(`task action has no namespace refusal: ${command.action}`);
   }
@@ -512,28 +432,17 @@ export async function runTaskCommand(
   const stdinDiagnostic = taskStdinDiagnostic(command);
   const stdin = stdinDiagnostic === undefined ? undefined : await runtime.readStdin();
   if (stdinDiagnostic !== undefined && isBlankInput(stdin ?? "")) throw new CliUsageError(stdinDiagnostic);
-  const planOnly = command.action === "compose" && command.flags.plan === true;
-  const composition =
-    command.action === "compose" && stdin !== undefined ? taskCompositionNamespaceHeader(stdin) : undefined;
-  const explicitNamespace =
-    command.action === "add"
-      ? namespace(value(command, "namespace"))
-      : command.action === "compose" && composition?.specified
-        ? composition.namespace
-        : undefined;
+  const explicitNamespace = command.action === "add" ? namespace(value(command, "namespace")) : undefined;
   const actor = actorFromEdge(
     typeof command.flags.actor === "string" ? command.flags.actor : undefined,
     runtime.environment,
   );
-  const world =
-    coordinates.world ??
-    (planOnly ? coordinates.candidateWorld : establishesWorld(command) ? await coordinates.establishWorld() : null);
+  const world = coordinates.world ?? (establishesWorld(command) ? await coordinates.establishWorld() : null);
   if (world === null) return missingWorld(command);
   const tasks = tasksWithExecution(world, runtime.execution);
   const contextSensitive =
     command.action === "context" ||
     (command.action === "add" && explicitNamespace === undefined) ||
-    (command.action === "compose" && composition?.specified !== true) ||
     (((command.action === "ls" && explicitListNamespace(command) === undefined) ||
       command.action === "ready" ||
       command.action === "blocked" ||
@@ -557,6 +466,5 @@ export async function runTaskCommand(
     ...(actor === undefined ? {} : { actor }),
     ...(current === undefined ? {} : { current }),
     ...(stdin === undefined ? {} : { stdin }),
-    ...(explicitNamespace === undefined ? {} : { composeNamespace: explicitNamespace }),
   });
 }

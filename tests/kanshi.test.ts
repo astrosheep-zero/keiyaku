@@ -8,9 +8,7 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import {
-  repositoryAt,
-} from "../src/git/repository.js";
+import { repositoryAt } from "../src/git/repository.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { kanshi, selectKanshi } from "../src/kanshi/index.js";
@@ -19,9 +17,6 @@ import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-
-
-
 
 function document(title = "Kanshi contract"): string {
   return contractMarkdown(title, {
@@ -55,7 +50,6 @@ async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T0
   return allocated.id;
 }
 
-
 function fixtureRepository(t: TestContext) {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
@@ -68,18 +62,19 @@ async function populatedWorld(t: TestContext) {
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const tasks = Tasks.of(await World.at(repository.path));
   const added = await tasks.add({ title: "Render status", priority: 0 });
-  assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
-  const bound = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
-    task: added.value.id,
-    markdown: document(),
-    workspace: "worktree",
-    target: "main",
-  }));
+  assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
+  const bound = accepted(
+    await Keiyaku.with().bind({
+      repo: await Repo.at({ path: repository.path }),
+      task: added.value.id,
+      markdown: document(),
+      workspace: "worktree",
+      target: "main",
+    }),
+  );
   const contract = present(await bound.value.keiyaku.state());
   const renamed = await tasks.task({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
-  await tasks.task({ id: added.value.id }).start();
   const akumaId = await bornAkuma(repository.path, "a0000001");
   assert.equal(
     (
@@ -94,10 +89,6 @@ async function populatedWorld(t: TestContext) {
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
   return { repository, contract, keiyaku: bound.value.keiyaku, taskId: added.value.id, akumaId };
 }
-
-
-
-
 
 test("Task board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
   const { repository, contract, akumaId } = await populatedWorld(t);
@@ -124,5 +115,8 @@ test("Task board failure names the malformed document once without suppressing C
   );
   assert.doesNotMatch(selected, /failed task document must begin with YAML front matter/u);
   const worldText = renderKanshiText(report, { columns: 80, color: false });
-  assert.equal((worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length, 1);
+  assert.equal(
+    (worldText.match(/task\/bad · failed task document must begin with YAML front matter/gu) ?? []).length,
+    1,
+  );
 });

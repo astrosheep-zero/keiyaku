@@ -5,6 +5,7 @@ import {
   parseTaskDocument,
   serializeTaskDocument,
   TaskAuthorityCorruptionError,
+  taskStateSchema,
 } from "../src/task/document.js";
 import {
   deriveLocalStem,
@@ -74,6 +75,29 @@ test("task authority is closed and the path owns identity", () => {
   assert.throws(
     () => parseTaskCreationDocument("---\ntitle: Bad\nid: task/bad\n---\n"),
     /unknown task front matter key/u,
+  );
+});
+
+test("Task states are a closed ledger vocabulary and corrupt state names remain visible", () => {
+  assert.deepEqual(taskStateSchema.options, ["open", "done", "drop"]);
+  const coordinate = { namespace: [], localId: "state" } as const;
+  const document = {
+    ...parseTaskCreationDocument("---\ntitle: State\n---\n"),
+    id: formatTaskId(coordinate),
+    createdAt: "2026-08-07T01:02:03.004Z",
+    updatedAt: "2026-08-07T01:02:03.004Z",
+  };
+  const invalid = Buffer.from(serializeTaskDocument(document))
+    .toString("utf8")
+    .replace("state: open", "state: unknown");
+  assert.throws(
+    () => parseTaskDocument(Buffer.from(invalid), coordinate),
+    (error: unknown) => {
+      assert.ok(error instanceof TaskAuthorityCorruptionError);
+      assert.equal(error.coordinate, document.id);
+      assert.match(error.message, /task state is invalid: unknown/u);
+      return true;
+    },
   );
 });
 

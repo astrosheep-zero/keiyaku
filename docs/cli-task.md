@@ -3,17 +3,17 @@
 The Task CLI is the user-facing adaptation of the separate Task product. It
 owns Task command intent and Task-oriented presentation; [task.md](task.md)
 owns all Task authority, lifecycle, relationships, persistence, and
-concurrency judgment. Literal forms, flags, properties, and composition syntax
-belong to executable leaf help and the parser, not this chapter.
+concurrency judgment. Task records confirmed unresolved work, not plans or
+execution progress. Literal forms, flags, and properties belong to executable
+leaf help and the parser, not this chapter.
 
 ## Commands and judgments
 
 | Verb family | Purpose | Refusal and result boundary |
 | --- | --- | --- |
 | add, update | Create or change a Task fact. | The Task product decides identity, validation, no-op, and authority corruption; accepted results identify the changed Task. |
-| start, stop, hold, resume, done, drop | Request a Task lifecycle change. | The Task product decides legal transition, target availability, and batch outcomes; a refusal or retry remains visible per requested Task. |
+| done, drop | Close resolved work or work that is no longer owed. | The Task product decides legal transition, target availability, and batch outcomes; a refusal or retry remains visible per requested Task. |
 | show, ls, ready, blocked, query, tree | Read Task authority or a derived Task view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
-| compose | Submit a planning intent or ask for its plan. | Task owns aliasing, dependency judgment, admission, partial completion, and reusable recovery intent. |
 | context | Observe or deliberately change the caller's default Task namespace. | Context is not authority and cannot retarget a complete Task identity. |
 | doctor | Diagnose Task authority and relationship health. | It reports; it never repairs. |
 
@@ -35,8 +35,7 @@ Task text makes accepted work, a substantive refusal, retryable contention,
 absence, and infrastructure failure distinguishable. JSON remains the same
 public Task value, not a reduced text-derived format.
 
-Composition presentation preserves the Task product's plan, accepted changes,
-and recovery draft boundaries. In particular, an incomplete composition keeps
-its reusable remaining intent separate from diagnostics about already admitted
-work. The Task CLI does not calculate diffs, diagnose graph validity, or make
-another admission decision merely to render output.
+Task presentation exposes open, done, and dropped work. Ready and blocked are
+derived views of open work and its prerequisites, never stored progress.
+Settlement may close a Task after Contract acceptance; the CLI owns no second
+completion decision.

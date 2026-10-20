@@ -172,7 +172,11 @@ definitions remain an archetype-owner listing, reachable through the root as
 that owner's bounded catalogue and its native error; no public definition
 loader joins the root. The independent Task product
 likewise captures World and does not read or write Contract authority except
-through the settlement owner.
+through the settlement owner. Its collection offers creation, bounded list,
+readiness, blocked and query views, diagnosis, and terminal batches. Addressed
+Task handles offer reads, relationship trees, updates, completion, and dropping.
+Board observation remains read-only. There is no planning or execution-progress
+operation; [task.md](task.md) owns the three-state ledger and its dependencies.
 
 CLI grammar, flags, help rows, and literal output are owned by the CLI chapters.
 They are deliberately not copied into this package law. Mutation outcome

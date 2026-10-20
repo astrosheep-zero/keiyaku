@@ -38,11 +38,7 @@ import {
 } from "../src/cli/render/akuma-activity.js";
 import { akumaStatusSchema, type AkumaList, type AkumaStatus } from "../src/akuma/akuma.js";
 import { type ActivityRow, type CompletedToolRow, type OutcomeRow } from "../src/akuma/projection.js";
-import type {
-  IntegrationConflictMaterialized,
-  ReconciliationLag,
-  RegionOverlap,
-} from "../src/index.js";
+import type { IntegrationConflictMaterialized, ReconciliationLag, RegionOverlap } from "../src/index.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiCategoryText, renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
@@ -77,13 +73,7 @@ import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkuId } from "../src/akuma/identity.js";
-import {
-  renderTaskCompose,
-  renderTaskList,
-  renderTaskMutation,
-  renderTaskShow,
-  renderTaskUpdate,
-} from "../src/cli/render/task.js";
+import { renderTaskList, renderTaskMutation, renderTaskShow, renderTaskUpdate } from "../src/cli/render/task.js";
 import type { TaskId, TaskPage, TaskRow } from "../src/task/index.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
@@ -110,13 +100,34 @@ function bindFact(contract: ContractId): Extract<JournalEntry, { kind: "bind" }>
   };
 }
 function claimedFact(contract: ContractId): Extract<JournalEntry, { kind: "claimed" }> {
-  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "claimed", data: { delivery: fixtureEntry } };
+  return {
+    v: 1,
+    at: "2026-01-01T00:00:00Z",
+    contract,
+    entry: fixtureEntry,
+    kind: "claimed",
+    data: { delivery: fixtureEntry },
+  };
 }
 function deliverFact(contract: ContractId): Extract<JournalEntry, { kind: "deliver" }> {
-  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V"), kind: "deliver",
-    data: { tenderSnapshot: snapshotId("tender-commit"), integration: { predecessor: snapshotId("base"), snapshot: snapshotId("integration"), changeId: changeId("content-id") }, method: "squash", policy: { requireBranchesToBeUpToDate: false } } };
+  return {
+    v: 1,
+    at: "2026-01-01T00:00:00Z",
+    contract,
+    entry: entryUlid("01K4AJ8F6K7JH8Y6Q5NEPRT41V"),
+    kind: "deliver",
+    data: {
+      tenderSnapshot: snapshotId("tender-commit"),
+      integration: {
+        predecessor: snapshotId("base"),
+        snapshot: snapshotId("integration"),
+        changeId: changeId("content-id"),
+      },
+      method: "squash",
+      policy: { requireBranchesToBeUpToDate: false },
+    },
+  };
 }
-
 
 // ---------------------------------------------------------------------------
 // Native accepted-outcome fixtures
@@ -196,14 +207,24 @@ function reviewAttestationFact(
 
 /** The arc fact the arc renderer reads to name its chapter. */
 function arcFact(contract: ContractId, seq: number, title: string): Extract<JournalEntry, { kind: "arc" }> {
-  return { v: 1, at: "2026-01-01T00:00:00Z", contract, entry: fixtureEntry, kind: "arc", data: { seq, title, body: "" } };
+  return {
+    v: 1,
+    at: "2026-01-01T00:00:00Z",
+    contract,
+    entry: fixtureEntry,
+    kind: "arc",
+    data: { seq, title, body: "" },
+  };
 }
 
 /** One native reconciliation lag effect; requiredness comes from the owner's own classifier. */
 function lagEffect(contract: ContractId, lag: ReconciliationLag): AcceptedEffect {
   return { kind: "reconciliation-lag", contract, affects: reconcileLagScope(lag), lag };
 }
-function cleanupEffect(contract: ContractId, issue: Extract<AcceptedEffect, { kind: "cleanup" }>["issue"]): AcceptedEffect {
+function cleanupEffect(
+  contract: ContractId,
+  issue: Extract<AcceptedEffect, { kind: "cleanup" }>["issue"],
+): AcceptedEffect {
   return { kind: "cleanup", contract, issue };
 }
 function retiredWorktreeEffect(contract: ContractId, name: string): AcceptedEffect {
@@ -493,22 +514,7 @@ test("a task title wraps its em-dash and title as one unit", () => {
   assert.match(text, /^  — a very long/mu, "the em-dash moves with its title to the continuation line");
 });
 
-test("compose plan renders positions and titles instead of provisional Task ids", () => {
-  const command = parseArgv(["task", "compose", "--plan", "-"]);
-  assert.ok("command" in command);
-  if (!command.command || command.command.command !== "task") throw new Error("expected task command");
-  const text = renderTaskCompose({
-    kind: "planned",
-    aliases: [{ alias: "alpha", position: 1 }],
-    admissionOrder: [{ position: 1, alias: "alpha" }],
-    admissions: [{ position: 1, kind: "new", alias: "alpha", title: "Alpha" }],
-    bodies: [],
-  });
-  assert.equal(text, "compose plan · 1 documents\nalias ^alpha 1\nadmit 1  + Alpha  as ^alpha");
-  assert.doesNotMatch(text, /task\//u);
-});
-
-test("task receipts report fields and admissions without projection diffs", () => {
+test("task receipts report fields without projection diffs", () => {
   const task = {
     id: "task/alpha" as never,
     namespace: [],
@@ -537,16 +543,6 @@ test("task receipts report fields and admissions without projection diffs", () =
   assert.doesNotMatch(update, /diff|updatedAt: noise/u);
   const added = renderTaskMutation("add", { kind: "accepted", value: task });
   assert.match(added, /^✓ added  task\/alpha/u);
-  const composed = renderTaskCompose({
-    kind: "accepted",
-    aliases: [{ alias: "alpha", taskId: task.id }],
-    admissionOrder: [task.id],
-    admissions: [{ position: 1, kind: "new", title: "Alpha", alias: "alpha" }],
-    documentChanges: [{ taskId: task.id, kind: "created", documentDiff: "+updatedAt: noise" }],
-  });
-  assert.match(composed, /^✓ composed · 1 changed/mu);
-  assert.match(composed, /^admit 1  \+ Alpha  as \^alpha$/mu);
-  assert.doesNotMatch(composed, /diff|updatedAt/u);
   const shown = renderTaskShow({
     task,
     needs: [],
@@ -639,9 +635,7 @@ test("rendered Akuma catalog header names Akuma names, never archetype", () => {
 test("root Task catalogue marks every disposition with its own state", () => {
   const cases = [
     ["ready", "○"],
-    ["in_progress", "●"],
     ["blocked", "‖"],
-    ["on_hold", "⧗"],
     ["done", "✓"],
     ["drop", "×"],
   ] as const;
@@ -696,31 +690,54 @@ test("category boards reuse World rows and bounded omission while naming their o
   const context = { columns: 120, color: false };
   const report = akumaWorldReport([activityAkumaRow("aku/worker/11110001", "asleep", idleAkumaSnapshot([]))]);
   assert.equal(
-    renderKanshiCategoryText({ category: "akuma", root: report.root, observedAt: report.observedAt, akuma: report.akuma }, context),
+    renderKanshiCategoryText(
+      { category: "akuma", root: report.root, observedAt: report.observedAt, akuma: report.akuma },
+      context,
+    ),
     renderAkuma(report, context).join("\n"),
   );
-  const contracts = { kind: "present" as const, value: { ...contractCatalog([contractRow()]), rows: [contractRow()], hasMore: true } };
+  const contracts = {
+    kind: "present" as const,
+    value: { ...contractCatalog([contractRow()]), rows: [contractRow()], hasMore: true },
+  };
   const category = { category: "contract" as const, root: report.root, observedAt: report.observedAt, contracts };
   const text = renderKanshiCategoryText(category, context);
-  assert.equal(text, renderKanshiText({ ...akumaWorldReport([]), contracts, tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } }, observedAt: report.observedAt }, context));
+  assert.equal(
+    text,
+    renderKanshiText(
+      {
+        ...akumaWorldReport([]),
+        contracts,
+        tasks: { kind: "present", value: { root: worldRoot, rows: [], hasMore: false } },
+        observedAt: report.observedAt,
+      },
+      context,
+    ),
+  );
   assert.ok(text.endsWith("…"));
-  assert.equal(renderKanshiCategoryText({ ...category, contracts: { kind: "present", value: { ...contracts.value, rows: [], hasMore: false } } }), "contracts  none");
+  assert.equal(
+    renderKanshiCategoryText({
+      ...category,
+      contracts: { kind: "present", value: { ...contracts.value, rows: [], hasMore: false } },
+    }),
+    "contracts  none",
+  );
   assert.equal(renderKanshiCategoryText({ ...category, contracts: { kind: "absent" } }), "CONTRACTS // absent");
-  assert.match(renderKanshiCategoryText({ ...category, contracts: { kind: "failed", failure: { message: "owner unavailable" } } }), /CONTRACTS \/\/ unavailable\n\n! owner unavailable/u);
+  assert.match(
+    renderKanshiCategoryText({ ...category, contracts: { kind: "failed", failure: { message: "owner unavailable" } } }),
+    /CONTRACTS \/\/ unavailable\n\n! owner unavailable/u,
+  );
 });
 
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(
-    renderTaskCatalogue({ rows: [], hasMore: false }, []),
-    "tasks  none",
-  );
+  assert.equal(renderTaskCatalogue({ rows: [], hasMore: false }, []), "tasks  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(
     renderAkumaCatalogue(
       {
         observedAt: "2026-08-12T00:00:00.000Z",
         rows: [],
-          searched: [],
+        searched: [],
         hasMore: false,
       },
       "worker",
@@ -1276,7 +1293,9 @@ test("amend receipt names gate and prerequisite changes even without document di
   assert.match(gates, /✓ amended[\s\S]*gates  reviewed · holder-smelled/u);
   assert.doesNotMatch(gates, /terms  unchanged/u);
   assert.match(
-    renderAccepted(acceptedAmend({ contract }, { documentDiff: "", changes: { after: [contractId("kei/prerequisite")] } })),
+    renderAccepted(
+      acceptedAmend({ contract }, { documentDiff: "", changes: { after: [contractId("kei/prerequisite")] } }),
+    ),
     /after  kei\/prerequisite/u,
   );
 });
@@ -1284,9 +1303,7 @@ test("amend receipt names gate and prerequisite changes even without document di
 test("amend terms diff keeps comparison headers without the banner or header whitespace", () => {
   const diff =
     "===================================================================\n--- before\t\n+++ after\t\n@@ -1 +1 @@\n-old\n+new\n";
-  const text = renderAccepted(
-    acceptedAmend({ contract: contractId("kei/diff") }, { documentDiff: diff, changes: {} }),
-  );
+  const text = renderAccepted(acceptedAmend({ contract: contractId("kei/diff") }, { documentDiff: diff, changes: {} }));
   assert.match(text, /^✓ amended  kei\/diff\n  terms diff\n  --- before\n  \+\+\+ after\n  @@/u);
   assert.doesNotMatch(text, /^  ===|before\t|after\t/mu);
 });
@@ -1375,7 +1392,9 @@ test("reconcile lists changed effects once with path last and no null sentinels"
     before: "a".repeat(40) as never,
     after: null,
   };
-  const text = renderReconcile(reconcile({ effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }] }));
+  const text = renderReconcile(
+    reconcile({ effects: [ref, ref, { ...ref, action: "unchanged" as const, before: null }] }),
+  );
   assert.equal(text, "✓ reconcile\n  effect  ref  removed · aaaaaaa  refs/keiyaku/delivery/example");
   assert.doesNotMatch(text, /null/u);
 });
@@ -1526,7 +1545,10 @@ test("Verification create action names are safe in text receipts", () => {
   assert.doesNotMatch(text, /\nINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
   const verification = result.value.verification;
-  assert.equal(verification?.kind === "stopped" && "name" in verification.stop ? verification.stop.name : undefined, name);
+  assert.equal(
+    verification?.kind === "stopped" && "name" in verification.stop ? verification.stop.name : undefined,
+    name,
+  );
 });
 
 test("Verification cleanup action names are safe in text receipts", () => {
@@ -1711,9 +1733,7 @@ test("direct placement stops render the public unmet prerequisites in order", ()
   );
 
   assert.equal(
-    renderAccepted(
-      acceptedReview({ contract, facts: [reviewAttestationFact(contract, "satisfied")] }, { placement }),
-    ),
+    renderAccepted(acceptedReview({ contract, facts: [reviewAttestationFact(contract, "satisfied")] }, { placement })),
     [
       "✓ review satisfied  kei/waiting-on-prerequisites",
       "! prerequisites unsatisfied",
@@ -1906,7 +1926,7 @@ test("continuation checkout stop keeps its exact block after the dependent conte
             target: "refs/heads/main",
           },
           continuation: {
-          claimed: [],
+            claimed: [],
             stopped: [
               {
                 contractId: dependent,
@@ -1972,7 +1992,10 @@ test("a retry placement stop renders through the delivered receipt without the f
     renderAccepted(
       acceptedDeliver(
         { contract },
-        { ...deliveryIdentity(), placement: { retry: { kind: "publication-failed", diagnostic: "fatal: unable to create lock" } } },
+        {
+          ...deliveryIdentity(),
+          placement: { retry: { kind: "publication-failed", diagnostic: "fatal: unable to create lock" } },
+        },
       ),
     ),
     [
@@ -2030,7 +2053,12 @@ test("deliver projects a ran Verification completion", () => {
 test("placement receipts name reused provenance in the audit surface's vocabulary", () => {
   const text = reviewText(contractId("kei/placement-reuse"), {
     completion: movement(),
-    verification: { kind: "reused", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
+    verification: {
+      kind: "reused",
+      snapshot: snapshotId("4".repeat(40)),
+      verdict: "satisfied",
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
+    },
   });
   assert.equal(
     text,
@@ -2054,7 +2082,12 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
         snapshot: snapshotId("b".repeat(40)),
         changeId: changeId("c".repeat(40)),
       },
-      verification: { snapshot: integration, kind: "reused", verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
+      verification: {
+        snapshot: integration,
+        kind: "reused",
+        verdict: "satisfied",
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
+      },
     }),
     [
       "✓ delivered  kei/standalone-subject",
@@ -2074,7 +2107,12 @@ test("a placed deliver keeps the verdict on the placement integration row only",
   const integration = snapshotId("4".repeat(40));
   const text = deliverText(contractId("kei/one-row"), {
     completion: movement(),
-    verification: { snapshot: integration, kind: "reused", verdict: "satisfied", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
+    verification: {
+      snapshot: integration,
+      kind: "reused",
+      verdict: "satisfied",
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
+    },
   });
   assert.equal((text.match(/integration result/gu) ?? []).length, 1);
   assert.match(text, /^  integration result  4444444 · verification reused satisfied$/mu);
@@ -2084,7 +2122,10 @@ test("terminal receipts name the retired worktree last", () => {
   const retiredReview = contractId("kei/retired-review");
   const review = reviewText(
     retiredReview,
-    { completion: movement(), verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" } },
+    {
+      completion: movement(),
+      verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" },
+    },
     { effects: [retiredWorktreeEffect(retiredReview, "fridge")] },
   );
   assert.match(review, /^  worktree  fridge retired$/mu);
@@ -2238,13 +2279,17 @@ test("movement projects its deviation and reintegration coordinates", () => {
   const facts: readonly JournalEntry[] = [
     {
       contract,
-      v: 1, at: "2026-01-01T00:00:00Z", entry: fixtureEntry,
+      v: 1,
+      at: "2026-01-01T00:00:00Z",
+      entry: fixtureEntry,
       kind: "reintegrated" as const,
       data: { predecessor, snapshot: integrated },
     },
     {
       contract,
-      v: 1, at: "2026-01-01T00:00:01Z", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+      v: 1,
+      at: "2026-01-01T00:00:01Z",
+      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
       kind: "reintegrated" as const,
       data: { predecessor: secondPredecessor, snapshot: secondIntegrated },
     },
@@ -2934,7 +2979,13 @@ test("status renders selected activity evidence while preserving history and com
     ],
     answeredOutcome(13, "final outcome"),
   );
-  const answeredStatus = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "asleep", allowed: [], timeline: outcomeSnapshot });
+  const answeredStatus = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
+    id,
+    life: "asleep",
+    allowed: [],
+    timeline: outcomeSnapshot,
+  });
   const outcomeText = snapshotText(
     { status: answeredStatus, contract: { kind: "none" }, createdTasks: { kind: "present", rows: [] } },
     DEFAULT_CONTEXT,
@@ -3107,7 +3158,13 @@ test("current attempt boundaries lead live streams exactly once", () => {
   assert.equal((wakeSnapshot.match(/resume with the new direction/gu) ?? []).length, 1);
   const wakeStatusText = snapshotText(
     {
-      status: akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id: "aku/worker/abcd0102", life: "running", allowed: [], timeline: woken }),
+      status: akumaStatusSchema.parse({
+        birth: DIRECT_BIRTH,
+        id: "aku/worker/abcd0102",
+        life: "running",
+        allowed: [],
+        timeline: woken,
+      }),
       contract: { kind: "none" },
     },
     context,
@@ -3142,8 +3199,21 @@ test("call and ask stream projected overlapping tool completions once in complet
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
     phase === "completed"
-      ? activityFact(sequence, 1, at(sequence), { type: "tool", phase: "completed", id: name, name: "bash", call: { kind: "run", command: name }, result: { status: "ok" as const } })
-      : activityFact(sequence, 1, at(sequence), { type: "tool", phase: "started", id: name, name: "bash", call: { kind: "run", command: name } });
+      ? activityFact(sequence, 1, at(sequence), {
+          type: "tool",
+          phase: "completed",
+          id: name,
+          name: "bash",
+          call: { kind: "run", command: name },
+          result: { status: "ok" as const },
+        })
+      : activityFact(sequence, 1, at(sequence), {
+          type: "tool",
+          phase: "started",
+          id: name,
+          name: "bash",
+          call: { kind: "run", command: name },
+        });
   const first: TimelineFact[] = [
     { kind: "turn-start", sequence: 1, bodySequence: 1, startedAt: at(1) },
     { kind: "call", sequence: 2, turnSequence: 1, at: at(2), body: "first question" },
@@ -3585,7 +3655,13 @@ test("a streamed observing call opens one framed head and never replays a settle
   };
   const stream = callObservationStream({ columns: 100, color: false }, head, { now: () => now });
   const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
-    akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", allowed: [], timeline: openAkumaSnapshot(entries) });
+    akumaStatusSchema.parse({
+      birth: DIRECT_BIRTH,
+      id,
+      life: "running",
+      allowed: [],
+      timeline: openAkumaSnapshot(entries),
+    });
   const tool = (sequence: number, command: string) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
   const headLines = [`${id} (@scout)`, "└─ kei/demo"];
@@ -3618,7 +3694,17 @@ test("a streamed observing call concludes truthfully when its stream never opene
   assert.ok(runningStream.opened());
 
   const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
-  observedStream.observe(live(akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) })));
+  observedStream.observe(
+    live(
+      akumaStatusSchema.parse({
+        birth: DIRECT_BIRTH,
+        id,
+        life: "running",
+        allowed: [],
+        timeline: openAkumaSnapshot([]),
+      }),
+    ),
+  );
   now = 55_000;
   const observed = observedStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.equal(

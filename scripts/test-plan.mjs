@@ -28,13 +28,12 @@ export async function runReleasePlan(run) {
     results.push(await phase("test:compile"));
     if (results[1] === 0) {
       // Reachability reads built exports; it shares the runtime phase, not build.
-      results.push(...await Promise.all([phase("test:reachability"), phase("tests")]));
+      results.push(...(await Promise.all([phase("test:reachability"), phase("tests")])));
     }
   }
-  results.push(...await independent);
+  results.push(...(await independent));
   return results.find((status) => status !== 0) ?? 0;
 }
-
 
 // Median per-file costs from the three passing Node 24.20.0 / four-core
 // candidate sweeps in Actions run 35311494909. These are scheduling estimates,
@@ -126,7 +125,6 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/sqlite-transaction-lock.test.ts": 400,
   "tests/target-checkout-reconcile.test.ts": 13000,
   "tests/target-placement-preparation.test.ts": 5500,
-  "tests/task-compose.test.ts": 4200,
   "tests/task-document.test.ts": 400,
   "tests/task-operations.test.ts": 3400,
   "tests/task-store.test.ts": 1000,
@@ -136,7 +134,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/windows-akuma-process.test.ts": 5400,
   "tests/worktree-hooks.test.ts": 8200,
   "tests/worktree-places.test.ts": 8200,
-  "tests/world.test.ts": 800
+  "tests/world.test.ts": 800,
 });
 
 /**
@@ -149,6 +147,7 @@ const SWEEP_COST_MS = Object.freeze({
 export function orderSweepEntries(entries) {
   /** @param {T} entry */
   const cost = (entry) => SWEEP_COST_MS[entry.file.replaceAll("\\", "/")] ?? entry.size / 10;
-  return [...entries].sort((left, right) =>
-    cost(right) - cost(left) || right.size - left.size || left.file.localeCompare(right.file));
+  return [...entries].sort(
+    (left, right) => cost(right) - cost(left) || right.size - left.size || left.file.localeCompare(right.file),
+  );
 }

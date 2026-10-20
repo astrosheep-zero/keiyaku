@@ -3,7 +3,7 @@ import { z } from "zod";
 import { formatTaskId, parseTaskId, type TaskCoordinate, type TaskId } from "./identity.js";
 
 export const taskNonblankTextSchema = z.string().refine((value) => value.trim() !== "");
-export const taskStateSchema = z.enum(["open", "in_progress", "on_hold", "done", "drop"]);
+export const taskStateSchema = z.enum(["open", "done", "drop"]);
 export const taskPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 export type TaskState = z.infer<typeof taskStateSchema>;
 export type TaskPriority = z.infer<typeof taskPrioritySchema>;
@@ -35,7 +35,7 @@ export class TaskAuthorityCorruptionError extends Error {
   }
 }
 
-const STATES = new Set<TaskState>(["open", "in_progress", "on_hold", "done", "drop"]);
+const STATES = new Set<TaskState>(["open", "done", "drop"]);
 const REQUIRED_STORED_KEYS = [
   "id",
   "title",
@@ -88,7 +88,7 @@ function priority(value: unknown, fail: (message: string) => never): TaskPriorit
   return value as TaskPriority;
 }
 function state(value: unknown, fail: (message: string) => never): TaskState {
-  if (typeof value !== "string" || !STATES.has(value as TaskState)) fail("task state is invalid");
+  if (typeof value !== "string" || !STATES.has(value as TaskState)) fail(`task state is invalid: ${String(value)}`);
   return value as TaskState;
 }
 function timestamp(value: unknown, field: string, fail: (message: string) => never): string {

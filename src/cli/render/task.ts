@@ -2,8 +2,6 @@ import type {
   BlockedTaskList,
   BlockedTaskRow,
   TaskBatchResult,
-  TaskCompositionDiagnostic,
-  TaskCompositionResult,
   TaskContextResult,
   TaskDecompositionTree,
   TaskDetail,
@@ -43,7 +41,6 @@ type TaskNativeResult =
   | TaskMutationResult
   | TaskUpdateResult
   | TaskBatchResult
-  | TaskCompositionResult
   | TaskShowResult
   | TaskList
   | BlockedTaskList
@@ -53,8 +50,7 @@ type TaskNativeResult =
   | TaskContextResult;
 type TaskFailure =
   | Extract<TaskMutationResult, { kind: "refused" | "retry" }>
-  | Extract<TaskContextResult, { kind: "refused" | "retry" }>
-  | Extract<TaskCompositionResult, { kind: "refused" }>;
+  | Extract<TaskContextResult, { kind: "refused" | "retry" }>;
 type TaskWord = TaskRow["disposition"] | TaskView["state"] | TaskRef["state"];
 type TaskEntity = Readonly<{
   id: string;
@@ -66,9 +62,7 @@ type TaskEntity = Readonly<{
 type RefusalProjection = Readonly<{
   diagnostic: string;
   facts?: readonly string[];
-  compositionDiagnostics?: readonly TaskCompositionDiagnostic[];
 }>;
-type ComposeStop = Extract<TaskCompositionResult, { kind: "incomplete" }>["stopped"];
 
 const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
 
@@ -122,7 +116,6 @@ function projectRefusal(refusal: TaskRefusal): RefusalProjection {
       ],
     };
   }
-  if (refusal.kind === "invalid-composition") return { diagnostic, compositionDiagnostics: refusal.diagnostics };
   return refusal.diagnostic === undefined ? { diagnostic } : { diagnostic, facts: [`detail  ${refusal.diagnostic}`] };
 }
 
@@ -131,14 +124,7 @@ function renderFailure(verb: string, result: TaskFailure, columns: number): stri
     return [...outcomeLines("?", verb, "retry", undefined, columns), result.reason].join("\n");
   }
   const facts = projectRefusal(result.refusal);
-  return refusalLines(
-    verb,
-    [`reason  ${facts.diagnostic}`, ...(facts.facts ?? [])],
-    columns,
-    (facts.compositionDiagnostics ?? []).map(
-      (item) => `line ${item.line} · ${safeText(item.reason)} · ${safeText(item.token)}`,
-    ),
-  ).join("\n");
+  return refusalLines(verb, [`reason  ${facts.diagnostic}`, ...(facts.facts ?? [])], columns).join("\n");
 }
 
 function edge(label: string, ref: TaskRef, mark?: string): string {
@@ -268,10 +254,6 @@ export function renderDoctor(report: TaskDoctorReport): string {
 
 const PAST_VERBS: Readonly<Record<string, string>> = {
   add: "added",
-  start: "started",
-  stop: "stopped",
-  hold: "held",
-  resume: "resumed",
   done: "done",
   drop: "dropped",
   update: "updated",
@@ -313,55 +295,6 @@ function renderBatch(verb: string, batch: TaskBatchResult, columns: number): str
   return batch.items.map((item) => renderBatchItem(verb, item, columns)).join("\n");
 }
 
-function admissionLines(
-  admissions: readonly Extract<TaskCompositionResult, { kind: "planned" }>["admissions"][number][],
-): string[] {
-  return admissions.map(
-    (admission) =>
-      `admit ${admission.position}  ${admission.kind === "new" ? "+" : `@${admission.taskId}`} ${safeText(admission.title)}${admission.kind === "new" && admission.alias !== undefined ? `  as ^${admission.alias}` : ""}`,
-  );
-}
-
-function stoppedLines(stopped: ComposeStop): string[] {
-  if (stopped.kind === "retry") return [`? stopped ${stopped.reason}`];
-  const facts = projectRefusal(stopped);
-  return refusalLines("stopped", [`reason  ${facts.diagnostic}`, ...(facts.facts ?? [])], DEFAULT_CLI_COLUMNS);
-}
-
-function aliasLines(aliases: readonly Readonly<{ alias: string; taskId: string }>[]): readonly string[] {
-  return aliases.map((binding) => `alias ^${binding.alias} ${binding.taskId}`);
-}
-
-function planAliasLines(aliases: Extract<TaskCompositionResult, { kind: "planned" }>["aliases"]): readonly string[] {
-  return aliases.map((binding) => `alias ^${binding.alias} ${binding.position}`);
-}
-
-function renderPlan(result: Extract<TaskCompositionResult, { kind: "planned" }>): string {
-  const lines = [
-    `compose plan · ${result.admissionOrder.length} documents`,
-    ...planAliasLines(result.aliases),
-    ...admissionLines(result.admissions),
-  ];
-  for (const body of result.bodies) {
-    lines.push(`body ${body.position}  + ${safeText(body.title)} · ${body.bytes} bytes`);
-    lines.push(`  first ${safeText(body.firstLine)}`);
-    lines.push(`  last ${safeText(body.lastLine)}`);
-  }
-  return lines.join("\n");
-}
-
-export function renderTaskCompose(result: TaskCompositionResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  const columns = context.columns;
-  if (result.kind === "incomplete") return "";
-  if (result.kind === "planned") return renderPlan(result);
-  if (result.kind !== "accepted") return renderFailure("compose", result, columns);
-  return [
-    `✓ composed · ${result.documentChanges.length} changed`,
-    ...aliasLines(result.aliases),
-    ...admissionLines(result.admissions),
-  ].join("\n");
-}
-
 export function renderTaskTree(result: TaskDecompositionTree, context: TextRenderContext = DEFAULT_CONTEXT): string {
   return result.kind === "accepted"
     ? treeLines(result.value, context.columns).join("\n")
@@ -392,24 +325,6 @@ export function renderTaskLifecycle(
   return "items" in result ? renderBatch(verb, result, context.columns) : renderMutation(verb, result, context.columns);
 }
 
-/** A native refusal the CLI edge raised for one action, through the shared refusal grammar. */
-export function renderTaskFailure(
-  verb: string,
-  result: TaskFailure,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return renderFailure(verb, result, context.columns);
-}
-
-export function renderTaskIncompleteDiagnostic(result: TaskCompositionResult): string {
-  if (result.kind !== "incomplete") return "";
-  return [
-    `! compose incomplete  ${result.documentChanges.length} admitted`,
-    ...admissionLines(result.admissions.slice(0, result.documentChanges.length)),
-    ...stoppedLines(result.stopped),
-  ].join("\n");
-}
-
 export function taskExitCode(result: TaskNativeResult): number {
   if ("issues" in result) return result.issues.length === 0 ? 0 : 1;
   if ("items" in result) {
@@ -418,7 +333,7 @@ export function taskExitCode(result: TaskNativeResult): number {
   }
   if ("kind" in result) {
     if (result.kind === "retry") return 2;
-    if (result.kind === "refused" || result.kind === "incomplete") return 1;
+    if (result.kind === "refused") return 1;
   }
   return 0;
 }

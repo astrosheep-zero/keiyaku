@@ -15,13 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import {
-  TaskAuthorityCorruptionError,
-  Tasks,
-  type TaskId,
-  type TaskMutationResult,
-  type TaskTreeNode,
-} from "../src/task/index.js";
+import { TaskAuthorityCorruptionError, Tasks, type TaskId, type TaskTreeNode } from "../src/task/index.js";
 import {
   taskMutationRequestCommand,
   type TaskMutationBodyRequest,
@@ -33,12 +27,7 @@ import { parseTaskId } from "../src/task/identity.js";
 import { settleTask } from "../src/task/operations.js";
 import { observeCreatedTaskObservations } from "../src/task/created-observation.js";
 import { createTaskRelations, projectCreatedByRows, projectTaskBoardObservation } from "../src/task/board.js";
-import {
-  readBoard,
-  nukeTaskAuthority,
-  replaceAuthority,
-  withTaskLocks
-} from "../src/task/store.js";
+import { readBoard, nukeTaskAuthority, replaceAuthority, withTaskLocks } from "../src/task/store.js";
 import { taskAuthorityFile } from "./support/task.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { runCli, cliJson } from "./support/cli-fixtures.js";
@@ -60,25 +49,8 @@ async function world(): Promise<{ root: WorldRoot; tasks: ReturnType<typeof Task
   };
 }
 
-async function lifecycle(
-  task: ReturnType<ReturnType<typeof Tasks.of>["task"]>,
-  verb: "start" | "stop" | "hold" | "resume" | "done",
-): Promise<TaskMutationResult> {
-  switch (verb) {
-    case "start":
-      return await task.start();
-    case "stop":
-      return await task.stop();
-    case "hold":
-      return await task.hold();
-    case "resume":
-      return await task.resume();
-    case "done":
-      return await task.done();
-  }
-}
 function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Tasks.of>["add"]>>): TaskId {
-  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
+  assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   return result.value.id;
 }
 
@@ -87,14 +59,19 @@ test("created Task association rows match complete board views and re-read manua
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const parent = acceptedId(await tasks.add({ title: "Created parent", actor: "one", priority: 1, body: "body" }));
   const need = acceptedId(await tasks.add({ title: "Other creator prerequisite", actor: "two", priority: 0 }));
-  const child = acceptedId(await tasks.add({ title: "Created child", actor: "one", parent, needs: [need], priority: 0 }));
+  const child = acceptedId(
+    await tasks.add({ title: "Created child", actor: "one", parent, needs: [need], priority: 0 }),
+  );
   acceptedId(await tasks.add({ title: "Terminal child", parent, state: "done", actor: "two" }));
   acceptedId(await tasks.add({ title: "Created dropped", actor: "one", state: "drop", priority: 1 }));
   acceptedId(await tasks.add({ title: "Unsigned dependency", needs: [parent] }));
   const ids = ["two", "absent", "one", "one"];
   const expected = projectTaskBoardObservation((await readBoard(root)).board);
   const observed = await observeCreatedTaskObservations(root, ids);
-  assert.deepEqual(observed, ids.map((id) => ({ kind: "present", rows: expected.selectCreatedBy(id) })));
+  assert.deepEqual(
+    observed,
+    ids.map((id) => ({ kind: "present", rows: expected.selectCreatedBy(id) })),
+  );
   const rows = observed[2];
   assert.ok(rows?.kind === "present");
   assert.equal(rows.rows[0]?.id, child);
@@ -104,10 +81,16 @@ test("created Task association rows match complete board views and re-read manua
 
   const before = await tasks.task({ id: need }).read();
   assert.ok(before !== null);
-  writeFileSync(taskAuthorityFile(root, need), serializeTaskDocument({ ...before.task, state: "done", createdBy: "one", title: "Manual edit" }));
+  writeFileSync(
+    taskAuthorityFile(root, need),
+    serializeTaskDocument({ ...before.task, state: "done", createdBy: "one", title: "Manual edit" }),
+  );
   const fresh = await observeCreatedTaskObservations(root, ids);
   const freshExpected = projectTaskBoardObservation((await readBoard(root)).board);
-  assert.deepEqual(fresh, ids.map((id) => ({ kind: "present", rows: freshExpected.selectCreatedBy(id) })));
+  assert.deepEqual(
+    fresh,
+    ids.map((id) => ({ kind: "present", rows: freshExpected.selectCreatedBy(id) })),
+  );
   assert.ok(fresh[2]?.kind === "present");
   assert.equal(fresh[2].rows.find((row) => row.id === child)?.disposition, "ready");
   assert.equal(fresh[2].rows.find((row) => row.id === need)?.title, "Manual edit");
@@ -127,13 +110,25 @@ test("created Task association rows match complete board views and re-read manua
 test("created Task projection visits relationships only for requested creators", () => {
   const selected = taskDocument({ id: "task/selected" as TaskId, title: "Selected", createdBy: "one" });
   const unrelated = taskDocument({ id: "task/unrelated" as TaskId, title: "Unrelated", createdBy: "two" });
-  const board = { tasks: new Map([[selected.id, selected], [unrelated.id, unrelated]]) };
+  const board = {
+    tasks: new Map([
+      [selected.id, selected],
+      [unrelated.id, unrelated],
+    ]),
+  };
   const relations = createTaskRelations(board);
   const visited: TaskId[] = [];
-  const rows = projectCreatedByRows(board, {
-    ...relations,
-    children: (id) => { visited.push(id); return relations.children(id); },
-  }, ["one", "one", "absent"]);
+  const rows = projectCreatedByRows(
+    board,
+    {
+      ...relations,
+      children: (id) => {
+        visited.push(id);
+        return relations.children(id);
+      },
+    },
+    ["one", "one", "absent"],
+  );
   assert.deepEqual(visited, [selected.id]);
   assert.deepEqual([...rows.keys()], ["one"]);
   assert.equal(rows.get("one")?.[0]?.id, selected.id);
@@ -142,13 +137,13 @@ test("created Task projection visits relationships only for requested creators",
 test("note is replaceable authority and product timestamps advance only on change", async () => {
   const { tasks } = await world();
   const added = await tasks.add({ title: "Timestamped", note: "first" });
-  assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
+  assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
   assert.equal(added.value.note, "first");
   assert.equal(added.value.createdAt, added.value.updatedAt);
   assert.equal(new Date(added.value.createdAt).toISOString(), added.value.createdAt);
 
   const replaced = await tasks.task({ id: added.value.id }).update({ note: "second" });
-  assert.ok(replaced.kind === "accepted", "expected replaced.kind = \"accepted\"");
+  assert.ok(replaced.kind === "accepted", 'expected replaced.kind = "accepted"');
   assert.equal(replaced.value.task.note, "second");
   assert.equal(replaced.value.task.createdAt, added.value.createdAt);
   assert.ok(replaced.value.task.updatedAt > added.value.updatedAt);
@@ -157,7 +152,7 @@ test("note is replaceable authority and product timestamps advance only on chang
   assert.deepEqual(replaced.value.changedFields, [{ field: "note", action: "replaced" }]);
 
   const unchanged = await tasks.task({ id: added.value.id }).update({ note: "second" });
-  assert.ok(unchanged.kind === "accepted", "expected unchanged.kind = \"accepted\"");
+  assert.ok(unchanged.kind === "accepted", 'expected unchanged.kind = "accepted"');
   assert.equal(unchanged.value.documentDiff, "");
   assert.deepEqual(unchanged.value.changedFields, []);
   assert.equal(unchanged.value.task.updatedAt, replaced.value.task.updatedAt);
@@ -213,15 +208,14 @@ test("done and drop replace note while preserving creation time", async () => {
   const afterRefusal = await tasks.task({ id: two }).read();
   assert.equal(afterRefusal?.task.state, "done");
   assert.equal(afterRefusal?.task.note, "completed");
-  assert.throws(() => tasks.batch({ verb: "hold", ids: [two], note: "invalid" }), /valid only for done or drop/u);
 });
 
-test("batch start preserves order and continues after per-task refusals", async () => {
+test("batch drop preserves order and continues after per-task refusals", async () => {
   const { tasks } = await world();
-  const first = acceptedId(await tasks.add({ title: "Batch start first" }));
-  const alreadyDone = acceptedId(await tasks.add({ title: "Batch start done", state: "done" }));
-  const third = acceptedId(await tasks.add({ title: "Batch start third" }));
-  const result = await tasks.batch({ verb: "start", ids: [first, "task/missing", alreadyDone, third] });
+  const first = acceptedId(await tasks.add({ title: "Batch drop first" }));
+  const alreadyDone = acceptedId(await tasks.add({ title: "Batch drop done", state: "done" }));
+  const third = acceptedId(await tasks.add({ title: "Batch drop third" }));
+  const result = await tasks.batch({ verb: "drop", ids: [first, "task/missing", alreadyDone, third] });
   assert.deepEqual(
     result.items.map((item) => item.id),
     [first, "task/missing", alreadyDone, third],
@@ -230,9 +224,75 @@ test("batch start preserves order and continues after per-task refusals", async 
     result.items.map((item) => item.outcome.kind),
     ["accepted", "refused", "refused", "accepted"],
   );
-  assert.equal((await tasks.task({ id: first }).read())?.task.state, "in_progress");
-  assert.equal((await tasks.task({ id: third }).read())?.task.state, "in_progress");
-  assert.throws(() => tasks.batch({ verb: "start", ids: [] }), /at least one TaskId/u);
+  assert.equal((await tasks.task({ id: first }).read())?.task.state, "drop");
+  assert.equal((await tasks.task({ id: third }).read())?.task.state, "drop");
+  assert.throws(() => tasks.batch({ verb: "drop", ids: [] }), /at least one TaskId/u);
+});
+
+test("terminal facts release prerequisites without storing readiness", async (t) => {
+  const { root, tasks } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const finished = acceptedId(await tasks.add({ title: "Complete prerequisite" }));
+  const dropped = acceptedId(await tasks.add({ title: "Unneeded prerequisite" }));
+  const dependent = acceptedId(await tasks.add({ title: "Dependent", needs: [finished, dropped] }));
+  const blocked = await tasks.blocked();
+  assert.ok(blocked.kind === "accepted");
+  assert.deepEqual(
+    blocked.value.rows.map((row) => row.id),
+    [dependent],
+  );
+  assert.deepEqual(
+    blocked.value.rows[0]?.blockers.map((row) => row.id),
+    [finished, dropped],
+  );
+  assert.equal((await tasks.task({ id: finished }).done()).kind, "accepted");
+  const stillBlocked = await tasks.blocked();
+  assert.ok(stillBlocked.kind === "accepted");
+  assert.deepEqual(
+    stillBlocked.value.rows[0]?.blockers.map((row) => row.id),
+    [dropped],
+  );
+  assert.equal((await tasks.batch({ verb: "drop", ids: [dropped] })).items[0]?.outcome.kind, "accepted");
+  const ready = await tasks.ready();
+  assert.ok(ready.kind === "accepted");
+  assert.deepEqual(
+    ready.value.rows.map(({ id, state, disposition }) => ({ id, state, disposition })),
+    [{ id: dependent, state: "open", disposition: "ready" }],
+  );
+  assert.equal(ready.value.hasMore, false);
+  const unblocked = await tasks.blocked();
+  assert.ok(unblocked.kind === "accepted");
+  assert.deepEqual(unblocked.value, { rows: [], hasMore: false });
+  assert.equal((await tasks.task({ id: dependent }).read())?.task.state, "open");
+});
+
+test("batch cancellation stops between items and preserves its completed closure", async (t) => {
+  const { root, tasks } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const first = acceptedId(await tasks.add({ title: "First closure" }));
+  const second = acceptedId(await tasks.add({ title: "Later closure", needs: [first] }));
+  const controller = new AbortController();
+  const close = DatabaseSync.prototype.close;
+  const mock = t.mock.method(DatabaseSync.prototype, "close", function (this: DatabaseSync) {
+    close.call(this);
+    controller.abort(new Error("stop between items"));
+  });
+  try {
+    await assert.rejects(
+      tasks.batch({ verb: "done", ids: [first, second], signal: controller.signal }),
+      /stop between items/u,
+    );
+  } finally {
+    mock.mock.restore();
+  }
+  assert.equal((await tasks.task({ id: first }).read())?.task.state, "done");
+  assert.equal((await tasks.task({ id: second }).read())?.task.state, "open");
+  const ready = await tasks.ready();
+  assert.ok(ready.kind === "accepted");
+  assert.deepEqual(
+    ready.value.rows.map((row) => row.id),
+    [second],
+  );
 });
 
 function nextTaskLockAttempt(t: TestContext): Promise<void> {
@@ -256,7 +316,7 @@ test("batch lifecycle reads one board before locks and retries only a concurrent
     timeoutMs: 100,
   });
   const lockAttempt = nextTaskLockAttempt(t);
-  const pending = tasks.batch({ verb: "start", ids: [first, second] });
+  const pending = tasks.batch({ verb: "done", ids: [first, second] });
   try {
     await lockAttempt;
     writeFileSync(taskAuthorityFile(root, second), "changed after batch observation\n");
@@ -281,7 +341,7 @@ test("batch invalid refusal retries when the Task becomes valid before its lock"
     timeoutMs: 100,
   });
   const lockAttempt = nextTaskLockAttempt(t);
-  const pending = tasks.batch({ verb: "start", ids: [id] });
+  const pending = tasks.batch({ verb: "done", ids: [id] });
   try {
     await lockAttempt;
     const current = await tasks.task({ id }).read();
@@ -305,11 +365,11 @@ test("batch missing refusal retries when the Task is created before its lock", a
     timeoutMs: 100,
   });
   const lockAttempt = nextTaskLockAttempt(t);
-  const pending = tasks.batch({ verb: "start", ids: [id] });
+  const pending = tasks.batch({ verb: "drop", ids: [id] });
   try {
     await lockAttempt;
     const created = await tasks.add({ title: "Batch stale missing" });
-    assert.ok(created.kind === "accepted", "expected created.kind = \"accepted\"");
+    assert.ok(created.kind === "accepted", 'expected created.kind = "accepted"');
     const source = taskAuthorityFile(root, created.value.id);
     const document = parseTaskDocument(readFileSync(source), parseTaskId(created.value.id));
     writeFileSync(taskAuthorityFile(root, id), serializeTaskDocument({ ...document, id }));
@@ -374,7 +434,6 @@ test("bounded Task query filters before limit and parent views recurse", async (
   const need = acceptedId(await tasks.add({ title: "Need", priority: 0, parent }));
   const ready = acceptedId(await tasks.add({ title: "Ready auth", priority: 1, parent }));
   const nested = acceptedId(await tasks.add({ title: "Nested", priority: 2, parent: ready, needs: [need] }));
-  assert.equal((await tasks.task({ id: nested }).start()).kind, "accepted");
 
   const selected = await tasks.query({
     scope: "world",
@@ -426,7 +485,13 @@ test("Task row views share the bounded-list contract and complete their graph ju
   const { root, tasks } = await world();
   mkdirSync(join(root, ".keiyaku", "tasks"), { recursive: true });
   const document = (id: TaskId, needs: readonly TaskId[] = []): TaskDocument =>
-    taskDocument({ id, title: id, needs, createdAt: "2026-08-31T00:00:00.000Z", updatedAt: "2026-08-31T00:00:00.000Z" });
+    taskDocument({
+      id,
+      title: id,
+      needs,
+      createdAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:00.000Z",
+    });
   for (let index = 0; index < 51; index += 1) {
     const ready = `task/ready-${String(index).padStart(2, "0")}` as TaskId;
     const blocked = `task/blocked-${String(index).padStart(2, "0")}` as TaskId;
@@ -568,10 +633,6 @@ test("CLI Task selection and parsed filters retain native query semantics", asyn
     return result.value.value.rows.map((row) => row.id);
   };
   assert.deepEqual(await rows([]), [active]);
-  assert.equal((await tasks.task({ id: active }).start()).kind, "accepted");
-  assert.deepEqual(await rows([]), [active]);
-  assert.equal((await tasks.task({ id: active }).hold()).kind, "accepted");
-  assert.deepEqual(await rows([]), [active]);
   assert.deepEqual(await rows(["--closed"]), [done, dropped]);
   assert.deepEqual(await rows(["--all"]), [done, dropped, active]);
   assert.deepEqual(await rows(["--where", 'title ~ "Selected"']), [active]);
@@ -600,7 +661,7 @@ test("CLI Task selection and parsed filters retain native query semantics", asyn
   );
   assert.deepEqual(await rows(["--where", `blocks = ${child} and not (state = done or state = drop)`]), [active]);
   assert.deepEqual(await rows(["--where", 'title = "Child \\"quoted\\""']), [child]);
-  assert.deepEqual(await rows(["--where", "ready"]), []);
+  assert.deepEqual(await rows(["--where", "ready"]), [active]);
 });
 
 test("Task query rejects direct JavaScript semantics and CLI reports the responsible source column", async (context) => {
@@ -710,7 +771,7 @@ test("task lock cancellation propagates and exceptional actions release held loc
   const path = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
   const held = await acquireSqliteTransactionLock({ path, mode: "immediate", timeoutMs: 100 });
   const controller = new AbortController();
-  const pending = tasks.task({ id }).start({ signal: controller.signal });
+  const pending = tasks.task({ id }).done({ signal: controller.signal });
   controller.abort(new Error("cancel task"));
   await assert.rejects(pending, /cancel task/u);
   held.close();
@@ -721,31 +782,7 @@ test("task lock cancellation propagates and exceptional actions release held loc
     }),
     /action failed/u,
   );
-  assert.equal((await tasks.task({ id }).start()).kind, "accepted");
-});
-
-test("nested compose retains cleanup diagnostics from inner and outer locks", { concurrency: false }, async () => {
-  const { tasks } = await world();
-  const originalClose = DatabaseSync.prototype.close;
-  let releases = 0;
-  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
-    releases += 1;
-    try {
-      throw new Error(`release-${releases}`);
-    } finally {
-      originalClose.call(this);
-    }
-  };
-  try {
-    const result = await tasks.compose({ markdown: "+ Nested compose\n" });
-    assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
-    assert.deepEqual(result.cleanup, {
-      kind: "lock-release-failed",
-      diagnostics: ["cannot release SQLite lock: release-1", "cannot release SQLite lock: release-2"],
-    });
-  } finally {
-    DatabaseSync.prototype.close = originalClose;
-  }
+  assert.equal((await tasks.task({ id }).done()).kind, "accepted");
 });
 
 test("task action failure retains a close failure", { concurrency: false }, async () => {
@@ -780,46 +817,6 @@ test("task action failure retains a close failure", { concurrency: false }, asyn
   }
 });
 
-test("partial task composition retains committed changes when lock cleanup fails", { concurrency: false }, async () => {
-  const { tasks, root } = await world();
-  const first = await tasks.add({ title: "Partial first" });
-  const second = await tasks.add({ title: "Partial second" });
-  assert.equal(first.kind, "accepted");
-  assert.equal(second.kind, "accepted");
-  if (first.kind !== "accepted" || second.kind !== "accepted") return;
-  const originalClose = DatabaseSync.prototype.close;
-  let signalCalls = 0;
-  const controller = new AbortController();
-  controller.signal.throwIfAborted = (): void => {
-    signalCalls += 1;
-    if (signalCalls === 4) writeFileSync(taskAuthorityFile(root, second.value.id), "changed\n");
-  };
-  DatabaseSync.prototype.close = function patchedClose(this: DatabaseSync): void {
-    try {
-      throw new Error("release after partial composition");
-    } finally {
-      originalClose.call(this);
-    }
-  };
-  try {
-    const result = await tasks.compose({
-      markdown: [`@${first.value.id}`, "pri = 1", `@${second.value.id}`, "pri = 1", ""].join("\n"),
-      signal: controller.signal,
-    });
-    assert.ok(result.kind === "incomplete", "expected result.kind = \"incomplete\"");
-    assert.equal(result.documentChanges.length, 1);
-    assert.deepEqual(result.cleanup, {
-      kind: "lock-release-failed",
-      diagnostics: [
-        "cannot release SQLite lock: release after partial composition",
-        "cannot release SQLite lock: release after partial composition",
-      ],
-    });
-  } finally {
-    DatabaseSync.prototype.close = originalClose;
-  }
-});
-
 test("manual predecessor movement is best-effort detected and idle lock deletion never changes authority", async () => {
   const { tasks } = await world(),
     id = acceptedId(await tasks.add({ title: "Manual" }));
@@ -835,7 +832,7 @@ test("manual predecessor movement is best-effort detected and idle lock deletion
   );
   assert.deepEqual(readFileSync(path), manual);
   writeFileSync(path, original);
-  assert.equal((await tasks.task({ id }).start()).kind, "accepted");
+  assert.equal((await tasks.task({ id }).update({ note: "before lock deletion" })).kind, "accepted");
   const lock = join(tasks.root, ".keiyaku", "locks", "task", `${parseTaskId(id).localId}.sqlite`);
   unlinkSync(lock);
   assert.equal((await tasks.task({ id }).done()).kind, "accepted");
@@ -866,7 +863,7 @@ test("task tree is parent decomposition with no needs residue", async () => {
   assert.equal((await tasks.task({ id: root }).update({ needs: [need] })).kind, "accepted");
 
   const tree = await tasks.task({ id: root }).tree();
-  assert.ok(tree.kind === "accepted", "expected tree.kind = \"accepted\"");
+  assert.ok(tree.kind === "accepted", 'expected tree.kind = "accepted"');
   assert.deepEqual(treeIds(tree.value), [root, child, nested, later]);
   assert.deepEqual(
     tree.value.children.map((node) => node.task.id),
@@ -923,7 +920,7 @@ test("task tree renders a parent cycle as a terminal cycle node", async () => {
   assert.equal((await tasks.task({ id: first }).update({ parent: second })).kind, "accepted");
 
   const tree = await tasks.task({ id: first }).tree();
-  assert.ok(tree.kind === "accepted", "expected tree.kind = \"accepted\"");
+  assert.ok(tree.kind === "accepted", 'expected tree.kind = "accepted"');
   assert.equal(tree.value.cycle, undefined);
   assert.equal(tree.value.children.length, 1);
   assert.equal(tree.value.children[0]?.task.id, second);
@@ -950,7 +947,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     if (unsigned.kind === "accepted") assert.equal("createdBy" in unsigned.value, false);
 
     const added = await tasks.add({ title: "Authored", actor: "flagship" });
-    assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
+    assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
     assert.equal(added.value.createdBy, "flagship");
     const addedPath = taskAuthorityFile(root, added.value.id);
     assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
@@ -967,36 +964,18 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     );
     assert.equal(await tasks.task({ id: "task/illegal" }).read(), null);
 
-    const composed = await tasks.compose({
-      markdown: ["+ Composed", "as = composed", `@${added.value.id}`, "pri = 1"].join("\n"),
-      actor: "composer",
-    });
-    assert.ok(composed.kind === "accepted", "expected composed.kind = \"accepted\"");
-    assert.equal(composed.documentChanges.length, 2);
-    const composedId =
-      composed.kind === "accepted"
-        ? composed.documentChanges.find((change) => change.taskId.startsWith("task/composed-"))?.taskId
-        : undefined;
-    const composedTask = composedId === undefined ? null : await tasks.task({ id: composedId }).read();
-    const updatedExisting = await tasks.task({ id: added.value.id }).read();
-    assert.equal(composedTask?.task.createdBy, "composer");
-    assert.equal(updatedExisting?.task.createdBy, "flagship");
-    assert.equal(updatedExisting?.task.priority, 1);
-
     const mutated = await tasks.task({ id: added.value.id }).update({ note: "changed" });
     assert.equal(mutated.kind, "accepted");
     if (mutated.kind === "accepted") assert.equal(mutated.value.task.createdBy, "flagship");
-    for (const verb of ["start", "stop", "hold", "resume", "done"] as const) {
-      const next = await lifecycle(tasks.task({ id: added.value.id }), verb);
-      assert.equal(next.kind, "accepted");
-      if (next.kind === "accepted") assert.equal(next.value.createdBy, "flagship");
-    }
+    const next = await tasks.task({ id: added.value.id }).done();
+    assert.equal(next.kind, "accepted");
+    if (next.kind === "accepted") assert.equal(next.value.createdBy, "flagship");
     const dropped = acceptedId(await tasks.add({ title: "Drop me", actor: "flagship" }));
     const drop = await tasks.task({ id: dropped }).drop();
     assert.equal(drop.kind, "accepted");
     if (drop.kind === "accepted") assert.equal(drop.value.createdBy, "flagship");
     const batchId = acceptedId(await tasks.add({ title: "Batch me", actor: "flagship" }));
-    const batch = await tasks.batch({ verb: "hold", ids: [batchId] });
+    const batch = await tasks.batch({ verb: "done", ids: [batchId] });
     assert.equal(batch.items[0]?.outcome.kind, "accepted");
     if (batch.items[0]?.outcome.kind === "accepted") assert.equal(batch.items[0].outcome.value.createdBy, "flagship");
     const settledId = acceptedId(await tasks.add({ title: "Settle me", actor: "flagship" }));
@@ -1026,11 +1005,11 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     const legacy = await tasks.task({ id: "task/legacy" }).read();
     assert.equal("createdBy" in (legacy?.task ?? {}), false);
     assert.equal((await tasks.task({ id: "task/legacy" }).update({ note: "still unsigned" })).kind, "accepted");
-    assert.equal((await tasks.task({ id: "task/legacy" }).start()).kind, "accepted");
+    assert.equal((await tasks.task({ id: "task/legacy" }).done()).kind, "accepted");
     assert.equal("createdBy" in ((await tasks.task({ id: "task/legacy" }).read())?.task ?? {}), false);
     assert.throws(() => tasks.add({ title: "Blank", actor: "  " }), /actor must be a nonblank string/u);
     assert.throws(() => tasks.task({ id: added.value.id }).update({ actor: "nope" } as never), /unknown field/u);
-    assert.throws(() => tasks.task({ id: added.value.id }).start({ actor: "nope" } as never), /unknown field/u);
+    assert.throws(() => tasks.task({ id: added.value.id }).done({ actor: "nope" } as never), /unknown field/u);
   } finally {
     if (previous === undefined) delete process.env[envKey];
     else process.env[envKey] = previous;
@@ -1045,7 +1024,7 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => tasks.add({ title: "Bad", state: "started" as never }), /state is invalid/u);
   const id = acceptedId(await tasks.add({ title: "Valid" }));
   assert.throws(() => tasks.task({ id }).update({ title: "   " }), /title must be nonblank/u);
-  assert.throws(() => tasks.task({ id }).start({ extra: true } as never), /unknown field/u);
+  assert.throws(() => tasks.task({ id }).done({ extra: true } as never), /unknown field/u);
   await assert.rejects(tasks.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
   assert.throws(() => Tasks.of({ root: tasks.root } as never), /Tasks.of world/u);
 });
@@ -1075,9 +1054,6 @@ const UNUSED_TASK_ABILITIES: TaskMutationRequestPort = {
     throw new Error("unexpected Task ability");
   },
   addDocument: async () => {
-    throw new Error("unexpected Task ability");
-  },
-  compose: async () => {
     throw new Error("unexpected Task ability");
   },
   update: async () => {

@@ -352,23 +352,6 @@ test("call accepts a bare alias name and keeps prefixed input compatible", () =>
   assert.throws(() => parseArgv(["call", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
-test("stop and resume accept one or more Task ids", () => {
-  assert.deepEqual(command(["task", "stop", "task/one", "task/two"]), {
-    command: "task",
-    action: "stop",
-    output: "text",
-    positionals: ["task/one", "task/two"],
-    flags: {},
-  });
-  assert.deepEqual(command(["task", "resume", "task/one", "task/two"]), {
-    command: "task",
-    action: "resume",
-    output: "text",
-    positionals: ["task/one", "task/two"],
-    flags: {},
-  });
-});
-
 test("wait accepts a plural selection without an explicit completion mode", () => {
   assert.deepEqual(command(["wait", "aku/claude/1234abcd", "aku/claude/5678ef90"]), {
     command: "wait",
@@ -473,7 +456,6 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["task", "add", "Title", "--body", ""], /--body requires a nonblank value/],
     [["task", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
     [["task", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
-    [["task", "compose", "--actor", "\t", "-"], /--actor requires a nonblank value/],
     [["task", "update", "task/a", "--title", " "], /--title requires a nonblank value/],
     [["task", "done", "task/a", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
@@ -481,7 +463,6 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["call", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
     [["task", "show", " "], /task show requires a nonblank value/],
     [["task", "add", "Title", "--needs", "task/a", "--needs", "\t"], /--needs requires a nonblank value/],
-    [["task", "hold", "task/a", "  "], /task hold requires a nonblank value/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
     [["region", "--path", "  "], /--path requires a nonblank value/],
     [["region", "--overlap"], /option --overlap is not valid for region/],

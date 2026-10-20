@@ -1,7 +1,8 @@
 # Task Product
 
-Task is Keiyaku's independent planning product. It answers what work exists,
-what may begin, and what is blocked. It is neither a prerequisite of Contract
+Task is Keiyaku's independent ledger of confirmed, unresolved work. It records
+what is still owed and the prerequisites that block it. Reasoning and session
+notes own plans; Task does not record execution progress. It is neither a prerequisite of Contract
 work nor an extension of Contract, Git, or Akuma lifecycle. Contract modules
 do not depend on Task; Task does not interpret Contract authority or Git state.
 
@@ -47,12 +48,15 @@ not turn corruption into a general-purpose deletion right.
 
 ## Lifecycle and relationships
 
-A Task begins in an admitted working state and may be active, paused, or
-terminal. Starting, stopping, holding, resuming, completing, and dropping are
-Task-owned lifecycle judgments. Terminal Tasks release their dependents.
-Readiness means an open Task has no unfinished prerequisites; blocked views
-show work waiting on such prerequisites, while deliberately held work is not
-misrepresented as either ready or blocked.
+A Task is open, done, or dropped. Open means confirmed work remains unresolved;
+done records completion and drop records that the work is no longer owed.
+Completion and dropping are Task-owned judgments. Settlement may complete a
+Task after Contract acceptance without making Contract lifecycle a Task fact.
+No active or paused execution state exists. An unrecognized stored state is
+corrupt authority, named in the failure rather than silently remapped.
+Terminal Tasks release their dependents. Readiness means an open Task has no
+unfinished prerequisites; blocked views show open work waiting on at least one
+unfinished prerequisite.
 
 One batch lifecycle request observes the board once, then judges its requested
 Tasks in caller order against that observation as advanced by its own accepted
@@ -62,11 +66,14 @@ Batch cancellation stops at an item boundary; already completed items remain
 durable and are observed through the board.
 
 Task owns dependency, parentage, supersession, and related-work relationships.
-They name complete Task identities and retain their declared order. A mutation
-refuses a missing target, a self relation, a cycle, a duplicate that would
-change no fact, an illegal lifecycle transition, or corrupted authority. It
-does not invent a relationship from a directory, a Contract, a caller, or a
-Git branch.
+They name complete Task identities and retain their declared order. Newly
+declared missing targets and self relations are refused; duplicate entries in
+relationship input are invalid. Illegal terminal transitions and corrupted
+authority cannot be admitted. Cycles may be written: diagnostic views report
+cycle components, and relationship trees mark cycles without recursing forever.
+An unchanged update leaves authority and its timestamp unchanged. Task does
+not invent a relationship from a directory, a Contract, a caller, or a Git
+branch.
 
 Creation and update retain author testimony only when a caller supplies it.
 That testimony is not an identity registry, permission, Contract association,
@@ -74,7 +81,7 @@ or later inferred attribution. Task deliberately has no event-log, cached
 readiness, counter, or partial-history promise: uncommitted Markdown edits are
 authority, so a synthetic history would be dishonest.
 
-## Views, composition, and recovery
+## Views
 
 A targeted Task read exposes only Task-owned outbound relations; reverse
 relations are derived only by named board projections. Task's board,
@@ -88,14 +95,6 @@ metadata never becomes Task authority or a returned fact. A missing World, an em
 document, and an unavailable observation remain distinct outcomes. Diagnosis
 explains graph or authority problems but never repairs them merely by observing
 them.
-
-Composition accepts one Task planning intent and first judges it against one
-board observation. A caller may ask for a plan or for admission. Accepted work
-keeps the planner's dependency order without replacing unrelated Task facts.
-If a write cannot finish because a competing writer changed authority, the
-result distinguishes retryable contention from a substantive refusal and
-retains the unadmitted intent as a reusable recovery draft. Composition does
-not mutate Contract or Akuma authority.
 
 ## Coordination and the Contract boundary
 

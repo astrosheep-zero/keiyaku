@@ -1,7 +1,7 @@
 ---
 id: task/清理-akuma-body-进程残留与-wake-kill-6678
 title: 清理 Akuma body 进程残留与 wake/kill 生命周期 race
-state: in_progress
+state: open
 priority: 2
 needs: []
 parent: null

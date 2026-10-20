@@ -19,15 +19,6 @@ import {
   type TaskRow,
   type TaskTreeNode,
 } from "./board.js";
-import {
-  composeTasks,
-  type TaskCompositionAlias,
-  type TaskCompositionAdmission,
-  type TaskCompositionBodyPreview,
-  type TaskCompositionPlanAlias,
-  type TaskCompositionPlanOrder,
-  type TaskCompositionResult,
-} from "./compose.js";
 import { TaskAuthorityCorruptionError, type TaskPriority, type TaskState } from "./document.js";
 import type { TaskId } from "./identity.js";
 import {
@@ -46,7 +37,6 @@ import {
   type AddTaskInput,
   type TaskBatchResult,
   type TaskCleanupFailure,
-  type TaskCompositionDiagnostic,
   type TaskMutationResult,
   type TaskOutcome,
   type TaskRefusal,
@@ -97,13 +87,6 @@ export type {
   BlockedTaskRow,
   TaskBatchResult,
   TaskCleanupFailure,
-  TaskCompositionDiagnostic,
-  TaskCompositionAlias,
-  TaskCompositionAdmission,
-  TaskCompositionBodyPreview,
-  TaskCompositionPlanAlias,
-  TaskCompositionPlanOrder,
-  TaskCompositionResult,
   TaskDoctorIssue,
   TaskId,
   TaskMutationResult,
@@ -157,7 +140,7 @@ function forwardTask<Request extends TaskMutationRequest>(
   });
 }
 
-type LifecycleAction = "task.start" | "task.stop" | "task.hold" | "task.resume" | "task.done" | "task.drop";
+type LifecycleAction = "task.done" | "task.drop";
 type SingleLifecycleRequest = Extract<TaskMutationRequest, { action: LifecycleAction; id: TaskId }>;
 type BatchLifecycleRequest = Extract<TaskMutationRequest, { action: LifecycleAction; ids: readonly TaskId[] }>;
 
@@ -165,10 +148,6 @@ type BatchLifecycleRequest = Extract<TaskMutationRequest, { action: LifecycleAct
 const SINGLE_LIFECYCLE: Readonly<
   Record<TaskLifecycleVerb, (id: TaskId, note: string | undefined) => SingleLifecycleRequest>
 > = {
-  start: (id) => ({ action: "task.start", id }),
-  stop: (id) => ({ action: "task.stop", id }),
-  hold: (id) => ({ action: "task.hold", id }),
-  resume: (id) => ({ action: "task.resume", id }),
   done: (id, note) => ({ action: "task.done", id, ...(note === undefined ? {} : { note }) }),
   drop: (id, note) => ({ action: "task.drop", id, ...(note === undefined ? {} : { note }) }),
 };
@@ -177,20 +156,9 @@ const SINGLE_LIFECYCLE: Readonly<
 const BATCH_LIFECYCLE: Readonly<
   Record<TaskLifecycleVerb, (ids: readonly TaskId[], note: string | undefined) => BatchLifecycleRequest>
 > = {
-  start: (ids) => ({ action: "task.start", ids }),
-  stop: (ids) => ({ action: "task.stop", ids }),
-  hold: (ids) => ({ action: "task.hold", ids }),
-  resume: (ids) => ({ action: "task.resume", ids }),
   done: (ids, note) => ({ action: "task.done", ids, ...(note === undefined ? {} : { note }) }),
   drop: (ids, note) => ({ action: "task.drop", ids, ...(note === undefined ? {} : { note }) }),
 };
-
-type ComposeValues = Readonly<{
-  markdown: string;
-  namespace?: readonly string[];
-  actor?: string;
-  signal?: AbortSignal;
-}>;
 
 /**
  * The one bound operation table for a captured route. Each entry either calls the
@@ -200,7 +168,6 @@ type ComposeValues = Readonly<{
 type TaskOperations = Readonly<{
   add(values: AddTaskInput): Promise<TaskMutationResult>;
   addDocument(values: AddTaskDocumentInput): Promise<TaskMutationResult>;
-  compose(values: ComposeValues): Promise<TaskCompositionResult>;
   update(id: TaskId, values: UpdateTaskInput): Promise<TaskUpdateResult>;
   lifecycle(
     id: TaskId,
@@ -236,13 +203,6 @@ function taskOperations(world: WorldRoot, route: TaskRoute): TaskOperations {
           { action: "task.addDocument", input: { markdown: values.markdown, namespace: values.namespace ?? [] } },
           values.signal,
         ),
-      compose: (values) =>
-        forwardTask(
-          directory,
-          world,
-          { action: "task.compose", markdown: values.markdown, namespace: values.namespace ?? [] },
-          values.signal,
-        ),
       update: (id, values) => {
         const { signal, ...request } = values;
         return forwardTask(directory, world, { action: "task.update", id, input: request }, signal);
@@ -254,15 +214,6 @@ function taskOperations(world: WorldRoot, route: TaskRoute): TaskOperations {
   return {
     add: (values) => addTask(world, values),
     addDocument: (values) => addTaskDocument(world, values),
-    compose: (values) =>
-      composeTasks({
-        world,
-        markdown: values.markdown,
-        ...(values.signal === undefined ? {} : { signal: values.signal }),
-        ...(values.actor === undefined ? {} : { actor: values.actor }),
-        ...(values.namespace === undefined ? {} : { defaultNamespace: values.namespace }),
-        planOnly: false,
-      }),
     update: (id, values) => updateTask(world, id, values),
     lifecycle: (id, verb, note, signal) => lifecycleTask(world, id, verb, signal, note),
     batch: (verb, ids, note, signal) => batchTasks(world, verb, ids, signal, note),
@@ -292,21 +243,9 @@ class TaskHandle {
   }
   private lifecycle(verb: TaskLifecycleVerb, input: unknown): Promise<TaskMutationResult> {
     const value = record(input ?? {}, `${verb} input`);
-    closed(value, verb === "drop" || verb === "done" ? ["note", "signal"] : ["signal"], `${verb} input`);
-    const note = verb === "drop" || verb === "done" ? text(value.note, "note") : undefined;
+    closed(value, ["note", "signal"], `${verb} input`);
+    const note = text(value.note, "note");
     return this.operations.lifecycle(this.id, verb, note, signal(value.signal));
-  }
-  start(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
-    return this.lifecycle("start", input);
-  }
-  stop(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
-    return this.lifecycle("stop", input);
-  }
-  hold(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
-    return this.lifecycle("hold", input);
-  }
-  resume(input?: { signal?: AbortSignal }): Promise<TaskMutationResult> {
-    return this.lifecycle("resume", input);
   }
   done(input?: { note?: string; signal?: AbortSignal }): Promise<TaskMutationResult> {
     return this.lifecycle("done", input);
@@ -447,7 +386,7 @@ class TasksHandle {
   }
   batch(
     input: Readonly<{
-      verb: "start" | "stop" | "done" | "drop" | "hold" | "resume";
+      verb: "done" | "drop";
       ids: readonly string[];
       note?: string;
       signal?: AbortSignal;
@@ -456,56 +395,12 @@ class TasksHandle {
     const v = record(input, "batch input");
     closed(v, ["verb", "ids", "note", "signal"], "batch input");
     const verb = v.verb;
-    if (
-      verb !== "start" &&
-      verb !== "stop" &&
-      verb !== "done" &&
-      verb !== "drop" &&
-      verb !== "hold" &&
-      verb !== "resume"
-    )
-      throw new TypeError("batch verb is invalid");
+    if (verb !== "done" && verb !== "drop") throw new TypeError("batch verb is invalid");
     const ids = taskIds(v.ids, "ids");
     if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one TaskId");
     const note = text(v.note, "note");
-    if (note !== undefined && verb !== "done" && verb !== "drop")
-      throw new TypeError("batch note is valid only for done or drop");
+
     return this.operations.batch(verb, ids, note, signal(v.signal));
-  }
-  compose(
-    input: Readonly<{
-      markdown: string;
-      namespace?: readonly string[];
-      actor?: string;
-      signal?: AbortSignal;
-      plan?: boolean;
-    }>,
-  ): Promise<TaskCompositionResult> {
-    const v = record(input, "compose input");
-    closed(v, ["markdown", "namespace", "actor", "signal", "plan"], "compose input");
-    const markdown = text(v.markdown, "markdown");
-    if (markdown === undefined) throw new TypeError("markdown is required");
-    if (v.plan !== undefined && typeof v.plan !== "boolean") throw new TypeError("plan must be a boolean");
-    const selected = namespace(v.namespace);
-    const selectedSignal = signal(v.signal);
-    const selectedActor = actor(v.actor);
-    if (v.plan === true) {
-      // A dry-run plan never leaves the process: it composes locally on any route.
-      return composeTasks({
-        world: this.world,
-        markdown,
-        ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
-        ...(selectedActor === undefined ? {} : { actor: selectedActor }),
-        ...(selected === undefined ? {} : { defaultNamespace: selected }),
-        planOnly: true,
-      });
-    }
-    return this.operations.compose({
-      markdown,
-      ...(selected === undefined ? {} : { namespace: selected }),
-      ...(selectedActor === undefined ? {} : { actor: selectedActor }),
-      ...(selectedSignal === undefined ? {} : { signal: selectedSignal }),
-    });
   }
 }
 export type Tasks = TasksHandle;

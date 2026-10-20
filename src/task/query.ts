@@ -34,7 +34,7 @@ export type TaskQueryRow = TaskRow &
   }>;
 export type TaskPage<Row> = BoundedList<Row>;
 
-const states: readonly TaskState[] = ["open", "in_progress", "on_hold", "done", "drop"];
+const states: readonly TaskState[] = ["open", "done", "drop"];
 const comparisons: readonly TaskQueryComparison[] = ["=", "!=", "<", "<=", ">", ">=", "~"];
 
 function fail(message: string): never {

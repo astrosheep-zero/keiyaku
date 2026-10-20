@@ -61,7 +61,7 @@ use a verb-past title, name gate and prerequisite changes independently, and
 reserve an unchanged-terms fact for a genuinely unchanged amendment. Their
 bounded terms comparison keeps only the comparison headers, without decorative
 banners or trailing header whitespace. Task mutation receipts use verb-past
-titles and field-level changes or admitted plan rows, never projection-file
+titles and field-level changes, never projection-file
 diffs. Task show timestamps omit millisecond precision in text; JSON retains
 full precision. An incomplete placement keeps its candidate and content-identity
 rows and its current reason for waiting. A placement receipt has three
@@ -96,7 +96,7 @@ and receipts use bare marks instead; in a causal history skeleton the mark
 itself carries the verdict, without a satisfied/unsatisfied word. `✓` marks a
 successfully completed action row (a tool settlement or an answered outcome);
 `│` is the neutral rail for voice rows and told Tells; `●` reports an observed
-in-motion state such as an in-progress Task or a running Akuma, and asserts
+in-motion state such as a running Akuma, and asserts
 continuing liveness only inside a redrawable live frame; `!` is failure; `?` is
 unresolved activity. History never contains `●`.
 

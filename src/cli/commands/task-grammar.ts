@@ -19,16 +19,11 @@ export type TaskAction =
   | "doctor"
   | "update"
   | "query"
-  | "start"
-  | "stop"
-  | "hold"
-  | "resume"
   | "done"
   | "drop"
-  | "context"
-  | "compose";
+  | "context";
 type TaskFlagValue = string | true | readonly string[];
-type TaskStdin = "document" | "body" | "append" | "note" | "compose";
+type TaskStdin = "document" | "body" | "append" | "note";
 
 export type ParsedTaskCommand = Readonly<{
   command: "task";
@@ -43,7 +38,7 @@ export type ParsedTaskCommand = Readonly<{
 type TaskCommandSpec = Readonly<{
   arity: readonly [minimum: number, maximum: number];
   flags: Readonly<Record<string, ScanFlagKind>>;
-  stdin?: "document" | "compose";
+  stdin?: "document";
   usage: string;
   purpose: string;
   details?: string;
@@ -68,7 +63,7 @@ const TASK_COMMAND_SPECS: Readonly<Record<TaskAction, TaskCommandSpec>> = {
       actor: "value",
     },
     usage: `task add <TITLE> [--namespace <ns>] [--priority 0..3]
-  [--state open|in_progress|on_hold|done|drop]
+  [--state open|done|drop]
   [--note <text>] [--actor <actor>]
   [--needs <TaskId>]... [--parent <TaskId>]
   [--supersedes <TaskId>]... [--relates <TaskId>]...
@@ -175,30 +170,6 @@ task add [--namespace <ns>] [--actor <actor>] -`,
       "--body - reads replacement body text from stdin.",
     ].join("\n"),
   },
-  start: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task start <TaskId>...",
-    purpose: "Move one or more open Tasks into progress.",
-  },
-  stop: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task stop <TaskId>...",
-    purpose: "Return one or more in-progress Tasks to open.",
-  },
-  hold: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task hold <TaskId>...",
-    purpose: "Put one or more Tasks on hold.",
-  },
-  resume: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "task resume <TaskId>...",
-    purpose: "Return one or more held Tasks to open.",
-  },
   done: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
@@ -217,31 +188,6 @@ task add [--namespace <ns>] [--actor <actor>] -`,
     usage: "task context [<namespace>]",
     purpose: "Set or read the default Task namespace for this directory.",
     details: "Omit <namespace> to read the current context; use / to reset it to the root namespace.",
-  },
-  compose: {
-    arity: [0, 0],
-    stdin: "compose",
-    flags: { ...COMMON, actor: "value", plan: "boolean" },
-    usage: "task compose [--actor <actor>] [--plan] -",
-    purpose: "Create or update several Tasks from one document, with an optional preview.",
-    details: [
-      "nodes: + <Title> creates; @task/<id> modifies a pre-existing Task",
-      "properties: as = <alias>; state = open|in_progress|on_hold|done|drop; pri = 0..3; parent = <ref>|empty",
-      "relations: needs|supersedes|relates with =, +=, or -=",
-      "references: @task/... is pre-existing; ^alias is new in this document",
-      "body: body = clears; body <<TOKEN reads exact content to TOKEN",
-      "TOKEN: [A-Z][A-Z0-9_]* with length 3..32",
-      "example:",
-      "  ns=feature",
-      "  + Parent",
-      "  as = parent",
-      "  pri = 1",
-      "  body <<BODY",
-      "  Exact body bytes.",
-      "  BODY",
-      "  + Child",
-      "  parent = ^parent",
-    ].join("\n"),
   },
 };
 
@@ -351,17 +297,7 @@ function validateTaskReadFlags(
 }
 
 /** Actions whose positionals are all addressed TaskIds validated by the native owner. */
-const TASK_ID_ACTIONS: ReadonlySet<TaskAction> = new Set([
-  "show",
-  "tree",
-  "update",
-  "start",
-  "stop",
-  "hold",
-  "resume",
-  "done",
-  "drop",
-]);
+const TASK_ID_ACTIONS: ReadonlySet<TaskAction> = new Set(["show", "tree", "update", "done", "drop"]);
 
 /** Validate every addressed TaskId positional through the native owner before any read or write. */
 function validateTaskIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {
@@ -405,7 +341,6 @@ function validateTaskScan(action: TaskAction, scanned: ScannedTask, fail: (messa
     Object.keys(flags).some((name) => name !== "json" && name !== "namespace" && name !== "actor")
   )
     fail("task add document input owns its creation fields");
-  if (action === "compose" && stdin !== "compose") fail("task compose requires '-' input");
   if (TASK_ID_ACTIONS.has(action)) validateTaskIdPositionals(positionals, fail);
   if (action === "ls" && positionals.length === 1) {
     validateListSelector(positionals[0]!, fail);

@@ -12,13 +12,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
-import {
-  HeldAkumaLeash,
-  admitRequest,
-  readHeart,
-  readRequest,
-  type Soul,
-} from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, admitRequest, readHeart, readRequest, type Soul } from "../src/akuma/heart/index.js";
 import { type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { AkumaNotBornError, AkumaObservationError } from "../src/akuma/akuma-errors.js";
@@ -147,9 +141,6 @@ const unusedTaskPort: TaskMutationRequestPort = {
     throw new Error("unexpected Task request");
   },
   addDocument: async () => {
-    throw new Error("unexpected Task request");
-  },
-  compose: async () => {
     throw new Error("unexpected Task request");
   },
   update: async () => {
@@ -356,18 +347,28 @@ test("forwarded observation identity is internal requester authority, not wire i
   const observers: string[] = [];
   const port: SelectionRequestPort = {
     ...unusedSelectionPort,
-    wait: async (input) => { observers.push(input.observer); return {} as never; },
-    ask: async (input) => { observers.push(input.observer); return {} as never; },
+    wait: async (input) => {
+      observers.push(input.observer);
+      return {} as never;
+    },
+    ask: async (input) => {
+      observers.push(input.observer);
+      return {} as never;
+    },
   };
   const facts: ExecutionFacts = {
-    id: "request-observer", admittedAt: "2026-09-09T00:00:01.000Z",
-    requester: "aku/requester/11111111", signal: new AbortController().signal, admissionOpen: () => true,
+    id: "request-observer",
+    admittedAt: "2026-09-09T00:00:01.000Z",
+    requester: "aku/requester/11111111",
+    signal: new AbortController().signal,
+    admissionOpen: () => true,
   };
   for (const action of ["akuma.wait", "akuma.ask"] as const) {
     const command = selectionRequestCommand(action, port);
-    const payload = action === "akuma.wait"
-      ? { targets: ["aku/worker/22222222"], completion: "all" }
-      : { target: "aku/worker/22222222", body: "work", initiator: "NotTheObserver" };
+    const payload =
+      action === "akuma.wait"
+        ? { targets: ["aku/worker/22222222"], completion: "all" }
+        : { target: "aku/worker/22222222", body: "work", initiator: "NotTheObserver" };
     assert.equal(command.protocol.decodeRequest({ ...payload, observer: "ForgedObserver" }), null);
     const request = command.protocol.decodeRequest(payload);
     assert.ok(request);
@@ -415,9 +416,21 @@ function acceptedContract(
             method: "squash" as const,
             policy: { requireBranchesToBeUpToDate: false },
             leading: { kind: "already-admitted" as const, fact: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
-            verification: { kind: "ran" as const, snapshot: snapshotId("snapshot"), verdict: "unsatisfied" as const, summary: marker },
+            verification: {
+              kind: "ran" as const,
+              snapshot: snapshotId("snapshot"),
+              verdict: "unsatisfied" as const,
+              summary: marker,
+            },
           }
-        : { verification: { kind: "ran" as const, snapshot: snapshotId("snapshot"), verdict: "unsatisfied" as const, summary: marker } },
+        : {
+            verification: {
+              kind: "ran" as const,
+              snapshot: snapshotId("snapshot"),
+              verdict: "unsatisfied" as const,
+              summary: marker,
+            },
+          },
   };
   return result as FixtureDeliveryResult | FixtureReviewResult;
 }
@@ -514,19 +527,19 @@ test("Selection owner codecs reject malformed live and service payloads", () => 
 });
 
 test("Task owner codecs reject malformed live and service/reference payloads", () => {
-  const protocol = taskMutationRequestProtocol("task.start");
-  const command = taskMutationRequestCommand("task.start", unusedTaskPort);
+  const protocol = taskMutationRequestProtocol("task.done");
+  const command = taskMutationRequestCommand("task.done", unusedTaskPort);
   assert.throws(
     () => protocol.decodeResult({ kind: "accepted" }),
-    /transport integrity: Task task\.start returned an invalid live result/u,
+    /transport integrity: Task task\.done returned an invalid live result/u,
   );
   assert.throws(
-    () => command.decodeService({ action: "task.stop" }),
-    /malformed stored Task service evidence for task\.start/u,
+    () => command.decodeService({ action: "task.drop" }),
+    /malformed stored Task service evidence for task\.done/u,
   );
   assert.throws(
-    () => protocol.decodeReference({ kind: "served-reference", action: "task.stop" }),
-    /malformed Task service reference for task\.start/u,
+    () => protocol.decodeReference({ kind: "served-reference", action: "task.drop" }),
+    /malformed Task service reference for task\.done/u,
   );
 });
 
@@ -1392,20 +1405,25 @@ test("stable entry succession serves fresh Task contexts without retargeting pin
   const parent = await born(root, "parent", "11111111", ["task.add"]);
   let leash = (await HeldAkumaLeash.try(parent.paths))!;
   const served: number[] = [];
-  const open = (bodySequence: number) => BodyRequestPump.open({
-    paths: parent.paths,
-    allowed: parent.soul.allowed,
-    bodySequence,
-    now: () => "2026-08-18T00:00:01.000Z",
-    signal: new AbortController().signal,
-    commands: { "task.add": eraseRequestCommand(taskMutationRequestCommand("task.add", {
-      ...unusedTaskPort,
-      add: async ({ world, options }) => {
-        served.push(bodySequence);
-        return await Tasks.of(world).add(options);
+  const open = (bodySequence: number) =>
+    BodyRequestPump.open({
+      paths: parent.paths,
+      allowed: parent.soul.allowed,
+      bodySequence,
+      now: () => "2026-08-18T00:00:01.000Z",
+      signal: new AbortController().signal,
+      commands: {
+        "task.add": eraseRequestCommand(
+          taskMutationRequestCommand("task.add", {
+            ...unusedTaskPort,
+            add: async ({ world, options }) => {
+              served.push(bodySequence);
+              return await Tasks.of(world).add(options);
+            },
+          }),
+        ),
       },
-    })) },
-  });
+    });
   const firstBody = await leash.recordBody(parent.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   const first = await open(firstBody.sequence);
   let second: BodyRequestPump | undefined;
@@ -1424,8 +1442,10 @@ test("stable entry succession serves fresh Task contexts without retargeting pin
     await first.close();
     const fresh = tasksWithExecution(root, await executionForEnvironment(environment));
     assert.equal((await fresh.add({ title: "Successor Body" })).kind, "accepted");
-    await assert.rejects(old.add({ title: "Never local or replayed" }), (error: unknown) =>
-      error instanceof AkumaBodyRequestError && error.outcome === "unknown");
+    await assert.rejects(
+      old.add({ title: "Never local or replayed" }),
+      (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
+    );
     assert.deepEqual(served, [1, 2]);
     const board = await Tasks.of(root).list({ selection: "all", scope: "world" });
     assert.equal(board.kind, "accepted");
@@ -2054,8 +2074,9 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     const returned = outcomes.find(
       (value): value is Extract<(typeof outcomes)[number], { kind: "returned" }> & { result: AkumaTellResult } =>
         (value as { kind: string }).kind === "returned" &&
-        selectionResultSchemas.tell.safeParse((value as Extract<(typeof outcomes)[number], { kind: "returned" }>).result)
-          .success,
+        selectionResultSchemas.tell.safeParse(
+          (value as Extract<(typeof outcomes)[number], { kind: "returned" }>).result,
+        ).success,
     );
     assert.equal(returned?.result.tell.admission.tellId, id);
     assert.deepEqual(returned?.result.tell.row, {

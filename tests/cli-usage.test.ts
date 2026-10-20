@@ -132,10 +132,10 @@ test("worktree hook failure reports exit 1 at the CLI boundary", async () => {
     lag: [
       {
         kind: "worktree-hook-failed",
-          phase: "create",
-          path: "/tmp/wt",
-          command: 0,
-          name: "prepare",
+        phase: "create",
+        path: "/tmp/wt",
+        command: 0,
+        name: "prepare",
         failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
       },
     ],
@@ -533,9 +533,9 @@ test("usage refusal exits 64 without touching an absent world", async () => {
 test("a worldless lifecycle request refuses every requested Task in its native shape", () => {
   const cwd = mkdtempSync(join(tmpdir(), "keiyaku-usage-worldless-"));
   try {
-    const single = runCli(cwd, ["task", "start", "task/alpha"]);
+    const single = runCli(cwd, ["task", "drop", "task/alpha"]);
     assert.equal(single.status, 1);
-    assert.match(single.stdout, /^× start refused$/mu);
+    assert.match(single.stdout, /^× drop refused$/mu);
     assert.match(single.stdout, /^  reason  task missing$/mu);
     assert.match(single.stdout, /^  task  task\/alpha$/mu);
     const plural = runCli(cwd, ["task", "done", "task/alpha", "task/beta", "--json"]);

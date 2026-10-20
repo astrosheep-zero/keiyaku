@@ -15,12 +15,8 @@ import { advanceTaskTimestamp, taskView } from "./view.js";
 const TRANSITIONS: Readonly<
   Record<TaskLifecycleVerb, Readonly<Partial<Record<TaskDocument["state"], TaskDocument["state"]>>>>
 > = {
-  start: { open: "in_progress" },
-  stop: { in_progress: "open" },
-  hold: { open: "on_hold", in_progress: "on_hold" },
-  resume: { on_hold: "open" },
-  done: { open: "done", in_progress: "done", on_hold: "done" },
-  drop: { open: "drop", in_progress: "drop", on_hold: "drop" },
+  done: { open: "done" },
+  drop: { open: "drop" },
 };
 
 type CurrentTaskBoard = {

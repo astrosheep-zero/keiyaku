@@ -33,7 +33,7 @@ to create parallel work.
 
 - Separate `kei`s have independently acceptable outcomes.
 - An Arc is a chapter of one `kei`; it is not separately accepted.
-- A Task stores decomposition or dependencies that outlive this conversation.
+- A Task records confirmed unresolved work and its dependencies.
 
 Use `after` only when one `kei` requires another to be accepted first. Ordinary
 overlap is not a dependency.

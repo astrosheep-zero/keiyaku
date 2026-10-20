@@ -14,12 +14,10 @@ import type {
   TaskUpdateResult,
   UpdateTaskInput,
 } from "./operations.js";
-import type { TaskCompositionResult } from "./compose.js";
 import { taskIdsSchema, taskNamespaceSchema } from "./identity.js";
 import { taskNonblankTextSchema, taskStateSchema, taskPrioritySchema } from "./document.js";
 import {
   taskBatchResultSchema,
-  taskCompositionResultSchema,
   taskMutationIdSchema,
   taskMutationResultSchema,
   taskUpdateResultSchema,
@@ -30,13 +28,8 @@ import { z } from "zod";
 export const TASK_MUTATION_ACTIONS = Object.freeze([
   "task.add",
   "task.addDocument",
-  "task.compose",
   "task.done",
   "task.drop",
-  "task.hold",
-  "task.resume",
-  "task.start",
-  "task.stop",
   "task.update",
 ] as const);
 
@@ -91,27 +84,10 @@ const addDocumentRequestSchema = z
   .object({ input: z.object({ markdown: z.string(), namespace: taskNamespaceSchema }).strict() })
   .strict()
   .transform(({ input }) => ({ action: "task.addDocument" as const, input }));
-const composeRequestSchema = z
-  .object({ markdown: z.string(), namespace: taskNamespaceSchema })
-  .strict()
-  .transform((request) => ({ action: "task.compose" as const, ...request }));
 const updateRequestSchema = z
   .object({ id: taskMutationIdSchema, input: updateInputSchema })
   .strict()
   .transform((request) => ({ action: "task.update" as const, ...request }));
-const singleOrBatchRequestSchema = <Action extends "task.start" | "task.stop" | "task.hold" | "task.resume">(
-  action: Action,
-) =>
-  z.union([
-    z
-      .object({ id: taskMutationIdSchema })
-      .strict()
-      .transform(({ id }) => ({ action, id })),
-    z
-      .object({ ids: nonemptyTaskIdsSchema })
-      .strict()
-      .transform(({ ids }) => ({ action, ids })),
-  ]);
 const terminalRequestSchema = <Action extends "task.done" | "task.drop">(action: Action) =>
   z.union([
     z
@@ -126,13 +102,8 @@ const terminalRequestSchema = <Action extends "task.done" | "task.drop">(action:
 const taskRequestSchemas = {
   "task.add": addRequestSchema,
   "task.addDocument": addDocumentRequestSchema,
-  "task.compose": composeRequestSchema,
   "task.done": terminalRequestSchema("task.done"),
   "task.drop": terminalRequestSchema("task.drop"),
-  "task.hold": singleOrBatchRequestSchema("task.hold"),
-  "task.resume": singleOrBatchRequestSchema("task.resume"),
-  "task.start": singleOrBatchRequestSchema("task.start"),
-  "task.stop": singleOrBatchRequestSchema("task.stop"),
   "task.update": updateRequestSchema,
 } as const;
 
@@ -153,14 +124,12 @@ export const forwardedTaskReferenceSchema = z
 export type ForwardedTaskReference = z.infer<typeof forwardedTaskReferenceSchema>;
 
 export type TaskMutationResultForRequest<Request extends TaskMutationRequest> =
-  Request extends Readonly<{ action: "task.compose" }>
-    ? TaskCompositionResult
-    : Request extends Readonly<{ action: "task.update" }>
-      ? TaskUpdateResult
-      : Request extends Readonly<{ ids: readonly string[] }>
-        ? TaskBatchResult
-        : TaskMutationResult;
-export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | "drop";
+  Request extends Readonly<{ action: "task.update" }>
+    ? TaskUpdateResult
+    : Request extends Readonly<{ ids: readonly string[] }>
+      ? TaskBatchResult
+      : TaskMutationResult;
+export type TaskLifecycleVerb = "done" | "drop";
 
 /**
  * The forced-local Tasks SDK abilities one descriptor execution entry consumes.
@@ -171,15 +140,6 @@ export type TaskLifecycleVerb = "start" | "stop" | "hold" | "resume" | "done" | 
 export type TaskMutationRequestPort = Readonly<{
   add(input: Readonly<{ world: WorldRoot; options: AddTaskInput }>): Promise<TaskMutationResult>;
   addDocument(input: Readonly<{ world: WorldRoot; document: AddTaskDocumentInput }>): Promise<TaskMutationResult>;
-  compose(
-    input: Readonly<{
-      world: WorldRoot;
-      markdown: string;
-      defaultNamespace: readonly string[];
-      actor: string;
-      signal?: AbortSignal;
-    }>,
-  ): Promise<TaskCompositionResult>;
   update(input: Readonly<{ world: WorldRoot; id: string; options: UpdateTaskInput }>): Promise<TaskUpdateResult>;
   lifecycle(
     input: Readonly<{
@@ -234,15 +194,13 @@ export function taskMutationRequestProtocol(
     encodeResult: (result) => result,
     decodeResult: (result) => {
       const schema =
-        action === "task.compose"
-          ? taskCompositionResultSchema
-          : action === "task.update"
-            ? taskUpdateResultSchema
-            : batch === undefined
-              ? z.union([taskMutationResultSchema, taskBatchResultSchema])
-              : batch
-                ? taskBatchResultSchema
-                : taskMutationResultSchema;
+        action === "task.update"
+          ? taskUpdateResultSchema
+          : batch === undefined
+            ? z.union([taskMutationResultSchema, taskBatchResultSchema])
+            : batch
+              ? taskBatchResultSchema
+              : taskMutationResultSchema;
       const parsed = schema.safeParse(result);
       if (!parsed.success) throw new Error(`transport integrity: Task ${action} returned an invalid live result`);
       return parsed.data;
@@ -284,15 +242,6 @@ export function taskMutationRequestCommand(
             document: { ...request.request.input, actor: facts.requester, signal: facts.signal },
           });
           break;
-        case "task.compose":
-          result = await port.compose({
-            world,
-            markdown: request.request.markdown,
-            defaultNamespace: request.request.namespace,
-            actor: facts.requester,
-            signal: facts.signal,
-          });
-          break;
         case "task.update":
           result = await port.update({
             world,
@@ -300,10 +249,6 @@ export function taskMutationRequestCommand(
             options: updateTaskOptions(request.request.input, facts.signal),
           });
           break;
-        case "task.start":
-        case "task.stop":
-        case "task.hold":
-        case "task.resume":
         case "task.done":
         case "task.drop": {
           const verb = action.slice("task.".length) as TaskLifecycleVerb;

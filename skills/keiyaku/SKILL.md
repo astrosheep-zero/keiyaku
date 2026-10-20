@@ -1,7 +1,7 @@
 ---
 name: keiyaku
 description: >-
-  Keiyaku is a CLI that records plans, writes handoff terms for deliveries,
+  Keiyaku is a CLI that records unresolved work, writes handoff terms for deliveries,
   and calls delegates. Use this skill when you need to figure out which
   Keiyaku skill or command to reach for.
 ---
@@ -10,8 +10,8 @@ description: >-
 
 ## Model
 
-Keiyaku is three independent pillars, not a bundle: **Task** remembers plans
-and dependencies, **Contract** makes acceptance standing and auditable,
+Keiyaku is three independent pillars, not a bundle: **Task** records unresolved
+work and dependencies, **Contract** makes acceptance standing and auditable,
 **Akuma** invokes capability. Use any one alone; combine them only when the
 work calls for it. Behind every Contract in flight there is one holder of its
 fulfillment loop — whoever turns intent into commissions and returns into
@@ -24,7 +24,6 @@ equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
 
 ```bash
 keiyaku -C <repo> task add "title"
-keiyaku -C <repo> task start <task-id>
 keiyaku -C <repo> bind [--task <task-id>] -
 keiyaku -C <repo> status
 keiyaku -C <repo> deliver [<contract>|@<contract>]

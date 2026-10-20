@@ -54,12 +54,6 @@ const taskViewSchema = z
       context.addIssue({ code: "custom", path: ["namespace"], message: "namespace must agree with task ID" });
   })
   .transform(({ createdBy, ...task }) => withoutUndefined({ ...task, createdBy }, ["createdBy"]));
-const compositionDiagnosticSchema = z
-  .object({ line: z.number().int().positive(), reason: z.string(), token: z.string() })
-  .strict();
-const invalidCompositionRefusalSchema = z
-  .object({ kind: z.literal("invalid-composition"), diagnostics: z.array(compositionDiagnosticSchema).readonly() })
-  .strict();
 export const taskRefusalSchema = z.union([
   z.object({ kind: z.literal("task-missing"), taskId: taskMutationIdSchema }).strict(),
   z
@@ -67,7 +61,7 @@ export const taskRefusalSchema = z.union([
       kind: z.literal("invalid-lifecycle-transition"),
       taskId: taskMutationIdSchema,
       state: taskStateSchema,
-      verb: z.enum(["start", "stop", "hold", "resume", "done", "drop"]),
+      verb: z.enum(["done", "drop"]),
     })
     .strict(),
   z.object({ kind: z.literal("invalid-graph"), diagnostic: z.string() }).strict(),
@@ -80,7 +74,6 @@ export const taskRefusalSchema = z.union([
       declaringTask: taskMutationIdSchema,
     })
     .strict(),
-  invalidCompositionRefusalSchema,
 ]);
 const taskRefusedResultSchema = z.object({ kind: z.literal("refused"), refusal: taskRefusalSchema }).strict();
 export const taskMutationResultSchema = z.union([
@@ -120,110 +113,17 @@ export const taskBatchResultSchema = z
     items: z.array(z.object({ id: taskMutationIdSchema, outcome: taskMutationResultSchema }).strict()).readonly(),
   })
   .strict();
-const aliasesSchema = z
-  .array(z.object({ alias: taskNonblankTextSchema, taskId: taskMutationIdSchema }).strict())
-  .readonly();
-const planAliasesSchema = z
-  .array(z.object({ alias: taskNonblankTextSchema, position: z.number().int().positive() }).strict())
-  .readonly();
-const planOrderSchema = z
-  .array(
-    z
-      .object({
-        position: z.number().int().positive(),
-        alias: taskNonblankTextSchema.optional(),
-        taskId: taskMutationIdSchema.optional(),
-      })
-      .strict(),
-  )
-  .readonly();
-const admissionsSchema = z
-  .array(
-    z.discriminatedUnion("kind", [
-      z
-        .object({
-          kind: z.literal("new"),
-          position: z.number().int().positive(),
-          alias: taskNonblankTextSchema.optional(),
-          title: z.string(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("existing"),
-          position: z.number().int().positive(),
-          taskId: taskMutationIdSchema,
-          title: z.string(),
-        })
-        .strict(),
-    ]),
-  )
-  .readonly();
-const documentChangesSchema = z
-  .array(
-    z.object({ taskId: taskMutationIdSchema, kind: z.enum(["created", "updated"]), documentDiff: z.string() }).strict(),
-  )
-  .readonly();
-const compositionFactsSchema = { aliases: aliasesSchema, admissionOrder: taskIdsSchema, admissions: admissionsSchema };
-export const taskCompositionResultSchema = z.union([
-  z
-    .object({
-      kind: z.literal("planned"),
-      aliases: planAliasesSchema,
-      admissionOrder: planOrderSchema,
-      admissions: admissionsSchema,
-      bodies: z
-        .array(
-          z
-            .object({
-              position: z.number().int().positive(),
-              title: z.string(),
-              bytes: z.number().int().nonnegative(),
-              firstLine: z.string(),
-              lastLine: z.string(),
-            })
-            .strict(),
-        )
-        .readonly(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("accepted"),
-      ...compositionFactsSchema,
-      documentChanges: documentChangesSchema,
-      cleanup: taskCleanupFailureSchema.optional(),
-    })
-    .strict()
-    .transform((value) => withoutUndefined(value, ["cleanup"])),
-  z.object({ kind: z.literal("refused"), refusal: invalidCompositionRefusalSchema }).strict(),
-  z
-    .object({
-      kind: z.literal("incomplete"),
-      ...compositionFactsSchema,
-      documentChanges: documentChangesSchema,
-      cleanup: taskCleanupFailureSchema.optional(),
-      stopped: z.union([taskRefusalSchema, taskRetrySchema]),
-      draft: z.string(),
-    })
-    .strict()
-    .transform((value) => withoutUndefined(value, ["cleanup"])),
-]);
-
 export const taskMutationExecutionResultSchema = z.union([
   taskBatchResultSchema,
   taskMutationResultSchema,
   taskUpdateResultSchema,
-  taskCompositionResultSchema,
 ]);
 
 export type TaskView = z.infer<typeof taskViewSchema>;
 export type TaskCleanupFailure = z.infer<typeof taskCleanupFailureSchema>;
-export type TaskCompositionDiagnostic = z.infer<typeof compositionDiagnosticSchema>;
 export type TaskRefusal = z.infer<typeof taskRefusalSchema>;
 export type TaskRetry = z.infer<typeof taskRetrySchema>["reason"];
 export type TaskMutationResult = z.infer<typeof taskMutationResultSchema>;
 export type TaskUpdateResult = z.infer<typeof taskUpdateResultSchema>;
 export type TaskBatchResult = z.infer<typeof taskBatchResultSchema>;
-export type TaskCompositionResult = z.infer<typeof taskCompositionResultSchema>;
 export type TaskMutationExecutionResult = z.infer<typeof taskMutationExecutionResultSchema>;

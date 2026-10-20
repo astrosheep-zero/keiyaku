@@ -5,7 +5,6 @@ import type { TaskCleanupFailure, TaskRefusal, TaskRetry, TaskView } from "./mut
 export type {
   TaskView,
   TaskCleanupFailure,
-  TaskCompositionDiagnostic,
   TaskRefusal,
   TaskRetry,
   TaskMutationResult,

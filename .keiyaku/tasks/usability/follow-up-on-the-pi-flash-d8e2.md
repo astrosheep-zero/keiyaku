@@ -1,7 +1,7 @@
 ---
 id: task/usability/follow-up-on-the-pi-flash-d8e2
 title: Follow up on the pi-flash workflow usability trials
-state: in_progress
+state: open
 priority: 1
 needs: []
 parent: null

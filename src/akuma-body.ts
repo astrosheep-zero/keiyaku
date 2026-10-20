@@ -99,10 +99,6 @@ type TaskLifecycleInput = Readonly<{ note?: string; signal?: AbortSignal }>;
 const TASK_LIFECYCLE: Readonly<
   Record<TaskLifecycleVerb, (handle: Task, input: TaskLifecycleInput) => Promise<TaskMutationResult>>
 > = {
-  start: async (handle, input) => await handle.start(input),
-  stop: async (handle, input) => await handle.stop(input),
-  hold: async (handle, input) => await handle.hold(input),
-  resume: async (handle, input) => await handle.resume(input),
   done: async (handle, input) => await handle.done(input),
   drop: async (handle, input) => await handle.drop(input),
 };
@@ -116,13 +112,6 @@ function taskMutationRequestPort(): TaskMutationRequestPort {
   return {
     add: async ({ world, options }) => await Tasks.of(world).add(options),
     addDocument: async ({ world, document }) => await Tasks.of(world).addDocument(document),
-    compose: async ({ world, markdown, defaultNamespace, actor, signal }) =>
-      await Tasks.of(world).compose({
-        markdown,
-        namespace: defaultNamespace,
-        actor,
-        ...(signal === undefined ? {} : { signal }),
-      }),
     update: async ({ world, id, options }) => await Tasks.of(world).task({ id }).update(options),
     lifecycle: async ({ world, verb, id, note, signal }) =>
       await TASK_LIFECYCLE[verb](Tasks.of(world).task({ id }), {

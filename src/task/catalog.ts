@@ -33,7 +33,7 @@ async function catalogRow(
     task.needs.map(async (id) => documents.get(id) ?? (await readTaskDocument(world, id))),
   );
   const blockers: TaskRef[] = [];
-  if (task.state === "open" || task.state === "in_progress") {
+  if (task.state === "open") {
     for (const [index, need] of needs.entries()) {
       if (terminal(need)) continue;
       blockers.push({ id: task.needs[index]!, title: need?.title ?? null, state: need?.state ?? "missing" });

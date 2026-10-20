@@ -35,14 +35,13 @@ import {
   underExpression,
 } from "./query.js";
 import { advanceTaskTimestamp, taskView } from "./view.js";
-export { advanceTaskTimestamp, taskView } from "./view.js";
+export { taskView } from "./view.js";
 export type {
   AddTaskDocumentInput,
   AddTaskInput,
   TaskCleanupFailure,
   SettledTaskResult,
   TaskBatchResult,
-  TaskCompositionDiagnostic,
   TaskMutationResult,
   TaskOutcome,
   TaskRefusal,
@@ -81,7 +80,6 @@ function currentTimestamp(): string {
   return new Date().toISOString();
 }
 
-/** Internal Task timestamp rule shared by ordinary mutations and compose. */
 function addDocument(
   base: TaskCreationDocument,
   namespace: readonly string[],

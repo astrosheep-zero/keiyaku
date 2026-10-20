@@ -1,7 +1,7 @@
 ---
 id: task/akuma-长时间等待时持续消耗-cpu-并出现-gb-9984
 title: Akuma 长时间等待时持续消耗 CPU，并出现 GB 级内存增长
-state: in_progress
+state: open
 priority: 1
 needs: []
 parent: null

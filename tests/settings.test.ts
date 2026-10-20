@@ -114,7 +114,10 @@ test("Contract bind expands mixed gates and bundles, deduplicates stably, and de
       "security-audited",
     ]);
     assert.deepEqual(await gates(loaded, ["reviewed"]), ["reviewed"]);
-    await assert.rejects(() => gates(loaded, ["default"]), /Unknown gate 'default'\. Known gate names: reviewed, verified, custom, empty, first, future, second/u);
+    await assert.rejects(
+      () => gates(loaded, ["default"]),
+      /Unknown gate 'default'\. Known gate names: reviewed, verified, custom, empty, first, future, second/u,
+    );
     for (const name of ["", " ", "Security", "reviewed,verified"]) {
       await assert.rejects(
         () => gates(loaded, [name]),
@@ -286,13 +289,8 @@ test("Archetype omission uses the delegation baseline while explicit allowed set
       "contract.deliver",
       "task.add",
       "task.addDocument",
-      "task.compose",
       "task.done",
       "task.drop",
-      "task.hold",
-      "task.resume",
-      "task.start",
-      "task.stop",
       "task.update",
     ]);
     writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: codex-app-server\n---\n");
@@ -729,8 +727,10 @@ test("omitted Settings accepts built-in gates only, empty hooks, and false fresh
     assert.deepEqual(present(await selected.value.keiyaku.state()).terms.gates, ["reviewed"]);
     await assert.rejects(
       Keiyaku.with().bind({ repo, markdown: contractDocument(), gates: ["security-audited"] }),
-      (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input"
-        && /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
+      (error: unknown) =>
+        error instanceof KeiyakuError &&
+        error.category === "invalid-input" &&
+        /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
     );
     const bare = accepted(await Keiyaku.with().bind({ repo, markdown: contractDocument("Bare core") }));
     assert.deepEqual(present(await bare.value.keiyaku.state()).terms.gates, []);

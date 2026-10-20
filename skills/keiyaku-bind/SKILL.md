@@ -59,11 +59,11 @@ writing one broad Objective around unrelated fixes.
 
 - Use an Arc only for a chapter inside that one acceptance boundary; an Arc is
   not separately accepted and MUST NOT substitute for an independent `kei`.
-- Use a Task for decomposition or dependency memory that must outlive the
-  current conversation.
+- Use a Task for confirmed unresolved work and dependencies that must outlive
+  the current conversation.
 
 A `kei` owns one independently acceptable outcome and its delivery lifecycle. A
-Task records decomposition or dependency memory; it may exist without a `kei`,
+Task records confirmed unresolved work; it may exist without a `kei`,
 and it does not create a second acceptance or lifecycle. Associate a `kei` with
 an existing Task only when that Task has real scheduling or dependency value.
 Do not create a Task just to mirror a `kei`.

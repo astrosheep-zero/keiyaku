@@ -1,6 +1,6 @@
 ---
 name: developing-keiyaku-v4
-description: Use when developing, reviewing, or coordinating work in the Keiyaku v4 repository. Follow the v4 authority law, task board, Keiyaku Akuma dispatch, five-minute observation windows, and the narrow Faye escalation rules below.
+description: Use when developing, reviewing, or coordinating work in the Keiyaku v4 repository. Follow the v4 authority law, task board, and the narrow Faye escalation rules below.
 ---
 
 # Developing Keiyaku v4
@@ -50,16 +50,13 @@ keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task ls
 keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 task show <task-id>
 ```
 
-Use the task board when work needs durable planning: decomposition,
-dependencies, priority, readiness, or coordination across deliveries. A Task
-is optional and is never required merely because a bounded Contract will be
-delivered. Do not create a Task that only duplicates a Contract objective. A
-task is open, in-progress, done, or dropped; it is never a contract binding.
-When a real Task already owns the plan, its loop is `task add` → `task start`
-→ implementation/review → `task done` (or `task stop`/`task drop`), and
-`bind --task <task/...>` atomically installs the optional Settlement-owned
-TaskHolder. Contract claim settles the current held Task to `done`, while
-abandon releases it. Otherwise bind the Contract without `--task`.
+Use the task board for confirmed unresolved work and its prerequisites, not
+plans or execution progress. A Task is optional and is never required merely
+because a bounded Contract will be delivered. Do not create a Task that only
+duplicates a Contract objective. A Task is open, done, or dropped; it is never a
+contract binding. `bind --task <task/...>` atomically installs the optional
+Settlement-owned TaskHolder. Contract acceptance settles the current held Task
+to `done`, while abandonment releases it. Otherwise bind without `--task`.
 
 Contract gate selections accept literal gates and configured bundles together.
 Use `--gates ""` for an explicit empty selection. Read `bind --help` and
@@ -67,10 +64,9 @@ Use `--gates ""` for an explicit empty selection. Read `bind --help` and
 
 ## Akuma dispatch
 
-Delegated implementation, review, scanning, and design work must use the
-`keiyaku akuma` command surface, not an ad-hoc subagent lane or a contract
-workflow. Every dispatch uses `-C` (or `--cwd`) for the v4 repository and has
-an explicit bounded brief:
+The `keiyaku akuma` command surface dispatches a bounded brief to a worker.
+Every dispatch uses `-C` (or `--cwd`) for the v4 repository and carries an
+explicit bounded brief:
 
 ```bash
 keiyaku -C <contract-worktree> call worker \
@@ -110,26 +106,13 @@ starts only after the settled decision is written into its owning root document.
 The coordinator must enforce this boundary in the brief and
 when reviewing the returned diff.
 
-Use the roles deliberately:
+Available roles:
 
 - `worker`: implementation or focused repository investigation.
 - `review-akuma` or `expert-review-akuma`: independent candidate review with
   concrete findings and file references; review does not silently become an
   implementation lane.
-- `fast`: cheap broad scans, adversarial eyes, or a quick second read
-  when the question benefits from parallel evidence. Its use does not need a
-  separate usage report unless the result changes a decision.
-
-Follow the shipped workflow's reviewer-reuse boundary: reuse the same Akuma by
-default for revisions within one Contract and role, but start a replacement
-when its judgment frame or context is contaminated. A new Contract always gets
-a new `call --contract`; never repurpose another Contract's Akuma with `tell`.
-
-Prefer parallel Akuma lanes whenever the work can be split without overlapping
-write surfaces: for example, implementation, review, and a broad
-scan can run together. Give each lane one bounded responsibility and one
-observable handoff; serialize only the part that truly depends on another
-lane's result.
+- `fast`: broad repository scans and focused second reads.
 
 When a Contract's declared gates include `reviewed`:
 
@@ -154,14 +137,12 @@ A reviewer answer without a review receipt remains review input. The actor
 assigned the `review` mutation in the workflow records the gate-visible
 journal entry.
 
-Akuma may call another Akuma when it has an independent, bounded subtask. It
-must still use `keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 ...`, keep the
-child scope explicit, and return the child result to its own coordinator. Do
-not create overlapping write surfaces merely to increase parallelism.
+Akuma supports nested calls for an independent, bounded subtask. The child
+scope remains explicit and its result returns to the coordinator.
 
-Use tasks to coordinate lanes, not contracts. Inspect `git status` before and
-after each lane. Workers must not revert unrelated user changes; the
-coordinator reviews the combined diff and owns the accepted commit.
+Inspect `git status` before and after each lane. Workers must not revert
+unrelated user changes; the coordinator reviews the combined diff and owns the
+accepted commit.
 
 ## Observation and steering
 
@@ -225,16 +206,14 @@ owning root document in the same accepted change when it is durable architecture
 ## Delivery loop
 
 1. Read `docs/README.md`, the owning root document, and neighboring code before editing.
-2. Add or update a Task only when durable planning has a concrete reader;
+2. Add or update a Task only for confirmed unresolved work;
    otherwise bind a bounded delivery directly.
 3. Write every settled design into the owning root document before implementation.
-4. Dispatch independent Akuma lanes with exact `-C`, authority citations, and
-   non-overlapping scope.
-5. Keep changes small, run focused tests first, then source-only typecheck and
+4. Keep changes small, run focused tests first, then source-only typecheck and
    broader tests proportional to the risk.
-6. Review the combined diff for second authorities, dead compatibility code,
+5. Review the combined diff for second authorities, dead compatibility code,
    duplicated lifecycle gates, and accidental v3 import.
-7. Commit only the coherent accepted slice; leave unrelated dirty files alone.
+6. Commit only the coherent accepted slice; leave unrelated dirty files alone.
 
 ### Test priority
 
