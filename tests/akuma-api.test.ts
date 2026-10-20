@@ -531,7 +531,7 @@ test("idle after kill names the killed life", async () => {
   }
 });
 
-test("idle timeout with a pending tell reports pendingTell", async (context) => {
+test("idle returns untidy execution while preserving a pending tell", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-api-idle-pending-");
   const { allocated, akuma } = await bornWorld(root, "a1000010");
   await recordTell(allocated.paths, {
@@ -541,8 +541,12 @@ test("idle timeout with a pending tell reports pendingTell", async (context) => 
     recordedAt: "2026-08-10T00:00:01.000Z",
   });
   const timed = await akuma.idle({ timeoutMs: 100 });
-  assert.equal(timed.reason, "deadline");
+  assert.equal(timed.reason, "completed");
+  assert.equal(timed.status.life, "untidy");
   assert.equal(timed.status.id, allocated.id);
+  assert.ok(timed.status.timeline.entries.some((entry) =>
+    entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "queued" && entry.row.state === "pending",
+  ));
 });
 
 const LIVE_WAIT_AT = "2026-10-01T00:00:00.000Z";

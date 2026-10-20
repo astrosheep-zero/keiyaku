@@ -10,6 +10,7 @@ import {
   appendActivity,
   beginTurn,
   breakBody,
+  finishBodyIfIdle,
   endTurn,
   recordCurrentModel,
   recordTellDeliveries,
@@ -183,7 +184,7 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
   try {
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
-    await breakBody(paths, { sequence: body.sequence, end: "put-down", at: value.soul.createdAt });
+    await finishBodyIfIdle(paths, { sequence: body.sequence, at: value.soul.createdAt });
     leash.release();
     const prepare = DatabaseSync.prototype.prepare;
     let probes = 0;
@@ -220,6 +221,42 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
         (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
       ),
     );
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
+test("wait returns stranded failure without consuming pending input", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    await recordTell(paths, { id: "undelivered", body: "OK", recordedAt: value.soul.createdAt });
+    const running = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs: 0 });
+    assert.equal(running.reason, "deadline");
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    await endTurn(paths, {
+      turnSequence: turn.sequence,
+      outcome: { kind: "failed", diagnostic: "session creation: 405" },
+      completedAt: value.soul.createdAt,
+    });
+    await breakBody(paths, { sequence: body.sequence, end: "put-down", at: value.soul.createdAt });
+    leash.release();
+    const result = await executeWaitAkuma({
+      path: value.root, ids: [id], completion: "all", signal: AbortSignal.timeout(2000),
+    });
+    assert.equal(result.reason, "completed");
+    const status = result.observations[0]!;
+    assert.equal(status.life, "stranded");
+    assert.equal(defaultWaitComplete(status), true);
+    assert.equal(status.timeline.kind, "idle");
+    assert.match(JSON.stringify(status.timeline), /session creation: 405/);
+    assert.ok(status.timeline.entries.some((entry) =>
+      entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "undelivered" && entry.row.state === "pending",
+    ));
   } finally {
     leash.release();
     value.close();

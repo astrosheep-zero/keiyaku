@@ -153,6 +153,9 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
   };
   return {
     clear,
+    async execution(signal?: AbortSignal) {
+      return (await bornObservation(paths, expected, () => reader.life(signal))).currentLife;
+    },
     tellOutcome: reader.tellOutcome,
     async complete(signal?: AbortSignal): Promise<boolean> {
       try {
@@ -246,8 +249,22 @@ export async function readLiveStatus(
   return await bornLiveStatus(pathsForAkuId(worldPath, id), id, input, signal);
 }
 
+export type ExecutionProgress = "settled" | "advancing" | "stopped";
+
+/** Pending input is not execution. An owned launch can bridge the admission gap. */
+export function executionProgress(
+  life: AkumaStatus["life"],
+  pending: boolean,
+  wake: "launching" | "settled" | "failed" = "settled",
+): ExecutionProgress {
+  if (wake === "launching" || life === "running") return "advancing";
+  if (wake === "failed") return "stopped";
+  if (life === "asleep") return pending ? "advancing" : "settled";
+  return "stopped";
+}
+
 function complete(life: AkumaStatus["life"], pending: boolean): boolean {
-  return life !== "running" && !pending;
+  return executionProgress(life, pending) !== "advancing";
 }
 
 export function defaultWaitComplete(status: AkumaStatus): boolean {

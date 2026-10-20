@@ -6,6 +6,7 @@ import {
   createLiveStatusReader,
   bornStatus,
   defaultWaitComplete,
+  executionProgress,
   observeOutcomeRows,
   observeStatusOutcome,
   type OutcomeObserver,
@@ -350,6 +351,7 @@ export class AkumaOwner {
       timeoutMs?: number;
       signal?: AbortSignal;
       observe?: (observation: LiveStatusObservation) => void | Promise<void>;
+      wake?: () => "launching" | "settled" | "failed";
     }> = {},
   ): Promise<Readonly<{ reason: WaitReason; outcome: TurnOutcome | null; completedAt: string | null }>> {
     const reader = createLiveStatusReader(this.paths, this.id);
@@ -358,6 +360,8 @@ export class AkumaOwner {
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
         observe: async () => {
+          const currentLife = await reader.execution(options.signal);
+          const progress = executionProgress(currentLife, true, options.wake?.());
           const { tell, end } = await reader.tellOutcome(tellId, options.signal);
           if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
           if (end !== undefined) await this.outcomeObserved?.(this.id, [`turn/${end.turnSequence}`]);
@@ -369,7 +373,8 @@ export class AkumaOwner {
           return {
             outcome: end?.outcome ?? null,
             completedAt: end?.completedAt ?? null,
-            terminalWithoutTurn: tell.state === "told" && tell.binding === undefined,
+            terminalWithoutTurn:
+              (tell.state === "told" && tell.binding === undefined) || progress === "stopped",
           };
         },
         complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,

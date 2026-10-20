@@ -144,8 +144,14 @@ surface contains no owner, born, Turn, call, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
 A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask, preempting current work before new Tell admission; kill is the pure stop. These forms retain the same busy, routing, and recovery semantics.
-Wait observes status until its Akuma-owned completion judgment — a non-running
-life with no pending Tell — or a caller deadline. Standalone `idle` and plural
+Wait observes status until its Akuma-owned completion judgment or a caller
+deadline. Running execution keeps observation open. Normally sleeping execution
+completes only without pending Tell, preserving ordinary successor handoff.
+Stranded, killed, hung, or untidy execution ends observation even with pending
+Tell: unsubmitted input remains retained, but is not evidence of execution that
+can advance it. Completion names the end of observation, not successful work;
+the final status preserves the lifecycle cause, outcome, and pending input.
+Standalone `idle` and plural
 or CLI `wait` name this same judgment for their respective caller contexts, and
 one set-observation owner serves both: frozen caller order, any/all completion,
 a shared ordinary-detail budget, transient unreadable peers, and honest final
@@ -163,6 +169,16 @@ The interrupt flag and kill expose only honest settlement or
 unavailability evidence. Hung, untidy, and resume-unsupported state preserve
 their durable cause and available facts; the surface does not prescribe the
 flagship's next action.
+
+Input-bound answer observation shares the execution-progress judgment, but never
+substitutes another input's outcome. An exact retained answer or failure wins;
+without one, stopped execution returns unanswered and retains the input. An
+invocation's unsettled wake preserves its launch gap; an explicitly failed wake
+ends waiting when no execution is running and retains its admission diagnostic.
+Unexpected wake rejection remains an exceptional failure, not a fabricated
+provider outcome. Observation neither retries nor changes Tell facts. Without
+invocation-owned wake evidence, sleeping execution with pending input retains
+the conservative handoff wait rather than guessing that launch has failed.
 
 Schema on an ask carries a provider answer contract. The contract may be
 the package's own schema value or any Standard Schema v1 value; a vendor value

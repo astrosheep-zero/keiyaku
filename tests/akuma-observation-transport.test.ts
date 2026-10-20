@@ -6,7 +6,8 @@ import test from "node:test";
 import { bornDirectAkuma, heartFixture } from "./support/akuma-fixtures.js";
 import { temporaryDirectory, waitForCondition } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
-import { recordTell, readRequest, beginTurn, bindTellsToTurn, endTurn } from "../src/akuma/heart/index.js";
+import { observeAdmittedAskAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { recordTell, readRequest, beginTurn, bindTellsToTurn, endTurn, breakBody, readTell } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
 import { createHeartReader, HeartAbsentError } from "../src/akuma/heart/storage.js";
@@ -126,6 +127,44 @@ test("ask shares its Heart connection across rounds and releases it after settle
   } finally {
     parent.leash.release();
   }
+});
+
+test("ask stops on an abandoned bound Turn without inventing an answer", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "kei-ask-stopped-"));
+  const parent = await born(root);
+  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
+  await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
+  const turn = await beginTurn(parent.paths, { bodySequence: body.sequence, startedAt: AT });
+  await bindTellsToTurn(parent.paths, { turnSequence: turn.sequence, tellIds: ["asked"], boundAt: AT });
+  await breakBody(parent.paths, { sequence: body.sequence, end: "put-down", at: AT });
+  parent.leash.release();
+  const result = await new AkumaOwner(parent.id, root).tellOutcome("asked", { signal: AbortSignal.timeout(2000) });
+  assert.equal(result.reason, "completed");
+  assert.equal(result.outcome, null);
+  assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
+});
+
+test("ask preserves the launch gap, then returns an explicit failed wake without waiting forever", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "kei-ask-wake-failed-"));
+  const parent = await born(root);
+  await recordTell(parent.paths, { kind: "tell", id: "asked", body: "work", recordedAt: AT });
+  parent.leash.release();
+  const owner = new AkumaOwner(parent.id, root);
+  const receipt = await owner.admittedReceipt("asked");
+  let release!: (value: typeof receipt) => void;
+  const wake = new Promise<typeof receipt>((resolve) => { release = resolve; });
+  let rounds = 0;
+  const result = await observeAdmittedAskAkuma({
+    path: root, id: parent.id, tellId: "asked", wake,
+    signal: AbortSignal.timeout(2000),
+    onObserve: { observe: async () => {
+      if (++rounds === 2) release({ ...receipt, wake: { kind: "failed", diagnostic: "spawn failed" } });
+    } },
+  });
+  assert.ok(rounds >= 3);
+  assert.equal(result.observation.reason, "unanswered");
+  assert.deepEqual(result.tell.wake, { kind: "failed", diagnostic: "spawn failed" });
+  assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
 });
 
 test("ask cancellation interrupts contended Heart admission", async (context) => {

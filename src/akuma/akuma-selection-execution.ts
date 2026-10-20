@@ -110,11 +110,14 @@ export async function observeAdmittedAskAkuma(
   const tell = input.receipt ?? (await owner.admittedReceipt(input.tellId));
   await input.onObserve?.admitted?.(tell, input.id);
   let settled: TellResult | undefined;
+  let wakeError: { error: unknown } | undefined;
+  let wakeState: "launching" | "settled" | "failed" = input.wake === undefined ? "settled" : "launching";
   void input.wake?.then(
     (receipt) => {
       settled = receipt;
+      wakeState = receipt.wake.kind === "failed" ? "failed" : "settled";
     },
-    () => undefined,
+    (error: unknown) => { wakeError = { error }; wakeState = "failed"; },
   );
   const admittedAt = Date.parse(tell.row.at);
   const observedAt = performance.timeOrigin + performance.now();
@@ -125,6 +128,10 @@ export async function observeAdmittedAskAkuma(
         : 0
       : Math.max(0, performance.now() - input.startedAt);
   const observed = await owner.tellOutcome(input.tellId, {
+    wake: () => {
+      if (wakeError !== undefined) throw wakeError.error;
+      return wakeState;
+    },
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, input.timeoutMs - elapsed) }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
