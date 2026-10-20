@@ -26,8 +26,10 @@ export type Tell = (world: string, akuId: string, signal: AbortSignal, text: str
 type PromptResult = Extract<ProviderEvent, { type: "session.prompt_result" }>["result"];
 
 export function messageText(prompt: ProviderPrompt): string {
-  if (prompt.outputSchema !== undefined || prompt.clearPendingPermissions) {
-    throw new Error("Keiyaku messages do not support output schemas or permission changes");
+  // Paseo requests stale permission cleanup on ordinary steering. This mirror
+  // owns no permission requests, so there is nothing to clear.
+  if (prompt.outputSchema !== undefined) {
+    throw new Error("Keiyaku messages do not support output schemas");
   }
   if (prompt.input.type !== "message") {
     throw new Error("Keiyaku messages support plain text only, not commands");

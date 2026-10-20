@@ -599,7 +599,8 @@ test("native born attach, SDK creation and identity retries share the registered
 
 const promptInput = (id = "client-1", text = "change direction"): Extract<ProviderInput, { type: "session.prompt" }> => ({
   type: "session.prompt", sessionId: "session", prompt: {
-    clientMessageId: id, delivery: "steer", input: { type: "message", content: [{ type: "text", text }] },
+    clientMessageId: id, delivery: "steer", clearPendingPermissions: true,
+    input: { type: "message", content: [{ type: "text", text }] },
   },
 });
 function tellReceipt(route?: "live" | "launch", wake: TellAdmission["wake"] = { kind: "told" }, tellId = "new-tell"): TellAdmission {

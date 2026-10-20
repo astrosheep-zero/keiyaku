@@ -115,7 +115,7 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
     async sync() { await bridge.sync({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
     async refresh() { await bridge.refresh({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
     close,
-    send(text: string, id: string) { return startAgentRun(manager, agent.id, text, logger, { activeTurnBehavior: "steer", replaceRunning: true, runOptions: { clientMessageId: id } }); },
+    send(text: string, id: string) { return startAgentRun(manager, agent.id, text, logger, { activeTurnBehavior: "steer", replaceRunning: true, clearPendingPermissions: true, runOptions: { clientMessageId: id } }); },
   };
 }
 const page = (rows: Row[], metadata: Partial<Omit<History, "rows">> = {}): History => ({ rows, omitted: 0, hasEarlier: false,

@@ -172,10 +172,13 @@ starts and outcomes still come from observed Keiyaku windows. A wake failure ret
 diagnostic without turning the recorded message into failure or adding a pending
 message UI. Initial retention notices are unchanged.
 
-Only nonblank plain text is supported. Commands, attachments, output schemas and
-permission changes are refused before submission. The returned Tell identity
-replaces the optimistic message through `clientMessageId`, retaining one stable
-history item even when refresh races with submission. Correlation is in memory
+Only nonblank plain text is supported. Commands, attachments and output schemas
+are refused before submission. A host-requested clear of stale permission
+prompts is accepted and ignored: Paseo asks for it on ordinary steering, and
+this mirror owns no permission requests, so there is nothing to clear. The
+returned Tell identity replaces the optimistic message through
+`clientMessageId`, retaining one stable history item even when refresh races
+with submission. Correlation is in memory
 only; reopening reads history and never resends. Missing or invalid admission
 receipts, cancellation and timeout preserve an uncertain-outcome diagnostic and
 reject that prompt operation to prevent host fallback and automatic resubmission.
