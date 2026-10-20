@@ -239,6 +239,9 @@ async function drivePi(
     settleCompletion = resolve;
   });
   const agent = native.agent;
+  // Tells are harness input, not interactive typing: deliver every queued one at
+  // the next boundary regardless of the user's interactive Pi setting.
+  agent.steeringMode = "all";
   let unsubscribeAgent: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined;
   let binding: Promise<void> | undefined;

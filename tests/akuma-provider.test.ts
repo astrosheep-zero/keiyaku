@@ -1400,6 +1400,7 @@ type FakePiObservation = {
   services?: Record<string, unknown>;
   prompt?: string;
   steered: Record<string, unknown>[];
+  readonly steeringMode: string;
   emitNative(event: Record<string, unknown>): void;
   finishPrompt(): void;
   agentListeners: number;
@@ -1451,6 +1452,9 @@ function fakePiSdk(
     get agentListeners() {
       return nativeListeners.size;
     },
+    get steeringMode() {
+      return session.agent.steeringMode;
+    },
     get sessionListeners() {
       return session.listener === undefined ? 0 : 1;
     },
@@ -1467,6 +1471,7 @@ function fakePiSdk(
     sessionId: "pi-session",
     sessionManager: manager,
     agent: {
+      steeringMode: "one-at-a-time",
       subscribe(listener: (event: Record<string, unknown>) => void) {
         seen.calls.push("agent-subscribe");
         nativeListeners.add(listener);
@@ -2004,6 +2009,7 @@ test("Pi live tells require exact native message evidence, not queue acknowledge
     freshInput("work", { cwd: tmpdir() }),
   );
   const drive = await attempt.result;
+  assert.equal(fake.seen.steeringMode, "all", "tells drain together, not the interactive setting");
   let firstResult: unknown;
   let secondResult: unknown;
   const first = drive.tell!({ id: "first", text: "same text" }).then((result) => {
