@@ -313,7 +313,7 @@ test("forwarded wait acknowledges real Square notice for the requesting Soul, no
     kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
     turnSequence: turn.sequence, participants: [parent.soul.id, "ServingSession"], outcome: { kind: "answered", text: "known answer" },
   });
-  const notice = (await square.history({ from: [target.allocated.id] })).find((item) => item.kind === "say")!;
+  const notice = (await square.history({ from: [target.allocated.id], limit: null })).activities.find((item) => item.kind === "say")!;
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(join(world, "plugins", "square.mjs"),
     `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);

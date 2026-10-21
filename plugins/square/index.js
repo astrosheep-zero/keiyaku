@@ -1,22 +1,26 @@
-import { createDefaultWakeTransport, createHostLedgerPort, createSquareApplication, Square, SquareError, squareAssignedParticipantName, } from "@astrosheep/square";
+import { createDefaultWakeTransport, createHostLedgerPort, Square, SquareError, squareAssignedParticipantName, } from "@astrosheep/square";
 import { join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
 function errorCode(error) {
     return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
-async function openSquare(path, environment, ledger, wakeTransport) {
+async function openSquare(path, environment, ledger, wakeTransport, cancellation) {
+    const control = cancellation === undefined ? {} : { signal: cancellation };
+    cancellation?.throwIfAborted();
     try {
-        return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport });
+        return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport }, control);
     }
     catch (error) {
+        cancellation?.throwIfAborted();
         if (errorCode(error) !== "ENOENT" && errorCode(error) !== "unavailable")
             throw error;
         try {
-            return await Square.build({ path, markdown: "", env: environment, hostLedger: ledger, wakeTransport });
+            return await Square.build({ path, markdown: "", env: environment, hostLedger: ledger, wakeTransport }, control);
         }
         catch (buildError) {
+            cancellation?.throwIfAborted();
             try {
-                return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport });
+                return await Square.at({ path, env: environment, hostLedger: ledger, wakeTransport }, control);
             }
             catch {
                 throw buildError;
@@ -94,17 +98,20 @@ const plugin = {
         const bodyNotifications = new Map();
         const expressAsAkuma = async (akumaId, expression, participants, cancellation) => {
             cancellation?.throwIfAborted();
-            const square = await openSquare(path, environment, ledger, wakeTransport);
+            const control = cancellation === undefined ? {} : { signal: cancellation };
+            const square = await openSquare(path, environment, ledger, wakeTransport, cancellation);
             try {
                 cancellation?.throwIfAborted();
-                const joined = await square.implicitJoin(akumaId);
+                const joined = await square.implicitJoin(akumaId, control);
                 if (joined.state === "done" || joined.participant === undefined)
                     return false;
                 cancellation?.throwIfAborted();
                 await joined.participant.express(expression, {
+                    // Notifications retain immediate refusal while held/throttled, not a queued send.
+                    noWait: true,
                     noMention: true,
                     ...(participants?.length ? { mentions: [...participants] } : {}),
-                });
+                }, control);
                 return true;
             }
             finally {
@@ -120,10 +127,12 @@ const plugin = {
         catch { }
         return {
             signals: {
-                async "akuma.initiating"(signal) {
-                    const square = await openSquare(path, environment, ledger, wakeTransport);
+                async "akuma.initiating"(signal, cancellation) {
+                    const control = cancellation === undefined ? {} : { signal: cancellation };
+                    const square = await openSquare(path, environment, ledger, wakeTransport, cancellation);
                     try {
-                        await square.implicitJoin(signal.initiator);
+                        cancellation?.throwIfAborted();
+                        await square.implicitJoin(signal.initiator, control);
                     }
                     finally {
                         await square.close();
@@ -133,14 +142,15 @@ const plugin = {
                     cancellation?.throwIfAborted();
                     if (signal.initiator === undefined)
                         return;
-                    const square = await openSquare(path, {}, ledger, wakeTransport);
+                    const control = cancellation === undefined ? {} : { signal: cancellation };
+                    const square = await openSquare(path, {}, ledger, wakeTransport, cancellation);
                     try {
                         cancellation?.throwIfAborted();
-                        const joined = await square.implicitJoin(signal.initiator);
+                        const joined = await square.implicitJoin(signal.initiator, control);
                         if (joined.state === "done" || joined.participant === undefined)
                             return;
                         cancellation?.throwIfAborted();
-                        await joined.participant.express(birthExpression(signal));
+                        await joined.participant.express(birthExpression(signal), { noWait: true }, control);
                     }
                     finally {
                         await square.close();
@@ -154,9 +164,10 @@ const plugin = {
                     // A forwarded semantic identity must not borrow the serving harness's
                     // session ownership or publish its wake route for the requester.
                     const env = signal.observer === undefined ? environment : {};
+                    const control = cancellation === undefined ? {} : { signal: cancellation };
                     let square;
                     try {
-                        square = await Square.at({ path, env, hostLedger: ledger });
+                        square = await Square.at({ path, env, hostLedger: ledger }, control);
                     }
                     catch (error) {
                         if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable")
@@ -165,23 +176,20 @@ const plugin = {
                     }
                     try {
                         cancellation?.throwIfAborted();
-                        const participants = await square.participants();
-                        if (!participants.some((item) => item.name === observer && item.state === "joined") ||
+                        const { participants } = await square.participants({}, control);
+                        if (!participants.some((item) => item.name === observer && item.state === "active") ||
                             !participants.some((item) => item.name === signal.akumaId))
                             return;
-                        const control = cancellation === undefined ? {} : { signal: cancellation };
-                        const notices = await square.history({
-                            from: [signal.akumaId], fixed: `${signal.akumaId} ${signal.historyId}`,
+                        const { activities: notices } = await square.history({
+                            from: [signal.akumaId], fixed: `${signal.akumaId} ${signal.historyId}`, limit: null,
                         }, control);
-                        const application = createSquareApplication({
-                            cwd: context.world, squarePath: path, participant: observer, env, hostLedger: ledger,
-                        });
+                        const participant = await square.participant(observer);
                         for (const notice of notices) {
                             if (!isOutcomeNotice(notice, signal))
                                 continue;
                             cancellation?.throwIfAborted();
                             try {
-                                await application.catch({ id: notice.id }, control);
+                                await participant.catch({ id: notice.id }, control);
                             }
                             catch (error) {
                                 // A notice can disappear or lose availability to this participant after history lookup.

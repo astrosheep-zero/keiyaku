@@ -3,7 +3,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createHostLedgerPort, createSquareApplication, Square, squareAssignedParticipantName } from "@astrosheep/square";
+import { DatabaseSync } from "node:sqlite";
+import { createHostLedgerPort, Square, squareAssignedParticipantName, type Activity } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
@@ -36,7 +37,7 @@ async function expressions(
 ): Promise<readonly Readonly<{ actor: string; body: string; mentions: readonly string[] }>[]> {
   const square = await Square.at({ path });
   try {
-    return (await square.history()).flatMap((activity) =>
+    return (await square.history({ limit: null })).activities.flatMap((activity) =>
       activity.kind === "say" && activity.body !== undefined
         ? [{ actor: activity.actor, body: activity.body, mentions: activity.mentions ?? [] }]
         : [],
@@ -61,8 +62,9 @@ async function withHeldSquareExpression<T>(
   const originalImplicitJoin = Square.prototype.implicitJoin;
   const { promise: sent, resolve: markSent } = promiseBarrier<void>();
   const { promise: released, resolve: release } = promiseBarrier<void>();
-  Square.prototype.implicitJoin = async function (name: string) {
-    const joined = await originalImplicitJoin.call(this, name);
+  Square.prototype.implicitJoin = async function (...arguments_: Parameters<typeof originalImplicitJoin>) {
+    const [name] = arguments_;
+    const joined = await originalImplicitJoin.call(this, ...arguments_);
     if (name !== akumaId || joined.participant === undefined) return joined;
     const express = joined.participant.express.bind(joined.participant);
     return {
@@ -336,7 +338,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       assert.equal(queued.length, 2);
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
-      assert.match(queued[0]?.at(-1) ?? "", /attention: act\/\d+ for Alice from aku\/answered/u);
+      assert.match(queued[0]?.at(-1) ?? "", /<square-activity [^>]*as="Alice" id="act\/\d+" from="aku\/answered">/u);
       const evidence = await createHostLedgerPort({ rootPath: join(root, "square-ledger") }).listWakeAttempts();
       assert.equal(
         evidence.filter((row) => row.kind === "wake" && row.outcome === "accepted" && ["Alice", "Bob"].includes(row.participant))
@@ -388,7 +390,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {
-      assert.deepEqual((await square.participants()).map(({ name }) => name).sort(), [
+      assert.deepEqual((await square.participants()).participants.map(({ name }) => name).sort(), [
         "Alice",
         "Bob",
         "aku/answered",
@@ -418,7 +420,7 @@ test("outcome observation catches exact notices only for the explicit observer",
       await other.express("aku/worker turn/1\n✓ came back\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
     });
-    const notices = await fixture.square((square) => square.history({ fixed: "aku/worker" }));
+    const { activities: notices } = await fixture.square((square) => square.history({ fixed: "aku/worker", limit: null }));
     const first = notices.find((item) => item.body?.startsWith("aku/worker turn/1 (@Alice)"))!;
     const failed = notices.find((item) => item.body?.startsWith("aku/worker turn/2 (@Alice)"))!;
     assert.ok(first);
@@ -434,9 +436,36 @@ test("outcome observation catches exact notices only for the explicit observer",
         assert.equal(snapshot.delivered("Alice", notice.id), false);
         assert.equal(snapshot.delivered("Bob", notice.id), [first.id, failed.id].includes(notice.id));
       }
-      const pending = await createSquareApplication({ cwd: ".", squarePath: square.location, participant: "Bob", env: {} }).catch();
-      assert.ok(pending.data.activities.some((item) => item.body?.startsWith("incidental")));
-      assert.ok(pending.data.activities.some((item) => item.actor === "aku/other"));
+      const pending = await (await square.participant("Bob")).catch();
+      assert.ok(pending.activities.some((item) => item.body?.startsWith("incidental")));
+      assert.ok(pending.activities.some((item) => item.actor === "aku/other"));
+    });
+  });
+});
+
+test("outcome observation acknowledges every exact duplicate beyond the default history page without joining", async (t) => {
+  await withSquareNotificationFixture("ack-full-archive", async (fixture) => {
+    const notices = await fixture.square(async (square) => {
+      const worker = (await square.implicitJoin("aku/repeated")).participant!;
+      const ids: Activity["id"][] = [];
+      for (let index = 0; index < 12; index++) {
+        const result = await worker.express("aku/repeated turn/1\n✓ came back\nignore if you have already seen this.",
+          { mentions: ["Alice", "Bob"], noMention: true, force: true });
+        ids.push(result.activity.id);
+      }
+      return ids;
+    });
+    const forbidJoin = t.mock.method(Square.prototype, "join", async () => { throw new Error("observation must not join"); });
+    const forbidImplicitJoin = t.mock.method(Square.prototype, "implicitJoin", async () => { throw new Error("observation must not reenter"); });
+    await fixture.observe("aku/repeated", "turn/1", "Bob");
+    forbidJoin.mock.restore();
+    forbidImplicitJoin.mock.restore();
+    await fixture.square(async (square) => {
+      const snapshot = await square.snapshot();
+      for (const id of notices) {
+        assert.equal(snapshot.delivered("Bob", id), true);
+        assert.equal(snapshot.delivered("Alice", id), false);
+      }
     });
   });
 });
@@ -450,7 +479,7 @@ test("outcome observation catches an unmentioned listener's notice without consu
     });
     await fixture.answeredTurn("aku/listened", 1, 1, undefined, "public to listeners");
     const notice = await fixture.square(async (square) =>
-      (await square.history({ from: ["aku/listened"] })).find((item) => item.kind === "say")!);
+      (await square.history({ from: ["aku/listened"], limit: null })).activities.find((item) => item.kind === "say")!);
     assert.deepEqual(notice.mentions, []);
     await fixture.observe("aku/listened", "turn/1", "Bob");
     await fixture.square(async (square) => {
@@ -475,14 +504,14 @@ test("observation does not create missing Square custody or anticipate a later n
     await fixture.observe("aku/late", "turn/1", "Ghost");
     await fixture.observe("aku/late", "turn/1", "Bob"); // Not in its landed audience.
     await fixture.square(async (square) => {
-      const notice = (await square.history({ from: ["aku/late"] })).find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: ["aku/late"], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const alice = (await square.implicitJoin("Alice")).participant!;
       await alice.done();
     });
     await fixture.observe("aku/late", "turn/1", "Alice");
     await fixture.square(async (square) => {
-      const notice = (await square.history({ from: ["aku/late"] })).find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: ["aku/late"], limit: null })).activities.find((item) => item.kind === "say")!;
       const snapshot = await square.snapshot();
       assert.equal(snapshot.delivered("Alice", notice.id), false);
       assert.equal(snapshot.participants.find((item) => item.name === "Alice")?.state, "done");
@@ -510,7 +539,7 @@ test("local observation uses captured identity and cancellation prevents acknowl
     await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event, controller.signal)));
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
-      const notice = (await square.history({ from: ["aku/local"] })).find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: ["aku/local"], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const interrupted = new AbortController();
       const originalHistory = Square.prototype.history;
@@ -534,6 +563,56 @@ test("local observation uses captured identity and cancellation prevents acknowl
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Square cancellation stops a contended open and never joins after the lock is released", async (t) => {
+  await withSquareNotificationFixture("cancel-open", async (fixture) => {
+    const controller = new AbortController();
+    const { promise: opening, resolve: markOpening } = promiseBarrier<void>();
+    await fixture.square(async (square) => {
+      const locked = new DatabaseSync(square.location);
+      locked.exec("BEGIN EXCLUSIVE");
+      const originalAt = Square.at;
+      const at = t.mock.method(Square, "at", (...arguments_: Parameters<typeof originalAt>) => {
+        assert.equal(arguments_[1]?.signal, controller.signal);
+        markOpening();
+        return originalAt.call(Square, ...arguments_);
+      });
+      try {
+        const attempt = fixture.answeredTurn("aku/cancel-open", 1, 1, "Alice", "cancelled", controller.signal);
+        const rejected = assert.rejects(attempt, { name: "AbortError" });
+        await opening;
+        controller.abort();
+        await rejected;
+      } finally {
+        at.mock.restore();
+        locked.exec("ROLLBACK");
+        locked.close();
+      }
+      assert.equal((await square.participants()).participants.some(({ name }) => name === "aku/cancel-open"), false);
+    });
+  });
+});
+
+test("Square notifications refuse while held and cancelled expressions cannot land later", async () => {
+  await withSquareNotificationFixture("bounded-express", async (fixture) => {
+    await fixture.square(async (square) => { await (await square.participant("Alice")).hold("paused"); });
+    await assert.rejects(fixture.answeredTurn("aku/held", 1, 1, "Alice", "held"));
+    await fixture.square(async (square) => { await (await square.participant("Alice")).resume(); });
+    assert.deepEqual(await fixture.expressions(), []);
+    await fixture.withHeldExpression("aku/cancel-before-send", async ({ sent, release }) => {
+      const controller = new AbortController();
+      const attempt = fixture.failedTurn("aku/cancel-before-send", 1, 1, "Alice", "cancelled", controller.signal);
+      const rejected = assert.rejects(attempt, { name: "AbortError" });
+      await sent;
+      controller.abort();
+      release();
+      await rejected;
+    }, false);
+    assert.deepEqual(await fixture.expressions(), []);
+    await fixture.bodyEnd("aku/cancel-before-send", 1, "hung", "Alice");
+    assert.equal((await fixture.bodies()).length, 1, "an unsent failure must not suppress its Body-end notice");
+  });
 });
 
 test("the Square plugin reports abnormal Bodies without replacing Turn alerts", async () => {
