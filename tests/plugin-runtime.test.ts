@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { emitPluginSignal } from "../src/plugin/akuma-signals.js";
@@ -686,12 +686,19 @@ test("a timed-out handler does not share cancellation with another handler", { t
 });
 
 
-test("bundled Paseo resolves outside the caller World and absent daemon is one diagnostic", async (context) => {
+test("separately installed Paseo resolves from the World and absent daemon is one diagnostic", async (context) => {
   const value = fixture();
   context.after(value.close);
   const previous = process.env.PASEO_HOME;
   process.env.PASEO_HOME = value.home;
   context.after(() => { if (previous === undefined) delete process.env.PASEO_HOME; else process.env.PASEO_HOME = previous; });
+  const scope = join(value.root, "node_modules", "@astrosheep");
+  mkdirSync(scope, { recursive: true });
+  symlinkSync(
+    resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..", "plugins/paseo/forwarder"),
+    join(scope, "keiyaku-plugin-paseo"),
+    "dir",
+  );
   writeProjectPlugins(value.root, { paseo: { package: "@astrosheep/keiyaku-plugin-paseo" } });
   const diagnostics: string[] = [];
   const runtime = await pluginRuntime({
@@ -704,7 +711,26 @@ test("bundled Paseo resolves outside the caller World and absent daemon is one d
   assert.equal(diagnostics.length, 1);
   assert.match(diagnostics[0] ?? "", /plugin paseo signal:.*Daemon is not running/u);
   assert.doesNotMatch(diagnostics[0] ?? "", /Cannot find|activation/u);
-  assert.equal(existsSync(join(value.root, "node_modules")), false);
+});
+
+test("missing selected Paseo does not fall back to the core installation or block another observer", async (context) => {
+  const value = fixture();
+  context.after(value.close);
+  const output = join(value.root, "trace.txt");
+  writeInitiatingPlugin(value.root);
+  writeProjectPlugins(value.root, {
+    alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    paseo: { package: "@astrosheep/keiyaku-plugin-paseo" },
+  });
+  const diagnostics: string[] = [];
+  const runtime = await pluginRuntime({
+    world: await World.at(value.root), settings: await settings({ root: value.root, home: value.home }),
+    reportDiagnostic: (message) => { diagnostics.push(message); },
+  });
+  await runtime.emit({ kind: "akuma.initiating", initiator: "tester" });
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0] ?? "", /plugin paseo import:.*@astrosheep\/keiyaku-plugin-paseo/u);
+  assert.deepEqual(trace(output), ["activate", "signal:tester"]);
 });
 
 test("completed plugin emissions leave no timeout keeping their process alive", (context) => {

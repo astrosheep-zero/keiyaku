@@ -22,7 +22,11 @@ dependency-light help selection and keeps that selection and its activated
 instances for the rest of the process. A later process may
 ordinarily observe a different configuration or installed package byte. Runtime
 loading neither acquires packages nor discovers optional plugins by scanning
-dependencies or process directories.
+dependencies or process directories. Apart from the shipped default Square
+observer, observers are installed independently of the core package and resolve
+from the caller's World. An optional observer is not a core installation
+prerequisite; an explicitly selected but missing package is an activation
+diagnostic, not a product failure.
 
 Plugin identity is declared by the activated package and must agree with the
 selected name. In one process it is unique and activation follows that identity's

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -151,6 +151,16 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
     { cwd: directory, encoding: "utf8" },
   );
   assert.equal(loaded.status, 0, loaded.stderr);
+});
+
+test("core installation does not require the separately installed Paseo observer", () => {
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  const locked = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")).packages[""];
+  for (const entry of [manifest, locked]) {
+    assert.equal(entry.dependencies["@astrosheep/keiyaku-plugin-paseo"], undefined);
+    assert.equal(entry.optionalDependencies?.["@astrosheep/keiyaku-plugin-paseo"], undefined);
+    assert.equal(entry.dependencies["@getpaseo/server"], undefined);
+  }
 });
 
 test("package exports reject deep internal imports", (context) => {

@@ -3,7 +3,22 @@
 Two plugins form one bridge:
 
 - Install `plugin/` as a Paseo directory-source plugin (`keiyaku-paseo`).
-- Enable the bundled Keiyaku forwarder in the World's Settings:
+- Separately install the Keiyaku forwarder from the World root, then enable it
+  in that World's Settings. The core package does not install this observer:
+
+```sh
+npm install @astrosheep/keiyaku-plugin-paseo
+```
+
+Package names resolve from the World, not from the Keiyaku installation. A
+user-level setting selects the observer but does not install it into each World;
+each selected World must be able to resolve the package through ordinary Node
+package resolution. Existing bundled installations must install the forwarder
+separately before upgrading the core. No ledger or permission migration is
+needed. A missing selected package reports an activation diagnostic without
+blocking the Keiyaku operation.
+
+Enable it with:
 
 ```json
 { "plugins": { "paseo": { "package": "@astrosheep/keiyaku-plugin-paseo" } } }
