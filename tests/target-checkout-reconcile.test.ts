@@ -276,6 +276,58 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
   });
 
+  test("reconcile preserves ignored directory contents until target recovery can follow safely", async () => {
+    const repository = repositoryWithMain({
+      files: {
+        ...TARGET_PLACEMENT_FILES,
+        ".gitignore": "artifact/local-secret\n",
+        "artifact/tracked.txt": "tracked\n",
+      },
+    });
+    const candidate = await managedCandidate(repository, ["reviewed"]);
+    repository.run(["-C", candidate.path, "rm", "-r", "artifact"]);
+    writeFileSync(resolve(candidate.path, "artifact"), "candidate file\n");
+    repository.run(["-C", candidate.path, "add", "artifact"]);
+    repository.run(["-C", candidate.path, "commit", "--quiet", "-m", "replace directory"]);
+    await admitClaimWithoutFollow(repository, candidate.contract);
+    const repo = await Repo.at({ path: repository.path });
+    const git = await cachedRepositoryAt(repository.path);
+    const accepted = (await observeContract(git, candidate.id)).state;
+    assert.equal(accepted?.terminal?.kind, "claimed");
+    const integration = accepted?.currentIntegration?.snapshot;
+    assert.ok(integration);
+    const journal = repository.run(["rev-parse", "refs/heads/keiyaku-state"]);
+    const index = readFileSync(resolve(repository.path, ".git", "index"));
+    const secret = Buffer.from([0, 255, 10, 115, 101, 99, 114, 101, 116]);
+    const secretPath = resolve(repository.path, "artifact", "local-secret");
+    writeFileSync(secretPath, secret);
+
+    const retained = await Keiyaku.with().reconcile({ repo, contract: candidate.id });
+
+    assert.deepEqual(readFileSync(secretPath), secret);
+    assert.equal(readFileSync(resolve(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
+    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
+    assert.equal((await observeContract(git, candidate.id)).state?.terminal?.kind, "claimed");
+    const lag = retained.lag.find((entry) => entry.kind === "target-checkout-retained");
+    assert.ok(lag);
+    assert.equal(lag.path, repository.path);
+    assert.equal(lag.target, "refs/heads/main");
+    assert.match(lag.diagnostic, /ignored.*artifact/);
+    assert.ok(!retained.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+
+    rmSync(secretPath);
+    const recovered = await Keiyaku.with().reconcile({ repo, contract: candidate.id });
+
+    assert.deepEqual(recovered.lag, []);
+    assert.equal(readFileSync(resolve(repository.path, "artifact"), "utf8"), "candidate file\n");
+    assert.equal(repository.run(["status", "--porcelain"]), "");
+    assert.ok(recovered.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
+    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
+  });
+
   test("reconcile aligns a candidate worktree to its index without disturbing unrelated staged content", async () => {
     const candidate = await claimedUnfollowedCandidateFixture();
     const { repository } = candidate;

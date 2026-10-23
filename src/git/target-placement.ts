@@ -215,7 +215,7 @@ function untrackedArgs(): readonly string[] {
 }
 
 async function untrackedRefusalWithinScopes(
-  input: CheckoutObservation,
+  input: Pick<CheckoutObservation, "repository" | "contractId" | "target" | "path">,
   scopes: readonly PhysicalScope[],
 ): Promise<CheckoutNotFollowableRefusal | null> {
   const { repository, contractId, target, path } = input;
@@ -519,10 +519,17 @@ export async function observeTargetCheckoutShape(
   return (await classifyCheckout({ repository, ...input, predecessorTree, candidateTree })).kind;
 }
 
-async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "recovered" | "retained"> {
+type CheckoutRecovery =
+  | Readonly<{ kind: "complete" | "recovered" }>
+  | Readonly<{ kind: "retained"; diagnostic: string }>;
+
+async function recoverCheckout(
+  input: CheckoutInput & Pick<CheckoutObservation, "contractId" | "target" | "changes">,
+): Promise<CheckoutRecovery> {
   const classified = await classifyCheckout(input);
-  if (classified.kind === "complete") return "complete";
-  if (classified.kind === "retained") return "retained";
+  if (classified.kind === "complete") return { kind: "complete" };
+  if (classified.kind === "retained")
+    return { kind: "retained", diagnostic: "target checkout entries are neither predecessor nor candidate" };
   const { repository, path, predecessor, candidate } = input;
   if (classified.action === "index-merge") {
     await executeGit(repository, [
@@ -534,8 +541,15 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
       gitObjectIdForSnapshot(predecessor),
       gitObjectIdForSnapshot(candidate),
     ]);
-    return "recovered";
+    return { kind: "recovered" };
   }
+  const scopes = await destructionScopes(path, input.changes.writes);
+  const refusal = await untrackedRefusalWithinScopes(input, scopes);
+  if (refusal !== null)
+    return {
+      kind: "retained",
+      diagnostic: `target checkout would overwrite ignored local entries: ${refusal.paths.join(", ")}`,
+    };
   await executeGit(repository, [
     "-C",
     path,
@@ -545,7 +559,7 @@ async function recoverCheckout(input: CheckoutInput): Promise<"complete" | "reco
     gitObjectIdForSnapshot(predecessor),
     gitObjectIdForSnapshot(candidate),
   ]);
-  return "recovered";
+  return { kind: "recovered" };
 }
 
 export async function recoverTargetPlacement(
@@ -560,6 +574,12 @@ export async function recoverTargetPlacement(
   if (integration === null || (await readRef(repository, target)) !== integration.snapshot)
     return { effects: [], lag: [] };
 
+  const movement: RefOperation = {
+    target,
+    expectedOid: integration.predecessor,
+    newOid: integration.snapshot,
+  };
+  const changes = await prepareTargetPlacementChanges(repository, movement);
   const candidateTree = await commitTree(repository, integration.snapshot);
   const predecessorTree = await commitTree(repository, integration.predecessor);
   const worktrees = (await registeredWorktrees(repository))
@@ -573,18 +593,21 @@ export async function recoverTargetPlacement(
     try {
       const recovery = await recoverCheckout({
         repository,
+        contractId: state.id,
+        target: movement,
+        changes,
         path: worktree.path,
         predecessor: integration.predecessor,
         candidate: integration.snapshot,
         predecessorTree,
         candidateTree,
       });
-      if (recovery === "retained") {
-        lag.push(recoveryLag(worktree.path, target, "target checkout entries are neither predecessor nor candidate"));
+      if (recovery.kind === "retained") {
+        lag.push(recoveryLag(worktree.path, target, recovery.diagnostic));
         onPhysical?.({ effects: [], lag: lag.slice(beforeLag) });
         continue;
       }
-      if (recovery === "recovered") {
+      if (recovery.kind === "recovered") {
         effects.push({ kind: "target-checkout", path: worktree.path, target, action: "recovered" });
       }
     } catch (error) {
