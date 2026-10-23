@@ -39,6 +39,33 @@ test("fresh capture takes final staged, unstaged, deleted and untracked bytes", 
   assert.equal(repository.run(["ls-tree", "--name-only", captured.tree]), "tracked.txt\nuntracked.txt\n");
 });
 
+test("capture ignores an ambient index while its explicit private index preserves both caller indices", async () => {
+  const repository = repositoryWithMain({ files: { "tracked.txt": "base\n" } });
+  const foreign = repositoryWithMain({ files: { "foreign.txt": "foreign\n" } });
+  writeFileSync(join(repository.path, "tracked.txt"), "staged\n");
+  repository.run(["add", "tracked.txt"]);
+  writeFileSync(join(repository.path, "tracked.txt"), "final\n");
+  const git = await cachedRepositoryAt(repository.path);
+  const before = custody(repository);
+  const foreignBefore = custody(foreign);
+  const previous = process.env.GIT_INDEX_FILE;
+  let captured;
+  try {
+    process.env.GIT_INDEX_FILE = join(foreign.path, ".git", "index");
+    captured = await captureWorkspaceTree(git, repository.path);
+  } finally {
+    if (previous === undefined) delete process.env.GIT_INDEX_FILE;
+    else process.env.GIT_INDEX_FILE = previous;
+  }
+
+  assert.deepEqual(captured.changes.staged, ["tracked.txt"]);
+  assert.deepEqual(captured.changes.unstaged, ["tracked.txt"]);
+  assert.equal(repository.run(["ls-tree", "--name-only", captured.tree]), "tracked.txt\n");
+  assert.equal(repository.run(["show", `${captured.tree}:tracked.txt`]), "final\n");
+  assert.deepEqual(custody(repository), before);
+  assert.deepEqual(custody(foreign), foreignBefore);
+});
+
 test("removed-filter history captures raw worktree bytes instead of cached converted bytes", async () => {
   const repository = repositoryWithMain();
   repository.run(["config", "filter.capture.clean", "sed 's/RAW/OLD/g'"]);

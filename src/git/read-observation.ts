@@ -4,7 +4,7 @@ import { spawnCancellableProcess } from "../runtime/proc/run.js";
 import { gitObjectId } from "./identity.js";
 import { parseTreeObject, validPath, type TreeEntry } from "./tree.js";
 import { GIT_FORMAT_BYTES, GIT_FORMAT_PATH, GIT_REF, readRef, type GitOid, type GitSnapshot } from "./repository.js";
-import { GitPlumbingError, type GitRepository } from "./process.js";
+import { gitChildEnvironment, GitPlumbingError, type GitRepository } from "./process.js";
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");
@@ -85,6 +85,7 @@ function batchChild(repository: GitRepository) {
   return spawnCancellableProcess({
     argv: [repository.gitPath, "cat-file", "--batch"],
     cwd: repository.effectiveCwd,
+    env: gitChildEnvironment(),
     ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
 }

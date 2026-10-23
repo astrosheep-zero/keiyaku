@@ -46,6 +46,22 @@ export class GitPlumbingError extends Error {
 
 const GIT_STDERR_BYTES = 16 * 1024;
 
+export function gitChildEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const inherited = { ...process.env };
+  for (const variable of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+  ]) {
+    delete inherited[variable];
+  }
+  return { ...inherited, ...environment };
+}
+
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
   const candidate = error as {
     message?: string;
@@ -82,7 +98,7 @@ export async function executeGit(
   const owned = spawnCancellableProcess({
     argv: [repository.gitPath, ...args],
     cwd: repository.effectiveCwd,
-    ...(environment === undefined ? {} : { env: { ...process.env, ...environment } }),
+    env: gitChildEnvironment(environment),
     ...(repository.signal === undefined ? {} : { signal: repository.signal }),
   });
   const child = owned.child;
@@ -161,6 +177,7 @@ export async function runGitPipe(
     const owned = spawnCancellableProcess({
       argv: [repository.gitPath, ...args],
       cwd: repository.effectiveCwd,
+      env: gitChildEnvironment(),
       ...(repository.signal === undefined ? {} : { signal: repository.signal }),
     });
     processes.push(owned);
@@ -237,6 +254,7 @@ export async function consumeGitStdout(
     {
       argv: [repository.gitPath, ...args],
       cwd: repository.effectiveCwd,
+      env: gitChildEnvironment(),
       ...(repository.signal === undefined ? {} : { signal: repository.signal }),
     },
     consume,
