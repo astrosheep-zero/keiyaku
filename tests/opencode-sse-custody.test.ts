@@ -63,6 +63,44 @@ test("OpenCode v2 HTML and foreign JSON cannot satisfy native readiness", async 
   }
 });
 
+test("OpenCode v2 readiness and events run on the package Undici fetch, not the host global", async () => {
+  const requests: string[] = [];
+  const native = await server((request, response) => {
+    requests.push(request.url ?? "");
+    if (request.url === "/api/info") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ version: "2.0.20", pid: 1, urls: [], paths: { tmp: "/tmp" } }));
+      return;
+    }
+    assert.equal(request.url, "/api/event");
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.write('data: {"type":"server.connected","data":{}}\n\n');
+    response.write('data: {"type":"server.heartbeat","data":{}}\n\n');
+  });
+  const hostFetch = globalThis.fetch;
+  // The host global is a different Undici; a request through it cannot carry
+  // this owned dispatcher. Readiness and the event feed must never reach it.
+  globalThis.fetch = () => Promise.reject(new Error("host global fetch was used"));
+  try {
+    const client = createNativeClient(native.base, "test-password");
+    try {
+      const info = { version: "2.0.20", pid: 1, urls: [], paths: { tmp: "/tmp" } };
+      assert.deepEqual(await client.sdk.server.info(), info);
+      const subscription = await client.subscribe(new AbortController().signal);
+      const event = await subscription.stream[Symbol.asyncIterator]().next();
+      assert.deepEqual(event, { done: false, value: { type: "server.heartbeat", data: {} } });
+      assert.deepEqual(requests, ["/api/info", "/api/event"]);
+      await client.close();
+      await until(() => native.sockets.size === 0);
+    } finally {
+      await client.close();
+    }
+  } finally {
+    globalThis.fetch = hostFetch;
+    await native.close();
+  }
+});
+
 test("OpenCode v2 SSE cancellation proves physical socket closure without retries", async () => {
   let requests = 0;
   const native = await server((request, response) => {

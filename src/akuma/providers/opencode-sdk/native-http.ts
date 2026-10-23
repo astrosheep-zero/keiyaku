@@ -1,6 +1,11 @@
 import { OpenCode, type OpenCodeClient } from "@opencode/client";
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 import { object } from "../decode.js";
+
+// A dispatcher is only understood by the fetch built for the same Undici, and
+// Node's global fetch carries its own copy. Take both halves from the declared
+// dependency so the generated SDK cannot hand this Agent to a foreign Undici.
+const matchedFetch = undiciFetch as unknown as typeof globalThis.fetch;
 
 /** The matching native SDK owns the dialect; this attempt owns its HTTP connections. */
 export function createNativeClient(
@@ -13,7 +18,7 @@ export function createNativeClient(
 }> {
   const dispatcher = new Agent();
   const controller = new AbortController();
-  // Node's fetch accepts an Undici dispatcher in addition to standard RequestInit.
+  // Undici's fetch accepts a dispatcher in addition to standard RequestInit.
   // Keep that native extension at this one SDK seam.
   const ownedFetch: typeof globalThis.fetch = (input, init) => {
     controller.signal.throwIfAborted();
@@ -22,7 +27,7 @@ export function createNativeClient(
       dispatcher,
       signal: init?.signal == null ? controller.signal : AbortSignal.any([controller.signal, init.signal]),
     };
-    return globalThis.fetch(input, options);
+    return matchedFetch(input, options);
   };
   const sdk = OpenCode.make({
     baseUrl,
