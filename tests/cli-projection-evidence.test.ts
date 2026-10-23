@@ -356,7 +356,7 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
 test("audit separates its observation outcome from complete candidate coordinates", () => {
   const path = `src/${"long-directory/".repeat(8)}file.ts`;
   const auditOutcome = acceptedReceipt({
-    operation: "audit",
+    operation: "deliver-preview",
     contract: contractId("kei/audit"),
     head: contractHead("private-head"),
     facts: [],
@@ -376,6 +376,7 @@ test("audit separates its observation outcome from complete candidate coordinate
           method: "squash",
           policy: { requireBranchesToBeUpToDate: false },
         },
+        requirements: { gates: [], unmetPrerequisites: [] },
         scope: { filesChanged: 1, insertions: 2, deletions: 3, paths: [path] },
       },
       verification: { kind: "not-run" },
@@ -386,8 +387,8 @@ test("audit separates its observation outcome from complete candidate coordinate
   assert.equal(
     output,
     [
-      "✓ audit  kei/audit",
-      `  candidate  ready  ${"a".repeat(7)}`,
+      "✓ deliver --dry-run  kei/audit",
+      `  candidate  prepared  ${"a".repeat(7)}`,
       `  integration result  ${"c".repeat(7)}`,
       `  content identity  ${"d".repeat(7)}`,
       "  worktree  /worktree",

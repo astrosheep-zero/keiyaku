@@ -149,7 +149,10 @@ export interface ProtocolProgress {
   recordPlacementPhysical(contractId: ContractId, report: ReconcileResult): void;
   recordVerification(contractId: ContractId, snapshot: SnapshotId | undefined, result: VerificationResidue): void;
   recordStop(stop: ExecutionStop): void;
-  recordAudit(contractId: ContractId, report: Partial<import("./audit.js").AuditReport>): void;
+  recordDeliveryPreview(
+    contractId: ContractId,
+    report: Partial<import("./delivery-preview.js").DeliveryPreviewReport>,
+  ): void;
   /** Current candidate conclusions, retained before the next await can fail. */
   recordCandidate(contractId: ContractId, evidence: CompletionEvidence): void;
   /** The candidate's completion base, retained before an optional scope read can fail. */

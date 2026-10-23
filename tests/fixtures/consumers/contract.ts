@@ -8,6 +8,9 @@ import {
   type BindResult,
   type ReviewOutcome,
   type DeliverOutcome,
+  type DeliveryPreviewInput,
+  type DeliveryPreviewOutcome,
+  type DeliveryPreviewReport,
   type InvocationEffect,
   type PendingSurface,
   type ReviewInput,
@@ -29,6 +32,17 @@ const targetlessInput: BindInput = { repo, markdown, target: null };
 const invalidTarget: BindInput = { repo, markdown, target: 7 };
 const bound: Promise<BindResult> = Keiyaku.with().bind(input);
 const selected = Keiyaku.with().select({ repo, id });
+const previewInput: DeliveryPreviewInput = { includeDirty: true, showDiff: true, signal: new AbortController().signal };
+const preview: DeliveryPreviewOutcome = await selected.previewDelivery(previewInput, { observe: () => {} });
+if (preview.kind === "accepted") {
+  const report: DeliveryPreviewReport = preview.value;
+  const operation: "deliver-preview" = preview.operation;
+  void [report, operation];
+}
+// @ts-expect-error standalone audit is retired
+selected.audit();
+// @ts-expect-error preview cannot accept mutation-only options
+selected.previewDelivery({ overwrite: true });
 const resolveInput: ContractResolveInput = { repo, selector: "@short", cwd: "/explicit/worktree" };
 const resolution: ContractResolution = await Keiyaku.with().resolve(resolveInput);
 if (resolution.kind === "resolved") Keiyaku.with().select({ repo, id: resolution.id });

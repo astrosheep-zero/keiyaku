@@ -1,6 +1,6 @@
 import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
 import type { PlacementStop, VerificationStop } from "../../index.js";
-import { gateDisplayName } from "./contract-observation.js";
+import { gateDisplayName, contractOperationName } from "./contract-observation.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -53,7 +53,7 @@ export function outcomeLines(
   contract: string | undefined,
   columns = DEFAULT_CLI_COLUMNS,
 ): string[] {
-  const base = `${mark} ${verb} ${word}`;
+  const base = `${mark} ${contractOperationName(verb)} ${word}`;
   if (contract === undefined) return [base];
   const inline = `${base}  ${contract}`;
   if (displayColumns(inline) <= columns) return [inline];
@@ -381,7 +381,7 @@ export function executionFailureLines(
   receiptRow(
     lines,
     "!",
-    "execution failed after admission",
+    receipt.operation === "deliver-preview" ? "deliver --dry-run failed" : "execution failed after admission",
     [{ text: category }, ...(contract === undefined ? [] : [{ text: contract, opaque: true }])],
     columns,
   );

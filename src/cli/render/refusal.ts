@@ -1,7 +1,7 @@
 import type { BindDraftReceipt } from "../draft.js";
 import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
 import type { ContractId, IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
-import { shortGitId } from "./contract-observation.js";
+import { shortGitId, contractOperationName } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
   checkoutNotFollowableLines,
@@ -151,7 +151,7 @@ export function renderRefusalFacts(
 }
 
 function refusalTitle(verb: string): string {
-  return `× ${verb} refused`;
+  return `× ${contractOperationName(verb)} refused`;
 }
 
 /**

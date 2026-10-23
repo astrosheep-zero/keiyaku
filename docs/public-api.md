@@ -47,7 +47,7 @@ coordinate is caller-invalid input, never quietly replaced by an ambient
 current directory. `Keiyaku` is the native branded Contract handle created by
 binding or by selecting a complete Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
-amendment, delivery, review, abandonment, arc, and audit. `Keiyaku.with()`
+amendment, delivery and its read-only preview, review, abandonment, and arc. `Keiyaku.with()`
 synchronously captures one already-loaded immutable Settings value and the
 Contract-local actor, then exposes the Contract collection operations bind,
 select, resolve, list, and observe, and the one public repair entry that reconciles
@@ -113,6 +113,12 @@ The listing is the live board: terminal Contracts leave it, and their record
 stays in the journal and Git.
 Listing remains a read-time projection, not a lifecycle judgment.
 
+Delivery preview observes a prospective candidate through a dedicated native handle
+operation, separate from delivery admission. CLI and other adapters consume that
+same typed result. It never runs Verification, reconciles, settles, or continues
+dependents. It preserves Git-less direct-parent forwarding without granting a
+mutable action. The observation is not a reservation: delivery observes again.
+
 `Delivery` exposes the captured candidate identity and a presentation diff.
 The diff may be unavailable when Git can no longer supply the recorded bytes;
 that absence is not a lifecycle error and the diff is never persisted, gated, or
@@ -123,7 +129,7 @@ JSON projection retains public result data. Forwarded delivery revives its local
 diff ability from owner evidence, never from serialized callbacks or transport
 state.
 
-Delivery, review, and audit each expose one promised answer and an optional
+Delivery, review, and delivery preview each expose one promised answer and an optional
 observation callback. Execution never depends on observation; a callback cannot
 hold custody, cancel execution, or change finality, even when it throws or
 rejects asynchronously. Caller cancellation alone requests a stop. Observations
@@ -185,7 +191,7 @@ is owned by [lifecycle.md](lifecycle.md).
 
 ## Cancellation And Confirmed Effects
 
-Review, delivery, and audit carry caller cancellation through their local or
+Review, delivery, and delivery preview carry caller cancellation through their local or
 parent-served execution. A signal is a request to stop further work, not proof
 that publication did not occur. Once a leading act has been accepted, cancellation
 preserves its receipt and identifies the unfinished stage. An unknown Git

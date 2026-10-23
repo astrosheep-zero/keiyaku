@@ -5,6 +5,7 @@ coverage/
 .keiyaku/akuma/
 .keiyaku/carrier-gates/
 .keiyaku/dispatch/
+.keiyaku/debts/
 .keiyaku/locks/
 .keiyaku/response/
 .keiyaku/runtime/

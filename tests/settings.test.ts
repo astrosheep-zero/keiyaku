@@ -210,7 +210,7 @@ test("Contract audit and delivery consume captured freshness while empty Setting
       reason: "not-based-on-target",
       targetHead: repository.run(["rev-parse", "main"]).trim(),
     };
-    const audited = accepted(await bound.value.keiyaku.audit());
+    const audited = accepted(await bound.value.keiyaku.previewDelivery());
     assert.deepEqual(audited.value.candidate, { kind: "blocked", refusal });
     const rejected = await bound.value.keiyaku.deliver();
     assert.equal(rejected.kind, "refused");
@@ -219,7 +219,7 @@ test("Contract audit and delivery consume captured freshness while empty Setting
     assert.equal(present(await bound.value.keiyaku.state()).delivery, null);
 
     const permissive = Keiyaku.with({ settings: await projectSettings(repository.path) }).select({ repo, id });
-    const ready = accepted(await permissive.audit());
+    const ready = accepted(await permissive.previewDelivery());
     assert.equal(ready.value.candidate.kind, "ready");
     accepted(await permissive.deliver());
     assert.deepEqual(present(await permissive.state()).delivery?.data.policy, { requireBranchesToBeUpToDate: false });
@@ -285,7 +285,6 @@ test("Archetype omission uses the delegation baseline while explicit allowed set
       "akuma.call",
       "akuma.kill",
       "akuma.tell",
-      "contract.audit",
       "contract.deliver",
       "debt.add",
       "debt.addDocument",
@@ -868,7 +867,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
     writeProjectSettings(repository.path, { git: { requireBranchesToBeUpToDate: "yes" } });
     const brokenFreshness = await projectSettings(repository.path);
     const selected = Keiyaku.with({ settings: brokenFreshness }).select({ repo, id: missing });
-    await assert.rejects(selected.audit(), invalidInputFromSettings);
+    await assert.rejects(selected.previewDelivery(), invalidInputFromSettings);
     await assert.rejects(selected.deliver(), invalidInputFromSettings);
     // Review consumes neither namespace and reaches its own admission instead.
     assert.equal((await selected.review({ verdict: "satisfied" })).kind, "refused");
@@ -882,7 +881,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
       },
     };
     await assert.rejects(
-      Keiyaku.with({ settings: unavailable }).select({ repo, id: missing }).audit(),
+      Keiyaku.with({ settings: unavailable }).select({ repo, id: missing }).previewDelivery(),
       (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input" && error.cause === cause,
     );
   } finally {

@@ -235,7 +235,7 @@ test("audit show-diff preserves an actual candidate diff", () => {
   writeFileSync(join(binding.value.workspace.path, "candidate.txt"), "candidate\n");
   const audited = spawnSync(
     process.execPath,
-    [builtCli(), "-C", repository.path, "audit", contract, "--include-dirty", "--show-diff"],
+    [builtCli(), "-C", repository.path, "deliver", contract, "--dry-run", "--include-dirty", "--show-diff"],
     {
       encoding: "utf8",
     },

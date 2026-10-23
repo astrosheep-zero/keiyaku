@@ -32,7 +32,7 @@ export function derivedHooks(composition: LocalContractCompositionCapture): Work
   }
 }
 
-function derivedFreshness(composition: LocalContractCompositionCapture): boolean {
+export function derivedFreshness(composition: LocalContractCompositionCapture): boolean {
   if (composition.settings === undefined) return false;
   try {
     const view = composition.settings.namespace("git");

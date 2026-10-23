@@ -125,7 +125,7 @@ const unusedSelectionPort: SelectionRequestPort = {
 };
 
 const unusedContractPort: ContractRequestPort = {
-  audit: async () => {
+  previewDelivery: async () => {
     throw new Error("unexpected Contract request");
   },
   deliver: async () => {
@@ -1597,8 +1597,8 @@ test("Heart leaves wait unkeyed and refuses disabled mutations before their exec
     },
   };
   const contract: ContractRequestPort = {
-    audit: async () => {
-      calls.push("audit");
+    previewDelivery: async () => {
+      calls.push("deliver-preview");
       return {} as never;
     },
     deliver: async () => {
@@ -2456,3 +2456,61 @@ test("forwarded native review preserves the owner outcome and stores the address
 });
 
 import { createKeiyakuHandle } from "../src/library/keiyaku.js";
+import { scopeForRepo } from "../src/library/repo.js";
+import { captureLocalContractComposition } from "../src/library/contract-settings.js";
+
+test("Git-less native preview forwards without mutation grants and preserves live result and typed failure", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const root = await World.at(repository.path);
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document("false"), gates: ["verified"] }));
+  assert.ok(bound.value.workspace?.kind === "worktree");
+  commitCandidate(repository, bound.value.workspace.path);
+  await writeFile(join(repository.path, "candidate.txt"), "target checkout bytes\n");
+  const before = await bound.value.keiyaku.history();
+  const parent = await born(root, "parent", "11111111", []);
+  let owner: Awaited<ReturnType<ContractRequestPort["previewDelivery"]>> | undefined;
+  const pump = await openContractPump(parent, {
+    previewDelivery: async (input) => {
+      if (input.includeDirty) throw new KeiyakuError("internal", "preview failed", { cause: new TypeError("owner bug") });
+      owner = await bound.value.keiyaku.previewDelivery({ showDiff: input.showDiff, signal: input.signal });
+      return owner;
+    },
+  });
+  try {
+    const forwarded = createKeiyakuHandle(bound.contract, {
+      ...scopeForRepo(repo),
+      get gitPath(): string { throw new Error("child has no Git custody"); },
+    }, bodyRequestExecutionContext(pump.directory), captureLocalContractComposition());
+    const result = accepted(await forwarded.previewDelivery({ showDiff: true }));
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), JSON.parse(JSON.stringify(owner)));
+    assert.deepEqual(result.facts, []);
+    assert.deepEqual(result.effects, []);
+    assert.deepEqual(result.value.verification, { kind: "required" });
+    assert.ok(result.value.candidate.kind === "ready");
+    assert.match(result.value.candidate.diff ?? "", /candidate.txt/u);
+    assert.ok(result.value.target.kind === "placeable");
+    const checkout = result.value.target.checkouts.find((entry) => entry.path === repository.path);
+    assert.ok(checkout?.kind === "not-followable");
+    assert.match(checkout.diagnostic, /candidate\.txt/u);
+    assert.equal(await readFile(join(repository.path, "candidate.txt"), "utf8"), "target checkout bytes\n");
+    const receipts = (await readdir(pump.directory)).filter((name) => name.endsWith(".receipt.json"));
+    assert.equal(receipts.length, 1);
+    const receipt = JSON.parse(await readFile(join(pump.directory, receipts[0]!), "utf8")) as { id: string };
+    const stored = await readRequest(parent.paths, receipt.id);
+    assert.deepEqual(stored?.state === "served" && "serviceJson" in stored ? JSON.parse(stored.serviceJson) : null, {
+      kind: "delivery-preview-report", repoRoot: repository.path, contractId: bound.contract, report: result.value,
+    });
+    await assert.rejects(forwarded.previewDelivery({ includeDirty: true }), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "internal");
+      assert.equal(error.message, "preview failed");
+      assert.ok(error.cause instanceof TypeError);
+      assert.equal(error.cause.message, "owner bug");
+      return true;
+    });
+    assert.deepEqual(await bound.value.keiyaku.history(), before);
+  } finally {
+    await pump.close();
+  }
+});

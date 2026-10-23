@@ -208,7 +208,7 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   assert.equal(region.exit, 0, region.stderr);
   assert.equal(region.value.kind, "present");
   assert.equal(region.value.value.declaration.contract, oldest.id);
-  const contextual = await cliJson<{ contract: string }>(["-C", oldest.worktreePath!, "audit"], { environment: {} });
+  const contextual = await cliJson<{ contract: string }>(["-C", oldest.worktreePath!, "deliver", "--dry-run"], { environment: {} });
   assert.equal(contextual.exit, 0, contextual.stderr);
   assert.equal(contextual.value.contract, oldest.id);
   const born = await bornDirectAkuma({ root: world, archetype: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });

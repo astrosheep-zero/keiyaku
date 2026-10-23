@@ -69,12 +69,13 @@ Each act changes a different part of the world:
   `reconcile` retries workspace realization.
 - **Work:** Changes and commits belong in the appointed worktree. Another
   lane's claim can move the target beneath it. Check target movement before
-  audit; when it matters, merge the target branch (main when selected) in the
-  worktree and resolve conflicts there before auditing.
-- **Audit:** Previews the candidate and target without tendering or claiming.
-  With `verified` selected, Verification runs for the captured subject and can
-  record an attestation. Without that gate, the section is inert text and no
-  verb runs Verification. A stopped run records no new verdict.
+  delivery preview; when it matters, merge the target branch (main when selected)
+  in the worktree and resolve conflicts there before previewing again.
+- **Delivery preview:** Use `deliver --dry-run` to observe the candidate, existing
+  Verification evidence and target followability without tendering or claiming.
+  It never runs Verification or hooks, admits testimony, or reconciles. Missing
+  or stale evidence means Verification is still required; an existing failure
+  remains unsatisfied. Preparation is not a promise of successful delivery.
 - **Deliver:** Captures a tender and integration against the observed target;
   journal gains a delivered candidate. Ready prerequisites and gates trigger
   placement and claim in this invocation; otherwise the candidate waits.
@@ -88,7 +89,7 @@ Each act changes a different part of the world:
   and abandoned Contracts cannot be reopened.
 
 Placement judges declared gates, not the producer's identity. Review does not
-replace Verification; audit never requests placement. Read the final receipt
+replace Verification; delivery preview never requests placement. Read the final receipt
 for stops and reconciliation lag after an admitted act.
 
 ## 5. Handing A Role To An Akuma
@@ -101,7 +102,7 @@ authority.
 | Role | Grant at birth | Return |
 | --- | --- | --- |
 | Holder | The actions the delegated loop will perform; include `contract.review` when this holder will review. Commission with the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
-| Deliverer | The ordinary baseline: every Debt mutation, Contract audit and delivery, and Akuma management. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
+| Deliverer | The ordinary baseline: every Debt mutation, Contract delivery, and Akuma management. Preview is unkeyed. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
 | Reviewer | `--allowed contract.review`: `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> --allowed contract.review -` | The verdict receipt. Without the grant, `not-allowed` refuses and no verdict is recorded. |
 
 An Archetype's explicit allowed set replaces the ordinary baseline; check

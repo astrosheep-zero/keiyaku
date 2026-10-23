@@ -83,7 +83,7 @@ Verification evidence only as the selected `verified` gate's obligation. Without
 that selection, no verb runs the producer. Every Verification refusal or runtime
 stop blocks placement; an unsatisfied verdict leaves the selected gate unmet.
 `reviewed` is independent and neither enables nor replaces
-Verification. Unsatisfied review and audit do not trigger placement. The trigger
+Verification. Unsatisfied review and delivery preview do not trigger placement. The trigger
 changes the entry point, never the placement rules. Completion observes target
 movement before judging the old integration's gates: an old failed verdict
 cannot prevent refreshing a moved target. A refreshed integration needs its
@@ -133,8 +133,10 @@ overwrite retains its remaining replacement behavior. Reuse references its earli
 admission without claiming that the new invocation admitted it again. Other
 redelivery and terminal refusal behavior is unchanged.
 
-Audit judges an active Contract and may create ordinary producer testimony, but
-never requests placement, claims, or moves a target. Once a leading act is
+Delivery preview observes an active Contract without admission. It judges standing
+evidence against the prospective integration through generic currentness, without
+executing a producer or pretending a delivery was persisted. It reports current
+prerequisite and prospective gate judgments without granting placement. Once a leading act is
 admitted, later verification, placement, continuation, cleanup, reconciliation,
 and settlement are independent obligations: their stops or lags cannot reverse
 the admission or conceal the Contract. Their public representation is owned by

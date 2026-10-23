@@ -56,7 +56,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/amend-body.test.ts": 300,
   "tests/arc.test.ts": 2900,
   "tests/architecture.test.ts": 1200,
-  "tests/audit.test.ts": 4400,
+  "tests/delivery-preview.test.ts": 4400,
   "tests/boundary-validation.test.ts": 1900,
   "tests/build-windows-launcher.test.ts": 1000,
   "tests/cli-akuma-msys.test.ts": 1000,

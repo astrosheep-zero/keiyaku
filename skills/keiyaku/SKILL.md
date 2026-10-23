@@ -36,7 +36,9 @@ selects the Contract repository; it never retargets that World. `call
 cwd). Without it, the call uses the invocation cwd; `--contract` associates a
 Contract without selecting an execution directory.
 
-`deliver`, `review`, and `audit` may take time after their leading admission.
+`deliver` and `review` may take time after their leading admission.
+`deliver --dry-run` only observes the prospective candidate, standing evidence,
+and target followability; it never runs Verification or hooks or admits work.
 Their witnessed progress is ephemeral stderr output; stdout remains one final
 text or JSON result. Ctrl-C asks the owned operation to stop and waits for its
 truthful final receipt, so it is not evidence that an already admitted action

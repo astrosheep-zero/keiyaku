@@ -20,8 +20,8 @@ import type {
   AbandonOutcome,
   AmendOutcome,
   ArcOutcome,
-  AuditInput,
-  AuditOutcome,
+  DeliveryPreviewInput,
+  DeliveryPreviewOutcome,
   DeliverOutcome,
   MutationObservation,
   ReviewOutcome,
@@ -170,8 +170,8 @@ export class Keiyaku {
     return await this.operations.arc(input);
   }
 
-  async audit(input?: AuditInput, options?: MutationObservation): Promise<AuditOutcome> {
-    return await this.operations.audit(input, options);
+  async previewDelivery(input?: DeliveryPreviewInput, options?: MutationObservation): Promise<DeliveryPreviewOutcome> {
+    return await this.operations.previewDelivery(input, options);
   }
 }
 

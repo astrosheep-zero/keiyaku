@@ -48,6 +48,8 @@ export type ParsedDeliver = Output &
   Readonly<{
     command: "deliver";
     contract?: string;
+    dryRun: boolean;
+    showDiff: boolean;
     message?: string;
     includeDirty: boolean;
     materializeConflict: boolean;
@@ -97,13 +99,6 @@ export type ParsedStatus = Output &
       }>
   );
 export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
-export type ParsedAudit = Output &
-  Readonly<{
-    command: "audit";
-    contract?: string;
-    includeDirty: boolean;
-    showDiff: boolean;
-  }>;
 export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
 export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
 export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
@@ -133,7 +128,6 @@ export type ParsedContractCommand =
   | ParsedShow
   | ParsedStatus
   | ParsedLs
-  | ParsedAudit
   | ParsedReconcile
   | ParsedNuke
   | ParsedSettings
@@ -235,8 +229,18 @@ function parseAmend(parts: ParsedContractParts): ParsedAmend {
 function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
   const contract = parts.positionals[0];
   const message = optionalFlag(parts.flags, "message");
+  const dryRun = parts.flags["dry-run"] === true;
+  if (dryRun) {
+    for (const flag of ["materialize-conflict", "overwrite", "message"]) {
+      if (parts.flags[flag] !== undefined) refuse("deliver", `--${flag} is not valid with --dry-run`);
+    }
+  } else if (parts.flags["show-diff"] === true) {
+    refuse("deliver", "--show-diff requires --dry-run");
+  }
   return {
     command: "deliver",
+    dryRun,
+    showDiff: parts.flags["show-diff"] === true,
     ...(contract === undefined ? {} : { contract }),
     ...(message === undefined ? {} : { message }),
     includeDirty: parts.flags["include-dirty"] === true,
@@ -413,16 +417,6 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
       return parseStatus(parts);
     case "ls":
       return parseLs(parts);
-    case "audit": {
-      const contract = parts.positionals[0];
-      return {
-        command: "audit",
-        ...(contract === undefined ? {} : { contract }),
-        includeDirty: parts.flags["include-dirty"] === true,
-        showDiff: parts.flags["show-diff"] === true,
-        output: parts.output,
-      };
-    }
     case "reconcile": {
       const contract = parts.positionals[0];
       return {

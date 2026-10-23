@@ -432,7 +432,7 @@ test("native Contract reads use null for lawful absence while corrupt fork terms
   });
 });
 
-test("native audit propagates an unexpected target-lag failure after verified publication with its partial report", async () => {
+test("native preview preserves partial observation on unexpected target-lag failure without admitting facts", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
@@ -452,21 +452,18 @@ test("native audit propagates an unexpected target-lag failure after verified pu
     },
   };
   const native = createKeiyakuHandle(bound.contract, scope, localExecutionContext(), captureLocalContractComposition());
-  let witnessedHead: string | undefined;
-  await assert.rejects(native.audit(), (error: unknown) => {
+  const witnessedHead = present(await bound.value.keiyaku.state()).head;
+  await assert.rejects(native.previewDelivery(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
     assert.equal(error.cause, original);
-    assert.ok(error.outcome?.operation === "audit");
+    assert.ok(error.outcome?.operation === "deliver-preview");
     assert.equal(error.outcome.contract, bound.contract);
-    assert.ok(error.outcome.head);
-    witnessedHead = error.outcome.head;
-    const attestation = error.outcome.facts.find((fact) => fact.kind === "attestation");
-    assert.ok(attestation?.kind === "attestation");
-    assert.equal(attestation.data.gate, "verified");
-    assert.equal(attestation.data.verdict, "satisfied");
+    assert.equal(error.outcome.head, undefined, "preview reports no admission head on failure");
+    assert.deepEqual(error.outcome.facts, []);
+    assert.deepEqual(error.outcome.effects, []);
     assert.equal(error.outcome.value?.candidate?.kind, "ready");
-    assert.equal(error.outcome.value?.verification?.kind, "satisfied");
+    assert.equal(error.outcome.value?.verification?.kind, "required");
     assert.equal(error.outcome.value?.target?.kind, "placeable");
     assert.equal(error.outcome.value?.targetLag, undefined);
     return true;

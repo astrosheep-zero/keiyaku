@@ -2,7 +2,7 @@ import type {
   AbandonOutcome,
   AmendOutcome,
   ArcOutcome,
-  AuditOutcome,
+  DeliveryPreviewOutcome,
   BindOutcome,
   DeliverOutcome,
   Fact,
@@ -22,7 +22,7 @@ import {
   effectRetiredWorktrees,
   effectSettlementLags,
 } from "./effects.js";
-import { renderAcceptedAudit } from "./audit.js";
+import { renderDeliveryPreview } from "./delivery-preview.js";
 import {
   appendHookPayload,
   executionCleanupLines,
@@ -48,7 +48,7 @@ export type ContractOutcome =
   | AmendOutcome
   | DeliverOutcome
   | ReviewOutcome
-  | AuditOutcome
+  | DeliveryPreviewOutcome
   | ArcOutcome
   | AbandonOutcome;
 export type AcceptedContractOutcome = Extract<ContractOutcome, { kind: "accepted" }>;
@@ -327,7 +327,7 @@ function landedChangesLines(
  * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
  * state. Satisfied Verification adds one fact row naming the integrated result; placement made that commit the
  * reference's new head, so the movement and integrated-result rows share one sha. The verdict names reuse in the
- * audit surface's vocabulary and carries no qualifier when this command executed declarations. A completion
+ * standing-evidence vocabulary and carries no qualifier when this command executed declarations. A completion
  * without an advanced reference states no movement. Journal ULIDs stay in JSON and `history`, never in ordinary
  * receipt text.
  */
@@ -589,8 +589,8 @@ function renderAcceptedAbandon(result: Accepted<AbandonOutcome>, columns: number
 export function renderAccepted(result: AcceptedContractOutcome, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   switch (result.operation) {
-    case "audit":
-      return renderAcceptedAudit(result, context);
+    case "deliver-preview":
+      return renderDeliveryPreview(result, context);
     case "bind":
       return renderAcceptedBind(result, columns, context?.color === true);
     case "amend":

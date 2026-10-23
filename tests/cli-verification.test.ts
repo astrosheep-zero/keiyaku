@@ -14,7 +14,7 @@ import { writeExecutionProgress } from "../src/cli/runtime.js";
 import {
   Keiyaku,
   Repo,
-  type AuditOutcome,
+  type DeliveryPreviewOutcome,
   type DeliverOutcome,
   type ExecutionObservation,
 } from "../src/index.js";
@@ -286,9 +286,9 @@ test("failed verification keeps its scene until replacement or terminal cleanup"
   await Keiyaku.with().reconcile({ repo, contract: id });
   assert.equal(existsSync(scratch), true, "active reconciliation preserves the scene");
 
-  const second = accepted(await native.audit());
-  assert.ok(second.value.verification.kind === "unsatisfied");
-  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "the attempt ran in its own clean scene");
+  const second = accepted(await native.previewDelivery());
+  assert.ok(second.value.verification.kind === "recorded" && second.value.verification.verdict === "unsatisfied");
+  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "preview preserves existing evidence");
   assert.equal(raw.run(["worktree", "list", "--porcelain"]).split(scratch).length - 1, 1);
   writeFileSync(ready, "ready");
   const successful = accepted(await native.deliver());
@@ -319,75 +319,73 @@ test("failed verification keeps its scene until replacement or terminal cleanup"
   assert.equal(existsSync(claimScene.issue.leak.path), false, "acceptance removes a retained scene without another run");
 });
 
-test("audit reports execution even when an unchanged verdict is deduplicated", async () => {
-  const { raw, id } = await bindAndDeliver("printf 'audit-executed\\n'; false");
-  const first = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
-  const second = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
-  assert.equal(first.kind, "accepted");
-  if (first.kind !== "accepted") throw new Error("first audit was not accepted");
-  assert.equal(first.facts.length, 0, "the recorded integration preserves the existing failure subject");
-  assert.equal(second.kind, "accepted");
-  if (second.kind !== "accepted") throw new Error("second audit was not accepted");
-  assert.equal(second.facts.length, 0);
-  assert.equal(second.value.verification.kind, "unsatisfied");
-  if (second.value.verification.kind !== "unsatisfied") throw new Error("audit did not report execution");
-  assert.equal(second.value.verification.passed, 0);
-  assert.equal(second.value.verification.total, 1);
-  assert.match(second.value.verification.summary ?? "", /audit-executed/u);
+test("dry-run observes a recorded failure without rerunning or admitting testimony", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "preview-failure-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const runs = resolve(external, "runs");
+  const { raw, id } = await bindAndDeliver(`echo run >> '${runs}'\nfalse`);
   const repository = await repositoryAt(raw.path);
-  const state = (await observeContract(repository, id)).state!;
-  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 1);
+  const before = (await observeContract(repository, id)).state!;
+  for (let index = 0; index < 2; index += 1) {
+    const result = accepted((await cliJson<DeliveryPreviewOutcome>(
+      ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
+    )).value);
+    assert.deepEqual(result.facts, []);
+    assert.deepEqual(result.effects, []);
+    assert.deepEqual(result.pending, []);
+    assert.equal(result.head, before.head);
+    assert.ok(result.value.verification.kind === "recorded" && result.value.verification.verdict === "unsatisfied");
+    assert.ok(result.value.candidate.kind === "ready");
+    assert.ok(result.value.candidate.requirements.gates.some(
+      (gate) => gate.gate === "verified" && gate.current.kind === "attested" && gate.current.verdict === "unsatisfied",
+    ));
+  }
+  assert.equal(readFileSync(runs, "utf8"), "run\n", "only real delivery executed Verification");
+  assert.equal((await observeContract(repository, id)).state?.head, before.head);
 });
 
-test("concurrent unchanged audits admit one attestation but both report execution", async () => {
-  const raw = makeGitRepository();
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  raw.run(["checkout", "--quiet", "-b", "candidate"]);
-  writeFileSync(resolve(raw.path, "candidate.txt"), "candidate\n");
-  raw.run(["add", "candidate.txt"]);
-  raw.run(["commit", "--quiet", "-m", "candidate"]);
-  mkdirSync(resolve(raw.path, ".keiyaku"), { recursive: true });
-  writeFileSync(
-    resolve(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({ gates: { default: { kind: "bundle", gates: ["verified"] } } }),
-  );
-  const bound = await cliJson<Readonly<{ kind: string; contract?: string }>>(
-    ["-C", raw.path, "bind", "--target", "refs/heads/main", "-"],
-    { environment: {}, readStdin: async () => markdown("false") },
-  );
-  assert.equal(bound.value.kind, "accepted");
-  const id = bound.value.contract as ContractId;
-  // Two concurrent audits cannot share the global stdout capture; exercise the same public operation directly.
+test("concurrent previews report missing evidence without executing Verification", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "preview-concurrent-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const marker = resolve(external, "ran");
+  const { raw, id } = await bindCandidate(`touch '${marker}'`);
   const native = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
-  const [first, second] = await Promise.all([native.audit(), native.audit()]);
-  assert.equal(first.kind, "accepted");
-  assert.equal(second.kind, "accepted");
-  if (first.kind !== "accepted" || second.kind !== "accepted") throw new Error("audit was not accepted");
-  assert.equal(first.facts.length + second.facts.length, 1);
-  assert.equal(first.value.verification.kind, "unsatisfied");
-  assert.equal(second.value.verification.kind, "unsatisfied");
-  const repository = await repositoryAt(raw.path);
-  const state = (await observeContract(repository, id)).state!;
-  assert.equal(state.attestations.filter((fact) => fact.data.gate === "verified").length, 1);
+  const [first, second] = await Promise.all([native.previewDelivery(), native.previewDelivery()]);
+  for (const result of [accepted(first), accepted(second)]) {
+    assert.deepEqual(result.facts, []);
+    assert.deepEqual(result.value.verification, { kind: "required" });
+    assert.equal(result.value.target.kind, "placeable");
+  }
+  assert.equal(existsSync(marker), false);
+  assert.deepEqual((await observeContract(await repositoryAt(raw.path), id)).state?.attestations, []);
 });
 
-test("audit admits a new attestation after the candidate changes", async () => {
-  const { raw, id } = await bindAndDeliver("false");
-  const first = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
-  assert.equal(first.kind, "accepted");
+test("dry-run reports matching satisfaction and stale evidence after candidate change", async (t) => {
+  const external = mkdtempSync(resolve(tmpdir(), "preview-currentness-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const runs = resolve(external, "runs");
+  const { raw, id } = await bindAndDeliver(`echo run >> '${runs}'`, ["reviewed", "verified"]);
   const repository = await repositoryAt(raw.path);
   const state = (await observeContract(repository, id)).state!;
+  const first = accepted((await cliJson<DeliveryPreviewOutcome>(
+    ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
+  )).value);
+  assert.ok(first.value.verification.kind === "recorded" && first.value.verification.verdict === "satisfied");
   const worktree = await appointedWorktreePath(repository, id);
   writeFileSync(resolve(worktree, "candidate.txt"), "changed\n");
   raw.run(["-C", worktree, "add", "candidate.txt"]);
   raw.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
-  const second = (await cliJson<AuditOutcome>(["-C", raw.path, "audit", id], { environment: {} })).value;
-  assert.equal(second.kind, "accepted");
-  if (second.kind !== "accepted") throw new Error("second audit was not accepted");
-  assert.equal(second.facts.length, 1);
-  const after = (await observeContract(repository, id)).state!;
-  assert.equal(after.attestations.filter((fact) => fact.data.gate === "verified").length, 2);
-  assert.notEqual(after.attestations.at(-1)?.data.subject, state.attestations.at(-1)?.data.subject);
+  const second = accepted((await cliJson<DeliveryPreviewOutcome>(
+    ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
+  )).value);
+  assert.deepEqual(second.value.verification, { kind: "required" });
+  assert.ok(second.value.candidate.kind === "ready");
+  assert.ok(second.value.candidate.requirements.gates.some(
+    (gate) => gate.gate === "verified" && gate.current.kind === "stale",
+  ));
+  assert.deepEqual(second.facts, []);
+  assert.equal(readFileSync(runs, "utf8"), "run\n");
+  assert.equal((await observeContract(repository, id)).state?.head, state.head);
 });
 
 test("closing or failing CLI progress output does not cancel the operation", async (t) => {

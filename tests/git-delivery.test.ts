@@ -8,7 +8,7 @@ import { join } from "node:path";
 import test, { describe } from "node:test";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { mintSnapshotId } from "../src/git/identity.js";
-import { adjudicateAuditTarget } from "../src/git/target-placement.js";
+import { adjudicatePreviewTarget } from "../src/git/target-placement.js";
 import { readRef } from "../src/git/repository.js";
 import { readDeliveryDiff, worktreeChangeId } from "../src/git/integration.js";
 import { followDependentManagedWorktree, unmergedWorkspacePaths } from "../src/git/workspace.js";
@@ -466,7 +466,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       ].join("\n"),
       {},
       async (gitPath) =>
-        adjudicateAuditTarget(
+        adjudicatePreviewTarget(
           { ...git, gitPath },
           {
             contractId: preparation.contractId,
@@ -485,6 +485,28 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     });
   });
 
+  test("preview target preserves an unrelated native failure coincident with cancellation", async () => {
+    const { preparation, git, prepared, targetName, expected } = await preparedAuditTarget();
+    const controller = new AbortController();
+    const reason = new Error("concurrent caller cancellation");
+    const original = new TypeError("independent target observation failure");
+    const repository = {
+      ...git,
+      signal: controller.signal,
+      get gitPath(): string {
+        controller.abort(reason);
+        throw original;
+      },
+    };
+    await assert.rejects(adjudicatePreviewTarget(repository, {
+      contractId: preparation.contractId,
+      coordinates: { ...preparation.coordinates, target: targetName },
+      predecessor: expected,
+      candidate: prepared.data.integration.snapshot,
+    }), (error: unknown) => error === original);
+    assert.equal(controller.signal.reason, reason);
+  });
+
   test("audit target adjudicator reobserves movement after followability", async () => {
     const { repository, preparation, git, prepared, targetName, expected } = await preparedAuditTarget();
 
@@ -497,7 +519,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       ].join("\n"),
       { KEIYAKU_TEST_REPO: repository.path },
       async (gitPath) =>
-        adjudicateAuditTarget(
+        adjudicatePreviewTarget(
           { ...git, gitPath },
           {
             contractId: preparation.contractId,

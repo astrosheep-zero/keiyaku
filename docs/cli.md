@@ -52,7 +52,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | Verb | Purpose and refusal boundary | Result boundary |
 | --- | --- | --- |
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
-| deliver, review, abandon, audit, reconcile | Request the named lifecycle, evidence, inspection, or repair judgment; refuse an absent or ambiguous Contract selector. | Return the owning lifecycle, audit, or reconciliation result unchanged. |
+| deliver, review, abandon, reconcile | Request lifecycle, evidence, or repair judgment, or delivery preview; refuse an absent or ambiguous Contract selector. | Return the owning operation result unchanged. |
 | status, ls | Read one requested Contract, Akuma, archetype, Debt, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
 | show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
@@ -75,7 +75,11 @@ A stable request entry is resolved asynchronously once inside the invocation's
 failure and cancellation boundary before operations begin; its actual channel
 is then pinned for the invocation under [akuma-requests.md](akuma-requests.md).
 The parent reconstructs local custody and returns the ordinary public result;
-forwarding does not create another delivery, review, audit, or Debt workflow.
+forwarding does not create another delivery, review, preview, or Debt workflow.
+
+Delivery's dry-run form calls the dedicated native preview operation, never the
+mutating delivery path. Unused or mutation-only options are refused before any
+product observation. Standalone audit is retired, not an effectful alias.
 
 ## Boundaries
 

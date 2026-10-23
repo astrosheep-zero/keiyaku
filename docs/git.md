@@ -58,6 +58,16 @@ completed effects and is retried under the World-owned confirmation rule.
 
 ## Delivery And Placement
 
+Delivery preview may prepare ref-free candidate Git objects and use a transient
+private index. It preserves every ref, the real index, worktree bytes, worktree
+registrations, and product authority. This is not a promise of zero filesystem
+writes, nor a reservation of the observed target or candidate. Preview never
+materializes conflicts, provisions scratch, executes hooks, or performs placement
+or reconciliation; real delivery obtains fresh custody and observation. Ref
+placeability and registered checkout followability are distinct observations.
+Preview retains a checkout's known inability to follow, including its path and
+Git diagnostic, without making ordinary checkout lag a placement veto.
+
 Git prepares tenders, target-specific integration results, content identity from
 patch-id (not a commit), recorded delivery diffs, and Verification
 scratch custody.

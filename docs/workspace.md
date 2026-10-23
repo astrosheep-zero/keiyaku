@@ -18,7 +18,7 @@ Derived guidance reserves its own document space from caller extensions. It
 does not make harness identity, worker identity, selected seat, or skill
 procedure into a Contract or Dispatch fact. Skills can give operating procedure
 but cannot amend Contract terms or gain acceptance authority. Guidance is a
-projection, not an audit result or an alternate lifecycle surface.
+projection, not a delivery preview or an alternate lifecycle surface.
 
 ## Managed Place
 
@@ -41,7 +41,9 @@ After admission, composition appoints before Git realizes the worktree and retri
 The workspace owner atomically creates or repairs its guidance, namespace
 context, and narrow local ignore protection after an active managed worktree
 exists. These files keep derived management material out of ordinary status and
-delivery capture without hiding project-owned data. Namespace context is the
+delivery capture without hiding project-owned data. Primary management ignore
+protection excludes the local Debt ledger while leaving shared Settings
+eligible for version control. Namespace context is the
 Contract-derived coordinate for active Debt work; a valid local override remains
 intact. The complete Contract coordinate is split into segments, so `kei/<slug>`
 provides Debt namespace `kei/<slug>` and identities under `debt/kei/<slug>/...`.

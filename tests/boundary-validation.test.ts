@@ -131,7 +131,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     (error: unknown) => invalidInput(error, "review input has unknown field: hooks"),
   );
   await assert.rejects(
-    () => bound.value.keiyaku.audit({ requireBranchesToBeUpToDate: true } as never),
-    (error: unknown) => invalidInput(error, "audit input has unknown field: requireBranchesToBeUpToDate"),
+    () => bound.value.keiyaku.previewDelivery({ requireBranchesToBeUpToDate: true } as never),
+    (error: unknown) => invalidInput(error, "delivery preview input has unknown field: requireBranchesToBeUpToDate"),
   );
 });

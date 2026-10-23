@@ -9,7 +9,7 @@ surface. Read every owner named for the surface being changed.
 | --- | --- |
 | [public-api.md](public-api.md) | Package-root composition, Contract handles and operations, construction, and delivery diff. |
 | [public-akuma.md](public-akuma.md) | Package-root Akuma creation, addressing, selection operations, and cross-product composition. |
-| [public-results.md](public-results.md) | Meaning and ownership of public operation outcomes, including refusal, retry, audit, and admission. |
+| [public-results.md](public-results.md) | Meaning and ownership of public operation outcomes, including refusal, retry, delivery preview, and admission. |
 | [document.md](document.md) | Contract document authority, amendment and arc intent, and reserved authorial boundaries. |
 | [model.md](model.md) | Journal authority, durable identity, current Contract interpretation, and dependency direction. |
 | [lifecycle.md](lifecycle.md) | Verb decisions, eligibility, phases, terminals, gates, review, protocol, and admission. |

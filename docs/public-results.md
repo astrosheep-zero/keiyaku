@@ -1,7 +1,7 @@
 # Public Mutation Results
 
 This chapter owns the conceptual public answers to Contract mutation,
-non-admission, audit, and post-admission work. Exact TypeScript unions, fields,
+non-admission, delivery preview, and post-admission work. Exact TypeScript unions, fields,
 and literal codes belong to the exported declarations and executable
 specifications.
 
@@ -56,7 +56,7 @@ Refusal and retry reasons belong to their addressed operation. Neither can claim
 safe retry when publication is unknown. A later operational stop preserves known
 leading evidence, while an unexpected programming failure or corruption remains
 exceptional with the same operation envelope at its actual, possibly incomplete,
-failure point. The exceptional value never pretends that an unfinished audit or
+failure point. The exceptional value never pretends that an unfinished preview or
 completion finished.
 
 The addressed operation is explicit. Consumers never infer it from coincidental
@@ -130,15 +130,28 @@ specific semantic, physical, or operational stop. A stopped dependent does not
 hide successful siblings or replace the addressed Contract's head. Discovery
 failure and cancellation retain all earlier confirmed admissions.
 
-## Audit And Observation
+## Delivery Preview And Observation
 
-Audit returns one already-adjudicated picture of candidate readiness,
-Verification, and target state. A blocked candidate admits no Verification fact;
-Audit observes target followability independently even when Verification stops.
-Audit may record terminal Verification testimony, but never places or moves a
-target. Its candidate comparison independently reports the admitted candidate's
-Verification status. Candidate diffs and scope are requested presentation data,
-including an empty diff, not journal, gate, or cache authority.
+Delivery preview returns one already-adjudicated observation of a prospective
+candidate, standing Verification evidence, and target followability. Acceptance
+means the observation completed, never that a delivery occurred or will succeed;
+it carries no new facts or product effects. Preparation refusals and integration
+conflicts remain explicit candidate observations. Candidate preparation is not
+acceptance readiness: prerequisites and gates retain their own current judgment,
+and an unsatisfied standing verdict is never satisfaction.
+
+Preview never executes declarations or hooks and never publishes testimony,
+admits a candidate, places it, reconciles, settles, or continues dependents.
+Standing evidence is evaluated by generic currentness against the prospective
+integration. Missing or stale evidence means Verification remains required;
+existing unsatisfied evidence remains visible without rerunning it. Target
+followability is observed independently of that evidence and separately from ref
+placeability; known checkout non-followability remains visible without denying
+ref movement. Cancellation interrupts preview with its native exceptional category
+and partial observations, never a successful target-failure observation. Candidate diffs and
+scope are requested presentation data, including an empty diff, not journal,
+gate, or cache authority. Real delivery observes afresh and retains its normal
+execution and admission behavior.
 
 Read-only workspace and board observations are owned by
 [public-api.md](public-api.md), not duplicated here. Nuke confirmation refusals

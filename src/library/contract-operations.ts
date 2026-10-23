@@ -9,7 +9,7 @@ import {
   type ServiceRequestCommand,
 } from "../akuma/request-wire.js";
 import type { ActorId } from "../core/facts/types.js";
-import { auditReportSchema } from "../protocol/audit.js";
+import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { materializedConflictSchema } from "../protocol/deliver.js";
 import { observationSchema, observeExecution, type ExecutionObserver } from "../protocol/execution-observation.js";
 import { contractIdSchema } from "../protocol/operations.js";
@@ -19,19 +19,19 @@ import { decodeFailureWire, encodeFailureWire, KeiyakuError, outcomeSchema, proj
 
 type DeliveryResult = import("./contract-outcomes.js").DeliverOutcome;
 type ReviewResult = import("./contract-outcomes.js").ReviewOutcome;
-type AuditResult = import("./contract-outcomes.js").AuditOutcome;
-type ContractResult = DeliveryResult | ReviewResult | AuditResult;
+type DeliveryPreviewResult = import("./contract-outcomes.js").DeliveryPreviewOutcome;
+type ContractResult = DeliveryResult | ReviewResult | DeliveryPreviewResult;
 type ContractRequester = ActorId;
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
 const nonblankStringSchema = z.string().refine((value) => value.trim() !== "");
 const contractRequestBaseSchema = z.object({ repoRoot: absolutePathSchema, contractId: contractIdSchema }).strict();
-const auditRequestSchema = contractRequestBaseSchema
+const previewRequestSchema = contractRequestBaseSchema
   .extend({
     includeDirty: z.boolean(),
     showDiff: z.boolean(),
   })
-  .transform((request) => ({ action: "contract.audit" as const, ...request }));
+  .transform((request) => ({ action: "contract.preview-delivery" as const, ...request }));
 const deliverRequestSchema = contractRequestBaseSchema
   .extend({
     includeDirty: z.boolean(),
@@ -49,24 +49,24 @@ const reviewRequestSchema = contractRequestBaseSchema
   .transform((request) => ({ action: "contract.review" as const, ...request }));
 
 export type ContractRequest =
-  | z.infer<typeof auditRequestSchema>
+  | z.infer<typeof previewRequestSchema>
   | z.infer<typeof deliverRequestSchema>
   | z.infer<typeof reviewRequestSchema>;
 type DeliverRequest = Extract<ContractRequest, { action: "contract.deliver" }>;
 type ReviewRequest = Extract<ContractRequest, { action: "contract.review" }>;
-type AuditRequest = Extract<ContractRequest, { action: "contract.audit" }>;
+type DeliveryPreviewRequest = Extract<ContractRequest, { action: "contract.preview-delivery" }>;
 type ContractResultFor<Action extends ContractRequest["action"]> = Action extends "contract.deliver"
   ? DeliveryResult
   : Action extends "contract.review"
     ? ReviewResult
-    : AuditResult;
+    : DeliveryPreviewResult;
 type ContractRequestFor<Action extends ContractRequest["action"]> = Extract<ContractRequest, { action: Action }>;
-const auditServiceSchema = z
+const previewServiceSchema = z
   .object({
-    kind: z.literal("audit-report"),
+    kind: z.literal("delivery-preview-report"),
     repoRoot: absolutePathSchema,
     contractId: contractIdSchema,
-    report: auditReportSchema,
+    report: deliveryPreviewReportSchema,
   })
   .strict();
 const deliveryReferenceSchema = z
@@ -94,7 +94,7 @@ const materializedHandoffServiceSchema = materializedConflictSchema
   })
   .strict();
 const contractServiceSchema = z.union([
-  auditServiceSchema,
+  previewServiceSchema,
   deliveryReferenceSchema,
   materializedHandoffServiceSchema,
   reviewReferenceSchema,
@@ -102,9 +102,10 @@ const contractServiceSchema = z.union([
 type ContractService = z.infer<typeof contractServiceSchema>;
 type ContractReference = ContractService | z.infer<typeof materializedHandoffReferenceSchema>;
 export type ContractRequestPort = Readonly<{
-  audit(
-    input: AuditRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
-  ): Promise<AuditResult>;
+  previewDelivery(
+    input: DeliveryPreviewRequest &
+      Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
+  ): Promise<DeliveryPreviewResult>;
   deliver(
     input: DeliverRequest &
       Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
@@ -115,8 +116,8 @@ export type ContractRequestPort = Readonly<{
 }>;
 function decodeContractRequest(action: ContractRequest["action"], value: unknown): ContractRequest | null {
   const schema =
-    action === "contract.audit"
-      ? auditRequestSchema
+    action === "contract.preview-delivery"
+      ? previewRequestSchema
       : action === "contract.deliver"
         ? deliverRequestSchema
         : reviewRequestSchema;
@@ -126,8 +127,8 @@ function decodeContractRequest(action: ContractRequest["action"], value: unknown
 
 function decodeContractService(action: ContractRequest["action"], value: unknown): ContractService {
   const schema =
-    action === "contract.audit"
-      ? auditServiceSchema
+    action === "contract.preview-delivery"
+      ? previewServiceSchema
       : action === "contract.deliver"
         ? z.union([deliveryReferenceSchema, materializedHandoffServiceSchema])
         : reviewReferenceSchema;
@@ -179,8 +180,8 @@ async function executeContractRequest(
   port: ContractRequestPort,
 ): Promise<import("../akuma/request-wire.js").ServiceCompletion<ContractResult, ContractService>> {
   const observation = executionObservation(facts);
-  if (request.action === "contract.audit") {
-    const result = await port.audit({
+  if (request.action === "contract.preview-delivery") {
+    const result = await port.previewDelivery({
       ...request,
       ...observation,
       requester: facts.requester as ContractRequester,
@@ -191,7 +192,7 @@ async function executeContractRequest(
       kind: "served",
       result,
       service: {
-        kind: "audit-report",
+        kind: "delivery-preview-report",
         repoRoot: request.repoRoot,
         contractId: request.contractId,
         report: result.value,
@@ -255,8 +256,8 @@ async function executeContractRequest(
 
 function decodedContractResult(action: ContractRequest["action"], value: unknown): ContractResult {
   const schema =
-    action === "contract.audit"
-      ? outcomeSchema("audit", auditReportSchema)
+    action === "contract.preview-delivery"
+      ? outcomeSchema("deliver-preview", deliveryPreviewReportSchema)
       : action === "contract.deliver"
         ? outcomeSchema("deliver", deliveryValueSchema, materializedHandoffReferenceSchema)
         : outcomeSchema("review", reviewSchema);
@@ -281,7 +282,7 @@ export function contractRequestProtocol(
     encodeFailure: encodeFailureWire,
     decodeFailure: (value) => decodeFailureWire(value),
     decodeReference: (reference) => decodeContractReference(action, reference),
-    isPermitted: (allowed) => allowed.includes(action),
+    isPermitted: (allowed) => action === "contract.preview-delivery" || allowed.includes(action),
   };
 }
 
@@ -301,9 +302,9 @@ export function contractRequestCommand(
 
 export function contractRequestCommands(
   port: ContractRequestPort,
-): Readonly<Record<"contract.audit" | "contract.deliver" | "contract.review", ErasedRequestCommand>> {
+): Readonly<Record<"contract.preview-delivery" | "contract.deliver" | "contract.review", ErasedRequestCommand>> {
   return {
-    "contract.audit": eraseRequestCommand(contractRequestCommand("contract.audit", port)),
+    "contract.preview-delivery": eraseRequestCommand(contractRequestCommand("contract.preview-delivery", port)),
     "contract.deliver": eraseRequestCommand(contractRequestCommand("contract.deliver", port)),
     "contract.review": eraseRequestCommand(contractRequestCommand("contract.review", port)),
   };
@@ -345,7 +346,11 @@ export async function requestForwardedContractLive<Action extends ContractReques
 export function mapForwardedContractFailure(error: unknown, request: ContractRequest) {
   if (error instanceof AkumaBodyRequestError && error.outcome === "voided") {
     const operation =
-      request.action === "contract.audit" ? "audit" : request.action === "contract.review" ? "review" : "deliver";
+      request.action === "contract.preview-delivery"
+        ? "deliver-preview"
+        : request.action === "contract.review"
+          ? "review"
+          : "deliver";
     const projected = project(operation, new InvocationAccumulator().snapshot(), {
       kind: "retry",
       contract: request.contractId,

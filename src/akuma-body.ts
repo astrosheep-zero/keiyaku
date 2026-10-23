@@ -55,9 +55,9 @@ function contractChannel(
 
 function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
   return {
-    audit: async (input) => {
+    previewDelivery: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
-      return await contractChannel(repo, input.contractId, input.requester, configuration).audit(
+      return await contractChannel(repo, input.contractId, input.requester, configuration).previewDelivery(
         {
           includeDirty: input.includeDirty,
           showDiff: input.showDiff,

@@ -8,7 +8,7 @@ authorization system; exact member names belong to public declarations and help.
 
 An Archetype may declare a complete default set. Its omission grants the
 ordinary delegation baseline: Akuma management, every Debt mutation, and
-Contract audit and delivery. Independent Contract review remains an explicit
+Contract delivery. Independent Contract review remains an explicit
 grant. An explicit empty set means none. Call-time additions can add to that
 default but never clear it. A nested birth clips the resulting set to its
 authenticated direct parent only; it never walks an ancestor chain.
@@ -24,7 +24,9 @@ persisted grants for surviving operations; a removed operation confers no
 replacement permission. This does not admit the retired spelling as a caller
 input or grant any new capability. Forwarded observation remains unkeyed; each
 mutable Debt or Contract operation is independently keyed, so one permission
-does not imply another or require a Contract association.
+does not imply another or require a Contract association. Delivery preview is an
+unkeyed observation; the retired audit grant is discarded from historical Souls
+without conferring delivery or review permission.
 
 ## Admission Boundary
 

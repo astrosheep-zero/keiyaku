@@ -270,10 +270,14 @@ async function matchesTreeOnPaths(
   return (await gitPaths(repository, path, args)).length === 0;
 }
 
+type CheckoutPrecheck =
+  | Readonly<{ kind: "followable" }>
+  | Readonly<{ kind: "not-followable"; diagnostic: string }>
+  | Readonly<{ kind: "refused"; refusal: CheckoutNotFollowableRefusal }>;
+
 /**
- * A checkout that git cannot carry is judged by the physical follow, which records its own lag.
- * The one collision read-tree cannot report is a candidate write over an ignored worktree entry:
- * git carries that by silently destroying the entry, so it is refused here instead.
+ * Retain the single dry-run's followability observation separately from ref-placement legality.
+ * Only a candidate write that silently destroys an ignored entry refuses placement here.
  */
 async function ordinaryPrecheck(
   repository: GitRepository,
@@ -281,7 +285,7 @@ async function ordinaryPrecheck(
   target: RefOperation,
   path: string,
   changes: TargetPlacementChanges,
-): Promise<CheckoutNotFollowableRefusal | null> {
+): Promise<CheckoutPrecheck> {
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
   const observation = { repository, contractId, target, path, predecessor, candidate, changes };
@@ -289,10 +293,11 @@ async function ordinaryPrecheck(
     await executeGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
-    return null;
+    return { kind: "not-followable", diagnostic: error.message };
   }
   const scopes = await destructionScopes(path, changes.writes);
-  return await untrackedRefusalWithinScopes(observation, scopes);
+  const refusal = await untrackedRefusalWithinScopes(observation, scopes);
+  return refusal === null ? { kind: "followable" } : { kind: "refused", refusal };
 }
 
 export async function acquireTargetPlacementFence(
@@ -317,8 +322,13 @@ type TargetPlacementObservationInput = Readonly<{
   candidate: SnapshotId;
 }>;
 
+const targetCheckoutObservationSchema = z.union([
+  z.object({ kind: z.literal("followable"), path: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("not-followable"), path: z.string().min(1), diagnostic: z.string().min(1) }).strict(),
+]);
+type TargetCheckoutObservation = z.infer<typeof targetCheckoutObservationSchema>;
 type TargetPlacementObservation =
-  | Readonly<{ kind: "ready"; arms: readonly FollowArm[] }>
+  | Readonly<{ kind: "ready"; arms: readonly FollowArm[]; checkouts: readonly TargetCheckoutObservation[] }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
 
 /** Observe whether registered target checkouts can follow a predecessor-to-candidate movement. */
@@ -339,20 +349,23 @@ export async function observeTargetPlacement(
     .filter((worktree) => worktree.branch === target.target)
     .sort((left, right) => left.path.localeCompare(right.path));
   const arms: FollowArm[] = [];
+  const checkouts: TargetCheckoutObservation[] = [];
   for (const worktree of worktrees) {
-    const refusal = await ordinaryPrecheck(repository, input.contractId, target, worktree.path, changes);
-    if (refusal !== null) return { kind: "refused", refusal };
+    const precheck = await ordinaryPrecheck(repository, input.contractId, target, worktree.path, changes);
+    if (precheck.kind === "refused") return precheck;
+    checkouts.push({ ...precheck, path: worktree.path });
     arms.push({ kind: "ordinary", path: worktree.path });
   }
-  return { kind: "ready", arms };
+  return { kind: "ready", arms, checkouts };
 }
 
-export const auditTargetAnswerSchema = z.union([
+export const previewTargetAnswerSchema = z.union([
   z
     .object({
       kind: z.literal("placeable"),
       ref: z.string().refine((value) => value.trim() !== ""),
       head: snapshotIdSchema,
+      checkouts: z.array(targetCheckoutObservationSchema).readonly(),
     })
     .strict(),
   z
@@ -366,12 +379,12 @@ export const auditTargetAnswerSchema = z.union([
   z.object({ kind: z.literal("refused"), refusal: checkoutNotFollowableRefusalSchema }).strict(),
   z.object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
 ]);
-type AuditTargetAnswer = z.infer<typeof auditTargetAnswerSchema>;
-/** Adjudicate the complete post-Verification audit target answer without placing. */
-export async function adjudicateAuditTarget(
+type PreviewTargetAnswer = z.infer<typeof previewTargetAnswerSchema>;
+/** Adjudicate prospective target followability without placing or running Verification. */
+export async function adjudicatePreviewTarget(
   repository: GitRepository,
   input: TargetPlacementObservationInput,
-): Promise<AuditTargetAnswer> {
+): Promise<PreviewTargetAnswer> {
   const ref = input.coordinates.target;
   const expected = input.predecessor;
   try {
@@ -382,9 +395,10 @@ export async function adjudicateAuditTarget(
     if (observed !== expected) return { kind: "moved", ref, expected, observed };
     return follow.kind === "refused"
       ? { kind: "refused", refusal: follow.refusal }
-      : { kind: "placeable", ref, head: expected };
+      : { kind: "placeable", ref, head: expected, checkouts: follow.checkouts };
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
+    repository.signal?.throwIfAborted();
     return { kind: "failed", diagnostic: error.message };
   }
 }

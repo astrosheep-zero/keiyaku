@@ -150,7 +150,8 @@ export type {
   AbandonOutcome,
   AmendOutcome,
   ArcOutcome,
-  AuditOutcome,
+  DeliveryPreviewInput,
+  DeliveryPreviewOutcome,
   BindOutcome,
   BindResult,
   DeliverOutcome,
@@ -207,7 +208,7 @@ export type {
   PluginSignal,
   PluginSignalMap,
 } from "./plugin/public.js";
-export type { AuditReport } from "./protocol/audit.js";
+export type { DeliveryPreviewReport } from "./protocol/delivery-preview.js";
 export type { IntegrationConflictMaterialized, VerificationReuse } from "./protocol/deliver.js";
 export type { ExecutionObservation, ExecutionObserver } from "./protocol/execution-observation.js";
 export type { PlacementStop, VerificationStop } from "./protocol/operations.js";

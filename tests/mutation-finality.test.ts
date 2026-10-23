@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AuditReport } from "../src/index.js";
+import type { DeliveryPreviewReport } from "../src/index.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
@@ -9,7 +9,7 @@ const id = contractId("kei/mutation-finality-test");
 function outcome(
   progress: InvocationAccumulator,
   value: unknown = undefined,
-  operation: "review" | "audit" | "amend" = "review",
+  operation: "review" | "deliver-preview" | "amend" = "review",
 ) {
   const result = project(operation, progress.snapshot(), {
     kind: "accepted",
@@ -22,19 +22,19 @@ function outcome(
   return result.outcome;
 }
 
-function auditReport(): AuditReport {
+function previewReport(): DeliveryPreviewReport {
   return {
     candidate: {
       kind: "blocked",
       refusal: { kind: "target-missing", contractId: contractId("kei/mutation-finality-test") },
     },
-    verification: { kind: "satisfied", passed: 1, total: 1 },
+    verification: { kind: "required" },
     target: { kind: "not-observed" },
   };
 }
 
-test("audit terminal verification projects complete", () => {
-  assert.deepEqual(outcome(new InvocationAccumulator(), auditReport(), "audit").pending, []);
+test("preview with required verification completes observation without pending work", () => {
+  assert.deepEqual(outcome(new InvocationAccumulator(), previewReport(), "deliver-preview").pending, []);
 });
 
 test("mutation lag scopes identify the affected pending action", () => {
@@ -170,14 +170,14 @@ test("the local failure projector never decodes partial owner evidence or masks 
   const progress = new InvocationAccumulator();
   const native = new TypeError("later programming failure");
   // Owner conclusions can be genuinely incomplete; strict wire decoding is not a local failure gate.
-  progress.recordAudit(id, { verification: { kind: "satisfied", passed: 1, total: 1 } });
-  const first = project("audit", progress.snapshot(), { kind: "failed", contract: id, error: native });
+  progress.recordDeliveryPreview(id, { verification: { kind: "required" } });
+  const first = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
   assert.equal(first.error.cause, native);
   assert.equal(first.error.category, "internal");
   Object.defineProperty(first.error, "requestOutcome", { value: "unproven", enumerable: false });
   progress.recordChannelRetirement(id, new Error("retirement failed"));
-  const final = project("audit", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
+  const final = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
   assert.ok(final.error instanceof KeiyakuError);
   assert.equal(final.error.cause, native);
@@ -185,5 +185,5 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.equal(Object.getOwnPropertyDescriptor(final.error, "requestOutcome")?.value, "unproven");
   assert.equal(final.error.outcome?.effects.length, 1);
   assert.deepEqual(first.error.outcome?.effects, []);
-  assert.deepEqual(final.error.outcome?.value, { verification: { kind: "satisfied", passed: 1, total: 1 } });
+  assert.deepEqual(final.error.outcome?.value, { verification: { kind: "required" } });
 });

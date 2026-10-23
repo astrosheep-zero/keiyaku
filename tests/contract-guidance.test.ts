@@ -146,9 +146,14 @@ test("projection batches each index as generated files grow and preserves bytes 
           ...generated.map(([path], index) => [join(worktree, path), index < 2 ? "unchanged" : "created"]),
         ],
       );
+      assert.equal(readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"), "*\n!settings.json\n");
+      mkdirSync(join(repository.path, ".keiyaku", "debts"), { recursive: true });
+      writeFileSync(join(repository.path, ".keiyaku", "debts", "local.md"), "Local ledger material\n");
+      writeFileSync(join(repository.path, ".keiyaku", "settings.json"), "{}\n");
+      assert.equal(repository.run(["check-ignore", ".keiyaku/debts/local.md"]).trimEnd(), ".keiyaku/debts/local.md");
       assert.equal(
-        readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"),
-        "*\n!settings.json\n!debts/\n!debts/**\n",
+        repository.run(["status", "--porcelain", "--untracked-files=all", "--", ".keiyaku/settings.json"]).trimEnd(),
+        "?? .keiyaku/settings.json",
       );
       for (const [path, bytes] of generated) assert.equal(readFileSync(join(worktree, path), "utf8"), bytes);
       const retried = await projectContractWorktree(capability, current, register);

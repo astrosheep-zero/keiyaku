@@ -157,8 +157,9 @@ commands; `5m` is the normal baseline.
 Verification runs only when the Contract selects the `verified` gate, against
 the exact integration snapshot in a clean disposable worktree for that attempt.
 `deliver` reuses current satisfied evidence or runs the declarations; unsatisfied
-results and runtime stops prevent placement. `audit` runs declarations for a
-prospective candidate. Without `verified`, no verb runs Verification and the
+results and runtime stops prevent placement. `deliver --dry-run` only observes
+standing evidence for a prospective candidate; it never executes declarations.
+Without `verified`, no verb runs Verification and the
 section is inert document text. `reviewed` independently requires review
 evidence. Selected gates are checked at placement.
 

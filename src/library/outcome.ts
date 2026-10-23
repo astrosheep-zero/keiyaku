@@ -7,7 +7,7 @@ import type { ContractHead, ContractId } from "../core/facts/types.js";
 import { contractHeadSchema } from "../git/identity.js";
 import { reconcileEffectSchema } from "../git/reconcile.js";
 import { worktreeWorkspaceSchema } from "../git/workspace.js";
-import { auditReportSchema, type AuditReport } from "../protocol/audit.js";
+import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { completionEvidenceSchema } from "../protocol/completion.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import { materializedConflictSchema } from "../protocol/deliver.js";
@@ -30,8 +30,8 @@ import {
 } from "./refusal.js";
 import { regionOverlapSchema } from "./region.js";
 
-/** The seven Contract verbs, plus the World reset that shares the same envelope shape. */
-export type ContractVerb = "bind" | "amend" | "deliver" | "review" | "audit" | "arc" | "abandon";
+/** Contract operation tags, including preview, sharing the invocation envelope with World reset. */
+export type ContractVerb = "bind" | "amend" | "deliver" | "review" | "deliver-preview" | "arc" | "abandon";
 type OutcomeOperation = ContractVerb | "nuke";
 
 // ---------------------------------------------------------------------------
@@ -156,10 +156,6 @@ function surface(surface: PendingAction, required: boolean): PendingSurface {
 }
 
 function phasePending(operation: OutcomeOperation, value: unknown): readonly PendingSurface[] {
-  if (operation === "audit") {
-    const report = value as AuditReport | undefined;
-    return report?.verification?.kind === "stopped" ? [surface("verification", true)] : [];
-  }
   if (operation !== "review" && operation !== "deliver") return [];
   const concluded = value as
     | { verification?: { kind?: string }; placement?: unknown; continuation?: ContinuationReport }
@@ -456,7 +452,7 @@ const partialValueSchemas = {
   amend: amendEvidenceSchema,
   deliver: partialDeliverySchema,
   review: reviewSchema,
-  audit: auditReportSchema.partial(),
+  "deliver-preview": deliveryPreviewReportSchema.partial(),
   arc: z.object({}).strict(),
   abandon: z.object({}).strict(),
 } as const;
@@ -470,7 +466,7 @@ const journalEntrySchema = z.unknown().transform((value, context) => {
 });
 const envelopeFieldsSchema = z
   .object({
-    operation: z.enum(["bind", "amend", "deliver", "review", "audit", "arc", "abandon"]),
+    operation: z.enum(["bind", "amend", "deliver", "review", "deliver-preview", "arc", "abandon"]),
     contract: contractIdSchema.optional(),
     facts: z.array(journalEntrySchema).readonly(),
     effects: z.array(contractEffectSchema).readonly(),
@@ -573,7 +569,7 @@ const partialContractEnvelopeSchema = z.union([
   partialContractSchema("amend", partialValueSchemas.amend),
   partialContractSchema("deliver", partialValueSchemas.deliver),
   partialContractSchema("review", partialValueSchemas.review),
-  partialContractSchema("audit", partialValueSchemas.audit),
+  partialContractSchema("deliver-preview", partialValueSchemas["deliver-preview"]),
   partialContractSchema("arc", partialValueSchemas.arc),
   partialContractSchema("abandon", partialValueSchemas.abandon),
 ]);

@@ -39,7 +39,7 @@ independent verdict fact. A row without a delivery association states no
 candidate and shows recorded verification independently. A receipt that reports
 a Verification verdict names the snapshot that verdict covers and says whether
 this command reused a standing attestation or executed declarations, in the
-words the audit surface already uses; when that snapshot later lands, the
+words the standing-evidence surface already uses; when that snapshot later lands, the
 landing row names the same identity, and a completed placement also names the
 landed diff's shape in the one shared diffstat vocabulary. A terminal receipt
 names its appointed worktree's short name when it retired the worktree, and
@@ -181,8 +181,13 @@ wrapping. Selected Contract status foregrounds the phase's outcome or current
 work judgment; terminal status does not repeat delivery mechanics, workspace
 observation, its phase, or its age as bare rows beneath the header. When the
 target has moved, a delivered card labels its recorded integration as predating
-that movement. Audit states absent Verification obligations once in human words
+that movement. Delivery preview states absent Verification obligations once in human words
 and names observed target lag as counted or unknown when the target is placeable.
+It identifies itself as a dry-run observation, never a successful delivery; candidate
+preparation, standing verdicts, unmet requirements, and target followability stay
+distinct. A checkout already observed as unable to follow names its path and
+observed cause separately from target ref placeability; it does not claim that
+placement is refused.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual
@@ -197,7 +202,7 @@ exactly once, in the receipt: a failure receipt names the facts admitted before
 the failure and then names the failure in outcome vocabulary with its reason,
 and internal phase names never appear in receipt text. A stop on a retryable
 conflict names its retry class in that same outcome vocabulary, never a
-terminal or substantive mark for a stop that concluded nothing. For delivery, review, and audit, witnessed progress lives on the
+terminal or substantive mark for a stop that concluded nothing. For delivery, review, and delivery preview, witnessed progress lives on the
 progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation

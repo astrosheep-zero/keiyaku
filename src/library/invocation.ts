@@ -4,7 +4,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { ReconcileResult } from "../git/reconcile.js";
-import type { AuditReport } from "../protocol/audit.js";
+import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import type { CandidateCompletion, CompletionEvidence } from "../protocol/completion.js";
 import {
   observeExecution,
@@ -177,7 +177,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.extendConclusions(contract, { completion });
   }
 
-  recordAudit(contract: ContractId, report: Partial<AuditReport>): void {
+  recordDeliveryPreview(contract: ContractId, report: Partial<DeliveryPreviewReport>): void {
     this.extendConclusions(contract, report);
   }
 

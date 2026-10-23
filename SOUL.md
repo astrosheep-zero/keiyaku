@@ -23,7 +23,7 @@ AI-first CLI。caller 是 agent。human 不直接碰这个工具——human 指�
 worktree、动了哪个 ref、Git 变了什么——在命令返回里清晰但不啰嗦地摆
 出来。一行事实，不是一段解说。隐藏机械，就是把旗舰当 human 糊弄。
 
-- **提醒可以，指路不行。** Keiyaku 存在的目的就是助力，所以能助力的提醒是好的：当前契约在什么状态、卡在哪个关卡、这只 akuma 跑了多久、还可以 `wait --any` 等一群、`tell` 中途 steer——把**状态和可用的手**摆到她眼前。audit 显示 verification 结果、落后主线几个 commit、diff preview，都是助力。但到"摆出来"为止：**"下一步修测试"、"全绿了，请 merge"——这种话一个字不说。** 邮件列表从不告诉 Linus 该合哪个 patch。
+- **提醒可以，指路不行。** Keiyaku 存在的目的就是助力，所以能助力的提醒是好的：当前契约在什么状态、卡在哪个关卡、这只 akuma 跑了多久、还可以 `wait --any` 等一群、`tell` 中途 steer——把**状态和可用的手**摆到她眼前。deliver --dry-run 显示现有 verification evidence、落后主线几个 commit、diff preview，都是助力。但到"摆出来"为止：**"下一步修测试"、"全绿了，请 merge"——这种话一个字不说。** 邮件列表从不告诉 Linus 该合哪个 patch。
 - **不照做有代价，但那是天然的代价，不是 Keiyaku 加的刑罚。** Linus 不用邮件列表，协作成本就得自己扛——世界自己会收费，工具不在账单上再加一笔。绕开它，你只是拿不到它的助力；回来时，账本照样认你。决策权永远在她手里。
 - 不固化 workflow。每个动词都是她可以选的工具，不是她必须走的关卡。
 - spec 化契约、写面 region 重叠预警、自动 verification、merge/conflict 便利、review 绑 patch diff（mini gerrit）——这些存在的理由只有一个：让她对状态有**清晰的掌控**，而不是让她多填一张表。

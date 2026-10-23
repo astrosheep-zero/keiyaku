@@ -31,7 +31,7 @@ export type PlacementRefusal =
       contractId: ContractId;
       unmet: readonly UnmetPrerequisite[];
     }>;
-function unmetPrerequisites(
+export function unmetPrerequisites(
   prerequisites: readonly ContractId[],
   observation: ReadonlyMap<ContractId, ContractState | null>,
 ): readonly UnmetPrerequisite[] {

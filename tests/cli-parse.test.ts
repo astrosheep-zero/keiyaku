@@ -139,32 +139,26 @@ test("root version is recognized only after coordinates and help", () => {
   );
 });
 
-test("audit maps only --show-diff to the existing display choice", () => {
-  assert.deepEqual(command(["audit"]), {
-    command: "audit",
-    includeDirty: false,
-    showDiff: false,
-    output: "text",
+test("delivery dry-run parses preview options and rejects unused mutation options", () => {
+  const normal = {
+    command: "deliver", includeDirty: false, materializeConflict: false,
+    overwrite: false, dryRun: false, showDiff: false, output: "text",
+  };
+  assert.deepEqual(command(["deliver"]), normal);
+  assert.deepEqual(command(["deliver", "--dry-run"]), { ...normal, dryRun: true });
+  assert.deepEqual(command(["deliver", "kei/example", "--dry-run", "--show-diff", "--include-dirty"]), {
+    ...normal, contract: "kei/example", dryRun: true, includeDirty: true, showDiff: true,
   });
-  assert.deepEqual(command(["audit", "kei/example", "--show-diff", "--include-dirty"]), {
-    command: "audit",
-    contract: "kei/example",
-    includeDirty: true,
-    showDiff: true,
-    output: "text",
+  assert.deepEqual(command(["deliver", "@example", "--dry-run", "--show-diff", "--json"]), {
+    ...normal, contract: "@example", dryRun: true, showDiff: true, output: "json",
   });
-  assert.deepEqual(command(["audit", "@example", "--show-diff", "--json"]), {
-    command: "audit",
-    contract: "@example",
-    includeDirty: false,
-    showDiff: true,
-    output: "json",
-  });
-  assert.throws(() => parseArgv(["audit", "--diff"]), /option --diff is not valid for audit/u);
-  assert.throws(
-    () => parseArgv(["deliver", "kei/example", "--show-diff"]),
-    /option --show-diff is not valid for deliver/u,
-  );
+  assert.throws(() => parseArgv(["deliver", "--dry-run", "--diff"]), /option --diff is not valid for deliver/u);
+  assert.throws(() => parseArgv(["deliver", "--show-diff"]), /--show-diff requires --dry-run/u);
+  for (const options of [["--overwrite"], ["--materialize-conflict"], ["--message", "unused"]]) {
+    assert.throws(() => parseArgv(["deliver", "--dry-run", ...options]), /not valid with --dry-run/u);
+  }
+  assert.throws(() => parseArgv(["audit"]), CliUsageError);
+  assert.throws(() => parseArgv(["deliver-preview"]), CliUsageError);
 });
 
 test("show parses a standalone Contract guidance read with root coordinates", () => {

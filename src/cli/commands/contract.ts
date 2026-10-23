@@ -3,7 +3,7 @@ import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, listArchetypeDefinitions
 import type {
   ActorId,
   AkumaObservation,
-  AuditOutcome,
+  DeliveryPreviewOutcome,
   ContractHistory,
   ContractId,
   DeliverOutcome,
@@ -55,7 +55,7 @@ import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.j
 
 type ContractMutation = Extract<
   ParsedContractCommand,
-  { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" | "audit" }
+  { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" }
 >;
 type ExistingContractCommand = Exclude<ContractMutation, { command: "bind" }>;
 
@@ -86,7 +86,7 @@ async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<S
 
 /**
  * The process edge loads one Settings value and hands it to the private composition.
- * A forwarded audit/deliver/review is served by its parent, which loads its own.
+ * A forwarded preview/deliver/review is served by its parent, which loads its own.
  */
 async function contractSettings(
   command: ParsedContractCommand,
@@ -96,7 +96,7 @@ async function contractSettings(
 ): Promise<Settings | undefined> {
   const forwarded =
     executionChannel(execution).kind === "body-request" &&
-    (command.command === "audit" || command.command === "deliver" || command.command === "review");
+    (command.command === "deliver" || command.command === "review");
   if (forwarded) return undefined;
   return await settingsAt(world ?? undefined, home);
 }
@@ -214,7 +214,7 @@ async function contractLibrary(
   runtime: CliRuntime,
 ): Promise<KeiyakuLibrary> {
   const actor =
-    executionChannel(execution).kind === "local" && ["audit", "deliver", "review"].includes(command.command)
+    executionChannel(execution).kind === "local" && ["deliver", "review"].includes(command.command)
       ? actorFromEdge(undefined, runtime.environment)
       : undefined;
   return composeContractLibrary(execution, createKeiyakuHandle, {
@@ -292,6 +292,7 @@ async function runDeliver(
   runtime: CliRuntime,
   seat: ExistingSeat,
 ): Promise<number> {
+  if (command.dryRun) return await runDeliveryPreview(command, runtime, seat);
   const driver = command.output === "text" ? await runtime.progress() : undefined;
   let answer: DeliverOutcome;
   try {
@@ -370,15 +371,15 @@ async function runAbandon(
   return await finishContractAnswer(answer, command.output);
 }
 
-async function runAudit(
-  command: Extract<ContractMutation, { command: "audit" }>,
+async function runDeliveryPreview(
+  command: Extract<ContractMutation, { command: "deliver" }>,
   runtime: CliRuntime,
   seat: ExistingSeat,
 ): Promise<number> {
   const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: AuditOutcome;
+  let answer: DeliveryPreviewOutcome;
   try {
-    answer = await seat.contract.audit(
+    answer = await seat.contract.previewDelivery(
       {
         includeDirty: command.includeDirty,
         showDiff: command.showDiff,
@@ -407,8 +408,6 @@ async function runContractMutation(command: ContractMutation, input: ContractMut
       return await runArc(command, input.runtime, seat);
     case "abandon":
       return await runAbandon(command, seat);
-    case "audit":
-      return await runAudit(command, input.runtime, seat);
   }
 }
 

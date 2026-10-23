@@ -48,7 +48,7 @@ export const operationRetrySchemas = {
   amend: protocolTerminalSchema,
   deliver: keiyakuRetryReasonSchema,
   review: keiyakuRetryReasonSchema,
-  audit: keiyakuRetryReasonSchema,
+  "deliver-preview": keiyakuRetryReasonSchema,
   arc: protocolTerminalSchema,
   abandon: protocolTerminalSchema,
 } as const;
@@ -70,7 +70,7 @@ export const operationRefusalSchemas = {
     verificationDeclarationRefusalSchema,
   ]),
   review: z.union([activeContractRefusalSchema, worktreeMissingRefusalSchema, dirtyWorkspaceRefusalSchema]),
-  audit: z.union([deliverRefusalSchema, verificationDeclarationRefusalSchema]),
+  "deliver-preview": z.union([deliverRefusalSchema, verificationDeclarationRefusalSchema]),
   arc: activeContractRefusalSchema,
   abandon: activeContractRefusalSchema,
 } as const;

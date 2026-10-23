@@ -16,7 +16,7 @@ import { repairNamespaceContext } from "./debt/context.js";
 import { contractNamespace } from "./debt/identity.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
-const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!debts/\n!debts/**\n";
+const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n";
 const SEAT_IGNORE_BYTES = ".gitignore\nSKILL.md\n";
 const SEAT_SKILLS = [
   ["keiyaku-onboarding", CONTRACT_ONBOARDING_SKILL],

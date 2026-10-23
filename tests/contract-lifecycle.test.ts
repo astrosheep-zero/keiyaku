@@ -325,7 +325,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const observed = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: keiyaku.toJSON().contract });
     assert.ok(observed.kind === "present");
     assert.deepEqual(observed.row.verification, { kind: "undeclared" });
-    const audited = accepted(await keiyaku.audit());
+    const audited = accepted(await keiyaku.previewDelivery());
     assert.deepEqual(audited.value.verification, { kind: "undeclared" });
     assert.deepEqual(audited.value.delivery?.verification, { kind: "undeclared" });
     const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));

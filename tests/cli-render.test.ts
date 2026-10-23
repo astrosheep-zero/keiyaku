@@ -180,8 +180,8 @@ function acceptedDeliver(envelope: AcceptedEnvelope, value: DeliveryValue): Acce
 function acceptedReview(envelope: AcceptedEnvelope, value: AcceptedOf<"review">["value"]): AcceptedOf<"review"> {
   return acceptedReceipt({ operation: "review", ...envelope, value });
 }
-function acceptedAudit(envelope: AcceptedEnvelope, value: AcceptedOf<"audit">["value"]): AcceptedOf<"audit"> {
-  return acceptedReceipt({ operation: "audit", ...envelope, value });
+function acceptedPreview(envelope: AcceptedEnvelope, value: AcceptedOf<"deliver-preview">["value"]): AcceptedOf<"deliver-preview"> {
+  return acceptedReceipt({ operation: "deliver-preview", ...envelope, value });
 }
 function acceptedArc(envelope: AcceptedEnvelope): AcceptedOf<"arc"> {
   return acceptedReceipt({ operation: "arc", ...envelope, value: undefined });
@@ -1237,20 +1237,20 @@ test("verb receipts expose scratch residue while retained workspace remains type
   }
 });
 
-test("audit verification summary names declarations without changing raw evidence", () => {
+test("preview verification summary names declarations without changing raw evidence", () => {
   const summary = "[1 bash exit 1]";
-  const result = acceptedAudit(
+  const result = acceptedPreview(
     { contract: contractId("kei/missing") },
     {
       candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: contractId("kei/missing") } },
-      verification: { kind: "unsatisfied", passed: 0, total: 1, summary },
+      verification: { kind: "recorded", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"), verdict: "unsatisfied", summary },
       target: { kind: "not-observed" },
     },
   );
   assert.match(renderAccepted(result), /declaration 1 · bash exit 1/u);
   assert.doesNotMatch(renderAccepted(result), /\[1 bash exit 1\]/u);
   const verification = result.value.verification;
-  assert.equal(verification?.kind === "unsatisfied" ? verification.summary : undefined, summary);
+  assert.equal(verification?.kind === "recorded" ? verification.summary : undefined, summary);
 });
 
 test("refusals use reason and option for missing contract and nuke confirmation", () => {
@@ -1327,11 +1327,11 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
   assert.equal(JSON.parse(JSON.stringify(result)).value.tenderSnapshot, tender);
 });
 
-test("audit declares Verification once and names target lag from its typed report", () => {
+test("preview declares Verification once and names target lag from its typed report", () => {
   const contract = contractId("kei/audit-lag");
   const head = snapshotId("a".repeat(40));
   const integrated = snapshotId("b".repeat(40));
-  const base = acceptedAudit(
+  const base = acceptedPreview(
     { contract },
     {
       candidate: {
@@ -1343,6 +1343,7 @@ test("audit declares Verification once and names target lag from its typed repor
           method: "squash" as const,
           policy: { requireBranchesToBeUpToDate: false },
         },
+        requirements: { gates: [], unmetPrerequisites: [] },
         scope: { filesChanged: 0, insertions: 0, deletions: 0 },
       },
       delivery: {
@@ -1351,7 +1352,7 @@ test("audit declares Verification once and names target lag from its typed repor
         verification: { kind: "undeclared" as const },
       },
       verification: { kind: "undeclared" as const },
-      target: { kind: "placeable" as const, ref: "refs/heads/main", head },
+      target: { kind: "placeable" as const, ref: "refs/heads/main", head, checkouts: [] },
       targetLag: {
         kind: "counted" as const,
         behind: 3,
@@ -1363,7 +1364,7 @@ test("audit declares Verification once and names target lag from its typed repor
   assert.match(counted, /^  verification  none declared$/mu);
   assert.equal((counted.match(/verification/gu) ?? []).length, 1);
   assert.match(counted, /^  target  placeable  main @ aaaaaaa · behind 3$/mu);
-  const unknown = renderAccepted(acceptedAudit({ contract }, { ...base.value, targetLag: { kind: "unknown" } }));
+  const unknown = renderAccepted(acceptedPreview({ contract }, { ...base.value, targetLag: { kind: "unknown" } }));
   assert.match(unknown, /^  target  placeable  main @ aaaaaaa · behind unknown$/mu);
   assert.doesNotMatch(unknown, /behind 3|not.run|undeclared/u);
 });

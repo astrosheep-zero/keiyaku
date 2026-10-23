@@ -1,9 +1,20 @@
-import type { ContractAfterEdge, ContractGateReport, ContractRow, ContractWorkspaceObservation } from "../../index.js";
+import type { ContractAfterEdge, ContractRow, ContractWorkspaceObservation } from "../../index.js";
+
+type GateDisplayReport = Readonly<{
+  gate: string;
+  current: Readonly<
+    { kind: "missing" } | { kind: "stale" } | { kind: "attested"; verdict: "satisfied" | "unsatisfied" }
+  >;
+}>;
 
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
 
 export function shortGitId(value: string): string {
   return GIT_OBJECT_ID.test(value) ? value.slice(0, 7) : value;
+}
+
+export function contractOperationName(operation: string): string {
+  return operation === "deliver-preview" ? "deliver --dry-run" : operation;
 }
 
 export function gateDisplayName(gate: string): string {
@@ -34,13 +45,13 @@ export function progressStrip(row: Pick<ContractRow, "delivery" | "gates">): str
   return [delivery, ...gates].join("  ");
 }
 
-export function gateGlyph(report: ContractGateReport): string {
+export function gateGlyph(report: GateDisplayReport): string {
   if (report.current.kind === "stale") return "!";
   if (report.current.kind === "missing") return "○";
   return report.current.verdict === "satisfied" ? "✓" : "×";
 }
 
-export function gateFact(report: ContractGateReport): string {
+export function gateFact(report: GateDisplayReport): string {
   return `${gateGlyph(report)} ${gateDisplayName(report.gate)}${report.current.kind === "stale" ? " · stale" : ""}`;
 }
 

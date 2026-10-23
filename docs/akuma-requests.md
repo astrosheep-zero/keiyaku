@@ -3,6 +3,10 @@
 This chapter owns one-hop Body Request transport, service, and recovery.
 Permission vocabulary and admission are owned by [akuma-allowed.md](akuma-allowed.md).
 Verb owners alone define their payloads, results, and service evidence.
+Delivery preview retains the Contract request owner's one-hop transport as an
+unkeyed observation. Its descriptor is preview-only, preserves the native live
+result and failure evidence, and cannot invoke mutable delivery. Service evidence
+records observation, not candidate admission or placement.
 
 ## Transport And Authority
 

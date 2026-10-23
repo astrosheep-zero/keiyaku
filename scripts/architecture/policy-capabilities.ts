@@ -29,7 +29,7 @@ export const capabilityPolicy = {
         { source: "git/tender.ts", symbols: ["z"] },
         { source: "git/terminal-seal.ts", symbols: ["z"] },
         { source: "git/workspace.ts", symbols: ["z"] },
-        { source: "protocol/audit.ts", symbols: ["z"] },
+        { source: "protocol/delivery-preview.ts", symbols: ["z"] },
         { source: "protocol/attempt.ts", symbols: ["z"] },
         { source: "protocol/bind.ts", symbols: ["z"] },
         { source: "protocol/completion.ts", symbols: ["z"] },

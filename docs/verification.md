@@ -46,9 +46,9 @@ spawn failure, unknown exit, and caller cancellation admit no attestation.
 The producer captures its subject before execution, and admission never
 retargets it. A completed older observation remains truthful history even when
 it is no longer current. Generic lifecycle currentness alone decides whether
-that evidence satisfies a declared gate. With `verified` selected, audit may
-create evidence for a prospective candidate; it becomes current only if delivery
-later names the same candidate. Deliver reuses matching current satisfied evidence.
+that evidence satisfies a declared gate. Delivery preview only observes existing
+testimony against a prospective integration; it never executes or admits producer
+evidence. Deliver reuses matching current satisfied evidence.
 A current unsatisfied verdict remains evidence, but does not suppress execution
 on a later delivery:
 that invocation runs Verification once against its candidate and may supersede
@@ -62,8 +62,8 @@ attestation. Successful declaration output remains live execution evidence,
 not summary material that can displace failure diagnostics. The summary is not
 a log, artifact, report store, or source for callers to parse counts. A stopped producer is a typed public stop. Delivery can still
 report its independently observed placement stop, but does not perform placement
-until Verification and gates permit it. Audit independently observes target
-followability without placing it.
+until Verification and gates permit it. Delivery preview independently observes target
+followability without placing it or running Verification.
 
 Environment failures from configured scratch hooks preserve the hook's configured
 name and typed failure detail as their public recovery identity; the hook's

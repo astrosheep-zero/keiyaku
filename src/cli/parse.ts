@@ -157,7 +157,6 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
     case "review":
     case "arc":
     case "abandon":
-    case "audit":
     case "reconcile":
     case "region":
     case "show":

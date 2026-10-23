@@ -11,7 +11,7 @@ import { documentDiff } from "../markdown/diff.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
-import { auditOperation, type AuditReport } from "../protocol/audit.js";
+import { previewDeliveryOperation, type DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import { completeCandidate, type CompletionEvidence } from "../protocol/completion.js";
 import { admitDeliveryOperation } from "../protocol/deliver.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
@@ -37,8 +37,8 @@ import type {
   AmendOutcome,
   AmendValue,
   ArcOutcome,
-  AuditInput,
-  AuditOutcome,
+  DeliveryPreviewInput,
+  DeliveryPreviewOutcome,
   DeliverOutcome,
   MutationObservation,
   ReviewOutcome,
@@ -46,6 +46,7 @@ import type {
 import { acceptedOutcome, expected, retainAdmission } from "./contract-outcomes.js";
 import {
   derivedContractPolicy,
+  derivedFreshness,
   derivedGates,
   derivedHooks,
   gateNames,
@@ -425,9 +426,11 @@ export class ContractExecution {
     );
   }
 
-  async audit(input?: AuditInput, options?: MutationObservation): Promise<AuditOutcome> {
+  async previewDelivery(input?: DeliveryPreviewInput, options?: MutationObservation): Promise<DeliveryPreviewOutcome> {
     const values = validated(() =>
-      input === undefined ? undefined : requireInput(input, "audit input", ["includeDirty", "showDiff", "signal"]),
+      input === undefined
+        ? undefined
+        : requireInput(input, "delivery preview input", ["includeDirty", "showDiff", "signal"]),
     );
     const includeDirty = validated(() => optionalBoolean(values?.includeDirty, "includeDirty") ?? false);
     const showDiff = validated(() => optionalBoolean(values?.showDiff, "showDiff") ?? false);
@@ -435,28 +438,28 @@ export class ContractExecution {
     const observer = validated(() => observationOptions(options));
     const channel = executionChannel(this.execution);
     if (channel.kind === "body-request")
-      return await forwardedContractOutcome<"audit", AuditReport>({
+      return await forwardedContractOutcome<"deliver-preview", DeliveryPreviewReport>({
         directory: channel.directory,
-        action: "contract.audit",
+        action: "contract.preview-delivery",
         ...(observer === undefined ? {} : { observe: observer }),
         ...(signal === undefined ? {} : { signal }),
         request: {
-          action: "contract.audit",
+          action: "contract.preview-delivery",
           repoRoot: this.scope.primaryWorktree,
           contractId: this.id,
           includeDirty,
           showDiff,
         },
       });
-    const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
+    const requireBranchesToBeUpToDate = derivedFreshness(this.composition);
     return await this.local(
-      "audit",
+      "deliver-preview",
       async (
         accumulator,
         localChannel,
         scope,
-      ): Promise<OutcomeProjection<"audit", AuditReport, OperationRefusals["audit"]>> => {
-        const admission = await auditOperation({
+      ): Promise<OutcomeProjection<"deliver-preview", DeliveryPreviewReport, OperationRefusals["deliver-preview"]>> => {
+        const admission = await previewDeliveryOperation({
           scope,
           channel: localChannel,
           progress: accumulator,
@@ -469,14 +472,8 @@ export class ContractExecution {
           ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
         if (admission.kind !== "accepted") return expected(this.id, admission);
-        const report = await this.conclude(accumulator, {
-          scope,
-          channel: localChannel,
-          leading: admission,
-          hooks,
-          value: (value: AuditReport) => value,
-        });
-        return acceptedOutcome("audit", this.id, accumulator, report);
+        accumulator.recordDeliveryPreview(this.id, admission.value);
+        return { kind: "accepted", contract: this.id, head: admission.head, value: admission.value };
       },
       signal,
       observer,
@@ -661,7 +658,7 @@ function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: C
   throw new Error("confirmed delivery requires its own receipt");
 }
 
-async function forwardedContractOutcome<Operation extends "deliver" | "review" | "audit", Value>(
+async function forwardedContractOutcome<Operation extends "deliver" | "review" | "deliver-preview", Value>(
   input: Readonly<{
     directory: string;
     action: ContractRequest["action"];

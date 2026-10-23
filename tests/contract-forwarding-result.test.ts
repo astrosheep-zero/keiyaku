@@ -21,7 +21,7 @@ const deliveryResultSchema = outcomeSchema(
   materializedConflictSchema,
 );
 const reviewResultSchema = outcomeSchema("review", reviewSchema);
-const auditResultSchema = outcomeSchema("audit", auditReportSchema);
+const previewResultSchema = outcomeSchema("deliver-preview", deliveryPreviewReportSchema);
 
 const contract = contractId("kei/forwarding-codec");
 const head = contractHead("head");
@@ -253,7 +253,7 @@ test("malformed settlement lag and extra envelope fields are transport-integrity
   refusesDelivery({}, { pending: [{ surface: "cleanup", required: false, extra: true }] });
 });
 
-test("refusal, retry, review, audit, and materialized conflict variants round-trip", () => {
+test("refusal, retry, review, preview, and materialized conflict variants round-trip", () => {
   const refused = {
     operation: "deliver",
     kind: "refused",
@@ -304,22 +304,19 @@ test("refusal, retry, review, audit, and materialized conflict variants round-tr
 
   const audit = {
     kind: "accepted",
-    operation: "audit",
+    operation: "deliver-preview",
     contract,
     effects: [],
     facts: [],
     head,
     value: {
       candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
-      verification: {
-        kind: "stopped",
-        stop: { failure: "spawn-error", diagnostic: "spawn refused", stderr: "forwarded audit tail", truncated: true },
-      },
+      verification: { kind: "required" },
       target: { kind: "not-observed" },
     },
     pending: [],
   };
-  assert.deepEqual(auditResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
+  assert.deepEqual(previewResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
 
   const conflict = {
     operation: "deliver",
@@ -465,7 +462,7 @@ test("union branches refuse keys that belong to a different arm", () => {
     false,
   );
   assert.equal(
-    auditResultSchema.safeParse({
+    previewResultSchema.safeParse({
       kind: "accepted",
       operation: "deliver",
       contract,
@@ -525,10 +522,10 @@ test("union branches refuse keys that belong to a different arm", () => {
   });
 });
 
-function acceptedAudit(target: Record<string, unknown>) {
+function acceptedPreview(target: Record<string, unknown>) {
   return {
     kind: "accepted",
-    operation: "audit",
+    operation: "deliver-preview",
     contract,
     effects: [],
     facts: [],
@@ -542,22 +539,22 @@ function acceptedAudit(target: Record<string, unknown>) {
   };
 }
 
-function refusesAudit(target: Record<string, unknown>): void {
-  assert.equal(auditResultSchema.safeParse(acceptedAudit(target)).success, false);
+function refusesPreview(target: Record<string, unknown>): void {
+  assert.equal(previewResultSchema.safeParse(acceptedPreview(target)).success, false);
 }
 
-test("audit target and git lag arms refuse keys that belong to a different arm", () => {
-  refusesAudit({ kind: "not-observed", diagnostic: "no" });
-  refusesAudit({ kind: "placeable", ref: "refs/heads/main", head: snapshot, diagnostic: "no" });
-  refusesAudit({
+test("preview target and git lag arms refuse keys that belong to a different arm", () => {
+  refusesPreview({ kind: "not-observed", diagnostic: "no" });
+  refusesPreview({ kind: "placeable", ref: "refs/heads/main", head: snapshot, checkouts: [], diagnostic: "no" });
+  refusesPreview({
     kind: "moved",
     ref: "refs/heads/main",
     expected: snapshot,
     observed: null,
     diagnostic: "no",
   });
-  refusesAudit({ kind: "failed", diagnostic: "boom", ref: "refs/heads/main" });
-  refusesAudit({
+  refusesPreview({ kind: "failed", diagnostic: "boom", ref: "refs/heads/main" });
+  refusesPreview({
     kind: "refused",
     refusal: {
       kind: "checkout-not-followable",
@@ -662,7 +659,7 @@ test("forwarded worktree descriptors preserve strict nonblank grammar in handoff
   };
   const audit = {
     kind: "accepted",
-    operation: "audit",
+    operation: "deliver-preview",
     contract,
     effects: [],
     facts: [],
@@ -676,7 +673,7 @@ test("forwarded worktree descriptors preserve strict nonblank grammar in handoff
     },
   };
   assert.deepEqual(deliveryResultSchema.parse(JSON.parse(JSON.stringify(handoff))), handoff);
-  assert.deepEqual(auditResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
+  assert.deepEqual(previewResultSchema.parse(JSON.parse(JSON.stringify(audit))), audit);
   for (const invalid of [
     { ...workspace, path: " \t" },
     { ...workspace, foreign: true },
@@ -687,7 +684,7 @@ test("forwarded worktree descriptors preserve strict nonblank grammar in handoff
       false,
     );
     assert.equal(
-      auditResultSchema.safeParse({
+      previewResultSchema.safeParse({
         ...audit,
         value: { ...audit.value, targetLag: { ...audit.value.targetLag, subject: invalid } },
       }).success,
@@ -696,15 +693,15 @@ test("forwarded worktree descriptors preserve strict nonblank grammar in handoff
   }
 });
 
-test("forwarding retry is canonical only for deliver, review and audit, with unchanged operation narrowing", () => {
+test("forwarding retry is canonical only for deliver, review and preview, with unchanged operation narrowing", () => {
   const reason = { kind: "owner-reason-unavailable", diagnostic: "expired live answer" } as const;
   const admitsForwarding: {
     [Operation in keyof OperationRetries]: typeof reason extends OperationRetries[Operation] ? true : false;
-  } = { bind: false, amend: false, deliver: true, review: true, audit: true, arc: false, abandon: false };
-  for (const operation of ["deliver", "review", "audit"] as const) {
+  } = { bind: false, amend: false, deliver: true, review: true, "deliver-preview": true, arc: false, abandon: false };
+  for (const operation of ["deliver", "review", "deliver-preview"] as const) {
     assert.equal(operationRetrySchemas[operation], keiyakuRetryReasonSchema);
   }
-  for (const operation of ["bind", "amend", "deliver", "review", "audit", "arc", "abandon"] as const) {
+  for (const operation of ["bind", "amend", "deliver", "review", "deliver-preview", "arc", "abandon"] as const) {
     const schema = outcomeSchema(operation, reviewSchema);
     const retry = { kind: "retry", operation, contract, facts: [], effects: [], pending: [], reason };
     assert.equal(schema.safeParse(JSON.parse(JSON.stringify(retry))).success, admitsForwarding[operation]);
@@ -712,4 +709,4 @@ test("forwarding retry is canonical only for deliver, review and audit, with unc
   }
 });
 
-import { auditReportSchema } from "../src/protocol/audit.js";
+import { deliveryPreviewReportSchema } from "../src/protocol/delivery-preview.js";

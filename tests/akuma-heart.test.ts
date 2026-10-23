@@ -1615,7 +1615,7 @@ test("Soul caller attribution shares admission validation and preserves legal ab
 
 test("persisted ledger permissions survive the rename without adding capabilities", () => {
   const legacy = { ...codecSoul(), allowed: ["task.add", "task.start", "task.compose", "contract.audit"] };
-  assert.deepEqual(decodeSoul(legacy).allowed, ["contract.audit", "debt.add"]);
+  assert.deepEqual(decodeSoul(legacy).allowed, ["debt.add"]);
   assert.deepEqual(decodeSoul({ ...legacy, allowed: ["task.start"] }).allowed, []);
   assert.throws(() => decodeSoul({ ...legacy, allowed: ["task.unknown"] }), /unknown action/u);
 });

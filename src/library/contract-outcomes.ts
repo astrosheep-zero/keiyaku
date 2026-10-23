@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import type { ContractId, Gate } from "../core/facts/types.js";
-import type { AuditReport } from "../protocol/audit.js";
+import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { IntentOutcome, IntentRetry } from "../protocol/operations.js";
 import type { ContractWorkspaceLocation } from "../workspace-place.js";
@@ -30,13 +30,17 @@ export type DeliverOutcome =
   | OperationOutcome<"deliver", Delivery & DeliveryValue, OperationRefusals["deliver"]>
   | HandoffOutcome;
 export type ReviewOutcome = OperationOutcome<"review", Review, OperationRefusals["review"]>;
-export type AuditOutcome = OperationOutcome<"audit", AuditReport, OperationRefusals["audit"]>;
+export type DeliveryPreviewOutcome = OperationOutcome<
+  "deliver-preview",
+  DeliveryPreviewReport,
+  OperationRefusals["deliver-preview"]
+>;
 export type ArcOutcome = OperationOutcome<"arc", void, OperationRefusals["arc"]>;
 export type AbandonOutcome = OperationOutcome<"abandon", void, OperationRefusals["abandon"]>;
 
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 
-export type AuditInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
+export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
 
 export type BindResult = BindOutcome;
 

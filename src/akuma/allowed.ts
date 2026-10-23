@@ -5,7 +5,6 @@ const AKUMA_MUTATION_ACTIONS = Object.freeze(["akuma.call", "akuma.kill", "akuma
 
 export const ALLOWED_ACTIONS = Object.freeze([
   ...AKUMA_MUTATION_ACTIONS,
-  "contract.audit",
   "contract.deliver",
   "contract.review",
   ...DEBT_MUTATION_ACTIONS,
@@ -16,7 +15,6 @@ export type AllowedActions = readonly AllowedAction[];
 
 export const DEFAULT_ALLOWED_ACTIONS: AllowedActions = Object.freeze([
   ...AKUMA_MUTATION_ACTIONS,
-  "contract.audit",
   "contract.deliver",
   ...DEBT_MUTATION_ACTIONS,
 ]);
@@ -53,7 +51,7 @@ export function historicalAllowedActions(value: unknown): AllowedActions {
   if (!Array.isArray(value)) return decodeAllowedActions(value);
   // Persisted permissions retain the same surviving capabilities after rename;
   // removed planning/progress operations confer no replacement permission.
-  const retired = new Set(["task.compose", "task.start", "task.stop", "task.hold", "task.resume"]);
+  const retired = new Set(["contract.audit", "task.compose", "task.start", "task.stop", "task.hold", "task.resume"]);
   return decodeAllowedActions(
     value
       .filter((action) => !retired.has(action))
