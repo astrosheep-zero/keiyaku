@@ -308,7 +308,18 @@ test("native test compilation transforms syntax, maps original sources, and reje
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   mkdirSync(join(directory, "tests"));
   mkdirSync(join(directory, "build", "src"), { recursive: true });
-  mkdirSync(join(directory, "plugins"));
+  const native = join(directory, "plugins", "paseo", "plugin");
+  mkdirSync(native, { recursive: true });
+  mkdirSync(join(directory, "docs"));
+  mkdirSync(join(directory, "node_modules"));
+  const nativeSource = "import { readFileSync } from 'node:fs';\nexport const value: string = readFileSync(new URL('./loader.txt', import.meta.url), 'utf8');\n";
+  const asset = "native runtime asset\n";
+  writeFileSync(join(native, "index.ts"), nativeSource);
+  writeFileSync(join(native, "loader.txt"), asset);
+  const otherPlugin = join(directory, "plugins", "other");
+  mkdirSync(join(otherPlugin, "build"), { recursive: true });
+  writeFileSync(join(otherPlugin, "index.ts"), "export const value: string = 'source';\n");
+  writeFileSync(join(otherPlugin, "build", "index.js"), "export const value = 'release';\n");
   writeFileSync(join(directory, "package.json"), '{"type":"module"}');
   const source = join(directory, "tests", "transform.test.ts");
   writeFileSync(source, "enum Flag { Yes = 7 }\nclass Box { constructor(readonly value: number) {} }\nexport const value = new Box(Flag.Yes).value;\n");
@@ -325,6 +336,17 @@ test("native test compilation transforms syntax, maps original sources, and reje
   // The compiler reports the canonical filesystem spelling of its working
   // directory, which is not necessarily the spelling /tmp was handed to us as.
   assert.deepEqual(map.sources.map((entry) => realpathSync(fileURLToPath(entry))), [realpathSync(source)]);
+  const mirroredNative = join(directory, ".test-build", "plugins", "paseo", "plugin");
+  assert.equal((await import(pathToFileURL(join(mirroredNative, "index.js")).href)).value, asset);
+  assert.equal(readFileSync(join(mirroredNative, "index.ts"), "utf8"), nativeSource);
+  assert.deepEqual(readFileSync(join(mirroredNative, "loader.txt")), Buffer.from(asset));
+  assert.equal(readFileSync(join(native, "index.ts"), "utf8"), nativeSource);
+  assert.equal(existsSync(join(native, "index.js")), false, "compilation must not emit into the authored plugin");
+  const release = join(directory, ".test-build", "plugins", "other", "build", "index.js");
+  assert.equal((await import(pathToFileURL(release).href)).value, "release");
+  assert.equal(realpathSync(release), realpathSync(join(otherPlugin, "build", "index.js")));
+  assert.equal(existsSync(join(directory, ".test-build", "plugins", "other", "index.js")), false,
+    "other plugins must retain their release projection rather than compile their sources");
   writeFileSync(source, "export const broken: = ;");
   assert.notEqual(compile().status, 0, "invalid input must not silently produce executable tests");
 });
