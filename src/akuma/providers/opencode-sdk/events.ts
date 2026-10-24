@@ -9,6 +9,7 @@ import {
 import { nonnegativeCount, object, positiveLine, stringValue, text } from "../decode.js";
 
 type Emitter = { emit(event: AgentEvent): void };
+type NativeData = Readonly<Record<string, unknown>>;
 type State = {
   sessionId?: string;
   tools: Map<string, { name: string; call?: ToolCall }>;
@@ -19,35 +20,50 @@ export function diagnostic(value: unknown): string {
   const data = object(value);
   return text(data?.message) ?? text(object(data?.data)?.message) ?? "OpenCode execution failed";
 }
+function shellCall(value: NativeData | undefined): ToolCall {
+  return { kind: "run", command: text(value?.command) ?? "shell" };
+}
+function readCall(value: NativeData | undefined): ToolCall | undefined {
+  const path = text(value?.filePath) ?? text(value?.path);
+  if (path === undefined) return undefined;
+  return {
+    kind: "read",
+    path,
+    ...(positiveLine(value?.offset) === undefined ? {} : { offset: positiveLine(value?.offset)! }),
+    ...(positiveLine(value?.limit) === undefined ? {} : { limit: positiveLine(value?.limit)! }),
+  };
+}
+function searchCall(name: "grep" | "glob", value: NativeData | undefined): ToolCall | undefined {
+  const query = text(value?.pattern);
+  const path = text(value?.path);
+  if (query === undefined) return undefined;
+  return {
+    kind: "search",
+    scope: name === "glob" ? "files" : "content",
+    query,
+    ...(path === undefined ? {} : { path }),
+  };
+}
+function editCall(value: NativeData | undefined): ToolCall | undefined {
+  const path = text(value?.path);
+  if (path !== undefined) return { kind: "fileChange", changes: [{ op: "update", path }] };
+  return undefined;
+}
 function callFor(name: string, input: unknown): ToolCall {
   const value = object(input);
-  if (name === "shell") return { kind: "run", command: text(value?.command) ?? name };
-  if (name === "read") {
-    const path = text(value?.filePath) ?? text(value?.path);
-    if (path !== undefined)
-      return {
-        kind: "read",
-        path,
-        ...(positiveLine(value?.offset) === undefined ? {} : { offset: positiveLine(value?.offset)! }),
-        ...(positiveLine(value?.limit) === undefined ? {} : { limit: positiveLine(value?.limit)! }),
-      };
+  switch (name) {
+    case "shell":
+      return shellCall(value);
+    case "read":
+      return readCall(value) ?? otherToolCall(name, input);
+    case "grep":
+    case "glob":
+      return searchCall(name, value) ?? otherToolCall(name, input);
+    case "edit":
+      return editCall(value) ?? otherToolCall(name, input);
+    default:
+      return otherToolCall(name, input);
   }
-  if (name === "grep" || name === "glob") {
-    const query = text(value?.pattern);
-    const path = text(value?.path);
-    if (query !== undefined)
-      return {
-        kind: "search",
-        scope: name === "glob" ? "files" : "content",
-        query,
-        ...(path === undefined ? {} : { path }),
-      };
-  }
-  if (name === "edit") {
-    const path = text(value?.path);
-    if (path !== undefined) return { kind: "fileChange", changes: [{ op: "update", path }] };
-  }
-  return otherToolCall(name, input);
 }
 function observedChanges(metadata: unknown): Extract<ToolCall, { kind: "fileChange" }> | undefined {
   const files = object(metadata)?.files;
@@ -112,6 +128,43 @@ const DROPPED = new Set([
   "session.retry.scheduled",
 ]);
 
+function toolResult(type: string, data: NativeData): ToolResult {
+  const observed = output(data.content);
+  const nativeExit = object(data.metadata)?.exit;
+  const exit = typeof nativeExit === "number" && Number.isInteger(nativeExit) ? nativeExit : undefined;
+  return {
+    status: type === "session.tool.failed" || (exit !== undefined && exit !== 0) ? "error" : "ok",
+    ...(type === "session.tool.failed" ? { message: diagnostic(data.error) } : {}),
+    ...(observed === undefined ? {} : { output: observed }),
+    ...(exit === undefined ? {} : { exitCode: exit }),
+  };
+}
+function toolEvent(type: string, data: NativeData, events: Emitter, state: State): void {
+  const id = text(data.id);
+  const started = id === undefined ? undefined : state.tools.get(id);
+  if (id === undefined || started === undefined || state.completed.has(id)) return;
+  if (started.call === undefined) {
+    started.call = callFor(started.name, data.input);
+    events.emit({ type: "tool", phase: "started", id, name: started.name, call: started.call });
+  }
+  if (type === "session.tool.called") return;
+  if (started.name === "edit" || started.name === "patch" || started.name === "write") {
+    started.call = observedChanges(data.metadata) ?? started.call;
+  }
+  const result = toolResult(type, data);
+  state.completed.add(id);
+  events.emit({ type: "tool", phase: "completed", id, name: started.name, call: started.call, result });
+}
+function stepStarted(data: NativeData, events: Emitter): void {
+  const model = object(data.model);
+  const provider = text(model?.providerID);
+  const id = text(model?.id);
+  if (provider !== undefined && id !== undefined) events.emit(modelEvent(`${provider}/${id}`));
+}
+function toolInputStarted(data: NativeData, state: State): void {
+  if (typeof data.id === "string" && typeof data.name === "string") state.tools.set(data.id, { name: data.name });
+}
+
 /** Only complete native values enter narration. The caller enforces submission/step correlation. */
 export function mapEvent(value: unknown, events: Emitter, state: State): void {
   const event = object(value);
@@ -119,57 +172,35 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   const data = object(event.data) ?? {};
   if (state.sessionId !== undefined && data.sessionID !== state.sessionId) return;
   const type = event.type;
-  if (type === "session.step.started") {
-    const model = object(data.model);
-    const provider = text(model?.providerID);
-    const id = text(model?.id);
-    if (provider !== undefined && id !== undefined) events.emit(modelEvent(`${provider}/${id}`));
-    return;
+  switch (type) {
+    case "session.step.started":
+      stepStarted(data, events);
+      return;
+    case "session.text.ended":
+    case "session.reasoning.ended":
+      if (typeof data.text === "string")
+        events.emit({ type: type === "session.text.ended" ? "assistant" : "thought", text: data.text });
+      return;
+    case "session.tool.input.started":
+      toolInputStarted(data, state);
+      return;
+    case "session.tool.called":
+    case "session.tool.success":
+    case "session.tool.failed":
+      toolEvent(type, data, events, state);
+      return;
+    case "session.compaction.ended":
+      events.emit(noteEvent("Context compacted"));
+      return;
+    case "session.compaction.failed":
+      events.emit(noteEvent(diagnostic(data.error)));
+      return;
+    case "session.compaction.started":
+    case "session.compaction.delta":
+      return;
+    default:
+      if (!DROPPED.has(type)) events.emit({ type: "unknown", kind: type });
   }
-  if (type === "session.text.ended" || type === "session.reasoning.ended") {
-    if (typeof data.text === "string")
-      events.emit({ type: type === "session.text.ended" ? "assistant" : "thought", text: data.text });
-    return;
-  }
-  if (type === "session.tool.input.started") {
-    if (typeof data.id === "string" && typeof data.name === "string") state.tools.set(data.id, { name: data.name });
-    return;
-  }
-  if (type === "session.tool.called" || type === "session.tool.success" || type === "session.tool.failed") {
-    const id = text(data.id);
-    const started = id === undefined ? undefined : state.tools.get(id);
-    if (id === undefined || started === undefined || state.completed.has(id)) return;
-    if (started.call === undefined) {
-      started.call = callFor(started.name, data.input);
-      events.emit({ type: "tool", phase: "started", id, name: started.name, call: started.call });
-    }
-    if (type === "session.tool.called") return;
-    if (started.name === "edit" || started.name === "patch" || started.name === "write") {
-      started.call = observedChanges(data.metadata) ?? started.call;
-    }
-    const observed = output(data.content);
-    const nativeExit = object(data.metadata)?.exit;
-    const exit = typeof nativeExit === "number" && Number.isInteger(nativeExit) ? nativeExit : undefined;
-    const result: ToolResult = {
-      status: type === "session.tool.failed" || (exit !== undefined && exit !== 0) ? "error" : "ok",
-      ...(type === "session.tool.failed" ? { message: diagnostic(data.error) } : {}),
-      ...(observed === undefined ? {} : { output: observed }),
-      ...(exit === undefined ? {} : { exitCode: exit }),
-    };
-    state.completed.add(id);
-    events.emit({ type: "tool", phase: "completed", id, name: started.name, call: started.call, result });
-    return;
-  }
-  if (type === "session.compaction.ended") {
-    events.emit(noteEvent("Context compacted"));
-    return;
-  }
-  if (type === "session.compaction.failed") {
-    events.emit(noteEvent(diagnostic(data.error)));
-    return;
-  }
-  if (type === "session.compaction.started" || type === "session.compaction.delta" || DROPPED.has(type)) return;
-  events.emit({ type: "unknown", kind: type });
 }
 export function createEventState(sessionId?: string): State {
   return { ...(sessionId === undefined ? {} : { sessionId }), tools: new Map(), completed: new Set() };
