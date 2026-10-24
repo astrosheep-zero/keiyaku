@@ -484,9 +484,12 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   assert.ok(checkout.kind === "not-followable");
   assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate|not uptodate.*delivered\.txt/su);
   const text = renderDeliveryPreview(preview, { columns: 200, color: false });
+  // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged
+  // without display whitespace while the whole rendering stays in the failure evidence.
+  const displayed = text.replace(/\s+/gu, "");
   assert.match(text, /target  placeable/u);
   assert.ok(text.includes(`checkout cannot follow  ${repository.path}`));
-  assert.ok(text.includes("not uptodate"));
+  assert.ok(displayed.includes("notuptodate"), `preview must render the checkout diagnostic; got:\n${text}`);
   const schema = outcomeSchema("deliver-preview", deliveryPreviewReportSchema);
   assert.deepEqual(schema.parse(JSON.parse(JSON.stringify(preview))), preview, "live forwarding retains checkout diagnostics");
   assert.deepEqual(custodySnapshot(repository, worktree), before);
