@@ -1584,14 +1584,17 @@ test("soul codec hard-fails invalid known members", () => {
 
 
 
-test("Soul caller attribution shares admission validation and preserves legal absence", async () => {
+test("Soul caller attribution shares admission validation and preserves legal absence", async (context) => {
   const { decodeAkumaCaller, projectAkumaBirth } = await import("../src/akuma/caller.js");
   const unknown = decodeSoul(codecSoul());
   assert.equal("caller" in unknown, false);
   assert.deepEqual(projectAkumaBirth(unknown).caller, { kind: "unknown" });
   assert.equal(JSON.stringify(unknown).includes('"caller"'), false);
+  // Attribution stores a canonical coordinate, so an absent World is admitted without a lookup.
+  const absentWorld = join(temporaryDirectory(context, "keiyaku-akuma-caller-"), "nonexistent-world");
+  assert.equal(existsSync(absentWorld), false);
   for (const caller of [
-    { kind: "akuma", world: "/nonexistent/world", akuId: "aku/delegator/1234abcd" },
+    { kind: "akuma", world: absentWorld, akuId: "aku/delegator/1234abcd" },
     { kind: "external", integration: "slack", id: "channel:thread" },
   ]) {
     const admitted = decodeAkumaCaller(caller);
@@ -1602,7 +1605,7 @@ test("Soul caller attribution shares admission validation and preserves legal ab
     null, { kind: "unknown" },
     { kind: "akuma", world: "relative", akuId: "aku/parent/1234abcd" },
     { kind: "akuma", world: "/world/../elsewhere", akuId: "aku/parent/1234abcd" },
-    { kind: "akuma", world: "/world", akuId: "aku/Parent/1234abcd" },
+    { kind: "akuma", world: absentWorld, akuId: "aku/Parent/1234abcd" },
     { kind: "external", integration: "Upper", id: "id" },
     { kind: "external", integration: "slack", id: " " },
     { kind: "external", integration: "slack", id: "a\u0000b" },
