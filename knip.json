@@ -1,6 +1,30 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["src/akuma-body.ts"],
-  "project": ["src/**/*.ts", "scripts/**/*.ts"],
-  "ignoreDependencies": ["prettier", "@astrosheep/keiyaku-plugin-square"]
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/akuma-body.ts",
+        "scripts/*.{js,mjs,ts}",
+        "tests/**/*.test.{js,mjs,ts}",
+        "tests/**/*.e2e.ts",
+        "tests/support/*.mjs",
+        "tests/fixtures/consumers/*.ts",
+        "plugins/pi/keiyaku.ts",
+        "plugins/paseo/plugin/index.server.ts",
+        "experiments/**/*.test.ts",
+        "experiments/pi-inprocess/extension.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "scripts/**/*.{js,mjs,ts}",
+        "tests/**/*.{js,mjs,ts}",
+        "plugins/pi/**/*.ts",
+        "plugins/paseo/plugin/**/*.ts",
+        "experiments/**/*.ts"
+      ]
+    },
+    "plugins/paseo/forwarder": {
+      "entry": ["index.ts", "backfill-titles.mjs"]
+    }
+  }
 }
