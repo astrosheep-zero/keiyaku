@@ -361,8 +361,17 @@ async function executeProcess(
   await terminate();
   output.finish();
 
-  const pid = child.pid ?? null;
   const capture = capturedOutput(stdout.result(), stderr.result(), consumeStdout !== undefined);
+  return processConsumption(terminal, capture, child.pid ?? null, streamError, stop);
+}
+
+function processConsumption(
+  terminal: Exclude<ProcessEnd, { kind: "termination-error" }>,
+  capture: ProcessCapture,
+  pid: number | null,
+  streamError: unknown,
+  stop: "timeout" | "cancelled" | undefined,
+): ProcessConsumption {
   if (terminal.kind === "spawn-error") {
     return { outcome: { kind: "spawn-error", diagnostic: terminal.error.message, ...capture }, pid };
   }
