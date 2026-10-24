@@ -109,47 +109,51 @@ async function availablePort(): Promise<number> {
     });
   });
 }
-export async function loadOpencode(
-  input: Readonly<{
-    execution: ProviderExecution;
-    cwd: string;
-    signal: AbortSignal;
-    loader?: OpencodeSdkLoader;
-    onRuntime?: (runtime: OpencodeRuntime) => void;
-    requests?: string;
-  }>,
-): Promise<OpencodeRuntime> {
-  const { execution, cwd, signal, loader, onRuntime, requests } = input;
-  if (loader !== undefined) {
-    const loaded = await abortable(
-      loader(
-        cwd,
-        {
-          ...execution,
-          env: akumaExecutionEnvironment(process.env, execution.env, requests),
-        },
-        signal,
-      ),
+type LoadOpencodeInput = Readonly<{
+  execution: ProviderExecution;
+  cwd: string;
+  signal: AbortSignal;
+  loader?: OpencodeSdkLoader;
+  onRuntime?: (runtime: OpencodeRuntime) => void;
+  requests?: string;
+}>;
+export async function loadOpencode(input: LoadOpencodeInput): Promise<OpencodeRuntime> {
+  const { loader } = input;
+  return loader === undefined ? loadNativeOpencode(input) : loadInjectedOpencode(input, loader);
+}
+async function loadInjectedOpencode(input: LoadOpencodeInput, loader: OpencodeSdkLoader): Promise<OpencodeRuntime> {
+  const { execution, cwd, signal, onRuntime, requests } = input;
+  const loaded = await abortable(
+    loader(
+      cwd,
+      {
+        ...execution,
+        env: akumaExecutionEnvironment(process.env, execution.env, requests),
+      },
       signal,
-    );
-    let closing: Promise<void> | undefined;
-    const runtime = {
-      client: loaded.client,
-      close: () =>
-        (closing ??= Promise.resolve()
-          .then(() => loaded.close?.())
-          .then(() => undefined)),
-    };
-    onRuntime?.(runtime);
-    try {
-      if (loaded.ready !== undefined) await abortable(loaded.ready, signal);
-      signal.throwIfAborted();
-      return runtime;
-    } catch (error) {
-      await runtime.close();
-      throw error;
-    }
+    ),
+    signal,
+  );
+  let closing: Promise<void> | undefined;
+  const runtime = {
+    client: loaded.client,
+    close: () =>
+      (closing ??= Promise.resolve()
+        .then(() => loaded.close?.())
+        .then(() => undefined)),
+  };
+  onRuntime?.(runtime);
+  try {
+    if (loaded.ready !== undefined) await abortable(loaded.ready, signal);
+    signal.throwIfAborted();
+    return runtime;
+  } catch (error) {
+    await runtime.close();
+    throw error;
   }
+}
+async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRuntime> {
+  const { execution, cwd, signal, onRuntime, requests } = input;
   const port = await availablePort();
   signal.throwIfAborted();
   const password =
