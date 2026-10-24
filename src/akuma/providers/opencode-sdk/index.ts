@@ -109,18 +109,70 @@ async function answer(
   }
   return { kind: "answered", answer: text, historyId: boundary };
 }
-async function observe(
-  input: Readonly<{
-    runtime: OpencodeRuntime;
-    stream: OwnedEventStream;
-    id: string;
-    admission: ReturnType<typeof liveAdmission>;
-    events: AgentEventChannel;
-  }>,
-): Promise<TurnResult> {
-  const state = createEventState(input.id);
-  let delivered: string | undefined;
-  let step: { id: string; input: string; ended: boolean } | undefined;
+type ObservationInput = Readonly<{
+  runtime: OpencodeRuntime;
+  stream: OwnedEventStream;
+  id: string;
+  admission: ReturnType<typeof liveAdmission>;
+  events: AgentEventChannel;
+}>;
+type ObservationState = {
+  narration: ReturnType<typeof createEventState>;
+  delivered: string | undefined;
+  step: { id: string; input: string; ended: boolean } | undefined;
+};
+function executionResult(
+  input: ObservationInput,
+  state: ObservationState,
+  event: Record<string, unknown> | undefined,
+  data: Record<string, unknown>,
+): TurnResult | Promise<TurnResult> | undefined {
+  const type = event?.type;
+  if (type === "session.step.failed" || type === "session.execution.failed") {
+    return { kind: "failed", diagnostic: diagnostic(data.error) };
+  }
+  if (type === "session.execution.interrupted")
+    return { kind: "failed", diagnostic: "OpenCode native execution interrupted" };
+  if (type !== "session.execution.succeeded" || state.delivered === undefined) return;
+  const step = state.step;
+  if (step === undefined || !step.ended || step.input !== input.admission.latest()) {
+    return { kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input" };
+  }
+  const terminalID = nonblank(event?.id);
+  if (terminalID === undefined || !terminalID.startsWith("evt_"))
+    return { kind: "failed", diagnostic: "OpenCode terminal identity missing" };
+  return answer(input.runtime, input.id, step.id, terminalID);
+}
+function observeEvent(
+  input: ObservationInput,
+  state: ObservationState,
+  event: Record<string, unknown> | undefined,
+  data: Record<string, unknown>,
+): TurnResult | Promise<TurnResult> | undefined {
+  const type = event?.type;
+  if (type === "session.inbox.enqueued" && typeof data.inboxID === "string" && object(data.item)?.type === "user") {
+    input.admission.admit(data.inboxID);
+  }
+  if (type === "session.inbox.delivered" && typeof data.inboxID === "string") {
+    if (!input.admission.owns(data.inboxID)) {
+      return {
+        kind: "failed",
+        diagnostic: "OpenCode consumed another writer's input; exact answer attribution unavailable",
+      };
+    }
+    input.admission.admit(data.inboxID);
+    state.delivered = data.inboxID;
+  }
+  if (type === "session.step.started" && state.delivered !== undefined && typeof data.assistantMessageID === "string") {
+    state.step = { id: data.assistantMessageID, input: state.delivered, ended: false };
+  }
+  if (data.assistantMessageID !== undefined && data.assistantMessageID !== state.step?.id) return;
+  if (state.delivered !== undefined) mapEvent(event, input.events, state.narration);
+  if (type === "session.step.ended" && state.step !== undefined) state.step.ended = true;
+  return executionResult(input, state, event, data);
+}
+async function observe(input: ObservationInput): Promise<TurnResult> {
+  const state: ObservationState = { narration: createEventState(input.id), delivered: undefined, step: undefined };
   try {
     for (;;) {
       const next = await input.stream.next();
@@ -128,44 +180,41 @@ async function observe(
       const event = object(next.value);
       const data = object(event?.data);
       if (data?.sessionID !== input.id) continue;
-      const type = event?.type;
-      if (type === "session.inbox.enqueued" && typeof data.inboxID === "string" && object(data.item)?.type === "user") {
-        input.admission.admit(data.inboxID);
-      }
-      if (type === "session.inbox.delivered" && typeof data.inboxID === "string") {
-        if (!input.admission.owns(data.inboxID)) {
-          return {
-            kind: "failed",
-            diagnostic: "OpenCode consumed another writer's input; exact answer attribution unavailable",
-          };
-        }
-        input.admission.admit(data.inboxID);
-        delivered = data.inboxID;
-      }
-      if (type === "session.step.started" && delivered !== undefined && typeof data.assistantMessageID === "string") {
-        step = { id: data.assistantMessageID, input: delivered, ended: false };
-      }
-      if (data.assistantMessageID !== undefined && data.assistantMessageID !== step?.id) continue;
-      if (delivered !== undefined) mapEvent(event, input.events, state);
-      if (type === "session.step.ended" && step !== undefined) step.ended = true;
-      if (type === "session.step.failed" || type === "session.execution.failed") {
-        return { kind: "failed", diagnostic: diagnostic(data.error) };
-      }
-      if (type === "session.execution.interrupted")
-        return { kind: "failed", diagnostic: "OpenCode native execution interrupted" };
-      if (type !== "session.execution.succeeded" || delivered === undefined) continue;
-      if (step === undefined || !step.ended || step.input !== input.admission.latest()) {
-        return { kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input" };
-      }
-      const terminalID = nonblank(event?.id);
-      if (terminalID === undefined || !terminalID.startsWith("evt_"))
-        return { kind: "failed", diagnostic: "OpenCode terminal identity missing" };
-      return await answer(input.runtime, input.id, step.id, terminalID);
+      const result = observeEvent(input, state, event, data);
+      if (result !== undefined) return await result;
     }
   } catch (error) {
     return { kind: "failed", diagnostic: `OpenCode observation failed: ${diagnostic(error)}` };
   } finally {
     input.admission.end();
+  }
+}
+type NativeModel = ReturnType<typeof parseModel> & Readonly<{ variant?: string }>;
+async function configureSession(
+  runtime: OpencodeRuntime,
+  input: Input,
+  id: string,
+  info: Record<string, unknown> | undefined,
+  model: NativeModel | undefined,
+): Promise<void> {
+  const session = runtime.client.session;
+  let selected = object(info?.model);
+  if (input.session.kind === "resume" && model !== undefined) {
+    await session.switchModel({ id, model });
+    selected = object(object(object(await session.get({ id }))?.data)?.model);
+  }
+  if (
+    model !== undefined &&
+    (selected?.providerID !== model.providerID ||
+      selected.id !== model.id ||
+      (selected.variant ?? "default") !== (input.options.effort ?? "default"))
+  ) {
+    throw new Error("OpenCode did not select the requested model");
+  }
+  if (input.options.systemPrompt !== undefined) {
+    // Native instruction entries join the system transcript and survive resume
+    // and fork. Updating the same entry announces an upstream instruction change.
+    await session.instructions({ id, text: input.options.systemPrompt });
   }
 }
 async function openSession(runtime: OpencodeRuntime, input: Input): Promise<string> {
@@ -189,35 +238,15 @@ async function openSession(runtime: OpencodeRuntime, input: Input): Promise<stri
   const active = object(object(await session.active())?.data);
   if (active === undefined) throw new Error("OpenCode active execution response missing");
   if (active[id] !== undefined) throw new Error("OpenCode native session is already busy");
-  let selected = object(info?.model);
-  if (input.session.kind === "resume" && model !== undefined) {
-    await session.switchModel({ id, model });
-    selected = object(object(object(await session.get({ id }))?.data)?.model);
-  }
-  if (
-    model !== undefined &&
-    (selected?.providerID !== model.providerID ||
-      selected.id !== model.id ||
-      (selected.variant ?? "default") !== (input.options.effort ?? "default"))
-  ) {
-    throw new Error("OpenCode did not select the requested model");
-  }
-  if (input.options.systemPrompt !== undefined) {
-    // Native instruction entries join the system transcript and survive resume
-    // and fork. Updating the same entry announces an upstream instruction change.
-    await session.instructions({ id, text: input.options.systemPrompt });
-  }
+  await configureSession(runtime, input, id, info, model);
   return id;
 }
-async function drive(
+async function openResources(
   execution: ProviderExecution,
   input: Input,
   loader: OpencodeSdkLoader | undefined,
   custody: AttemptCustody,
-): Promise<Session> {
-  admit(input.options);
-  if (input.schemaJson !== undefined) throw new Error("OpenCode v2 does not expose native structured answer schemas");
-  if (input.session.kind === "resume") sessionId(input.session.coordinate);
+) {
   let closeRuntime!: () => Promise<void>;
   const runtime = await loadOpencode({
     execution,
@@ -237,89 +266,111 @@ async function drive(
   });
   let closing: Promise<void> | undefined;
   const close = () => (closing ??= Promise.all([stream.retire(), closeRuntime()]).then(() => undefined));
-  try {
-    const id = await openSession(runtime, input);
-    await stream.ready;
-    custody.signal.throwIfAborted();
-    const events = new AgentEventChannel();
-    events.emit({ type: "session", coordinate: coordinate(id) });
-    let sequence = 0;
-    const initial = messageId(sequence++);
-    const admission = liveAdmission(initial);
-    let control: Promise<unknown> | undefined;
-    let finishing = false;
-    let finish!: (result: TurnResult) => Promise<void>;
-    const completion = new Promise<TurnResult>((resolve) => {
-      let settlement: Promise<void> | undefined;
-      finish = (result) => {
-        finishing = true;
-        return (settlement ??= (async () => {
-          await close();
-          events.end();
-          resolve(result);
-        })());
+  return { runtime, stream, close };
+}
+async function submitPrompt(runtime: OpencodeRuntime, id: string, nativeID: string, text: string): Promise<void> {
+  const response = object(object(await runtime.client.session.prompt({ id, body: { id: nativeID, text } }))?.data);
+  if (response?.id !== nativeID || response.sessionID !== id || response.type !== "user") {
+    throw new Error("OpenCode returned no exact native inbox admission");
+  }
+}
+async function openTurn(
+  input: Input,
+  signal: AbortSignal,
+  resources: Awaited<ReturnType<typeof openResources>>,
+  id: string,
+): Promise<Session> {
+  const { runtime, stream, close } = resources;
+  const events = new AgentEventChannel();
+  events.emit({ type: "session", coordinate: coordinate(id) });
+  let sequence = 0;
+  const initial = messageId(sequence++);
+  const admission = liveAdmission(initial);
+  let control: Promise<unknown> | undefined;
+  let finishing = false;
+  let finish!: (result: TurnResult) => Promise<void>;
+  const completion = new Promise<TurnResult>((resolve) => {
+    let settlement: Promise<void> | undefined;
+    finish = (result) => {
+      finishing = true;
+      return (settlement ??= (async () => {
+        await close();
+        events.end();
+        resolve(result);
+      })());
+    };
+  });
+  const observed = observe({ runtime, stream, id, admission, events });
+  // Start observation before submission: admission broadcasts can precede HTTP completion.
+  void observed
+    .then(async (result) => {
+      // Explicit interrupt owns its response too: a terminal broadcast can be
+      // published before that response, and must not close its connection early.
+      if (control !== undefined) await control;
+      await finish(result);
+    })
+    .catch(() => undefined);
+  const prompt = (nativeID: string, text: string) => submitPrompt(runtime, id, nativeID, text);
+  await prompt(initial, launchPrompt(input.body, input.launchTells));
+  signal.throwIfAborted();
+  let submissions: Promise<void> = admission.initial.then(() => undefined);
+  return {
+    admission: { fence: initial },
+    events,
+    completion,
+    tell(tell) {
+      const submit = async () => {
+        if (!admission.open()) return { kind: "turn-ended" } as const;
+        const nativeID = messageId(sequence++);
+        const receipt = admission.wait(nativeID);
+        void prompt(nativeID, tell.text).catch((error: unknown) => admission.fail(nativeID, error));
+        return await receipt;
       };
-    });
-    const observed = observe({ runtime, stream, id, admission, events });
-    // Start observation before submission: admission broadcasts can precede HTTP completion.
-    void observed
-      .then(async (result) => {
-        // Explicit interrupt owns its response too: a terminal broadcast can be
-        // published before that response, and must not close its connection early.
-        if (control !== undefined) await control;
-        await finish(result);
-      })
-      .catch(() => undefined);
-    const prompt = async (nativeID: string, text: string) => {
-      const response = object(object(await runtime.client.session.prompt({ id, body: { id: nativeID, text } }))?.data);
-      if (response?.id !== nativeID || response.sessionID !== id || response.type !== "user") {
-        throw new Error("OpenCode returned no exact native inbox admission");
+      const next = submissions.then(submit);
+      submissions = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      return next;
+    },
+    abort: async () => {
+      admission.end();
+      if (finishing) {
+        await close();
+        return;
       }
-    };
-    await prompt(initial, launchPrompt(input.body, input.launchTells));
+      // The v2 interrupt response follows execution settlement. Do not hide its
+      // refusal; server and connection retirement must still run on failure.
+      control ??= runtime.client.session.interrupt({ id });
+      try {
+        await control;
+      } finally {
+        await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
+      }
+    },
+    forceDispose: async () => {
+      admission.end();
+      await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
+    },
+  };
+}
+async function drive(
+  execution: ProviderExecution,
+  input: Input,
+  loader: OpencodeSdkLoader | undefined,
+  custody: AttemptCustody,
+): Promise<Session> {
+  admit(input.options);
+  if (input.schemaJson !== undefined) throw new Error("OpenCode v2 does not expose native structured answer schemas");
+  if (input.session.kind === "resume") sessionId(input.session.coordinate);
+  const resources = await openResources(execution, input, loader, custody);
+  try {
+    const id = await openSession(resources.runtime, input);
+    await resources.stream.ready;
     custody.signal.throwIfAborted();
-    let submissions: Promise<void> = admission.initial.then(() => undefined);
-    return {
-      admission: { fence: initial },
-      events,
-      completion,
-      tell(tell) {
-        const submit = async () => {
-          if (!admission.open()) return { kind: "turn-ended" } as const;
-          const nativeID = messageId(sequence++);
-          const receipt = admission.wait(nativeID);
-          void prompt(nativeID, tell.text).catch((error: unknown) => admission.fail(nativeID, error));
-          return await receipt;
-        };
-        const next = submissions.then(submit);
-        submissions = next.then(
-          () => undefined,
-          () => undefined,
-        );
-        return next;
-      },
-      abort: async () => {
-        admission.end();
-        if (finishing) {
-          await close();
-          return;
-        }
-        // The v2 interrupt response follows execution settlement. Do not hide its
-        // refusal; server and connection retirement must still run on failure.
-        control ??= runtime.client.session.interrupt({ id });
-        try {
-          await control;
-        } finally {
-          await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
-        }
-      },
-      forceDispose: async () => {
-        admission.end();
-        await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
-      },
-    };
+    return await openTurn(input, custody.signal, resources, id);
   } catch (error) {
-    await close();
+    await resources.close();
     throw error;
   }
 }
