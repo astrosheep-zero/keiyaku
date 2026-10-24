@@ -373,8 +373,7 @@ export class AkumaOwner {
           return {
             outcome: end?.outcome ?? null,
             completedAt: end?.completedAt ?? null,
-            terminalWithoutTurn:
-              (tell.state === "told" && tell.binding === undefined) || progress === "stopped",
+            terminalWithoutTurn: (tell.state === "told" && tell.binding === undefined) || progress === "stopped",
           };
         },
         complete: (observed) => observed.outcome !== null || observed.terminalWithoutTurn,

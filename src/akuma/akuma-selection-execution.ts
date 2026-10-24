@@ -117,7 +117,10 @@ export async function observeAdmittedAskAkuma(
       settled = receipt;
       wakeState = receipt.wake.kind === "failed" ? "failed" : "settled";
     },
-    (error: unknown) => { wakeError = { error }; wakeState = "failed"; },
+    (error: unknown) => {
+      wakeError = { error };
+      wakeState = "failed";
+    },
   );
   const admittedAt = Date.parse(tell.row.at);
   const observedAt = performance.timeOrigin + performance.now();
