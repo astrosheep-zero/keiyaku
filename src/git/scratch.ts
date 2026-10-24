@@ -11,6 +11,7 @@ import {
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, gitRefLocator, gitObjectIdForSnapshot } from "./identity.js";
 import { executeGit, type GitRepository } from "./process.js";
+import { registeredWorktreePaths } from "./repository.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
@@ -31,9 +32,23 @@ type CollectableScratchWorktree = Readonly<{
 
 export const worktreeLeakSchema = z.object({ path: z.string().optional(), diagnostic: z.string() }).strict();
 export type WorktreeLeak = z.infer<typeof worktreeLeakSchema>;
+
+export class ScratchMaterializationError extends Error {
+  readonly leak: WorktreeLeak;
+
+  constructor(cause: unknown, leak: WorktreeLeak) {
+    super(
+      `${cause instanceof Error ? cause.message : String(cause)}; scratch cleanup failed at ${leak.path}: ${leak.diagnostic}`,
+      { cause },
+    );
+    this.name = "ScratchMaterializationError";
+    this.leak = { ...leak, diagnostic: this.message };
+  }
+}
+
 type CollectableScratchRemoval = Readonly<{
   path: string;
-  /** False only when Git removed the path and absence was confirmed; retained removals own a diagnostic. */
+  /** False only when scratch custody is confirmed absent; retained removals own a diagnostic. */
   retained: boolean;
   diagnostic?: string;
 }>;
@@ -89,21 +104,30 @@ async function pathExists(path: string): Promise<boolean> {
 
 async function removeScratch(repository: GitRepository, path: string): Promise<WorktreeLeak | null> {
   const removal = AbortSignal.timeout(SCRATCH_REMOVAL_TIMEOUT_MS);
+  const retirementRepository = { ...repository, signal: removal };
+  let present = true;
+  let absenceDiagnostic: string | undefined;
   try {
-    const present = await pathExists(path);
-    await executeGit({ ...repository, signal: removal }, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
-    return (await pathExists(path))
-      ? { path, diagnostic: `Git reported scratch worktree removal but the path remains: ${path}` }
-      : null;
+    present = await pathExists(path);
+    if (!present && !(await registeredWorktreePaths(retirementRepository)).includes(path)) {
+      present = await pathExists(path);
+      if (!present) return null;
+    }
+  } catch (error) {
+    absenceDiagnostic = `scratch absence could not be confirmed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  let diagnostic: string;
+  try {
+    await executeGit(retirementRepository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
+    if (!(await pathExists(path))) return null;
+    diagnostic = `Git reported scratch worktree removal but the path remains: ${path}`;
   } catch (error) {
     const original = error instanceof Error ? error.message : String(error);
-    return {
-      path,
-      diagnostic: removal.aborted
-        ? `scratch worktree removal timed out after ${SCRATCH_REMOVAL_TIMEOUT_MS}ms: ${original}`
-        : original,
-    };
+    diagnostic = removal.aborted
+      ? `scratch worktree removal timed out after ${SCRATCH_REMOVAL_TIMEOUT_MS}ms: ${original}`
+      : original;
   }
+  return { path, diagnostic: absenceDiagnostic === undefined ? diagnostic : `${absenceDiagnostic}; ${diagnostic}` };
 }
 
 /** Remove only abandoned Verification scratch worktrees whose ownership locks are held. */
@@ -193,7 +217,13 @@ export async function materializeScratchCandidate(
   try {
     await executeGit(repository, ["worktree", "add", "--detach", cwd, gitObjectIdForSnapshot(candidate)]);
   } catch (error) {
-    ownership.close();
+    let leak: WorktreeLeak | null;
+    try {
+      leak = await removeScratch(repository, cwd);
+    } finally {
+      ownership.close();
+    }
+    if (leak !== null) throw new ScratchMaterializationError(error, leak);
     await removeOwnershipLock(lockPath);
     throw error;
   }

@@ -3,7 +3,9 @@ import { randomBytes } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { Keiyaku, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { materializeScratchCandidate, removeCollectableScratchWorktrees } from "../src/git/scratch.js";
@@ -390,6 +392,200 @@ test("satisfied and cancelled attempts remove only their own scenes", async () =
   } finally {
     await removeCollectableScratchWorktrees(git, new Set([retained.path]), id);
   }
+});
+
+test("pre-spawn cancellation releases ownership only after scratch absence is proved", async (t) => {
+  for (const observationFails of [false, true]) {
+    await t.test(observationFails ? "unknown absence retains cleanup diagnostics" : "proved absence is not a leak", async (context) => {
+      const raw = repositoryWithMain();
+      const commands = join(raw.path, "git-commands");
+      const deny = join(raw.path, "deny-observation");
+      await withGitShim([
+        'printf "%s\\n" "$*" >> "$COMMANDS"',
+        'if [ -f "$DENY" ] && [ "$1" = "worktree" ]; then',
+        '  if [ "$2" = "list" ]; then echo "registration observation denied" >&2; exit 7; fi',
+        '  if [ "$2" = "remove" ]; then echo "scratch removal denied" >&2; exit 8; fi',
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"), { COMMANDS: commands, DENY: deny }, async (gitPath) => {
+        const repository = await repositoryAt(raw.path, gitPath);
+        rmSync(commands);
+        if (observationFails) writeFileSync(deny, "deny\n");
+        const controller = new AbortController();
+        let lockPath: string | undefined;
+        const exec = DatabaseSync.prototype.exec;
+        const injection = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+          const result = exec.call(this, sql);
+          if (sql === "BEGIN EXCLUSIVE") {
+            const file = this.prepare("PRAGMA database_list").get()?.file;
+            assert.equal(typeof file, "string");
+            lockPath = String(file);
+            assert.match(basename(lockPath), /^\.keiyaku-v4-verify-[0-9a-f]{24}\.owner\.sqlite$/u);
+            assert.equal(existsSync(lockPath), true);
+            // The ownership transaction is live, but executeGit has not been entered or spawned yet.
+            controller.abort(new Error("cancel before Git spawn"));
+          }
+          return result;
+        });
+        try {
+          const result = await executeVerification({
+            repository: { ...repository, signal: controller.signal },
+            candidate: snapshotId(raw.run(["rev-parse", "HEAD"]).trim()),
+            contractId: contractId("kei/pre-spawn-cancellation"),
+            declarations: [{ executor: "bash", script: "false" }],
+            materializeScratchCandidate,
+            projectSettings,
+            signal: controller.signal,
+          });
+          assert.ok(lockPath);
+          const scratch = join(realpathSync(tmpdir()), basename(lockPath).slice(1, -".owner.sqlite".length));
+          const calls = readFileSync(commands, "utf8");
+          assert.doesNotMatch(calls, /worktree add/u);
+          assert.equal(existsSync(scratch), false);
+          assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), false);
+          assert.deepEqual(result.outcome, { kind: "cancelled" });
+          assert.equal(existsSync(lockPath), observationFails);
+          if (observationFails) {
+            assert.equal(result.leak?.path, scratch);
+            assert.match(result.leak?.diagnostic ?? "", /git process cancelled/u);
+            assert.match(result.leak?.diagnostic ?? "", /registration observation denied/u);
+            assert.match(result.leak?.diagnostic ?? "", /scratch removal denied/u);
+            assert.match(calls, /worktree remove/u);
+          } else {
+            assert.equal(result.leak, undefined);
+            assert.doesNotMatch(calls, /worktree remove/u);
+          }
+        } finally {
+          injection.mock.restore();
+          if (lockPath !== undefined) rmSync(lockPath, { force: true });
+        }
+      });
+    });
+  }
+});
+
+test("public delivery retires a partially materialized scratch after post-checkout cancellation", async (t) => {
+  for (const removalFails of [false, true]) {
+    await t.test(removalFails ? "removal failure stays visible" : "successful removal leaves no custody", async () => {
+      const raw = repositoryWithMain();
+      const marker = join(raw.path, "checkout-started");
+      const hook = join(raw.path, ".git/hooks/post-checkout");
+      await withGitShim(
+        [
+          'if [ "$1" = "worktree" ] && [ "$2" = "remove" ] && [ "$DENY_REMOVAL" = "yes" ]; then',
+          '  echo "cancelled scratch removal denied" >&2; exit 7',
+          "fi",
+          'exec "$KEIYAKU_REAL_GIT" "$@"',
+        ].join("\n"),
+        { DENY_REMOVAL: removalFails ? "yes" : "no" },
+        async (gitPath) => {
+          const bound = accepted(await Keiyaku.with().bind({
+            repo: await Repo.at({ path: raw.path, gitPath }),
+            markdown: document("touch declaration-ran"),
+            workspace: "worktree",
+            gates: ["verified", "reviewed"],
+          }));
+          const source = await appointedWorktreePath(await repositoryAt(raw.path), present(await bound.value.keiyaku.state()).id);
+          writeFileSync(hook, [
+            "#!/bin/sh",
+            'case "$PWD" in',
+            "  */keiyaku-v4-verify-*)",
+            `    printf '%s' "$PWD" > '${marker}'`,
+            '    echo "post-checkout interrupted" >&2',
+            "    while :; do sleep 1; done ;;",
+            "esac",
+          ].join("\n"), { mode: 0o755 });
+          const controller = new AbortController();
+          const pending = bound.value.keiyaku.deliver({ signal: controller.signal });
+          try {
+            const deadline = AbortSignal.timeout(10_000);
+            while (!existsSync(marker)) {
+              deadline.throwIfAborted();
+              await setTimeout(10);
+            }
+            const scratch = readFileSync(marker, "utf8");
+            // The hook is still running: add has registered and populated the worktree before it throws.
+            assert.equal(existsSync(join(scratch, ".git")), true);
+            assert.equal(existsSync(ownershipLockFor(scratch)), true);
+            assert.ok(raw.run(["worktree", "list", "--porcelain"]).includes(scratch));
+            controller.abort(new Error("cancel during post-checkout"));
+            const result = accepted(await pending);
+            const verification = result.value.verification;
+            assert.ok(
+              verification?.kind === "stopped" && "failure" in verification.stop && verification.stop.failure === "cancelled",
+              JSON.stringify(result),
+            );
+            const cleanup = result.effects.filter((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
+            if (removalFails) {
+              assert.equal(cleanup.length, 1);
+              const effect = cleanup[0]!;
+              assert.ok(effect.kind === "cleanup");
+              const issue = effect.issue;
+              assert.equal(issue.kind, "worktree-leak");
+              assert.ok(issue.kind === "worktree-leak");
+              assert.equal(issue.leak.path, scratch);
+              assert.ok(issue.leak.diagnostic.includes(scratch));
+              assert.match(issue.leak.diagnostic, /worktree add --detach.*post-checkout interrupted/su);
+              assert.match(issue.leak.diagnostic, /cancelled scratch removal denied/u);
+            } else {
+              assert.deepEqual(cleanup, []);
+            }
+            assert.equal(existsSync(scratch), removalFails);
+            assert.equal(existsSync(ownershipLockFor(scratch)), removalFails);
+            assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), removalFails);
+            assert.equal(existsSync(join(source, ".git")), true);
+            assert.equal(existsSync(join(scratch, "declaration-ran")), false);
+            assert.equal(present(await bound.value.keiyaku.state()).attestations.length, 0);
+          } finally {
+            controller.abort();
+            await pending.catch(() => undefined);
+            rmSync(hook, { force: true });
+            if (existsSync(marker)) {
+              const scratch = readFileSync(marker, "utf8");
+              if (existsSync(scratch)) {
+                const removals = await removeCollectableScratchWorktrees(await repositoryAt(raw.path), new Set([scratch]));
+                assert.equal(removals[0]?.retained, false);
+              }
+            }
+          }
+        },
+      );
+    });
+  }
+});
+
+test("ordinary post-checkout failure removes partial scratch and permits another attempt", async () => {
+  const raw = repositoryWithMain();
+  const marker = join(raw.path, "checkout-started");
+  const hook = join(raw.path, ".git/hooks/post-checkout");
+  writeFileSync(hook, `#!/bin/sh\nprintf '%s' "$PWD" > '${marker}'\necho 'checkout failed' >&2\nexit 7\n`, { mode: 0o755 });
+  const input = {
+    repository: await repositoryAt(raw.path),
+    candidate: snapshotId(raw.run(["rev-parse", "HEAD"]).trim()),
+    contractId: contractId("kei/checkout-failure"),
+    declarations: [{ executor: "bash" as const, script: "true" }],
+    materializeScratchCandidate,
+    projectSettings,
+  };
+  try {
+    const result = await executeVerification(input);
+    assert.ok(result.outcome.kind === "candidate-unavailable");
+    assert.match(result.outcome.diagnostic, /checkout failed/u);
+    assert.equal(result.leak, undefined);
+    const scratch = readFileSync(marker, "utf8");
+    assert.equal(existsSync(scratch), false);
+    assert.equal(existsSync(ownershipLockFor(scratch)), false);
+    assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), false);
+  } finally {
+    rmSync(hook, { force: true });
+    if (existsSync(marker)) {
+      const scratch = readFileSync(marker, "utf8");
+      if (existsSync(scratch)) await removeCollectableScratchWorktrees(input.repository, new Set([scratch]));
+    }
+  }
+  assert.deepEqual(await executeVerification(input), {
+    outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 },
+  });
 });
 
 test("scratch disposal names its bounded removal timeout and keeps ownership evidence", async (context) => {

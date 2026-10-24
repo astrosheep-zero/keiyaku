@@ -1,6 +1,6 @@
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { runHookCommands, worktreeHooksFrom, type HookCommand, type HookFailure } from "../git/hooks.js";
-import type { MaterializedScratchCandidate, WorktreeLeak } from "../git/scratch.js";
+import { ScratchMaterializationError, type MaterializedScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import type { GitRepository } from "../git/process.js";
 import type { Settings } from "../settings.js";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
@@ -220,9 +220,11 @@ async function materializeScratch(
       state: "finished",
       outcome: input.signal?.aborted ? "cancelled" : "failed",
     });
-    if (input.signal?.aborted) return { outcome: { kind: "cancelled" } };
     return {
-      outcome: { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+      outcome: input.signal?.aborted
+        ? { kind: "cancelled" }
+        : { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+      ...(error instanceof ScratchMaterializationError ? { leak: error.leak } : {}),
     };
   }
 }
