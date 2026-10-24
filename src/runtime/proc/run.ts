@@ -304,11 +304,17 @@ async function executeProcess(
   const terminationFailure = new Promise<Readonly<{ kind: "termination-error"; error: unknown }>>((resolve) => {
     reportTerminationFailure = (error) => resolve({ kind: "termination-error", error });
   });
+  const terminate = (): Promise<void> => {
+    if (termination === undefined) {
+      termination = terminateOwnedProcess(child);
+      void termination.catch(reportTerminationFailure);
+    }
+    return termination;
+  };
   const requestStop = (reason: "timeout" | "cancelled"): void => {
     if (stop !== undefined) return;
     stop = reason;
-    termination = terminateOwnedProcess(child);
-    void termination.catch(reportTerminationFailure);
+    void terminate();
   };
   const failStream = (error: unknown): void => {
     if (streamError !== undefined) return;
@@ -339,11 +345,20 @@ async function executeProcess(
   input.signal?.addEventListener("abort", cancel, { once: true });
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => requestStop("timeout"), timeoutMs);
 
+  const retire = (): void => {
+    if (timeout !== undefined) clearTimeout(timeout);
+    input.signal?.removeEventListener("abort", cancel);
+    void terminate();
+  };
+  // Descendants can retain the output pipes after leader exit, so cleanup must
+  // start at exit rather than waiting for close. Close still drains the output.
+  child.once("exit", retire);
   const terminal = await waitForProcessEnd(child, terminationFailure);
   if (timeout !== undefined) clearTimeout(timeout);
   input.signal?.removeEventListener("abort", cancel);
+  child.removeListener("exit", retire);
   if (terminal.kind === "termination-error") throw terminal.error;
-  await termination;
+  await terminate();
   output.finish();
 
   const pid = child.pid ?? null;

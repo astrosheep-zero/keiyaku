@@ -881,41 +881,64 @@ test("Unix natural leader exit leaves no stale terminate after descendants are a
   }
 });
 
-test("runProcess timeout settles after cleaning inherited pipes from an owned group", async (t) => {
+for (const stdio of ["ignore", "inherit"] as const) {
+  test(`runProcess natural exit retires a live descendant with ${stdio} pipes before returning`, { timeout: 60_000 }, async (t) => {
+    if (process.platform === "win32") {
+      t.skip("POSIX process groups only");
+      return;
+    }
+    const root = temporaryDirectory(t, "keiyaku-v4-runtime-natural-descendant-");
+    const descendantPidPath = join(root, "descendant-pid");
+    const descendant = [
+      'process.on("SIGTERM", () => {});',
+      "setInterval(() => {}, 1_000);",
+      'process.send("ready");',
+    ].join(" ");
+    const parent = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync, writeSync } = require("node:fs");',
+      `const child = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", ${JSON.stringify(stdio)}, ${JSON.stringify(stdio)}, "ipc"] });`,
+      'child.once("message", () => {',
+      `writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid) + "\\n");`,
+      'writeSync(1, "leader/out"); writeSync(2, "leader/err");',
+      "process.exit(0); });",
+    ].join(" ");
+    const controller = new AbortController();
+    t.signal.addEventListener("abort", () => controller.abort(), { once: true });
+    const pending = runProcess({ argv: [process.execPath, "-e", parent], signal: controller.signal });
+    let descendantPid: number | undefined;
+    try {
+      descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
+      assert.deepEqual(await pending, {
+        kind: "terminal", code: 0, stdout: "leader/out", stderr: "leader/err", truncated: false,
+      });
+      assert.equal(processExists(descendantPid), false, "retirement must precede the returned leader outcome");
+    } finally {
+      controller.abort();
+      killFixtureProcess(descendantPid);
+      if (descendantPid !== undefined) await waitForProcessExit(descendantPid);
+      await pending.catch(() => undefined);
+    }
+  });
+}
+
+test("runProcess preserves a natural-exit cleanup failure and starts termination only once", async (t) => {
   if (process.platform === "win32") {
     t.skip("POSIX process groups only");
     return;
   }
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-runtime-inherited-pipes-"));
-  const descendantPidPath = join(root, "descendant-pid");
-  const descendant = [
-    'process.stdout.write("descendant/ready\\n");',
-    'process.on("SIGTERM", () => {});',
-    "setInterval(() => {}, 1_000);",
-  ].join(" ");
-  const parent = [
-    'const { spawn } = require("node:child_process");',
-    'const { writeFileSync } = require("node:fs");',
-    `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: ["ignore", "inherit", "inherit"] });`,
-    `writeFileSync(${JSON.stringify(descendantPidPath)}, String(descendant.pid) + "\\n");`,
-    "process.exit(0);",
-  ].join(" ");
-  let pending: ReturnType<typeof runProcess> | undefined;
-  let descendantPid: number | undefined;
-  try {
-    pending = runProcess({ ...input([process.execPath, "-e", parent]), cwd: root, timeoutMs: 6_000 });
-    descendantPid = Number.parseInt(await waitForFile(descendantPidPath, 5_000), 10);
-    const started = performance.now();
-    const outcome = await pending;
-    assert.equal(outcome.kind, "timeout");
-    if (outcome.kind === "timeout") assert.match(outcome.stdout, /descendant\/ready/u);
-    assert.ok(performance.now() - started < 9_000);
-    await waitForProcessExit(descendantPid);
-  } finally {
-    killFixtureProcess(descendantPid);
-    if (pending !== undefined) await pending;
-    rmSync(root, { recursive: true, force: true });
-  }
+  const originalKill = process.kill;
+  let signals = 0;
+  const failure = Object.assign(new Error("natural cleanup failed"), { code: "EIO" });
+  t.mock.method(process, "kill", ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid < 0 && signal === "SIGTERM") {
+      signals += 1;
+      throw failure;
+    }
+    return originalKill(pid, signal as NodeJS.Signals);
+  }) as typeof process.kill);
+  await assert.rejects(runProcess(input([process.execPath, "-e", "process.exit(0)"])), (error) => error === failure);
+  assert.equal(signals, 1);
 });
 
 test("runProcess cancellation closes the directly-owned helper boundary", async () => {

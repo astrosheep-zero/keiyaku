@@ -1,4 +1,4 @@
-import { deferred as promiseBarrier } from "./support/process.js";
+import { deferred as promiseBarrier, killFixtureProcess, processExists, waitForProcessExit } from "./support/process.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,6 +76,47 @@ test("deliver adapts a successful Verification result through the CLI", async ()
   const repository = await repositoryAt(raw.path);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
   assert.equal(stderr, "", "JSON carries one native result and no text activity");
+});
+
+test("successful public Verification retires its helper before delivery and scratch removal", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX process groups only");
+    return;
+  }
+  const external = mkdtempSync(resolve(tmpdir(), "verification-natural-helper-"));
+  const receipt = resolve(external, "helper.json");
+  const launcher = resolve(external, "launcher.cjs");
+  const helper = [
+    'process.on("SIGTERM", () => {});',
+    "setInterval(() => {}, 1_000);",
+    'process.send("ready");',
+  ].join(" ");
+  writeFileSync(launcher, [
+    'const { spawn } = require("node:child_process");',
+    'const { writeFileSync } = require("node:fs");',
+    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(helper)}], { stdio: ["ignore", "ignore", "ignore", "ipc"] });`,
+    'child.once("message", () => {',
+    `writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ pid: child.pid, scratch: process.cwd() }));`,
+    "process.exit(0); });",
+  ].join("\n"));
+  try {
+    const { raw, id, result } = await bindAndDeliver(`'${process.execPath}' '${launcher}'`);
+    const { pid, scratch } = JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; scratch: string };
+    assert.equal(result.kind, "accepted");
+    assert.ok(result.kind === "accepted" && result.facts.some(
+      (fact) => fact.kind === "attestation" && fact.data.verdict === "satisfied",
+    ));
+    assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.terminal?.kind, "claimed");
+    assert.equal(existsSync(scratch), false, "successful Verification disposed its execution scratch");
+    assert.equal(processExists(pid), false, "accepted delivery cannot leave the helper alive outside the scratch");
+  } finally {
+    if (existsSync(receipt)) {
+      const { pid } = JSON.parse(readFileSync(receipt, "utf8")) as { pid: number };
+      killFixtureProcess(pid);
+      await waitForProcessExit(pid);
+    }
+    rmSync(external, { recursive: true, force: true });
+  }
 });
 
 test("text deliver streams its Verification activity on stderr and keeps the receipt clean", async () => {
