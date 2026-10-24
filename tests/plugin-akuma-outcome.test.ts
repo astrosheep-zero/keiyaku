@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Square } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
-import test from "node:test";
+import test, { after } from "node:test";
 import { Akuma, Akumas, Schema, World, type WorldRoot } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
@@ -19,6 +20,24 @@ import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.
 
 const AT = "2026-10-14T00:00:00.000Z";
 type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; historyId: string; observer?: string }>;
+
+/**
+ * A World resolves user Settings through the process home, so the plugins configured for
+ * the developer or machine running this file would activate inside every fixture below and
+ * their diagnostics would be counted as this file's own fixtures. This file therefore owns
+ * one empty user coordinate: `os.homedir()` names the process home from HOME on POSIX and
+ * from USERPROFILE on Windows, so both are pointed at it and only each fixture's project
+ * plugins stay selected.
+ */
+const USER_HOME_NAMES = ["HOME", "USERPROFILE"] as const;
+const priorUserHome = Object.fromEntries(USER_HOME_NAMES.map((name) => [name, process.env[name]]));
+const isolatedUserHome = mkdtempSync(join(tmpdir(), "keiyaku-plugin-outcome-home-"));
+for (const name of USER_HOME_NAMES) process.env[name] = isolatedUserHome;
+
+after(() => {
+  restoreEnvironmentValues(priorUserHome);
+  rmSync(isolatedUserHome, { recursive: true, force: true });
+});
 
 function recordingPlugin(world: WorldRoot, fail = false) {
   const output = join(world, "observations.jsonl");
