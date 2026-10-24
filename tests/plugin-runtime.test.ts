@@ -10,6 +10,7 @@ import { pluginRuntime } from "../src/plugin/runtime.js";
 import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
+import { restoreEnvironmentValues } from "./support/process.js";
 import { runCli } from "./support/cli-fixtures.js";
 
 test("one outcome observation batch bounds concurrent attempts rather than multiplying timeouts", async (context) => {
@@ -68,15 +69,24 @@ function isolateSquareSessionEnvironment(): () => void {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-runtime-"));
   const home = join(root, "home");
+  const ambientHome = join(root, "ambient-home");
   const plugins = join(root, "plugins");
   const restoreSquareSessionEnvironment = isolateSquareSessionEnvironment();
+  const previousAmbientHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
   mkdirSync(home, { recursive: true });
+  mkdirSync(ambientHome, { recursive: true });
   mkdirSync(plugins, { recursive: true });
+  // A runtime without explicit Settings reads the process home, which Node
+  // resolves from HOME on POSIX and USERPROFILE on Windows. Point both inside
+  // the fixture so the developer's real user settings never select plugins here.
+  process.env.HOME = ambientHome;
+  process.env.USERPROFILE = ambientHome;
   return {
     root,
     home,
     plugins,
     close: () => {
+      restoreEnvironmentValues(previousAmbientHome);
       restoreSquareSessionEnvironment();
       rmSync(root, { recursive: true, force: true });
     },
