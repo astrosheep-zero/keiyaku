@@ -1,4 +1,4 @@
-import { copyFileSync, globSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { stripTypeScriptTypes } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -56,6 +56,9 @@ const transformTypeScript = await (async () => {
 })();
 
 rmSync(".test-build", { recursive: true, force: true });
+// Paseo ships TypeScript for its host loader. Preserve those sources and assets
+// beside the executable mirror, never emitting JavaScript into the authored tree.
+cpSync("plugins/paseo/plugin", ".test-build/plugins/paseo/plugin", { recursive: true });
 // The typecheck command owns semantic checking. Like tsx's focused mode, this
 // pass only transpiles, once per invocation rather than in every isolated worker.
 for (const file of globSync([
@@ -65,6 +68,7 @@ for (const file of globSync([
   "scripts/**/*.ts",
   "scripts/**/*.js",
   "scripts/**/*.mjs",
+  "plugins/paseo/plugin/**/*.ts",
 ])) {
   if (file.replaceAll("\\", "/").startsWith("tests/fixtures/consumers/")) continue;
   const output = ".test-build/" + file.replace(/\.ts$/u, ".js");
@@ -77,13 +81,26 @@ for (const file of globSync([
   // and parameter properties; its inline map points back to the original test.
   writeFileSync(output, transformTypeScript(readFileSync(file, "utf8"), pathToFileURL(resolve(file)).href, file));
 }
-// Execute the actual release modules and plugin, not a second source compilation.
-// Tests also read repository documents by their source-relative path, so project
-// `docs` the same way: one repository document, source and compiled layouts alike.
+// Other plugins and workspace packages execute their actual release modules,
+// while Paseo's source-only plugin uses the mirror above.
+for (const [directory, mirrored] of /** @type {ReadonlyArray<readonly [string, string]>} */ ([
+  ["plugins", "paseo"],
+  ["plugins/paseo", "plugin"],
+])) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === mirrored) continue;
+    const source = resolve(directory, entry.name);
+    const output = `.test-build/${directory}/${entry.name}`;
+    if (entry.isDirectory()) symlinkSync(source, output, "junction");
+    else copyFileSync(source, output);
+  }
+}
+// Documents and relative deep dependency imports retain their source-relative
+// coordinates too, resolving the same repository bytes in either layout.
 for (const [directory, target] of /** @type {ReadonlyArray<readonly [string, string]>} */ ([
   ["src", "build/src"],
-  ["plugins", "plugins"],
   ["docs", "docs"],
+  ["node_modules", "node_modules"],
 ])) {
   symlinkSync(resolve(target), `.test-build/${directory}`, "junction");
 }
