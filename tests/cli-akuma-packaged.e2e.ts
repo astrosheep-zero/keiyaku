@@ -16,7 +16,7 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { Akumas } from "../src/index.js";
+import { Akumas, type AkumaKillResult } from "../src/index.js";
 import { World, type WorldRoot } from "../src/world.js";
 
 const packagedCli = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
@@ -161,17 +161,23 @@ function ruleFor(...headLines: readonly string[]): string {
 }
 
 async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
-  const killed = await Akumas.of(world).kill({
+  const akumas = Akumas.of(world);
+  const killed = await akumas.kill({
     akuma: [selector],
   });
   assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
   const member = killed.results[0]!;
-  assert.ok(
-    member.evidence === "killed" || member.evidence === "already-killed" || member.evidence === "already-stopped",
-    `public kill has settled evidence for ${selector}: ${member.evidence}`,
-  );
+  const settled =
+    member.evidence === "killed" || member.evidence === "already-killed" || member.evidence === "already-stopped";
+  if (!settled)
+    assert.fail(
+      [
+        `public kill has settled evidence for ${selector}: ${member.evidence}`,
+        await unsettledKillEvidence(akumas, selector, killed),
+      ].join("\n"),
+    );
 
-  const waited = await Akumas.of(world).wait({
+  const waited = await akumas.wait({
     akuma: [selector],
     timeoutMs: 10_000,
   });
@@ -179,6 +185,26 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
   assert.equal(waited.observations.length, 1, `public wait observes ${selector} once`);
   assert.equal(waited.observations[0]!.status.id, member.id);
   assert.notEqual(waited.observations[0]!.status.life, "running");
+}
+
+/**
+ * The evidence an unsettled kill owes a real Windows runner: the complete kill receipt plus the
+ * public status and history that say why provider custody stayed hung. Read only on failure, so a
+ * settled cleanup pays nothing.
+ */
+async function unsettledKillEvidence(akumas: Akumas, selector: string, killed: AkumaKillResult): Promise<string> {
+  const sections = [`kill receipt for ${selector}: ${JSON.stringify(killed, null, 2)}`];
+  try {
+    sections.push(`status for ${selector}: ${JSON.stringify(await akumas.status({ akuma: selector }), null, 2)}`);
+  } catch (error) {
+    sections.push(`status for ${selector} failed: ${String(error)}`);
+  }
+  try {
+    sections.push(`history for ${selector}: ${JSON.stringify(await akumas.history({ akuma: selector }), null, 2)}`);
+  } catch (error) {
+    sections.push(`history for ${selector} failed: ${String(error)}`);
+  }
+  return sections.join("\n");
 }
 
 test("packaged prompt-free call births without admitting a Tell", { timeout: 120_000 }, async () => {
