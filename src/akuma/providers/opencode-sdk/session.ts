@@ -1,4 +1,5 @@
 import type { SessionCreateInput, SessionSwitchModelInput } from "@opencode/client";
+import { SessionMessage } from "@opencode/schema/session-message";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
 import { abortable } from "../../abort.js";
@@ -37,9 +38,8 @@ export type OpencodeSdkLoader = (
 >;
 export const OPENCODE_SDK_PROVIDER = "opencode-sdk" as const;
 
-export function messageId(sequence = 0): string {
-  const timestamp = BigInt(Date.now()) * 0x1000n + BigInt(sequence);
-  return `msg_${timestamp.toString(16)}${randomBytes(14).toString("hex")}`;
+export function messageId(): string {
+  return SessionMessage.ID.create();
 }
 export function parseModel(model: string): Readonly<{ providerID: string; id: string }> {
   const slash = model.indexOf("/");

@@ -283,8 +283,7 @@ async function openTurn(
   const { runtime, stream, close } = resources;
   const events = new AgentEventChannel();
   events.emit({ type: "session", coordinate: coordinate(id) });
-  let sequence = 0;
-  const initial = messageId(sequence++);
+  const initial = messageId();
   const admission = liveAdmission(initial);
   let control: Promise<unknown> | undefined;
   let finishing = false;
@@ -321,7 +320,7 @@ async function openTurn(
     tell(tell) {
       const submit = async () => {
         if (!admission.open()) return { kind: "turn-ended" } as const;
-        const nativeID = messageId(sequence++);
+        const nativeID = messageId();
         const receipt = admission.wait(nativeID);
         void prompt(nativeID, tell.text).catch((error: unknown) => admission.fail(nativeID, error));
         return await receipt;

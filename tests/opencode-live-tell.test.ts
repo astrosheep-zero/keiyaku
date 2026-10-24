@@ -3,12 +3,13 @@ import test from "node:test";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { opencodeFixture, until } from "./support/opencode-v2.js";
 
-test("OpenCode v2 correlates native enqueue, delivery, assistant and terminal boundary", async () => {
+test("OpenCode v2 submits distinct native message identities and correlates enqueue, delivery, assistant and terminal", async () => {
   const native = opencodeFixture();
   const provider = createOpencodeProvider({ loader: native.loader });
   const attempt = provider.start({ ...native.input, options: { model: "vendor/model", effort: "high" } });
   const drive = await attempt.result;
   const first = native.prompts[0]!.body.id;
+  assert.match(first, /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/u);
   assert.equal(drive.admission.fence, first);
   assert.deepEqual(native.calls[0], {
     method: "create",
@@ -20,6 +21,7 @@ test("OpenCode v2 correlates native enqueue, delivery, assistant and terminal bo
   const tell = drive.tell!({ id: "tell", text: "steer" });
   await until(() => native.prompts.length === 2);
   const next = native.prompts[1]!.body.id;
+  assert.match(next, /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/u);
   assert.notEqual(next, first);
   assert.equal(native.prompts[1]!.body.text, "steer");
   let accepted = false;
