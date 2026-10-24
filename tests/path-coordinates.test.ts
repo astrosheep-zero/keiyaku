@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-import test from "node:test";
+import { isAbsolute, join, relative } from "node:path";
+import test, { type TestContext } from "node:test";
 import { cliJson } from "./support/cli-fixtures.js";
 import { cliCoordinateDiscovery } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
@@ -20,8 +20,15 @@ function parseArgv(argv: readonly string[]): ParsedCommandInvocation {
   return parsed;
 }
 
-function repositoryWithSpaces(): string {
-  const parent = mkdtempSync(join(tmpdir(), "keiyaku coordinates with spaces-"));
+/** A relative coordinate cannot cross Windows drives, so the fixture must share the caller's drive. */
+function callerDriveTemporaryBase(): string {
+  const temporary = tmpdir();
+  return isAbsolute(relative(process.cwd(), temporary)) ? process.cwd() : temporary;
+}
+
+function repositoryWithSpaces(t: TestContext, base = tmpdir()): string {
+  const parent = mkdtempSync(join(base, "keiyaku coordinates with spaces-"));
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
   const path = join(parent, "repository with spaces");
   mkdirSync(path);
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", path]);
@@ -31,9 +38,10 @@ function repositoryWithSpaces(): string {
   return path;
 }
 
-test("CLI canonicalizes a relative repository coordinate with spaces while Repo demands the absolute one", async () => {
-  const path = repositoryWithSpaces();
+test("CLI canonicalizes a relative repository coordinate with spaces while Repo demands the absolute one", async (t) => {
+  const path = repositoryWithSpaces(t, callerDriveTemporaryBase());
   const alias = relative(process.cwd(), path);
+  assert.equal(isAbsolute(alias), false, "the fixture must be reachable by a relative coordinate");
   const canonical = await realpath(path);
 
   // The edge resolves the caller's relative spelling; the library accepts only the absolute coordinate.
@@ -57,8 +65,8 @@ test("CLI canonicalizes a relative repository coordinate with spaces while Repo 
   assert.equal((await World.resolve({ cwd: alias, repositoryRoot: fromCanonical.root })).root, canonical);
 });
 
-test("registered worktrees retain a prunable record below a regular-file parent", async () => {
-  const path = repositoryWithSpaces();
+test("registered worktrees retain a prunable record below a regular-file parent", async (t) => {
+  const path = repositoryWithSpaces(t);
   const parent = join(mkdtempSync(join(tmpdir(), "keiyaku missing worktree-")), "not-a-directory");
   const missing = join(parent, "missing");
   mkdirSync(parent);
@@ -82,8 +90,8 @@ function contractDocument(title: string): string {
   });
 }
 
-test("CLI accepts native repository coordinate spellings through managed worktree creation", async () => {
-  const path = repositoryWithSpaces();
+test("CLI accepts native repository coordinate spellings through managed worktree creation", async (t) => {
+  const path = repositoryWithSpaces(t);
   const coordinates = process.platform === "win32" ? [path, path.replaceAll("\\", "/")] : [path];
 
   for (const [index, coordinate] of coordinates.entries()) {
