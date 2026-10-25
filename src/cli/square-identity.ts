@@ -20,7 +20,7 @@ const HARNESS_SESSIONS = [
   { provider: undefined, variable: "PASEO_AGENT_ID" },
 ] as const;
 
-const SEAT_PREFIX = "keiyaku-seat-";
+const SEAT_PREFIX = "keiyaku-assigned-";
 const SEAT_DIGEST_DOMAIN = "keiyaku/square-seat/v1";
 const SEAT_DIGEST_LENGTH = 12;
 /** One bounded identity observation; a non-cooperative Square never holds a submission. */
@@ -118,9 +118,10 @@ async function joinedBindings(
  */
 async function finishedHere(square: Square, environment: NodeJS.ProcessEnv, signal: AbortSignal): Promise<boolean> {
   const former = squareAssignedParticipantName(environment);
-  if (former === undefined) return false;
+  const previous = seatCandidate(environment)?.replace(SEAT_PREFIX, "keiyaku-seat-");
+  if (former === undefined && previous === undefined) return false;
   const { participants } = await square.participants({}, { signal });
-  return participants.some(({ name, state }) => name === former && state === "done");
+  return participants.some(({ name, state }) => (name === former || name === previous) && state === "done");
 }
 
 /**

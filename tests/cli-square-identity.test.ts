@@ -33,7 +33,7 @@ type SeatWorld = Readonly<{
  * root instead of the developer's live ledger.
  */
 function seatWorld(t: TestContext): SeatWorld {
-  const root = temporaryDirectory(t, "keiyaku-seat-");
+  const root = temporaryDirectory(t, "keiyaku-assigned-");
   const home = join(root, "home");
   mkdirSync(join(root, ".keiyaku"), { recursive: true });
   mkdirSync(join(root, ".square"), { recursive: true });
@@ -105,10 +105,10 @@ async function recognize(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<
   }
 }
 
-test("a fresh supported session derives one keiyaku-seat name and no provider prefix", async (t) => {
+test("a fresh supported session derives one keiyaku-assigned name and no provider prefix", async (t) => {
   const world = seatWorld(t);
   const first = await squareSeat({ path: world.world, environment: world.environment({ PI_SESSION_ID: "one" }) });
-  assert.match(first ?? "", /^keiyaku-seat-[0-9a-f]{12}$/u);
+  assert.match(first ?? "", /^keiyaku-assigned-[0-9a-f]{12}$/u);
   assert.doesNotMatch(first ?? "", /auto|^(?:pi|codex|claude|opencode)-/u);
   assert.equal(
     await squareSeat({ path: world.world, environment: world.environment({ PI_SESSION_ID: "one" }) }),
@@ -167,10 +167,22 @@ test("an established legacy participant is reused and a prepared seat becomes re
 
   const fresh = { PI_SESSION_ID: "fresh" };
   const seat = await squareSeat({ path: world.world, environment: world.environment(fresh) });
-  assert.match(seat ?? "", /^keiyaku-seat-[0-9a-f]{12}$/u);
+  assert.match(seat ?? "", /^keiyaku-assigned-[0-9a-f]{12}$/u);
   assert.equal(await recognize(world, fresh), undefined, "nothing is recognizable before preparation");
   await withJoined(world, fresh, seat!, async () => undefined);
   assert.equal(await recognize(world, fresh), seat, "the prepared seat is one real recognizable participant");
+});
+
+test("an existing old-prefix participant is reused and never replaced after finishing", async (t) => {
+  const world = seatWorld(t);
+  const session = { PI_SESSION_ID: "old-prefix" };
+  const assigned = await squareSeat({ path: world.world, environment: world.environment(session) });
+  assert.ok(assigned);
+  const previous = assigned.replace("keiyaku-assigned-", "keiyaku-seat-");
+  await withJoined(world, session, previous, async () => undefined);
+  assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), previous);
+  await withJoined(world, session, previous, async (participant) => await participant.done());
+  assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), undefined);
 });
 
 test("a finished seat stays this session's name and Square refuses to rejoin it", async (t) => {
@@ -296,7 +308,7 @@ test("call, tell, ask, and fork prepare one seat before forwarding", async (t) =
   writeTracePlugin(world.root, trace);
   const environment = world.environment({ PI_SESSION_ID: "submitting" });
   const seat = await squareSeat({ path: world.world, environment });
-  assert.match(seat ?? "", /^keiyaku-seat-[0-9a-f]{12}$/u);
+  assert.match(seat ?? "", /^keiyaku-assigned-[0-9a-f]{12}$/u);
   const address = "aku/ghost/00000001";
   for (const argv of [
     ["call", "ghost", "hi"],
@@ -362,7 +374,7 @@ test("a genuinely absent Square selects the deterministic candidate", async (t) 
   const world = seatWorld(t);
   assert.equal(existsSync(world.squareFile), false, "the fixture has not created a Square yet");
   const seat = await squareSeat({ path: world.world, environment: world.environment({ PI_SESSION_ID: "absent" }) });
-  assert.match(seat ?? "", /^keiyaku-seat-[0-9a-f]{12}$/u);
+  assert.match(seat ?? "", /^keiyaku-assigned-[0-9a-f]{12}$/u);
   assert.equal(existsSync(world.squareFile), false, "selecting a candidate creates no Square");
 });
 
@@ -424,7 +436,7 @@ test("a child Akuma environment never carries the parent seat as its identity", 
   const child = akumaExecutionEnvironment(
     {
       PI_SESSION_ID: "parent-session",
-      SQUARE_PARTICIPANT_NAME: "keiyaku-seat-0123456789ab",
+      SQUARE_PARTICIPANT_NAME: "keiyaku-assigned-0123456789ab",
       KEIYAKU_INITIATOR: "Parent",
       KEIYAKU_EXTERNAL_CALLER: "paseo:parent",
       PATH: "/usr/bin",

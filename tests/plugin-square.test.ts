@@ -856,7 +856,7 @@ test("local observation acknowledges the recognized seat, never the former provi
     const serving = { ...process.env };
     const submitter = await activateSquare(root);
     const seat = (await squareSeat({ path: root as WorldRoot, environment: serving }))!;
-    assert.match(seat, /^keiyaku-seat-[0-9a-f]{12}$/u);
+    assert.match(seat, /^keiyaku-assigned-[0-9a-f]{12}$/u);
     await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: seat });
 
     // The identity the former edge would have recomputed from this same session.
