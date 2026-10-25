@@ -6,11 +6,13 @@ import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
 import type { CallResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
-  associatedIdentity,
+  actionReceipt,
+  callObservationStream,
   inputWaitStream,
   killResultText,
-  snapshotHeading,
-  tellText,
+  subordinateLines,
+  tellAdmissionRow,
+  tellPayloadLines,
   type ObservedCallHead,
 } from "./akuma-activity.js";
 import { safeText, type TextRenderContext } from "./terminal.js";
@@ -43,7 +45,7 @@ export function askProgressStream(
       return stream.admitted({
         at: tell.row.at,
         sequence: tell.row.sequence,
-        rows: [tellText({ akuma: target, tell }, alias, context, { identity: false })],
+        rows: [tellAdmissionRow(tell, context)],
       });
     },
     observe: (observation) => stream.observe(observation),
@@ -73,18 +75,18 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
   if (stage.kind === "dispatched") {
     return (stage.seatClose ?? []).map((lag) => `dispatch lag ${lag.kind} ${safeText(lag.diagnostic)}`);
   }
-  if (stage.failure.kind === "conflict") return [`dispatch failed conflict ${stage.failure.current.contractId}`];
-  return [`dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
+  if (stage.failure.kind === "conflict") return [`! dispatch failed conflict ${stage.failure.current.contractId}`];
+  return [`! dispatch failed ${stage.failure.kind} ${safeText(stage.failure.diagnostic)}`];
 }
 
 /** The shared identity frame for one admitted call input. */
-export function callObservationHead(input: Readonly<{ akuma: string }> & CallWaitHead): ObservedCallHead {
+export function callObservationHead(input: Readonly<{ akuma: string; cwd?: string }> & CallWaitHead): ObservedCallHead {
   const alias = input.alias.kind === "aliased" ? input.alias.alias.alias : undefined;
   const contractId = input.dispatch.kind === "dispatched" ? input.dispatch.dispatch.contractId : undefined;
   const facts = [
     ...dispatchLines(input.dispatch),
     ...(input.alias.kind === "failed"
-      ? [`alias failed ${input.alias.failure.kind} ${safeText(input.alias.failure.diagnostic)}`]
+      ? [`! alias failed ${input.alias.failure.kind} ${safeText(input.alias.failure.diagnostic)}`]
       : []),
   ];
   return {
@@ -92,7 +94,17 @@ export function callObservationHead(input: Readonly<{ akuma: string }> & CallWai
     ...(alias === undefined ? {} : { alias }),
     contract: contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
     facts,
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
   };
+}
+
+/** The admitted context a call action receipt can state without reading anything new. */
+function callEvidence(result: CallResult, head: ObservedCallHead): readonly string[] {
+  return [
+    ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
+    safeText(result.execution.cwd),
+    ...head.facts,
+  ];
 }
 
 export function renderCallText(result: CallResult, streamed: boolean, context: TextRenderContext): string {
@@ -101,23 +113,35 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
     akuma: result.akuma,
     dispatch: result.dispatch,
     alias: result.alias,
+    cwd: result.execution.cwd,
   });
+  const receipt = (mark: "✓" | "!", extra: readonly string[] = []): string =>
+    actionReceipt({
+      mark,
+      verb: "called",
+      id: result.akuma,
+      ...(head.alias === undefined ? {} : { alias: head.alias }),
+      evidence: [...callEvidence(result, head), ...extra],
+    }).join("\n");
   if (result.observation.kind === "detached" || result.observation.kind === "born") {
-    const branches = [
-      ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
-      safeText(result.execution.cwd),
-    ];
-    return [
-      associatedIdentity(result.akuma, head.alias),
-      ...branches.map((fact, index) => `${index === branches.length - 1 ? "└─" : "├─"} ${fact}`),
-      ...head.facts,
-    ].join("\n");
+    // Birth and integration are admitted facts; a failed Dispatch/Alias stage marks the receipt
+    // honestly instead of letting a successful action line stand over it.
+    return receipt(result.dispatch.kind === "failed" || result.alias.kind === "failed" ? "!" : "✓");
   }
   if (result.observation.kind === "failed") {
+    // The child, its admitted Tell input, and its context survive a failed stage; a detached failure
+    // stays an action receipt rather than becoming an observation panel.
+    const admittedTell = result.observation.tell;
     return [
-      ...snapshotHeading(head.id, head.alias, head.contract),
-      ...head.facts,
-      `! error ${safeText(result.observation.failure.diagnostic)}`,
+      ...actionReceipt({
+        mark: "!",
+        verb: "called",
+        id: result.akuma,
+        ...(head.alias === undefined ? {} : { alias: head.alias }),
+        evidence: callEvidence(result, head),
+      }),
+      ...(admittedTell === undefined ? [] : tellPayloadLines(admittedTell.row.text, context)),
+      ...subordinateLines([`! error ${safeText(result.observation.failure.diagnostic)}`]),
     ].join("\n");
   }
   const inputObservation = result.observation;
@@ -130,23 +154,49 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
   });
 }
 
+/**
+ * The failure panel for an observing call whose stream never opened. It opens the same shared head
+ * over the failure's own evidence, including a Tell the invocation had already admitted.
+ */
+export function renderFailedCallObservation(result: CallResult, context: TextRenderContext): string {
+  const failure = callObservationStream(
+    context,
+    callObservationHead({
+      akuma: result.akuma,
+      dispatch: result.dispatch,
+      alias: result.alias,
+      cwd: result.execution.cwd,
+    }),
+  );
+  return failure.conclude(result.observation);
+}
+
 export function renderForkText(receipt: ForkResult): string {
   if (receipt.kind !== "forked") {
-    if (receipt.kind === "unknown-history") return `${receipt.at} has no matching retained answered turn`;
-    if (receipt.kind === "provider-cannot-fork") return `${receipt.provider} cannot fork`;
-    return receipt.diagnostic;
+    const reason =
+      receipt.kind === "unknown-history"
+        ? `${receipt.at} has no matching retained answered turn`
+        : receipt.kind === "provider-cannot-fork"
+          ? `${receipt.provider} cannot fork`
+          : receipt.diagnostic;
+    return actionReceipt({ mark: "!", verb: "fork", id: receipt.parent, evidence: [reason] }).join("\n");
   }
   const contractId = receipt.dispatch.kind === "dispatched" ? receipt.dispatch.dispatch.contractId : undefined;
-  return associatedIdentity(
-    receipt.child,
-    undefined,
-    contractId === undefined ? { kind: "none" } : { kind: "associated", contractId },
-  );
+  return actionReceipt({
+    mark: receipt.dispatch.kind === "failed" ? "!" : "✓",
+    verb: "forked",
+    id: receipt.child,
+    evidence: [
+      `from ${receipt.parent}`,
+      ...(contractId === undefined ? [] : [safeText(contractId)]),
+      ...dispatchLines(receipt.dispatch),
+    ],
+  }).join("\n");
 }
 
 export function renderKillText(result: AkumaKillResult, alias: string | undefined, context: TextRenderContext): string {
   void context;
-  return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n\n");
+  return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n");
 }
 
 export function callExitCode(result: CallResult): number {

@@ -213,11 +213,12 @@ test("packaged prompt-free call births without admitting a Tell", { timeout: 120
   try {
     const born = await runPackagedCli(["-C", world, "call", "worker"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
-    assert.match(born.stdout, /^aku\/worker\/[0-9a-f]{8}$/mu, "the final receipt exposes the born identity");
+    assert.match(born.stdout, /^✓ called aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
     assert.ok(
-      born.stdout.split("\n").includes(`└─ ${await realpath(world)}`),
-      `the identity tree branch carries the canonical execution cwd:\n${born.stdout}`,
+      born.stdout.split("\n").includes(`  ${await realpath(world)}`),
+      `the indented execution directory is the canonical cwd:\n${born.stdout}`,
     );
+    assert.doesNotMatch(born.stdout, /└─|├─/u, "an action receipt grows no identity tree");
     assert.equal(born.stderr, "", "prompt-free birth has no progress or Tell output");
     assert.doesNotMatch(born.stdout, /tell/u, "prompt-free birth admits no Tell");
   } finally {
@@ -240,8 +241,13 @@ test(
       assert.equal(unfinished.stdout, "", "an unfinished observing call writes no stdout");
       const lines = unfinished.stderr.split("\n");
       assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
-      assert.equal(lines[1], ruleFor(lines[0]!), "the shared rule underlines the identity head");
-      assert.doesNotMatch(unfinished.stderr, /cwd/u, "the observing receipt never shows a detached cwd row");
+      assert.equal(
+        lines[1],
+        `  ${await realpath(world)}`,
+        "the known execution directory is static context",
+      );
+      assert.equal(lines[2], ruleFor(lines[0]!, lines[1]!), "the shared rule underlines the identity head");
+      assert.doesNotMatch(unfinished.stderr, /cwd/u, "the directory is a bare coordinate, not a labelled row");
       assert.equal(
         unfinished.stderr.match(/● running — waited /gu)?.length,
         1,

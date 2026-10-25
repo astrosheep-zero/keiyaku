@@ -77,13 +77,12 @@ stop on unmet requirements speaks the same pending vocabulary in its
 continuation line. Internal refusal kinds never print on receipts.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
-at that fact: identity uses a tree, a timeline admission uses a row, and Git
-movement uses a reference line. A frame rule appears only when content follows;
-no admission receipt adds an observation conclusion or claims a live state.
-The complete identity roots one line, and each coordinate fact hangs as one tree
-branch beneath it. Labels, arrows, and key-value columns are not receipt
-vocabulary. Reset receipts enumerate owner-confirmed removals and explain
-retained coordination residue without claiming a world-wide transaction.
+at that fact: a timeline admission uses a row, and Git movement uses a reference
+line. A frame rule appears only when content follows; no admission receipt adds
+an observation conclusion or claims a live state. Labels, arrows, and key-value
+columns are not receipt vocabulary. Reset receipts enumerate owner-confirmed
+removals and explain retained coordination residue without claiming a
+world-wide transaction.
 
 ## Shared rendering
 
@@ -151,26 +150,52 @@ established Akuma keeps its reason with that identity. Pre-operation refusals
 remain distinct from provider, lifecycle, and action failures after the target
 has been established.
 
-Detached call receipts foreground the complete Akuma identity with any alias
-as a parenthetical supplement, name the associated Contract and the actual
-execution directory, and stop at facts: no asserted live state, no prescribed
-follow-up. Tell delivery has one text carrier: its timeline row, with one
-bounded preview of the submitted Tell; a failed delivery adds one prominent
-failure fact to that same carrier. Opaque configuration and observation values
-retain exact names, scalar types, collection membership, empty values, and
-provenance, with terminal-safe characters escaped reversibly. Refusal and
-recovery text keeps specific causes, capabilities, and coordinates; removing
-internal terminology never removes evidence. Presentation may densify and wrap
-for the terminal but cannot truncate a copyable identity or replace a public
-discriminant with decoration.
+One Akuma action family covers detached and prompt-free calls, forks, tells, and
+kills, including plural kills and partial failures. Every action receipt leads
+with the action verdict and the complete Akuma identity, with an existing alias
+only as a parenthetical supplement; no action receipt hangs facts from an
+identity tree. Contract association, source identity, execution directory, the
+submitted Tell payload, and a stage diagnosis are indented supporting facts;
+distinct fact kinds never collapse into one punctuation run, and an absent fact
+adds no line. Birth and integration are admitted facts, so a receipt never
+prints an unqualified success over a stage that failed: the verdict carries the
+partial failure and each concrete cause stays copyable and attached to its
+subject. A Tell is evidence of admission and delivery, not of work finished: its
+submitted input appears once beneath the verdict, and held evidence stays
+distinct from a failed delivery. Admitted input survives a later failure, so a
+call whose Tell stage failed still names the admitted child, the resolved
+execution directory, that submitted input, and the native cause. Kill keeps
+killed, already-killed, already-stopped, hung, untidy, and unavailable distinct
+outcomes in frozen selection order, one compact block per member, using native
+failure evidence rather than one generic verdict. Opaque configuration and
+observation values retain exact names, scalar types, collection membership,
+empty values, and provenance, with terminal-safe characters escaped reversibly.
+Refusal and recovery text keeps specific causes, capabilities, and coordinates;
+removing internal terminology never removes evidence. Presentation may densify
+and wrap for the terminal but cannot truncate a copyable identity or replace a
+public discriminant with decoration.
 
-An Akuma activity frame separates identity from its timeline: the frame boundary
-opens directly onto activity, and the shared life or input conclusion closes that
-timeline without an intervening section. Status uses the same completion judgment
-as wait, including a sleeping Akuma with an outstanding Tell. Only an observed
-input wait can justify elapsed-duration text. Read-only reference facts follow the
-conclusion, with reported changes before diagnostics and the execution directory
-last; an unknown change size remains unknown rather than implying additions or
+One Akuma observation panel orders its facts the same way wherever they exist,
+for selected status, wait, observing call, ask progress, and history: the
+complete identity with an optional alias parenthetical and any known associated
+Contract on one line, then static context — the execution directory when
+supplied, and effective allowed actions only on surfaces that already expose
+them — indented beneath it. A static coordinate appears once, above the content
+boundary, and an unknown coordinate is omitted rather than filled in. One
+width-aware rule opens the content only when timeline or observed conclusion
+content follows, and it never exceeds the terminal. Chronological activity
+retains the owner's selection, event order, payloads, omissions, labels,
+timestamps, marks, and input attribution. One truthful observed conclusion
+closes that activity; the timeline's own terminal outcome may already be that
+conclusion, and it is then not restated. Reported changes and created Debts
+follow as indented dynamic output, then indented diagnostics such as a failed
+association — a diagnostic never becomes an unlabeled static property and stays
+attached to its subject. History is an immutable timeline: it takes the same
+identity, static context, and content boundary, but adds no fabricated
+current-state conclusion and reads no extra state to fill the panel. Status uses
+the same completion judgment as wait, including a sleeping Akuma with an
+outstanding Tell. Only an observed input wait can justify elapsed-duration text,
+and an unknown change size remains unknown rather than implying additions or
 removals. Across observations, including Contract testimony and Akuma snapshot, history,
 compact, and attributed activity, free text uses one bounded payload discipline:
 one quote boundary and │-railed, body-aligned continuations. Payloads slice by
@@ -210,8 +235,8 @@ asks the owned operation to stop and waits for its truthful final receipt
 rather than replacing it with an early exit.
 
 An observing call and an ask share one input-wait
-presentation discipline, defined once: an identity frame opens on the progress
-channel, eligible timeline rows stream once each in retained order, active
+presentation discipline, defined once: the shared observation head opens on the
+progress channel, eligible timeline rows stream once each in retained order, active
 activity stays in the redrawable frame until it settles, and one truthful
 conclusion follows the shared clock, mark, verb, and duration grammar. Closing
 accounts for every row still in flight with `?`; history and status never assert

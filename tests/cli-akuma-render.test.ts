@@ -13,10 +13,22 @@ import {
   tellText,
   waitText,
 } from "../src/cli/render/akuma-activity.js";
-import { askProgressStream, waitedTellProgress } from "../src/cli/render/akuma.js";
+import {
+  askProgressStream,
+  renderCallText,
+  renderForkText,
+  renderKillText,
+  waitedTellProgress,
+} from "../src/cli/render/akuma.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkuId } from "../src/akuma/identity.js";
+import type { AkumaTellResult } from "../src/akuma/selection-observation.js";
+import type { AkumaAlias } from "../src/identity/selector.js";
+import type { CallObservation, CallResult } from "../src/library/akuma-creation.js";
+import type { DispatchStage, ForkResult } from "../src/index.js";
+import { contractId } from "../src/core/facts/types.js";
+import type { DebtRow } from "../src/debt/board.js";
 import { displayColumns, padToDisplay } from "../src/cli/render/terminal.js";
 import {
   activeTool,
@@ -43,7 +55,7 @@ function liveObservation(status: AkumaStatus, rows: readonly ActivityRow[]) {
   return { status, rows, ordinarySelected: 0 };
 }
 
-test("status frame closes its timeline before references and ends at cwd", () => {
+test("status panel puts static coordinates above the timeline and dynamic facts below", () => {
   const id = "aku/worker/abcd1234";
   const note: ActivityRow = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" };
   const status = akumaStatusSchema.parse({
@@ -57,15 +69,25 @@ test("status frame closes its timeline before references and ends at cwd", () =>
   const lines = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, DEFAULT_CONTEXT, {
     showAllowed: true,
   }).split("\n");
-  assert.equal(lines[0], id);
-  assert.equal(lines[1], frameRule([id]));
-  assert.match(lines[2]!, /note +edited$/u);
-  assert.match(lines[3]!, /^\d{2}:\d{2} ● running$/u);
-  assert.ok(lines.indexOf("changes 1") > 3);
-  assert.ok(lines.some((line) => /^  ~ +\/work\/file$/u.test(line)));
-  assert.ok(lines.indexOf("allowed  none") > lines.indexOf("changes 1"));
-  assert.ok(lines.indexOf("! contract failed lookup refused") > lines.indexOf("changes 1"));
-  assert.equal(lines.at(-1), "cwd  /work/appointed");
+  assert.equal(lines[0], id, "identity roots the panel alone");
+  assert.equal(lines[1], "  allowed  none", "effective actions are static context");
+  assert.equal(lines[2], "  /work/appointed", "the execution directory is static context, not a labelled row");
+  assert.equal(
+    lines[3],
+    frameRule([id, "  /work/appointed"], DEFAULT_CONTEXT.columns),
+    "one rule divides context from activity",
+  );
+  assert.match(lines[4]!, /note +edited$/u);
+  assert.match(lines[5]!, /^\d{2}:\d{2} ● running$/u);
+  assert.ok(lines.indexOf("  changes 1") > 5, "reported changes follow the conclusion, subordinate");
+  assert.ok(lines.some((line) => /^ {4}~ +\/work\/file$/u.test(line)));
+  assert.equal(
+    lines.filter((line) => line.includes("/work/appointed")).length,
+    1,
+    "no static coordinate is repeated below the timeline",
+  );
+  assert.ok(lines.indexOf("  ! contract failed lookup refused") > lines.indexOf("  changes 1"));
+  assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
 });
 
 test("quoted activity hard-wraps once, aligns continuations and truncates at a grapheme boundary", () => {
@@ -164,9 +186,14 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     body: result.body,
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
-  assert.match(tellText(ordinary.result, undefined, context), /✓ told +"continue"/u);
+  const standalone = tellText(ordinary.result, undefined, context);
+  assert.match(
+    standalone,
+    /^✓ told aku\/worker\/deadbeef\n {2}"continue"$/u,
+    "verdict and subject, payload beneath it",
+  );
   const progress = waitedTellProgress(result.result, undefined, context);
-  assert.match(progress, /✓ told +"continue"/u);
+  assert.match(progress, /✓ told +"continue"/u, "the panel keeps its timeline row for admitted input");
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
   assert.equal(progress.match(/✓ told +"continue"/gu)?.length, 1, "the admission row is not replayed");
   assert.match(progress, /✓ answered\n\n$/u, "the progress conclusion separates stdout answer bytes");
@@ -184,20 +211,17 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     },
   };
   const receipt = tellText(long.result, undefined, context).split("\n");
-  assert.equal(receipt.length, 3, "frame head, rule and one Tell row only");
-  assert.equal(receipt[1], frameRule([result.result.akuma]));
-  assert.match(receipt[2]!, /✓ told +"one line of caller input .*…"$/u);
-  assert.doesNotMatch(receipt.join("\n"), /running|completed|pending tell/u);
-  assert.ok(displayColumns(receipt[2]!) <= 80);
+  assert.equal(receipt.length, 2, "a verdict line and one bounded payload line");
+  assert.equal(receipt[0], "✓ told aku/worker/deadbeef");
+  assert.match(receipt[1]!, /^ {2}"one line of caller input .*…"$/u);
+  assert.doesNotMatch(receipt.join("\n"), /running|completed|pending tell|─/u, "an action receipt has no frame");
+  assert.ok(displayColumns(receipt[1]!) <= 80);
   assert.match(
-    tellText(
-      { ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } },
-      undefined,
-      context,
-    ),
-    /⧗ tell/u,
+    tellText({ ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } }, undefined, context),
+    /^⧗ tell aku\/worker\/deadbeef\n {2}"one line of caller input .*…"$/u,
+    "a held Tell keeps neutral vocabulary and the pending mark",
   );
-  assert.match(
+  assert.equal(
     tellText(
       {
         ...ordinary.result,
@@ -206,11 +230,14 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
       undefined,
       context,
     ),
-    /^\d{2}:\d{2} ! tell +"continue"\n! tell delivery failed · wake refused$/mu,
+    ["! tell aku/worker/deadbeef", '  "continue"', "  ! tell delivery failed · wake refused"].join("\n"),
+    "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
   );
+  assert.equal(killResultText(result.result.akuma, "killed"), `✓ killed ${result.result.akuma}`);
   assert.equal(
-    killResultText(result.result.akuma, "killed"),
-    `${result.result.akuma}\n${frameRule([result.result.akuma])}\n\n✓ killed`,
+    killResultText(result.result.akuma, "unavailable", "@tired"),
+    `! not killed ${result.result.akuma} (@tired)\n  unavailable`,
+    "an untidy outcome keeps its native evidence",
   );
   assert.equal(result.result.tell.row.text, "continue", "timeline evidence still retains the Tell body");
   assert.deepEqual(JSON.parse(JSON.stringify(result.result)), result.result);
@@ -347,7 +374,13 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
     wake: { kind: "told" as const },
   };
   const earlier: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at, text: "earlier" };
-  const beforeOpening: OpenSnapshotRow = { kind: "note", sequence: 5, turnSequence: 1, at, text: "eligible but skipped" };
+  const beforeOpening: OpenSnapshotRow = {
+    kind: "note",
+    sequence: 5,
+    turnSequence: 1,
+    at,
+    text: "eligible but skipped",
+  };
   const opening: OpenSnapshotRow = { kind: "call", sequence: 6, turnSequence: 2, at, text: "next turn" };
   const afterOpening: OpenSnapshotRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
   const live: OpenSnapshotRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
@@ -445,7 +478,10 @@ test("an open turn settles old says on the rail and only its trailing say flushe
   );
   assert.ok(!flushed.some((line) => line.includes("old settled say")), "a settled say is never flushed");
   assert.ok(!flushed.some((line) => line.includes("after-say-6")), "an in-flight final say omits prior tail tools");
-  assert.ok(flushed.some((line) => line.includes("⋮ 1 omitted")), "the earlier tool stays accounted for");
+  assert.ok(
+    flushed.some((line) => line.includes("⋮ 1 omitted")),
+    "the earlier tool stays accounted for",
+  );
 });
 
 test("display-width padding measures cells, so a wide emoji alias cannot skew its column", () => {
@@ -477,11 +513,11 @@ test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
   });
   const text = snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT);
   assert.ok(
-    text.split("\n").some((line) => /^  ~ +\/work\/unknown$/u.test(line)),
+    text.split("\n").some((line) => /^ {4}~ +\/work\/unknown$/u.test(line)),
     text,
   );
   assert.ok(
-    text.split("\n").some((line) => /^  \+3 -1 +\/work\/known$/u.test(line)),
+    text.split("\n").some((line) => /^ {4}\+3 -1 +\/work\/known$/u.test(line)),
     text,
   );
   assert.doesNotMatch(text, /\+\? -\?/u);
@@ -507,4 +543,338 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
   assert.match(lines, /src\/unknown\.ts — ~/u);
   assert.match(lines, /src\/known\.ts — \+2 -1/u);
   assert.doesNotMatch(lines, /\+\? -\?/u);
+});
+
+/**
+ * The family specimens below are the readable contract of the hierarchy: an action receipt leads
+ * with its verdict and subject, an observation panel separates identity, static context, activity,
+ * conclusion, dynamic outputs, and diagnostics.
+ */
+const SPECIMEN_ID = parseAkuId("aku/worker/1234abcd").id;
+
+function tellReceipt(
+  text: string,
+  state: "told" | "pending",
+  wake: AkumaTellResult["tell"]["wake"],
+): AkumaTellResult["tell"] {
+  return {
+    admission: { fact: "recorded", tellId: "tell/specimen" },
+    row: { kind: "tell", sequence: 1, at: AKUMA_ACTIVITY_AT, tellId: "tell/specimen", text, state, deliveries: [] },
+    wake,
+  };
+}
+
+function called(
+  observation: CallObservation,
+  dispatch: CallResult["dispatch"] = { kind: "none" },
+  alias: CallResult["alias"] = { kind: "none" },
+): CallResult {
+  return {
+    kind: "called",
+    akuma: SPECIMEN_ID,
+    execution: { cwd: "/work/repo", source: "process" },
+    dispatch,
+    alias,
+    observation,
+  };
+}
+
+function dispatchOf(contract: string): DispatchStage {
+  return {
+    kind: "dispatched",
+    dispatch: { akuId: SPECIMEN_ID, contractId: contractId(contract), dispatchedAt: AKUMA_ACTIVITY_AT },
+  };
+}
+
+function forkReceipt(parent: string, child: string, dispatch: DispatchStage): ForkResult {
+  return { kind: "forked", parent: parseAkuId(parent).id, child: parseAkuId(child).id, dispatch };
+}
+
+function createdDebtRow(): DebtRow {
+  return {
+    id: "debt/example" as DebtRow["id"],
+    title: "close the rake",
+    state: "open",
+    priority: 2,
+    disposition: "ready",
+    updatedAt: AKUMA_ACTIVITY_AT,
+    bodyPresent: false,
+  };
+}
+
+test("every action receipt leads with a verdict and subject, then indented evidence", () => {
+  const context = { columns: 100, color: false };
+  assert.deepEqual(
+    renderCallText(called({ kind: "born" }), false, context).split("\n"),
+    ["✓ called aku/worker/1234abcd", "  /work/repo"],
+    "a prompt-free birth is an action receipt with its directory subordinate",
+  );
+  assert.deepEqual(
+    renderCallText(
+      called({ kind: "detached", tell: tellReceipt("go", "told", { kind: "told" }) }, dispatchOf("kei/example-1234"), {
+        kind: "aliased",
+        alias: { alias: "@reviewer" as AkumaAlias, akuId: SPECIMEN_ID },
+        previous: null,
+      }),
+      false,
+      context,
+    ).split("\n"),
+    ["✓ called aku/worker/1234abcd (@reviewer)", "  kei/example-1234", "  /work/repo"],
+    "the alias supplements the subject and distinct fact kinds stay on their own lines",
+  );
+  assert.deepEqual(
+    renderCallText(
+      called(
+        { kind: "detached", tell: tellReceipt("go", "told", { kind: "told" }) },
+        { kind: "failed", failure: { kind: "infrastructure", diagnostic: "busy" } },
+        { kind: "skipped", reason: "dispatch-failed" },
+      ),
+      false,
+      context,
+    ).split("\n"),
+    ["! called aku/worker/1234abcd", "  /work/repo", "  ! dispatch failed infrastructure busy"],
+    "a failed stage marks the receipt instead of standing under an unqualified success",
+  );
+  assert.deepEqual(
+    renderCallText(
+      called({
+        kind: "failed",
+        tellId: "tell/specimen",
+        failure: { kind: "infrastructure", diagnostic: "window lost" },
+      }),
+      false,
+      context,
+    ).split("\n"),
+    ["! called aku/worker/1234abcd", "  /work/repo", "  ! error window lost"],
+    "a detached failure with no admitted Tell stays an action receipt over the born child",
+  );
+  assert.deepEqual(
+    renderCallText(
+      called({
+        kind: "failed",
+        tellId: "tell/specimen",
+        tell: tellReceipt("exact prompt", "told", { kind: "told" }),
+        failure: { kind: "infrastructure", diagnostic: "window lost" },
+      }),
+      false,
+      context,
+    ).split("\n"),
+    ["! called aku/worker/1234abcd", "  /work/repo", '  "exact prompt"', "  ! error window lost"],
+    "an admitted Tell input stays visible beneath the failed call verdict",
+  );
+  assert.deepEqual(
+    renderCallText(
+      called(
+        { kind: "detached", tell: tellReceipt("go", "told", { kind: "told" }) },
+        {
+          kind: "dispatched",
+          dispatch: { akuId: SPECIMEN_ID, contractId: contractId("kei/example-1234"), dispatchedAt: AKUMA_ACTIVITY_AT },
+          seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat closed late" }],
+        },
+      ),
+      false,
+      context,
+    ).split("\n"),
+    [
+      "✓ called aku/worker/1234abcd",
+      "  kei/example-1234",
+      "  /work/repo",
+      "  dispatch lag private-state-seat-close-failed seat closed late",
+    ],
+    "an admitted lag is evidence, not a failed verdict",
+  );
+  assert.deepEqual(
+    renderForkText(forkReceipt("aku/worker/9999beef", "aku/worker/5678abcd", dispatchOf("kei/example-1234"))).split(
+      "\n",
+    ),
+    ["✓ forked aku/worker/5678abcd", "  from aku/worker/9999beef", "  kei/example-1234"],
+    "a fork states its source without inventing a Turn or a directory",
+  );
+  assert.deepEqual(
+    renderForkText(
+      forkReceipt("aku/worker/9999beef", "aku/worker/5678abcd", {
+        kind: "failed",
+        failure: { kind: "publication-failed", diagnostic: "read-only mirror" },
+      }),
+    ).split("\n"),
+    [
+      "! forked aku/worker/5678abcd",
+      "  from aku/worker/9999beef",
+      "  ! dispatch failed publication-failed read-only mirror",
+    ],
+    "a forked child with a failed association keeps both identities and the concrete cause",
+  );
+  assert.deepEqual(
+    renderForkText({ kind: "provider-cannot-fork", provider: "acp-x", parent: SPECIMEN_ID }).split("\n"),
+    ["! fork aku/worker/1234abcd", "  acp-x cannot fork"],
+    "a fork that never happened keeps its reason beneath the marked verdict",
+  );
+});
+
+test("Tell and kill keep pending, failure, and plural evidence inside the action hierarchy", () => {
+  const context = { columns: 100, color: false };
+  assert.deepEqual(
+    tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("go", "told", { kind: "told" }) }, undefined, context).split("\n"),
+    ["✓ told aku/worker/1234abcd", '  "go"'],
+    "the submitted payload appears once beneath its delivery verdict",
+  );
+  assert.deepEqual(
+    tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("go", "pending", { kind: "held" }) }, undefined, context).split(
+      "\n",
+    ),
+    ["⧗ tell aku/worker/1234abcd", '  "go"'],
+    "a held Tell keeps the pending mark and asserts no delivery",
+  );
+  assert.deepEqual(
+    tellText(
+      { akuma: SPECIMEN_ID, tell: tellReceipt("go", "told", { kind: "failed", diagnostic: "wake refused" }) },
+      undefined,
+      context,
+    ).split("\n"),
+    ["! tell aku/worker/1234abcd", '  "go"', "  ! tell delivery failed · wake refused"],
+    "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
+  );
+  assert.equal(
+    renderKillText(
+      {
+        results: [
+          { id: parseAkuId("aku/worker/1234abcd").id, evidence: "killed" },
+          { id: parseAkuId("aku/worker/5678abcd").id, evidence: "already-stopped" },
+          { id: parseAkuId("aku/worker/9999beef").id, evidence: "hung" },
+        ],
+      },
+      undefined,
+      context,
+    ),
+    [
+      "✓ killed aku/worker/1234abcd",
+      "✓ already stopped aku/worker/5678abcd",
+      "! not killed aku/worker/9999beef",
+      "  hung",
+    ].join("\n"),
+    "plural kill keeps one compact block per member in frozen order",
+  );
+});
+
+test("an observation panel orders identity, context, activity, conclusion, outputs, and diagnostics", () => {
+  const id = "aku/worker/abcd1234";
+  const context = { columns: 100, color: false };
+  const status = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
+    id,
+    life: "running",
+    cwd: "/work/appointed",
+    allowed: [],
+    timeline: openAkumaSnapshot(
+      [{ kind: "row", row: { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" } }],
+      [reportedFileChange(1, "update", "/work/file")],
+    ),
+  });
+  const text = snapshotText(
+    {
+      status,
+      contract: { kind: "associated", contractId: contractId("kei/example-1234") },
+      createdDebts: { kind: "present", rows: [createdDebtRow()] },
+    },
+    context,
+  );
+  const lines = text.split("\n");
+  const head = [`${id} · kei/example-1234`, "  /work/appointed"];
+  assert.deepEqual(lines.slice(0, 2), head, "identity carries its Contract inline and context sits beneath it");
+  assert.equal(lines[2], frameRule(head, context.columns), "one rule divides context from content");
+  assert.match(lines[3]!, /note +edited$/u);
+  assert.match(lines[4]!, /^\d{2}:\d{2} ● running$/u, "the activity closes on one truthful conclusion");
+  assert.deepEqual(
+    lines.slice(5),
+    ["  changes 1", "    ~  /work/file", "  debts 1", "    ○ debt/example · close the rake · ready · P2"],
+    "dynamic outputs stay subordinate and no diagnostic is reported",
+  );
+  const failedContract = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, context);
+  assert.equal(
+    failedContract.split("\n").at(-1),
+    "  ! contract failed lookup refused",
+    "a lookup that failed is a subordinate diagnostic, not a free Contract",
+  );
+});
+
+test("a narrow panel never truncates a copyable identity and caps its rule at the terminal", () => {
+  const id = "aku/worker/abcd1234";
+  const context = { columns: 40, color: false };
+  const status = akumaStatusSchema.parse({
+    birth: DIRECT_BIRTH,
+    id,
+    life: "running",
+    cwd: "/work/界界界/deep/path",
+    allowed: [],
+    timeline: openAkumaSnapshot([
+      {
+        kind: "row",
+        row: { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "👩‍💻".repeat(30) },
+      },
+    ]),
+  });
+  const lines = snapshotText(
+    { status, contract: { kind: "associated", contractId: contractId("kei/narrow-columns") } },
+    context,
+  ).split("\n");
+  assert.equal(lines[0], `${id} · kei/narrow-columns`, "the copyable identity is never wrapped or truncated");
+  assert.equal(displayColumns(lines[2]!), 40, "the shared rule never exceeds the terminal");
+  assert.ok(
+    lines.slice(3).every((line) => displayColumns(line) <= 40),
+    "payload and activity stay inside the terminal",
+  );
+  assert.ok(
+    lines.some((line) => line.includes("👩‍💻")),
+    "wide graphemes survive wrapping",
+  );
+});
+
+test("a failed observing call keeps a known directory and its admitted Tell input exactly once", () => {
+  const context = { columns: 100, color: false };
+  const head = {
+    id: SPECIMEN_ID,
+    alias: "@scout",
+    contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
+    facts: [] as readonly string[],
+  };
+  const failedObservation = (tell: AkumaTellResult["tell"]): CallObservation => ({
+    kind: "failed",
+    tellId: tell.admission.fact === "recorded" ? tell.admission.tellId : "tell/specimen",
+    tell,
+    failure: { kind: "infrastructure", diagnostic: "window lost" },
+  });
+  const stream = callObservationStream(context, { ...head, cwd: "/work/repo" });
+  const lines = stream.conclude(failedObservation(tellReceipt("exact prompt", "told", { kind: "told" }))).split("\n");
+  const headLines = [`${SPECIMEN_ID} (@scout) · kei/demo`, "  /work/repo"];
+  assert.deepEqual(
+    lines.slice(0, 3),
+    [...headLines, frameRule(headLines, context.columns)],
+    "the failure panel states the known directory above the boundary and fabricates nothing",
+  );
+  assert.match(lines[3]!, /^\d{2}:\d{2} ✓ told +"exact prompt"$/u, "the admitted input is the panel's first evidence");
+  assert.equal(lines[4], "! error window lost");
+
+  // A Tell row that already settled on the timeline is that evidence; the close must not replay it.
+  const observedStream = callObservationStream(context, head);
+  const settled = observedStream.observe({
+    status: running(SPECIMEN_ID, [tellReceipt("exact prompt", "told", { kind: "told" }).row]),
+    rows: [tellReceipt("exact prompt", "told", { kind: "told" }).row],
+  });
+  const observedText = [
+    ...settled,
+    observedStream.conclude(failedObservation(tellReceipt("exact prompt", "told", { kind: "told" }))),
+  ].join("\n");
+  assert.equal((observedText.match(/exact prompt/gu) ?? []).length, 1, "a settled admission row is never replayed");
+  assert.match(observedText, /! error window lost\n*$/u);
+
+  // An admission that never settled was never printed, so closing on it prints it once.
+  const pending = tellReceipt("exact prompt", "pending", { kind: "held" });
+  const pendingStream = callObservationStream(context, head);
+  const pendingSettled = pendingStream.observe({
+    status: running(SPECIMEN_ID, [pending.row]),
+    rows: [pending.row],
+  });
+  const pendingText = [...pendingSettled, pendingStream.conclude(failedObservation(pending))].join("\n");
+  assert.equal((pendingText.match(/exact prompt/gu) ?? []).length, 1);
+  assert.match(pendingText, /⧗ tell +"exact prompt"/u);
 });

@@ -32,11 +32,13 @@ const TIME_WIDTH = 5;
 const VERB_WIDTH = 6;
 
 /**
- * The one blessed ruler: a run of U+2500 exactly as wide as the frame head's
- * widest line, marking the boundary between an observation frame and its content.
+ * The one blessed ruler: a run of U+2500 as wide as the frame head's widest line,
+ * never wider than the terminal, marking the boundary between an observation
+ * frame and its content.
  */
-export function frameRule(headLines: readonly string[]): string {
-  const width = headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0);
+export function frameRule(headLines: readonly string[], columns?: number): string {
+  const widest = headLines.reduce((widest, line) => Math.max(widest, displayColumns(line)), 0);
+  const width = columns === undefined ? widest : Math.min(widest, Math.max(0, columns));
   return "─".repeat(width);
 }
 
@@ -59,19 +61,53 @@ function associatedContractId(contract: DispatchAssociation): string | undefined
   return contract.kind === "associated" ? contract.contractId : undefined;
 }
 
-export function associatedIdentity(id: string, alias?: string, contract?: DispatchAssociation): string {
-  const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return `${identity(id, alias)}${contractId === undefined ? "" : `\n└─ ${contractId}`}`;
+/** The one human-fact separator of this family. */
+const FACT_SEPARATOR = " · ";
+
+/** A supporting fact of an action receipt or an observation panel is one indent deep. */
+const SUBORDINATE_INDENT = "  ";
+
+/** Indent already-decided supporting lines one level, for every caller of this family. */
+export function subordinateLines(lines: readonly string[]): readonly string[] {
+  return lines.map((line) => `${SUBORDINATE_INDENT}${line}`);
 }
 
-export function snapshotHeading(
+/**
+ * The one observation identity line: complete Akuma identity, optional alias as a parenthetical
+ * supplement, and a known associated Contract inline behind the shared separator.
+ */
+function panelIdentity(id: string, alias?: string, contract?: DispatchAssociation): string {
+  const contractId = contract === undefined ? undefined : associatedContractId(contract);
+  return `${identity(id, alias)}${contractId === undefined ? "" : `${FACT_SEPARATOR}${contractId}`}`;
+}
+
+/**
+ * Identity and its static coordinates. The execution directory and any already-exposed effective
+ * actions belong above the content boundary; an absent coordinate is an absent line.
+ */
+export function panelHead(
   id: string,
   alias: string | undefined,
   contract: DispatchAssociation | undefined,
+  context: readonly string[] = [],
 ): readonly string[] {
-  const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  const head = [identity(id, alias), ...(contractId === undefined ? [] : [`└─ ${contractId}`])];
-  return [...head, frameRule(head)];
+  return [panelIdentity(id, alias, contract), ...subordinateLines(context)];
+}
+
+/**
+ * One action receipt: the verdict and the complete subject on the first line, every supporting fact
+ * indented beneath it. Identity and evidence are never merged into one punctuation run.
+ */
+export function actionReceipt(
+  input: Readonly<{
+    mark: "✓" | "⧗" | "!";
+    verb: string;
+    id: string;
+    alias?: string;
+    evidence?: readonly string[];
+  }>,
+): readonly string[] {
+  return [`${input.mark} ${input.verb} ${identity(input.id, input.alias)}`, ...subordinateLines(input.evidence ?? [])];
 }
 
 function contractFacts(contract: DispatchAssociation): readonly string[] {
@@ -877,10 +913,17 @@ export type ObservedCallHead = Readonly<{
   alias?: string;
   contract: DispatchAssociation;
   facts: readonly string[];
+  /** A directory the invocation already resolved; never read here to fill the panel. */
+  cwd?: string;
 }>;
 
 export type InputWaitConclusion =
-  | Readonly<{ kind: "failed"; diagnostic: string }>
+  | Readonly<{
+      kind: "failed";
+      diagnostic: string;
+      /** Already-decided evidence rows, such as a Tell admitted before the failure. */
+      evidence?: readonly string[];
+    }>
   | Readonly<{
       kind: "observed";
       observation: AkumaAskObservation;
@@ -946,7 +989,14 @@ export function inputWaitStream(
     if (!admitted && !failedBeforeAdmission) throw new Error("input wait observed before admission");
     opened = true;
     const identity = head();
-    lines.push(...snapshotHeading(identity.id, identity.alias, identity.contract));
+    const headLines = panelHead(
+      identity.id,
+      identity.alias,
+      identity.contract,
+      identity.cwd === undefined ? [] : [safeText(identity.cwd)],
+    );
+    // A streamed panel always states an observed conclusion before it closes, so its rule opens here.
+    lines.push(...headLines, frameRule(headLines, context.columns));
   };
   const observe: InputWaitStream["observe"] = (observation) => {
     const lines: string[] = [];
@@ -963,6 +1013,7 @@ export function inputWaitStream(
   const conclude: InputWaitStream["conclude"] = (result) => {
     const lines: string[] = [];
     open(lines, result.kind === "failed");
+    if (result.kind === "failed" && result.evidence !== undefined) lines.push(...result.evidence);
     lines.push(...activity.flush());
     if (result.kind === "failed") lines.push(`! error ${safeText(result.diagnostic)}`);
     else
@@ -974,7 +1025,7 @@ export function inputWaitStream(
           ...(lastStatus === undefined ? {} : { status: lastStatus }),
         }),
       );
-    lines.push(...head().facts);
+    lines.push(...subordinateLines(head().facts));
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };
   return { admitted: admit, observe, frame, flush, conclude, opened: () => opened };
@@ -991,11 +1042,26 @@ export function callObservationStream(
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
+  /** Tell rows already settled on the timeline, so a failed close never replays one. */
+  const settledTells = new Set<number>();
   return {
     ...stream,
+    observe: (observation) => {
+      for (const row of observation.rows)
+        if (row.kind === "tell" && row.state === "told") settledTells.add(row.sequence);
+      return stream.observe(observation);
+    },
     conclude: (observation) => {
-      if (observation.kind === "failed")
-        return stream.conclude({ kind: "failed", diagnostic: observation.failure.diagnostic });
+      if (observation.kind === "failed") {
+        const tell = observation.tell;
+        const evidence =
+          tell === undefined || settledTells.has(tell.row.sequence) ? [] : [tellAdmissionRow(tell, context)];
+        return stream.conclude({
+          kind: "failed",
+          diagnostic: observation.failure.diagnostic,
+          ...(evidence.length === 0 ? {} : { evidence }),
+        });
+      }
       if (observation.kind !== "observed") return "";
       return stream.conclude({
         kind: "observed",
@@ -1059,17 +1125,17 @@ function snapshotCore(
   view: SnapshotView,
   context: TextRenderContext,
   options: SnapshotCoreOptions,
-): Readonly<{ activity: readonly string[]; lines: readonly string[]; facts: readonly string[] }> {
+): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
   const activity = snapshotActivityLines(view.status.timeline, context);
-  const facts = [
+  // Static coordinates belong above the content boundary; a dynamic diagnostic stays below it.
+  const contextFacts = [
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
-    ...contractFacts(view.contract),
-    ...(options.facts ?? []),
-    ...(view.status.cwd === undefined ? [] : [`cwd  ${safeText(view.status.cwd)}`]),
+    ...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)]),
   ];
+  const facts = [...contractFacts(view.contract), ...(options.facts ?? [])];
   return {
     activity,
-    lines: [...snapshotHeading(view.status.id, options.alias, view.contract), ...activity],
+    head: panelHead(view.status.id, options.alias, view.contract, contextFacts),
     facts,
   };
 }
@@ -1090,27 +1156,37 @@ export function snapshotText(
   options: SnapshotCoreOptions = {},
 ): string {
   const core = snapshotCore(view, context, options);
-  const debtContext = renderDebtContextLines(view.createdDebts, context.columns);
   const conclusion = snapshotConclusion(view.status);
+  const content = [...core.activity, ...(conclusion.length === 0 ? [] : [conclusion])];
   return [
-    ...core.lines,
-    ...(conclusion.length === 0 ? [] : [conclusion]),
-    ...(debtContext.length > 0 ? ["", ...debtContext] : []),
-    ...(view.status.timeline.reportedChanges.length > 0 || view.status.timeline.reportedChangesOmitted > 0 ? [""] : []),
-    ...renderReportedChangeLines(view.status.timeline),
-    ...(core.facts.length > 0 ? ["", ...core.facts] : []),
+    ...core.head,
+    ...(content.length === 0 ? [] : [frameRule(core.head, context.columns), ...content]),
+    ...subordinateLines([
+      ...renderReportedChangeLines(view.status.timeline),
+      ...renderDebtContextLines(view.createdDebts, context.columns - SUBORDINATE_INDENT.length),
+      ...core.facts,
+    ]),
   ].join("\n");
 }
 
-function killResultLabel(evidence: KillEvidence): string {
-  if (evidence === "killed") return "✓ killed";
-  if (evidence === "already-killed") return "✓ already killed";
-  if (evidence === "already-stopped") return "✓ already stopped";
-  return `! not killed · ${evidence}`;
+function killResultLabel(
+  evidence: KillEvidence,
+): Readonly<{ mark: "✓" | "!"; verb: string; evidence: readonly string[] }> {
+  if (evidence === "killed") return { mark: "✓", verb: "killed", evidence: [] };
+  if (evidence === "already-killed") return { mark: "✓", verb: "already killed", evidence: [] };
+  if (evidence === "already-stopped") return { mark: "✓", verb: "already stopped", evidence: [] };
+  return { mark: "!", verb: "not killed", evidence: [evidence] };
 }
 
 export function killResultText(id: string, evidence: KillEvidence, alias?: string): string {
-  return [...snapshotHeading(id, alias, undefined), "", killResultLabel(evidence)].join("\n");
+  const label = killResultLabel(evidence);
+  return actionReceipt({
+    mark: label.mark,
+    verb: label.verb,
+    id,
+    ...(alias === undefined ? {} : { alias }),
+    evidence: label.evidence,
+  }).join("\n");
 }
 
 function answerBytes(answer: unknown, structured: boolean): string | undefined {
@@ -1180,38 +1256,66 @@ export function historyText(
           ),
         ]
       : [];
-  return [...snapshotHeading(result.id, presentation.alias, result.contract), ...paging, ...rows].join("\n");
+  // History is an immutable timeline, so it takes the shared heading and content boundary and
+  // never gains a fabricated current-state conclusion or a live mark.
+  const content = [...paging, ...rows];
+  const head = panelHead(result.id, presentation.alias, result.contract);
+  return [...head, ...(content.length === 0 ? [] : [frameRule(head, context.columns), ...content])].join("\n");
 }
 
-export function tellText(
-  result: AkumaTellResult,
-  alias: string | undefined,
-  context: TextRenderContext,
-  options: Readonly<{ identity?: boolean }> = {},
-): string {
-  const wake = result.tell.wake;
-  const target = identity(result.akuma, alias);
+/** One bounded preview of a submitted Tell, indented once beneath its verdict or evidence. */
+export function tellPayloadLines(text: string, context: TextRenderContext): readonly string[] {
+  return renderBoundedPayload({
+    text,
+    first: SUBORDINATE_INDENT,
+    continuation: `${SUBORDINATE_INDENT}│ `,
+    columns: context.columns,
+    maxLines: 1,
+    quote: '"',
+    openQuote: false,
+    truncated: false,
+  });
+}
+
+/** One admitted Tell as a timeline row inside a shared input panel; the panel owns the identity. */
+export function tellAdmissionRow(tell: AkumaTellResult["tell"], context: TextRenderContext): string {
+  const wake = tell.wake;
   const glyph = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
   const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
-  const row = groupedRows([result.tell.row], context, {
+  return groupedRows([tell.row], context, {
     ...plainLayout(),
     head: (time, _glyph, _verb, columns) => eventPrefix(glyph, verb, time, columns),
     singleLine: true,
   }).join("\n");
-  const heading = options.identity === false ? [] : snapshotHeading(target, undefined, undefined);
-  if (wake.kind === "failed") {
-    const child = "child" in wake ? wake.child : undefined;
-    const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
-    return [
-      ...heading,
-      row,
-      ...renderBoundedTextBlock(failure, {
+}
+
+/**
+ * One Tell action receipt: the delivery verdict and complete subject, then the submitted payload
+ * once. A held Tell keeps neutral vocabulary; a failed delivery keeps its own concrete diagnosis.
+ */
+export function tellText(result: AkumaTellResult, alias: string | undefined, context: TextRenderContext): string {
+  const wake = result.tell.wake;
+  const mark = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
+  const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
+  const verdict = actionReceipt({
+    mark,
+    verb,
+    id: result.akuma,
+    ...(alias === undefined ? {} : { alias }),
+  });
+  if (wake.kind !== "failed") return [...verdict, ...tellPayloadLines(result.tell.row.text, context)].join("\n");
+  const child = "child" in wake ? wake.child : undefined;
+  const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
+  return [
+    ...verdict,
+    ...tellPayloadLines(result.tell.row.text, context),
+    ...subordinateLines(
+      renderBoundedTextBlock(failure, {
         first: "",
-        continuation: "  ",
-        columns: context.columns,
+        continuation: "",
+        columns: context.columns - SUBORDINATE_INDENT.length,
         lines: Number.MAX_SAFE_INTEGER,
       }),
-    ].join("\n");
-  }
-  return [...heading, row].join("\n");
+    ),
+  ].join("\n");
 }

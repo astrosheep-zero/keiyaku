@@ -18,7 +18,7 @@ import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
 import { displayContext, emit, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
-import { callObservationStream, inputWaitStream } from "../render/akuma-activity.js";
+import { callObservationStream } from "../render/akuma-activity.js";
 import {
   askRawAnswer,
   callRawAnswer,
@@ -36,6 +36,7 @@ import {
   historyExitCode,
   killExitCode,
   renderCallText,
+  renderFailedCallObservation,
   renderForkText,
   renderKillText,
   tellExitCode,
@@ -155,9 +156,15 @@ async function runCall(
   const observe: CallRequest["observe"] = observing
     ? {
         admitted: (tell, id, head) => {
-          stream = callObservationStream(resultContext(), callObservationHead({ akuma: id, ...head }), {
-            admittedAt: tell.row.at,
-          });
+          stream = callObservationStream(
+            resultContext(),
+            callObservationHead({
+              akuma: id,
+              ...head,
+              ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
+            }),
+            { admittedAt: tell.row.at },
+          );
           driver.redraw(stream.frame());
         },
         observe: (observation) => {
@@ -176,17 +183,7 @@ async function runCall(
     if (stream !== undefined) {
       driver.conclude(stream.conclude(result.observation));
     } else if (observing && result.observation.kind === "failed") {
-      const fallback = inputWaitStream(
-        resultContext(),
-        () =>
-          callObservationHead({
-            akuma: result.akuma,
-            dispatch: result.dispatch,
-            alias: result.alias,
-          }),
-        { cursor: "empty", answerSeparator: true },
-      );
-      writeStderr(fallback.conclude({ kind: "failed", diagnostic: result.observation.failure.diagnostic }));
+      writeStderr(renderFailedCallObservation(result, resultContext()));
       streamed = true;
     }
     if (command.output === "json") {

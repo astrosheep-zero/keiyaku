@@ -2851,7 +2851,13 @@ test("status text and JSON report the Akuma execution workdir", () => {
     contract: { kind: "none" as const },
     createdDebts: { kind: "present" as const, rows: [] },
   };
-  assert.match(snapshotText(observation, DEFAULT_CONTEXT), /^cwd {2}\/work\/tree$/mu);
+  const statusLines = snapshotText(observation, DEFAULT_CONTEXT).split("\n");
+  assert.deepEqual(
+    statusLines.slice(0, 3),
+    [id, "  /work/tree", frameRule([id, "  /work/tree"], DEFAULT_CONTEXT.columns)],
+    "the execution directory is a static coordinate above the content boundary",
+  );
+  assert.doesNotMatch(statusLines.join("\n"), /cwd/u, "the coordinate is named once, above the timeline");
   const json = JSON.parse(JSON.stringify(observation)) as { status: { cwd?: string } };
   assert.equal(json.status.cwd, "/work/tree");
 });
@@ -3653,6 +3659,7 @@ test("a streamed observing call opens one framed head and never replays a settle
     alias: "@scout",
     contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
     facts: [],
+    cwd: "/work/repo",
   };
   const stream = callObservationStream({ columns: 100, color: false }, head, { now: () => now });
   const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
@@ -3665,22 +3672,26 @@ test("a streamed observing call opens one framed head and never replays a settle
     });
   const tool = (sequence: number, command: string) =>
     snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
-  const headLines = [`${id} (@scout)`, "└─ kei/demo"];
+  const headLines = [`${id} (@scout) · kei/demo`, "  /work/repo"];
   const opening = stream.observe(
     live(running([snapshotRow(activeTool(1, "bash", { kind: "run", command: "first" }))])),
   );
-  assert.deepEqual(opening, [...headLines, frameRule(headLines)], "the head opens once before any row");
-  assert.doesNotMatch(opening.join("\n"), /cwd|✓ run/u);
+  assert.deepEqual(
+    opening,
+    [...headLines, frameRule(headLines)],
+    "the head opens once, with the invocation's known execution directory above the boundary",
+  );
+  assert.doesNotMatch(opening.join("\n"), /cwd |✓ run/u, "no labelled directory row and no fabricated activity");
   const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
   const text = stream.observe(live(growing)).join("\n");
   assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
   assert.match(text, /✓ run +\$ first/u);
-  assert.doesNotMatch(text, /second|@scout|└─ kei\/demo/u, "the head never recurs and the newest row is still moving");
+  assert.doesNotMatch(text, /second|@scout|kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
   const conclusion = stream.conclude(callObservation({ reason: "answered", answer: "the answer" }));
   assert.equal(conclusion, `      ? run    \$ second\n${clockAt(settledAtMs)} ✓ answered — 4s\n\n`);
-  assert.doesNotMatch(conclusion, /the answer|└─ kei\/demo|@scout/u, "no head or answer replay");
+  assert.doesNotMatch(conclusion, /the answer|kei\/demo|@scout/u, "no head or answer replay");
 });
 
 test("a streamed observing call concludes truthfully when its stream never opened", () => {
