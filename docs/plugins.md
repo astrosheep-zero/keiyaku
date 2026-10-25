@@ -52,7 +52,20 @@ The Square observer shares Square's host-wide session registry with native
 harness integrations. Caller registration and outcome observation use that same
 registry across execution directories; a worktree-local registry cannot stand in
 for it. Square activity remains World-local, and worktree disposal does not
-relocate it to the primary World. Before a submitting
+relocate it to the primary World. The submitting integration edge owns which
+participant a session speaks as: an explicit name stays authoritative, an
+already-established participant of that session is reused unchanged, and a
+session with no identity here derives one stable name from its own provider
+session coordinate. Square remains the owner of standing, ownership, and
+lifecycle, so an ambiguous identity, a name another session holds, or an
+unavailable registry selects nothing rather than inventing, migrating, or taking
+over a participant. Recognition is a read of Square's own registry and never
+rejoins, renames, or migrates a finished participant.
+
+A generic integration initiator supplied by the caller outranks the Square
+integration's own selection and is forwarded unchanged; Square-specific
+recognition belongs to the integration adapter rather than the generic caller
+decoder or the Akuma domain. Before a submitting
 process sends an attributed Akuma input, the optional initiation observation
 lets Square establish that initiator's callable route
 in the submitting session. This is identity preparation, not evidence of
@@ -65,6 +78,12 @@ address every participant carried by the Turn's signal, never a caller captured
 from the producing process. The opening initiator remains the owner, not the
 entire audience. No participants produces an unaddressed outcome rather than a
 fallback mention.
+Local outcome observation acknowledges notices for the participant the producing
+session is recognized as standing, and for an explicitly named participant when
+no standing binding exists. It never computes a substitute identity, joins a
+participant, or creates a route merely to acknowledge, and a missing standing,
+notice, or identity stays silence. An explicitly forwarded observer names its own
+participant and never acquires the serving session's identity or wake route.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention

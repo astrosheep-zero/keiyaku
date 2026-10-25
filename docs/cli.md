@@ -116,10 +116,16 @@ the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
-Call, fork, tell, and ask capture the submitting process's assigned Square identity at the
-invocation edge and pass it as optional input attribution, including through a
-direct-parent request. Missing or unusable Square identity leaves attribution
-absent and never refuses the operation. The Body does not rediscover the caller
+Call, fork, tell, and ask select the submitting process's Square participant name at
+the invocation edge and pass it as optional input attribution, including through a
+direct-parent request. An explicit Square participant name is authoritative, an
+established participant already owned by this session is reused unchanged, and a
+session with no identity in the World's local Square derives one stable name from
+its own provider session coordinate. An ambiguous or missing session coordinate,
+an ambiguous existing binding, or an unavailable registry selects nothing.
+Missing or unusable Square identity leaves attribution absent and never refuses
+the operation. A generic integration initiator supplied by the caller outranks
+that selection and is forwarded unchanged. The Body does not rediscover the caller
 from its own environment. Call establishes the already selected World before
 preparing the submitting participant's route; a later failed first call may
 therefore leave that World marker.

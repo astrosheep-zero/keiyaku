@@ -6,6 +6,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createHostLedgerPort, Square, squareAssignedParticipantName, type Activity } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
+import { squareSeat } from "../src/cli/square-identity.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
 import { deferred as promiseBarrier, restoreEnvironmentValues } from "./support/process.js";
@@ -839,6 +840,178 @@ test("Pi caller registration and outcomes share the harness ledger across execut
     assert.equal(existsSync(squarePath(cwd)), false);
   } finally {
     process.chdir(priorCwd);
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("local observation acknowledges the recognized seat, never the former provider default", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-seat-observation-"));
+  const prior = { ...ambientSessionIdentity(), SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "host-ledger");
+    mkdirSync(join(root, ".square"), { recursive: true });
+    process.env.PI_SESSION_ID = "serving";
+    const serving = { ...process.env };
+    const submitter = await activateSquare(root);
+    const seat = (await squareSeat({ path: root as WorldRoot, environment: serving }))!;
+    assert.match(seat, /^keiyaku-seat-[0-9a-f]{12}$/u);
+    await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: seat });
+
+    // The identity the former edge would have recomputed from this same session.
+    const former = squareAssignedParticipantName(serving)!;
+    assert.match(former, /^pi-/u);
+    process.env.PI_SESSION_ID = "elsewhere";
+    const elsewhere = await Square.at({ path: squarePath(root), env: { ...process.env } });
+    try {
+      await elsewhere.implicitJoin(former);
+    } finally {
+      await elsewhere.close();
+    }
+
+    process.env.PI_SESSION_ID = "body";
+    const body = await activateSquare(root);
+    const turn = body.signals?.["akuma.turn-outcome"];
+    assert.ok(turn);
+    await turn({ kind: "akuma.turn-outcome", akumaId: "aku/seat", bodySequence: 1, turnSequence: 1,
+      initiator: seat, participants: [seat], outcome: { kind: "answered", text: "ok" } });
+    await turn({ kind: "akuma.turn-outcome", akumaId: "aku/seat", bodySequence: 1, turnSequence: 2,
+      participants: [former], outcome: { kind: "answered", text: "ok" } });
+
+    const square = await Square.at({ path: squarePath(root), env: {} });
+    try {
+      const standing = (await square.participants()).participants.map(({ name }) => name).sort();
+      for (const historyId of ["turn/1", "turn/2"]) {
+        await submitter.signals?.["akuma.outcome-observed"]?.({
+          kind: "akuma.outcome-observed", akumaId: "aku/seat", historyId,
+        });
+      }
+      const notices = (await square.history({ from: ["aku/seat"], limit: null })).activities
+        .filter((activity) => activity.kind === "say");
+      const seatNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/1"))!;
+      const formerNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/2"))!;
+      const snapshot = await square.snapshot();
+      assert.equal(snapshot.delivered(seat, seatNotice.id), true, "the recognized seat takes its own notice");
+      assert.equal(
+        snapshot.delivered(former, formerNotice.id),
+        false,
+        "a recomputed provider name never acknowledges another participant's notice",
+      );
+      const after = (await square.participants()).participants;
+      assert.deepEqual(
+        after.map(({ name }) => name).sort(),
+        standing,
+        "acknowledgment joins or creates no participant",
+      );
+      assert.deepEqual(after.find(({ name }) => name === seat)?.listening, [], "listen state is untouched");
+    } finally {
+      await square.close();
+    }
+  } finally {
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an explicit forwarded observer never borrows the serving session's identity or route", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-forwarded-observer-"));
+  const prior = {
+    ...ambientSessionIdentity(),
+    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
+  };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "host-ledger");
+    mkdirSync(join(root, ".square"), { recursive: true });
+    process.env.PI_SESSION_ID = "serving";
+    const serving = { ...process.env };
+    const submitter = await activateSquare(root);
+    const seat = (await squareSeat({ path: root as WorldRoot, environment: serving }))!;
+    await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: seat });
+
+    process.env.PI_SESSION_ID = "requester";
+    const requester = await activateSquare(root);
+    await requester.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Forwarded" });
+
+    process.env.PI_SESSION_ID = "body";
+    const body = await activateSquare(root);
+    const turn = body.signals?.["akuma.turn-outcome"];
+    assert.ok(turn);
+    await turn({ kind: "akuma.turn-outcome", akumaId: "aku/forwarded", bodySequence: 1, turnSequence: 1,
+      initiator: "Forwarded", participants: ["Forwarded"], outcome: { kind: "answered", text: "ok" } });
+
+    await submitter.signals?.["akuma.outcome-observed"]?.({
+      kind: "akuma.outcome-observed", akumaId: "aku/forwarded", historyId: "turn/1", observer: "Forwarded",
+    });
+
+    const square = await Square.at({ path: squarePath(root), env: {} });
+    try {
+      const notice = (await square.history({ from: ["aku/forwarded"], limit: null })).activities
+        .find((activity) => activity.kind === "say")!;
+      assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), true, "the forwarded requester is served");
+      assert.equal((await square.snapshot()).delivered(seat, notice.id), false, "the serving session is not the observer");
+    } finally {
+      await square.close();
+    }
+    const bindings = await createHostLedgerPort().listPresence({ session: serving.PI_SESSION_ID! });
+    assert.deepEqual(
+      bindings.map(({ participant }) => participant),
+      [seat],
+      "the serving session keeps its own single binding and gains nothing from forwarding",
+    );
+  } finally {
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a declared name resolves an ambiguous session binding in local acknowledgment", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-explicit-ack-"));
+  const prior = { ...ambientSessionIdentity(), SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "host-ledger");
+    mkdirSync(join(root, ".square"), { recursive: true });
+    // One session that joined twice: Square can no longer name it on its own.
+    process.env.PI_SESSION_ID = "ambiguous-session";
+    const joined = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env } });
+    try {
+      await (await joined.implicitJoin("Stale")).participant?.catch();
+      await (await joined.implicitJoin("Declared")).participant?.catch();
+    } finally {
+      await joined.close();
+    }
+
+    process.env.PI_SESSION_ID = "body";
+    const body = await activateSquare(root);
+    const turn = body.signals?.["akuma.turn-outcome"];
+    assert.ok(turn);
+    await turn({ kind: "akuma.turn-outcome", akumaId: "aku/explicit", bodySequence: 1, turnSequence: 1,
+      initiator: "Declared", participants: ["Declared"], outcome: { kind: "answered", text: "ok" } });
+    await turn({ kind: "akuma.turn-outcome", akumaId: "aku/explicit", bodySequence: 1, turnSequence: 2,
+      participants: ["Stale"], outcome: { kind: "answered", text: "ok" } });
+
+    process.env.PI_SESSION_ID = "ambiguous-session";
+    process.env.SQUARE_PARTICIPANT_NAME = "Declared";
+    const local = await activateSquare(root);
+    for (const historyId of ["turn/1", "turn/2"]) {
+      await local.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId: "aku/explicit", historyId });
+    }
+
+    const square = await Square.at({ path: squarePath(root), env: {} });
+    try {
+      const notices = (await square.history({ from: ["aku/explicit"], limit: null })).activities
+        .filter((activity) => activity.kind === "say");
+      const snapshot = await square.snapshot();
+      const declaredNotice = notices.find((notice) => notice.body?.startsWith("aku/explicit turn/1"))!;
+      const staleNotice = notices.find((notice) => notice.body?.startsWith("aku/explicit turn/2"))!;
+      assert.equal(snapshot.delivered("Declared", declaredNotice.id), true, "the declared name resolves the binding");
+      assert.equal(snapshot.delivered("Stale", staleNotice.id), false, "the other binding is left untouched");
+    } finally {
+      await square.close();
+    }
+  } finally {
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }

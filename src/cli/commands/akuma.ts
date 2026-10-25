@@ -3,7 +3,7 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma-grammar.js"
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { squareAssignedParticipantName } from "@astrosheep/square";
+import { squareSeat } from "../square-identity.js";
 import { emitPluginSignal } from "../../plugin/akuma-signals.js";
 import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
@@ -98,11 +98,25 @@ async function promptBody(
   return bytes;
 }
 
-async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
-  let initiator: string | undefined;
+/**
+ * A generic integration initiator outranks any Square guess; otherwise the Square
+ * edge selects. Identity selection is optional, so it never refuses the operation.
+ */
+async function submittingInitiator(input: InvokeInput): Promise<string | undefined> {
+  const declared = input.environment.KEIYAKU_INITIATOR?.trim();
+  if (declared !== undefined && declared !== "") return declared;
   try {
-    initiator = squareAssignedParticipantName(input.environment);
-  } catch {}
+    return await squareSeat(
+      { path: input.path, environment: input.environment },
+      { ...(input.signal === undefined ? {} : { signal: input.signal }) },
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
+  const initiator = await submittingInitiator(input);
   if (initiator === undefined) return {};
   // Identity preparation needs established plugin custody, not just a candidate.
   if (!(await World.established(input.path))) return { initiator };

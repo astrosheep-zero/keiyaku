@@ -120,11 +120,39 @@ const plugin = {
         };
         const expressTurnOutcome = (signal, cancellation) => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.participants, cancellation);
         const expressBodyEnd = (signal, participants, cancellation) => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), participants, cancellation);
-        let caller;
-        try {
-            caller = squareAssignedParticipantName(environment);
-        }
-        catch { }
+        /**
+         * A process with no harness session and no explicit name has nothing here to
+         * recognize, and settles that without touching Square.
+         */
+        const hasLocalIdentity = () => {
+            try {
+                return squareAssignedParticipantName(environment) !== undefined;
+            }
+            catch {
+                return false;
+            }
+        };
+        /**
+         * Local outcome acknowledgment names the participant this session speaks as.
+         * Recognition is the ownership-safe authority: Square only lets a session
+         * acknowledge notices for a name it stands as, so a declared name is the
+         * fallback that resolves an ambiguous binding rather than a replacement for a
+         * standing one. Nothing is recomputed or joined merely to acknowledge.
+         */
+        const localObserver = async (square) => {
+            const recognized = await square.recognize(environment);
+            if (recognized !== null)
+                return recognized.name;
+            const declared = environment.SQUARE_PARTICIPANT_NAME?.trim();
+            if (declared === undefined || declared === "")
+                return undefined;
+            try {
+                return (await square.participant(declared)).name;
+            }
+            catch {
+                return undefined;
+            }
+        };
         return {
             signals: {
                 async "akuma.initiating"(signal, cancellation) {
@@ -158,8 +186,9 @@ const plugin = {
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();
-                    const observer = signal.observer ?? caller;
-                    if (observer === undefined)
+                    // A local acknowledgment has nothing to recognize without a session
+                    // coordinate or an explicit name; settle that before any Square read.
+                    if (signal.observer === undefined && !hasLocalIdentity())
                         return;
                     // A forwarded semantic identity must not borrow the serving harness's
                     // session ownership or publish its wake route for the requester.
@@ -176,6 +205,9 @@ const plugin = {
                     }
                     try {
                         cancellation?.throwIfAborted();
+                        const observer = signal.observer ?? await localObserver(square);
+                        if (observer === undefined)
+                            return;
                         const { participants } = await square.participants({}, control);
                         if (!participants.some((item) => item.name === observer && item.state === "active") ||
                             !participants.some((item) => item.name === signal.akumaId))
