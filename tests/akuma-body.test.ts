@@ -1104,7 +1104,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     };
     const sdk = {
       createAgentSessionFromServices: async () => ({ session }),
-      createAgentSessionServices: async () => ({}),
+      createAgentSessionServices: async () => ({ resourceLoader: { getExtensions: () => ({ errors: [] }) } }),
       createBashToolDefinition: () => ({}),
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
@@ -1187,7 +1187,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
         return { session };
       },
       createBashToolDefinition: () => ({}),
-      createAgentSessionServices: async () => ({}),
+      createAgentSessionServices: async () => ({ resourceLoader: { getExtensions: () => ({ errors: [] }) } }),
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;

@@ -51,7 +51,7 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
         captured = options as unknown as Record<string, unknown>;
         return { session } as never;
       },
-      createAgentSessionServices: async () => ({}) as never,
+      createAgentSessionServices: async () => ({ resourceLoader: { getExtensions: () => ({ errors: [] }) } }) as never,
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager } as never,
     },

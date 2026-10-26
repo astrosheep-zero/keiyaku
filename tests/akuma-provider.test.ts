@@ -1596,7 +1596,7 @@ function fakePiSdk(
               return input.missingModel ? undefined : { provider, id };
             },
           },
-          resourceLoader: { getExtensions: () => ({ runtime: { invalidate: () => { seen.invalidated += 1; } } }) },
+          resourceLoader: { getExtensions: () => ({ errors: [], runtime: { invalidate: () => { seen.invalidated += 1; } } }) },
         };
         seen.services = services;
         return services as never;
