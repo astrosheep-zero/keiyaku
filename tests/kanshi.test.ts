@@ -1,6 +1,6 @@
 import { accepted, present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { appendActivity, beginTurn, breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
@@ -227,7 +227,7 @@ test("unattempted associations without a Repo are not marked unavailable", async
   assert.equal(report.debts.value.rows.find((row) => row.id === debtId)?.contractAssociationUnavailable, undefined);
   const akuma = report.akuma.value.rows.find((row) => row.id === akumaId);
   assert.equal(akuma?.contractAssociationUnavailable, undefined);
-  assert.equal(akuma?.aliasesUnavailable, undefined);
+  assert.equal(report.akuma.value.aliasesUnavailable, undefined);
 
   const contractOnly = await kanshi({ world: null, repo: await Repo.at({ path: repository.path }) });
   assert.equal(contractOnly.contracts.kind, "present");
@@ -377,7 +377,7 @@ test("missing placement proof retains the Akuma's reported changes", async (t) =
   );
 });
 
-test("Alias failure leaves Akuma rows readable and marks aliases unavailable", async (t) => {
+test("Alias failure leaves Akuma rows readable and marks the section's aliases unavailable", async (t) => {
   const repository = fixtureRepository(t);
   const akumaId = await bornAkuma(repository.path, "a0000004");
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
@@ -387,9 +387,48 @@ test("Alias failure leaves Akuma rows readable and marks aliases unavailable", a
   assert.equal(observation.aliases.kind, "failed");
   assert.equal(observation.report.akuma.kind, "present");
   if (observation.report.akuma.kind !== "present") return;
+  assert.equal(observation.report.akuma.value.aliasesUnavailable, true);
   const row = observation.report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
-  assert.equal(row?.aliasesUnavailable, true);
+  assert.ok(row !== undefined);
+  assert.equal("aliasesUnavailable" in row, false);
+  assert.deepEqual(row.aliases, []);
   assert.match(renderKanshiText(observation.report, { columns: 100, color: false }), /aliases unavailable/u);
+});
+
+test("an empty Akuma roster retains a failed Alias observation as section evidence", async (t) => {
+  const repository = fixtureRepository(t);
+  mkdirSync(join(repository.path, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(repository.path, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
+
+  const report = await kanshi({ world: await World.at(repository.path) });
+  assert.equal(report.akuma.kind, "present");
+  if (report.akuma.kind !== "present") return;
+  assert.equal(report.akuma.value.aliasesUnavailable, true);
+  assert.deepEqual(report.akuma.value.rows, []);
+  const text = renderKanshiText(report, { columns: 100, color: false });
+  assert.match(text, /akuma  none/u);
+  assert.match(text, /aliases unavailable/u);
+  assert.doesNotMatch(text, /AKUMA \/\/ unavailable|world empty/u);
+});
+
+test("an attached Contract roster derives Alias availability from the Akuma section", async (t) => {
+  const { repository, contract, akumaId } = await populatedWorld(t);
+  writeFileSync(join(repository.path, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
+
+  const report = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+  });
+  assert.equal(report.akuma.kind, "present");
+  assert.equal(report.contracts.kind, "present");
+  if (report.akuma.kind !== "present" || report.contracts.kind !== "present") return;
+  assert.equal(report.akuma.value.aliasesUnavailable, true);
+  const akuma = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
+  assert.ok(akuma !== undefined);
+  assert.equal("aliasesUnavailable" in akuma, false);
+  const contractRow = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
+  assert.equal(contractRow?.roster[0]?.aliasesUnavailable, true);
+  assert.deepEqual(contractRow?.roster[0]?.aliases, []);
 });
 
 test("Debt board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {

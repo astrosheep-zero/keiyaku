@@ -215,7 +215,7 @@ function attachRoster(
     current.push({
       id: row.id,
       aliases: row.aliases,
-      ...(row.aliasesUnavailable === true ? { aliasesUnavailable: true as const } : {}),
+      ...(akuma.value.aliasesUnavailable === true ? { aliasesUnavailable: true as const } : {}),
     });
     attachments.set(row.contract.id, current);
   }
@@ -444,6 +444,7 @@ function attachAkumaAssociations(
     kind: "present",
     value: {
       ...product.value,
+      ...(aliases.kind === "failed" ? { aliasesUnavailable: true as const } : {}),
       rows: product.value.rows.map((row) => {
         const dispatch = dispatchById.get(row.id);
         const snapshot = row.snapshot;
@@ -451,7 +452,6 @@ function attachAkumaAssociations(
         return {
           ...row,
           aliases: aliases.kind === "present" ? (aliasById.get(row.id) ?? []).map((binding) => binding.alias) : [],
-          ...(aliases.kind === "failed" ? { aliasesUnavailable: true as const } : {}),
           ...(dispatches.kind === "failed"
             ? { contractAssociationUnavailable: true as const }
             : dispatch === undefined

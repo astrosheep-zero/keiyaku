@@ -27,6 +27,13 @@ unavailable; it does not fail readable Debt or Akuma rows or establish that no
 link exists. Alias remains independently observed from Akuma, so failure to
 read Alias does not erase the Akuma observation.
 
+Alias availability belongs to the composite Akuma section, not to any single
+row: a failed Alias observation leaves the section present and readable, and
+its evidence survives an empty roster instead of failing the section or
+disappearing into an evidence-free emptiness. Readable alias values remain the
+Alias owner's, and an attached Contract roster derives availability from this
+one section fact.
+
 The World Debt section is a recent bounded catalogue. It attaches only
 relationships already observed for those rows, while a selected Contract's
 owned Debt section retains the complete owner view required to explain that

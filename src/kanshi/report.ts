@@ -57,7 +57,6 @@ export type DebtKanshiWorld = BoundedList<DebtKanshiRow> & Readonly<{ root: Worl
 export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
   Readonly<{
     aliases: readonly AkumaAlias[];
-    aliasesUnavailable?: true;
     contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
     contractAssociationUnavailable?: true;
     snapshot?: ActivitySnapshot;
@@ -66,6 +65,7 @@ export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
 export type AkumaKanshiWorld = Omit<AkumaList, "rows"> &
   Readonly<{
     rows: readonly AkumaKanshiRow[];
+    aliasesUnavailable?: true;
   }>;
 
 export type KanshiRegionSelection =

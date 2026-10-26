@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -170,6 +170,18 @@ test("failed Dispatch leaves the bounded Akuma category and Alias rows readable"
   );
   assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
   assert.equal(report.akuma.value.rows[0]!.contractAssociationUnavailable, true);
+});
+
+test("an empty Akuma roster keeps a failed Alias observation at the section", async (context) => {
+  const world = await World.at(realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-public-alias-"))));
+  context.after(() => rmSync(world, { recursive: true, force: true }));
+  mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
+
+  const report = await kanshiCategory({ world, category: "akuma" });
+  if (report.category !== "akuma" || report.akuma.kind !== "present") assert.fail(JSON.stringify(report));
+  assert.equal(report.akuma.value.aliasesUnavailable, true);
+  assert.deepEqual(report.akuma.value.rows, []);
 });
 
 test("malformed category input is refused before owner observation", async () => {

@@ -4,6 +4,7 @@ import { akumaMark } from "./marks.js";
 import {
   ageText,
   elapsedMilliseconds,
+  emptyCatalogue,
   entityLines,
   identityLine,
   RECENT_TONE_MS,
@@ -46,10 +47,10 @@ function latestActivityLines(
   );
 }
 
-function akumaLabel(row: AkumaKanshiRow): string {
+function akumaLabel(row: AkumaKanshiRow, aliasesUnavailable: boolean): string {
   const aliases = row.aliases ?? [];
   if (aliases.length > 0) return `(${aliases.join(" ")})`;
-  return row.aliasesUnavailable === true ? "(aliases unavailable)" : "";
+  return aliasesUnavailable ? "(aliases unavailable)" : "";
 }
 
 function endpointFact(id: string, observed: string | undefined): string {
@@ -61,7 +62,9 @@ function endpointFact(id: string, observed: string | undefined): string {
 /**
  * One Akuma board section. The World board omits an empty section because its other
  * sections already say what the World holds; a category board states that emptiness
- * itself, since it is the whole answer.
+ * itself, since it is the whole answer. A failed Alias observation belongs to the
+ * section, so an empty roster still states its emptiness rather than dropping that
+ * evidence.
  */
 function renderAkumaBoard(
   section: Section<AkumaKanshiWorld>,
@@ -73,7 +76,14 @@ function renderAkumaBoard(
   if (section.kind === "failed")
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
   const rows = section.value.rows;
-  if (rows.length === 0) return emptyRows;
+  const aliasesUnavailable = section.value.aliasesUnavailable === true;
+  if (rows.length === 0) {
+    if (!aliasesUnavailable) return emptyRows;
+    return [
+      ...(emptyRows.length === 0 ? [emptyCatalogue("akuma")] : emptyRows),
+      tone("! aliases unavailable", "alert", context.color),
+    ];
+  }
   const rowLines = rows.map((row) => {
     const statusTone = akumaStatusTone(row, observedAt);
     const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
@@ -95,7 +105,7 @@ function renderAkumaBoard(
         : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = row.snapshot;
     const snapshotLines = snapshot === undefined ? [] : latestActivityLines(snapshot, context);
-    const aliases = akumaLabel(row);
+    const aliases = akumaLabel(row, aliasesUnavailable);
     if (context.columns > NARROW_COLUMNS) {
       const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
       return [...lines, ...snapshotLines];
