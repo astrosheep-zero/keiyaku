@@ -1,6 +1,6 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { recordTell, seedLegacySchema, soulFixture } from "./support/akuma-fixtures.js";
+import { recordTell, seedLegacySchema, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import {
   activitySlice,
   appendActivity,
   AkumaBusyError,
+  BodyControlledError,
   beginTurn,
   bindTellsToTurn,
   breakBody,
@@ -40,12 +41,12 @@ import {
   recordTellDeliveries,
   recordTellReceipt,
   readTurn,
-  requestPause,
   requestStop,
   type Soul,
 } from "../src/akuma/heart/index.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
+import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 
 async function fixture() {
@@ -1062,6 +1063,150 @@ test("an unresolved Tell disposition remains eligible for recovery", async () =>
   }
 });
 
+test("interrupt admission joins one stable frontier and stale completion preserves newer control", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-barrier-join-");
+  const { allocated, holder, body } = await bornBody(root, "baba1001", "2026-08-08T00:00:00.000Z");
+  try {
+    const [first, second] = await Promise.all([
+      heartRecordTell(allocated.paths, {
+        kind: "tell",
+        id: "interrupt-one",
+        body: "first",
+        recordedAt: "2026-08-08T00:00:01.000Z",
+      }, { interrupt: true }),
+      heartRecordTell(allocated.paths, {
+        kind: "tell",
+        id: "interrupt-two",
+        body: "second",
+        recordedAt: "2026-08-08T00:00:02.000Z",
+      }, { interrupt: true }),
+    ]);
+    assert.equal(first.kind, "recorded");
+    assert.equal(second.kind, "recorded");
+    if (first.kind !== "recorded" || second.kind !== "recorded") throw new Error("concurrent interrupts were not admitted");
+    const firstBarrier = first.barrier;
+    assert.ok(firstBarrier);
+    assert.equal(second.barrier?.frontierTellId, firstBarrier.frontierTellId);
+    const duplicate = await heartRecordTell(allocated.paths, {
+      kind: "tell",
+      id: first.tell.id,
+      body: first.tell.body,
+      recordedAt: "2026-08-08T00:00:03.000Z",
+    }, { interrupt: true });
+    assert.equal(duplicate.kind, "recorded");
+    if (duplicate.kind !== "recorded") throw new Error("duplicate interrupt identity was refused");
+    assert.equal(duplicate.tell.sequence, first.tell.sequence);
+    assert.equal(duplicate.tell.recordedAt, first.tell.recordedAt);
+    assert.equal(duplicate.barrier?.frontierTellId, firstBarrier.frontierTellId);
+
+    const admittedHeart = await readHeart(allocated.paths);
+    assert.equal(admittedHeart.pause?.bodySequence, body.sequence);
+    assert.equal(admittedHeart.pause?.frontierTellId, firstBarrier.frontierTellId);
+    assert.deepEqual(
+      admittedHeart.pending.map((tell) => tell.id).sort(),
+      [first.tell.id, second.tell.id].sort(),
+    );
+    await assert.rejects(
+      heartRecordTell(allocated.paths, {
+        kind: "tell",
+        id: first.tell.id,
+        body: "changed payload",
+        recordedAt: first.tell.recordedAt,
+      }, { interrupt: true }),
+      /reused different input/u,
+    );
+
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-08T00:00:05.000Z" });
+    holder.release();
+    const successorLeash = await HeldAkumaLeash.try(allocated.paths);
+    assert.ok(successorLeash);
+    const settled = await successorLeash.completeInterruptBarrier(allocated.paths, firstBarrier);
+    assert.equal(settled.kind, "completed");
+    assert.equal((await readHeart(allocated.paths)).pause, null);
+    const successor = await successorLeash.recordBody(allocated.paths, { leashTakenAt: "2026-08-08T00:00:06.000Z" });
+    const newer = await heartRecordTell(allocated.paths, {
+      kind: "tell",
+      id: "interrupt-three",
+      body: "third",
+      recordedAt: "2026-08-08T00:00:07.000Z",
+    }, { interrupt: true });
+    assert.equal(newer.kind, "recorded");
+    if (newer.kind !== "recorded") throw new Error("successor interrupt was not admitted");
+    const newerBarrier = newer.barrier;
+    assert.ok(newerBarrier);
+    assert.equal(newerBarrier.bodySequence, successor.sequence);
+    const stale = await successorLeash.completeInterruptBarrier(allocated.paths, firstBarrier);
+    assert.equal(stale.kind, "completed");
+    assert.deepEqual((await readHeart(allocated.paths)).pause, newerBarrier);
+    assert.equal((await successorLeash.completeInterruptBarrier(allocated.paths, newerBarrier)).kind, "unavailable");
+    successorLeash.release();
+  } finally {
+    holder.release();
+  }
+});
+
+test("recordBody refuses a start admitted across an unsettled interrupt barrier", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-body-race-");
+  const { allocated, holder, body } = await bornBody(root, "baba1002", "2026-08-08T00:00:00.000Z");
+  holder.release();
+  const candidate = await HeldAkumaLeash.try(allocated.paths);
+  assert.ok(candidate);
+  try {
+    assert.equal((await candidate.completeInterruptBarrier(allocated.paths)).kind, "clear");
+    const admitted = await heartRecordTell(allocated.paths, {
+      kind: "tell",
+      id: "race-interrupt",
+      body: "protected",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    }, { interrupt: true });
+    assert.equal(admitted.kind, "recorded");
+    await assert.rejects(
+      candidate.recordBody(allocated.paths, { leashTakenAt: "2026-08-08T00:00:02.000Z" }),
+      BodyControlledError,
+    );
+    const heart = await readHeart(allocated.paths);
+    assert.equal(heart.latestBody?.sequence, body.sequence);
+    assert.equal(heart.pause?.frontierTellId, "race-interrupt");
+    assert.deepEqual(heart.pending.map((tell) => tell.id), ["race-interrupt"]);
+  } finally {
+    candidate.release();
+  }
+});
+
+test("legacy pause clears only after explicit non-hung settlement without inventing a Tell", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-legacy-pause-");
+  const { allocated, holder, body } = await bornBody(root, "baba1003", "2026-08-08T00:00:00.000Z");
+  try {
+    await insertLegacyPauseControl(allocated.paths, body.sequence, "2026-08-08T00:00:01.000Z");
+    const pause = (await readHeart(allocated.paths)).pause;
+    assert.ok(pause);
+    assert.equal(pause.frontierTellId, undefined);
+    assert.equal((await holder.completeInterruptBarrier(allocated.paths)).kind, "unavailable");
+    assert.equal((await readHeart(allocated.paths)).pause?.bodySequence, body.sequence);
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-08T00:00:02.000Z" });
+    assert.equal((await holder.completeInterruptBarrier(allocated.paths)).kind, "completed");
+    assert.equal((await readHeart(allocated.paths)).pause, null);
+    assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+  } finally {
+    holder.release();
+  }
+});
+
+test("malformed pause frontier is Heart corruption, not legacy state", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-malformed-pause-");
+  const { allocated, holder, body } = await bornBody(root, "baba1004", "2026-08-08T00:00:00.000Z");
+  const database = new DatabaseSync(allocated.paths.heart);
+  try {
+    database
+      .prepare("INSERT INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
+      .run(JSON.stringify({ bodySequence: body.sequence, frontierTellId: "missing-interrupt-tell" }), "2026-08-08T00:00:01.000Z");
+    await assert.rejects(readHeart(allocated.paths), HeartAuthorityCorruptionError);
+  } finally {
+    database.close();
+    holder.release();
+  }
+});
+
 test("pause remains distinct from stop and can be cleared only under the leash", async () => {
   const value = await fixture();
   try {
@@ -1075,30 +1220,30 @@ test("pause remains distinct from stop and can be cleared only under the leash",
       kind: "requested",
       body: firstBody,
     });
-    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:02.000Z"), {
-      kind: "requested",
-      body: firstBody,
-    });
+    await insertLegacyPauseControl(value.allocated.paths, firstBody.sequence, "2026-08-08T00:00:02.000Z");
     assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
     assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
 
     const interruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await interruptor.clearPause(value.allocated.paths);
+    assert.equal((await interruptor.completeInterruptBarrier(value.allocated.paths)).kind, "unavailable");
+    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
+    await breakBody(value.allocated.paths, { sequence: firstBody.sequence, end: "put-down", at: "2026-08-08T00:00:03.000Z" });
+    assert.equal((await interruptor.completeInterruptBarrier(value.allocated.paths)).kind, "completed");
     interruptor.release();
     assert.equal((await readHeart(value.allocated.paths)).pause, null);
     assert.notEqual((await readHeart(value.allocated.paths)).stop, null);
 
-    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:04.000Z"), {
-      kind: "requested",
-      body: firstBody,
-    });
-    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
+    await insertLegacyPauseControl(value.allocated.paths, firstBody.sequence, "2026-08-08T00:00:04.000Z");
+    const nextInterruptor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    assert.equal((await nextInterruptor.completeInterruptBarrier(value.allocated.paths)).kind, "completed");
+    nextInterruptor.release();
+    assert.equal((await readHeart(value.allocated.paths)).pause, null);
   } finally {
     value.close();
   }
 });
 
-test("interrupt admission clears pause and records one pending Tell under the leash transaction", async () => {
+test("a fresh interrupt Tell joins but does not rewrite a legacy pause", async () => {
   const value = await fixture();
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
@@ -1106,18 +1251,15 @@ test("interrupt admission clears pause and records one pending Tell under the le
     const body = await leash.recordBody(value.allocated.paths, {
       leashTakenAt: "2026-08-08T00:00:00.000Z",
     });
-    assert.deepEqual(await requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z"), {
-      kind: "requested",
-      body,
-    });
+    await insertLegacyPauseControl(value.allocated.paths, body.sequence, "2026-08-08T00:00:01.000Z");
     assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
 
-    const admitted = await leash.recordInterruptTell(value.allocated.paths, {
+    const admitted = await heartRecordTell(value.allocated.paths, {
       kind: "tell",
       id: "interrupt-tell",
       body: "take this interrupt",
       recordedAt: "2026-08-08T00:00:02.000Z",
-    });
+    }, { interrupt: true });
     assert.equal(admitted.kind, "recorded");
     if (admitted.kind !== "recorded") return;
     assert.equal(admitted.tell.id, "interrupt-tell");
@@ -1126,7 +1268,8 @@ test("interrupt admission clears pause and records one pending Tell under the le
     assert.equal(admitted.tell.state, "pending");
     assert.deepEqual(admitted.tell.deliveries, []);
     const snapshot = await readHeart(value.allocated.paths);
-    assert.equal(snapshot.pause, null);
+    assert.equal(snapshot.pause?.bodySequence, body.sequence);
+    assert.equal(snapshot.pause?.frontierTellId, undefined);
     assert.deepEqual(snapshot.pending, [admitted.tell]);
     leash.release();
   } finally {
@@ -1137,16 +1280,16 @@ test("interrupt admission clears pause and records one pending Tell under the le
 test("interrupt admission refuses unborn work without recording a Tell", async () => {
   const value = await fixture();
   try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    const admitted = await leash.recordInterruptTell(value.allocated.paths, {
-      kind: "tell",
-      id: "unborn-tell",
-      body: "never admitted",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    assert.deepEqual(admitted, { kind: "not-born" });
+    assert.deepEqual(
+      await heartRecordTell(value.allocated.paths, {
+        kind: "tell",
+        id: "unborn-tell",
+        body: "never admitted",
+        recordedAt: "2026-08-08T00:00:01.000Z",
+      }, { interrupt: true }),
+      { kind: "not-born" },
+    );
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    leash.release();
   } finally {
     value.close();
   }
@@ -1426,7 +1569,7 @@ test("Body idle settlement atomically obeys current control", async () => {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
     const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
-    await requestPause(value.allocated.paths, "2026-08-08T00:00:01.000Z");
+    await insertLegacyPauseControl(value.allocated.paths, body.sequence, "2026-08-08T00:00:01.000Z");
     assert.deepEqual(
       await finishBodyIfIdle(value.allocated.paths, {
         sequence: body.sequence,

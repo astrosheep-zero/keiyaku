@@ -1,3 +1,4 @@
+import { AkumaSelfInterruptError } from "./akuma-errors.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import { requireBornAkuma } from "./akuma-probe.js";
@@ -19,6 +20,7 @@ import type { SelectionRequestPort } from "./selection-request.js";
 export function selectionRequestPort(
   world: WorldRoot,
   reportDiagnostic: (message: string) => void,
+  servingBodyId?: AkumaStatus["id"],
 ): SelectionRequestPort {
   const prove = async (targets: readonly AkumaStatus["id"][]): Promise<void> => {
     for (const id of targets) await requireBornAkuma(world, id);
@@ -37,10 +39,12 @@ export function selectionRequestPort(
       return { ...native, observations: native.observations.map(akumaObservationOf) };
     },
     tell: async ({ target, ...request }) => {
+      if (request.interrupt === true && servingBodyId === target) throw new AkumaSelfInterruptError(target);
       await prove([target]);
       return await executeTellAkuma({ path: world, id: target, ...request });
     },
     ask: async ({ target, observer, ...request }) => {
+      if (request.interrupt === true && servingBodyId === target) throw new AkumaSelfInterruptError(target);
       await prove([target]);
       return await executeAskAkuma({
         path: world,

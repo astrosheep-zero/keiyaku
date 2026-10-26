@@ -6,7 +6,9 @@ import type {
   BodyFact,
   ForkPoint,
   HeartSnapshot,
+  InterruptCompletion,
   KillFact,
+  PauseFact,
   SealFact,
   SessionFact,
   Soul,
@@ -18,20 +20,23 @@ import type {
   TurnOutcome,
   TurnStartFact,
 } from "./facts.js";
+import { BodyControlledError } from "./facts.js";
 import {
   answeredTurnFact,
+  completeInterruptBarrier as judgeInterruptBarrier,
   endBodyFact,
   finishBodyFact,
   deleteStopControl,
   insertActivityFact,
   insertTurnEndFact,
   insertTurnStartFact,
-  insertPauseControl,
   insertKillFact,
   insertSessionFact,
   insertStopControl,
   killFactForBody,
   latestBodyFact,
+  insertInterruptBarrier,
+  isTellProtectedByPause,
   latestKillFact,
   latestSessionFact,
   latestTurnFactForBody,
@@ -55,6 +60,7 @@ import {
   pendingTellFacts,
   hasPendingTell,
   resolveTellDispositionSnapshot,
+  sameTellInput,
   tellDispositionResolved,
   tellFact,
   tellIdsForFence,
@@ -104,12 +110,15 @@ export {
   voidRequest,
 } from "./request-authority.js";
 
-export { AkumaBusyError, life, lifeAt, projectTell } from "./facts.js";
+export { AkumaBusyError, BodyControlledError, life, lifeAt, projectTell } from "./facts.js";
 export { drainPendingTells } from "./tells.js";
 export type {
   AkumaLife,
   AkumaOrigin,
   BodyEnd,
+  BodyFact,
+  InterruptCompletion,
+  PauseFact,
   HeartSnapshot,
   KillEvidence,
   RequestFact,
@@ -122,6 +131,14 @@ export type {
 export type { ResumeCoordinate } from "../coordinate.js";
 
 const ACTIVITY_LIMIT = 5_000;
+
+export async function readInterruptCompletion(
+  paths: AkumaPaths,
+  expected: PauseFact,
+): Promise<Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>> {
+  const result = await withReadOnlyHeart(paths, (heart) => judgeInterruptBarrier(heart, expected, false));
+  return result.kind === "clear" ? { kind: "unavailable", evidence: "untidy" } : result;
+}
 
 export async function readSoul(paths: AkumaPaths): Promise<Soul | null> {
   try {
@@ -322,35 +339,76 @@ export async function readLifeSnapshot(
   }
 }
 
-function sameTellInput(
-  existing: TellFact,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
-): boolean {
-  return (
-    existing.body === tell.body &&
-    existing.recordedAt === tell.recordedAt &&
-    existing.schemaJson === tell.schemaJson &&
-    existing.initiator === tell.initiator
-  );
-}
+export type InterruptTellAdmission =
+  | Readonly<{
+      kind: "not-born";
+    }>
+  | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" }>
+  | Readonly<{
+      kind: "recorded";
+      tell: TellFact;
+      predecessorWasRunning: boolean;
+      barrier?: PauseFact;
+    }>;
 
+type TellAdmission = Readonly<{ kind: "not-born" }> | Readonly<{ kind: "recorded"; tell: TellFact }>;
+
+export function recordTell(
+  paths: AkumaPaths,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  options: Readonly<{ interrupt: true; signal?: AbortSignal }>,
+): Promise<InterruptTellAdmission>;
+export function recordTell(
+  paths: AkumaPaths,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  options?: Readonly<{ interrupt?: false; signal?: AbortSignal }>,
+): Promise<TellAdmission>;
 export async function recordTell(
   paths: AkumaPaths,
   tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
-  options: Readonly<{ interrupt?: boolean }> = {},
-): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
-  return await withHeartTransaction(paths, (heart) => {
-    if (soulFact(heart) === null) return { kind: "not-born" };
-    const existing = tellFact(heart, tell.id);
-    if (existing !== null) {
-      if (!sameTellInput(existing, tell)) throw new Error(`tell ${tell.id} reused different input`);
-      return { kind: "recorded", tell: existing };
-    }
-    const body = latestBodyFact(heart);
-    const running = body !== null && body.end === undefined && body.hung === undefined;
-    if (tell.schemaJson !== undefined && running && options.interrupt !== true) throw new AkumaBusyError();
-    return recordPendingTell(heart, tell);
-  });
+  options: Readonly<{ interrupt?: boolean; signal?: AbortSignal }> = {},
+): Promise<TellAdmission | InterruptTellAdmission> {
+  const interrupt = options.interrupt === true;
+  return await withHeartTransaction(
+    paths,
+    (heart) => {
+      if (soulFact(heart) === null) return { kind: "not-born" };
+      const existing = tellFact(heart, tell.id);
+      const body = latestBodyFact(heart);
+      const pause = interrupt ? pauseFact(heart) : null;
+      if (existing !== null) {
+        if (!sameTellInput(existing, interrupt ? { ...tell, recordedAt: existing.recordedAt } : tell))
+          throw new Error(`tell ${tell.id} reused different input`);
+        if (!interrupt) return { kind: "recorded", tell: existing };
+        const barrier =
+          body !== null && pause !== null && isTellProtectedByPause(heart, tell.id, body.sequence) ? pause : undefined;
+        return {
+          kind: "recorded",
+          tell: existing,
+          predecessorWasRunning: body !== null && body.end === undefined,
+          ...(barrier === undefined ? {} : { barrier }),
+        };
+      }
+      if (interrupt) {
+        if (body?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
+        if (body === null) return { kind: "unavailable", evidence: "untidy" };
+        if (pause !== null && pause.bodySequence !== body.sequence) return { kind: "unavailable", evidence: "untidy" };
+        const admitted = recordPendingTell(heart, tell);
+        const barrier =
+          pause ??
+          insertInterruptBarrier(heart, {
+            bodySequence: body.sequence,
+            tellId: tell.id,
+            at: tell.recordedAt,
+          });
+        return { ...admitted, predecessorWasRunning: body.end === undefined, barrier };
+      }
+      const running = body !== null && body.end === undefined && body.hung === undefined;
+      if (tell.schemaJson !== undefined && running) throw new AkumaBusyError();
+      return recordPendingTell(heart, tell);
+    },
+    options.signal,
+  );
 }
 
 export async function readTell(paths: AkumaPaths, id: string): Promise<TellFact | null> {
@@ -362,6 +420,9 @@ export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly T
     for (const input of inputs) {
       const current = tellFact(heart, input.tellId);
       if (current === null) throw new Error(`unknown tell ${input.tellId}`);
+      const turn = turnFact(heart, input.turnSequence);
+      if (turn === null) throw new Error(`unknown Akuma Turn ${input.turnSequence}`);
+      if (isTellProtectedByPause(heart, input.tellId, turn.bodySequence)) throw new BodyControlledError();
     }
     let changed = false;
     for (const input of inputs) changed = insertTellDeliveryFact(heart, input) || changed;
@@ -374,6 +435,11 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
     const tellIds =
       input.evidence === "exact" ? [input.tellId] : tellIdsForFence(heart, input.turnSequence, input.fence);
     if (tellIds.length === 0) throw new Error("tell receipt has no delivery mapping");
+    const pause = pauseFact(heart);
+    for (const tellId of tellIds) {
+      if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
+      if (pause !== null && isTellProtectedByPause(heart, tellId, pause.bodySequence)) throw new BodyControlledError();
+    }
     const changed = insertTellReceiptFact(heart, input);
     pruneActivityFacts(heart, ACTIVITY_LIMIT, changed);
   });
@@ -394,6 +460,11 @@ export async function decidePendingTellDisposition(
     if (tellDispositionResolved(heart, input.bodySequence) === true) return null;
     const existing = openTellDispositionIds(heart, input.bodySequence);
     if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
+    if (pauseFact(heart)?.bodySequence === input.bodySequence) {
+      if (input.handoff && body.end === undefined)
+        endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
+      return null;
+    }
     const pending = pendingTellFacts(heart);
     const tellIds = pending.map((tell) => tell.id);
     if (tellIds.length === 0) return null;
@@ -473,24 +544,6 @@ export async function requestStop(
   );
 }
 
-export async function requestPause(
-  paths: AkumaPaths,
-  at: string,
-  signal?: AbortSignal,
-): Promise<Readonly<{ kind: "not-born" } | { kind: "requested"; body: BodyFact }>> {
-  return await withHeartTransaction(
-    paths,
-    (heart) => {
-      if (soulFact(heart) === null) return { kind: "not-born" };
-      const body = latestBodyFact(heart);
-      if (body === null) throw new Error("Akuma has no Body to interrupt");
-      insertPauseControl(heart, at);
-      return { kind: "requested", body };
-    },
-    signal,
-  );
-}
-
 export async function breakBody(
   paths: AkumaPaths,
   input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>,
@@ -503,6 +556,8 @@ export async function beginTurn(
   input: Readonly<{ bodySequence: number; startedAt: string; call?: string; schemaJson?: string; initiator?: string }>,
 ): Promise<TurnStartFact> {
   return await withHeartTransaction(paths, (heart) => {
+    if (pauseFact(heart)?.bodySequence === input.bodySequence) throw new BodyControlledError();
+    if (stopFact(heart)?.bodySequence === input.bodySequence) throw new BodyControlledError();
     const fact = insertTurnStartFact(heart, input);
     pruneActivityFacts(heart, ACTIVITY_LIMIT);
     return fact;
@@ -514,8 +569,13 @@ export async function bindTellsToTurn(
   input: Readonly<{ turnSequence: number; tellIds: readonly string[]; boundAt: string }>,
 ): Promise<void> {
   await withHeartTransaction(paths, (heart) => {
+    const turn = turnFact(heart, input.turnSequence);
+    if (turn === null) throw new Error(`Akuma Turn ${input.turnSequence} is missing`);
     for (const tellId of input.tellIds) {
       if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
+      if (isTellProtectedByPause(heart, tellId, turn.bodySequence)) throw new BodyControlledError();
+    }
+    for (const tellId of input.tellIds) {
       insertTellBindingFact(heart, { tellId, turnSequence: input.turnSequence, boundAt: input.boundAt });
     }
     pruneActivityFacts(heart, ACTIVITY_LIMIT);

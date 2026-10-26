@@ -95,6 +95,7 @@ export function installTellRuntime(runtime: TellWakeRuntime): () => void {
   const originalAdmitTell = AkumaOwner.prototype.admitTell;
   const originalInterrupt = AkumaOwner.prototype.interrupt;
   const originalAdmitInterrupt = AkumaOwner.prototype.admitInterrupt;
+  const originalCompleteInterruptAdmission = AkumaOwner.prototype.completeInterruptAdmission;
   AkumaOwner.prototype.tell = function (body, tellId, recordedAt, existingRuntime, options) {
     return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
   };
@@ -105,13 +106,17 @@ export function installTellRuntime(runtime: TellWakeRuntime): () => void {
     return originalInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
   };
   AkumaOwner.prototype.admitInterrupt = function (body, options) {
-    return originalAdmitInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
+    return originalAdmitInterrupt.call(this, body, options);
+  };
+  AkumaOwner.prototype.completeInterruptAdmission = function (admission, existingRuntime, signal) {
+    return originalCompleteInterruptAdmission.call(this, admission, existingRuntime ?? runtime, signal);
   };
   return () => {
     AkumaOwner.prototype.tell = originalTell;
     AkumaOwner.prototype.admitTell = originalAdmitTell;
     AkumaOwner.prototype.interrupt = originalInterrupt;
     AkumaOwner.prototype.admitInterrupt = originalAdmitInterrupt;
+    AkumaOwner.prototype.completeInterruptAdmission = originalCompleteInterruptAdmission;
   };
 }
 

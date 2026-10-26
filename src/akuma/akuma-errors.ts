@@ -31,6 +31,13 @@ export class AkumaDecodeError extends Error {
   }
 }
 
+export class AkumaSelfInterruptError extends Error {
+  readonly kind = "akuma-self-interrupt";
+  constructor(readonly id: AkuId) {
+    super(`Akuma ${id} cannot interrupt its serving Body`);
+    this.name = "AkumaSelfInterruptError";
+  }
+}
 export class AkumaProviderError extends Error {
   readonly kind = "akuma-provider";
   constructor(readonly diagnostic: string) {

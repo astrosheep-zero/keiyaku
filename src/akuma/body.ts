@@ -10,6 +10,7 @@ import type { AkumaCallRequestChildLaunch, InitialTellAdmissionRequest } from ".
 import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
+  BodyControlledError,
   breakBody,
   decidePendingTellDisposition,
   drainPendingTells,
@@ -345,12 +346,12 @@ async function prepareBodyExecution(
   const birth = await bornSoul(launch, leash, runtime.now());
   if (birth === null) return null;
   const { soul } = birth;
+  if (!(await prepareBodyStart(launch.paths, leash))) return null;
   if (launch.seed === undefined && launch.initialBody === undefined) {
     const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
     if (heart.pending.length === 0 && requests.length === 0) return null;
   }
   const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
-  if (!(await prepareBodyStart(launch.paths, leash))) return null;
   return { ...birth, adapter: selected };
 }
 
@@ -382,8 +383,9 @@ async function preserveBodyFailure(
 }
 
 async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promise<boolean> {
+  const completion = await leash.completeInterruptBarrier(paths);
+  if (completion.kind === "unavailable") return false;
   const before = await readHeart(paths);
-  if (before.pause !== null) return false;
   if (before.stop === null) return true;
   if (before.latestBody?.sequence === before.stop.bodySequence && before.latestBody.end === "put-down") {
     await leash.settleStop(paths);
@@ -537,9 +539,12 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime, turnStarted, turnOutcome } = input;
   let initial = launch.initialBody;
   for (;;) {
+    const control = supervisor.current();
     const launchTells = drainPendingTells(
-      supervisor.current().pending,
+      control.pending,
       await readOpenBoundTurns(launch.paths, bodySequence),
+      control.pause,
+      bodySequence,
     );
     if (supervisor.signal.aborted) {
       await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now);
@@ -760,7 +765,10 @@ export async function driveAkumaBody(
   let emitTurnOutcome: TurnOutcomeEmitter | undefined;
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
-    if (prepared === null) return;
+    if (prepared === null) {
+      if ((await readHeart(launch.paths)).pause !== null) return "held";
+      return;
+    }
     emitBodyEnd = bodyEndEmitter(launch, prepared.soul, world);
     emitTurnStarted = turnStartedEmitter(launch, prepared.soul, world);
     emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul, world);
@@ -796,6 +804,11 @@ export async function driveAkumaBody(
       turnOutcome: emitTurnOutcome,
     });
   } catch (error) {
+    if (error instanceof BodyControlledError) {
+      if (bodySequence !== undefined)
+        await breakBody(launch.paths, { sequence: bodySequence, end: "put-down", at: runtime.now() });
+      return "held";
+    }
     await preserveBodyFailure(launch.paths, leash, error, runtime.now());
     throw error;
   } finally {

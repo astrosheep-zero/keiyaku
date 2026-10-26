@@ -317,6 +317,24 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
   });
 });
 
+test("bounded interrupt Ask returns its own admitted Tell without awaiting predecessor settlement", async () => {
+  await withWaitedTellFixture(async ({ born }) => {
+    const value = await born("a1000022", answering("unused"));
+    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: WAITED_TELL_NOW });
+    try {
+      const started = performance.now();
+      const result = await waitTell(value, { body: "bounded interrupt", interrupt: true, timeoutMs: 0 });
+      assert.deepEqual(result.observation, { reason: "deadline" });
+      assert.equal(result.tell.interruption?.kind, "pending");
+      assert.ok(performance.now() - started < 200, "an expired Ask must not wait for predecessor settlement");
+      assert.equal((await readTell(value.allocated.paths, result.tell.admission.tellId))?.body, "bounded interrupt");
+      assert.equal((await readHeart(value.allocated.paths)).pause?.bodySequence, body.sequence);
+    } finally {
+      leash.release();
+    }
+  });
+});
 test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
   await withWaitedTellFixture(async ({ born, withRuntime, settle }) => {
     const terminal = await born("a1000016", answering("edge answer"));

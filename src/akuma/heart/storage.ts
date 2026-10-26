@@ -3,7 +3,17 @@ import { lstat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { setTimeout } from "node:timers/promises";
 import type { AkumaPaths } from "../identity.js";
-import type { BodyFact, LeashProbe, SessionFact, Soul, StopFact, TellFact } from "./facts.js";
+import type {
+  BodyFact,
+  InterruptCompletion,
+  LeashProbe,
+  PauseFact,
+  SessionFact,
+  Soul,
+  StopFact,
+  TellFact,
+} from "./facts.js";
+import { BodyControlledError } from "./facts.js";
 import {
   HEART_SCHEMA,
   LEASH_SCHEMA,
@@ -12,8 +22,8 @@ import {
   heartSchemaIsCurrent,
 } from "./schema.js";
 import {
-  deletePauseControl,
   deleteStopControl,
+  completeInterruptBarrier as judgeInterruptBarrier,
   insertBodyFact,
   insertKillFact,
   insertSealFact,
@@ -309,16 +319,22 @@ export class HeldAkumaLeash {
     return sealFact(this.database);
   }
 
-  async clearPause(paths: AkumaPaths): Promise<void> {
-    await withHeartTransaction(paths, deletePauseControl);
-  }
   async clearStop(paths: AkumaPaths): Promise<void> {
     await withHeartTransaction(paths, deleteStopControl);
   }
 
+  async completeInterruptBarrier(paths: AkumaPaths, expected?: PauseFact): Promise<InterruptCompletion> {
+    if (this.closed) throw new Error("Akuma interrupt completion requires a held leash");
+    return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected));
+  }
+
   async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
     if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
-    const sequence = await withHeartTransaction(paths, (heart) => insertBodyFact(heart, input));
+    const sequence = await withHeartTransaction(paths, (heart) => {
+      const completion = judgeInterruptBarrier(heart);
+      if (completion.kind === "unavailable") throw new BodyControlledError();
+      return insertBodyFact(heart, input);
+    });
     this.bodySequence = sequence;
     return { sequence, leashTakenAt: input.leashTakenAt };
   }
@@ -358,17 +374,6 @@ export class HeldAkumaLeash {
           : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
       deleteStopControl(heart);
       return { target, result };
-    });
-  }
-
-  async recordInterruptTell(
-    paths: AkumaPaths,
-    tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
-  ): Promise<Readonly<{ kind: "not-born" } | { kind: "recorded"; tell: TellFact }>> {
-    return await withHeartTransaction(paths, (heart) => {
-      deletePauseControl(heart);
-      if (soulFact(heart) === null) return { kind: "not-born" };
-      return recordPendingTell(heart, tell);
     });
   }
 

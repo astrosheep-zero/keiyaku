@@ -26,7 +26,7 @@ import {
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
+import { driveAkumaBody, LEASH_HELD_EXIT, type BodyLaunch } from "../src/akuma/body.js";
 import {
   activitySlice,
   appendActivity,
@@ -49,7 +49,9 @@ import { settings } from "../src/settings.js";
 import { AkumaArchetypeError, Akumas, listArchetypeDefinitions } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { World, type WorldRoot } from "../src/world.js";
-import type { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { withHeartTransaction } from "../src/akuma/heart/storage.js";
+import { insertBodyFact } from "../src/akuma/heart/rows.js";
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
@@ -1548,7 +1550,7 @@ test("kill settles a stranded dead Body and later observation presents the kille
   assert.equal(await handle.kill(), "already-killed");
 });
 
-test("interrupt records a tell only after taking an idle leash", async (context) => {
+test("interrupt atomically admits its Tell and frontier before predecessor completion", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-idle-");
   const seat = join(root, "seat");
   mkdirSync(seat);
@@ -1575,20 +1577,70 @@ test("interrupt records a tell only after taking an idle leash", async (context)
   );
   rmSync(seat, { recursive: true, force: true });
 
-  const handle = (await akumaAt(root)).of({ id: allocated.id });
-  const receipt = await handle.interrupt("next");
-  assert.equal(receipt.kind, "interrupted");
-  if (receipt.kind !== "interrupted" || "kind" in receipt.tell) return;
-  assert.equal(receipt.putDown, "was-idle");
-  assert.equal(typeof receipt.tell.wake, "object");
+  const owner = new AkumaOwner(allocated.id, await World.at(root));
+  const held = await HeldAkumaLeash.try(allocated.paths);
+  assert.ok(held);
+  const admission = await owner.admitInterrupt("next", { tellId: "idle-interrupt" });
+  assert.equal(admission.kind, "admitted");
+  if (admission.kind !== "admitted") throw new Error("interrupt Tell was not admitted");
+  const admitted = await readHeart(allocated.paths);
+  assert.equal(admitted.pause?.bodySequence, admitted.latestBody?.sequence);
+  assert.equal(admitted.pause?.frontierTellId, admission.tell.id);
+  assert.deepEqual(admitted.pending.map((tell) => tell.id), [admission.tell.id]);
+  held.release();
+  const receipt = await owner.completeInterruptAdmission(admission, {
+    async spawn(paths) {
+      return {
+        pid: 0,
+        exited: Promise.resolve({
+          code: LEASH_HELD_EXIT,
+          signal: null,
+          log: { path: paths.log, from: 0, to: 0 },
+        }),
+        async terminate() {},
+        release() {},
+      };
+    },
+  });
+  assert.equal(receipt.interruption?.kind, "completed");
+  assert.equal(receipt.wake.kind, "held");
   assert.equal((await readHeart(allocated.paths)).pause, null);
-  assert.deepEqual(
-    (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-    [receipt.tell.admission.tellId],
-  );
-  if (receipt.tell.wake.kind === "pursuing") {
-    await handle.kill();
-    await handle.wait();
+  assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), [receipt.admission.tellId]);
+});
+
+test("interrupt completion refuses unexplained successor custody", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unexplained-successor-");
+  const { allocated, holder, body } = await bornBody(root, "1d1e0010", "2026-08-08T00:00:00.000Z");
+  let successorLeash: HeldAkumaLeash | null = null;
+  try {
+    const owner = new AkumaOwner(allocated.id, await World.at(root));
+    const admission = await owner.admitInterrupt("protected", {
+      tellId: "unexplained-successor-interrupt",
+      recordedAt: "2026-08-08T00:00:01.000Z",
+    });
+    assert.equal(admission.kind, "admitted");
+    if (admission.kind !== "admitted") throw new Error("interrupt Tell was not admitted");
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-08T00:00:02.000Z" });
+    holder.release();
+
+    successorLeash = await HeldAkumaLeash.try(allocated.paths);
+    assert.ok(successorLeash);
+    await withHeartTransaction(allocated.paths, (heart) => {
+      insertBodyFact(heart, { leashTakenAt: "2026-08-08T00:00:03.000Z" });
+    });
+
+    const receipt = await owner.completeInterruptAdmission(admission);
+    assert.deepEqual(receipt.interruption, {
+      kind: "unavailable",
+      bodySequence: body.sequence,
+      evidence: "untidy",
+    });
+    const heart = await readHeart(allocated.paths);
+    assert.equal(heart.pause?.frontierTellId, admission.tell.id);
+    assert.deepEqual(heart.pending.map((tell) => tell.id), [admission.tell.id]);
+  } finally {
+    holder.release();
+    successorLeash?.release();
   }
 });
 
@@ -1643,8 +1695,10 @@ test("interrupt waits for leash release after a durable Body end beyond the defa
     releaseHolder?.();
     releaseHolder = undefined;
     const receipt = await operation;
-    assert.equal(receipt.kind, "interrupted");
-    if (receipt.kind === "interrupted") assert.equal(receipt.putDown, "was-idle");
+    assert.equal("kind" in receipt, false);
+    if ("kind" in receipt) throw new Error("interrupt was unavailable");
+    assert.equal(receipt.interruption?.kind, "completed");
+    if (receipt.interruption?.kind === "completed") assert.equal(receipt.interruption.putDown, "was-idle");
   } finally {
     restoreTry?.();
     releaseHolder?.();
@@ -1653,36 +1707,59 @@ test("interrupt waits for leash release after a durable Body end beyond the defa
   }
 });
 
-test("interrupt caller cancellation stops waiting without manufacturing control evidence", async () => {
+test("interrupt cancellation after admission stops waiting but keeps Tell and frontier", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-interrupt-cancelled-"));
   let releaseHolder: (() => void) | undefined;
   try {
     const value = await bornHistoryHandle(root, "1d1e000a");
     releaseHolder = value.holder.release.bind(value.holder);
     const controller = new AbortController();
-    const operation = value.handle.interrupt("cancelled", { signal: controller.signal });
-    setTimeout(() => controller.abort(new Error("caller stopped waiting")), 20);
-    await assert.rejects(operation, /caller stopped waiting/u);
-    assert.notEqual((await readHeart(value.allocated.paths)).pause, null);
-    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    releaseHolder?.();
-    releaseHolder = undefined;
+    const reason = new Error("caller stopped waiting");
+    const { promise: admitted, resolve: witnessAdmission } = promiseBarrier<Awaited<ReturnType<AkumaOwner["admitInterrupt"]>>>();
+    const original = AkumaOwner.prototype.admitInterrupt;
+    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async function (
+      this: AkumaOwner,
+      body: string,
+      options?: Parameters<AkumaOwner["admitInterrupt"]>[1],
+    ) {
+      const result = await original.call(this, body, options);
+      witnessAdmission(result);
+      return result;
+    });
+    const operation = value.handle.interrupt("cancelled", {
+      tellId: "cancelled-interrupt",
+      signal: controller.signal,
+    });
+    const admission = await admitted;
+    assert.equal(admission.kind, "admitted");
+    controller.abort(reason);
+    await assert.rejects(operation, (error: unknown) => error === reason);
+    const heart = await readHeart(value.allocated.paths);
+    assert.equal(heart.pause?.frontierTellId, "cancelled-interrupt");
+    assert.deepEqual(heart.pending.map((tell) => tell.id), ["cancelled-interrupt"]);
   } finally {
     releaseHolder?.();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("interrupt reports untidy when a free leash has no clean Body settlement", async (context) => {
+test("interrupt preserves an admitted Tell when predecessor custody is untidy", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unstoppable-");
   const { allocated, holder } = await bornBody(root, "1d1e0003", "2026-08-08T00:00:00.000Z");
   holder.release();
-  assert.deepEqual(await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded"), {
+  const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded", { tellId: "untidy-interrupt" });
+  assert.equal("kind" in receipt, false);
+  if ("kind" in receipt) throw new Error("untidy interruption was not admitted");
+  assert.equal(receipt.admission.tellId, "untidy-interrupt");
+  assert.deepEqual(receipt.interruption, {
     kind: "unavailable",
+    bodySequence: (await readHeart(allocated.paths)).latestBody!.sequence,
     evidence: "untidy",
   });
-  assert.equal((await readHeart(allocated.paths)).pause, null);
-  assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+  assert.notEqual(receipt.wake.kind, "failed");
+  const heart = await readHeart(allocated.paths);
+  assert.equal(heart.pause?.frontierTellId, "untidy-interrupt");
+  assert.deepEqual(heart.pending.map((tell) => tell.id), ["untidy-interrupt"]);
 });
 
 test("interrupt reports hung when the Body does not release its held leash", async (context) => {
@@ -1705,7 +1782,7 @@ test("interrupt reports hung when the Body does not release its held leash", asy
       evidence: "hung",
     });
     assert.equal((await handle.status()).life, "hung");
-    assert.notEqual((await readHeart(allocated.paths)).pause, null);
+    assert.equal((await readHeart(allocated.paths)).pause, null);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     holder.release();
     assert.deepEqual(await handle.interrupt("still never recorded"), {

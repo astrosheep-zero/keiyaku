@@ -6,6 +6,7 @@ import type {
   BodyEnd,
   BodyFact,
   CallFact,
+  InterruptCompletion,
   KillFact,
   PauseFact,
   ResumeCoordinate,
@@ -16,6 +17,7 @@ import type {
   TurnStartFact,
   TurnEndFact,
 } from "./facts.js";
+import { HeartAuthorityCorruptionError } from "./facts.js";
 import type { ProviderOptions } from "../provider-recipe.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
 import { agentEventSchema, type AgentEvent } from "./activity-schema.js";
@@ -262,12 +264,44 @@ export function insertStopControl(database: DatabaseSync, bodySequence: number, 
     .run(json({ bodySequence }), at);
 }
 
-export function insertPauseControl(database: DatabaseSync, at: string): void {
-  const body = latestBodyFact(database);
-  if (body === null) throw new Error("Akuma has no Body to interrupt");
-  database
-    .prepare("INSERT OR IGNORE INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
-    .run(json({ bodySequence: body.sequence }), at);
+export function insertInterruptBarrier(
+  database: DatabaseSync,
+  input: Readonly<{ bodySequence: number; tellId: string; at: string }>,
+): PauseFact {
+  const value = json({ bodySequence: input.bodySequence, frontierTellId: input.tellId });
+  database.prepare("INSERT INTO control(kind, value_json, at) VALUES ('pause', ?, ?)").run(value, input.at);
+  return { bodySequence: input.bodySequence, requestedAt: input.at, frontierTellId: input.tellId };
+}
+
+export function completeInterruptBarrier(
+  database: DatabaseSync,
+  expected?: PauseFact,
+  consume = true,
+): InterruptCompletion {
+  const barrier = pauseFact(database);
+  if (expected !== undefined && barrier !== null && !samePause(barrier, expected))
+    return settledPreviousBarrier(database, expected);
+  if (barrier === null) {
+    if (expected === undefined) return { kind: "clear" };
+    return settledPreviousBarrier(database, expected);
+  }
+  const latest = latestBodyFact(database);
+  if (latest?.sequence !== barrier.bodySequence) return { kind: "unavailable", evidence: "untidy" };
+  if (latest.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
+  if (latest.end === undefined || !consume) return { kind: "unavailable", evidence: "untidy" };
+  deletePauseControl(database);
+  return { kind: "completed", body: latest };
+}
+
+function settledPreviousBarrier(database: DatabaseSync, expected: PauseFact): InterruptCompletion {
+  const previous = bodyFact(database, expected.bodySequence);
+  if (previous?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
+  if (previous?.end !== undefined) return { kind: "completed", body: previous };
+  return { kind: "unavailable", evidence: "untidy" };
+}
+
+function samePause(left: PauseFact, right: PauseFact): boolean {
+  return left.bodySequence === right.bodySequence && left.frontierTellId === right.frontierTellId;
 }
 
 export function stopFact(database: DatabaseSync): StopFact | null {
@@ -282,16 +316,53 @@ export function stopFact(database: DatabaseSync): StopFact | null {
   return { bodySequence: value.bodySequence as number, requestedAt: row.at };
 }
 
+const pauseControlSchema = z
+  .object({ bodySequence: z.number().int().positive(), frontierTellId: sessionText.optional() })
+  .strict();
+
 export function pauseFact(database: DatabaseSync): PauseFact | null {
   const row = database.prepare("SELECT value_json, at FROM control WHERE kind = 'pause'").get() as
     | ControlRow
     | undefined;
   if (row === undefined) return null;
-  const value = parsed<{ bodySequence: unknown }>(row.value_json);
-  if (!Number.isSafeInteger(value.bodySequence) || (value.bodySequence as number) <= 0) {
-    throw new Error("Akuma pause control has an invalid Body sequence");
+  let value: z.infer<typeof pauseControlSchema>;
+  try {
+    value = pauseControlSchema.parse(parsed<unknown>(row.value_json));
+  } catch (error) {
+    throw new HeartAuthorityCorruptionError("Akuma pause control is malformed", { cause: error });
   }
-  return { bodySequence: value.bodySequence as number, requestedAt: row.at };
+  if (value.frontierTellId !== undefined) {
+    const tell = database.prepare("SELECT 1 FROM tells WHERE id = ?").get(value.frontierTellId);
+    if (tell === undefined)
+      throw new HeartAuthorityCorruptionError("Akuma pause control references a missing Tell frontier");
+  }
+  return {
+    bodySequence: value.bodySequence,
+    requestedAt: row.at,
+    ...(value.frontierTellId === undefined ? {} : { frontierTellId: value.frontierTellId }),
+  };
+}
+
+export function bodyFact(database: DatabaseSync, sequence: number): BodyFact | null {
+  const row = database
+    .prepare(`SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at FROM bodies WHERE sequence = ?`)
+    .get(sequence) as BodyRow | undefined;
+  return row === undefined ? null : decodeBodyRow(row);
+}
+
+export function isTellProtectedByPause(database: DatabaseSync, tellId: string, bodySequence: number): boolean {
+  const pause = pauseFact(database);
+  if (pause?.bodySequence !== bodySequence) return false;
+  if (pause.frontierTellId === undefined) return true;
+  const tell = database.prepare("SELECT sequence FROM tells WHERE id = ?").get(tellId) as
+    | { sequence: number }
+    | undefined;
+  const frontier = database.prepare("SELECT sequence FROM tells WHERE id = ?").get(pause.frontierTellId) as
+    | { sequence: number }
+    | undefined;
+  if (tell === undefined || frontier === undefined)
+    throw new HeartAuthorityCorruptionError("Akuma pause control references a missing Tell frontier");
+  return tell.sequence >= frontier.sequence;
 }
 
 export function insertKillFact(database: DatabaseSync, bodySequence: number, at: string): void {

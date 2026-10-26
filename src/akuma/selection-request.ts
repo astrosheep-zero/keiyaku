@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
+import { AkumaNotBornError, AkumaObservationError, AkumaSelfInterruptError } from "./akuma-errors.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { KillEvidence } from "./heart/index.js";
 import { akumaIdSchema } from "./identity.js";
@@ -96,6 +96,7 @@ const killServiceSchema = z
 const selectionRefusalSchema = z.union([
   z.object({ kind: z.literal("akuma-not-born"), id: akumaIdSchema }).strict(),
   z.object({ kind: z.literal("akuma-observation"), id: akumaIdSchema, diagnostic: z.string() }).strict(),
+  z.object({ kind: z.literal("akuma-self-interrupt"), id: akumaIdSchema }).strict(),
 ]);
 const selectionLiveFailureSchema = z.object({ kind: z.literal("refused"), failure: selectionRefusalSchema }).strict();
 
@@ -105,7 +106,9 @@ export function encodeSelectionLiveFailure(error: unknown): unknown | null {
       ? { kind: "akuma-not-born" as const, id: error.id }
       : error instanceof AkumaObservationError
         ? { kind: "akuma-observation" as const, id: error.id, diagnostic: error.diagnostic }
-        : null;
+        : error instanceof AkumaSelfInterruptError
+          ? { kind: "akuma-self-interrupt" as const, id: error.id }
+          : null;
   return failure === null ? null : { kind: "refused", failure };
 }
 
@@ -115,7 +118,9 @@ export function decodeSelectionLiveFailure(value: unknown): Error | null {
   const failure = parsed.data.failure;
   return failure.kind === "akuma-not-born"
     ? new AkumaNotBornError(failure.id as AkumaStatus["id"])
-    : new AkumaObservationError(failure.id as AkumaStatus["id"], failure.diagnostic);
+    : failure.kind === "akuma-self-interrupt"
+      ? new AkumaSelfInterruptError(failure.id as AkumaStatus["id"])
+      : new AkumaObservationError(failure.id as AkumaStatus["id"], failure.diagnostic);
 }
 
 export type SelectionRequest =

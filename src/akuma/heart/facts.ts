@@ -198,7 +198,22 @@ export type RequestFact =
 export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;
 export type StopFact = Readonly<{ bodySequence: number; requestedAt: string }>;
-export type PauseFact = Readonly<{ bodySequence: number; requestedAt: string }>;
+export type PauseFact = Readonly<{
+  bodySequence: number;
+  requestedAt: string;
+  frontierTellId?: string;
+}>;
+export type InterruptCompletion =
+  | Readonly<{ kind: "clear" }>
+  | Readonly<{ kind: "completed"; body: BodyFact }>
+  | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" }>;
+
+export class BodyControlledError extends Error {
+  constructor() {
+    super("Akuma Body admission is fenced by durable control");
+    this.name = "BodyControlledError";
+  }
+}
 export type SealFact = Readonly<{ evidence: string; at: string }>;
 export type LeashProbe = "held" | "free";
 

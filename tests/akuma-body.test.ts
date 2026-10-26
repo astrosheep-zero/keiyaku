@@ -1,6 +1,6 @@
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { allocatedHeart, claudeBodyLaunch, recordTell } from "./support/akuma-fixtures.js";
+import { allocatedHeart, claudeBodyLaunch, recordTell, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import { expectBodySettles, settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
@@ -37,7 +37,6 @@ import {
   readLatestTurnForBody,
   recordSession,
   recordTell as heartRecordTell,
-  requestPause,
   requestStop,
   reserveRequest,
 } from "../src/akuma/heart/index.js";
@@ -1749,7 +1748,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     await started;
     const current = (await readHeart(allocated.paths)).latestBody!;
     const requestedAt = performance.now();
-    await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
+    await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:01.000Z");
     await expectBodySettles(body, "Body did not abort stalled setup", 500);
     assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
@@ -1814,7 +1813,7 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
         ),
       ]);
       const requestedAt = performance.now();
-      await requestPause(allocated.paths, new Date().toISOString());
+      await insertLegacyPauseControl(allocated.paths, current.sequence, new Date().toISOString());
       await expectBodySettles(body, "Body did not interrupt request settlement", 500);
       assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
       assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
@@ -1941,20 +1940,103 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
         },
       },
     });
-    assert.equal(interrupted.kind, "interrupted");
-    if (interrupted.kind !== "interrupted") throw new Error("interrupt was not completed");
+    assert.equal("kind" in interrupted, false);
+    if ("kind" in interrupted) throw new Error("interrupt was unavailable");
+    assert.equal(interrupted.interruption?.kind, "completed");
     await body;
     assert.equal(aborted, 1);
     assert.deepEqual(await outcomes(allocated.paths), []);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
-    assert.equal(interrupted.tell.wake.kind, "held");
+    assert.equal(interrupted.wake.kind, "held");
   } finally {
     releaseClosed();
     await body?.catch(() => undefined);
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("ordinary wake recovers an interrupt admitted before its caller disappears", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-interrupt-caller-loss-");
+  const { promise: closed, resolve: releaseClosed } = promiseBarrier<void>();
+  let body: Promise<unknown> | undefined;
+  let oldLiveTells = 0;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "c0ffee10");
+    const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
+    const oldProvider = scenarioProvider(async () => ({
+      admission: { fence: "old-body" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "old-body" } };
+          markEventsEnded();
+        },
+      },
+      completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "old answer", historyId: "old-answer" }),
+      tell: async () => {
+        oldLiveTells += 1;
+        return { kind: "accepted" as const, fence: "old-body" };
+      },
+      resource: {
+        closed,
+        abort: async () => releaseClosed(),
+        forceDispose: async () => releaseClosed(),
+      },
+    }));
+    body = runAkumaBody(claudeBodyLaunch(allocated, root, "work"), bodyAdapter(oldProvider), {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    await waitUntilLatestBody(allocated.paths, body);
+    await eventsEnded;
+
+    const owner = new AkumaOwner(allocated.id, await World.at(root));
+    const admission = await owner.admitInterrupt("continue", { tellId: "caller-lost-interrupt" });
+    assert.equal(admission.kind, "admitted");
+    if (admission.kind !== "admitted") throw new Error("interrupt Tell was not durably admitted");
+    assert.equal((await readHeart(allocated.paths)).pause?.frontierTellId, admission.tell.id);
+
+    // No completion observer runs: the durable barrier and Tell are all that survive.
+    await body;
+    assert.equal((await readHeart(allocated.paths)).pause?.frontierTellId, admission.tell.id);
+    assert.equal(oldLiveTells, 0, "the protected input never reached the predecessor provider");
+
+    const delivered: Readonly<{ id: string; text: string }>[] = [];
+    const nextProvider = scenarioProvider(
+      async () => {
+        throw new Error("an existing session should be resumed");
+      },
+      {
+        resume: async (input) => {
+          delivered.push(...input.launchTells);
+          return {
+            admission: { fence: "successor-body" },
+            events: {
+              async *[Symbol.asyncIterator]() {
+                yield { type: "session" as const, coordinate: { sessionId: "old-body" } };
+              },
+            },
+            completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "recovered", historyId: "recovered" }),
+            resource: { closed: Promise.resolve(), abort: async () => {}, forceDispose: async () => {} },
+          };
+        },
+      },
+    );
+    await runAkumaBody({ paths: allocated.paths }, bodyAdapter(nextProvider), {
+      now: () => "2026-08-08T00:00:02.000Z",
+    });
+
+    assert.deepEqual(delivered, [{ id: admission.tell.id, text: "continue" }]);
+    assert.equal(oldLiveTells, 0);
+    assert.equal((await readTell(allocated.paths, admission.tell.id))?.state, "told");
+    assert.equal((await readTell(allocated.paths, admission.tell.id))?.deliveries.length, 1);
+    assert.equal((await readHeart(allocated.paths)).pause, null);
+  } finally {
+    releaseClosed();
+    await body?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 
 test("pause aborts the current drive and records the body as put down", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-pause-");
@@ -1994,10 +2076,7 @@ test("pause aborts the current drive and records the body as put down", async ()
     });
     await started;
     const current = (await readHeart(allocated.paths)).latestBody!;
-    assert.deepEqual(await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z"), {
-      kind: "requested",
-      body: current,
-    });
+    await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:01.000Z");
     await body;
     assert.equal(aborted, true);
     assert.equal(forced, true);
@@ -2039,7 +2118,8 @@ test("forced disposal failure records hung and broke-off before the Body returns
       { now: () => "2026-08-08T00:00:00.000Z" },
     );
     await started;
-    await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z");
+    const current = (await readHeart(allocated.paths)).latestBody!;
+    await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:01.000Z");
     await body;
     const heart = await readHeart(allocated.paths);
     assert.deepEqual(heart.latestBody?.hung, {
@@ -2164,7 +2244,8 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
       recordedAt: new Date().toISOString(),
     });
     await started;
-    await requestPause(allocated.paths, new Date().toISOString());
+    const current = (await readHeart(allocated.paths)).latestBody!;
+    await insertLegacyPauseControl(allocated.paths, current.sequence, new Date().toISOString());
     await body;
     assert.equal(await probeLeash(allocated.paths), "free");
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
@@ -2241,7 +2322,8 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     });
     await resumeStarted;
     const bound = await readTell(allocated.paths, "open-bound");
-    await requestPause(allocated.paths, "2026-08-08T00:00:05.000Z");
+    const current = (await readHeart(allocated.paths)).latestBody!;
+    await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:05.000Z");
     await expectBodySettles(hanging, "Body did not put down open bound Turn");
     const failed = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
     assert.equal(failed?.end?.outcome.kind, "failed");

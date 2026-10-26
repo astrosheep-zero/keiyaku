@@ -32,18 +32,21 @@ import {
   projectTell,
   readForkPoint,
   readHeart,
+  readInterruptCompletion,
   readKill,
   readLastAnsweredTurn,
   readSoul,
   readTell,
   recordTell,
-  requestPause,
   requestStop,
+  type InterruptCompletion,
+  type InterruptTellAdmission,
   type KillEvidence,
   type ResumeCoordinate,
   type SessionFact,
   type TellFact,
   type TurnOutcome,
+  type PauseFact,
 } from "./heart/index.js";
 import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
@@ -51,16 +54,7 @@ import { projectTurns, selectExactHistory, selectHistory } from "./projection.js
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 
-export type InterruptReceipt =
-  | Readonly<{
-      kind: "unavailable";
-      evidence: "hung" | "untidy" | "unavailable";
-    }>
-  | Readonly<{
-      kind: "interrupted";
-      putDown: "was-idle" | "self-aborted";
-      tell: TellResult;
-    }>;
+export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
 
 export type ForkReceipt =
   | Readonly<{ kind: "forked"; child: AkuId }>
@@ -77,13 +71,27 @@ type TellAdmission =
 type InitialTellAdmission = CallInitialTellAdmission;
 
 type InterruptAdmission =
-  | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>
-  | Readonly<{
-      kind: "admitted";
-      tell: TellFact;
-      putDown: "was-idle" | "self-aborted";
-      wake: Promise<TellResult>;
-    }>;
+  | Extract<InterruptTellAdmission, { kind: "unavailable" }>
+  | (Omit<Extract<InterruptTellAdmission, { kind: "recorded" }>, "kind"> & Readonly<{ kind: "admitted" }>);
+
+async function awaitInterruptCompletion(
+  paths: AkumaPaths,
+  barrier: PauseFact,
+  signal?: AbortSignal,
+): Promise<Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>> {
+  const leash = await acquireLeash(paths, {
+    bodySequence: barrier.bodySequence,
+    ...(signal === undefined ? { deadline: Number.POSITIVE_INFINITY } : { signal }),
+  });
+  if (leash === null) return await readInterruptCompletion(paths, barrier);
+  try {
+    const result = await leash.completeInterruptBarrier(paths, barrier);
+    if (result.kind === "completed" || result.kind === "unavailable") return result;
+    return { kind: "unavailable", evidence: "untidy" };
+  } finally {
+    leash.release();
+  }
+}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -93,11 +101,9 @@ async function takeLeashUntilSignal(
   paths: AkumaPaths,
   bodySequence: number,
   signal?: AbortSignal,
-  unbounded = false,
 ): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>> {
   const leash = await acquireLeash(paths, {
     bodySequence,
-    ...(signal === undefined && unbounded ? { deadline: Number.POSITIVE_INFINITY } : {}),
     ...(signal === undefined ? {} : { signal }),
   });
   if (leash !== null) return leash;
@@ -392,6 +398,7 @@ export class AkumaOwner {
     body: string,
     options: Readonly<{
       tellId?: string;
+      recordedAt?: string;
       schemaJson?: string;
       initiator?: string;
       signal?: AbortSignal;
@@ -400,71 +407,64 @@ export class AkumaOwner {
   ): Promise<InterruptReceipt> {
     const admitted = await this.admitInterrupt(body, options);
     if (admitted.kind === "unavailable") return admitted;
-    return { kind: "interrupted", putDown: admitted.putDown, tell: await admitted.wake };
+    return await this.completeInterruptAdmission(admitted, options.runtime, options.signal);
   }
 
-  /**
-   * Settle the predecessor and record the interrupt Tell, returning at the
-   * admission boundary so a bounded caller owns the wake wait.
-   */
+  /** Atomic Tell-plus-barrier admission; no leash wait or completion observation occurs here. */
   async admitInterrupt(
     body: string,
     options: Readonly<{
       tellId?: string;
+      recordedAt?: string;
       schemaJson?: string;
       initiator?: string;
       signal?: AbortSignal;
-      runtime?: TellWakeRuntime;
     }> = {},
   ): Promise<InterruptAdmission> {
-    const request = await requestPause(this.paths, new Date().toISOString(), options.signal);
-    if (request.kind === "not-born") {
-      throw new AkumaNotBornError(this.id);
-    }
-
-    let putDown: "was-idle" | "self-aborted" = "was-idle";
-    let leash = await HeldAkumaLeash.try(this.paths);
-    if (leash === null) {
-      const waited = await takeLeashUntilSignal(this.paths, request.body.sequence, options.signal, true);
-      if ("kind" in waited) return waited;
-      leash = waited;
-      putDown = "self-aborted";
-    }
-    let recorded: TellFact;
-    try {
-      options.signal?.throwIfAborted();
-
-      const settledBody = (await readHeart(this.paths)).latestBody;
-      if (settledBody?.sequence === request.body.sequence && settledBody.hung !== undefined) {
-        await leash.clearPause(this.paths);
-        return { kind: "unavailable", evidence: "hung" };
-      }
-      if (settledBody?.sequence !== request.body.sequence || settledBody.end === undefined) {
-        await leash.clearPause(this.paths);
-        return { kind: "unavailable", evidence: "untidy" };
-      }
-      if (request.body.end !== undefined || settledBody.end !== "put-down") putDown = "was-idle";
-
-      options.signal?.throwIfAborted();
-      const id = randomUUID();
-      const admitted = await leash.recordInterruptTell(this.paths, {
+    const admitted = await recordTell(
+      this.paths,
+      {
         kind: "tell",
-        id: options.tellId ?? id,
+        id: options.tellId ?? randomUUID(),
         body,
-        recordedAt: new Date().toISOString(),
+        recordedAt: options.recordedAt ?? new Date().toISOString(),
         ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
         ...(options.schemaJson === undefined ? {} : { schemaJson: options.schemaJson }),
-      });
-      if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-      recorded = admitted.tell;
-    } finally {
-      leash.release();
+      },
+      { interrupt: true, ...(options.signal === undefined ? {} : { signal: options.signal }) },
+    );
+    if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
+    if (admitted.kind === "unavailable") return admitted;
+    return { ...admitted, kind: "admitted" };
+  }
+
+  /** Complete only the exact admitted predecessor barrier, then wake the stable Tell. */
+  async completeInterruptAdmission(
+    admission: Extract<InterruptAdmission, { kind: "admitted" }>,
+    runtime?: TellWakeRuntime,
+    signal?: AbortSignal,
+  ): Promise<TellResult> {
+    if (admission.barrier === undefined) return await wakeRecordedTell(this.paths, admission.tell.id, runtime, signal);
+    const completion = await awaitInterruptCompletion(this.paths, admission.barrier, signal);
+    if (completion.kind === "unavailable") {
+      const receipt = await this.admittedReceipt(admission.tell.id);
+      return {
+        ...receipt,
+        interruption: {
+          kind: "unavailable",
+          bodySequence: admission.barrier.bodySequence,
+          evidence: completion.evidence,
+        },
+      };
     }
+    const receipt = await wakeRecordedTell(this.paths, admission.tell.id, runtime, signal);
     return {
-      kind: "admitted",
-      tell: recorded,
-      putDown,
-      wake: wakeRecordedTell(this.paths, recorded.id, options.runtime, options.signal),
+      ...receipt,
+      interruption: {
+        kind: "completed",
+        bodySequence: admission.barrier.bodySequence,
+        putDown: admission.predecessorWasRunning && completion.body.end === "put-down" ? "self-aborted" : "was-idle",
+      },
     };
   }
 

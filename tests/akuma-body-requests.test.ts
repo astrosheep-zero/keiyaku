@@ -12,11 +12,12 @@ import { join } from "node:path";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
-import { HeldAkumaLeash, admitRequest, readHeart, readRequest, type Soul } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, admitRequest, readHeart, readRequest, readTell, type Soul } from "../src/akuma/heart/index.js";
 import { type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
-import { AkumaNotBornError, AkumaObservationError } from "../src/akuma/akuma-errors.js";
+import { AkumaNotBornError, AkumaObservationError, AkumaSelfInterruptError } from "../src/akuma/akuma-errors.js";
 import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
+import { externalRequestCommandsFor } from "../src/akuma-body.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import {
   atomicJson,
@@ -222,17 +223,29 @@ async function requestBodyWait(
   });
 }
 
-async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string }>) {
+async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; interrupt?: boolean }>) {
   const command = selectionRequestProtocol("akuma.tell");
   return await requestBodyCommand({
     ...input,
     command,
-    value: { action: "akuma.tell", target: input.target, body: input.body },
+    value: {
+      action: "akuma.tell",
+      target: input.target,
+      body: input.body,
+      ...(input.interrupt === true ? { interrupt: true } : {}),
+    },
   });
 }
 
 async function requestBodyAsk(
-  input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; timeoutMs: number }>,
+  input: Readonly<{
+    directory: string;
+    id?: string;
+    target: AkuId;
+    body: string;
+    timeoutMs: number;
+    interrupt?: boolean;
+  }>,
 ) {
   return await requestBodyCommand({
     ...input,
@@ -242,6 +255,7 @@ async function requestBodyAsk(
       target: input.target,
       body: input.body,
       timeoutMs: input.timeoutMs,
+      ...(input.interrupt === true ? { interrupt: true } : {}),
     },
   });
 }
@@ -1713,6 +1727,40 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
   }
 });
 
+test("a forwarded self-interrupt Tell and Ask refuse without product effects and leave the pump closable", async () => {
+  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-self-interrupt-")));
+  const parent = await born(root, "parent", "46464647");
+  const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {});
+  const pump = await openPump(parent, commands);
+  const before = await readHeart(parent.paths);
+  try {
+    for (const action of ["tell", "ask"] as const) {
+      const id = randomUUID();
+      await assert.rejects(
+        action === "tell"
+          ? requestBodyTell({ directory: pump.directory, id, target: parent.id, body: "self interrupt", interrupt: true })
+          : requestBodyAsk({
+              directory: pump.directory,
+              id,
+              target: parent.id,
+              body: "self interrupt",
+              timeoutMs: 0,
+              interrupt: true,
+            }),
+        (error: unknown) => error instanceof AkumaSelfInterruptError && error.id === parent.id,
+      );
+      assert.equal((await readRequest(parent.paths, id))?.state, "voided");
+      assert.equal(await readTell(parent.paths, id), null);
+      const after = await readHeart(parent.paths);
+      assert.deepEqual(after.pending, before.pending);
+      assert.deepEqual(after.pause, before.pause);
+    }
+    await pump.close();
+  } finally {
+    await pump.close().catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 test("a forwarded operation answers from the parent World without reading the child's Hearts", async () => {
   const parentWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-parent-")));
   const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-child-")));
@@ -1846,39 +1894,26 @@ test("transport rejects malformed target sets and foreign World coordinates befo
   }
 });
 
-test("bounded forwarded Tell admits once under the request identity", async () => {
+test("bounded forwarded interrupt Ask admits once under the request identity", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-")));
   const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
-  const target = "aku/worker/22222222" as AkuId;
+  const target = await born(root, "worker", "22222222");
+  const predecessor = (await HeldAkumaLeash.try(target.paths))!;
+  const body = await predecessor.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   let calls = 0;
+  const port = selectionRequestPort(root, console.error, parent.id);
   const pump = await openSelectionPump(parent, {
-    ...unusedSelectionPort,
+    ...port,
     ask: async (input) => {
       calls += 1;
-      return {
-        akuma: input.target,
-        tell: {
-          admission: { fact: "recorded", tellId: input.tellId },
-          row: {
-            kind: "tell",
-            sequence: 1,
-            at: input.recordedAt,
-            tellId: input.tellId,
-            text: input.body,
-            state: "pending",
-            deliveries: [],
-          },
-          wake: { kind: "held" },
-        },
-        observation: { reason: "deadline" },
-      };
+      return await port.ask!(input);
     },
   });
   try {
     const id = randomUUID();
     const outcomes = await Promise.all(
       [1, 2].map(
-        async () => await requestBodyAsk({ directory: pump.directory, id, target, body: "continue", timeoutMs: 0 }),
+        async () => await requestBodyAsk({ directory: pump.directory, id, target: target.id, body: "continue", timeoutMs: 0, interrupt: true }),
       ),
     );
     const returned = outcomes.find((value) => value.kind === "returned");
@@ -1886,15 +1921,21 @@ test("bounded forwarded Tell admits once under the request identity", async () =
     if (returned?.kind === "returned") {
       const result = selectionResultSchemas.ask.parse(returned.result);
       assert.equal(result.tell.admission.tellId, id);
+      assert.deepEqual(result.tell.interruption, { kind: "pending", bodySequence: body.sequence });
       assert.deepEqual(result.observation, { reason: "deadline" });
+      const retained = await readTell(target.paths, id);
+      assert.equal(retained?.body, "continue");
+      assert.equal(retained?.recordedAt, "2026-08-18T00:00:01.000Z");
+      assert.equal((await readHeart(target.paths)).pause?.frontierTellId, id);
     }
     assert.equal(calls, 1);
     assert.deepEqual(
       outcomes.find((value) => value.kind === "reference"),
-      { kind: "reference", reference: { action: "akuma.ask", target, tellId: id } },
+      { kind: "reference", reference: { action: "akuma.ask", target: target.id, tellId: id } },
     );
   } finally {
     await pump.close();
+    predecessor.release();
     rmSync(root, { recursive: true, force: true });
   }
 });

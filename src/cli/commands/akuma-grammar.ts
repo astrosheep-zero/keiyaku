@@ -118,7 +118,7 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Tell an Akuma something without waiting for its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
+      "--interrupt durably admits the new Tell while asking the current Body to yield; admission remains even if completion cannot be proven.",
       "Use ask to block for the answer or supply a schema.",
     ].join("\n"),
   },
@@ -130,7 +130,7 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Ask an Akuma and block until it answers.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt ends the Akuma's current work before accepting the new prompt and waking it again.",
+      "--interrupt durably admits the new Tell while asking the current Body to yield; admission remains even if completion cannot be proven.",
       "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
       "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
       "Completed activity streams on stderr and the final answer is written to stdout once.",

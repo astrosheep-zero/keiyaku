@@ -5,8 +5,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
-import { readHeart, requestPause } from "../src/akuma/heart/index.js";
-import { allocatedHeart } from "./support/akuma-fixtures.js";
+import { readHeart } from "../src/akuma/heart/index.js";
+import { allocatedHeart, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import { temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
 import test from "node:test";
 import { createNativeClient } from "../src/akuma/providers/opencode-sdk/native-http.js";
@@ -242,7 +242,8 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
     // Iterator return, not elapsed time or prompt submission, proves this exact phase.
     await waitForCondition("whole closure entered unproven iterator return", () => returning, { budgetMs: 5_000 });
     if (control === "stop") {
-      assert.equal((await requestPause(allocated.paths, "2026-08-08T00:00:01.000Z")).kind, "requested");
+      const current = (await readHeart(allocated.paths)).latestBody!;
+      await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:01.000Z");
       await expectBodySettles(body, "Body parked outside custody supervision", 6_000);
       const heart = await readHeart(allocated.paths);
       assert.match(heart.latestBody?.hung?.diagnostic ?? "", /provider custody remained live/u);

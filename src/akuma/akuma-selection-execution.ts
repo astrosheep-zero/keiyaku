@@ -32,12 +32,12 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   if (input.interrupt === true) {
     const interrupted = await owner.interrupt(input.body, {
       ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    if (interrupted.kind === "unavailable")
-      throw new AkumaProviderError(`Tell interrupt unavailable: ${interrupted.evidence}`);
-    tell = interrupted.tell;
+    if ("kind" in interrupted) throw new AkumaProviderError(`Tell interrupt unavailable: ${interrupted.evidence}`);
+    tell = interrupted;
   } else {
     tell = await owner.tell(input.body, input.tellId, input.recordedAt, undefined, {
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
@@ -152,21 +152,50 @@ export async function executeAskAkuma(
 ): Promise<AkumaAskResult> {
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
-  const admission =
-    input.interrupt === true
-      ? await owner.admitInterrupt(input.body, {
-          ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
-          ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
-          ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-        })
-      : await owner.admitTell(input.body, input.tellId, input.recordedAt, undefined, {
-          ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
-          ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-          ...(input.signal === undefined ? {} : { signal: input.signal }),
-        });
-  if (admission.kind === "unavailable")
-    throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+  if (input.interrupt === true) {
+    const admission = await owner.admitInterrupt(input.body, {
+      ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
+      ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+    if (admission.kind === "unavailable")
+      throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+    const observing = new AbortController();
+    const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
+    const wake = owner.completeInterruptAdmission(admission, undefined, signal);
+    try {
+      const receipt =
+        admission.barrier === undefined
+          ? undefined
+          : {
+              ...(await owner.admittedReceipt(admission.tell.id)),
+              interruption: { kind: "pending" as const, bodySequence: admission.barrier.bodySequence },
+            };
+      return await observeAdmittedAskAkuma({
+        path: input.path,
+        id: input.id,
+        tellId: admission.tell.id,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        startedAt: performance.now(),
+        wake,
+        ...(receipt === undefined ? {} : { receipt }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
+        ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
+      });
+    } finally {
+      if (!observing.signal.aborted) observing.abort(new Error("interrupt observation ended"));
+      await wake.catch(() => undefined);
+    }
+  }
+
+  const admission = await owner.admitTell(input.body, input.tellId, input.recordedAt, undefined, {
+    ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
   if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
   return await observeAdmittedAskAkuma({
     path: input.path,

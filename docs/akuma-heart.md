@@ -97,11 +97,24 @@ as absent and never overrides the current value.
 Body facts name lifecycle custody but persist no process coordinate or
 reconstructable signal authority: a launch runtime is a live coordinate of the
 waking process, never durable Heart authority. A seal shares the leash's atomic
-birth judge, closing a coordinate permanently. Stop and pause are distinct
-transient control facts; a later leash holder can clear abandoned control but
-cannot claim physical custody of its predecessor. Kill witnesses one exact,
-explicitly settled Body; a successor supersedes its life projection without
-deleting history.
+birth judge, closing a coordinate permanently. Stop and interrupt are distinct
+transient controls. An interrupt retains the admitted Tell and a barrier naming
+its predecessor Body and Tell frontier in one Heart admission. Concurrent
+interrupts join that barrier in Tell order without replacing its predecessor or
+frontier. Repeating a Tell identity keeps its admitted input and never reissues
+control; changed input refuses. The predecessor cannot select, bind, deliver,
+receipt, or terminalize frontier-and-later input. Earlier pending input remains
+available for successor recovery, and retention preserves the barrier's proof
+until it is consumed.
+
+Completion consumes only the exact barrier after explicit non-hung predecessor
+settlement under the leash. Free custody or elapsed time alone is not proof,
+and refusal never clears the barrier. A stale helper cannot consume newer
+control or claim custody of a successor. A legacy pause without a frontier
+remains readable and can be cleared only by the same settlement proof, without
+inventing a Tell. Malformed present frontier is corruption, never legacy state.
+Kill witnesses one exact, explicitly settled Body; a successor supersedes its
+life projection without deleting history.
 
 Hung evidence records failure of a Body's owned provider custody to retire. It
 permanently gates same-identity succession and never clears, changes sessions,

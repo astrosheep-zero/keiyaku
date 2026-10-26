@@ -1,3 +1,4 @@
+import type { PauseFact } from "./facts.js";
 import type { DatabaseSync } from "node:sqlite";
 import {
   HeartAuthorityCorruptionError,
@@ -41,10 +42,16 @@ END`;
 
 // Open decisions retain their exact proof inputs even after a Tell becomes told.
 export const pendingTellSequencesSql = `SELECT tells.sequence FROM tells WHERE ${tellStateSql} = 'pending'
-  UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id`;
+  UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id
+  UNION SELECT tells.sequence FROM tells JOIN control c ON c.kind = 'pause'
+    WHERE json_type(c.value_json, '$.frontierTellId') = 'text'
+      AND tells.id = json_extract(c.value_json, '$.frontierTellId')`;
 export const pendingTellProtectionSql = `SELECT d.turn_sequence FROM tell_deliveries d
   JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'
-  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id`;
+  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id
+  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN control c ON c.kind = 'pause'
+    WHERE json_type(c.value_json, '$.frontierTellId') = 'text'
+      AND d.tell_id = json_extract(c.value_json, '$.frontierTellId')`;
 
 type TellBatch = Readonly<{
   rows: readonly TellRow[];
@@ -140,6 +147,18 @@ export function tellFact(database: DatabaseSync, id: string): TellFact | null {
     )
     .get(id) as TellRow | undefined;
   return row === undefined ? null : decodeTellRows(database, [row])[0]!;
+}
+
+export function sameTellInput(
+  existing: TellFact,
+  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+): boolean {
+  return (
+    existing.body === tell.body &&
+    existing.recordedAt === tell.recordedAt &&
+    existing.schemaJson === tell.schemaJson &&
+    existing.initiator === tell.initiator
+  );
 }
 
 export function insertTellDeliveryFact(database: DatabaseSync, input: TellDeliveryInput): boolean {
@@ -326,8 +345,19 @@ export function turnParticipants(database: DatabaseSync, turnSequence: number): 
 export function drainPendingTells(
   pending: readonly TellFact[],
   activeTurnSequences: readonly number[] = [],
+  pause?: PauseFact | null,
+  bodySequence?: number,
 ): readonly TellFact[] {
-  const eligible = pending.filter(
+  let available = pending;
+  if (pause !== undefined && pause !== null && pause.bodySequence === bodySequence) {
+    if (pause.frontierTellId === undefined) {
+      available = [];
+    } else {
+      const frontier = pending.find((tell) => tell.id === pause.frontierTellId);
+      available = frontier === undefined ? [] : pending.filter((tell) => tell.sequence < frontier.sequence);
+    }
+  }
+  const eligible = available.filter(
     (tell) => tell.binding === undefined || !activeTurnSequences.includes(tell.binding.turnSequence),
   );
   if (eligible.length === 0) return [];

@@ -29,6 +29,23 @@ const failedTellWakeSchema = z
   })
   .strict()
   .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
+const interruptReceiptSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("completed"),
+      bodySequence: z.number().int().positive(),
+      putDown: z.enum(["was-idle", "self-aborted"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("pending"), bodySequence: z.number().int().positive() }).strict(),
+  z
+    .object({
+      kind: z.literal("unavailable"),
+      bodySequence: z.number().int().positive(),
+      evidence: z.enum(["hung", "untidy"]),
+    })
+    .strict(),
+]);
 const tellWakeSchema = z.union([
   z.object({ kind: z.literal("told") }).strict(),
   z.object({ kind: z.literal("held") }).strict(),
@@ -40,6 +57,7 @@ export const tellResultSchema = z
     admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
     row: tellRowSchema,
     wake: tellWakeSchema,
+    interruption: interruptReceiptSchema.optional(),
   })
   .strict();
 export type TellWake = z.infer<typeof tellWakeSchema>;

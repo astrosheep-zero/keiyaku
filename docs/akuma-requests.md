@@ -34,6 +34,11 @@ channels retain their meaning. Declaring both routes or an invalid or empty rout
 refuses composition rather than selecting precedence. Discovery retains cancellation
 and the native failure cause; it creates no Heart admission or caller authority.
 
+A serving Body refuses a forwarded interrupt aimed at its own Akuma before the
+selection owner runs. The refusal is effect-free and prevents the Body from
+waiting on retirement of its own request pump. This boundary requires known
+serving identity and does not invent one for an ordinary local SDK caller.
+
 Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
 execution carries only request-service facts and never transports product capabilities.
 Forwarded verbs carry their flags verbatim; a flag dropped in transport is a product bug, not

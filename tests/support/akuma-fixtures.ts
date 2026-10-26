@@ -11,7 +11,8 @@ import {
   type Soul,
   type TimelineFact,
 } from "../../src/akuma/heart/index.js";
-import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
+import { allocateAkumaDirectory, type AkumaPaths } from "../../src/akuma/identity.js";
+import { withHeartTransaction } from "../../src/akuma/heart/storage.js";
 import { World } from "../../src/world.js";
 
 type AllocatedAkuma = Awaited<ReturnType<typeof allocateAkumaDirectory>>;
@@ -124,7 +125,15 @@ export async function recordTell(
   return await heartRecordTell(paths, { kind: "tell", ...tell });
 }
 
-/** Write one old-version schema row so an owner open can prove its hard refusal. */
+export async function insertLegacyPauseControl(paths: AkumaPaths, bodySequence: number, at: string): Promise<void> {
+  await withHeartTransaction(paths, (database) => {
+    database
+      .prepare("INSERT OR REPLACE INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
+      .run(JSON.stringify({ bodySequence }), at);
+  });
+}
+
+/** One old-version schema row so an owner open can prove its hard refusal. */
 export function seedLegacySchema(path: string, table: "akuma_schema" | "leash_schema", version: number): void {
   const database = new DatabaseSync(path);
   try {

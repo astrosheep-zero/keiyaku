@@ -4,6 +4,7 @@ import {
   appendActivity,
   beginTurn,
   bindTellsToTurn,
+  BodyControlledError,
   breakBody,
   drainPendingTells,
   heartExists,
@@ -387,9 +388,9 @@ async function submitPendingLiveTells(
     if (attempted.has(tell.id) || tell.schemaJson !== undefined) continue;
     attempted.add(tell.id);
     const outcome = await writeWitness(async () => {
+      await bindTellsToTurn(input.paths, { turnSequence, tellIds: [tell.id], boundAt: input.now() });
       const submission = await tellLive({ id: tell.id, text: tell.body });
       if (!mayWrite() || submission.kind === "turn-ended") return "turn-ended" as const;
-      await bindTellsToTurn(input.paths, { turnSequence, tellIds: [tell.id], boundAt: input.now() });
       await recordTellDeliveries(input.paths, [
         {
           tellId: tell.id,
@@ -609,6 +610,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
     }
   } catch (error) {
     writesOpen = false;
+    if (error instanceof BodyControlledError) input.supervisor.cancel("control");
     if (input.supervisor.signal.aborted) {
       const retirement = await stopActiveDrive(input, active);
       return retirement.kind === "hung" ? retirement : { kind: "stopped" };

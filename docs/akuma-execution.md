@@ -115,12 +115,25 @@ groups ordinary Tells only until the next schema Tell.
 A body-less publication composed before a schema Tell exits cleanly before that
 Tell is admitted; it never makes the Tell contend with its own birth Body.
 
-Interrupt asks the current Body to yield, then requires its explicit settlement
-and leash proof before atomically recording the Tell and waking a successor.
-The control caller does not manufacture a hung or unavailable result from
-elapsed time while that settlement is in progress; it may stop waiting through
-its own signal. Hung remains a Body/provider-custody fact, and a settled or hung
-Body is reported through the existing structured unavailable evidence.
+Interrupt atomically admits the Tell with a request for the current Body to
+yield. The predecessor never receives the protected input, and normal session
+completion cannot discard it. Submission already begun before admission is not
+undone. Admission survives loss of the initiating caller; the next ordinary wake
+can finish the handoff, with no background recovery promise or second input
+store. Both paths use the same leash-held Heart settlement judgment, and Body
+publication cannot cross an unsettled barrier admitted during preparation.
+A crash after barrier consumption but before launch leaves ordinary pending Tell.
+
+Admission and completion are separate evidence. A completed interruption requires
+explicit non-hung settlement of the exact predecessor, not elapsed time or a free
+leash alone. Failure to establish completion retains the admitted Tell identity
+and its recovery boundary rather than implying non-admission. Known hung refuses
+fresh admission. Cancellation before admission leaves no input or control;
+after admission it stops waiting only. A bounded ask starts observing its own
+Tell immediately after admission and leaves no detached completion wait when
+observation ends. Hung remains a Body/provider-custody fact, never a caller's
+timeout judgment.
+
 Kill similarly requires explicit settlement of the exact stopped Body before it
 can record a witness. A Body that is already explicitly settled without a kill
 witness — a stranded life whose process is gone — needs no stop request: kill
@@ -130,7 +143,7 @@ running or asleep Body keeps its semantics: the running Body is asked to stop
 and is witnessed only after settlement, the asleep Body receipts already
 stopped, and only an already witnessed Body receipts already killed. Hung,
 untidy, held, or changed custody returns the existing unavailable evidence and
-never authorizes external signaling. Pause and stop are distinct control facts.
+never authorizes external signaling. Stop and interrupt remain distinct controls.
 For an externally hosted persistent runtime, kill and interrupt control current
 native execution while preserving the runtime for later resume. Ordinary Turn
 completion only disconnects the adapter's owned client. Neither client retirement

@@ -20,6 +20,7 @@ import { settings } from "./settings.js";
 import { Debts, type Debt, type DebtMutationResult } from "./debt/index.js";
 import { debtMutationRequestCommands, type DebtLifecycleVerb, type DebtMutationRequestPort } from "./debt/mutation.js";
 import { World } from "./world.js";
+import { readSoul } from "./akuma/heart/index.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
@@ -138,13 +139,18 @@ export async function externalRequestCommandsFor(
   }>
 > {
   const world = await World.prove(worldRootForAkumaPaths(launch.paths));
+  const servingBody = launch.seed?.id ?? (await readSoul(launch.paths))?.id;
   return {
     world,
     commands: composeRequestCommands(
       selectionRequestCommands(
-        selectionRequestPort(world, (message) => {
-          void recordPluginDiagnostic(launch.paths, "outcome observation", message);
-        }),
+        selectionRequestPort(
+          world,
+          (message) => {
+            void recordPluginDiagnostic(launch.paths, "outcome observation", message);
+          },
+          servingBody,
+        ),
       ),
       contractRequestCommands(contractUpstream(processConfiguration)),
       debtMutationRequestCommands(debtMutationRequestPort()),
