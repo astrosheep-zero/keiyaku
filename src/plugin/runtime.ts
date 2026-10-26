@@ -464,31 +464,26 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   return Object.freeze({
     async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
-      const activated = await boundedAttempt(async (cancellation) => {
-        const handlers = await Promise.all(
+      const expiry = new AbortController();
+      const timer = setTimeout(() => expiry.abort(), PLUGIN_ATTEMPT_TIMEOUT_MS);
+      try {
+        await Promise.all(
           activations.map(async (activation, index) => {
-            const activatedHandlers = await settleBefore(activation, cancellation);
-            if (activatedHandlers !== ABORTED) {
-              if (activatedHandlers.timedOut)
-                reportPluginDiagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
-              return activatedHandlers.handlers;
+            const activated = await settleBefore(activation, expiry.signal);
+            if (activated === ABORTED || activated.timedOut) {
+              reportPluginDiagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
+              if (activated === ABORTED) return;
             }
-            reportPluginDiagnostic(reportDiagnostic, selected[index]!.id, "signal", timeoutError());
-            return [];
+            await Promise.all(
+              activated.handlers
+                .filter((entry) => entry.kind === signal.kind)
+                .map((entry) => deliver(entry, signal, reportDiagnostic, Math.max(0, deadline - performance.now()))),
+            );
           }),
         );
-        return handlers.flat();
-      });
-      if (activated.kind === "failed") {
-        reportPluginDiagnostic(reportDiagnostic, "runtime", "signal", activated.error);
-        return;
+      } finally {
+        clearTimeout(timer);
       }
-      if (activated.kind === "timed-out") return;
-      await Promise.all(
-        activated.value
-          .filter((entry) => entry.kind === signal.kind)
-          .map((entry) => deliver(entry, signal, reportDiagnostic, Math.max(0, deadline - performance.now()))),
-      );
     },
   });
 }

@@ -27,7 +27,10 @@ test("one outcome observation batch bounds concurrent attempts rather than multi
       '  } } };',
       '} };',
     ].join("\n"));
-    writeProjectPlugins(value.root, { alpha: { package: "./plugins/alpha.mjs", config: { trace: output } } });
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
     const world = await World.at(value.root);
     const diagnostics: string[] = [];
     const observer = outcomePluginObserver({ world, reportDiagnostic: (message) => { diagnostics.push(message); } });
@@ -519,7 +522,7 @@ test("plugin writable paths reject traversal, management custody, duplicate name
   }
 });
 
-test("hanging activation is bounded independently and does not replay an emission", { timeout: 5_000 }, async (context) => {
+test("a healthy plugin is emitted to while another activation hangs", { timeout: 5_000 }, async (context) => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -530,7 +533,7 @@ test("hanging activation is bounded independently and does not replay an emissio
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "hanging", apiVersion: 1 },',
-        '  activate(context, cancellation) { appendFileSync(context.config.trace, "activation-started\\n"); return new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); resolve({}); }, { once: true })); },',
+        '  activate(context, cancellation) { appendFileSync(context.config.trace, "activation-started\\n"); return new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); resolve({ signals: { "akuma.born": () => appendFileSync(context.config.trace, "late-called\\n") } }); }, { once: true })); },',
         "};",
       ].join("\n"),
     );
@@ -546,6 +549,7 @@ test("hanging activation is bounded independently and does not replay an emissio
       ].join("\n"),
     );
     writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
       hanging: { package: "./plugins/hanging.mjs", config: { trace: output } },
       working: { package: "./plugins/working.mjs", config: { trace: output } },
     });
@@ -556,22 +560,79 @@ test("hanging activation is bounded independently and does not replay an emissio
       world: await World.at(value.root),
       reportDiagnostic: (value) => diagnostics.push(value),
     });
-    await eventually(() => trace(output).includes("activated"));
-    assert.deepEqual(trace(output), ["activation-started", "activated"]);
-    // The emission starts after activation and therefore owns a later deadline.
-    advance(1);
+    // Emitted immediately after runtime acquisition, while the hanging activation
+    // is still in flight: the ready plugin's own activation is the only thing its
+    // handler waits for, so no clock advance or staging delay is needed.
     const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1, origin: { kind: "direct" }, caller: { kind: "unknown" } }, (value) => diagnostics.push(value));
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    advance(4_998);
-    assert.deepEqual(trace(output), ["activation-started", "activated"]);
-    advance(1);
+    await eventually(() => trace(output).includes("activation-started") && trace(output).includes("called"));
+    assert.deepEqual(trace(output), ["activation-started", "activated", "called"]);
+    advance(5_000);
     await emission;
-    assert.deepEqual(trace(output), ["activation-started", "activated", "activation-aborted", "called"]);
-    assert.equal(
-      diagnostics.some((value) => value.startsWith("plugin hanging activation: timed out after 5000ms")),
-      true,
-    );
+    // The hung activation is bounded and diagnosed, and its late handler set
+    // never replays the emission it missed.
+    assert.deepEqual(trace(output), ["activation-started", "activated", "called", "activation-aborted"]);
+    assert.equal(diagnostics.includes("plugin hanging activation: timed out after 5000ms"), true, diagnostics.join("; "));
+    assert.equal(diagnostics.includes("plugin hanging signal: timed out after 5000ms"), true, diagnostics.join("; "));
   } finally {
+    value.close();
+  }
+});
+
+test("a plugin activated after the signal deadline cannot replay the emission", { timeout: 5_000 }, async (context) => {
+  const value = fixture();
+  const gateKey = `keiyaku-plugin-gate-${Date.now()}`;
+  let openGate!: () => void;
+  (globalThis as Record<string, unknown>)[gateKey] = new Promise<void>((resolve) => {
+    openGate = resolve;
+  });
+  try {
+    const output = join(value.root, "trace.txt");
+    // A gated import holds the first activation attempt, which in turn holds the
+    // ordered start of the second plugin until that attempt bound.
+    writePlugin(
+      value.root,
+      "blocked",
+      [
+        'import { appendFileSync } from "node:fs";',
+        `await globalThis[${JSON.stringify(gateKey)}];`,
+        "export default {",
+        '  manifest: { id: "blocked", apiVersion: 1 },',
+        '  activate(context) { appendFileSync(context.config.trace, "blocked-activated\\n"); return {}; },',
+        "};",
+      ].join("\n"),
+    );
+    writePlugin(
+      value.root,
+      "ready",
+      [
+        'import { appendFileSync } from "node:fs";',
+        "export default {",
+        '  manifest: { id: "ready", apiVersion: 1 },',
+        '  activate(context) { appendFileSync(context.config.trace, "ready-activated\\n"); return { signals: { "akuma.born": () => appendFileSync(context.config.trace, "ready-signal\\n") } }; },',
+        "};",
+      ].join("\n"),
+    );
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      blocked: { package: "./plugins/blocked.mjs", config: { trace: output } },
+      ready: { package: "./plugins/ready.mjs", config: { trace: output } },
+    });
+
+    const diagnostics: string[] = [];
+    const advance = deadlineClock(context);
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (value) => diagnostics.push(value),
+    });
+    const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1, origin: { kind: "direct" }, caller: { kind: "unknown" } }, (value) => diagnostics.push(value));
+    advance(5_000);
+    await eventually(() => trace(output).includes("ready-activated"));
+    await emission;
+    assert.deepEqual(trace(output), ["ready-activated"], "the late activation never receives the emission");
+    assert.equal(diagnostics.includes("plugin blocked activation: timed out after 5000ms"), true, diagnostics.join("; "));
+    assert.equal(diagnostics.some((value) => value.startsWith("plugin ready signal:")), true, diagnostics.join("; "));
+  } finally {
+    openGate();
     value.close();
   }
 });

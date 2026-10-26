@@ -100,8 +100,9 @@ host supplies each activation and handler attempt its own cancellation signal; a
 non-cooperative attempt that outlives its limit loses all authority except its
 diagnostic evidence. A signal that arrives while a selected plugin is still
 activating remains eligible only when that activation settles successfully
-within the signal producer's own bounded delivery; otherwise it is dropped with
-a diagnostic and is never replayed.
+within the signal producer's own bounded delivery; a pending activation holds
+back only that plugin's handlers, and an emission it misses is dropped with a
+diagnostic and is never replayed.
 
 ## Host Diagnostics
 
