@@ -45,6 +45,8 @@ import type { ProviderOptions } from "../src/akuma/provider-recipe.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import {
   createProviderAttempt,
+  AGENT_EVENT_QUEUE_LIMIT,
+  AgentEventChannel,
   type AgentEvent,
   type ProviderAdapter,
   type ProviderAttempt,
@@ -2226,6 +2228,67 @@ test("a confirmed native model is the one selection every later Turn resumes wit
       undefined,
       "an absent current model removes the stale option instead of replaying it",
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the model a Turn proved it ran survives narration overflow into Soul and the next Turn", async () => {
+  const root = bodyTestDirectory("keiyaku-runtime-model-overflow-");
+  try {
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c99");
+    const launch = claudeBodyLaunch(allocated, root, "first");
+    const starts: ProviderOptions[] = [];
+    const drive = async (
+      call:
+        | Parameters<ProviderAdapter["start"]>[0]
+        | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
+    ): Promise<FixtureSession> => {
+      starts.push(call.options);
+      // A fast native adapter fills the channel before the Body's durable
+      // writers consume anything, which is the overflow a slow consumer sees.
+      const events = new AgentEventChannel();
+      events.emit({ type: "session", coordinate: { sessionId: "overflow-session" } });
+      events.emit({ type: "model", model: "claude-native" });
+      for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
+        events.emit({ type: "assistant", text: `narration-${index}` });
+      events.end();
+      return {
+        admission: { fence: `overflow-${starts.length}` },
+        events,
+        completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "done" }),
+        async abort() {},
+        async forceDispose() {},
+      };
+    };
+    const provider: FixtureProviderAdapter = scenarioProvider(drive, { resume: drive });
+
+    await driveAkumaBody(
+      { ...launch, seed: { ...launch.seed!, options: { model: "claude-requested" } } },
+      provider,
+      { now: () => "2026-08-08T00:00:10.000Z" },
+    );
+    assert.equal(starts[0]?.model, "claude-requested", "birth admits the requested selection");
+    assert.equal(
+      (await readHeart(allocated.paths)).soul?.options.model,
+      "claude-native",
+      "the model the attempt reported survives the narration flood",
+    );
+    const retained = (await activitySlice(allocated.paths)).rows.flatMap((fact) =>
+      fact.kind === "activity" ? [fact.event] : [],
+    );
+    assert.equal(retained.length, AGENT_EVENT_QUEUE_LIMIT, "the flood saturated the bound without growing it");
+    assert.equal(retained.some((event) => event.type === "assistant" && event.text === "narration-0"), false);
+    assert.equal(
+      retained.some(
+        (event) => event.type === "assistant" && event.text === `narration-${AGENT_EVENT_QUEUE_LIMIT + 7}`,
+      ),
+      true,
+    );
+
+    await recordTell(allocated.paths, { id: "overflow-tell", body: "again", recordedAt: "2026-08-08T00:00:11.000Z" });
+    await driveAkumaBody({ paths: allocated.paths }, provider, { now: () => "2026-08-08T00:00:12.000Z" });
+    assert.equal(starts[1]?.model, "claude-native", "the next Turn's recipe runs the model the last one proved");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

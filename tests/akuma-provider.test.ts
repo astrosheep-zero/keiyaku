@@ -668,6 +668,54 @@ test("AgentEventChannel coalesces protected overflow without throwing", async ()
   assert.equal(markers[0]?.text, "Agent event queue overflow: 2 terminal/error events coalesced");
 });
 
+test("AgentEventChannel keeps the runtime model observation narration overflow would drop", async () => {
+  const channel = new AgentEventChannel();
+  channel.emit({ type: "session", coordinate: { sessionId: "session-1" } });
+  channel.emit({ type: "model", model: "claude-native" });
+  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
+    channel.emit({ type: "assistant", text: `update-${index}` });
+  channel.end();
+
+  const events: AgentEvent[] = [];
+  for await (const event of channel) events.push(event);
+  assert.deepEqual(
+    events.filter((event) => event.type === "model"),
+    [{ type: "model", model: "claude-native" }],
+    "the model the adapter proved it ran is not narration to discard",
+  );
+  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT + 1);
+  assert.equal(events.some((event) => event.type === "assistant" && event.text === "update-0"), false);
+  assert.equal(
+    events.some((event) => event.type === "assistant" && event.text === `update-${AGENT_EVENT_QUEUE_LIMIT + 7}`),
+    true,
+  );
+});
+
+test("AgentEventChannel keeps the latest model observation above a saturated protected queue", async () => {
+  const channel = new AgentEventChannel();
+  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT; index += 1) channel.emit(noteEvent(`error-${index}`));
+  channel.emit({ type: "model", model: "claude-native" });
+  channel.emit({ type: "model" });
+  channel.emit(noteEvent("error-late-1"));
+  channel.emit(noteEvent("error-late-2"));
+  channel.end();
+
+  const events: AgentEvent[] = [];
+  for await (const event of channel) events.push(event);
+  assert.deepEqual(
+    events.filter((event) => event.type === "model"),
+    [{ type: "model" }],
+    "one coalesced observation holds the newest fact, an unnamed one clearing the named one",
+  );
+  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT + 1);
+  const markers = events.filter(
+    (event): event is Extract<AgentEvent, { type: "note" }> =>
+      event.type === "note" && event.text.startsWith("Agent event queue overflow"),
+  );
+  assert.equal(markers.length, 1);
+  assert.equal(markers[0]?.text, "Agent event queue overflow: 3 terminal/error events coalesced");
+});
+
 test("ProviderAttempt applies only the current retirement mode to late ownership", async () => {
   const setup = deferred<void>();
   let custody!: AttemptCustody;
@@ -2483,10 +2531,13 @@ function fakeCodex(
   requests(): readonly Readonly<Record<string, unknown>>[];
   requestEnvironment(): Readonly<{ requests: string; literal: string; actor: string }>;
   environment(): NodeJS.ProcessEnv;
+  /** Creating this file releases the fixture's model reroute. */
+  rerouteRelease: string;
 }> {
   const executable = join(root, "codex");
   const log = join(root, "requests.jsonl");
   const environment = join(root, "request-environment.txt");
+  const rerouteRelease = join(root, "model-reroute-release");
   writeFileSync(
     executable,
     [
@@ -2496,6 +2547,7 @@ function fakeCodex(
       `const log=${JSON.stringify(log)};`,
       `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify(process.env));`,
       `const mode=${JSON.stringify(mode)};`,
+      `const rerouteRelease=${JSON.stringify(rerouteRelease)};`,
       "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
       "const reply=(message,result)=>send({id:message.id,result});",
       "const hang=mode==='terminal-hang'?setInterval(()=>{},1000):null;",
@@ -2522,8 +2574,17 @@ function fakeCodex(
       "    if(mode==='rpc-reject') return send({id:message.id,error:{message:'turn start refused'}});",
       "    if(mode==='missing-turn-id') return reply(message,{turn:{}});",
       "    reply(message,{turn:{id:'turn-1'}});",
-      "    if(mode==='model-evidence') send({method:'model/rerouted',params:{threadId:message.params.threadId,turnId:'turn-1',fromModel:'gpt-5-codex',toModel:'gpt-5-codex-mini',reason:'capacity'}});",
-      "    if(mode==='complete'||mode==='model-evidence'){",
+      "    if(mode==='model-evidence'){",
+      "      const released=setInterval(()=>{",
+      "        if(!fs.existsSync(rerouteRelease)) return;",
+      "        clearInterval(released);",
+      "        send({method:'model/rerouted',params:{threadId:message.params.threadId,turnId:'turn-1',fromModel:'gpt-5-codex',toModel:'gpt-5-codex-mini',reason:'capacity'}});",
+      "        send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
+      "        send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
+      "      },5);",
+      "      return;",
+      "    }",
+      "    if(mode==='complete'){",
       "      send({method:'item/completed',params:{item:{id:'item-1',type:'agentMessage',text:'codex answer'}}});",
       "      send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:'turn-1',status:'completed'}}});",
       "    }",
@@ -2594,6 +2655,7 @@ function fakeCodex(
       };
     },
     environment: () => JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv,
+    rerouteRelease,
   };
 }
 
@@ -3025,7 +3087,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
 });
 
-test("native adapters report only the runtime model their own payloads name", async (context) => {
+test("native adapters report only the runtime model their own payloads name", { timeout: 30_000 }, async (context) => {
   const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
   assert.deepEqual(
     translatePiEvent(
@@ -3046,46 +3108,43 @@ test("native adapters report only the runtime model their own payloads name", as
   assert.equal(piSessionModel({ provider: "anthropic", id: "claude-x" }), "anthropic/claude-x");
   assert.equal(piSessionModel({ id: "claude-x" }), undefined, "a half-named selection is not evidence");
 
-  const claudeChannel = new AgentEventChannel();
+  // Each message is observed through its own channel: the channel keeps one
+  // unconsumed model observation, so adapter evidence is what one message emits.
   const claudeState: ClaudeObservationState = { tools: new Map() };
-  emitClaudeMessage({ type: "system", subtype: "init", model: "claude-startup" } as never, claudeChannel, claudeState);
-  emitClaudeMessage(
-    { type: "assistant", message: { model: "claude-response", content: [] } } as never,
-    claudeChannel,
-    claudeState,
-  );
-  emitClaudeMessage(
-    {
+  const claudeModels = async (message: unknown): Promise<readonly AgentEvent[]> => {
+    const channel = new AgentEventChannel();
+    emitClaudeMessage(message as never, channel, claudeState);
+    return (await drainChannel(channel)).filter((event) => event.type === "model");
+  };
+  assert.deepEqual(await claudeModels({ type: "system", subtype: "init", model: "claude-startup" }), [
+    { type: "model", model: "claude-startup" },
+  ]);
+  assert.deepEqual(await claudeModels({ type: "assistant", message: { model: "claude-response", content: [] } }), [
+    { type: "model", model: "claude-response" },
+  ]);
+  assert.deepEqual(
+    await claudeModels({
       type: "system",
       subtype: "model_refusal_fallback",
       scope: "local",
       direction: "retry",
       original_model: "claude-startup",
       fallback_model: "claude-local-only",
-    } as never,
-    claudeChannel,
-    claudeState,
+    }),
+    [],
+    "a local fallback leaves the session model unchanged",
   );
-  emitClaudeMessage(
-    {
+  assert.deepEqual(
+    await claudeModels({
       type: "system",
       subtype: "model_refusal_fallback",
       scope: "session",
       direction: "retry",
       original_model: "claude-response",
       fallback_model: "claude-fallback",
-    } as never,
-    claudeChannel,
-    claudeState,
-  );
-  assert.deepEqual(
-    (await drainChannel(claudeChannel)).filter((event) => event.type === "model"),
-    [
-      { type: "model", model: "claude-startup" },
-      { type: "model", model: "claude-response" },
-      { type: "model", model: "claude-fallback" },
-    ],
-    "a local fallback leaves the session model unchanged",
+    }),
+    [{ type: "model", model: "claude-fallback" }],
+    "a session fallback names the model the attempt is now running",
   );
 
   const opencodeEvents: AgentEvent[] = [];
@@ -3147,10 +3206,20 @@ test("native adapters report only the runtime model their own payloads name", as
     options: {},
     session: { kind: "fresh" },
   }).result;
-  const events = await collectEvents(drive.events);
+  // The channel keeps one unconsumed model observation, so the fixture reroutes
+  // only once a reader has seen the admitted model: the two observations below
+  // are ordered by that handshake, never by elapsed time.
+  const observed: AgentEvent[] = [];
+  const collecting = (async () => {
+    for await (const event of drive.events) {
+      observed.push(event);
+      if (event.type === "model") writeFileSync(fake.rerouteRelease, "");
+    }
+  })();
   await drive.completion;
+  await collecting;
   assert.deepEqual(
-    events.filter((event) => event.type === "model"),
+    observed.filter((event) => event.type === "model"),
     [
       { type: "model", model: "gpt-5-codex" },
       { type: "model", model: "gpt-5-codex-mini" },

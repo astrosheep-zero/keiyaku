@@ -254,16 +254,23 @@ export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown
 type EventWaiter = Readonly<{ resolve(value: IteratorResult<AgentEvent>): void }>;
 
 // Slow consumers may lose reconstructible narration, but session coordinates,
-// notes, and error events stay observable. A full protected queue replaces one
-// protected item with a bounded aggregate note; `end` ignores later emission.
+// notes, error events, and the latest runtime-model observation stay
+// observable. The one queue reserves a single model slot, so that observation
+// never competes for narration admission and no overflow can hide the model a
+// Turn proved it ran. A full protected queue replaces one protected item with a
+// bounded aggregate note; `end` ignores later emission.
 function isErrorEvent(event: AgentEvent): boolean {
   if (event.type === "note") return true;
   if (event.type === "tool" && event.phase === "completed") return event.result.status === "error";
   return event.type === "unknown" && /(?:error|fail|abort|cancel|stop|terminal)/iu.test(event.kind);
 }
 
+function isModelEvent(event: AgentEvent): boolean {
+  return event.type === "model";
+}
+
 function isReconstructibleEvent(event: AgentEvent): boolean {
-  return event.type !== "session" && !isErrorEvent(event);
+  return event.type !== "session" && !isModelEvent(event) && !isErrorEvent(event);
 }
 
 const AGENT_EVENT_OVERFLOW_PREFIX = "Agent event queue overflow";
@@ -286,7 +293,18 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
       waiter.resolve({ done: false, value: event });
       return;
     }
-    if (this.queued.length >= AGENT_EVENT_QUEUE_LIMIT) {
+    if (isModelEvent(event)) {
+      // Model evidence is control state, never narration: it occupies the
+      // queue's one reserved model slot, so a narration flood and a full
+      // protected queue both leave it observable. An unconsumed predecessor is
+      // obsolete, and superseding it is what keeps the newest fact, an unnamed
+      // one clearing the confirmation it disconfirms.
+      const obsolete = this.queued.findIndex(isModelEvent);
+      if (obsolete === -1) this.queued.push(event);
+      else this.queued[obsolete] = event;
+      return;
+    }
+    if (this.narrationCount() >= AGENT_EVENT_QUEUE_LIMIT) {
       const reconstructible = this.queued.findIndex(isReconstructibleEvent);
       if (reconstructible === -1) {
         if (isReconstructibleEvent(event)) return;
@@ -301,8 +319,9 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
           }
           this.overflowMarker = undefined;
         }
-        const protectedIndex = this.queued.findIndex((queued) => queued.type !== "session");
-        const replacement = protectedIndex === -1 ? 0 : protectedIndex;
+        const protectedItem = this.queued.findIndex((queued) => queued.type !== "session" && !isModelEvent(queued));
+        const replacement =
+          protectedItem === -1 ? this.queued.findIndex((queued) => !isModelEvent(queued)) : protectedItem;
         this.overflowCount += 1;
         const marker = overflowEvent(this.overflowCount);
         this.queued[replacement] = marker;
@@ -312,6 +331,11 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
       this.queued.splice(reconstructible, 1);
     }
     this.queued.push(event);
+  }
+
+  /** Narration and protected slots; the reserved model slot is not one of them. */
+  private narrationCount(): number {
+    return this.queued.length - Number(this.queued.some(isModelEvent));
   }
 
   end(): void {

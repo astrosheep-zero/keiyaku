@@ -136,7 +136,11 @@ precise limitation rather than a guess. Adapters only produce that observation:
 Body admits it through Heart, where only the exact latest running Body may move
 the Soul's one current model that every later Turn, resume, and fork reads. The
 observation is never retained as activity and never becomes a second model
-record.
+record. Bounded narration retention never displaces it: one reserved model slot
+in that same bounded retention holds the latest unconsumed observation and
+supersedes an obsolete one instead of retaining both, so neither narration
+overflow nor a full protected backlog leaves the Soul on a model the attempt is
+no longer running. An unnamed observation clears the confirmation it replaces.
 
 A generic native tool invocation may contribute one bounded compact preview of
 the structured arguments it actually supplied. That preview is narration, not
