@@ -154,7 +154,7 @@ test("a public bind's appointed worktree inherits its installed namespace and sh
 });
 
 function malformedContext(): { root: string; current: string } {
-  const root = realpathSync(temporary()),
+  const root = realpathSync.native(temporary()),
     current = join(root, ".keiyaku", "namespace", "current");
   mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(current, "Bad Namespace\n");
