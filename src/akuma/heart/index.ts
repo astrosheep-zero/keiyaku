@@ -574,8 +574,6 @@ export async function bindTellsToTurn(
     for (const tellId of input.tellIds) {
       if (tellFact(heart, tellId) === null) throw new Error(`unknown tell ${tellId}`);
       if (isTellProtectedByPause(heart, tellId, turn.bodySequence)) throw new BodyControlledError();
-    }
-    for (const tellId of input.tellIds) {
       insertTellBindingFact(heart, { tellId, turnSequence: input.turnSequence, boundAt: input.boundAt });
     }
     pruneActivityFacts(heart, ACTIVITY_LIMIT);
