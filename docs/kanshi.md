@@ -21,6 +21,12 @@ or an assertion of causality between producers. Kanshi does not reread a
 section while formatting it, synthesize history, probe provider state, or
 repair an inconsistency it encountered.
 
+Read-time association is enrichment, not a prerequisite for observing either
+product. A failed DebtHolder or Dispatch observation makes affected links
+unavailable; it does not fail readable Debt or Akuma rows or establish that no
+link exists. Alias remains independently observed from Akuma, so failure to
+read Alias does not erase the Akuma observation.
+
 The World Debt section is a recent bounded catalogue. It attaches only
 relationships already observed for those rows, while a selected Contract's
 owned Debt section retains the complete owner view required to explain that

@@ -111,6 +111,7 @@ function isTerminalAkuma(life: string): boolean {
 }
 
 function linkedAkumaSummary(row: ContractKanshiRow, akuma: Section<AkumaKanshiWorld> | undefined): string | undefined {
+  if (row.rosterUnavailable === true) return "akuma  unavailable";
   if (row.roster.length === 0) return undefined;
   if (akuma === undefined || akuma.kind !== "present") return "akuma  unavailable";
   const byId = new Map<string, AkumaAttachmentRow>(akuma.value.rows.map((akuma) => [akuma.id, akuma]));
@@ -343,6 +344,7 @@ function renderDebts(report: KanshiReport, context: TextRenderContext): readonly
   if (rows.length === 0) return [];
   const rowLines: readonly (readonly string[])[] = rows.map((row) => {
     const relation = row.contract === undefined ? [] : [endpointFact(row.contract.id, row.contract.observed)];
+    if (row.contractAssociationUnavailable === true) relation.push("contract association unavailable");
     const childFacts =
       row.children === undefined ? [] : [`children ${row.children.live} live · ${row.children.total} total`];
     const blockerFacts = (row.blockers ?? []).map((blocker) => `blocked ${blocker.id}`);

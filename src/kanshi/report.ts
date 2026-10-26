@@ -26,6 +26,7 @@ export type ContractHolderObservation =
 export type ContractRosterAttachment = Readonly<{
   id: string;
   aliases: readonly AkumaAlias[];
+  aliasesUnavailable?: true;
 }>;
 
 export type ContractKanshiRow = ContractBoard["rows"][number] &
@@ -33,6 +34,7 @@ export type ContractKanshiRow = ContractBoard["rows"][number] &
     phase: ContractPhase;
     holder: ContractHolderObservation;
     roster: readonly ContractRosterAttachment[];
+    rosterUnavailable?: true;
     namespaceDebts?: Section<readonly DebtRow[]>;
     issue?: CurrentPhysicalIssue;
   }>;
@@ -46,6 +48,7 @@ export type ContractKanshiBoard = Omit<ContractBoard, "rows"> &
 export type DebtKanshiRow = DebtRow &
   Readonly<{
     contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
+    contractAssociationUnavailable?: true;
     blockers?: readonly DebtRef[];
   }>;
 
@@ -54,7 +57,9 @@ export type DebtKanshiWorld = BoundedList<DebtKanshiRow> & Readonly<{ root: Worl
 export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
   Readonly<{
     aliases: readonly AkumaAlias[];
+    aliasesUnavailable?: true;
     contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
+    contractAssociationUnavailable?: true;
     snapshot?: ActivitySnapshot;
   }>;
 

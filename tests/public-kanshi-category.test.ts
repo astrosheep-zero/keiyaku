@@ -5,7 +5,17 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { breakBody } from "../src/akuma/heart/index.js";
 import { moveAlias } from "../src/alias/index.js";
+import { contractId } from "../src/core/facts/types.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
+import { publishDispatch } from "../src/dispatch/index.js";
+import {
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeStateCommit,
+  repositoryAt,
+} from "../src/git/repository.js";
+import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { Akumas, kanshiCategory, Keiyaku, Repo, World } from "../src/index.js";
 import type { KanshiCategoryInput, KanshiCategoryReport } from "../src/index.js";
 import type { WorldRoot } from "../src/world.js";
@@ -55,6 +65,7 @@ test("category observation reuses owner rows and is the operation the CLI runs",
     owner.rows.slice(0, 2).map((row) => row.id),
   );
   assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
+  assert.equal(report.akuma.value.rows[0]!.contractAssociationUnavailable, undefined);
   assert.equal("contracts" in report, false);
   assert.equal("debts" in report, false);
 
@@ -97,7 +108,68 @@ test("category observation reuses owner rows and is the operation the CLI runs",
     contracts.contracts.value.rows.map((row) => row.id),
     [contract.id],
   );
+  assert.equal(contracts.contracts.value.rows[0]!.rosterUnavailable, undefined);
   assert.equal("akuma" in contracts, false);
+});
+
+test("failed Dispatch leaves the bounded Akuma category and Alias rows readable", async (context) => {
+  const repository = makeGitRepository();
+  context.after(() => rmSync(repository.path, { recursive: true, force: true }));
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const born = await bornDirectAkuma({
+    root: world,
+    archetype: "worker",
+    draw: "a0000001",
+    createdAt: "2026-08-09T00:00:00.000Z",
+  });
+  const body = await born.leash.recordBody(born.paths, { leashTakenAt: born.soul.createdAt });
+  await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at: born.soul.createdAt });
+  born.leash.release();
+  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akuId: born.id });
+  const git = await repositoryAt(repository.path);
+  assert.equal(
+    (
+      await publishDispatch({
+        repository: git,
+        akuId: born.id,
+        contractId: contractId("kei/category-dispatch"),
+      })
+    ).kind,
+    "dispatched",
+  );
+  const snapshot = await withGitDecodeChannel(git, (channel) =>
+    withGitReadObservation(git, channel, (observation) => observation.snapshot),
+  );
+  const tree = await updateGitTree(
+    git,
+    snapshot.tree,
+    new Map([["dispatch", { oid: await writeBlob(git, "not a Dispatch tree\\n") }]]),
+  );
+  const commit = await writeStateCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(
+    (
+      await updateRefsAtomically(git, [
+        { ref: "refs/heads/keiyaku-state", newOid: commit, expectedOid: snapshot.commit },
+      ])
+    ).kind,
+    "published",
+  );
+
+  const report = await kanshiCategory({
+    world,
+    repo: await Repo.at({ path: repository.path }),
+    category: "akuma",
+    limit: 1,
+  });
+  assert.equal(report.category, "akuma");
+  if (report.category !== "akuma" || report.akuma.kind !== "present") assert.fail(JSON.stringify(report));
+  assert.deepEqual(
+    report.akuma.value.rows.map((row) => row.id),
+    [born.id],
+  );
+  assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
+  assert.equal(report.akuma.value.rows[0]!.contractAssociationUnavailable, true);
 });
 
 test("malformed category input is refused before owner observation", async () => {

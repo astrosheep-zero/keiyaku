@@ -48,7 +48,8 @@ function latestActivityLines(
 
 function akumaLabel(row: AkumaKanshiRow): string {
   const aliases = row.aliases ?? [];
-  return aliases.length === 0 ? "" : `(${aliases.join(" ")})`;
+  if (aliases.length > 0) return `(${aliases.join(" ")})`;
+  return row.aliasesUnavailable === true ? "(aliases unavailable)" : "";
 }
 
 function endpointFact(id: string, observed: string | undefined): string {
@@ -86,7 +87,12 @@ function renderAkumaBoard(
       row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
         ? [life, ...activity, "resume unsupported"]
         : [life, ...activity];
-    const relation = row.contract === undefined ? [] : [endpointFact(row.contract.id, row.contract.observed)];
+    const relation =
+      row.contract === undefined
+        ? row.contractAssociationUnavailable === true
+          ? ["contract association unavailable"]
+          : []
+        : [endpointFact(row.contract.id, row.contract.observed)];
     const snapshot = row.snapshot;
     const snapshotLines = snapshot === undefined ? [] : latestActivityLines(snapshot, context);
     const aliases = akumaLabel(row);
