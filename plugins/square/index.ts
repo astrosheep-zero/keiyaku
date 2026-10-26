@@ -51,7 +51,7 @@ function outcomeExpression(signal: PluginSignalMap["akuma.turn-outcome"]): strin
   ]
     .filter((value) => value !== undefined)
     .join(" ");
-  const outcome = signal.outcome.kind === "answered" ? "✓ came back" : `× ${signal.outcome.reason}`;
+  const outcome = signal.outcome.kind === "answered" ? signal.outcome.text : `× ${signal.outcome.reason}`;
   return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
 }
 
@@ -63,8 +63,7 @@ function isOutcomeNotice(activity: Activity, signal: PluginSignalMap["akuma.outc
   if (header !== identity && !header?.startsWith(`${identity} `)) return false;
   const suffix = header.slice(identity.length);
   if (!/^(?: \(@[^\n]+\))?(?: kei\/\S+)?$/u.test(suffix)) return false;
-  return lines.at(-1) === DUPLICATE_HINT &&
-    (lines.join("\n") === `✓ came back\n${DUPLICATE_HINT}` || lines[0]?.startsWith("× ") === true);
+  return lines.at(-1) === DUPLICATE_HINT;
 }
 
 function birthExpression(signal: PluginSignalMap["akuma.born"]): string {

@@ -37,7 +37,7 @@ function outcomeExpression(signal) {
     ]
         .filter((value) => value !== undefined)
         .join(" ");
-    const outcome = signal.outcome.kind === "answered" ? "✓ came back" : `× ${signal.outcome.reason}`;
+    const outcome = signal.outcome.kind === "answered" ? signal.outcome.text : `× ${signal.outcome.reason}`;
     return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
 }
 function isOutcomeNotice(activity, signal) {
@@ -51,8 +51,7 @@ function isOutcomeNotice(activity, signal) {
     const suffix = header.slice(identity.length);
     if (!/^(?: \(@[^\n]+\))?(?: kei\/\S+)?$/u.test(suffix))
         return false;
-    return lines.at(-1) === DUPLICATE_HINT &&
-        (lines.join("\n") === `✓ came back\n${DUPLICATE_HINT}` || lines[0]?.startsWith("× ") === true);
+    return lines.at(-1) === DUPLICATE_HINT;
 }
 function birthExpression(signal) {
     const source = signal.caller.kind === "akuma" ? signal.caller.akuId : undefined;

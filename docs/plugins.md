@@ -198,8 +198,13 @@ local observations may use the observer plugin's current participant identity.
 This attribution grants no permission and changes no public operation result.
 
 Square may acknowledge only already-existing outcome notices corresponding to
-the observed Akuma and exact retained outcome, for that observer alone. Explicit
-observer attribution takes precedence over ambient participant identity and
+the observed Akuma and exact retained outcome, for that observer alone. A
+successful Turn notice carries the exact committed answer without a content-free
+placeholder or added status marker, while failed-Turn and abnormal-Body notices
+keep their human-readable markers. Acknowledgment relies on the established
+identity and notification envelope rather than parsing an answer or outcome
+marker. Explicit observer attribution takes precedence over ambient participant
+identity and
 never borrows the producing session's ownership or route. Square owns the
 acknowledgment; core owns only the semantic observation. Missing Square,
 observer, standing participant, corresponding notice, or availability to that

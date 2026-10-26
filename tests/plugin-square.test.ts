@@ -322,12 +322,12 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        body: "aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.",
         mentions: ["Alice"],
       },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/2 (@Bob) kei/example\n✓ came back\nignore if you have already seen this.",
+        body: "aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.",
         mentions: ["Bob"],
       },
     ]);
@@ -374,12 +374,12 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/1 (@Alice) kei/example\n✓ came back\nignore if you have already seen this.",
+        body: "aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.",
         mentions: ["Alice"],
       },
       {
         actor: "aku/answered",
-        body: "aku/answered turn/2 (@Bob) kei/example\n✓ came back\nignore if you have already seen this.",
+        body: "aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.",
         mentions: ["Bob"],
       },
       { actor: "Bob", body: "called aku/external\nignore if you have already seen this.", mentions: [] },
@@ -415,10 +415,10 @@ test("outcome observation catches exact notices only for the explicit observer",
     await fixture.square(async (square) => {
       const worker = (await square.implicitJoin("aku/worker")).participant!;
       await worker.express("incidental aku/worker turn/1", { mentions: ["Alice", "Bob"], noMention: true, force: true });
-      await worker.express("aku/worker turn/1 extra\n✓ came back\nignore if you have already seen this.",
+      await worker.express("aku/worker turn/1 extra\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
       const other = (await square.implicitJoin("aku/other")).participant!;
-      await other.express("aku/worker turn/1\n✓ came back\nignore if you have already seen this.",
+      await other.express("aku/worker turn/1\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
     });
     const { activities: notices } = await fixture.square((square) => square.history({ fixed: "aku/worker", limit: null }));
@@ -444,13 +444,32 @@ test("outcome observation catches exact notices only for the explicit observer",
   });
 });
 
+test("answer notices carry the outcome text and are acknowledged by identity", async () => {
+  await withSquareNotificationFixture("answer-forms", async (fixture) => {
+    await fixture.answeredTurn("aku/forms", 1, 1, "Alice", "first line\nsecond line");
+    await fixture.answeredTurn("aku/forms", 1, 2, "Alice", "");
+    assert.deepEqual(await fixture.expressions(), [
+      captured("aku/forms", "aku/forms turn/1 (@Alice)\nfirst line\nsecond line\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/forms", "aku/forms turn/2 (@Alice)\n\nignore if you have already seen this.", ["Alice"]),
+    ]);
+    await fixture.observe("aku/forms", "turn/1", "Alice");
+    await fixture.observe("aku/forms", "turn/2", "Alice");
+    await fixture.square(async (square) => {
+      const notices = (await square.history({ from: ["aku/forms"], limit: null })).activities
+        .filter((activity) => activity.kind === "say");
+      const snapshot = await square.snapshot();
+      for (const notice of notices) assert.equal(snapshot.delivered("Alice", notice.id), true);
+    });
+  });
+});
+
 test("outcome observation acknowledges every exact duplicate beyond the default history page without joining", async (t) => {
   await withSquareNotificationFixture("ack-full-archive", async (fixture) => {
     const notices = await fixture.square(async (square) => {
       const worker = (await square.implicitJoin("aku/repeated")).participant!;
       const ids: Activity["id"][] = [];
       for (let index = 0; index < 12; index++) {
-        const result = await worker.express("aku/repeated turn/1\n✓ came back\nignore if you have already seen this.",
+        const result = await worker.express("aku/repeated turn/1\nack\nignore if you have already seen this.",
           { mentions: ["Alice", "Bob"], noMention: true, force: true });
         ids.push(result.activity.id);
       }
@@ -628,7 +647,7 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
     await fixture.bodyEnd("aku/silent", 5, "put-down");
     assert.deepEqual(await fixture.expressions(), [
       captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/answered", "aku/answered turn/2 (@Alice)\n✓ came back\nignore if you have already seen this.", ["Alice"]),
+      captured("aku/answered", "aku/answered turn/2 (@Alice)\ndone\nignore if you have already seen this.", ["Alice"]),
       captured("aku/answered", "aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
       captured("aku/different", "aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.", ["Alice"]),
       captured("aku/different", "aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
@@ -649,7 +668,7 @@ test("Square addresses all Turn participants and suppresses only already-notifie
       captured("aku/group", "aku/group turn/1 (@Alice)\n× failed\nignore if you have already seen this.", ["Alice", "Bob", "Carol"]),
       captured("aku/group", "aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
       captured("aku/silent-owner", "aku/silent-owner turn/2\n× failed\nignore if you have already seen this.", ["Bob"]),
-      captured("aku/no-audience", "aku/no-audience turn/3 (@Alice)\n✓ came back\nignore if you have already seen this."),
+      captured("aku/no-audience", "aku/no-audience turn/3 (@Alice)\ndone\nignore if you have already seen this."),
     ]);
   });
 });
@@ -669,7 +688,7 @@ test("same-Body notifications serialize while distinct Bodies overlap", async ()
     });
   });
   await withSquareNotificationFixture("overlap", async (fixture) => {
-    const liveExpression = captured("aku/live-body", "aku/live-body turn/1 (@Bob)\n✓ came back\nignore if you have already seen this.", ["Bob"]);
+    const liveExpression = captured("aku/live-body", "aku/live-body turn/1 (@Bob)\nlive\nignore if you have already seen this.", ["Bob"]);
     const parkedExpression = captured("aku/parked-body", "aku/parked-body turn/1 (@Alice)\n× parked failure\nignore if you have already seen this.", ["Alice"]);
     await fixture.withHeldExpression("aku/parked-body", async ({ sent, release }) => {
       const parked = fixture.failedTurn("aku/parked-body", 1, 1, "Alice", "parked failure");
@@ -833,7 +852,7 @@ test("Pi caller registration and outcomes share the harness ledger across execut
       const joined = await square.implicitJoin(initiator);
       assert.ok(joined.participant);
       const caught = await joined.participant.catch();
-      assert.ok(caught.activities.some((item) => item.body?.includes("✓ came back")));
+      assert.ok(caught.activities.some((item) => item.body?.includes("\ndone\n")));
     } finally {
       await square.close();
     }
