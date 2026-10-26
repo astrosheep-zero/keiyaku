@@ -73,16 +73,28 @@ successful admission; a later refusal may leave the participant standing.
 Birth observation expresses only as its explicitly carried initiator, using the
 route already prepared by the submitting session. It never borrows the child
 process's identity or registers the child's harness route for that initiator.
-Without an initiator it is silent. Turn outcomes
-address every participant carried by the Turn's signal, never a caller captured
-from the producing process. The opening initiator remains the owner, not the
-entire audience. No participants produces an unaddressed outcome rather than a
-fallback mention.
+Without an initiator it is silent. Turn outcomes and abnormal Body endings are
+not expressed by the subject Akuma: one World-local notification participant
+authors every such notice for the World, so the notice no longer depends on a
+worker participant that may have already stepped out. That author is a logical
+integration identity with a stable session of its own, not a harness session
+for the producing process: it registers no recipient wake route and borrows no
+ambient session ownership. Square's public host-wide ownership ledger is its
+only custody; before each send it acquires or reuses that ownership and joins
+ordinarily, reusing active standing and receiving an ordinary rejoin after it
+has stepped out. It never takes over a foreign claim and never marks itself
+done after a send. Turn outcomes address every participant carried by the
+Turn's signal, never a caller captured from the producing process. The opening
+initiator remains the owner, not the entire audience. No participants produces
+an unaddressed outcome rather than a fallback mention.
 Local outcome observation acknowledges notices for the participant the producing
 session is recognized as standing, and for an explicitly named participant when
-no standing binding exists. It never computes a substitute identity, joins a
-participant, or creates a route merely to acknowledge, and a missing standing,
-notice, or identity stays silence. An explicitly forwarded observer names its own
+no standing binding exists. A notice is recognized through the shared author or
+the former per-Akuma author, and the subject Akuma's own standing is irrelevant.
+The operation never computes a substitute identity, joins a participant, or
+creates a route merely to acknowledge; missing standing, notice, or availability
+to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
+notice is never consumed. An explicitly forwarded observer names its own
 participant and never acquires the serving session's identity or wake route.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather

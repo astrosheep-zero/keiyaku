@@ -12,6 +12,10 @@ import type { WorldRoot } from "../src/world.js";
 import { deferred as promiseBarrier, restoreEnvironmentValues } from "./support/process.js";
 
 const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
+// One World-local notifier authors every outcome and abnormal Body notice.
+const NOTIFIER = "keiyaku-notice";
+const NOTIFIER_SESSION = "keiyaku:square-notifier";
+const NOTIFIER_CHANNEL = "unknown";
 
 function activateSquare(world: string): ReturnType<typeof squarePlugin.activate> {
   return squarePlugin.activate({
@@ -53,6 +57,8 @@ type CapturedExpression = Readonly<{ actor: string; body: string; mentions: read
 type HeldExpression = Readonly<{ sent: Promise<void>; release: () => void }>;
 
 const captured = (actor: string, body: string, mentions: readonly string[] = []): CapturedExpression => ({ actor, body, mentions });
+const outcome = (body: string, mentions: readonly string[] = []): CapturedExpression =>
+  captured(NOTIFIER, body, mentions);
 const optionalInitiator = (initiator: string | undefined): { initiator?: string } => (initiator === undefined ? {} : { initiator });
 const optionalDiagnostic = (diagnostic: string | undefined): { diagnostic?: string } => (diagnostic === undefined ? {} : { diagnostic });
 async function withHeldSquareExpression<T>(
@@ -60,24 +66,25 @@ async function withHeldSquareExpression<T>(
   callback: (barrier: HeldExpression) => Promise<T>,
   holdAfterSend = true,
 ): Promise<T> {
-  const originalImplicitJoin = Square.prototype.implicitJoin;
+  // The shared notifier authors every send, so the subject Akuma survives only
+  // in the expression's envelope; hold exactly that send.
+  const originalJoin = Square.prototype.join;
   const { promise: sent, resolve: markSent } = promiseBarrier<void>();
   const { promise: released, resolve: release } = promiseBarrier<void>();
-  Square.prototype.implicitJoin = async function (...arguments_: Parameters<typeof originalImplicitJoin>) {
-    const [name] = arguments_;
-    const joined = await originalImplicitJoin.call(this, ...arguments_);
-    if (name !== akumaId || joined.participant === undefined) return joined;
+  Square.prototype.join = async function (...arguments_: Parameters<typeof originalJoin>) {
+    const joined = await originalJoin.call(this, ...arguments_);
     const express = joined.participant.express.bind(joined.participant);
     return {
       ...joined,
       participant: {
         ...joined.participant,
-        express: async (...arguments_: Parameters<typeof express>) => {
+        express: async (...expressArguments: Parameters<typeof express>) => {
+          if (!String(expressArguments[0]).startsWith(`${akumaId} `)) return express(...expressArguments);
           if (!holdAfterSend) {
             markSent();
             await released;
           }
-          const result = await express(...arguments_);
+          const result = await express(...expressArguments);
           if (holdAfterSend) {
             markSent();
             await released;
@@ -91,7 +98,7 @@ async function withHeldSquareExpression<T>(
     return await callback({ sent, release });
   } finally {
     release();
-    Square.prototype.implicitJoin = originalImplicitJoin;
+    Square.prototype.join = originalJoin;
   }
 }
 type SquareNotificationFixture = Readonly<{
@@ -207,7 +214,7 @@ async function withSquareNotificationFixture<T>(
           ...(observer === undefined ? {} : { observer }) }, cancellation);
       },
       async square(operation) {
-        const square = await Square.at({ path: squarePath(root), env: {} });
+        const square = await Square.at({ path: squarePath(root), env: {}, hostLedger: createHostLedgerPort() });
         try { return await operation(square); } finally { await square.close(); }
       },
       expressions: () => expressions(squarePath(root)),
@@ -222,6 +229,15 @@ async function withSquareNotificationFixture<T>(
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+async function outcomeNotice(fixture: SquareNotificationFixture, prefix: string): Promise<Activity> {
+  const found = await fixture.square(async (square) =>
+    (await square.history({ from: [NOTIFIER], limit: null })).activities.find(
+      (activity) => activity.kind === "say" && activity.body?.startsWith(prefix) === true,
+    ));
+  assert.ok(found !== undefined, `expected a ${NOTIFIER} notice starting with ${prefix}`);
+  return found;
 }
 
 test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
@@ -320,16 +336,8 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
-      {
-        actor: "aku/answered",
-        body: "aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/answered",
-        body: "aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.",
-        mentions: ["Bob"],
-      },
+      outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
     ]);
     if (process.platform !== "win32") {
       const queued = readFileSync(codexQueueLog, "utf8")
@@ -339,7 +347,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       assert.equal(queued.length, 2);
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
-      assert.match(queued[0]?.at(-1) ?? "", /<square-activity [^>]*as="Alice" id="act\/\d+" from="aku\/answered">/u);
+      assert.match(queued[0]?.at(-1) ?? "", /<square-activity [^>]*as="Alice" id="act\/\d+" from="keiyaku-notice">/u);
       const evidence = await createHostLedgerPort({ rootPath: join(root, "square-ledger") }).listWakeAttempts();
       assert.equal(
         evidence.filter((row) => row.kind === "wake" && row.outcome === "accepted" && ["Alice", "Bob"].includes(row.participant))
@@ -372,30 +380,17 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.deepEqual(await expressions(squarePath(root)), [
       { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
-      {
-        actor: "aku/answered",
-        body: "aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.",
-        mentions: ["Alice"],
-      },
-      {
-        actor: "aku/answered",
-        body: "aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.",
-        mentions: ["Bob"],
-      },
+      outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
       { actor: "Bob", body: "called aku/external\nignore if you have already seen this.", mentions: [] },
-      {
-        actor: "aku/failed",
-        body: "aku/failed turn/3\n× provider failed\nignore if you have already seen this.",
-        mentions: [],
-      },
+      outcome("aku/failed turn/3\n× provider failed\nignore if you have already seen this."),
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {
       assert.deepEqual((await square.participants()).participants.map(({ name }) => name).sort(), [
         "Alice",
         "Bob",
-        "aku/answered",
-        "aku/failed",
+        NOTIFIER,
       ]);
     } finally {
       await square.close();
@@ -404,6 +399,90 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("one shared notifier sends after its worker is done and needs no worker participant", async () => {
+  await withSquareNotificationFixture("notifier-shared", async (fixture) => {
+    await fixture.square(async (square) => { await (await square.implicitJoin("aku/gone")).participant!.done(); });
+    await fixture.answeredTurn("aku/gone", 1, 1, "Alice", "after shutdown");
+    // No participant ever stood for this Akuma.
+    await fixture.answeredTurn("aku/absent", 2, 1, "Bob", "no worker at all");
+    assert.deepEqual(await fixture.expressions(), [
+      outcome("aku/gone turn/1 (@Alice)\nafter shutdown\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/absent turn/1 (@Bob)\nno worker at all\nignore if you have already seen this.", ["Bob"]),
+    ]);
+    const absentNotice = await outcomeNotice(fixture, "aku/absent turn/1");
+    // Observation needs the observer's standing, not a standing subject worker; it
+    // acknowledges only where the notice is actually available to that observer.
+    await fixture.observe("aku/absent", "turn/1", "Bob");
+    await fixture.square(async (square) => {
+      const roster = (await square.participants()).participants;
+      assert.equal(roster.find(({ name }) => name === "aku/gone")?.state, "done");
+      assert.equal(roster.some(({ name }) => name === "aku/absent"), false);
+      assert.equal((await square.snapshot()).delivered("Bob", absentNotice.id), true);
+      assert.equal((await square.snapshot()).delivered("Alice", absentNotice.id), false);
+    });
+  });
+});
+
+test("the shared notifier reuses active custody and rejoins only after it is done", async () => {
+  await withSquareNotificationFixture("notifier-custody", async (fixture) => {
+    const joinCount = async (): Promise<number> => fixture.square(async (square) =>
+      (await square.history({ from: [NOTIFIER], limit: null })).activities.filter(({ kind }) => kind === "join").length);
+    await fixture.answeredTurn("aku/one", 1, 1, "Alice", "one");
+    await fixture.answeredTurn("aku/two", 1, 1, "Bob", "two");
+    assert.equal(await joinCount(), 1, "an active notifier is reused without another join");
+    await fixture.square(async (square) => { await (await square.participant(NOTIFIER)).done(); });
+    await fixture.answeredTurn("aku/three", 1, 1, "Alice", "three");
+    assert.equal(await joinCount(), 2, "a done notifier receives an ordinary rejoin");
+    assert.deepEqual((await fixture.expressions()).map(({ actor }) => actor), [NOTIFIER, NOTIFIER, NOTIFIER]);
+  });
+});
+
+test("an ending harness session never retires the shared notifier", async () => {
+  const prior = process.env.PI_SESSION_ID;
+  process.env.PI_SESSION_ID = "ambient-parent";
+  try {
+    await withSquareNotificationFixture("notifier-session", async (fixture) => {
+      const ledger = createHostLedgerPort({ rootPath: process.env.SQUARE_HOST_LEDGER_ROOT! });
+      const notifierPresence = async () => (await ledger.listPresence({ participant: NOTIFIER }))[0];
+      await fixture.answeredTurn("aku/session", 1, 1, "Alice", "kept");
+      const before = await notifierPresence();
+      assert.equal(before?.session, NOTIFIER_SESSION);
+      assert.equal(before?.channel, NOTIFIER_CHANNEL);
+      await fixture.square(async (square) => { await square.endOwnedSession("Alice", "ambient-parent"); });
+      // The ambient session's own binding is gone; the integration identity is not.
+      assert.deepEqual(await ledger.listPresence({ session: "ambient-parent", participant: "Alice" }), []);
+      assert.deepEqual(await notifierPresence(), before);
+      await fixture.answeredTurn("aku/session", 1, 2, "Bob", "still there");
+      const joins = await fixture.square(async (square) =>
+        (await square.history({ from: [NOTIFIER], limit: null })).activities.filter(({ kind }) => kind === "join").length);
+      assert.equal(joins, 1, "an ambient session end neither retires nor re-owns the notifier");
+    });
+  } finally {
+    if (prior === undefined) delete process.env.PI_SESSION_ID;
+    else process.env.PI_SESSION_ID = prior;
+  }
+});
+
+test("shared notifier custody is owned through Square's public ledger", async () => {
+  await withSquareNotificationFixture("notifier-ledger", async (fixture) => {
+    const ledger = createHostLedgerPort({ rootPath: process.env.SQUARE_HOST_LEDGER_ROOT! });
+    await fixture.answeredTurn("aku/owned", 1, 1, "Alice", "owned");
+    const [row] = await ledger.listPresence({ participant: NOTIFIER });
+    assert.equal(row?.session, NOTIFIER_SESSION);
+    assert.equal(row?.channel, NOTIFIER_CHANNEL);
+    const claim = { location: row!.location, participant: NOTIFIER, session: NOTIFIER_SESSION, channel: NOTIFIER_CHANNEL, epoch: 1 } as const;
+    assert.equal((await ledger.claimPresence(claim)).status, "owned", "an owned chain is reused");
+    await ledger.removePresence({ location: row!.location, participant: NOTIFIER, session: NOTIFIER_SESSION, channel: NOTIFIER_CHANNEL });
+    const intruder = { ...claim, session: "keiyaku:square-notifier-intruder" };
+    assert.equal((await ledger.claimPresence(intruder)).status, "acquired");
+    await assert.rejects(fixture.answeredTurn("aku/foreign", 1, 1, "Alice", "refused"), { code: "already_joined" });
+    assert.equal((await fixture.bodies()).some((body) => body.startsWith("aku/foreign ")), false);
+    await ledger.removePresence({ location: row!.location, participant: NOTIFIER, session: intruder.session, channel: NOTIFIER_CHANNEL });
+    await fixture.answeredTurn("aku/owned-again", 1, 1, "Alice", "owned again");
+    assert.ok((await fixture.bodies()).some((body) => body.startsWith("aku/owned-again turn/1 ")));
+  });
 });
 
 test("outcome observation catches exact notices only for the explicit observer", async () => {
@@ -417,15 +496,27 @@ test("outcome observation catches exact notices only for the explicit observer",
       await worker.express("incidental aku/worker turn/1", { mentions: ["Alice", "Bob"], noMention: true, force: true });
       await worker.express("aku/worker turn/1 extra\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
+      // Retained exact notices from the former per-Akuma author.
+      await worker.express("aku/worker turn/1 (@Alice)\ndone\nignore if you have already seen this.",
+        { mentions: ["Alice", "Bob"], noMention: true, force: true });
+      await worker.express("aku/worker turn/2 (@Alice)\n× failed\nignore if you have already seen this.",
+        { mentions: ["Alice", "Bob"], noMention: true, force: true });
       const other = (await square.implicitJoin("aku/other")).participant!;
       await other.express("aku/worker turn/1\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
     });
     const { activities: notices } = await fixture.square((square) => square.history({ fixed: "aku/worker", limit: null }));
-    const first = notices.find((item) => item.body?.startsWith("aku/worker turn/1 (@Alice)"))!;
-    const failed = notices.find((item) => item.body?.startsWith("aku/worker turn/2 (@Alice)"))!;
+    const noticeFor = (prefix: string, actor = NOTIFIER): Activity | undefined =>
+      notices.find((item) => item.actor === actor && item.body?.startsWith(prefix));
+    const first = noticeFor("aku/worker turn/1 (@Alice)");
+    const failed = noticeFor("aku/worker turn/2 (@Alice)");
+    // Retained notices from the former per-Akuma author stay observable.
+    const legacyFirst = noticeFor("aku/worker turn/1 (@Alice)", "aku/worker");
+    const legacyFailed = noticeFor("aku/worker turn/2 (@Alice)", "aku/worker");
     assert.ok(first);
     assert.ok(failed);
+    assert.ok(legacyFirst);
+    assert.ok(legacyFailed);
     // Explicit attribution wins even while the plugin's process belongs to someone else.
     await fixture.observe("aku/worker", "turn/1", "Bob");
     await fixture.observe("aku/worker", "turn/1", "Bob");
@@ -433,9 +524,10 @@ test("outcome observation catches exact notices only for the explicit observer",
     await fixture.observe("aku/worker", "body/2", "Bob");
     await fixture.square(async (square) => {
       const snapshot = await square.snapshot();
+      const delivered = new Set([first.id, failed.id, legacyFirst.id, legacyFailed.id]);
       for (const notice of notices.filter((item) => item.kind === "say")) {
         assert.equal(snapshot.delivered("Alice", notice.id), false);
-        assert.equal(snapshot.delivered("Bob", notice.id), [first.id, failed.id].includes(notice.id));
+        assert.equal(snapshot.delivered("Bob", notice.id), delivered.has(notice.id));
       }
       const pending = await (await square.participant("Bob")).catch();
       assert.ok(pending.activities.some((item) => item.body?.startsWith("incidental")));
@@ -449,13 +541,13 @@ test("answer notices carry the outcome text and are acknowledged by identity", a
     await fixture.answeredTurn("aku/forms", 1, 1, "Alice", "first line\nsecond line");
     await fixture.answeredTurn("aku/forms", 1, 2, "Alice", "");
     assert.deepEqual(await fixture.expressions(), [
-      captured("aku/forms", "aku/forms turn/1 (@Alice)\nfirst line\nsecond line\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/forms", "aku/forms turn/2 (@Alice)\n\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/forms turn/1 (@Alice)\nfirst line\nsecond line\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/forms turn/2 (@Alice)\n\nignore if you have already seen this.", ["Alice"]),
     ]);
     await fixture.observe("aku/forms", "turn/1", "Alice");
     await fixture.observe("aku/forms", "turn/2", "Alice");
     await fixture.square(async (square) => {
-      const notices = (await square.history({ from: ["aku/forms"], limit: null })).activities
+      const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .filter((activity) => activity.kind === "say");
       const snapshot = await square.snapshot();
       for (const notice of notices) assert.equal(snapshot.delivered("Alice", notice.id), true);
@@ -494,12 +586,13 @@ test("outcome observation catches an unmentioned listener's notice without consu
   await withSquareNotificationFixture("listener-ack", async (fixture) => {
     await fixture.square(async (square) => {
       for (const name of ["Alice", "Bob"]) {
-        await (await square.implicitJoin(name)).participant!.listen("aku/listened");
+        // The shared notifier is the author, so listening to the subject worker
+        // no longer addresses its notices.
+        await (await square.implicitJoin(name)).participant!.listen(NOTIFIER);
       }
     });
     await fixture.answeredTurn("aku/listened", 1, 1, undefined, "public to listeners");
-    const notice = await fixture.square(async (square) =>
-      (await square.history({ from: ["aku/listened"], limit: null })).activities.find((item) => item.kind === "say")!);
+    const notice = await outcomeNotice(fixture, "aku/listened turn/1");
     assert.deepEqual(notice.mentions, []);
     await fixture.observe("aku/listened", "turn/1", "Bob");
     await fixture.square(async (square) => {
@@ -524,14 +617,14 @@ test("observation does not create missing Square custody or anticipate a later n
     await fixture.observe("aku/late", "turn/1", "Ghost");
     await fixture.observe("aku/late", "turn/1", "Bob"); // Not in its landed audience.
     await fixture.square(async (square) => {
-      const notice = (await square.history({ from: ["aku/late"], limit: null })).activities.find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const alice = (await square.implicitJoin("Alice")).participant!;
       await alice.done();
     });
     await fixture.observe("aku/late", "turn/1", "Alice");
     await fixture.square(async (square) => {
-      const notice = (await square.history({ from: ["aku/late"], limit: null })).activities.find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       const snapshot = await square.snapshot();
       assert.equal(snapshot.delivered("Alice", notice.id), false);
       assert.equal(snapshot.participants.find((item) => item.name === "Alice")?.state, "done");
@@ -559,7 +652,7 @@ test("local observation uses captured identity and cancellation prevents acknowl
     await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event, controller.signal)));
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
-      const notice = (await square.history({ from: ["aku/local"], limit: null })).activities.find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const interrupted = new AbortController();
       const originalHistory = Square.prototype.history;
@@ -609,7 +702,7 @@ test("Square cancellation stops a contended open and never joins after the lock 
         locked.exec("ROLLBACK");
         locked.close();
       }
-      assert.equal((await square.participants()).participants.some(({ name }) => name === "aku/cancel-open"), false);
+      assert.equal((await square.participants()).participants.some(({ name }) => name === NOTIFIER), false);
     });
   });
 });
@@ -646,11 +739,11 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
     await fixture.bodyEnd("aku/silent", 4, "exited");
     await fixture.bodyEnd("aku/silent", 5, "put-down");
     assert.deepEqual(await fixture.expressions(), [
-      captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/answered", "aku/answered turn/2 (@Alice)\ndone\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/answered", "aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/different", "aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/different", "aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
+      outcome("aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/answered turn/2 (@Alice)\ndone\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
     ]);
   });
 });
@@ -665,17 +758,17 @@ test("Square addresses all Turn participants and suppresses only already-notifie
     await fixture.bodyEnd("aku/silent-owner", 2, "hung", undefined, undefined, undefined, ["Bob"]);
     await fixture.answeredTurn("aku/no-audience", 3, 3, "Alice", "done", undefined, []);
     assert.deepEqual(await fixture.expressions(), [
-      captured("aku/group", "aku/group turn/1 (@Alice)\n× failed\nignore if you have already seen this.", ["Alice", "Bob", "Carol"]),
-      captured("aku/group", "aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
-      captured("aku/silent-owner", "aku/silent-owner turn/2\n× failed\nignore if you have already seen this.", ["Bob"]),
-      captured("aku/no-audience", "aku/no-audience turn/3 (@Alice)\ndone\nignore if you have already seen this."),
+      outcome("aku/group turn/1 (@Alice)\n× failed\nignore if you have already seen this.", ["Alice", "Bob", "Carol"]),
+      outcome("aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
+      outcome("aku/silent-owner turn/2\n× failed\nignore if you have already seen this.", ["Bob"]),
+      outcome("aku/no-audience turn/3 (@Alice)\ndone\nignore if you have already seen this."),
     ]);
   });
 });
 
 test("same-Body notifications serialize while distinct Bodies overlap", async () => {
   await withSquareNotificationFixture("serialize", async (fixture) => {
-    const failedExpression = captured("aku/same", "aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]);
+    const failedExpression = outcome("aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]);
     await fixture.withHeldExpression("aku/same", async ({ sent, release }) => {
       const failed = fixture.failedTurn("aku/same", 1, 1, "Alice", "failed first");
       await sent;
@@ -688,8 +781,8 @@ test("same-Body notifications serialize while distinct Bodies overlap", async ()
     });
   });
   await withSquareNotificationFixture("overlap", async (fixture) => {
-    const liveExpression = captured("aku/live-body", "aku/live-body turn/1 (@Bob)\nlive\nignore if you have already seen this.", ["Bob"]);
-    const parkedExpression = captured("aku/parked-body", "aku/parked-body turn/1 (@Alice)\n× parked failure\nignore if you have already seen this.", ["Alice"]);
+    const liveExpression = outcome("aku/live-body turn/1 (@Bob)\nlive\nignore if you have already seen this.", ["Bob"]);
+    const parkedExpression = outcome("aku/parked-body turn/1 (@Alice)\n× parked failure\nignore if you have already seen this.", ["Alice"]);
     await fixture.withHeldExpression("aku/parked-body", async ({ sent, release }) => {
       const parked = fixture.failedTurn("aku/parked-body", 1, 1, "Alice", "parked failure");
       await sent;
@@ -712,7 +805,7 @@ test("Square notification authority survives rejection and cancellation boundari
       await fixture.admit("Ghost");
       await fixture.bodyEnd("aku/rejected", 1, "broke-off", "Ghost", "route established late");
       assert.deepEqual(await fixture.expressions(), [
-        captured("aku/rejected", "aku/rejected body/1 (@Ghost)\n× interrupted: broke-off: route established late\nignore if you have already seen this.", ["Ghost"]),
+        outcome("aku/rejected body/1 (@Ghost)\n× interrupted: broke-off: route established late\nignore if you have already seen this.", ["Ghost"]),
       ]);
     },
     ["Alice"],
@@ -739,9 +832,9 @@ test("Square notification authority survives rejection and cancellation boundari
       await assert.rejects(late);
     });
     await fixture.bodyEnd("aku/late", 1, "broke-off", "Alice", "after timeout");
-    assert.deepEqual((await fixture.expressions()).filter(({ actor }) => actor === "aku/late"), [
-      captured("aku/late", "aku/late turn/1 (@Alice)\n× late failure\nignore if you have already seen this.", ["Alice"]),
-      captured("aku/late", "aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
+    assert.deepEqual((await fixture.expressions()).filter(({ body }) => body.startsWith("aku/late ")), [
+      outcome("aku/late turn/1 (@Alice)\n× late failure\nignore if you have already seen this.", ["Alice"]),
+      outcome("aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
     ]);
   });
 });
@@ -777,21 +870,9 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
     assert.deepEqual(
       await expressions(squarePath(root)),
       [
-        {
-          actor: "aku/worker",
-          body: "aku/worker turn/1 (@Alice)\n× fixture failure\nignore if you have already seen this.",
-          mentions: ["Alice"],
-        },
-        {
-          actor: "aku/worker",
-          body: "aku/worker turn/2 (@Bob)\n× fixture failure\nignore if you have already seen this.",
-          mentions: ["Bob"],
-        },
-        {
-          actor: "aku/worker",
-          body: "aku/worker turn/3\n× fixture failure\nignore if you have already seen this.",
-          mentions: [],
-        },
+        outcome("aku/worker turn/1 (@Alice)\n× fixture failure\nignore if you have already seen this.", ["Alice"]),
+        outcome("aku/worker turn/2 (@Bob)\n× fixture failure\nignore if you have already seen this.", ["Bob"]),
+        outcome("aku/worker turn/3\n× fixture failure\nignore if you have already seen this."),
       ],
     );
   } finally {
@@ -906,7 +987,7 @@ test("local observation acknowledges the recognized seat, never the former provi
           kind: "akuma.outcome-observed", akumaId: "aku/seat", historyId,
         });
       }
-      const notices = (await square.history({ from: ["aku/seat"], limit: null })).activities
+      const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .filter((activity) => activity.kind === "say");
       const seatNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/1"))!;
       const formerNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/2"))!;
@@ -966,7 +1047,7 @@ test("an explicit forwarded observer never borrows the serving session's identit
 
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
-      const notice = (await square.history({ from: ["aku/forwarded"], limit: null })).activities
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .find((activity) => activity.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), true, "the forwarded requester is served");
       assert.equal((await square.snapshot()).delivered(seat, notice.id), false, "the serving session is not the observer");
@@ -1020,7 +1101,7 @@ test("a declared name resolves an ambiguous session binding in local acknowledgm
 
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
-      const notices = (await square.history({ from: ["aku/explicit"], limit: null })).activities
+      const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .filter((activity) => activity.kind === "say");
       const snapshot = await square.snapshot();
       const declaredNotice = notices.find((notice) => notice.body?.startsWith("aku/explicit turn/1"))!;

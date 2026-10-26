@@ -1,6 +1,15 @@
 import { createDefaultWakeTransport, createHostLedgerPort, Square, SquareError, squareAssignedParticipantName, } from "@astrosheep/square";
 import { join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
+/**
+ * One World-local notification participant authors every committed outcome and
+ * abnormal Body ending, so a resulting notice never depends on whether the
+ * subject worker still stands. It is a logical integration custody identity:
+ * a stable session of its own, no native harness session, and therefore no
+ * recipient wake route of its own.
+ */
+const NOTIFIER = "keiyaku-notice";
+const NOTIFIER_SESSION = "keiyaku:square-notifier";
 function errorCode(error) {
     return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
@@ -41,8 +50,13 @@ function outcomeExpression(signal) {
     return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
 }
 function isOutcomeNotice(activity, signal) {
+    // The shared notifier and the former per-Akuma author are the only authors a
+    // notice may come from; the envelope's own identity below rejects another
+    // Akuma, another Turn, a birth, or a Body notice.
     if (!/^turn\/[1-9]\d*$/u.test(signal.historyId) ||
-        activity.kind !== "say" || activity.actor !== signal.akumaId || activity.body === undefined)
+        activity.kind !== "say" ||
+        (activity.actor !== NOTIFIER && activity.actor !== signal.akumaId) ||
+        activity.body === undefined)
         return false;
     const [header, ...lines] = activity.body.split("\n");
     const identity = `${signal.akumaId} ${signal.historyId}`;
@@ -95,20 +109,45 @@ const plugin = {
         const ledger = createHostLedgerPort();
         const wakeTransport = await createDefaultWakeTransport(ledger, Date.now, environment);
         const bodyNotifications = new Map();
-        const expressAsAkuma = async (akumaId, expression, participants, cancellation) => {
+        /**
+         * The notifier owns its custody through Square's public host-wide ledger:
+         * an absent identity is claimed once, an owned identity is reused, another
+         * session's claim refuses, and a degraded ledger propagates its own error.
+         */
+        const claimNotifier = async (cancellation) => {
+            const claim = await ledger.claimPresence({
+                location: path,
+                participant: NOTIFIER,
+                session: NOTIFIER_SESSION,
+                channel: "unknown",
+                epoch: 1,
+            }, cancellation);
             cancellation?.throwIfAborted();
+            if (claim.status === "busy") {
+                throw new SquareError("already_joined", `${NOTIFIER} already stands here — another session holds the name`);
+            }
+            if (claim.status === "degraded")
+                throw claim.error;
+        };
+        const expressAsNotifier = async (expression, participants, cancellation) => {
+            cancellation?.throwIfAborted();
+            await claimNotifier(cancellation);
             const control = cancellation === undefined ? {} : { signal: cancellation };
-            const square = await openSquare(path, environment, ledger, wakeTransport, cancellation);
+            // The sender is a logical integration identity, never this process's
+            // harness session: an empty environment neither claims a native session
+            // nor publishes the notifier as a wake route.
+            const square = await openSquare(path, {}, ledger, wakeTransport, cancellation);
             try {
                 cancellation?.throwIfAborted();
-                const joined = await square.implicitJoin(akumaId, control);
-                if (joined.state === "done" || joined.participant === undefined)
-                    return false;
+                const joined = await square.join(NOTIFIER, {}, control);
                 cancellation?.throwIfAborted();
                 await joined.participant.express(expression, {
                     // Notifications retain immediate refusal while held/throttled, not a queued send.
                     noWait: true,
                     noMention: true,
+                    // The outcome is already committed, so a reader backlog must not hold it
+                    // back; hold, cap, and throttle refusals below remain effective.
+                    force: true,
                     ...(participants?.length ? { mentions: [...participants] } : {}),
                 }, control);
                 return true;
@@ -117,8 +156,8 @@ const plugin = {
                 await square.close();
             }
         };
-        const expressTurnOutcome = (signal, cancellation) => expressAsAkuma(signal.akumaId, outcomeExpression(signal), signal.participants, cancellation);
-        const expressBodyEnd = (signal, participants, cancellation) => expressAsAkuma(signal.akumaId, bodyEndExpression(signal), participants, cancellation);
+        const expressTurnOutcome = (signal, cancellation) => expressAsNotifier(outcomeExpression(signal), signal.participants, cancellation);
+        const expressBodyEnd = (signal, participants, cancellation) => expressAsNotifier(bodyEndExpression(signal), participants, cancellation);
         /**
          * A process with no harness session and no explicit name has nothing here to
          * recognize, and settles that without touching Square.
@@ -208,11 +247,19 @@ const plugin = {
                         if (observer === undefined)
                             return;
                         const { participants } = await square.participants({}, control);
-                        if (!participants.some((item) => item.name === observer && item.state === "active") ||
-                            !participants.some((item) => item.name === signal.akumaId))
+                        // The observer must still stand; the subject worker need not, because
+                        // the notice was authored by the shared notifier.
+                        if (!participants.some((item) => item.name === observer && item.state === "active"))
+                            return;
+                        // Retained notices from the former per-Akuma author stay observable
+                        // without a second send or a rewrite of the archive. History resolves
+                        // an author only when it has stood here, and a name with no history to
+                        // query carries no notice anyway.
+                        const authors = [NOTIFIER, signal.akumaId].filter((name) => participants.some((item) => item.name === name));
+                        if (authors.length === 0)
                             return;
                         const { activities: notices } = await square.history({
-                            from: [signal.akumaId], fixed: `${signal.akumaId} ${signal.historyId}`, limit: null,
+                            from: authors, fixed: `${signal.akumaId} ${signal.historyId}`, limit: null,
                         }, control);
                         const participant = await square.participant(observer);
                         for (const notice of notices) {
