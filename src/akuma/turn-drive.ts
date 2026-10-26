@@ -552,6 +552,57 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   let drainArmed = false;
   let drainingEffects: Promise<void> | undefined;
   const wakeups = createTurnWakeups((after) => input.supervisor.next(after));
+
+  /**
+   * Consumes exactly one wake. A replaced Heart snapshot rearms its own observation, a settled Tell
+   * pump releases that source, and a provider event keeps its order: end, write, coordinate, next pull.
+   */
+  const reduceWakeup = async (next: TurnWakeup): Promise<void> => {
+    switch (next.kind) {
+      case "failed":
+        throw next.error;
+      case "heart":
+        heart = next.observation;
+        wakeups.heart(heart);
+        return;
+      case "tell":
+        tellPump = null;
+        liveTells = next.result === "live";
+        return;
+      case "completion":
+        result = next.result;
+        liveTells = false;
+        return;
+      case "closed":
+        attemptClosed = true;
+        return;
+      case "drained":
+        effectsDrained = true;
+        drainArmed = false;
+        return;
+      case "event":
+        break;
+    }
+    if (next.event.done) {
+      eventsEnded = true;
+      return;
+    }
+    await writeProviderEvent(input, active, next.event.value, witness);
+    if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
+    wakeups.event(iterator.next());
+  };
+
+  /** Completion waits for ended events, an outcome, a closed attempt, and no live Tell pump. */
+  const ready = (): boolean => eventsEnded && result !== undefined && attemptClosed && tellPump === null;
+
+  /** Retirement decides the ending: only a provider that could not retire replaces the requested one. */
+  const stopAndReturn = async (
+    outcome: Readonly<{ kind: "stopped" }> | Readonly<{ kind: "handoff" }>,
+  ): Promise<TurnDriveResult> => {
+    const retirement = await stopActiveDrive(input, active);
+    return retirement.kind === "hung" ? retirement : outcome;
+  };
+
   wakeups.event(iterator.next());
   wakeups.heart(heart);
   wakeups.failure(receiptFailure);
@@ -562,59 +613,31 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
     for (;;) {
       if (input.supervisor.signal.aborted) {
         writesOpen = false;
-        const retirement = await stopActiveDrive(input, active);
-        return retirement.kind === "hung" ? retirement : { kind: "stopped" };
+        return await stopAndReturn({ kind: "stopped" });
       }
       if (result === undefined && hasUnattemptedTell(liveTells, tellPump, heart.pending, attempted)) {
         if (drive.tell === undefined) {
           writesOpen = false;
-          const retirement = await stopActiveDrive(input, active);
-          return retirement.kind === "hung" ? retirement : { kind: "handoff" };
+          return await stopAndReturn({ kind: "handoff" });
         }
         tellPump = submitPendingLiveTells(writers, heart.pending, attempted, drive.tell);
         wakeups.tell(tellPump);
       }
-      const next = await wakeups.next();
-      if (next.kind === "failed") throw next.error;
-      if (next.kind === "heart") {
-        heart = next.observation;
-        wakeups.heart(heart);
-      } else if (next.kind === "tell") {
-        tellPump = null;
-        liveTells = next.result === "live";
-      } else if (next.kind === "completion") {
-        result = next.result;
-        liveTells = false;
-      } else if (next.kind === "closed") {
-        attemptClosed = true;
-      } else if (next.kind === "drained") {
-        effectsDrained = true;
-        drainArmed = false;
-      } else if (next.kind === "event") {
-        if (next.event.done) eventsEnded = true;
-        else {
-          await writeProviderEvent(input, active, next.event.value, witness);
-          if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
-          wakeups.event(iterator.next());
-        }
-      }
-      if (eventsEnded && result !== undefined && attemptClosed && tellPump === null && !drainArmed) {
+      await reduceWakeup(await wakeups.next());
+      if (ready() && !drainArmed) {
         drainingEffects ??= writeWitness.drain();
         drainArmed = true;
         wakeups.drained(drainingEffects);
       }
-      if (eventsEnded && result !== undefined && attemptClosed && tellPump === null && effectsDrained) {
+      if (ready() && effectsDrained) {
         writesOpen = false;
-        return await settleCompletion(result, turnSession, active);
+        return await settleCompletion(result!, turnSession, active);
       }
     }
   } catch (error) {
     writesOpen = false;
     if (error instanceof BodyControlledError) input.supervisor.cancel("control");
-    if (input.supervisor.signal.aborted) {
-      const retirement = await stopActiveDrive(input, active);
-      return retirement.kind === "hung" ? retirement : { kind: "stopped" };
-    }
+    if (input.supervisor.signal.aborted) return await stopAndReturn({ kind: "stopped" });
     const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
     try {
       await requests.close();
