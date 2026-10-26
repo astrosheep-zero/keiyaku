@@ -2326,12 +2326,17 @@ test("Pi keeps abort pending when native cleanup refuses to settle", async () =>
     freshInput("wait", { cwd: "/work" }),
   );
   await attempt.result;
-  let settled = false;
-  void attempt.abort().then(() => {
-    settled = true;
-  });
+  let settled = 0;
+  const observe = (pending: Promise<void>) => {
+    void pending.then(() => {
+      settled += 1;
+    });
+  };
+  // Attempt owns abort memoization: a repeated request reuses one native abort.
+  observe(attempt.abort());
+  observe(attempt.abort());
   await new Promise((resolve) => setTimeout(resolve, 75));
-  assert.equal(settled, false);
+  assert.equal(settled, 0);
   assert.equal(fake.seen.aborted, 1);
   assert.equal(fake.seen.disposed, 0);
 });

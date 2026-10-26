@@ -105,7 +105,6 @@ type PiNativeSession = PiCreatedSession["session"];
 type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
 type PiDriveState = {
   terminalFailure: string | null;
-  abortRequest?: Promise<void>;
   aborting: boolean;
   settled: boolean;
 };
@@ -264,18 +263,15 @@ async function drivePi(
     })().then(settleRetired, failRetired);
     return closed;
   };
-  const abort = (): Promise<void> => {
-    state.abortRequest ??= (async () => {
-      if (state.settled) return;
-      state.aborting = true;
-      try {
-        await native.abort();
-      } catch {
-        /* prompt settlement still proves local cleanup */
-      }
-      await settle({ kind: "failed", diagnostic: "Pi session aborted" });
-    })();
-    return state.abortRequest;
+  const abort = async (): Promise<void> => {
+    if (state.settled) return;
+    state.aborting = true;
+    try {
+      await native.abort();
+    } catch {
+      /* prompt settlement still proves local cleanup */
+    }
+    await settle({ kind: "failed", diagnostic: "Pi session aborted" });
   };
   const forceDispose = async (): Promise<void> => {
     if (!state.settled) state.aborting = true;
