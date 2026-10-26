@@ -1,3 +1,4 @@
+import type { DatabaseSync } from "node:sqlite";
 import type { AkumaPaths } from "../identity.js";
 import { parsePublicHistoryId } from "../identity.js";
 import { decodeRuntimeModel, withoutModel } from "../provider-recipe.js";
@@ -353,19 +354,65 @@ export type InterruptTellAdmission =
 
 type TellAdmission = Readonly<{ kind: "not-born" }> | Readonly<{ kind: "recorded"; tell: TellFact }>;
 
+type TellInput = Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">;
+
+type TellAdmissionInputs = Readonly<{
+  heart: DatabaseSync;
+  tell: TellInput;
+  body: BodyFact | null;
+  pause: PauseFact | null;
+  interrupt: boolean;
+}>;
+
+function judgeExistingTell(inputs: TellAdmissionInputs, existing: TellFact): TellAdmission | InterruptTellAdmission {
+  const { heart, tell, body, pause, interrupt } = inputs;
+  if (!sameTellInput(existing, interrupt ? { ...tell, recordedAt: existing.recordedAt } : tell))
+    throw new Error(`tell ${tell.id} reused different input`);
+  if (!interrupt) return { kind: "recorded", tell: existing };
+  const barrier =
+    body !== null && pause !== null && isTellProtectedByPause(heart, tell.id, body.sequence) ? pause : undefined;
+  return {
+    kind: "recorded",
+    tell: existing,
+    predecessorWasRunning: body !== null && body.end === undefined,
+    ...(barrier === undefined ? {} : { barrier }),
+  };
+}
+
+function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTellAdmission {
+  const { heart, tell, body, pause, interrupt } = inputs;
+  if (interrupt) {
+    if (body?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
+    if (body === null) return { kind: "unavailable", evidence: "untidy" };
+    if (pause !== null && pause.bodySequence !== body.sequence) return { kind: "unavailable", evidence: "untidy" };
+    const admitted = recordPendingTell(heart, tell);
+    const barrier =
+      pause ??
+      insertInterruptBarrier(heart, {
+        bodySequence: body.sequence,
+        tellId: tell.id,
+        at: tell.recordedAt,
+      });
+    return { ...admitted, predecessorWasRunning: body.end === undefined, barrier };
+  }
+  const running = body !== null && body.end === undefined && body.hung === undefined;
+  if (tell.schemaJson !== undefined && running) throw new AkumaBusyError();
+  return recordPendingTell(heart, tell);
+}
+
 export function recordTell(
   paths: AkumaPaths,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  tell: TellInput,
   options: Readonly<{ interrupt: true; signal?: AbortSignal }>,
 ): Promise<InterruptTellAdmission>;
 export function recordTell(
   paths: AkumaPaths,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  tell: TellInput,
   options?: Readonly<{ interrupt?: false; signal?: AbortSignal }>,
 ): Promise<TellAdmission>;
 export async function recordTell(
   paths: AkumaPaths,
-  tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,
+  tell: TellInput,
   options: Readonly<{ interrupt?: boolean; signal?: AbortSignal }> = {},
 ): Promise<TellAdmission | InterruptTellAdmission> {
   const interrupt = options.interrupt === true;
@@ -376,36 +423,8 @@ export async function recordTell(
       const existing = tellFact(heart, tell.id);
       const body = latestBodyFact(heart);
       const pause = interrupt ? pauseFact(heart) : null;
-      if (existing !== null) {
-        if (!sameTellInput(existing, interrupt ? { ...tell, recordedAt: existing.recordedAt } : tell))
-          throw new Error(`tell ${tell.id} reused different input`);
-        if (!interrupt) return { kind: "recorded", tell: existing };
-        const barrier =
-          body !== null && pause !== null && isTellProtectedByPause(heart, tell.id, body.sequence) ? pause : undefined;
-        return {
-          kind: "recorded",
-          tell: existing,
-          predecessorWasRunning: body !== null && body.end === undefined,
-          ...(barrier === undefined ? {} : { barrier }),
-        };
-      }
-      if (interrupt) {
-        if (body?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
-        if (body === null) return { kind: "unavailable", evidence: "untidy" };
-        if (pause !== null && pause.bodySequence !== body.sequence) return { kind: "unavailable", evidence: "untidy" };
-        const admitted = recordPendingTell(heart, tell);
-        const barrier =
-          pause ??
-          insertInterruptBarrier(heart, {
-            bodySequence: body.sequence,
-            tellId: tell.id,
-            at: tell.recordedAt,
-          });
-        return { ...admitted, predecessorWasRunning: body.end === undefined, barrier };
-      }
-      const running = body !== null && body.end === undefined && body.hung === undefined;
-      if (tell.schemaJson !== undefined && running) throw new AkumaBusyError();
-      return recordPendingTell(heart, tell);
+      const inputs: TellAdmissionInputs = { heart, tell, body, pause, interrupt };
+      return existing === null ? judgeNewTell(inputs) : judgeExistingTell(inputs, existing);
     },
     options.signal,
   );
