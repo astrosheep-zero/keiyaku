@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { installNamespaceContext, readNamespaceContext, repairNamespaceContext } from "../src/debt/context.js";
+import { cliJson } from "./support/cli-fixtures.js";
+import { makeGitRepository } from "./support/git.js";
+import { document } from "./support/library-verbs.js";
+import {
+  installNamespaceContext,
+  readNamespaceContext,
+  repairNamespaceContext,
+  resolveDebtNamespaceContext,
+} from "../src/debt/context.js";
 
 function temporary(): string {
   return mkdtempSync(join(tmpdir(), "keiyaku-namespace-"));
@@ -42,4 +50,89 @@ test("repair replaces malformed current bytes and readers reject symlinks", asyn
     kind: "malformed",
     path: join(linked, ".keiyaku", "namespace", "current"),
   });
+});
+
+test("nested directories inherit the boundary namespace and a nearer context overrides it", async () => {
+  const root = temporary(),
+    nested = join(root, "src", "deep");
+  mkdirSync(nested, { recursive: true });
+  await installNamespaceContext(root, ["kei", "installed"]);
+  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["kei", "installed"]);
+  assert.deepEqual(await readNamespaceContext({ directory: join(root, "src"), boundary: root }), ["kei", "installed"]);
+  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: root }), ["kei", "installed"]);
+
+  await installNamespaceContext(join(root, "src"), ["kei", "nearer"]);
+  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: root }), ["kei", "nearer"]);
+  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["kei", "installed"]);
+});
+
+test("namespace source attribution follows the directory that answered", async () => {
+  const root = temporary(),
+    src = join(root, "src");
+  mkdirSync(src, { recursive: true });
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: src, boundary: root, managed: true }), {
+    namespace: [],
+    source: "default-root",
+  });
+  await installNamespaceContext(root, ["kei", "installed"]);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: src, boundary: root, managed: true }), {
+    namespace: ["kei", "installed"],
+    source: "contract-installed",
+  });
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: src, boundary: root, managed: false }), {
+    namespace: ["kei", "installed"],
+    source: "local-override",
+  });
+  await installNamespaceContext(src, ["kei", "nearer"]);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: src, boundary: root, managed: true }), {
+    namespace: ["kei", "nearer"],
+    source: "local-override",
+  });
+});
+
+test("the ancestor walk stops at the boundary instead of escaping to an outer context", async () => {
+  const outer = temporary(),
+    world = join(outer, "world"),
+    nested = join(world, "src");
+  mkdirSync(nested, { recursive: true });
+  await installNamespaceContext(outer, ["outside"]);
+  assert.equal(await readNamespaceContext({ directory: nested, boundary: world }), "absent");
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: nested, boundary: world, managed: true }), {
+    namespace: [],
+    source: "default-root",
+  });
+
+  await installNamespaceContext(world, ["inside"]);
+  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: world }), ["inside"]);
+});
+
+test("a public bind's appointed worktree inherits its installed namespace and shares the Debt World", async () => {
+  const raw = makeGitRepository();
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const environment = { KEIYAKU_HOME: join(raw.path, "empty-home") };
+  const bound = await cliJson<
+    Readonly<{ kind: string; contract: string; value: Readonly<{ workspace: Readonly<{ path: string }> }> }>
+  >(["-C", raw.path, "bind", "--gates", "", "-"], { environment, readStdin: async () => document() });
+  assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
+  const slug = bound.value.contract.slice("kei/".length),
+    worktree = bound.value.value.workspace.path,
+    namespace = ["kei", slug],
+    src = join(worktree, "src");
+  mkdirSync(src, { recursive: true });
+
+  for (const directory of [worktree, src])
+    assert.deepEqual(
+      (await cliJson<Readonly<{ value: unknown }>>(["-C", directory, "debt", "context"], { environment })).value.value,
+      { namespace, source: "contract-installed" },
+    );
+
+  const added = await cliJson<Readonly<{ value: Readonly<{ id: string }> }>>(
+    ["-C", src, "debt", "add", "Worktree ledger entry"],
+    { environment },
+  );
+  const id = added.value.value.id,
+    local = id.slice(id.lastIndexOf("/") + 1);
+  assert.equal(id, `debt/kei/${slug}/${local}`);
+  assert.ok(existsSync(join(raw.path, ".keiyaku", "debts", "kei", slug, `${local}.md`)));
+  assert.equal(existsSync(join(worktree, ".keiyaku", "debts")), false);
 });

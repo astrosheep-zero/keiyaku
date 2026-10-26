@@ -1,5 +1,5 @@
 import { lstat, mkdir, readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
@@ -47,42 +47,45 @@ function validNamespaceSegments(value: unknown): value is readonly string[] {
 }
 
 async function readAt(root: string): Promise<NamespaceContextRead> {
+  const path = currentPath(root);
   let bytes: string;
   try {
-    const path = currentPath(root),
-      stat = await lstat(path);
+    const stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "malformed", path };
     bytes = await readFile(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
     throw error;
   }
-  if (!bytes.endsWith("\n") || bytes.slice(0, -1).includes("\n")) {
-    return { kind: "malformed", path: currentPath(root) };
-  }
+  if (!bytes.endsWith("\n") || bytes.slice(0, -1).includes("\n")) return { kind: "malformed", path };
   const content = bytes.slice(0, -1);
   const segments = content === "" ? [] : content.split("/");
-  return validNamespaceSegments(segments) ? segments : { kind: "malformed", path: currentPath(root) };
+  return validNamespaceSegments(segments) ? segments : { kind: "malformed", path };
 }
 
-async function readAtWithPath(
-  root: string,
-): Promise<NamespaceContextRead | Readonly<{ value: readonly string[]; path: string }>> {
-  const selected = await readAt(root);
-  if (selected === "absent" || (typeof selected === "object" && "kind" in selected)) return selected;
-  return { value: selected, path: currentPath(root) };
+/** One ancestor walk: the nearest context at or below the boundary, and the directory that answers it. */
+async function walkNamespaceContext(
+  coordinates: NamespaceContextInput,
+): Promise<Readonly<{ read: NamespaceContextRead; root: string }>> {
+  const boundary = resolve(coordinates.boundary);
+  let current = resolve(coordinates.directory);
+  for (;;) {
+    const read = await readAt(current);
+    if (read !== "absent" || current === boundary) return { read, root: current };
+    const parent = dirname(current);
+    if (parent === current || !descendsFrom(parent, boundary)) return { read, root: current };
+    current = parent;
+  }
+}
+
+/** Whether `candidate` is the boundary or lies beneath it; a sibling or ancestor never does. */
+function descendsFrom(candidate: string, boundary: string): boolean {
+  const step = relative(boundary, candidate);
+  return step === "" || (!isAbsolute(step) && step !== ".." && !step.startsWith(`..${sep}`));
 }
 
 export async function readNamespaceContext(coordinates: NamespaceContextInput): Promise<NamespaceContextRead> {
-  let current = coordinates.directory;
-  for (;;) {
-    const selected = await readAt(current);
-    if (selected !== "absent") return selected;
-    if (current === coordinates.boundary) return "absent";
-    const resolvedParent = dirname(resolve(current));
-    if (resolvedParent === current || !resolvedParent.startsWith(`${coordinates.boundary}/`)) return "absent";
-    current = resolvedParent;
-  }
+  return (await walkNamespaceContext(coordinates)).read;
 }
 
 export async function installNamespaceContext(root: string, segments: readonly string[]): Promise<void> {
@@ -98,8 +101,7 @@ async function installIgnore(root: string): Promise<void> {
 }
 
 export async function repairNamespaceContext(root: string, segments: readonly string[]): Promise<"kept" | "installed"> {
-  const current = await readNamespaceContext({ directory: root, boundary: root });
-  if (Array.isArray(current)) {
+  if (Array.isArray(await readAt(root))) {
     await installIgnore(root);
     return "kept";
   }
@@ -110,22 +112,11 @@ export async function repairNamespaceContext(root: string, segments: readonly st
 export async function resolveDebtNamespaceContext(
   input: NamespaceContextInput,
 ): Promise<ResolvedNamespaceContext | Readonly<{ kind: "invalid-namespace-context"; path: string }>> {
-  let current = input.directory;
-  for (;;) {
-    const selected = await readAtWithPath(current);
-    if (selected !== "absent") {
-      if (typeof selected === "object" && "kind" in selected)
-        return { kind: "invalid-namespace-context", path: selected.path };
-      return {
-        namespace: "value" in selected ? selected.value : selected,
-        source: current === input.boundary && input.managed === true ? "contract-installed" : "local-override",
-      };
-    }
-    if (current === input.boundary) return { namespace: [], source: "default-root" };
-    const resolvedParent = dirname(resolve(current));
-    if (resolvedParent === current || !resolvedParent.startsWith(`${input.boundary}/`)) {
-      return { namespace: [], source: "default-root" };
-    }
-    current = resolvedParent;
-  }
+  const { read, root } = await walkNamespaceContext(input);
+  if (read === "absent") return { namespace: [], source: "default-root" };
+  if (typeof read === "object" && "kind" in read) return { kind: "invalid-namespace-context", path: read.path };
+  return {
+    namespace: read,
+    source: root === resolve(input.boundary) && input.managed === true ? "contract-installed" : "local-override",
+  };
 }

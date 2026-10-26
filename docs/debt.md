@@ -9,11 +9,14 @@ do not depend on Debt; Debt does not interpret Contract authority or Git state.
 ## World, identity, and custody
 
 A Debt board belongs to one World. The process edge resolves the World and the
-directory-local namespace context before calling Debt. Context is a convenience
-default for a namespace, never Debt, Contract, or Git authority: a complete
-Debt identity is sufficient without it, and an explicit selector prevails over
-context. A managed worktree shares its repository's Debt World; a deliberate
-nested Debt World remains separate.
+directory-local namespace context before calling Debt. The directory-local
+context is the nearest one the invocation directory or an ancestor declares, and
+that walk includes the World boundary itself: a nearer context overrides a
+broader one, and the walk never continues above the boundary or adopts an outer
+context as a fallback. Context is a convenience default for a namespace, never
+Debt, Contract, or Git authority: a complete Debt identity is sufficient without
+it, and an explicit selector prevails over context. A managed worktree shares
+its repository's Debt World; a deliberate nested Debt World remains separate.
 
 Debt identity is stable, human-readable, and names both its immutable namespace
 and local member. Creation derives an identity under Debt custody, rather than
