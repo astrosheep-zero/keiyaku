@@ -22,6 +22,13 @@ ambiguous, surplus, or ill-formed request before invoking Debt. It does not
 infer a namespace, Debt identity, lifecycle state, association, or actor from
 the caller's directory, Contract, Git state, or Akuma request.
 
+Observing a context and deliberately changing one are different judgments. Only
+an operation that consumes the default resolves the installed context, so a
+malformed installed context refuses that work and never blocks a deliberate
+change. A change validates the supplied namespace before it touches anything,
+replaces the installed default durably, and reports the default later callers
+resolve; it reads no previous context and repairs nothing by implication.
+
 ## Presentation
 
 Text helps a caller scan complete Debt identity, current disposition, priority,

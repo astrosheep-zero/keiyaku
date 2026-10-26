@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { cliJson } from "./support/cli-fixtures.js";
+import { main } from "../src/cli/main.js";
+import { captureOutput, cliJson } from "./support/cli-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { document } from "./support/library-verbs.js";
 import {
@@ -135,4 +144,55 @@ test("a public bind's appointed worktree inherits its installed namespace and sh
   assert.equal(id, `debt/kei/${slug}/${local}`);
   assert.ok(existsSync(join(raw.path, ".keiyaku", "debts", "kei", slug, `${local}.md`)));
   assert.equal(existsSync(join(worktree, ".keiyaku", "debts")), false);
+});
+
+function malformedContext(): { root: string; current: string } {
+  const root = realpathSync(temporary()),
+    current = join(root, ".keiyaku", "namespace", "current");
+  mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
+  writeFileSync(current, "Bad Namespace\n");
+  return { root, current };
+}
+
+test("an explicit context replacement installs the supplied namespace over malformed current bytes", async () => {
+  const { root, current } = malformedContext();
+  const replaced = await cliJson<unknown>(["-C", root, "debt", "context", "good/place"], { environment: {} });
+  assert.equal(replaced.exit, 0, replaced.stderr);
+  assert.deepEqual(replaced.value, {
+    kind: "accepted",
+    value: { namespace: ["good", "place"], source: "local-override" },
+  });
+  assert.equal(readFileSync(current, "utf8"), "good/place\n");
+  const read = await cliJson<unknown>(["-C", root, "debt", "context"], { environment: {} });
+  assert.equal(read.exit, 0, read.stderr);
+  assert.deepEqual(read.value, {
+    kind: "accepted",
+    value: { namespace: ["good", "place"], source: "local-override" },
+  });
+  const added = await cliJson<{ value: { id: string } }>(["-C", root, "debt", "add", "Spawned"], { environment: {} });
+  assert.equal(added.exit, 0, added.stderr);
+  assert.match(added.value.value.id, /^debt\/good\/place\//u);
+});
+
+test("a malformed context still refuses the operations that need the default", async () => {
+  const { root, current } = malformedContext();
+  const refusal = { kind: "invalid-namespace-context", path: current };
+  for (const argv of [["context"], ["ls"], ["add", "Needs the default"]]) {
+    const result = await cliJson<unknown>(["-C", root, "debt", ...argv], { environment: {} });
+    assert.equal(result.exit, 1, `${argv.join(" ")}: ${result.stderr}`);
+    assert.deepEqual(result.value, { kind: "refused", refusal });
+  }
+  assert.equal(readFileSync(current, "utf8"), "Bad Namespace\n");
+  assert.equal(existsSync(join(root, ".keiyaku", "debts")), false);
+});
+
+test("an unusable context replacement refuses before the installed bytes are touched", async () => {
+  const { root, current } = malformedContext();
+  for (const invalid of ["Bad Name", "good//place", ".."]) {
+    const result = await captureOutput(() => main(["-C", root, "debt", "context", invalid]));
+    assert.equal(result.exit, 64, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /namespace must contain normalized segments/u);
+    assert.equal(readFileSync(current, "utf8"), "Bad Namespace\n");
+  }
 });

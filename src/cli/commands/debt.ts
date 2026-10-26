@@ -43,7 +43,6 @@ type DebtContext = Readonly<{ directory: string; boundary: string; writeRoot?: s
 type DebtInput = Readonly<{
   debts: DebtProduct;
   command: ParsedDebtCommand;
-  context: DebtContext;
   actor?: string;
   current?: readonly string[];
   stdin?: string;
@@ -340,7 +339,7 @@ async function runBatchLifecycle(
 }
 
 async function runMutation(input: DebtInput): Promise<number> {
-  const { debts, command, current } = input;
+  const { debts, command } = input;
   if (isWorldObservationAction(command) || command.action === "tree") return await runRead(input);
   switch (command.action) {
     case "add": {
@@ -359,24 +358,6 @@ async function runMutation(input: DebtInput): Promise<number> {
     case "done":
     case "drop":
       return await runBatchLifecycle(debts, command, command.action);
-    case "context": {
-      const selected = namespace(command.positionals[0]);
-      if (selected !== undefined) {
-        await installNamespaceContext(input.context.writeRoot ?? input.context.directory, selected);
-        const resolved = await resolveDebtNamespaceContext(input.context);
-        if (typeof resolved === "object" && "kind" in resolved) {
-          const result = { kind: "refused" as const, refusal: resolved };
-          return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
-        }
-        const result = { kind: "accepted" as const, value: resolved };
-        return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
-      }
-      const result = {
-        kind: "accepted" as const,
-        value: { namespace: current ?? [], source: "default-root" as const },
-      };
-      return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
-    }
     default:
       throw new Error(`debt action has no invocation: ${command.action}`);
   }
@@ -415,11 +396,34 @@ function refuseNamespace(
         () => renderDebtMutation("add", result, displayContext()),
         debtExitCode(result),
       );
-    case "context":
-      return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
     default:
       throw new Error(`debt action has no namespace refusal: ${command.action}`);
   }
+}
+
+/**
+ * `debt context` adapted once. An omitted selector observes the default, so it reads the installed
+ * context. An explicit selector replaces it without consulting the context it supersedes, so malformed
+ * old bytes cannot block a deliberate change. The owner validates the supplied namespace, and every
+ * answer is the readback of the default a later caller would resolve.
+ */
+async function runContext(command: ParsedDebtCommand, context: DebtContext): Promise<number> {
+  const selected = namespace(command.positionals[0]);
+  if (selected !== undefined) {
+    try {
+      await installNamespaceContext(context.writeRoot ?? context.directory, selected);
+    } catch (error) {
+      // A namespace the owner refuses to install is caller input, never an internal fault.
+      if (error instanceof TypeError) throw new CliUsageError(error.message);
+      throw error;
+    }
+  }
+  const resolved = await resolveDebtNamespaceContext(context);
+  const result =
+    typeof resolved === "object" && "kind" in resolved
+      ? { kind: "refused" as const, refusal: resolved }
+      : { kind: "accepted" as const, value: resolved };
+  return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
 }
 
 // eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
@@ -439,9 +443,9 @@ export async function runDebtCommand(
   );
   const world = coordinates.world ?? (establishesWorld(command) ? await coordinates.establishWorld() : null);
   if (world === null) return missingWorld(command);
+  if (command.action === "context") return await runContext(command, coordinates.debtContext);
   const debts = debtsWithExecution(world, runtime.execution);
-  const contextSensitive =
-    command.action === "context" ||
+  const consumesDefaultNamespace =
     (command.action === "add" && explicitNamespace === undefined) ||
     (((command.action === "ls" && explicitListNamespace(command) === undefined) ||
       command.action === "ready" ||
@@ -449,20 +453,15 @@ export async function runDebtCommand(
       command.action === "query") &&
       command.flags.world !== true);
   let current: readonly string[] | undefined;
-  if (contextSensitive) {
+  if (consumesDefaultNamespace) {
     const resolved = await resolveDebtNamespaceContext(coordinates.debtContext);
     if (typeof resolved === "object" && "kind" in resolved) return refuseNamespace(command, resolved);
     current = resolved.namespace;
-    if (command.action === "context" && command.positionals.length === 0) {
-      const result = { kind: "accepted" as const, value: resolved };
-      return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
-    }
   }
   if (command.action === "show") return await runShow(command, debts);
   return await runMutation({
     debts,
     command,
-    context: coordinates.debtContext,
     ...(actor === undefined ? {} : { actor }),
     ...(current === undefined ? {} : { current }),
     ...(stdin === undefined ? {} : { stdin }),
