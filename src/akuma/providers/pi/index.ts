@@ -7,6 +7,7 @@ import type {
   CreateAgentSessionOptions,
   CreateAgentSessionFromServicesOptions,
   AgentSessionServices,
+  LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 
 /* eslint-disable max-lines-per-function -- Native Pi setup and disposal share one custody boundary. */
@@ -19,6 +20,7 @@ import {
   createProviderAttempt,
   launchPrompt,
   modelEvent,
+  noteEvent,
   tellRegistry,
   type AttemptCustody,
   type ProviderAdapter,
@@ -101,6 +103,10 @@ function piCreateOptions(
 type PiDriveInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 
 type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSessionFromServices"]>>;
+type PiSessionSetup = Readonly<{
+  created: PiCreatedSession;
+  extensionErrors: readonly LoadExtensionsResult["errors"][number][];
+}>;
 type PiNativeSession = PiCreatedSession["session"];
 type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
 type PiDriveState = {
@@ -109,11 +115,7 @@ type PiDriveState = {
   settled: boolean;
 };
 
-async function createPiSession(
-  sdk: PiSdk,
-  execution: ProviderExecution,
-  input: PiDriveInput,
-): Promise<PiCreatedSession> {
+async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: PiDriveInput): Promise<PiSessionSetup> {
   if (execution.config !== undefined) {
     throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
   }
@@ -130,9 +132,12 @@ async function createPiSession(
               : { systemPromptOverride: () => input.options.systemPrompt },
         }),
   });
+  const extensionErrors = services.resourceLoader.getExtensions().errors ?? [];
+  for (const failure of extensionErrors) console.error(`Pi extension load failed: ${failure.path}\n${failure.error}`);
   try {
     input.signal?.throwIfAborted();
-    return await sdk.createAgentSessionFromServices(piCreateOptions(sdk, input, services));
+    const created = await sdk.createAgentSessionFromServices(piCreateOptions(sdk, input, services));
+    return { created, extensionErrors };
   } catch (error) {
     // Before a session owns the extension runtime, failed selection/setup must
     // retire registrations and event-bus subscriptions loaded by the services.
@@ -206,7 +211,7 @@ async function drivePi(
   signal: AbortSignal,
   custody?: AttemptCustody,
 ): Promise<Session> {
-  const created = await createPiSession(sdk, execution, input);
+  const { created, extensionErrors } = await createPiSession(sdk, execution, input);
   const native = created.session;
   let settleRetired!: () => void;
   let failRetired!: (error: unknown) => void;
@@ -304,6 +309,9 @@ async function drivePi(
   await abortable(binding, signal);
   signal.throwIfAborted();
   events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
+  for (const failure of extensionErrors) {
+    events.emit(noteEvent(`Pi extension load failed: ${failure.path}: ${failure.error}`));
+  }
   const sessionModel = piSessionModel(native.model);
   if (sessionModel !== undefined) events.emit(modelEvent(sessionModel));
   void runPiPrompt(native, input, eventState, state, (result) => {

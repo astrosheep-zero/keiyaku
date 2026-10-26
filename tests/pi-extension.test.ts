@@ -323,6 +323,34 @@ test("Pi closure reports extension shutdown failure but still disposes native st
   assert.equal(shutdowns, 1);
 });
 
+test("Pi reports extension load failures to stderr and Akuma activity", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-pi-extension-load-failure-");
+  const nativeSdk = await extensionSdk(root, () => {
+    throw new Error("extension load fixture failure");
+  }, sdk.createEventBus());
+  const stderr = t.mock.method(console, "error", () => {});
+  const provider = createPiProvider(undefined, async () => nativeSdk);
+  const attempt = provider.start({
+    body: "work", launchTells: [], cwd: root, options: {},
+    requests: { dir: join(root, "requests") },
+    signal: new AbortController().signal, session: { kind: "fresh" },
+  });
+  try {
+    const drive = await attempt.result;
+    const events = drive.events[Symbol.asyncIterator]();
+    assert.equal((await events.next()).value?.type, "session");
+    const note = (await events.next()).value;
+    assert.equal(note?.type, "note");
+    assert.match(note?.text ?? "", /Pi extension load failed: .*extension load fixture failure/u);
+    const logged = stderr.mock.calls.flatMap((call) => call.arguments).join("\n");
+    assert.match(logged, /Pi extension load failed:/u);
+    assert.match(logged, /extension load fixture failure/u);
+  } finally {
+    await attempt.forceDispose();
+    await attempt.closed;
+  }
+});
+
 test("npm root package declares its Pi resources", () => {
   assert.equal(Array.isArray(packageJson.keywords) && packageJson.keywords.includes("pi-package"), true);
   assert.deepEqual(packageJson.pi, {
@@ -369,7 +397,7 @@ test("Pi loads the root package without host-provided dependency warnings", asyn
   assert.deepEqual(result.warnings, []);
   assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
   assert.equal(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"], "*");
-  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.0.0");
+  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.4.0");
 });
 
 type Handler = (event: unknown, context: ExtensionContext) => unknown;

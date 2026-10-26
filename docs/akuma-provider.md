@@ -168,6 +168,12 @@ distinguishable from one the native surface never supplied. Observed result text
 is never the diagnostic clause a settled tool reports, and never enters the
 compact board presentation that clause feeds.
 
+Native extension load failures remain visible even when the native runtime can
+continue without the failed extension. The adapter reports the native cause to
+its diagnostic output and, once a Session is admitted, as bounded narration.
+That diagnostic neither invents a failed Turn nor claims that the extension
+loaded successfully; native setup and execution still own their outcomes.
+
 Provider context compaction is retained as bounded narration when the native
 adapter reports it. Compaction is execution housekeeping, not a Turn failure,
 retry, or lifecycle transition; a compaction error may be narrated separately
