@@ -110,7 +110,6 @@ export type DriveTurnInput = Readonly<{
 type ActiveTurn = Readonly<{
   turnSequence: number;
   attempt: ProviderAttempt<Session>;
-  attemptClosure: Promise<AttemptClosure>;
   drive: Session;
   requests: BodyRequestPump;
   cwd: string;
@@ -128,7 +127,6 @@ type TurnWriters = Readonly<{
 }>;
 
 type Retirement = Readonly<{ kind: "retired" }> | Readonly<{ kind: "hung" }>;
-type AttemptClosure = Readonly<{ kind: "closed" }> | Readonly<{ kind: "failed"; error: unknown }>;
 type StartTurnResult =
   | ActiveTurn
   | Readonly<{ kind: "stopped" }>
@@ -253,14 +251,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     session === undefined
       ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
       : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
-  const attemptClosure: Promise<AttemptClosure> = attempt.closed.then(
-    () => ({ kind: "closed" as const }),
-    (error: unknown) => ({ kind: "failed" as const, error }),
-  );
-  const custodyFailure = attemptClosure.then((closure) => {
-    if (closure.kind === "failed") throw closure.error;
-    return new Promise<never>(() => undefined);
-  });
+  const custodyFailure = observeFailure(attempt.closed);
   try {
     const selected = await Promise.race([attempt.result, requests.failure, custodyFailure]);
     if (input.supervisor.signal.aborted) {
@@ -291,7 +282,6 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     return {
       turnSequence: turn.sequence,
       attempt,
-      attemptClosure,
       drive: selected,
       requests,
       cwd,
@@ -513,9 +503,10 @@ function createTurnWakeups(observeHeart: (after: BodyControlSnapshot) => Promise
         (error: unknown) => publish({ kind: "failed", error }),
       );
     },
-    closure: (source: Promise<AttemptClosure>): void => {
-      void source.then((closure) =>
-        publish(closure.kind === "closed" ? { kind: "closed" } : { kind: "failed", error: closure.error }),
+    closure: (source: Promise<void>): void => {
+      void source.then(
+        () => publish({ kind: "closed" }),
+        (error: unknown) => publish({ kind: "failed", error }),
       );
     },
     drained: (source: Promise<void>): void => {
@@ -565,7 +556,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   wakeups.failure(receiptFailure);
   wakeups.failure(requests.failure);
   wakeups.completion(drive.completion);
-  wakeups.closure(active.attemptClosure);
+  wakeups.closure(active.attempt.closed);
   try {
     for (;;) {
       if (input.supervisor.signal.aborted) {
@@ -593,7 +584,6 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
       } else if (next.kind === "completion") {
         result = next.result;
         liveTells = false;
-        requests.stopAdmission();
       } else if (next.kind === "closed") {
         attemptClosed = true;
       } else if (next.kind === "drained") {
