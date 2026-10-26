@@ -173,10 +173,6 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
   const events = new AgentEventChannel();
   const server = codexServer(execution, input);
   const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
-  const close = async () => await server.close(true);
-  let abortOwned = close;
-  let forceDisposeOwned = close;
-  custody.own({ closed, abort: () => abortOwned(), forceDispose: () => forceDisposeOwned() });
   const state: CodexTurnState = { settled: false, tools: new Map() };
   let settle!: (result: TurnResult) => void;
   const completion = new Promise<TurnResult>((resolve) => {
@@ -193,11 +189,14 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
     };
     void server.endInputAndDrain().then(done, done);
   };
-  abortOwned = () => abortTurn(server, state, finish);
-  forceDisposeOwned = async () => {
-    if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server force-disposed" });
-    await server.close(true);
-  };
+  custody.own({
+    closed,
+    abort: async () => await abortTurn(server, state, finish),
+    forceDispose: async () => {
+      if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server force-disposed" });
+      await server.close(true);
+    },
+  });
   server.onNotification((notification) => {
     const result = codexNotificationResult(notification, state, events);
     if (result !== undefined) finish(result);
