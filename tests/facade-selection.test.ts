@@ -31,7 +31,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
-import { addressAkumaSet, resolveNamedAddress } from "../src/library/address.js";
+import { addressAkumaSet, observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { projectDebtBoardObservation } from "../src/debt/board.js";
@@ -1091,41 +1091,42 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const source = await answered(repository.path, "worker", "00000001");
   const path = await World.at(repository.path);
   await moveAlias({ world: path, alias, akuId: source.id });
-  const observation = await observeKanshi({ world: path, repo });
+  const authority = await observeNamedAddress({ world: path, repo });
   assert.throws(
-    () => resolveNamedAddress({ selector: alias, report: observation.report, aliases: observation.aliases }),
+    () =>
+      resolveNamedAddress({ selector: alias, contracts: authority.contracts, aliases: authority.aliases }),
     /ambiguous selector matches Contract and Akuma/u,
   );
 });
 
 test("named Address refuses failed Kanshi Contract and Alias observations", async (t) => {
   const root = fixtureRoot(t, "keiyaku-named-kanshi-failed-");
-  const observation = await observeKanshi({ world: root });
   const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
   const source = await answered(root, "worker", "00000002");
   const alias = parseAkumaAlias("@readable");
   await moveAlias({ world: root, alias, akuId: source.id });
+  const detached = await observeNamedAddress({ world: root, repo: null });
   assert.deepEqual(
     resolveNamedAddress({
       selector: alias,
-      report: { ...observation.report, contracts: failure },
+      contracts: failure,
       aliases: { kind: "present", value: await readAliases(root) },
     }),
     { kind: "akuma", id: source.id },
     "a readable Alias remains an Akuma address when optional Contract composition is degraded",
   );
   assert.throws(
-    () =>
-      resolveNamedAddress({
-        selector: "@missing",
-        report: { ...observation.report, contracts: failure },
-        aliases: observation.aliases,
-      }),
+    () => resolveNamedAddress({ selector: "@missing", contracts: failure, aliases: detached.aliases }),
     /Contract world is failed/u,
   );
   assert.throws(
-    () => resolveNamedAddress({ selector: "@missing", report: observation.report, aliases: failure }),
+    () => resolveNamedAddress({ selector: "@missing", contracts: detached.contracts, aliases: failure }),
     /Alias authority is failed/u,
+  );
+  assert.throws(
+    () => resolveNamedAddress({ selector: "@missing", contracts: detached.contracts, aliases: detached.aliases }),
+    /unknown Akuma alias: @missing/u,
+    "an absent Repo is a World without a Contract family, so an unknown name stays an unknown Alias",
   );
 });
 
@@ -1134,13 +1135,14 @@ test("named Address resolves a retained Alias outside Kanshi roster rows", async
   const id = akuId({ archetype: "worker", suffix: "deadbeef" });
   await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
   const observation = await observeKanshi({ world: root });
+  const authority = await observeNamedAddress({ world: root, repo: null });
   assert.equal(observation.report.akuma.kind, "present");
   assert.equal(
     observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id),
     false,
   );
   assert.deepEqual(
-    resolveNamedAddress({ selector: "@outside", report: observation.report, aliases: observation.aliases }),
+    resolveNamedAddress({ selector: "@outside", contracts: authority.contracts, aliases: authority.aliases }),
     {
       kind: "akuma",
       id,

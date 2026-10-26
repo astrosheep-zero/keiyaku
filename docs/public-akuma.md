@@ -88,6 +88,17 @@ in the separate association context rather than concealing the core Akuma.
 Address may use the explicit advanced complete library observation for this
 frozen expansion; it never becomes a second public catalogue.
 
+Contract membership inside a named selector is the complete live candidate set
+the Contract resolver owns, so a bounded display catalogue never decides which
+names exist or which Contract a name means, and a Contract older than any
+recent aperture still collides with a same-named Alias. A failed Contract
+observation refuses an otherwise-unresolved name instead of passing as an empty
+Contract world, while a readable Alias still selects its Akuma through that
+failure. An absent Repo coordinate is simply a World without a Contract family,
+where a readable Alias selects its Akuma and an unknown name stays an unknown
+Alias. Identity is decided first; display detail is requested only for the
+identity it yields.
+
 Selection composes public Akuma handles after address expansion. Plural
 selection resolves and freezes identities once, then fans out the same lower
 owner operations or one shared set-observation algorithm. It preserves the raw

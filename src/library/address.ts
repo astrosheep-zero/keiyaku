@@ -12,9 +12,10 @@ import {
   type AkumaAlias,
   type AkumaGlob,
 } from "../identity/selector.js";
+import type { Section } from "../kanshi/index.js";
+import type { ContractRow } from "../protocol/read/status.js";
 import { World, type WorldRoot } from "../world.js";
-import type { KanshiReport, Section } from "../kanshi/index.js";
-import { matchContractCandidates } from "./contract-address.js";
+import { matchContractCandidates, readCompleteContractCandidates } from "./contract-address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -102,21 +103,53 @@ export type NamedAddress =
   | Readonly<{ kind: "contract"; id: ReturnType<typeof contractId> }>
   | Readonly<{ kind: "akuma"; id: AkuId }>;
 
-export type NamedAddressInput = Readonly<{
-  selector: string;
-  report: KanshiReport;
+/** The frozen authority a named selector is adjudicated against. */
+export type NamedAddressAuthority = Readonly<{
+  contracts: Section<readonly ContractRow[]>;
   aliases: Section<readonly AliasBinding[]>;
 }>;
+
+export type NamedAddressInput = NamedAddressAuthority & Readonly<{ selector: string }>;
+
+async function observeAliasBindings(path: WorldRoot): Promise<Section<readonly AliasBinding[]>> {
+  try {
+    return { kind: "present", value: await readAliases(path) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function observeContractCandidates(repo: Repo): Promise<Section<readonly ContractRow[]>> {
+  try {
+    return { kind: "present", value: await readCompleteContractCandidates(repo) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+/**
+ * Freeze the one complete Contract candidate observation and the Alias
+ * observation a named selector is judged against. The complete candidate set is
+ * the Contract owner's board, so display-age bounds never decide membership. An
+ * absent Repo is a World without a Contract family, not a failed observation.
+ */
+export async function observeNamedAddress(
+  input: Readonly<{ world: WorldRoot | null; repo: Repo | null }>,
+): Promise<NamedAddressAuthority> {
+  return {
+    contracts: input.repo === null ? { kind: "absent" } : await observeContractCandidates(input.repo),
+    aliases: input.world === null ? { kind: "absent" } : await observeAliasBindings(input.world),
+  };
+}
 
 export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   const selector = nonblank(input.selector, "selector");
   if (selector.startsWith("kei/")) return { kind: "contract", id: contractId(selector) };
   if (selector.startsWith("aku/")) return { kind: "akuma", id: parseAddressId(selector).id };
   const alias = parseAddressAlias(selector);
-  const contractMatches = matchContractCandidates(
-    input.report.contracts.kind === "present" ? input.report.contracts.value.rows : [],
-    { selector: alias },
-  );
+  const contractMatches = matchContractCandidates(input.contracts.kind === "present" ? input.contracts.value : [], {
+    selector: alias,
+  });
   const aliasId =
     input.aliases.kind === "present"
       ? (input.aliases.value.find((binding) => binding.alias === alias)?.akuId ?? null)
@@ -128,12 +161,10 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   if (aliasId !== null) return { kind: "akuma", id: aliasId };
   if (contractMatches.length === 1) return { kind: "contract", id: contractMatches[0]!.id };
   if (contractMatches.length > 1) throw new TypeError(`ambiguous Contract selector: ${selector}`);
-  if (input.report.contracts.kind === "failed") {
+  if (input.contracts.kind === "failed")
     throw new TypeError("cannot resolve a named selector while the Contract world is failed");
-  }
-  if (input.aliases.kind === "failed") {
+  if (input.aliases.kind === "failed")
     throw new TypeError("cannot resolve a named selector while Alias authority is failed");
-  }
   throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias });
 }
 

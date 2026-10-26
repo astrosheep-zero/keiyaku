@@ -15,8 +15,8 @@ import type {
   WorldRoot,
 } from "../../index.js";
 import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
-import { kanshi, observeKanshi, selectRegion } from "../../kanshi/index.js";
-import { resolveNamedAddress } from "../../library/address.js";
+import { kanshi, selectRegion } from "../../kanshi/index.js";
+import { observeNamedAddress, resolveNamedAddress, type NamedAddressAuthority } from "../../library/address.js";
 import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
 import { createKeiyakuHandle } from "../../library/keiyaku.js";
@@ -500,30 +500,22 @@ async function readAkumaStatus(
 async function readContractStatus(
   selector: string | undefined,
   coordinates: CliCoordinates,
-  named: Awaited<ReturnType<typeof observeKanshi>> | undefined,
 ): Promise<Readonly<{ value: KanshiReport; project: () => string }>> {
   const repo = requiredRepo(coordinates);
-  if (selector !== undefined && selector.startsWith("@")) {
-    if (named === undefined) throw new CliUsageError("cannot resolve a named status selector");
-    const address = resolveNamedAddress({ selector, report: named.report, aliases: named.aliases });
-    if (address.kind === "akuma") throw new CliUsageError("named status selector resolved to an Akuma");
-    const report = await kanshi({ world: coordinates.world, repo, contract: address.id });
-    return { value: report, project: () => renderKanshiText(report, displayContext(), "contract") };
-  }
   const contract = selector === undefined ? undefined : canonicalContractSelector(selector);
   const report = await kanshi({ world: coordinates.world, repo, ...(contract === undefined ? {} : { contract }) });
   return { value: report, project: () => renderKanshiText(report, displayContext(), "contract") };
 }
 
+/** Identity comes from the complete candidate observation; display detail is requested only after it. */
 async function namedStatus(
   selector: string,
   coordinates: CliCoordinates,
-  named: Awaited<ReturnType<typeof observeKanshi>> | undefined,
+  authority: NamedAddressAuthority,
 ): Promise<Readonly<{ value: AkumaObservation | KanshiReport; project: () => string }>> {
-  if (named === undefined) throw new CliUsageError("cannot resolve a named status selector");
-  const address = resolveNamedAddress({ selector, report: named.report, aliases: named.aliases });
+  const address = resolveNamedAddress({ selector, contracts: authority.contracts, aliases: authority.aliases });
   if (address.kind === "akuma") return await readAkumaStatus(address.id, selector, coordinates);
-  return await readContractStatus(address.id, coordinates, named);
+  return await readContractStatus(address.id, coordinates);
 }
 
 async function runShow(
@@ -552,11 +544,8 @@ async function runStatusSelection(
     coordinates.repo === undefined
   )
     throw new CliUsageError("cannot select a contract while the Contract world is absent");
-  const named = selectors.some((selector) => selector.startsWith("@"))
-    ? await observeKanshi({
-        world: coordinates.world,
-        ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-      })
+  const authority = selectors.some((selector) => selector.startsWith("@"))
+    ? await observeNamedAddress({ world: coordinates.world, repo: coordinates.repo ?? null })
     : undefined;
   const values: (AkumaObservation | KanshiReport)[] = [];
   const blocks: string[] = [];
@@ -564,8 +553,8 @@ async function runStatusSelection(
     const resolved = selector.startsWith("aku/")
       ? await readAkumaStatus(selector, undefined, coordinates)
       : selector.startsWith("@")
-        ? await namedStatus(selector, coordinates, named)
-        : await readContractStatus(selector, coordinates, named);
+        ? await namedStatus(selector, coordinates, authority!)
+        : await readContractStatus(selector, coordinates);
     values.push(resolved.value);
     if (command.output === "text") blocks.push(resolved.project());
   }
@@ -601,10 +590,7 @@ async function runStatusIdentity(
     const resolved = await namedStatus(
       command.contract,
       coordinates,
-      await observeKanshi({
-        world: coordinates.world,
-        ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-      }),
+      await observeNamedAddress({ world: coordinates.world, repo: coordinates.repo ?? null }),
     );
     return emit(command.output, resolved.value, () => resolved.project(), 0);
   }
