@@ -42,16 +42,10 @@ END`;
 
 // Open decisions retain their exact proof inputs even after a Tell becomes told.
 export const pendingTellSequencesSql = `SELECT tells.sequence FROM tells WHERE ${tellStateSql} = 'pending'
-  UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id
-  UNION SELECT tells.sequence FROM tells JOIN control c ON c.kind = 'pause'
-    WHERE json_type(c.value_json, '$.frontierTellId') = 'text'
-      AND tells.id = json_extract(c.value_json, '$.frontierTellId')`;
+  UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id`;
 export const pendingTellProtectionSql = `SELECT d.turn_sequence FROM tell_deliveries d
   JOIN tells ON tells.id = d.tell_id WHERE ${tellStateSql} = 'pending'
-  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id
-  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN control c ON c.kind = 'pause'
-    WHERE json_type(c.value_json, '$.frontierTellId') = 'text'
-      AND d.tell_id = json_extract(c.value_json, '$.frontierTellId')`;
+  UNION SELECT d.turn_sequence FROM tell_deliveries d JOIN tell_disposition_members m ON m.tell_id = d.tell_id`;
 
 type TellBatch = Readonly<{
   rows: readonly TellRow[];
