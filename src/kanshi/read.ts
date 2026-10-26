@@ -447,7 +447,7 @@ function attachAkumaAssociations(
       ...(aliases.kind === "failed" ? { aliasesUnavailable: true as const } : {}),
       rows: product.value.rows.map((row) => {
         const dispatch = dispatchById.get(row.id);
-        const snapshot = row.snapshot;
+        const { snapshot } = row;
         const placed = dispatch !== undefined && claimed.has(dispatch.contractId);
         return {
           ...row,
@@ -527,6 +527,40 @@ type RepoObservationInput = Readonly<{
   branch: string | null;
 }>;
 
+/**
+ * The repository-observation failure view: a failed Contract and Region beside the
+ * independently observed Debt, Alias, and Akuma sections. Debt reports the rows
+ * already observed before the failure and performs the existing fallback read only
+ * when none were.
+ */
+async function observeRepoFailure(
+  input: RepoObservationInput,
+  error: unknown,
+  akumaProduct: Section<AkumaProductWorld>,
+  aliases: Section<readonly AliasBinding[]>,
+  observedDebtRows: Section<DebtKanshiWorld> | undefined,
+): Promise<KanshiObservation> {
+  const { world, region, observedAt, branch } = input;
+  const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
+  const debtRows = observedDebtRows ?? (await readDebtRows(world));
+  const observeContract = contractEndpointObserver(failure);
+  return {
+    report: {
+      root: world,
+      observedAt,
+      branch,
+      contracts: failure,
+      debts: world === null ? { kind: "absent" } : joinDebts(debtRows, failure, observeContract),
+      akuma:
+        world === null
+          ? { kind: "absent" }
+          : attachAkumaAssociations(akumaProduct, aliases, failure, observeContract, new Set<string>()),
+      ...(region === undefined ? {} : { region: failure }),
+    },
+    aliases,
+  };
+}
+
 async function observeRepo(input: RepoObservationInput): Promise<KanshiObservation> {
   const { world, repo, region, contract, observedAt, branch } = input;
   const [initialDebtRows, aliases, akumaProduct] =
@@ -565,8 +599,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           board === undefined ? undefined : (id) => (id === contract ? namespaceDebtSection(board, id) : undefined),
         );
         const observeContract = contractEndpointObserver(contracts);
-        const debts =
-          world === null ? observedDebtRows : joinDebts(observedDebtRows, holders, observeContract);
+        const debts = world === null ? observedDebtRows : joinDebts(observedDebtRows, holders, observeContract);
         const claimed =
           dispatches.kind === "present"
             ? await claimedAssociatedContracts(observation, dispatches.value)
@@ -596,24 +629,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
       }),
     );
   } catch (error) {
-    const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
-    observedDebtRows ??= await readDebtRows(world);
-    const observeContract = contractEndpointObserver(failure);
-    return {
-      report: {
-        root: world,
-        observedAt,
-        branch,
-        contracts: failure,
-        debts: world === null ? { kind: "absent" } : joinDebts(observedDebtRows, failure, observeContract),
-        akuma:
-          world === null
-            ? { kind: "absent" }
-            : attachAkumaAssociations(akumaProduct, aliases, failure, observeContract, new Set()),
-        ...(region === undefined ? {} : { region: failure }),
-      },
-      aliases,
-    };
+    return await observeRepoFailure(input, error, akumaProduct, aliases, observedDebtRows);
   }
 }
 
