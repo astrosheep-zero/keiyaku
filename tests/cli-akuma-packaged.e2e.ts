@@ -305,7 +305,7 @@ test(
       for (const row of answerNarration)
         assert.match(
           row,
-          /^(?:\d{2}:\d{2}| {5}) \? say +“the answer”$/u,
+          /^(?:\d{2}:\d{2}| {5}) \? the answer$/u,
           "only unresolved narration may contain answer text",
         );
       assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");

@@ -187,7 +187,6 @@ export function renderBoundedPayload(
     columns: number;
     maxLines: number;
     quote: string;
-    openQuote: boolean;
     truncated: boolean;
   }>,
 ): readonly string[] {
@@ -197,7 +196,7 @@ export function renderBoundedPayload(
     const prefix = index === 0 ? input.first : input.continuation;
     if (rest.length === 0 && !input.quote && index === 0) return [prefix.trimEnd()];
     const opening = input.quote && index === 0 ? input.quote : "";
-    const closing = input.quote && !input.openQuote ? (input.quote === "“" ? "”" : input.quote) : "";
+    const closing = input.quote === "“" ? "”" : input.quote;
     const budget = Math.max(0, input.columns - displayColumns(prefix + opening + closing));
     if (budget === 0) return lines.length === 0 ? [prefix.trimEnd()] : lines;
     const fragment = payloadFragment(rest, budget, index === input.maxLines - 1, input.truncated);

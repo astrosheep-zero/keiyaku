@@ -2583,7 +2583,7 @@ test("a settled successful tool wears ✓ again while voice rows and told Tells 
   });
   const text = snapshotText({ status, contract: { kind: "none" } }, { columns: 100, color: false });
   assert.match(text, /✓ read/u, "a settled tool action affirms success");
-  assert.match(text, /│ say/u, "a voice row stays on the rail");
+  assert.match(text, /│ spoken$/mu, "speech sits directly on the rail without a label or quotes");
   assert.match(text, /│ told/u, "a told Tell stays on the rail");
   assert.ok((text.match(/✓/gu) ?? []).length >= 2, "multiple success marks are normal on one stream");
 });
@@ -2789,7 +2789,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]),
     { columns: 120, color: false },
   ).join("\n");
-  assert.match(truncatedRoster, /…”/u);
+  assert.match(truncatedRoster, /…$/u);
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
 });
 

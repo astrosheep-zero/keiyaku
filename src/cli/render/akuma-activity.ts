@@ -126,7 +126,7 @@ function clock(at: string): string {
 }
 
 function label(row: RenderRow, tool?: ToolRepr): string {
-  if (row.kind === "said") return "say";
+  if (row.kind === "said") return "";
   if (row.kind === "thought") return "think";
   if (row.kind === "note") return "note";
   if (row.kind === "call") return "call";
@@ -200,13 +200,14 @@ function verbColumn(verb: string): number {
  */
 function actionCell(head: string, verb: string, columns: number): string {
   const prefix = `${head} `;
+  if (verb === "") return prefix;
   const available = Math.max(0, columns - displayColumns(prefix) - 1);
   const width = Math.min(verbColumn(verb), available);
   return `${prefix}${padToDisplay(truncateDisplayText(verb, width), width)} `;
 }
 
-function continuationPrefix(): string {
-  return " ".repeat(TIME_WIDTH) + " │ " + " ".repeat(VERB_WIDTH) + " ";
+function continuationPrefix(verb: string): string {
+  return " ".repeat(TIME_WIDTH) + " │ " + (verb === "" ? "" : " ".repeat(VERB_WIDTH + 1));
 }
 
 /**
@@ -214,7 +215,7 @@ function continuationPrefix(): string {
  */
 type RowLayout = Readonly<{
   head: (time: string | undefined, glyph: string, verb: string, columns: number) => string;
-  continuation: () => string;
+  continuation: (verb: string) => string;
   marker: (count: number) => string;
   history?: true;
   compactRun?: true;
@@ -245,12 +246,7 @@ function historyLayout(): RowLayout {
 }
 
 function quotedBody(row: RenderRow): boolean {
-  return (
-    row.kind === "said" ||
-    row.kind === "thought" ||
-    row.kind === "tell" ||
-    (row.kind === "outcome" && row.outcome.kind === "answered")
-  );
+  return row.kind === "thought" || row.kind === "tell" || (row.kind === "outcome" && row.outcome.kind === "answered");
 }
 
 function pathTail(path: string, maximum: number): string {
@@ -326,7 +322,6 @@ type RowRenderOptions = Readonly<{
   first: string;
   continuation: string;
   tool?: ToolRepr | undefined;
-  inFlightSay?: boolean;
 }>;
 
 function rowBody(row: RenderRow, text: string, columns: number): string {
@@ -361,7 +356,7 @@ function toolOverflowPreview(
 }
 
 function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
-  const { layout, first, continuation, tool, inFlightSay = false } = options;
+  const { layout, first, continuation, tool } = options;
   const value = rowText(row, tool);
   const overflow = toolOverflowPreview(options, value, context.columns);
   if (overflow !== undefined) return overflow;
@@ -380,8 +375,7 @@ function renderRow(row: RenderRow, context: TextRenderContext, options: RowRende
         : layout.history === true
           ? Number.MAX_SAFE_INTEGER
           : value.lines,
-    quote: quotedBody(row) ? (layout.singleLine === true && row.kind !== "said" ? '"' : "“") : "",
-    openQuote: row.kind === "said" && inFlightSay,
+    quote: quotedBody(row) ? (layout.singleLine === true ? '"' : "“") : "",
     truncated: "truncated" in row && row.truncated === true,
   });
 }
@@ -403,12 +397,12 @@ function renderTimelineRow(
   const { inFlightSay = false, live = false, unsettled = false } = options;
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const glyph = inFlightSay ? (live ? "●" : "?") : unsettled ? "?" : mark(row, live);
+  const verb = label(row, tool);
   return renderRow(row, context, {
     layout,
-    first: layout.head(time, glyph, label(row, tool), context.columns),
-    continuation: layout.continuation(),
+    first: layout.head(time, glyph, verb, context.columns),
+    continuation: layout.continuation(verb),
     tool,
-    inFlightSay,
   });
 }
 
@@ -1272,7 +1266,6 @@ export function tellPayloadLines(text: string, context: TextRenderContext): read
     columns: context.columns,
     maxLines: 1,
     quote: '"',
-    openQuote: false,
     truncated: false,
   });
 }

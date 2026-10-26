@@ -73,7 +73,6 @@ export function renderContractCatalogue(list: ContractList): string {
             columns: 100,
             maxLines: 3,
             quote: "“",
-            openQuote: false,
             truncated: false,
           })),
     ];

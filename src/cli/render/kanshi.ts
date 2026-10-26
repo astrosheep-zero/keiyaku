@@ -141,7 +141,6 @@ function payload(label: string, text: string, context: TextRenderContext): reado
     columns: context.columns,
     maxLines: 3,
     quote: "“",
-    openQuote: false,
     truncated: false,
   });
 }

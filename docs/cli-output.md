@@ -197,10 +197,13 @@ the same completion judgment as wait, including a sleeping Akuma with an
 outstanding Tell. Only an observed input wait can justify elapsed-duration text,
 and an unknown change size remains unknown rather than implying additions or
 removals. Across observations, including Contract testimony and Akuma snapshot, history,
-compact, and attributed activity, free text uses one bounded payload discipline:
-one quote boundary and │-railed, body-aligned continuations. Payloads slice by
-whole grapheme cells without word-sensitive rearrangement and expose truncation
-at the end. World-board answer previews alone anchor to the tail with a leading
+compact, and attributed activity, free text uses one bounded payload discipline
+with body-aligned continuations. Akuma speech sits directly on the timeline rail
+without an action label or added quotation marks; tool actions and final answers
+retain their explicit labels. Other quoted payloads retain one quote boundary.
+This distinction changes presentation only, never event order or selection.
+Payloads slice by whole grapheme cells without word-sensitive rearrangement and
+expose truncation at the end. World-board answer previews alone anchor to the tail with a leading
 omission mark when the head is cut; the selected Akuma detail keeps head-first
 wrapping. Selected Contract status foregrounds the phase's outcome or current
 work judgment; terminal status does not repeat delivery mechanics, workspace

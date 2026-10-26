@@ -90,7 +90,7 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
   assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
 });
 
-test("quoted activity hard-wraps once, aligns continuations and truncates at a grapheme boundary", () => {
+test("speech uses the rail without a label or quotes and wraps at a grapheme boundary", () => {
   const row: ActivityRow = {
     kind: "said",
     sequence: 1,
@@ -100,10 +100,10 @@ test("quoted activity hard-wraps once, aligns continuations and truncates at a g
   };
   const lines = snapshotActivityLines(openAkumaSnapshot([{ kind: "row", row }]), { columns: 40, color: false });
   assert.equal(lines.length, 2);
-  assert.equal((lines.join("\n").match(/“/gu) ?? []).length, 1);
-  assert.equal((lines.join("\n").match(/”/gu) ?? []).length, 1);
-  assert.match(lines[1]!, /^ {5} │ {8}👩‍💻/u);
-  assert.match(lines[1]!, /…”$/u);
+  assert.doesNotMatch(lines.join("\n"), /say|[“”]/u);
+  assert.match(lines[0]!, /^\d{2}:\d{2} │ 👩‍💻/u);
+  assert.match(lines[1]!, /^ {5} │ 👩‍💻/u);
+  assert.match(lines[1]!, /…$/u);
   for (const line of lines) assert.ok(displayColumns(line) <= 40);
 });
 
@@ -467,10 +467,10 @@ test("an open turn settles old says on the rail and only its trailing say flushe
   assert.ok(!settled.some((line) => line.includes("?")), "a settled say never prints as unresolved");
   const live = stream.frame();
   assert.ok(!live.some((line) => line.includes("old settled say")), "a settled say never enters the live frame");
-  const liveSay = live.find((line) => line.includes(" say    "))!;
-  assert.match(liveSay, /● say/u, "only the open turn's trailing say stays live");
+  const liveSay = live.find((line) => line.includes("still streaming"))!;
+  assert.match(liveSay, /● still streaming$/u, "only the open turn's trailing say stays live");
   assert.ok(liveSay.includes("still streaming"), "the trailing say's text is live");
-  assert.ok(!liveSay.includes("”"), "the trailing say's quote remains open");
+  assert.doesNotMatch(liveSay, /[“”]/u, "live speech has no added quote boundary");
   const flushed = stream.flush();
   assert.ok(
     flushed.some((line) => line.includes("still streaming") && line.includes("?")),
