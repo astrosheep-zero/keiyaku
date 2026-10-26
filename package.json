@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku",
-  "version": "4.6.12",
+  "version": "4.6.13",
   "workspaces": [
     "plugins/square",
     "plugins/paseo/forwarder"
