@@ -15,12 +15,7 @@ import { main } from "../src/cli/main.js";
 import { captureOutput, cliJson } from "./support/cli-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { document } from "./support/library-verbs.js";
-import {
-  installNamespaceContext,
-  readNamespaceContext,
-  repairNamespaceContext,
-  resolveDebtNamespaceContext,
-} from "../src/debt/context.js";
+import { installNamespaceContext, repairNamespaceContext, resolveDebtNamespaceContext } from "../src/debt/context.js";
 
 function temporary(): string {
   return mkdtempSync(join(tmpdir(), "keiyaku-namespace-"));
@@ -29,13 +24,16 @@ function temporary(): string {
 test("namespace context stores root and nested namespaces in canonical bytes", async () => {
   const root = temporary();
   const coordinates = { directory: root, boundary: root };
-  assert.equal(await readNamespaceContext(coordinates), "absent");
+  assert.deepEqual(await resolveDebtNamespaceContext(coordinates), { namespace: [], source: "default-root" });
   await installNamespaceContext(root, ["contract", "inside"]);
-  assert.deepEqual(await readNamespaceContext(coordinates), ["contract", "inside"]);
+  assert.deepEqual(await resolveDebtNamespaceContext(coordinates), {
+    namespace: ["contract", "inside"],
+    source: "local-override",
+  });
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", ".gitignore"), "utf8"), "*\n");
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", "current"), "utf8"), "contract/inside\n");
   await installNamespaceContext(root, []);
-  assert.deepEqual(await readNamespaceContext(coordinates), []);
+  assert.deepEqual(await resolveDebtNamespaceContext(coordinates), { namespace: [], source: "local-override" });
   assert.equal(readFileSync(join(root, ".keiyaku", "namespace", "current"), "utf8"), "\n");
 });
 test("repair replaces malformed current bytes and readers reject symlinks", async () => {
@@ -43,20 +41,23 @@ test("repair replaces malformed current bytes and readers reject symlinks", asyn
     directory = join(root, ".keiyaku", "namespace");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "current"), "Bad Namespace\n");
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), {
-    kind: "malformed",
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: root, boundary: root }), {
+    kind: "invalid-namespace-context",
     path: join(root, ".keiyaku", "namespace", "current"),
   });
   assert.equal(await repairNamespaceContext(root, ["default"]), "installed");
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["default"]);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: root, boundary: root }), {
+    namespace: ["default"],
+    source: "local-override",
+  });
 
   const linked = temporary(),
     target = join(linked, "target");
   mkdirSync(join(linked, ".keiyaku", "namespace"), { recursive: true });
   writeFileSync(target, "linked\n");
   symlinkSync(target, join(linked, ".keiyaku", "namespace", "current"));
-  assert.deepEqual(await readNamespaceContext({ directory: linked, boundary: linked }), {
-    kind: "malformed",
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: linked, boundary: linked }), {
+    kind: "invalid-namespace-context",
     path: join(linked, ".keiyaku", "namespace", "current"),
   });
 });
@@ -66,13 +67,17 @@ test("nested directories inherit the boundary namespace and a nearer context ove
     nested = join(root, "src", "deep");
   mkdirSync(nested, { recursive: true });
   await installNamespaceContext(root, ["kei", "installed"]);
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["kei", "installed"]);
-  assert.deepEqual(await readNamespaceContext({ directory: join(root, "src"), boundary: root }), ["kei", "installed"]);
-  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: root }), ["kei", "installed"]);
+  const installed = { namespace: ["kei", "installed"], source: "local-override" };
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: root, boundary: root }), installed);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: join(root, "src"), boundary: root }), installed);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: nested, boundary: root }), installed);
 
   await installNamespaceContext(join(root, "src"), ["kei", "nearer"]);
-  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: root }), ["kei", "nearer"]);
-  assert.deepEqual(await readNamespaceContext({ directory: root, boundary: root }), ["kei", "installed"]);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: nested, boundary: root }), {
+    namespace: ["kei", "nearer"],
+    source: "local-override",
+  });
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: root, boundary: root }), installed);
 });
 
 test("namespace source attribution follows the directory that answered", async () => {
@@ -105,14 +110,16 @@ test("the ancestor walk stops at the boundary instead of escaping to an outer co
     nested = join(world, "src");
   mkdirSync(nested, { recursive: true });
   await installNamespaceContext(outer, ["outside"]);
-  assert.equal(await readNamespaceContext({ directory: nested, boundary: world }), "absent");
   assert.deepEqual(await resolveDebtNamespaceContext({ directory: nested, boundary: world, managed: true }), {
     namespace: [],
     source: "default-root",
   });
 
   await installNamespaceContext(world, ["inside"]);
-  assert.deepEqual(await readNamespaceContext({ directory: nested, boundary: world }), ["inside"]);
+  assert.deepEqual(await resolveDebtNamespaceContext({ directory: nested, boundary: world }), {
+    namespace: ["inside"],
+    source: "local-override",
+  });
 });
 
 test("a public bind's appointed worktree inherits its installed namespace and shares the Debt World", async () => {

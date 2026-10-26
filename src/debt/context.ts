@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
 import { normalizeIdentityStem } from "../identity/normalize.js";
 
-export type NamespaceContextRead =
+type NamespaceContextRead =
   | readonly string[]
   | "absent"
   | Readonly<{
@@ -82,10 +82,6 @@ async function walkNamespaceContext(
 function descendsFrom(candidate: string, boundary: string): boolean {
   const step = relative(boundary, candidate);
   return step === "" || (!isAbsolute(step) && step !== ".." && !step.startsWith(`..${sep}`));
-}
-
-export async function readNamespaceContext(coordinates: NamespaceContextInput): Promise<NamespaceContextRead> {
-  return (await walkNamespaceContext(coordinates)).read;
 }
 
 export async function installNamespaceContext(root: string, segments: readonly string[]): Promise<void> {
