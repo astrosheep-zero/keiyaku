@@ -111,17 +111,9 @@ export type NamedAddressAuthority = Readonly<{
 
 export type NamedAddressInput = NamedAddressAuthority & Readonly<{ selector: string }>;
 
-async function observeAliasBindings(path: WorldRoot): Promise<Section<readonly AliasBinding[]>> {
+async function observe<T>(read: () => Promise<T>): Promise<Section<T>> {
   try {
-    return { kind: "present", value: await readAliases(path) };
-  } catch (error) {
-    return { kind: "failed", failure: { message: error instanceof Error ? error.message : String(error) } };
-  }
-}
-
-async function observeContractCandidates(repo: Repo): Promise<Section<readonly ContractRow[]>> {
-  try {
-    return { kind: "present", value: await readCompleteContractCandidates(repo) };
+    return { kind: "present", value: await read() };
   } catch (error) {
     return { kind: "failed", failure: { message: error instanceof Error ? error.message : String(error) } };
   }
@@ -136,9 +128,10 @@ async function observeContractCandidates(repo: Repo): Promise<Section<readonly C
 export async function observeNamedAddress(
   input: Readonly<{ world: WorldRoot | null; repo: Repo | null }>,
 ): Promise<NamedAddressAuthority> {
+  const { world, repo } = input;
   return {
-    contracts: input.repo === null ? { kind: "absent" } : await observeContractCandidates(input.repo),
-    aliases: input.world === null ? { kind: "absent" } : await observeAliasBindings(input.world),
+    contracts: repo === null ? { kind: "absent" } : await observe(() => readCompleteContractCandidates(repo)),
+    aliases: world === null ? { kind: "absent" } : await observe(() => readAliases(world)),
   };
 }
 
