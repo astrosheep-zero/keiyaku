@@ -25,6 +25,8 @@ type TellExecutionInput = Readonly<{
   outcomeObserved?: OutcomeObserver;
 }>;
 
+type AskExecutionInput = TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>;
+
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
@@ -147,49 +149,55 @@ export async function observeAdmittedAskAkuma(
   };
 }
 
-export async function executeAskAkuma(
-  input: TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>,
-): Promise<AkumaAskResult> {
+/**
+ * The interrupt half of Ask: admit the Tell together with its yield request,
+ * then observe the answer bound to that same admission. Kept out of the public
+ * operation so ordinary and interrupted admission each read as one flow; both
+ * share `observeAdmittedAskAkuma`.
+ */
+async function executeInterruptAskAkuma(input: AskExecutionInput, owner: AkumaOwner): Promise<AkumaAskResult> {
+  const admission = await owner.admitInterrupt(input.body, {
+    ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
+    ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
+    ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
+    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  if (admission.kind === "unavailable")
+    throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+  const observing = new AbortController();
+  const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
+  const wake = owner.completeInterruptAdmission(admission, undefined, signal);
+  try {
+    const receipt =
+      admission.barrier === undefined
+        ? undefined
+        : {
+            ...(await owner.admittedReceipt(admission.tell.id)),
+            interruption: { kind: "pending" as const, bodySequence: admission.barrier.bodySequence },
+          };
+    return await observeAdmittedAskAkuma({
+      path: input.path,
+      id: input.id,
+      tellId: admission.tell.id,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      startedAt: performance.now(),
+      wake,
+      ...(receipt === undefined ? {} : { receipt }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
+      ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
+    });
+  } finally {
+    if (!observing.signal.aborted) observing.abort(new Error("interrupt observation ended"));
+    await wake.catch(() => undefined);
+  }
+}
+
+export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult> {
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
-  if (input.interrupt === true) {
-    const admission = await owner.admitInterrupt(input.body, {
-      ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
-      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-      ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    if (admission.kind === "unavailable")
-      throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
-    const observing = new AbortController();
-    const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
-    const wake = owner.completeInterruptAdmission(admission, undefined, signal);
-    try {
-      const receipt =
-        admission.barrier === undefined
-          ? undefined
-          : {
-              ...(await owner.admittedReceipt(admission.tell.id)),
-              interruption: { kind: "pending" as const, bodySequence: admission.barrier.bodySequence },
-            };
-      return await observeAdmittedAskAkuma({
-        path: input.path,
-        id: input.id,
-        tellId: admission.tell.id,
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        startedAt: performance.now(),
-        wake,
-        ...(receipt === undefined ? {} : { receipt }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
-        ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
-      });
-    } finally {
-      if (!observing.signal.aborted) observing.abort(new Error("interrupt observation ended"));
-      await wake.catch(() => undefined);
-    }
-  }
+  if (input.interrupt === true) return await executeInterruptAskAkuma(input, owner);
 
   const admission = await owner.admitTell(input.body, input.tellId, input.recordedAt, undefined, {
     ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
