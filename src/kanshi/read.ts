@@ -537,7 +537,6 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           readAliasBindings(world),
           readAkumaProduct(world),
         ]);
-  let observedDebtBoard: DebtWorldRead | undefined;
   let observedDebtRows = initialDebtRows;
   try {
     return await withGitDecodeChannel(repo, (channel) =>
@@ -552,22 +551,22 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
           contract !== undefined &&
           contractSection.kind === "present" &&
           contractSection.value.rows.some((row) => row.id === contract);
-        const board = selectedContract ? (observedDebtBoard = await readDebtWorld(world)) : undefined;
-        const debtRows =
+        const board = selectedContract ? await readDebtWorld(world) : undefined;
+        observedDebtRows =
           world === null
             ? { kind: "absent" as const }
-            : selectedContract
-              ? debtRowsFromBoard(world, board!)
-              : (initialDebtRows ?? (await readDebtRows(world)));
-        observedDebtRows = debtRows;
+            : board === undefined
+              ? (initialDebtRows ?? (await readDebtRows(world)))
+              : debtRowsFromBoard(world, board);
         const contracts = decorateContracts(
           contractSection,
           holders,
           dispatches,
-          selectedContract ? (id) => (id === contract ? namespaceDebtSection(board!, id) : undefined) : undefined,
+          board === undefined ? undefined : (id) => (id === contract ? namespaceDebtSection(board, id) : undefined),
         );
         const observeContract = contractEndpointObserver(contracts);
-        const debts = world === null ? debtRows : joinDebts(debtRows, holders, observeContract);
+        const debts =
+          world === null ? observedDebtRows : joinDebts(observedDebtRows, holders, observeContract);
         const claimed =
           dispatches.kind === "present"
             ? await claimedAssociatedContracts(observation, dispatches.value)
@@ -598,11 +597,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
     );
   } catch (error) {
     const failure = { kind: "failed" as const, failure: { message: diagnostic(error) } };
-    const debtRows =
-      world === null
-        ? { kind: "absent" as const }
-        : (observedDebtRows ??
-          (observedDebtBoard === undefined ? await readDebtRows(world) : debtRowsFromBoard(world, observedDebtBoard)));
+    observedDebtRows ??= await readDebtRows(world);
     const observeContract = contractEndpointObserver(failure);
     return {
       report: {
@@ -610,7 +605,7 @@ async function observeRepo(input: RepoObservationInput): Promise<KanshiObservati
         observedAt,
         branch,
         contracts: failure,
-        debts: world === null ? { kind: "absent" } : joinDebts(debtRows, failure, observeContract),
+        debts: world === null ? { kind: "absent" } : joinDebts(observedDebtRows, failure, observeContract),
         akuma:
           world === null
             ? { kind: "absent" }
