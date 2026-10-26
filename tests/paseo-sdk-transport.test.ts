@@ -264,6 +264,9 @@ export const Akuma = {
     return {
       async tell(text, options) {
         const values = await control();
+        // A pending Tell never settles on its own. No timer can finish it before
+        // the transport closes, so close -- not scheduling -- owns the outcome.
+        if (values.tellPending === true) await new Promise(() => {});
         if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
         if (values.tellMismatch === true) return { akuma: "aku/other/1", tell: values.tell.tell };
         return values.tell ?? { akuma: aku, tell: { admission: { fact: "recorded", tellId: "tell/1" },
@@ -376,10 +379,12 @@ test("cancellation settles only its own request, and close is the only thing tha
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "one request's cancellation never terminates unrelated work");
 
-  await set({ tellDelayMs: 5_000 });
+  // One stable control value for the whole concurrent phase: publishing the
+  // stream settings afterwards could make the worker read a Tell configuration
+  // this phase never intended.
+  await set({ tellPending: true, streamHistory: frame(1), streamDelayMs: 5_000 });
   const inFlight = transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction")
     .then(() => "resolved", (error: Error) => error.message);
-  await set({ streamHistory: frame(1), streamDelayMs: 5_000 });
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
   assert.deepEqual(pulled(await stream.next()), [1], "the transport serves a stream to the same worker");
   const inFlightFrame = stream.next().then(() => "resolved", (error: Error) => error.message);
