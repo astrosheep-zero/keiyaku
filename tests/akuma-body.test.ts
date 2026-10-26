@@ -56,6 +56,8 @@ import {
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { Akuma } from "../src/akuma/index.js";
 import { World } from "../src/world.js";
 
 /** Lifecycle watchdogs exclude optional default-observer startup and delivery. */
@@ -288,27 +290,47 @@ function installTurnOutcomeRecorder(paths: Parameters<typeof outcomes>[0]): Turn
   return recorder;
 }
 
-function sessionResource(session: Session) {
-  const { promise: closed, resolve: settleClosed } = promiseBarrier<void>();
-  void session.completion.then(() => settleClosed(), () => settleClosed());
+type FixtureResource = Readonly<{
+  closed?: Promise<void>;
+  abort?: () => Promise<void>;
+  forceDispose?: () => Promise<void>;
+}>;
+
+type FixtureSession = Omit<Session, "admission"> &
+  Readonly<{ admission?: Session["admission"]; resource?: FixtureResource }>;
+
+function sessionResource(session: FixtureSession): Readonly<{
+  closed: Promise<void>;
+  abort(): Promise<void>;
+  forceDispose(): Promise<void>;
+}> {
+  let settleClosed!: () => void;
+  const defaultClosed = new Promise<void>((resolve) => {
+    settleClosed = resolve;
+  });
+  const hasCustomClosure = session.resource?.closed !== undefined;
+  if (!hasCustomClosure) void session.completion.then(settleClosed, settleClosed);
+  const closeDefaultResource = (): void => {
+    if (!hasCustomClosure) settleClosed();
+  };
   return {
-    closed,
+    closed: session.resource?.closed ?? defaultClosed,
     abort: async () => {
-      await session.abort();
-      settleClosed();
+      await session.resource?.abort?.();
+      closeDefaultResource();
     },
     forceDispose: async () => {
-      await session.forceDispose?.();
-      settleClosed();
+      await (session.resource?.forceDispose ?? session.resource?.abort)?.();
+      closeDefaultResource();
     },
   };
 }
 
-function sessionAttempt(establish: () => Promise<Session>) {
-  return createProviderAttempt(undefined, async (custody) => {
+function sessionAttempt(establish: () => Promise<FixtureSession>, signal?: AbortSignal) {
+  return createProviderAttempt(signal, async (custody) => {
     const session = await establish();
     custody.own(sessionResource(session));
-    return session;
+    return normalizeSession(session);
   });
 }
 
@@ -327,32 +349,32 @@ function scenarioProvider(
   return { admitOptions: (options) => ({ kind: "admitted", options }), start, ...extra };
 }
 
-type FixtureSession = Omit<Session, "forceDispose"> & { forceDispose?: () => Promise<void> };
-
 function normalizeSession(session: FixtureSession): Session {
-  return { ...session, forceDispose: session.forceDispose ?? (async () => {}) };
+  const { admission, resource: _resource, ...drive } = session;
+  return { ...drive, admission: admission ?? { fence: "fixture" } };
 }
 
 function attemptForFixtureSession(
   value: Promise<FixtureSession> | ProviderAttempt<FixtureSession>,
+  signal?: AbortSignal,
 ): ProviderAttempt<Session> {
   if ("result" in value) return value as unknown as ProviderAttempt<Session>;
-  return createProviderAttempt(undefined, async (custody) => {
-    const session = normalizeSession(await value);
-    custody.own(sessionResource(session));
-    return session;
+  return createProviderAttempt(signal, async (custody) => {
+    const fixture = await value;
+    custody.own(sessionResource(fixture));
+    return normalizeSession(fixture);
   });
 }
 
 function bodyAdapter(adapter: FixtureProviderAdapter): ProviderAdapter {
   return {
     ...adapter,
-    start: (input) => attemptForFixtureSession(adapter.start(input)),
+    start: (input) => attemptForFixtureSession(adapter.start(input), input.signal),
     ...(adapter.resume === undefined
       ? {}
       : {
           resume: (input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) =>
-            attemptForFixtureSession(adapter.resume!(input)),
+            attemptForFixtureSession(adapter.resume!(input), input.signal),
         }),
   } as ProviderAdapter;
 }
@@ -390,7 +412,7 @@ function hangingSession(fence: string, abort: () => Promise<void> = async () => 
       },
     },
     completion: unresolved<TurnResult>(),
-    abort,
+    resource: { abort },
   };
 }
 
@@ -493,8 +515,7 @@ function adapter(
         },
       },
       completion: eventsFinished.then(() => input.result),
-      async abort() {},
-      async forceDispose() {},
+      resource: { abort: async () => {}, forceDispose: async () => {} },
     };
   };
   return scenarioProvider((input) => sessionAttempt(async () => await drive(input)), {
@@ -770,7 +791,7 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
           refused = true;
           return { kind: "turn-ended" as const };
         },
-        async abort() {},
+        resource: { abort: async () => {} },
       };
     };
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "build it", { initiator: "Alice" }), scenarioProvider(session, { resume: session }), {
@@ -920,7 +941,7 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
             tellObserved();
             return { kind: "accepted" as const, fence: "live-fence" };
           },
-          async abort() {},
+          resource: { abort: async () => {} },
         };
     });
     const launch = claudeBodyLaunch(allocated, root, "work", { initiator: "Alice" });
@@ -998,8 +1019,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
             tellObserved();
             return { kind: "accepted" as const, fence: "turn-1:tell-live" };
           },
-          async abort() {},
-          async forceDispose() {},
+          resource: { abort: async () => {}, forceDispose: async () => {} },
         }));
     });
     body = driveAkumaBody(
@@ -1492,9 +1512,11 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
               },
             },
             completion: new Promise<TurnResult>(() => {}),
-            async abort() {
-              aborted = true;
-              releaseEvents();
+            resource: {
+              abort: async () => {
+                aborted = true;
+                releaseEvents();
+              },
             },
           };
       }),
@@ -1535,9 +1557,11 @@ test("request-pump failure aborts the Session and closes request transport", asy
               },
             },
             completion: new Promise<TurnResult>(() => {}),
-            async abort() {
-              aborted = true;
-              releaseEvents();
+            resource: {
+              abort: async () => {
+                aborted = true;
+                releaseEvents();
+              },
             },
           };
       }),
@@ -1804,6 +1828,134 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
   }
 });
 
+test("public kill supervises an answered Turn until Attempt closure proof", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-kill-after-answer-");
+  const { promise: closed, resolve: releaseClosed } = promiseBarrier<void>();
+  let aborted = 0;
+  let forced = 0;
+  let body: Promise<unknown> | undefined;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "c0ffee08");
+    const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
+    const { promise: answerSettled, resolve: markAnswerSettled } = promiseBarrier<void>();
+    const answer: TurnResult = { kind: "answered", answer: "answer", historyId: "answer-history" };
+    const running = scenarioProvider(async () => ({
+      admission: { fence: "answer-before-close" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "answer-before-close" } };
+          markEventsEnded();
+        },
+      },
+      completion: Promise.resolve(answer).then((result) => {
+        markAnswerSettled();
+        return result;
+      }),
+      resource: {
+        closed,
+        abort: async () => {
+          aborted += 1;
+        },
+        forceDispose: async () => {
+          forced += 1;
+          releaseClosed();
+        },
+      },
+    }));
+    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    await waitUntilLatestBody(allocated.paths, body);
+    await Promise.all([eventsEnded, answerSettled]);
+    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, undefined);
+    assert.equal(aborted, 0);
+    assert.equal(forced, 0);
+    assert.equal(
+      await Akuma.select(await World.at(root), allocated.id).kill({ signal: AbortSignal.timeout(5_000) }),
+      "killed",
+    );
+    await body;
+    assert.equal(aborted, 1);
+    assert.equal(forced, 1);
+    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
+  } finally {
+    releaseClosed();
+    await body?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("interrupt supervises an answered Turn until Attempt closure proof", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-interrupt-after-answer-");
+  const { promise: closed, resolve: releaseClosed } = promiseBarrier<void>();
+  let aborted = 0;
+  let body: Promise<unknown> | undefined;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "c0ffee09");
+    const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
+    const { promise: answerSettled, resolve: markAnswerSettled } = promiseBarrier<void>();
+    const running = scenarioProvider(async () => ({
+      admission: { fence: "interrupt-before-close" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "interrupt-before-close" } };
+          markEventsEnded();
+        },
+      },
+      completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "answer", historyId: "answer-history" }).then(
+        (result) => {
+          markAnswerSettled();
+          return result;
+        },
+      ),
+      resource: {
+        closed,
+        abort: async () => {
+          aborted += 1;
+          releaseClosed();
+        },
+        forceDispose: async () => {},
+      },
+    }));
+    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
+    await waitUntilLatestBody(allocated.paths, body);
+    await Promise.all([eventsEnded, answerSettled]);
+    assert.deepEqual(await outcomes(allocated.paths), []);
+    const interrupted = await new AkumaOwner(allocated.id, await World.at(root)).interrupt("continue", {
+      runtime: {
+        async spawn(paths) {
+          return {
+            pid: 0,
+            exited: Promise.resolve({
+              code: LEASH_HELD_EXIT,
+              signal: null,
+              log: { path: paths.log, from: 0, to: 0 },
+            }),
+            async terminate() {},
+            release() {},
+          } satisfies OwnedProcess;
+        },
+      },
+    });
+    assert.equal(interrupted.kind, "interrupted");
+    if (interrupted.kind !== "interrupted") throw new Error("interrupt was not completed");
+    await body;
+    assert.equal(aborted, 1);
+    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
+    assert.equal((await readHeart(allocated.paths)).pending.length, 1);
+    assert.equal(interrupted.tell.wake.kind, "held");
+  } finally {
+    releaseClosed();
+    await body?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("pause aborts the current drive and records the body as put down", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-pause-");
   try {
@@ -1825,13 +1977,15 @@ test("pause aborts the current drive and records the body as put down", async ()
             },
           },
           completion,
-          async abort() {
-            throw new Error("graceful disposal failed");
-          },
-          async forceDispose() {
-            forced = true;
-            aborted = true;
-            settle({ kind: "failed", diagnostic: "paused" });
+          resource: {
+            abort: async () => {
+              throw new Error("graceful disposal failed");
+            },
+            forceDispose: async () => {
+              forced = true;
+              aborted = true;
+              settle({ kind: "failed", diagnostic: "paused" });
+            },
           },
         };
     });
@@ -1872,11 +2026,13 @@ test("forced disposal failure records hung and broke-off before the Body returns
               },
             },
             completion: new Promise<TurnResult>(() => {}),
-            async abort() {
-              throw new Error("graceful disposal failed");
-            },
-            async forceDispose() {
-              throw new Error("forced disposal failed");
+            resource: {
+              abort: async () => {
+                throw new Error("graceful disposal failed");
+              },
+              forceDispose: async () => {
+                throw new Error("forced disposal failed");
+              },
             },
           };
       }),
@@ -1916,8 +2072,6 @@ test("provider closure failure enters Body supervision before session completion
                 },
               },
               completion: new Promise<TurnResult>(() => {}),
-              async abort() {},
-              async forceDispose() {},
             }),
             closed,
             async abort() {},
@@ -1973,9 +2127,11 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
               tellReturned();
               return { kind: "turn-ended" as const };
             },
-            async abort() {
-              aborted = true;
-              settle({ kind: "failed", diagnostic: "paused" });
+            resource: {
+              abort: async () => {
+                aborted = true;
+                settle({ kind: "failed", diagnostic: "paused" });
+              },
             },
           };
       }),
@@ -2058,7 +2214,6 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
               },
             },
             completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "history-bad" }),
-            async abort() {},
           };
       }),
       { now: () => "2026-08-08T00:00:02.000Z" },
@@ -2257,8 +2412,7 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
         admission: { fence: `overflow-${starts.length}` },
         events,
         completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "done" }),
-        async abort() {},
-        async forceDispose() {},
+        resource: { abort: async () => {}, forceDispose: async () => {} },
       };
     };
     const provider: FixtureProviderAdapter = scenarioProvider(drive, { resume: drive });

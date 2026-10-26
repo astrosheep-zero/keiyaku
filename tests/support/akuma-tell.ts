@@ -14,8 +14,14 @@ import {
 } from "../../src/akuma/provider.js";
 import { World } from "../../src/world.js";
 
-type FixtureSession = Omit<Session, "admission" | "forceDispose"> &
-  Readonly<{ admission?: Session["admission"]; forceDispose?: Session["forceDispose"] }>;
+type FixtureResource = Readonly<{
+  closed?: Promise<void>;
+  abort?: () => Promise<void>;
+  forceDispose?: () => Promise<void>;
+}>;
+
+type FixtureSession = Omit<Session, "admission"> &
+  Readonly<{ admission?: Session["admission"]; resource?: FixtureResource }>;
 
 export function fixtureAttempt(
   input: Readonly<{ signal: AbortSignal }>,
@@ -24,28 +30,16 @@ export function fixtureAttempt(
 ) {
   return createProviderAttempt(input.signal, async (custody) => {
     const fixture = await establish();
-    const session: Session = {
-      ...fixture,
-      admission: fixture.admission ?? { fence },
-      forceDispose: fixture.forceDispose ?? fixture.abort,
-    };
-    let settleClosed!: () => void;
-    const closed = new Promise<void>((resolve) => {
-      settleClosed = resolve;
-    });
-    void session.completion.then(settleClosed, settleClosed);
+    const { admission, resource, ...session } = fixture;
     custody.own({
-      closed,
-      abort: async () => {
-        await session.abort();
-        settleClosed();
-      },
-      forceDispose: async () => {
-        await session.forceDispose();
-        settleClosed();
-      },
+      closed: resource?.closed ?? fixture.completion.then(() => undefined, () => undefined),
+      ...(resource?.abort === undefined ? {} : { abort: resource.abort }),
+      forceDispose: resource?.forceDispose ?? resource?.abort ?? (async () => undefined),
     });
-    return session;
+    return {
+      ...session,
+      admission: admission ?? { fence },
+    };
   });
 }
 
@@ -63,7 +57,7 @@ export function answering(answer: string): ProviderAdapter {
           },
         },
         completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "tell-history" }),
-        async abort() {},
+        resource: { abort: async () => {} },
       }));
     },
   };

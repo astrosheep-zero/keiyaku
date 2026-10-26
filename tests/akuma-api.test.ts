@@ -228,7 +228,7 @@ function gatedAnswer(gate: Promise<string>, started?: () => void): ProviderAdapt
       },
     },
     completion: gate.then((answer) => ({ kind: "answered" as const, answer, historyId: "waited-fixture" })),
-    async abort() {},
+    resource: { abort: async () => {} },
   }));
 }
 
@@ -390,7 +390,7 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
         },
       },
       completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
-      async abort() {},
+      resource: { abort: async () => {} },
     }));
     const failed = await born("a1000005", failing);
     assert.deepEqual((await failed.akuma.ask("structured", { schema })).observation, { reason: "failed", diagnostic: "provider broke" });
@@ -504,8 +504,10 @@ test("idle after kill names the killed life", async () => {
         },
       },
       completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
-      async abort() {
-        release?.();
+      resource: {
+        abort: async () => {
+          release?.();
+        },
       },
     }));
     await recordTell(allocated.paths, {

@@ -1917,7 +1917,7 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
         },
       },
       completion: finish.promise,
-      async abort() {},
+      resource: { abort: async () => {} },
     })),
     now: "2026-08-18T00:00:02.000Z",
   });
@@ -1999,7 +1999,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
         },
       },
       completion: finish.promise,
-      async abort() {},
+      resource: { abort: async () => {} },
     })),
     now: "2026-08-18T00:00:03.000Z",
   });

@@ -38,7 +38,13 @@ function admit(options: ProviderOptions): void {
   if (options.effort !== undefined && options.model === undefined)
     throw new Error("OpenCode effort requires an explicit model");
 }
-function ownRuntime(custody: AttemptCustody, runtime: OpencodeRuntime): () => Promise<void> {
+function ownRuntime(
+  custody: AttemptCustody,
+  runtime: OpencodeRuntime,
+): Readonly<{
+  close(): Promise<void>;
+  setControls(controls: Readonly<{ abort(): Promise<void>; forceDispose(): Promise<void> }>): void;
+}> {
   let closing: Promise<void> | undefined;
   let resolve!: () => void;
   let reject!: (error: unknown) => void;
@@ -53,8 +59,16 @@ function ownRuntime(custody: AttemptCustody, runtime: OpencodeRuntime): () => Pr
     }
     return closing;
   };
-  custody.own({ closed, abort: close, forceDispose: close });
-  return close;
+  let abort = close;
+  let forceDispose = close;
+  custody.own({ closed, abort: () => abort(), forceDispose: () => forceDispose() });
+  return {
+    close,
+    setControls(controls) {
+      abort = controls.abort;
+      forceDispose = controls.forceDispose;
+    },
+  };
 }
 function liveAdmission(initial: string) {
   let latest = initial;
@@ -247,14 +261,14 @@ async function openResources(
   loader: OpencodeSdkLoader | undefined,
   custody: AttemptCustody,
 ) {
-  let closeRuntime!: () => Promise<void>;
+  let runtimeOwner!: ReturnType<typeof ownRuntime>;
   const runtime = await loadOpencode({
     execution,
     cwd: input.cwd,
     signal: custody.signal,
     ...(loader === undefined ? {} : { loader }),
     onRuntime: (ready) => {
-      closeRuntime = ownRuntime(custody, ready);
+      runtimeOwner = ownRuntime(custody, ready);
     },
     ...(input.requests === undefined ? {} : { requests: input.requests.dir }),
   });
@@ -265,8 +279,8 @@ async function openResources(
     subscribe: runtime.client.event.subscribe,
   });
   let closing: Promise<void> | undefined;
-  const close = () => (closing ??= Promise.all([stream.retire(), closeRuntime()]).then(() => undefined));
-  return { runtime, stream, close };
+  const close = () => (closing ??= Promise.all([stream.retire(), runtimeOwner.close()]).then(() => undefined));
+  return { runtime, stream, runtimeOwner, close };
 }
 async function submitPrompt(runtime: OpencodeRuntime, id: string, nativeID: string, text: string): Promise<void> {
   const response = object(object(await runtime.client.session.prompt({ id, body: { id: nativeID, text } }))?.data);
@@ -280,7 +294,7 @@ async function openTurn(
   resources: Awaited<ReturnType<typeof openResources>>,
   id: string,
 ): Promise<Session> {
-  const { runtime, stream, close } = resources;
+  const { runtime, stream, runtimeOwner, close } = resources;
   const events = new AgentEventChannel();
   events.emit({ type: "session", coordinate: coordinate(id) });
   const initial = messageId();
@@ -313,6 +327,26 @@ async function openTurn(
   await prompt(initial, launchPrompt(input.body, input.launchTells));
   signal.throwIfAborted();
   let submissions: Promise<void> = admission.initial.then(() => undefined);
+  const abort = async (): Promise<void> => {
+    admission.end();
+    if (finishing) {
+      await close();
+      return;
+    }
+    // The v2 interrupt response follows execution settlement. Do not hide its
+    // refusal; server and connection retirement must still run on failure.
+    control ??= runtime.client.session.interrupt({ id });
+    try {
+      await control;
+    } finally {
+      await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
+    }
+  };
+  const forceDispose = async (): Promise<void> => {
+    admission.end();
+    await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
+  };
+  runtimeOwner.setControls({ abort, forceDispose });
   return {
     admission: { fence: initial },
     events,
@@ -331,25 +365,6 @@ async function openTurn(
         () => undefined,
       );
       return next;
-    },
-    abort: async () => {
-      admission.end();
-      if (finishing) {
-        await close();
-        return;
-      }
-      // The v2 interrupt response follows execution settlement. Do not hide its
-      // refusal; server and connection retirement must still run on failure.
-      control ??= runtime.client.session.interrupt({ id });
-      try {
-        await control;
-      } finally {
-        await finish({ kind: "failed", diagnostic: "OpenCode session interrupted" });
-      }
-    },
-    forceDispose: async () => {
-      admission.end();
-      await finish({ kind: "failed", diagnostic: "OpenCode session force-disposed" });
     },
   };
 }
@@ -391,14 +406,14 @@ export function createOpencodeProvider(
     fork: (input) =>
       createProviderAttempt(new AbortController().signal, async (custody) => {
         const id = sessionId(input.session);
-        let close!: () => Promise<void>;
+        let runtimeOwner!: ReturnType<typeof ownRuntime>;
         const runtime = await loadOpencode({
           execution,
           cwd: input.cwd,
           signal: custody.signal,
           ...(loader === undefined ? {} : { loader }),
           onRuntime: (ready) => {
-            close = ownRuntime(custody, ready);
+            runtimeOwner = ownRuntime(custody, ready);
           },
         });
         try {
@@ -422,7 +437,7 @@ export function createOpencodeProvider(
           }
           return { session: coordinate(child) };
         } finally {
-          await close();
+          await runtimeOwner.close();
         }
       }),
   };

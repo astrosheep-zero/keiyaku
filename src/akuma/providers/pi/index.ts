@@ -264,11 +264,24 @@ async function drivePi(
     })().then(settleRetired, failRetired);
     return closed;
   };
+  const abort = (): Promise<void> => {
+    state.abortRequest ??= (async () => {
+      if (state.settled) return;
+      state.aborting = true;
+      try {
+        await native.abort();
+      } catch {
+        /* prompt settlement still proves local cleanup */
+      }
+      await settle({ kind: "failed", diagnostic: "Pi session aborted" });
+    })();
+    return state.abortRequest;
+  };
   const forceDispose = async (): Promise<void> => {
     if (!state.settled) state.aborting = true;
     await settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
   };
-  custody?.own({ closed, abort: forceDispose, forceDispose });
+  custody?.own({ closed, abort, forceDispose });
   try {
     unsubscribeAgent = agent.subscribe((event) => {
       if (event.type === "message_end") tells.accept(event.message);
@@ -319,20 +332,6 @@ async function drivePi(
       }
       return submission;
     },
-    abort: () => {
-      state.abortRequest ??= (async () => {
-        if (state.settled) return;
-        state.aborting = true;
-        try {
-          await native.abort();
-        } catch {
-          /* prompt settlement still proves local cleanup */
-        }
-        await settle({ kind: "failed", diagnostic: "Pi session aborted" });
-      })();
-      return state.abortRequest;
-    },
-    forceDispose,
   };
 }
 

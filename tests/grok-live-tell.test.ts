@@ -361,7 +361,7 @@ test("Grok Build settles a pending tell turn-ended on graceful abort or forced d
   const abortedRun = await startSession(aborted);
   const abortSubmission = abortedRun.session.tell!({ id: "abort-pending", text: "stop" });
   await aborted.interjectStarted;
-  const aborting = abortedRun.session.abort();
+  const aborting = abortedRun.attempt.abort();
   assert.deepEqual(await bounded(abortSubmission), { kind: "turn-ended" });
   await aborting;
   assert.equal(aborted.cancelled(), 1);
@@ -373,7 +373,7 @@ test("Grok Build settles a pending tell turn-ended on graceful abort or forced d
   const disposedRun = await startSession(disposed);
   const disposeSubmission = disposedRun.session.tell!({ id: "dispose-pending", text: "stop" });
   await disposed.interjectStarted;
-  const disposing = disposedRun.session.forceDispose();
+  const disposing = disposedRun.attempt.forceDispose();
   assert.deepEqual(await bounded(disposeSubmission), { kind: "turn-ended" });
   await disposing;
   assert.equal(disposed.forcedCleanup(), 1);

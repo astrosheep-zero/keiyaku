@@ -233,20 +233,6 @@ function beginAcpPrompt(
     admission: { fence: sessionId },
     events: turn.events,
     completion: turn.completion,
-    abort: async () => {
-      let result: TurnResult = { kind: "failed", diagnostic: "ACP turn cancelled" };
-      try {
-        await agent.notify(acp.methods.agent.session.cancel, { sessionId });
-      } catch (error) {
-        result = { kind: "failed", diagnostic: diagnostic(acp, error) };
-      }
-      if (!turn.open()) await child.close(true);
-      else await turn.finish(result, () => child.close(true));
-    },
-    forceDispose: async () => {
-      if (!turn.open()) await child.close(true);
-      else await turn.finish({ kind: "failed", diagnostic: "ACP turn force-disposed" }, () => child.close(true));
-    },
   };
 }
 
@@ -264,10 +250,12 @@ export async function startAcpSession(
     cwd: input.cwd,
     env: akumaExecutionEnvironment(globalThis.process.env, launch.env, input.requests?.dir),
   });
+  let abortOwned = async (): Promise<void> => await child.close(true);
+  let forceDisposeOwned = async (): Promise<void> => await child.close(true);
   custody?.own({
     closed: child.exited.then(() => undefined),
-    abort: async () => await child.close(true),
-    forceDispose: async () => await child.close(true),
+    abort: () => abortOwned(),
+    forceDispose: () => forceDisposeOwned(),
   });
   let sessionId: string | undefined;
   let turn!: ReturnType<typeof createAcpTurn>;
@@ -290,6 +278,20 @@ export async function startAcpSession(
       signal,
     );
     turn.events.emit({ type: "session", coordinate: { sessionId } });
+    abortOwned = async () => {
+      let result: TurnResult = { kind: "failed", diagnostic: "ACP turn cancelled" };
+      try {
+        await connection.agent.notify(acp.methods.agent.session.cancel, { sessionId: sessionId! });
+      } catch (error) {
+        result = { kind: "failed", diagnostic: diagnostic(acp, error) };
+      }
+      if (!turn.open()) await child.close(true);
+      else await turn.finish(result, () => child.close(true));
+    };
+    forceDisposeOwned = async () => {
+      if (!turn.open()) await child.close(true);
+      else await turn.finish({ kind: "failed", diagnostic: "ACP turn force-disposed" }, () => child.close(true));
+    };
     const session = beginAcpPrompt({ acp, agent: connection.agent }, child, turn, sessionId, input);
     return { session, agent: connection.agent, sessionId, open: turn.open };
   } catch (error) {

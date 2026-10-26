@@ -110,7 +110,7 @@ export type DriveTurnInput = Readonly<{
 type ActiveTurn = Readonly<{
   turnSequence: number;
   attempt: ProviderAttempt<Session>;
-  custodyFailure: Promise<never>;
+  attemptClosure: Promise<AttemptClosure>;
   drive: Session;
   requests: BodyRequestPump;
   cwd: string;
@@ -128,6 +128,7 @@ type TurnWriters = Readonly<{
 }>;
 
 type Retirement = Readonly<{ kind: "retired" }> | Readonly<{ kind: "hung" }>;
+type AttemptClosure = Readonly<{ kind: "closed" }> | Readonly<{ kind: "failed"; error: unknown }>;
 type StartTurnResult =
   | ActiveTurn
   | Readonly<{ kind: "stopped" }>
@@ -252,7 +253,14 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     session === undefined
       ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
       : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
-  const custodyFailure = observeFailure(attempt.closed);
+  const attemptClosure: Promise<AttemptClosure> = attempt.closed.then(
+    () => ({ kind: "closed" as const }),
+    (error: unknown) => ({ kind: "failed" as const, error }),
+  );
+  const custodyFailure = attemptClosure.then((closure) => {
+    if (closure.kind === "failed") throw closure.error;
+    return new Promise<never>(() => undefined);
+  });
   try {
     const selected = await Promise.race([attempt.result, requests.failure, custodyFailure]);
     if (input.supervisor.signal.aborted) {
@@ -283,7 +291,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     return {
       turnSequence: turn.sequence,
       attempt,
-      custodyFailure,
+      attemptClosure,
       drive: selected,
       requests,
       cwd,
@@ -378,13 +386,6 @@ function observeFailure(settlement: Promise<unknown>): Promise<never> {
   );
 }
 
-function observeCompletionFailure(drive: Session): Promise<Readonly<{ kind: "completion-failed"; error: unknown }>> {
-  return drive.completion.then(
-    () => new Promise<never>(() => {}),
-    (error: unknown) => ({ kind: "completion-failed" as const, error }),
-  );
-}
-
 async function submitPendingLiveTells(
   writers: TurnWriters,
   pending: readonly TellFact[],
@@ -453,7 +454,9 @@ type TurnWakeup =
   | Readonly<{ kind: "event"; event: IteratorResult<AgentEvent> }>
   | Readonly<{ kind: "heart"; observation: BodyControlSnapshot }>
   | Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>
-  | Readonly<{ kind: "completion-failed"; error: unknown }>
+  | Readonly<{ kind: "completion"; result: TurnResult }>
+  | Readonly<{ kind: "closed" }>
+  | Readonly<{ kind: "drained" }>
   | Readonly<{ kind: "failed"; error: unknown }>;
 
 /**
@@ -504,8 +507,22 @@ function createTurnWakeups(observeHeart: (after: BodyControlSnapshot) => Promise
         (error: unknown) => publish({ kind: "failed", error }),
       );
     },
-    completionFailed: (source: Promise<Readonly<{ kind: "completion-failed"; error: unknown }>>): void => {
-      void source.then((wakeup) => publish(wakeup));
+    completion: (source: Promise<TurnResult>): void => {
+      void source.then(
+        (result) => publish({ kind: "completion", result }),
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
+    },
+    closure: (source: Promise<AttemptClosure>): void => {
+      void source.then((closure) =>
+        publish(closure.kind === "closed" ? { kind: "closed" } : { kind: "failed", error: closure.error }),
+      );
+    },
+    drained: (source: Promise<void>): void => {
+      void source.then(
+        () => publish({ kind: "drained" }),
+        (error: unknown) => publish({ kind: "failed", error }),
+      );
     },
     next: (): Promise<TurnWakeup> => {
       const ready = queue.shift();
@@ -532,18 +549,23 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;
   const writers: TurnWriters = { input, turnSequence, drive, writeWitness, mayWrite };
   const receiptFailure = observeFailure(pumpReceipts(writers));
-  const completionFailure = observeCompletionFailure(drive);
   const iterator = drive.events[Symbol.asyncIterator]();
   const witness: ModelWitness = { written: false, model: undefined };
   let liveTells = true;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
+  let eventsEnded = false;
+  let result: TurnResult | undefined;
+  let attemptClosed = false;
+  let effectsDrained = false;
+  let drainArmed = false;
+  let drainingEffects: Promise<void> | undefined;
   const wakeups = createTurnWakeups((after) => input.supervisor.next(after));
   wakeups.event(iterator.next());
   wakeups.heart(heart);
   wakeups.failure(receiptFailure);
   wakeups.failure(requests.failure);
-  wakeups.failure(active.custodyFailure);
-  wakeups.completionFailed(completionFailure);
+  wakeups.completion(drive.completion);
+  wakeups.closure(active.attemptClosure);
   try {
     for (;;) {
       if (input.supervisor.signal.aborted) {
@@ -551,7 +573,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         const retirement = await stopActiveDrive(input, active);
         return retirement.kind === "hung" ? retirement : { kind: "stopped" };
       }
-      if (hasUnattemptedTell(liveTells, tellPump, heart.pending, attempted)) {
+      if (result === undefined && hasUnattemptedTell(liveTells, tellPump, heart.pending, attempted)) {
         if (drive.tell === undefined) {
           writesOpen = false;
           const retirement = await stopActiveDrive(input, active);
@@ -561,32 +583,40 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         wakeups.tell(tellPump);
       }
       const next = await wakeups.next();
-      if (next.kind === "completion-failed") {
-        requests.stopAdmission();
-        throw next.error;
-      }
       if (next.kind === "failed") throw next.error;
       if (next.kind === "heart") {
         heart = next.observation;
         wakeups.heart(heart);
-        continue;
-      }
-      if (next.kind === "tell") {
+      } else if (next.kind === "tell") {
         tellPump = null;
         liveTells = next.result === "live";
-        continue;
+      } else if (next.kind === "completion") {
+        result = next.result;
+        liveTells = false;
+        requests.stopAdmission();
+      } else if (next.kind === "closed") {
+        attemptClosed = true;
+      } else if (next.kind === "drained") {
+        effectsDrained = true;
+        drainArmed = false;
+      } else if (next.kind === "event") {
+        if (next.event.done) eventsEnded = true;
+        else {
+          await writeProviderEvent(input, active, next.event.value, witness);
+          if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
+          wakeups.event(iterator.next());
+        }
       }
-      if (next.event.done) break;
-      await writeProviderEvent(input, active, next.event.value, witness);
-      if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
-      wakeups.event(iterator.next());
+      if (eventsEnded && result !== undefined && attemptClosed && tellPump === null && !drainArmed) {
+        drainingEffects ??= writeWitness.drain();
+        drainArmed = true;
+        wakeups.drained(drainingEffects);
+      }
+      if (eventsEnded && result !== undefined && attemptClosed && tellPump === null && effectsDrained) {
+        writesOpen = false;
+        return await settleCompletion(result, turnSession, active);
+      }
     }
-    const result = await drive.completion;
-    await active.attempt.closed;
-    if (tellPump !== null) await tellPump;
-    await writeWitness.drain();
-    writesOpen = false;
-    return await settleCompletion(result, turnSession, active);
   } catch (error) {
     writesOpen = false;
     if (input.supervisor.signal.aborted) {

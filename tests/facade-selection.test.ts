@@ -76,13 +76,11 @@ function fixtureSession(input: Readonly<{ signal: AbortSignal }>) {
         },
       },
       completion,
-      async abort() {},
-      async forceDispose() {},
     };
     custody.own({
       closed: completion.then(() => undefined),
-      abort: session.abort,
-      forceDispose: session.forceDispose,
+      abort: async () => {},
+      forceDispose: async () => {},
     });
     return session;
   });
@@ -727,8 +725,10 @@ test(
           answer: "done",
           historyId: "waiting-history",
         })),
-        async abort() {
-          finish.resolve();
+        resource: {
+          abort: async () => {
+            finish.resolve();
+          },
         },
       };
     });

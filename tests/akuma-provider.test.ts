@@ -1149,8 +1149,9 @@ test("ACP refuses unavailable model and effort choices before sending a prompt",
 test("ACP forced disposal closes its owned process tree after standard session/cancel", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-acp-cancel-");
   const fake = fakeAcp(root, "cancel");
-  const drive = await createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root })).result;
-  await drive.forceDispose();
+  const attempt = createAcpProvider(fake.execution).start(freshInput("wait", { cwd: root }));
+  const drive = await attempt.result;
+  await attempt.forceDispose();
   const events = await collectEvents(drive.events);
   assert.deepEqual(events, [{ type: "session", coordinate: { sessionId: "fresh-session" } }]);
   assert.equal((await drive.completion).kind, "failed");
@@ -2306,7 +2307,10 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
     })();
 
     await attempt[dispose]();
-    assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "Pi session force-disposed" });
+    assert.deepEqual(await drive.completion, {
+      kind: "failed",
+      diagnostic: dispose === "abort" ? "Pi session aborted" : "Pi session force-disposed",
+    });
     await draining;
     await attempt.closed;
     assert.deepEqual(events, [
@@ -2318,11 +2322,12 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
 
 test("Pi keeps abort pending when native cleanup refuses to settle", async () => {
   const fake = fakePiSdk({ promptNeverSettles: true, abortNeverSettles: true });
-  const drive = await createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
+  const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
     freshInput("wait", { cwd: "/work" }),
-  ).result;
+  );
+  await attempt.result;
   let settled = false;
-  void drive.abort().then(() => {
+  void attempt.abort().then(() => {
     settled = true;
   });
   await new Promise((resolve) => setTimeout(resolve, 75));
@@ -3540,9 +3545,9 @@ test("Codex admission failures preserve the original diagnostic", async () => {
 test("Codex app-server abort interrupts and releases its owned child", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-codex-abort-");
   const fake = fakeCodex(root, "interrupt");
-  const provider = createCodexAppServerProvider(fake.executable);
-  const drive = await provider.start(freshInput("wait", { cwd: root })).result;
-  await drive.abort();
+  const attempt = createCodexAppServerProvider(fake.executable).start(freshInput("wait", { cwd: root }));
+  const drive = await attempt.result;
+  await attempt.abort();
   await collectEvents(drive.events);
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "codex app-server interrupted" });
 });

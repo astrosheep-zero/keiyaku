@@ -435,14 +435,6 @@ async function driveClaude(
     receipts,
     completion: observed.completion,
     tell: claudeTell(input, observed, accepted, driveState, run),
-    async abort(): Promise<void> {
-      shutDown(new Error("Claude query aborted"));
-      await observed.completion;
-    },
-    async forceDispose(): Promise<void> {
-      shutDown(new Error("Claude query force-disposed"));
-      await observed.completion;
-    },
   };
 }
 

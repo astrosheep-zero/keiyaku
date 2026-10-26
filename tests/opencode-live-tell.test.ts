@@ -111,7 +111,7 @@ test("OpenCode v2 cancellation interrupts once and retires queued live admission
   const attempt = createOpencodeProvider({ loader: native.loader }).start(native.input);
   const drive = await attempt.result;
   const pending = drive.tell!({ id: "tell", text: "queued" });
-  await drive.abort();
+  await attempt.abort();
   await attempt.closed;
   assert.deepEqual(await pending, { kind: "turn-ended" });
   assert.deepEqual(native.calls.at(-1), { method: "interrupt", value: { id: native.id } });
@@ -126,14 +126,14 @@ test("OpenCode v2 resume selects the model before its first prompt, never freshe
     session: { kind: "resume", coordinate: { sessionId: native.id } },
     options: { model: "vendor/model", effort: "high", systemPrompt: "follow these rules" },
   });
-  const drive = await attempt.result;
+  await attempt.result;
   assert.deepEqual(native.calls.slice(0, 3), [
     { method: "get", value: { id: native.id } },
     { method: "switchModel", value: { id: native.id, model: { providerID: "vendor", id: "model", variant: "high" } } },
     { method: "get", value: { id: native.id } },
   ]);
   assert.deepEqual(native.calls[3], { method: "instructions", value: { id: native.id, text: "follow these rules" } });
-  await drive.forceDispose();
+  await attempt.forceDispose();
   await attempt.closed;
 });
 

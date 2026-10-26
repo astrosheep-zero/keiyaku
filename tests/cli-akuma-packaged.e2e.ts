@@ -490,11 +490,13 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
             answer: "finished",
             historyId: "packaged-history",
           })),
-          async abort() {
-            finishEvents();
-          },
-          async forceDispose() {
-            finishEvents();
+          resource: {
+            abort: async () => {
+              finishEvents();
+            },
+            forceDispose: async () => {
+              finishEvents();
+            },
           },
         };
       });

@@ -448,7 +448,7 @@ const provider: ProviderAdapter = fixtureAdapter(async () => {
       answer: "public answer",
       historyId: "public-history",
     })),
-    async abort() {},
+    resource: { abort: async () => {} },
   };
 });
 
@@ -467,7 +467,7 @@ test("turn owner folds a rejected completion while the event stream remains open
         },
       },
       completion,
-      async abort() {},
+      resource: { abort: async () => {} },
     };
   });
   let driving: ReturnType<typeof driveAkumaBody> | undefined;
@@ -1276,7 +1276,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
         kind: "answered" as const,
         answer: "complete without fork",
       })),
-      async abort() {},
+      resource: { abort: async () => {} },
     };
   });
   await driveAkumaBody(
@@ -1882,9 +1882,11 @@ test("kill gives the Body a grace window to abort its owned provider session", a
       },
     },
     completion,
-    async abort() {
-      aborted = true;
-      settle({ kind: "failed", diagnostic: "stopped" });
+    resource: {
+      abort: async () => {
+        aborted = true;
+        settle({ kind: "failed", diagnostic: "stopped" });
+      },
     },
   }));
   const launch: BodyLaunch = {

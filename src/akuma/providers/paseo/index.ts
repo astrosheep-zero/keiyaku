@@ -297,8 +297,6 @@ class PaseoDrive {
       admission: { fence },
       events: this.turn.events,
       completion,
-      abort: () => this.retire(true),
-      forceDispose: () => this.retire(true),
     };
   }
 
