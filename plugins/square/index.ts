@@ -1,8 +1,18 @@
-import { Square, SquareError, type Activity, type Body, type WakeAddress } from "@astrosheep/square";
+import {
+  Square,
+  SquareError,
+  type Activity,
+  type ActivityMetadata,
+  type Body,
+  type WakeAddress,
+} from "@astrosheep/square";
 import { join } from "node:path";
 import type { KeiyakuPlugin, PluginSignalMap } from "@astrosheep/keiyaku/plugin";
 
 const DUPLICATE_HINT = "ignore if you have already seen this.";
+const NOTICE_METADATA_KEY = "keiyaku";
+const TURN_OUTCOME_KIND = "akuma.turn-outcome" satisfies keyof PluginSignalMap;
+const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
 /**
  * One World-local notification participant authors every committed outcome and
  * abnormal Body ending, so a resulting notice never depends on whether the
@@ -68,27 +78,56 @@ async function openSquare(
   }
 }
 
-function outcomeExpression(signal: PluginSignalMap["akuma.turn-outcome"]): string {
-  const header = [
-    signal.akumaId,
-    `turn/${signal.turnSequence}`,
-    signal.initiator === undefined ? undefined : `(@${signal.initiator})`,
-    signal.contractId,
+function turnOutcomeBody(signal: PluginSignalMap["akuma.turn-outcome"]): string {
+  const context = [
+    `turn/${signal.turnSequence}${signal.outcome.kind === "failed" ? " failed" : ""}`,
+    signal.initiator === undefined ? undefined : `· requested by @${signal.initiator}`,
+    signal.contractId === undefined ? undefined : `· ${signal.contractId}`,
   ]
     .filter((value) => value !== undefined)
     .join(" ");
-  const outcome = signal.outcome.kind === "answered" ? signal.outcome.text : `× ${signal.outcome.reason}`;
-  return `${header}\n${outcome}\n${DUPLICATE_HINT}`;
+  const result = signal.outcome.kind === "failed" ? signal.outcome.reason : signal.outcome.text;
+  const marker = signal.outcome.kind === "failed" ? "×" : "✓";
+  return `${marker} ${signal.akumaId} came back\n${context}\n\n---\n\n${result}`;
 }
 
-function isOutcomeNotice(activity: Activity, signal: PluginSignalMap["akuma.outcome-observed"]): boolean {
-  // The shared notifier and the former per-Akuma author are the only authors a
-  // notice may come from; the envelope's own identity below rejects another
-  // Akuma, another Turn, a birth, or a Body notice.
-  if (!/^turn\/[1-9]\d*$/u.test(signal.historyId) ||
-      activity.kind !== "say" ||
-      (activity.actor !== NOTIFIER && activity.actor !== signal.akumaId) ||
-      activity.body === undefined) return false;
+function turnOutcomeMetadata(signal: PluginSignalMap["akuma.turn-outcome"]): ActivityMetadata {
+  return {
+    [NOTICE_METADATA_KEY]: {
+      kind: TURN_OUTCOME_KIND,
+      akumaId: signal.akumaId,
+      historyId: `turn/${signal.turnSequence}`,
+    },
+  };
+}
+
+function metadataRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCurrentTurnNotice(activity: Activity, signal: PluginSignalMap["akuma.outcome-observed"]): boolean {
+  if (activity.kind !== "say" || activity.actor !== NOTIFIER || !TURN_HISTORY.test(signal.historyId)) return false;
+  const metadata = activity.metadata;
+  if (!metadataRecord(metadata)) return false;
+  const identity = metadata[NOTICE_METADATA_KEY];
+  if (!metadataRecord(identity)) return false;
+  return (
+    Object.keys(identity).length === 3 &&
+    identity.kind === TURN_OUTCOME_KIND &&
+    identity.akumaId === signal.akumaId &&
+    identity.historyId === signal.historyId
+  );
+}
+
+function isLegacyTurnNotice(activity: Activity, signal: PluginSignalMap["akuma.outcome-observed"]): boolean {
+  if (
+    activity.metadata !== undefined ||
+    activity.kind !== "say" ||
+    activity.body === undefined ||
+    !TURN_HISTORY.test(signal.historyId) ||
+    (activity.actor !== NOTIFIER && activity.actor !== signal.akumaId)
+  )
+    return false;
   const [header, ...lines] = activity.body.split("\n");
   const identity = `${signal.akumaId} ${signal.historyId}`;
   if (header !== identity && !header?.startsWith(`${identity} `)) return false;
@@ -154,7 +193,7 @@ const plugin: KeiyakuPlugin = {
     const environment = { ...process.env };
     const bodyNotifications = new Map<string, BodyNotificationState>();
     const expressAsNotifier = async (
-      expression: string,
+      expression: string | Readonly<{ body: string; metadata?: ActivityMetadata }>,
       participants: readonly string[] | undefined,
       cancellation?: AbortSignal,
     ): Promise<boolean> => {
@@ -165,12 +204,18 @@ const plugin: KeiyakuPlugin = {
         cancellation?.throwIfAborted();
         const joined = await square.join(NOTIFIER, {}, control);
         cancellation?.throwIfAborted();
-        await joined.participant.express(expression, {
-          noWait: true,
-          noMention: true,
-          force: true,
-          ...(participants?.length ? { mentions: [...participants] } : {}),
-        }, control);
+        const notice = typeof expression === "string" ? { body: expression } : expression;
+        await joined.participant.express(
+          {
+            body: notice.body,
+            ...(notice.metadata === undefined ? {} : { metadata: notice.metadata }),
+            noWait: true,
+            noMention: true,
+            force: true,
+            ...(participants?.length ? { mentions: [...participants] } : {}),
+          },
+          control,
+        );
         return true;
       } finally {
         await square.close();
@@ -179,7 +224,12 @@ const plugin: KeiyakuPlugin = {
     const expressTurnOutcome = (
       signal: PluginSignalMap["akuma.turn-outcome"],
       cancellation?: AbortSignal,
-    ): Promise<boolean> => expressAsNotifier(outcomeExpression(signal), signal.participants, cancellation);
+    ): Promise<boolean> =>
+      expressAsNotifier(
+        { body: turnOutcomeBody(signal), metadata: turnOutcomeMetadata(signal) },
+        signal.participants,
+        cancellation,
+      );
     const expressBodyEnd = (
       signal: PluginSignalMap["akuma.body-ended"],
       participants: readonly string[],
@@ -229,15 +279,28 @@ const plugin: KeiyakuPlugin = {
               : (await square.recognize()).find(({ name }) => name === signal.observer)?.name;
             if (observer === undefined) return;
             const { participants } = await square.participants({}, control);
-            const authors = [NOTIFIER, signal.akumaId].filter((name) =>
-              participants.some((item) => item.name === name));
-            if (authors.length === 0) return;
-            const { activities: notices } = await square.history({
-              from: authors, fixed: `${signal.akumaId} ${signal.historyId}`, limit: null,
-            }, control);
+            const authored = (name: string): boolean => participants.some((item) => item.name === name);
+            const notices: Activity[] = [];
+            if (authored(NOTIFIER)) {
+              notices.push(...(await square.history({ from: [NOTIFIER], limit: null }, control)).activities);
+            }
+            if (authored(signal.akumaId)) {
+              notices.push(
+                ...(
+                  await square.history(
+                    {
+                      from: [signal.akumaId],
+                      fixed: `${signal.akumaId} ${signal.historyId}`,
+                      limit: null,
+                    },
+                    control,
+                  )
+                ).activities,
+              );
+            }
             const participant = await square.participant(observer);
             for (const notice of notices) {
-              if (!isOutcomeNotice(notice, signal)) continue;
+              if (!isCurrentTurnNotice(notice, signal) && !isLegacyTurnNotice(notice, signal)) continue;
               cancellation?.throwIfAborted();
               try {
                 await participant.catch({ id: notice.id }, control);

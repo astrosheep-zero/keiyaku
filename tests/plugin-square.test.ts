@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test, { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
-import { Square, type Activity, type Body } from "@astrosheep/square";
+import { Square, type Activity, type ActivityMetadata, type Body } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import { squareSeat } from "../src/cli/square-identity.js";
 import type { PluginHooks } from "../src/plugin/public.js";
@@ -56,7 +56,12 @@ async function expressions(
   try {
     return (await square.history({ limit: null })).activities.flatMap((activity) =>
       activity.kind === "say" && activity.body !== undefined
-        ? [{ actor: activity.actor, body: activity.body, mentions: activity.mentions ?? [] }]
+        ? [{
+            actor: activity.actor,
+            body: activity.body,
+            mentions: activity.mentions ?? [],
+            ...(activity.metadata === undefined ? {} : { metadata: activity.metadata }),
+          }]
         : [],
     );
   } finally {
@@ -65,12 +70,21 @@ async function expressions(
 }
 
 type BodyEndDetails = Omit<Parameters<NonNullable<PluginHooks["akuma.body-ended"]>>[0], "kind">;
-type CapturedExpression = Readonly<{ actor: string; body: string; mentions: readonly string[] }>;
+type CapturedExpression = Readonly<{ actor: string; body: string; mentions: readonly string[]; metadata?: ActivityMetadata }>;
 type HeldExpression = Readonly<{ sent: Promise<void>; release: () => void }>;
 
-const captured = (actor: string, body: string, mentions: readonly string[] = []): CapturedExpression => ({ actor, body, mentions });
+const captured = (
+  actor: string,
+  body: string,
+  mentions: readonly string[] = [],
+  metadata?: ActivityMetadata,
+): CapturedExpression => ({ actor, body, mentions, ...(metadata === undefined ? {} : { metadata }) });
 const outcome = (body: string, mentions: readonly string[] = []): CapturedExpression =>
   captured(NOTIFIER, body, mentions);
+const turnOutcome = (body: string, akumaId: string, sequence: number, mentions: readonly string[] = []): CapturedExpression =>
+  captured(NOTIFIER, body, mentions, {
+    keiyaku: { kind: "akuma.turn-outcome", akumaId, historyId: `turn/${sequence}` },
+  });
 const optionalInitiator = (initiator: string | undefined): { initiator?: string } => (initiator === undefined ? {} : { initiator });
 const optionalDiagnostic = (diagnostic: string | undefined): { diagnostic?: string } => (diagnostic === undefined ? {} : { diagnostic });
 async function withHeldSquareExpression<T>(
@@ -92,7 +106,16 @@ async function withHeldSquareExpression<T>(
         ...joined.participant,
         express: (async (...expressArguments: unknown[]) => {
           const send = () => Reflect.apply(express, undefined, expressArguments) as ReturnType<typeof express>;
-          if (!String(expressArguments[0]).startsWith(`${akumaId} `)) return send();
+          const input = expressArguments[0];
+          const body = typeof input === "string"
+            ? input
+            : typeof input === "object" && input !== null && "body" in input && typeof input.body === "string"
+              ? input.body
+              : undefined;
+          if (body === undefined ||
+              (!body.startsWith(`✓ ${akumaId} came back\n`) && !body.startsWith(`× ${akumaId} came back\n`))) {
+            return send();
+          }
           if (!holdAfterSend) {
             markSent();
             await released;
@@ -124,6 +147,7 @@ type SquareNotificationFixture = Readonly<{
     reason: string,
     cancellation?: AbortSignal,
     participants?: readonly string[],
+    contractId?: string,
   ): Promise<void>;
   answeredTurn(
     akumaId: string,
@@ -133,6 +157,7 @@ type SquareNotificationFixture = Readonly<{
     text: string,
     cancellation?: AbortSignal,
     participants?: readonly string[],
+    contractId?: string,
   ): Promise<void>;
   bodyEnd(
     akumaId: string,
@@ -181,7 +206,7 @@ async function withSquareNotificationFixture<T>(
       async admit(initiator) {
         await initiating({ kind: "akuma.initiating", initiator });
       },
-      async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation, participants) {
+      async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation, participants, contractId) {
         await turn(
           {
             kind: "akuma.turn-outcome",
@@ -190,12 +215,13 @@ async function withSquareNotificationFixture<T>(
             turnSequence,
             ...optionalInitiator(initiator),
             ...(participants === undefined && initiator === undefined ? {} : { participants: participants ?? [initiator!] }),
+            ...(contractId === undefined ? {} : { contractId }),
             outcome: { kind: "failed", reason },
           },
           cancellation,
         );
       },
-      async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation, participants) {
+      async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation, participants, contractId) {
         await turn(
           {
             kind: "akuma.turn-outcome",
@@ -204,6 +230,7 @@ async function withSquareNotificationFixture<T>(
             turnSequence,
             ...optionalInitiator(initiator),
             ...(participants === undefined && initiator === undefined ? {} : { participants: participants ?? [initiator!] }),
+            ...(contractId === undefined ? {} : { contractId }),
             outcome: { kind: "answered", text },
           },
           cancellation,
@@ -251,12 +278,22 @@ async function withSquareNotificationFixture<T>(
   }
 }
 
-async function outcomeNotice(fixture: SquareNotificationFixture, prefix: string): Promise<Activity> {
+function isMetadataRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTurnNotice(activity: Activity, akumaId: string, sequence: number): boolean {
+  const identity = activity.metadata?.keiyaku;
+  return activity.kind === "say" && activity.actor === NOTIFIER && isMetadataRecord(identity) &&
+    identity.kind === "akuma.turn-outcome" && identity.akumaId === akumaId && identity.historyId === `turn/${sequence}`;
+}
+async function outcomeNotice(fixture: SquareNotificationFixture, akumaId: string, sequence: number): Promise<Activity> {
   const found = await fixture.square(async (square) =>
-    (await square.history({ from: [NOTIFIER], limit: null })).activities.find(
-      (activity) => activity.kind === "say" && activity.body?.startsWith(prefix) === true,
-    ));
-  assert.ok(found !== undefined, `expected a ${NOTIFIER} notice starting with ${prefix}`);
+    (await square.history({ from: [NOTIFIER], limit: null })).activities.find((activity) =>
+      isTurnNotice(activity, akumaId, sequence),
+    ),
+  );
+  assert.ok(found !== undefined, `expected the structured Turn notice for ${akumaId} turn/${sequence}`);
   return found;
 }
 
@@ -355,8 +392,8 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
       outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
+      turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
+      turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
     ]);
     if (process.platform !== "win32") {
       const queued = readFileSync(codexQueueLog, "utf8")
@@ -393,10 +430,10 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.deepEqual(await expressions(squarePath(root)), [
       outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
+      turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
+      turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
       outcome("Bob called aku/external\nignore if you have already seen this.", ["Bob"]),
-      outcome("aku/failed turn/3\n× provider failed\nignore if you have already seen this."),
+      turnOutcome("× aku/failed came back\nturn/3 failed\n\n---\n\nprovider failed", "aku/failed", 3),
     ]);
     const square = await Square.at({ path: squarePath(root) });
     try {
@@ -421,10 +458,10 @@ test("one shared notifier sends after its worker is done and needs no worker par
     // No participant ever stood for this Akuma.
     await fixture.answeredTurn("aku/absent", 2, 1, "Bob", "no worker at all");
     assert.deepEqual(await fixture.expressions(), [
-      outcome("aku/gone turn/1 (@Alice)\nafter shutdown\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/absent turn/1 (@Bob)\nno worker at all\nignore if you have already seen this.", ["Bob"]),
+      turnOutcome("✓ aku/gone came back\nturn/1 · requested by @Alice\n\n---\n\nafter shutdown", "aku/gone", 1, ["Alice"]),
+      turnOutcome("✓ aku/absent came back\nturn/1 · requested by @Bob\n\n---\n\nno worker at all", "aku/absent", 1, ["Bob"]),
     ]);
-    const absentNotice = await outcomeNotice(fixture, "aku/absent turn/1");
+    const absentNotice = await outcomeNotice(fixture, "aku/absent", 1);
     // Observation needs the observer's standing, not a standing subject worker; it
     // acknowledges only where the notice is actually available to that observer.
     await fixture.observe("aku/absent", "turn/1", "Bob");
@@ -506,11 +543,11 @@ test("outcome observation catches exact notices only for the explicit observer",
       await other.express("aku/worker turn/1\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
     });
-    const { activities: notices } = await fixture.square((square) => square.history({ fixed: "aku/worker", limit: null }));
+    const { activities: notices } = await fixture.square((square) => square.history({ limit: null }));
     const noticeFor = (prefix: string, actor = NOTIFIER): Activity | undefined =>
       notices.find((item) => item.actor === actor && item.body?.startsWith(prefix));
-    const first = noticeFor("aku/worker turn/1 (@Alice)");
-    const failed = noticeFor("aku/worker turn/2 (@Alice)");
+    const first = noticeFor("✓ aku/worker came back\nturn/1 · requested by @Alice");
+    const failed = noticeFor("× aku/worker came back\nturn/2 failed · requested by @Alice");
     // Retained notices from the former per-Akuma author stay observable.
     const legacyFirst = noticeFor("aku/worker turn/1 (@Alice)", "aku/worker");
     const legacyFailed = noticeFor("aku/worker turn/2 (@Alice)", "aku/worker");
@@ -537,32 +574,153 @@ test("outcome observation catches exact notices only for the explicit observer",
   });
 });
 
-test("answer notices carry the outcome text and are acknowledged by identity", async () => {
+test("answer and failure notices preserve exact results and structured identity", async () => {
   await withSquareNotificationFixture("answer-forms", async (fixture) => {
-    await fixture.answeredTurn("aku/forms", 1, 1, "Alice", "first line\nsecond line");
-    await fixture.answeredTurn("aku/forms", 1, 2, "Alice", "");
+    await fixture.answeredTurn(
+      "aku/forms",
+      1,
+      1,
+      "Alice",
+      "first line\nsecond line",
+      undefined,
+      undefined,
+      "kei/example",
+    );
+    await fixture.answeredTurn("aku/forms", 1, 2, undefined, "", undefined, ["Alice"]);
+    await fixture.failedTurn("aku/forms", 1, 3, "Bob", "denied\nbecause", undefined, undefined, "kei/failure");
     assert.deepEqual(await fixture.expressions(), [
-      outcome("aku/forms turn/1 (@Alice)\nfirst line\nsecond line\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/forms turn/2 (@Alice)\n\nignore if you have already seen this.", ["Alice"]),
+      turnOutcome(
+        "✓ aku/forms came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\nfirst line\nsecond line",
+        "aku/forms",
+        1,
+        ["Alice"],
+      ),
+      turnOutcome("✓ aku/forms came back\nturn/2\n\n---\n\n", "aku/forms", 2, ["Alice"]),
+      turnOutcome(
+        "× aku/forms came back\nturn/3 failed · requested by @Bob · kei/failure\n\n---\n\ndenied\nbecause",
+        "aku/forms",
+        3,
+        ["Bob"],
+      ),
     ]);
     await fixture.observe("aku/forms", "turn/1", "Alice");
     await fixture.observe("aku/forms", "turn/2", "Alice");
+    await fixture.observe("aku/forms", "turn/3", "Bob");
+    const first = await outcomeNotice(fixture, "aku/forms", 1);
+    const empty = await outcomeNotice(fixture, "aku/forms", 2);
+    const failed = await outcomeNotice(fixture, "aku/forms", 3);
     await fixture.square(async (square) => {
-      const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
-        .filter((activity) => activity.kind === "say");
       const snapshot = await square.snapshot();
-      for (const notice of notices) assert.equal(snapshot.delivered("Alice", notice.id), true);
+      assert.equal(snapshot.delivered("Alice", first.id), true);
+      assert.equal(snapshot.delivered("Alice", empty.id), true);
+      assert.equal(snapshot.delivered("Bob", failed.id), true);
+      assert.deepEqual(first.metadata, {
+        keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/forms", historyId: "turn/1" },
+      });
     });
   });
 });
 
+test("current Turn acknowledgment trusts exact structured identity, never current prose or malformed metadata", async () => {
+  await withSquareNotificationFixture("metadata-ack", async (fixture) => {
+    const notices = await fixture.square(async (square) => {
+      const notifier = (await square.implicitJoin(NOTIFIER)).participant!;
+      const current = await notifier.express({
+        body: "prose has no outcome identity at all",
+        metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/1" } },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const currentStyleWithoutMetadata = await notifier.express({
+        body: "✓ aku/meta came back\nturn/1\n\n---\n\nanswer",
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const legacyShaped = "aku/meta turn/1\ndone\nignore if you have already seen this.";
+      const malformed = await notifier.express({
+        body: legacyShaped,
+        metadata: { keiyaku: "not an identity object" },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const wrongKind = await notifier.express({
+        body: legacyShaped,
+        metadata: { keiyaku: { kind: "akuma.born", akumaId: "aku/meta", historyId: "turn/1" } },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const wrongAkuma = await notifier.express({
+        body: legacyShaped,
+        metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/other", historyId: "turn/1" } },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const wrongTurn = await notifier.express({
+        body: legacyShaped,
+        metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/2" } },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const extraIdentityField = await notifier.express({
+        body: legacyShaped,
+        metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/1", extra: true } },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      const extraNamespace = await notifier.express({
+        body: legacyShaped,
+        metadata: {
+          keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/1" },
+          other: "not the exact notice envelope",
+        },
+        mentions: ["Alice"],
+        noMention: true,
+        force: true,
+      });
+      return [
+        current,
+        currentStyleWithoutMetadata,
+        malformed,
+        wrongKind,
+        wrongAkuma,
+        wrongTurn,
+        extraIdentityField,
+        extraNamespace,
+      ].map(({ activity }) => activity);
+    });
+    await fixture.observe("aku/meta", "turn/1", "Alice");
+    await fixture.square(async (square) => {
+      const snapshot = await square.snapshot();
+      assert.equal(snapshot.delivered("Alice", notices[0]!.id), true, "exact metadata matches despite arbitrary prose");
+      for (const notice of notices.slice(1, -1)) {
+        assert.equal(
+          snapshot.delivered("Alice", notice.id),
+          false,
+          "prose cannot rescue missing, malformed, or mismatched metadata",
+        );
+      }
+      assert.equal(
+        snapshot.delivered("Alice", notices.at(-1)!.id),
+        true,
+        "an unrelated root namespace does not erase the exact keiyaku identity",
+      );
+    });
+  });
+});
 test("outcome observation acknowledges every exact duplicate beyond the default history page without joining", async (t) => {
   await withSquareNotificationFixture("ack-full-archive", async (fixture) => {
     const notices = await fixture.square(async (square) => {
-      const worker = (await square.implicitJoin("aku/repeated")).participant!;
+      const notifier = (await square.implicitJoin(NOTIFIER)).participant!;
       const ids: Activity["id"][] = [];
       for (let index = 0; index < 12; index++) {
-        const result = await worker.express("aku/repeated turn/1\nack\nignore if you have already seen this.",
+        const result = await notifier.express("aku/repeated turn/1\nack\nignore if you have already seen this.",
           { mentions: ["Alice", "Bob"], noMention: true, force: true });
         ids.push(result.activity.id);
       }
@@ -593,7 +751,7 @@ test("outcome observation catches an unmentioned listener's notice without consu
       }
     });
     await fixture.answeredTurn("aku/listened", 1, 1, undefined, "public to listeners");
-    const notice = await outcomeNotice(fixture, "aku/listened turn/1");
+    const notice = await outcomeNotice(fixture, "aku/listened", 1);
     assert.deepEqual(notice.mentions, []);
     await fixture.observe("aku/listened", "turn/1", "Bob");
     await fixture.square(async (square) => {
@@ -740,10 +898,10 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
     await fixture.bodyEnd("aku/silent", 4, "exited");
     await fixture.bodyEnd("aku/silent", 5, "put-down");
     assert.deepEqual(await fixture.expressions(), [
-      outcome("aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/answered turn/2 (@Alice)\ndone\nignore if you have already seen this.", ["Alice"]),
+      turnOutcome("× aku/same came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed first", "aku/same", 1, ["Alice"]),
+      turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Alice\n\n---\n\ndone", "aku/answered", 2, ["Alice"]),
       outcome("aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/different turn/3 (@Alice)\n× failed for Alice\nignore if you have already seen this.", ["Alice"]),
+      turnOutcome("× aku/different came back\nturn/3 failed · requested by @Alice\n\n---\n\nfailed for Alice", "aku/different", 3, ["Alice"]),
       outcome("aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
     ]);
   });
@@ -759,17 +917,17 @@ test("Square addresses all Turn participants and suppresses only already-notifie
     await fixture.bodyEnd("aku/silent-owner", 2, "hung", undefined, undefined, undefined, ["Bob"]);
     await fixture.answeredTurn("aku/no-audience", 3, 3, "Alice", "done", undefined, []);
     assert.deepEqual(await fixture.expressions(), [
-      outcome("aku/group turn/1 (@Alice)\n× failed\nignore if you have already seen this.", ["Alice", "Bob", "Carol"]),
+      turnOutcome("× aku/group came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed", "aku/group", 1, ["Alice", "Bob", "Carol"]),
       outcome("aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
-      outcome("aku/silent-owner turn/2\n× failed\nignore if you have already seen this.", ["Bob"]),
-      outcome("aku/no-audience turn/3 (@Alice)\ndone\nignore if you have already seen this."),
+      turnOutcome("× aku/silent-owner came back\nturn/2 failed\n\n---\n\nfailed", "aku/silent-owner", 2, ["Bob"]),
+      turnOutcome("✓ aku/no-audience came back\nturn/3 · requested by @Alice\n\n---\n\ndone", "aku/no-audience", 3),
     ]);
   });
 });
 
 test("same-Body notifications serialize while distinct Bodies overlap", async () => {
   await withSquareNotificationFixture("serialize", async (fixture) => {
-    const failedExpression = outcome("aku/same turn/1 (@Alice)\n× failed first\nignore if you have already seen this.", ["Alice"]);
+    const failedExpression = turnOutcome("× aku/same came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed first", "aku/same", 1, ["Alice"]);
     await fixture.withHeldExpression("aku/same", async ({ sent, release }) => {
       const failed = fixture.failedTurn("aku/same", 1, 1, "Alice", "failed first");
       await sent;
@@ -782,8 +940,8 @@ test("same-Body notifications serialize while distinct Bodies overlap", async ()
     });
   });
   await withSquareNotificationFixture("overlap", async (fixture) => {
-    const liveExpression = outcome("aku/live-body turn/1 (@Bob)\nlive\nignore if you have already seen this.", ["Bob"]);
-    const parkedExpression = outcome("aku/parked-body turn/1 (@Alice)\n× parked failure\nignore if you have already seen this.", ["Alice"]);
+    const liveExpression = turnOutcome("✓ aku/live-body came back\nturn/1 · requested by @Bob\n\n---\n\nlive", "aku/live-body", 1, ["Bob"]);
+    const parkedExpression = turnOutcome("× aku/parked-body came back\nturn/1 failed · requested by @Alice\n\n---\n\nparked failure", "aku/parked-body", 1, ["Alice"]);
     await fixture.withHeldExpression("aku/parked-body", async ({ sent, release }) => {
       const parked = fixture.failedTurn("aku/parked-body", 1, 1, "Alice", "parked failure");
       await sent;
@@ -833,10 +991,15 @@ test("Square notification authority survives rejection and cancellation boundari
       await assert.rejects(late);
     });
     await fixture.bodyEnd("aku/late", 1, "broke-off", "Alice", "after timeout");
-    assert.deepEqual((await fixture.expressions()).filter(({ body }) => body.startsWith("aku/late ")), [
-      outcome("aku/late turn/1 (@Alice)\n× late failure\nignore if you have already seen this.", ["Alice"]),
-      outcome("aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
-    ]);
+    assert.deepEqual(
+      (await fixture.expressions()).filter(
+        ({ body }) => body.startsWith("aku/late body/1 ") || body.startsWith("× aku/late came back\n"),
+      ),
+      [
+        turnOutcome("× aku/late came back\nturn/1 failed · requested by @Alice\n\n---\n\nlate failure", "aku/late", 1, ["Alice"]),
+        outcome("aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
+      ],
+    );
   });
 });
 
@@ -871,9 +1034,9 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
     assert.deepEqual(
       await expressions(squarePath(root)),
       [
-        outcome("aku/worker turn/1 (@Alice)\n× fixture failure\nignore if you have already seen this.", ["Alice"]),
-        outcome("aku/worker turn/2 (@Bob)\n× fixture failure\nignore if you have already seen this.", ["Bob"]),
-        outcome("aku/worker turn/3\n× fixture failure\nignore if you have already seen this."),
+        turnOutcome("× aku/worker came back\nturn/1 failed · requested by @Alice\n\n---\n\nfixture failure", "aku/worker", 1, ["Alice"]),
+        turnOutcome("× aku/worker came back\nturn/2 failed · requested by @Bob\n\n---\n\nfixture failure", "aku/worker", 2, ["Bob"]),
+        turnOutcome("× aku/worker came back\nturn/3 failed\n\n---\n\nfixture failure", "aku/worker", 3),
       ],
     );
   } finally {
@@ -934,7 +1097,7 @@ test("Pi caller registration and outcomes share artifact ownership across execut
       const joined = await square.implicitJoin(initiator);
       assert.ok(joined.participant);
       const caught = await joined.participant.catch();
-      assert.ok(caught.activities.some((item) => item.body?.includes("\ndone\n")));
+      assert.ok(caught.activities.some((item) => item.body?.includes("\n\n---\n\ndone")));
     } finally {
       await square.close();
     }
@@ -990,8 +1153,8 @@ test("local observation acknowledges the recognized seat, never the former provi
       }
       const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .filter((activity) => activity.kind === "say");
-      const seatNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/1"))!;
-      const formerNotice = notices.find((notice) => notice.body?.startsWith("aku/seat turn/2"))!;
+      const seatNotice = notices.find((notice) => isTurnNotice(notice, "aku/seat", 1))!;
+      const formerNotice = notices.find((notice) => isTurnNotice(notice, "aku/seat", 2))!;
       const snapshot = await square.snapshot();
       assert.equal(snapshot.delivered(seat, seatNotice.id), true, "the recognized seat takes its own notice");
       assert.equal(
@@ -1108,8 +1271,8 @@ test("a declared name resolves an ambiguous session binding in local acknowledgm
       const notices = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .filter((activity) => activity.kind === "say");
       const snapshot = await square.snapshot();
-      const declaredNotice = notices.find((notice) => notice.body?.startsWith("aku/explicit turn/1"))!;
-      const staleNotice = notices.find((notice) => notice.body?.startsWith("aku/explicit turn/2"))!;
+      const declaredNotice = notices.find((notice) => isTurnNotice(notice, "aku/explicit", 1))!;
+      const staleNotice = notices.find((notice) => isTurnNotice(notice, "aku/explicit", 2))!;
       assert.equal(snapshot.delivered("Declared", declaredNotice.id), true, "the declared name resolves the binding");
       assert.equal(snapshot.delivered("Stale", staleNotice.id), false, "the other binding is left untouched");
     } finally {
