@@ -2,6 +2,7 @@ import { executionChannel, type ExecutionContext, type LibraryExecution } from "
 import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
 import type {
   ActorId,
+  AkumaCaller,
   AkumaObservation,
   DeliveryPreviewOutcome,
   ContractHistory,
@@ -23,6 +24,7 @@ import { createKeiyakuHandle } from "../../library/keiyaku.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
 import type { Repo } from "../../library/repo.js";
 import { SettingsError, settings } from "../../settings.js";
+import { akumaCallerFromEnvironment } from "../akuma-caller.js";
 import { Debts } from "../../debt/index.js";
 import { actorFromEdge } from "../actor.js";
 import type { CliCoordinates } from "../coordinates.js";
@@ -46,7 +48,8 @@ import type { TextRenderContext } from "../render/terminal.js";
 import type { CliRuntime } from "../runtime.js";
 import { canonicalContractSelector, contractFromInput, resolveContractId } from "../selectors.js";
 import { displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
-import { CliUsageError, isBlankInput } from "../usage.js";
+import { CliUsageError, commandGuide, isBlankInput } from "../usage.js";
+import { CONTRACT_COMMAND_SPECS } from "./contract-help.js";
 import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.js";
 
 // ---------------------------------------------------------------------------
@@ -447,6 +450,7 @@ async function runLs(
   command: Extract<ParsedContractCommand, { command: "ls" }>,
   coordinates: CliCoordinates,
   home: string | undefined,
+  runtime: CliRuntime,
 ): Promise<number> {
   const query = command.query;
   if (query.kind === "contracts") {
@@ -474,11 +478,40 @@ async function runLs(
     if (listed.kind !== "accepted") throw new Error("Debt list did not return an accepted observation");
     return emit(command.output, listed, () => renderDebtCatalogue(listed.value, query.namespace ?? []), 0);
   }
+  const caller = await lsCaller(query.caller, coordinates, runtime);
   const listed = await Akumas.of(coordinates.world).list({
     ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
+    ...(caller === undefined ? {} : { caller }),
   });
-  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.archetype ?? null), 0);
+  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.archetype ?? null, caller), 0);
+}
+
+/** `--mine` is the process caller identity; `--caller` names the same coordinate explicitly. */
+async function lsCaller(
+  selection: Extract<Extract<ParsedContractCommand, { command: "ls" }>["query"], { kind: "akuma" }>["caller"],
+  coordinates: CliCoordinates,
+  runtime: CliRuntime,
+): Promise<AkumaCaller | undefined> {
+  const usage = (diagnostic: string) =>
+    new CliUsageError(diagnostic, commandGuide("ls", CONTRACT_COMMAND_SPECS.ls.usage));
+  if (selection === undefined) return undefined;
+  if (selection.kind === "external") return selection.caller;
+  if (selection.kind === "akuma") {
+    if (coordinates.world === null) throw usage("no Keiyaku world contains the invocation cwd");
+    return { kind: "akuma", world: coordinates.world, akuId: selection.akuId };
+  }
+  let caller: AkumaCaller | undefined;
+  try {
+    caller = await akumaCallerFromEnvironment(runtime.environment);
+  } catch (error) {
+    throw usage(error instanceof Error ? error.message : String(error));
+  }
+  if (caller === undefined)
+    throw usage(
+      "--mine requires a caller identity; set KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD or run inside a calling host",
+    );
+  return caller;
 }
 
 async function readAkumaStatus(
@@ -723,7 +756,7 @@ export async function runContractCommand(
     case "nuke":
       return await runNuke(command, coordinates);
     case "ls":
-      return await runLs(command, coordinates, home);
+      return await runLs(command, coordinates, home, runtime);
     case "show":
       return await runShow(command, coordinates);
     case "status":

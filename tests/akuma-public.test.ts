@@ -3,7 +3,14 @@ import { selectionRequestProtocol } from "../src/akuma/selection-request.js";
 import { decodeAgentEvent } from "../src/akuma/heart/activity-schema.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
-import { activityFact, bornBody, claudeBodyLaunch, seedLegacySchema, turnEndFact } from "./support/akuma-fixtures.js";
+import {
+  activityFact,
+  bornBody,
+  bornLineageAkuma,
+  claudeBodyLaunch,
+  seedLegacySchema,
+  turnEndFact,
+} from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { waitForFixtureFile as waitForFile } from "./support/process.js";
@@ -12,6 +19,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { AkumaNotBornError } from "../src/akuma/akuma-errors.js";
+import type { AkumaCaller } from "../src/akuma/caller.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
 import {
@@ -42,6 +50,7 @@ import {
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -1481,6 +1490,238 @@ test("public Akuma handles separate compact list rows from full status and wait"
     historyId: "public-history",
     session: { sessionId: "public-session" },
   });
+});
+
+test("caller roster follows frozen Soul edges across archetypes before its bound", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-caller-roster-");
+  const proved = await World.at(root);
+  const world = Akuma.of(proved);
+  const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
+  const akumaCaller = (akuId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akuId: akuId as never }) as AkumaCaller;
+  const direct = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110001",
+    createdAt: "2026-08-08T00:00:01.000Z",
+    caller: rootCaller,
+  });
+  const sibling = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110002",
+    createdAt: "2026-08-08T00:00:02.000Z",
+    caller: rootCaller,
+  });
+  const grandchild = await bornLineageAkuma({
+    root,
+    archetype: "intern",
+    draw: "ca110003",
+    createdAt: "2026-08-08T00:00:03.000Z",
+    caller: akumaCaller(direct.id),
+  });
+  const greatGrandchild = await bornLineageAkuma({
+    root,
+    archetype: "intern",
+    draw: "ca110004",
+    createdAt: "2026-08-08T00:00:04.000Z",
+    caller: akumaCaller(grandchild.id),
+  });
+  const delegation = await bornLineageAkuma({
+    root,
+    archetype: "delegator",
+    draw: "ca110005",
+    createdAt: "2026-08-08T00:00:05.000Z",
+    caller: akumaCaller(sibling.id),
+  });
+  const unrelated = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110006",
+    createdAt: "2026-08-08T00:00:06.000Z",
+    caller: { kind: "external", integration: "other", id: "elsewhere" },
+    origin: { kind: "fork", parent: direct.id, at: "turn/1" },
+  });
+  const forked = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110007",
+    createdAt: "2026-08-08T00:00:07.000Z",
+    origin: { kind: "fork", parent: direct.id, at: "turn/1" },
+  });
+
+  const listed = await world.list({ caller: rootCaller });
+  assert.deepEqual(
+    listed.rows.map((row) => row.id),
+    [delegation.id, greatGrandchild.id, grandchild.id, sibling.id, direct.id],
+    "activity order applies after caller and archetype selection",
+  );
+  assert.deepEqual(
+    listed.rows.map((row) => ("caller" in row ? row.caller : undefined)),
+    [akumaCaller(sibling.id), akumaCaller(grandchild.id), akumaCaller(direct.id), rootCaller, rootCaller],
+    "every born row keeps its frozen caller edge",
+  );
+  assert.equal(listed.rows.some((row) => row.id === unrelated.id), false, "a different caller is not descended");
+  assert.equal(listed.rows.some((row) => row.id === forked.id), false, "fork origin alone is not a caller edge");
+
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller, archetype: "intern" })).rows.map((row) => row.id),
+    [greatGrandchild.id, grandchild.id],
+    "the closure is complete across archetypes before the name filter",
+  );
+  assert.deepEqual(
+    (await world.list({ caller: akumaCaller(direct.id) })).rows.map((row) => row.id),
+    [greatGrandchild.id, grandchild.id],
+    "an Akuma caller sees its transitive descendants and not itself",
+  );
+  assert.deepEqual(
+    (await world.list({ caller: akumaCaller(sibling.id) })).rows.map((row) => row.id),
+    [delegation.id],
+  );
+
+  const bounded = await world.list({ caller: rootCaller, limit: 2 });
+  assert.deepEqual(
+    bounded.rows.map((row) => row.id),
+    [delegation.id, greatGrandchild.id],
+  );
+  assert.equal(bounded.hasMore, true, "the remaining matching members are reported honestly");
+
+  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
+  assert.equal(existsSync(cache), true, "the optional lineage cache stays inside this World");
+  unlinkSync(cache);
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    listed.rows.map((row) => row.id),
+    "an unavailable cache falls back to direct Soul reads",
+  );
+  await assert.rejects(world.list({ caller: { kind: "elsewhere" } } as never), TypeError);
+});
+
+test("birth refreshes the World-local caller lineage cache", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-cache-");
+  const world = await akumaAt(root);
+  const caller = { kind: "external", integration: "test", id: "birth" } as const;
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "ca110010" });
+  await initializeHeart(allocated.paths);
+  await driveAkumaBody(
+    {
+      paths: allocated.paths,
+      seed: {
+        id: allocated.id,
+        archetype: "claude",
+        provider: CLAUDE_EXECUTION,
+        options: {},
+        origin: { kind: "direct" },
+        allowed: [],
+        cwd: root,
+        caller,
+      },
+      initialBody: "work",
+    },
+    provider,
+    { now: () => "2026-08-08T00:00:00.000Z" },
+  );
+  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
+  await waitForFile(cache);
+  assert.deepEqual(
+    (await world.list({ caller })).rows.map((row) => row.id),
+    [allocated.id],
+    "the recorded edge answers the caller-scoped query",
+  );
+  unlinkSync(cache);
+  assert.deepEqual(
+    (await world.list({ caller })).rows.map((row) => row.id),
+    [allocated.id],
+    "the same birth remains discoverable without its cache",
+  );
+});
+
+test("a wrong lineage cache edge cannot fabricate members or their ancestor chain", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-tamper-");
+  const proved = await World.at(root);
+  const world = Akuma.of(proved);
+  const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
+  const akumaCaller = (akuId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akuId: akuId as never }) as AkumaCaller;
+  const direct = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110011",
+    createdAt: "2026-08-08T00:00:01.000Z",
+    caller: rootCaller,
+  });
+  const descendant = await bornLineageAkuma({
+    root,
+    archetype: "intern",
+    draw: "ca110012",
+    createdAt: "2026-08-08T00:00:02.000Z",
+    caller: akumaCaller(direct.id),
+  });
+  const stranger = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110013",
+    createdAt: "2026-08-08T00:00:03.000Z",
+    caller: { kind: "external", integration: "other", id: "elsewhere" },
+  });
+  const strangerChild = await bornLineageAkuma({
+    root,
+    archetype: "intern",
+    draw: "ca110014",
+    createdAt: "2026-08-08T00:00:04.000Z",
+    caller: akumaCaller(stranger.id),
+  });
+  const unborn = await allocateAkumaDirectory({ worldRoot: proved, archetype: "intern", draw: () => "ca110015" });
+  await initializeHeart(unborn.paths);
+
+  // Forged edges: an unrelated worker looks like a direct child, its real child
+  // keeps a true edge (so only full-chain verification exposes the forgery), and
+  // an unborn identity is given a born caller edge.
+  await recordAkumaLineage(proved, { id: stranger.id, caller: rootCaller });
+  await recordAkumaLineage(proved, { id: strangerChild.id, caller: akumaCaller(stranger.id) });
+  await recordAkumaLineage(proved, { id: unborn.id, caller: rootCaller });
+
+  const listed = await world.list({ caller: rootCaller });
+  assert.deepEqual(
+    listed.rows.map((row) => row.id),
+    [descendant.id, direct.id],
+    "only Soul-proven members survive the forged record",
+  );
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    [descendant.id, direct.id],
+    "the discarded record is rebuilt from Souls and stays correct",
+  );
+  assert.deepEqual(
+    (await world.list({ caller: akumaCaller(stranger.id) })).rows.map((row) => row.id),
+    [strangerChild.id],
+    "the real child remains a child of its real caller",
+  );
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller, archetype: "intern" })).rows.map((row) => row.id),
+    [descendant.id],
+  );
+});
+
+test("a lineage cache row for a vanished directory never resurrects an identity", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-stale-");
+  const proved = await World.at(root);
+  const world = Akuma.of(proved);
+  const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
+  const direct = await bornLineageAkuma({
+    root,
+    archetype: "worker",
+    draw: "ca110016",
+    createdAt: "2026-08-08T00:00:01.000Z",
+    caller: rootCaller,
+  });
+  await recordAkumaLineage(proved, { id: "aku/ghost/deadbeef" as never, caller: rootCaller });
+  assert.deepEqual((await world.list({ caller: rootCaller })).rows.map((row) => row.id), [direct.id]);
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    [direct.id],
+    "the vanished identity stays pruned",
+  );
 });
 
 test("kill returns before its successor recovery settles", async (context) => {

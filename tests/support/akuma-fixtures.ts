@@ -7,10 +7,12 @@ import type { BodyLaunch } from "../../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   initializeHeart,
+  finishBodyIfIdle,
   recordTell as heartRecordTell,
   type Soul,
   type TimelineFact,
 } from "../../src/akuma/heart/index.js";
+import type { AkumaCaller } from "../../src/akuma/caller.js";
 import { allocateAkumaDirectory, type AkumaPaths } from "../../src/akuma/identity.js";
 import { withHeartTransaction } from "../../src/akuma/heart/storage.js";
 import { World } from "../../src/world.js";
@@ -51,6 +53,41 @@ export async function bornDirectAkuma(
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   await leash.birth(allocated.paths, soul);
   return { ...allocated, soul, leash };
+}
+
+/** Allocate, birth, and cleanly finish one Soul whose frozen caller edge is explicit. */
+export async function bornLineageAkuma(
+  input: Readonly<{
+    root: string;
+    archetype: string;
+    draw: string;
+    createdAt: string;
+    caller?: AkumaCaller;
+    origin?: Soul["origin"];
+  }>,
+) {
+  const allocated = await allocatedHeart(input.root, input.archetype, input.draw);
+  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
+  try {
+    const soul: Soul = {
+      id: allocated.id,
+      archetype: input.archetype,
+      provider: { name: "codex-app-server", kind: "codex-app-server" },
+      options: {},
+      cwd: input.root,
+      origin: input.origin ?? { kind: "direct" },
+      ...(input.caller === undefined ? {} : { caller: input.caller }),
+      allowed: [],
+      createdAt: input.createdAt,
+    };
+    if ((await leash.birth(allocated.paths, soul)) !== "born") throw new Error("fixture Soul was not born");
+    const body = await leash.recordBody(allocated.paths, { leashTakenAt: input.createdAt });
+    const finished = await finishBodyIfIdle(allocated.paths, { sequence: body.sequence, at: input.createdAt });
+    if (finished.kind !== "finished") throw new Error("fixture body did not finish");
+    return { ...allocated, soul };
+  } finally {
+    leash.release();
+  }
 }
 
 /** Keep the data under test explicit; only the repeated carrier shape lives here. */

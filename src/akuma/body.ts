@@ -36,6 +36,7 @@ import {
   type TurnOutcome,
 } from "./heart/index.js";
 import { akumaPathsSchema, pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { recordAkumaLineage } from "./lineage-cache.js";
 import {
   admitCallInitialTell,
   type CallInitialTellAdmission,
@@ -345,6 +346,8 @@ async function prepareBodyExecution(
 ): Promise<Readonly<{ soul: Soul; created: boolean; adapter: ProviderAdapter }> | null> {
   const birth = await bornSoul(launch, leash, runtime.now());
   if (birth === null) return null;
+  // The immutable caller edge refreshes after Soul durability, best-effort.
+  if (birth.created) void recordAkumaLineage(runtime.world, birth.soul);
   const { soul } = birth;
   if (!(await prepareBodyStart(launch.paths, leash))) return null;
   if (launch.seed === undefined && launch.initialBody === undefined) {

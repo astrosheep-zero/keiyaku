@@ -119,7 +119,10 @@ A bounded catalogue signals its one public fact — that more rows exist —
 without adding counts, an exhaustive-mode claim, or a continuation
 instruction; the omission marker renders bounded observation, not a recovery
 route. A complete catalogue has no omission tail. Multi-line payloads sit
-directly under their label, bounded, and name their own truncation.
+directly under their label, bounded, and name their own truncation. A
+caller-scoped Akuma catalogue names a descendant row's immediate calling Akuma
+after its own facts (`· by <akuId>`); ordinary catalogue rows keep their shape,
+and a direct child of the selected Akuma caller needs no such label.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
 projection. Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their

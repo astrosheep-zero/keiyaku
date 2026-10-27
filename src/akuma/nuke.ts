@@ -1,8 +1,9 @@
 import { lstat, readdir, rm, rmdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
 import { knownAkuma, type KnownAkuma } from "./akuma.js";
+import { akumaLineageCachePath } from "./lineage-cache.js";
 import { settleAkumaKill } from "./akuma-owner.js";
 import { acquireLeash } from "./control.js";
 import { classifyHeartSchema, readHeart, type HeldAkumaLeash } from "./heart/index.js";
@@ -118,6 +119,8 @@ async function removeAkumaEntry(entry: KnownAkuma): Promise<void> {
 
 async function removeEmptyAkumaRunRoot(world: WorldRoot): Promise<void> {
   const runRoot = akumaRunRoot(world);
+  const cache = basename(akumaLineageCachePath(world));
+  const custody = new Set([".gitignore", cache, `${cache}-wal`, `${cache}-shm`]);
   let names: readonly string[];
   try {
     names = await readdir(runRoot);
@@ -125,8 +128,8 @@ async function removeEmptyAkumaRunRoot(world: WorldRoot): Promise<void> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  if (names.some((name) => name !== ".gitignore")) return;
-  if (names.includes(".gitignore")) await removeKnownRegularFile(join(runRoot, ".gitignore"));
+  if (names.some((name) => !custody.has(name))) return;
+  for (const name of names) await removeKnownRegularFile(join(runRoot, name));
   await removeEmptyDirectory(runRoot);
   await removeEmptyDirectory(dirname(runRoot));
 }

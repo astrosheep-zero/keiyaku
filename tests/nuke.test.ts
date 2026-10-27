@@ -221,6 +221,9 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     mkdirSync(join(allocated.paths.requests, "1"), { recursive: true });
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.request.json"), "{}\n");
     writeFileSync(join(allocated.paths.requests, "1", "41111111-1111-4111-8111-111111111111.receipt.json"), "{}\n");
+    const lineageCache = join(world, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
+    writeFileSync(lineageCache, "disposable\n");
+    writeFileSync(`${lineageCache}-wal`, "wal\n");
     assert.deepEqual(await nuke({ world, confirm: world }), {
       operation: "nuke",
       kind: "accepted",
@@ -237,6 +240,8 @@ test("confirmed nuke removes known stopped-entry artifacts and empty run roots",
     assert.equal(existsSync(entry), false);
     assert.equal(existsSync(allocated.paths.requests), false);
     assert.equal(existsSync(allocated.paths.directory), false);
+    assert.equal(existsSync(lineageCache), false);
+    assert.equal(existsSync(`${lineageCache}-wal`), false);
     assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
     assert.deepEqual(await nuke({ world, confirm: world }), {
       operation: "nuke",

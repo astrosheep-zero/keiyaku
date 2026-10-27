@@ -36,6 +36,9 @@ selects the Contract repository; it never retargets that World. `call
 cwd). Without it, the call uses the invocation cwd; `--contract` associates a
 Contract without selecting an execution directory.
 
+An Akuma caller can find its own delegation tree with `keiyaku ls --mine` (or an
+explicit `--caller`); see `keiyaku-akuma` for the roster and its text labels.
+
 `deliver` and `review` may take time after their leading admission.
 `deliver --dry-run` only observes the prospective candidate, standing evidence,
 and target followability; it never runs Verification or hooks or admits work.

@@ -252,6 +252,49 @@ test("ls parses only canonical identity directories", () => {
   }
 });
 
+test("ls parses caller-scoped Akuma selection", () => {
+  assert.deepEqual(parseArgv(["ls", "--mine"]), {
+    command: { command: "ls", query: { kind: "akuma", caller: { kind: "mine" } }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/*/*", "--mine", "--json"]), {
+    command: { command: "ls", query: { kind: "akuma", caller: { kind: "mine" } }, output: "json" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/intern", "--mine"]), {
+    command: { command: "ls", query: { kind: "akuma", archetype: "intern", caller: { kind: "mine" } }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/*/*", "--caller", "slack:channel:thread"]), {
+    command: {
+      command: "ls",
+      query: {
+        kind: "akuma",
+        caller: { kind: "external", caller: { kind: "external", integration: "slack", id: "channel:thread" } },
+      },
+      output: "text",
+    },
+  });
+  assert.deepEqual(parseArgv(["ls", "aku/worker/*", "--caller", "aku/lead/1234abcd", "--limit", "5"]), {
+    command: {
+      command: "ls",
+      query: {
+        kind: "akuma",
+        archetype: "worker",
+        caller: { kind: "akuma", akuId: "aku/lead/1234abcd" },
+        limit: 5,
+      },
+      output: "text",
+    },
+  });
+  for (const argv of [
+    ["ls", "aku/*/*", "--mine", "--caller", "slack:channel"],
+    ["ls", "aku/*/*", "--caller", "missing-colon"],
+    ["ls", "aku/*/*", "--caller", "aku/lead/nothex"],
+    ["ls", "aku/", "--mine"],
+    ["ls", "kei", "--mine"],
+    ["ls", "debt", "--mine"],
+  ])
+    assert.throws(() => parseArgv(argv), CliUsageError, argv.join(" "));
+});
+
 test("bind and amend retain complete after snapshots and mixed gate selectors", () => {
   assert.deepEqual(
     parseArgv(["bind", "--after", "kei/one", "--after", "kei/two", "--gates", "strict,review-only", "-"]),

@@ -1,4 +1,5 @@
 import type { AkumaList } from "../../akuma/akuma.js";
+import { akumaCallerKey, type AkumaCaller } from "../../akuma/caller.js";
 import type { ArchetypeCatalog } from "../../index.js";
 import type { ContractList } from "../../library/contract-types.js";
 import type { DebtPage, DebtRow } from "../../debt/index.js";
@@ -12,11 +13,12 @@ function relativeAge(source: string | null, observedAt: string): string | null {
   return ageText(source, observedAt);
 }
 
-export function renderAkumaCatalogue(list: AkumaList, archetype: string | null): string {
+export function renderAkumaCatalogue(list: AkumaList, archetype: string | null, caller?: AkumaCaller): string {
   const rows = list.rows;
   if (rows.length === 0) {
     return emptyCatalogue("akuma");
   }
+  const root = caller === undefined ? undefined : akumaCallerKey(caller);
   const lines = [archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(archetype)}`, ""];
   for (const row of rows) {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
@@ -28,8 +30,13 @@ export function renderAkumaCatalogue(list: AkumaList, archetype: string | null):
       ...(activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
     ];
     const aliases = row.aliases.length === 0 ? "" : ` (${row.aliases.map((alias) => safeText(alias)).join(" ")})`;
+    const rowCaller = "caller" in row ? row.caller : undefined;
+    const by =
+      root !== undefined && rowCaller?.kind === "akuma" && akumaCallerKey(rowCaller) !== root
+        ? ` · by ${safeText(rowCaller.akuId)}`
+        : "";
     lines.push(
-      `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}`,
+      `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}${by}`,
     );
   }
   if (list.hasMore) lines.push("…");

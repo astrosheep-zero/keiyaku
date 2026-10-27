@@ -93,6 +93,18 @@ erase it. Home supplies Archetype configuration only, never runtime authority.
 The accepted risk of force-cleaning repository-local management state is not
 hidden by a second store or automatic defense.
 
+A disposable World-local lineage record may cache each born Akuma's frozen
+caller edge beside Heart custody, so a caller-scoped roster need not open every
+Heart to learn known edges. It stores no identity, lifecycle, or permission
+fact of its own, is reconstructible from Hearts alone, and is never a second
+authority: an offered edge only proposes a candidate, and every returned
+member's caller chain is rechecked against its born Souls before that member is
+accepted. Any disagreement discards the record for an answer built from direct
+Soul evidence rather than an empty result. A record row whose Akuma directory no
+longer exists is pruned before the closure and never resurrects an identity.
+Pruning that record never deletes Heart or Akuma data, and confirmed World reset
+removes it with the rest of known Akuma custody.
+
 Confirmed World reset stops and retains each recognized Akuma's leash through
 deletion of its known custody. It removes only known management material and
 preserves unknown bytes; unsupported historical Hearts remain reset custody but

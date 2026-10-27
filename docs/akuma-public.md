@@ -213,6 +213,27 @@ advanced library observation may read the complete roster for callers whose
 semantics require a frozen set; it is distinct from ordinary bounded observation
 and never becomes a catalogue command.
 
+The roster also answers one caller-scoped question inside the same World.
+Given one frozen caller coordinate — an external integration or an Akuma in this
+World — it returns the directly called Akumas and their transitively descended
+Akumas. Only frozen Soul caller edges are followed; fork origin is not a caller
+edge, and absent attribution is never inferred. The complete caller closure is
+computed across every Archetype before a requested Archetype narrows it, then
+presented in the same semantic activity order and bound. A caller-scoped
+observation never opens every historical Heart merely to build a roster
+projection: a disposable World-local record of born identity and caller offers
+candidate edges. That record never justifies a returned member by itself: that
+member's
+own edge and every parent link back to the exact query root are rechecked
+against the born Souls, and any disagreement discards the record and answers
+from direct Soul evidence instead of an empty success. A record row whose Akuma
+directory no longer exists never joins the closure, and a member that cannot be
+proven is omitted honestly rather than claimed absent. A skipped or unprovable
+matching member leaves the reported extent honest rather than claiming there is
+nothing more. Born rows
+carry their frozen caller attribution; unborn or stillborn allocation state
+never enters a caller-scoped set because it has no Soul attribution.
+
 ## Boundary
 
 Provider observation is defined by [akuma-provider.md](akuma-provider.md); Heart

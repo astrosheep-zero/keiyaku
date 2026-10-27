@@ -98,7 +98,10 @@ export const capabilityPolicy = {
         { source: "workspace-place.ts" },
       ],
     },
-    { module: "node:sqlite", owners: [{ source: "akuma/heart/**" }, { source: "coordination/**" }] },
+    {
+      module: "node:sqlite",
+      owners: [{ source: "akuma/heart/**" }, { source: "akuma/lineage-cache.ts" }, { source: "coordination/**" }],
+    },
     { module: "crypto", owners: [] },
   ],
   forbiddenSourcePatterns: [

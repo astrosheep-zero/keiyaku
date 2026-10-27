@@ -197,14 +197,17 @@ export const CONTRACT_COMMAND_SPECS = {
   ls: {
     positional: "optional",
     stdin: "none",
-    flags: { limit: "value", json: "boolean" },
+    flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value" },
     usage:
-      'ls debt[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]',
+      'ls debt[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls ["aku/*/*"] --mine\nls ["aku/*/*"] --caller <integration>:<id> | aku/<name>/<suffix>',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
       "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists the living Akumas under one name.",
       'ls "aku/<name>/*" is the same living set in glob form; ls "aku/*/*" lists every living Akuma.',
+      "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
+      "--caller selects an explicit caller instead; both selectors are World-local and refuse for Contract, Debt, or Akuma-name catalogues.",
+      "Descendant rows name their immediate calling Akuma beside the row.",
     ].join("\n"),
   },
   reconcile: {

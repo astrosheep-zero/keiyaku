@@ -124,7 +124,12 @@ Tell and kill return their primary evidence; ask returns its input-bound observa
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
-or reopen the whole roster. The lower roster supplies that native membership,
+or reopen the whole roster. Its optional caller selection narrows that one
+World's roster to the selected caller's directly and transitively descended
+Akumas; the caller closure is completed across Archetypes before any Archetype
+filter, activity order, and bound, and it never aggregates Worlds or consults a
+user-home index. Its rows carry the frozen caller attribution the roster
+observed. The lower roster supplies that native membership,
 order, and extent, and World composition attaches the current Alias bindings
 afterward without replacing the semantic order or counting the board. Archetype definitions are listed by the archetype
 owner. The owner's bounded definitions catalogue and the native Archetype

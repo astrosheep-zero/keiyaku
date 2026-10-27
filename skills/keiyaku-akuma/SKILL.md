@@ -87,12 +87,18 @@ keiyaku status
 keiyaku status @reviewer
 keiyaku ls aku/
 keiyaku ls "aku/*/*"
+keiyaku ls --mine
 keiyaku history @reviewer --last
 keiyaku history @reviewer --id turn/3
 ```
 
 `status` shows the roster or one Akuma's workdir and effective actions.
 `ls aku/` shows callable names; `ls "aku/*/*"` shows born workers.
+`ls --mine` narrows that roster to Akumas this process's caller called and their
+transitive descendants in this World; `--caller <integration>:<id>` or
+`--caller aku/<name>/<suffix>` names the same selection explicitly. Descendant
+rows show their immediate caller as `· by <akuId>`. The selection is World-local
+and refuses for Contract, Debt, and Akuma-name catalogues.
 `history --last` reads the latest complete answer; `history --id` reads an
 exact result named by status or wait. Use the complete AkuId when an alias may
 move; see `history --help` for paging.

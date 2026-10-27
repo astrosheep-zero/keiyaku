@@ -1,13 +1,19 @@
 import { validateAkumaName } from "../../identity/normalize.js";
+import { decodeAkumaCaller, type AkumaCaller } from "../../akuma/caller.js";
+import { parseAkuId, type AkuId } from "../../akuma/identity.js";
 import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
+type AkumaCallerSelector =
+  | Readonly<{ kind: "mine" }>
+  | Readonly<{ kind: "external"; caller: AkumaCaller }>
+  | Readonly<{ kind: "akuma"; akuId: AkuId }>;
 type CatalogQuery =
   | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number }>
   | Readonly<{ kind: "contracts"; limit?: number }>
   | Readonly<{ kind: "archetypes"; limit?: number }>
-  | Readonly<{ kind: "akuma"; archetype?: string; limit?: number }>;
+  | Readonly<{ kind: "akuma"; archetype?: string; caller?: AkumaCallerSelector; limit?: number }>;
 type Output = Readonly<{ output: "text" | "json" }>;
 type Actor = Readonly<{ actor?: string }>;
 
@@ -356,23 +362,66 @@ function debtCatalogQuery(path: string, limit: number | undefined): CatalogQuery
   }
 }
 
+function parseCallerSelector(parts: ParsedContractParts): AkumaCallerSelector | undefined {
+  const mine = parts.flags.mine === true;
+  const value = optionalFlag(parts.flags, "caller");
+  if (mine && value !== undefined) refuse("ls", "--mine and --caller are mutually exclusive");
+  if (mine) return { kind: "mine" };
+  if (value === undefined) return undefined;
+  const text = value.trim();
+  if (text.startsWith("aku/")) {
+    try {
+      return { kind: "akuma", akuId: parseAkuId(text).id };
+    } catch (error) {
+      refuse("ls", `--caller has an invalid Akuma identity: ${error instanceof Error ? error.message : text}`);
+    }
+  }
+  const colon = text.indexOf(":");
+  if (colon < 0) refuse("ls", "--caller requires <integration>:<id> or aku/<name>/<suffix>");
+  try {
+    const caller = decodeAkumaCaller({
+      kind: "external",
+      integration: text.slice(0, colon),
+      id: text.slice(colon + 1),
+    });
+    if (caller === undefined) refuse("ls", "--caller requires <integration>:<id> or aku/<name>/<suffix>");
+    return { kind: "external", caller };
+  } catch (error) {
+    refuse("ls", `--caller is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0];
-  if (path === undefined) refuse("ls", "ls requires a selector");
   const limit = listLimit(parts);
-  const debtQuery = debtCatalogQuery(path, limit);
-  if (debtQuery !== null) return { command: "ls", query: debtQuery, output: parts.output };
-  if (path === "kei" || path === "kei/") {
+  const caller = parseCallerSelector(parts);
+  const callerRefusal = "--mine and --caller select Akuma instances only";
+  if (path !== undefined) {
+    const debtQuery = debtCatalogQuery(path, limit);
+    if (debtQuery !== null) {
+      if (caller !== undefined) refuse("ls", callerRefusal);
+      return { command: "ls", query: debtQuery, output: parts.output };
+    }
+    if (path === "kei" || path === "kei/") {
+      if (caller !== undefined) refuse("ls", callerRefusal);
+      return {
+        command: "ls",
+        query: { kind: "contracts", ...(limit === undefined ? {} : { limit }) },
+        output: parts.output,
+      };
+    }
+    if (caller !== undefined && (path === "aku" || path === "aku/"))
+      refuse("ls", "--mine and --caller need an Akuma instance catalogue, not Akuma names");
+  }
+  if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
+  try {
+    const query = path === undefined ? ({ kind: "akuma" } as const) : parseAkumaCatalogPath(path);
+    if (query === null) refuse("ls", "ls requires a supported identity directory selector");
     return {
       command: "ls",
-      query: { kind: "contracts", ...(limit === undefined ? {} : { limit }) },
+      query: { ...query, ...(limit === undefined ? {} : { limit }), ...(caller === undefined ? {} : { caller }) },
       output: parts.output,
     };
-  }
-  try {
-    const query = parseAkumaCatalogPath(path);
-    if (query === null) refuse("ls", "ls requires a supported identity directory selector");
-    return { command: "ls", query: { ...query, ...(limit === undefined ? {} : { limit }) }, output: parts.output };
   } catch (error) {
     if (error instanceof CliUsageError) throw error;
     refuse("ls", error instanceof Error ? error.message : "invalid ls directory");

@@ -53,6 +53,7 @@ export async function rosterListRow(
       lastActivityAt: observed.snapshot.lastActivityAt,
       pending: observed.snapshot.pending.map((tell) => tell.id),
       aliases,
+      ...(observed.soul.caller === undefined ? {} : { caller: observed.soul.caller }),
     };
   }
   try {

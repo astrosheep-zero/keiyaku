@@ -62,6 +62,10 @@ test("namespace and leaf help identify an executable command", () => {
   assert.doesNotMatch(statusHelp, /guidance/u);
   assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
+  const lsHelp = renderContractHelp("ls");
+  assert.match(lsHelp, /ls \["aku\/\*\/\*"\] --mine/u);
+  assert.match(lsHelp, /--caller <integration>:<id> \| aku\/<name>\/<suffix>/u);
+  assert.match(lsHelp, /direct and transitive descendants in this World/u);
   const settingsHelp = renderContractHelp("settings");
   assert.match(settingsHelp, /"url": "ws:\/\/127\.0\.0\.1:6767\/ws"/u);
   assert.match(settingsHelp, /native provider id is bare/u);

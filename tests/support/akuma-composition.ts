@@ -85,8 +85,10 @@ export class AkumaComposition {
   }
 
   async listComplete(input: AkumaListInput = {}): Promise<AkumaCompleteList> {
-    if (input.archetype !== undefined) return await readAkumaCompleteRoster(this.root, { archetype: input.archetype });
-    return await readAkumaCompleteRoster(this.root);
+    return await readAkumaCompleteRoster(this.root, {
+      ...(input.archetype === undefined ? {} : { archetype: input.archetype }),
+      ...(input.caller === undefined ? {} : { caller: input.caller }),
+    });
   }
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {

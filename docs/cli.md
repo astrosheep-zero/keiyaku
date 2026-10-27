@@ -111,6 +111,14 @@ typed refusal evidence as invocation diagnostics without owning candidate
 matching; a bounded display never narrows selector meaning. Complete identities
 retain the requested operation's missing-Contract refusal. The SDK exposes product `list` operations and no mixed `ls`.
 
+An Akuma-instance `ls` may additionally select one caller: `--mine` uses the
+invocation's own caller identity, and `--caller` names an external
+`<integration>:<id>` or an `aku/<name>/<suffix>` coordinate in this World. Both
+select the same caller-scoped roster and stay World-local. Absent or ambiguous
+identity, a conflicting or invalid selector, and any Contract, Debt, or
+Akuma-name catalogue query refuse at the usage boundary rather than returning a
+misleading empty list.
+
 The call and ask edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,

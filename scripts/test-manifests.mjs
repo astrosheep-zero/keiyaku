@@ -4,6 +4,7 @@ export const LOCAL_TEST_FILES = [
   "tests/architecture.test.ts",
   "tests/build-windows-launcher.test.ts",
   "tests/cli-akuma-render.test.ts",
+  "tests/cli-catalog.test.ts",
   "tests/cli-draft.test.ts",
   "tests/cli-help.test.ts",
   "tests/cli-install.test.ts",
