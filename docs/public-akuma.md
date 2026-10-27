@@ -76,6 +76,18 @@ requesting a separate Tell authority. A schema belongs to that same input and
 its answer contract; it creates no second call workflow or route and does not
 alter the existing busy refusal for schema Tells to a running Akuma.
 
+After a successful call or fork has made its new Akuma durable, and outside that
+birth transaction, one best-effort inactive-retention sweep may follow. It can
+only retire entries that satisfy the Akuma owner's fifteen-day, stopped,
+unaliased, terminal-Dispatch judgment under the Alias authority lock and the
+private-state publication seat that Dispatch publication uses; it never rolls
+back, changes, or replaces the reported birth or fork result. Its final Heart
+revalidation preserves a pending Tell observed before removal; Tell admission
+takes no shared custody with retention, so an admission immediately after that
+read is a best-effort boundary, not an atomic guarantee. Only an in-flight
+sweep is coalesced, so a later successful birth can sweep again. List, status,
+history, wait, tell, ask, and every other observation path never run it.
+
 ## Address, Selection, And Listing
 
 The Address facet is the sole selector interpreter for Akumas. It resolves
@@ -124,14 +136,15 @@ Tell and kill return their primary evidence; ask returns its input-bound observa
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
-or reopen the whole roster. Its optional caller selection narrows that one
-World's roster to the selected caller's directly and transitively descended
-Akumas; the caller closure is completed across Archetypes before any Archetype
-filter, activity order, and bound, and it never aggregates Worlds or consults a
-user-home index. Its rows carry the frozen caller attribution the roster
-observed. The lower roster supplies that native membership,
-order, and extent, and World composition attaches the current Alias bindings
-afterward without replacing the semantic order or counting the board. Archetype definitions are listed by the archetype
+or reopen the whole roster. Reading it is observation only and never retires an
+entry. Its optional caller selection narrows that one World's roster to the
+selected caller's directly and transitively descended Akumas; the caller
+closure is completed across Archetypes before any Archetype filter, activity
+order, and bound, and it never aggregates Worlds or consults a user-home index.
+Its rows carry the frozen caller attribution the roster observed. The lower
+roster supplies that native membership, order, and extent, and World
+composition attaches the current Alias bindings afterward without replacing the
+semantic order or counting the board. Archetype definitions are listed by the archetype
 owner. The owner's bounded definitions catalogue and the native Archetype
 error that call admission already throws are reachable from the package root,
 so a root-only caller lists the same callable definitions the CLI shows and

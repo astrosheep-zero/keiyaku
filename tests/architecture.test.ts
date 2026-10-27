@@ -42,6 +42,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/selection.ts", ["plugin/akuma-signals.ts", "stderrPluginDiagnostic"], true],
   ["library/akumas.ts", ["akuma/akuma-instance.ts", "captureAkumaHostDiagnostic"], true],
   ["library/akumas.ts", ["akuma/akuma-instance.ts", "AkumaHostOptions", true], true],
+  ["library/akuma-retention.ts", ["akuma/retention.ts", "retireInactiveAkuma"], true],
+  ["akuma/retention.ts", ["git/observe.ts", "observeContractAt"], false],
   ["akuma/selection-owner-port.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
   ["akuma/akuma-observe.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], false],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],

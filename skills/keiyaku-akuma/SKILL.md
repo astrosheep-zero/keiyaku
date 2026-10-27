@@ -103,6 +103,20 @@ and refuses for Contract, Debt, and Akuma-name catalogues.
 exact result named by status or wait. Use the complete AkuId when an alias may
 move; see `history --help` for paging.
 
+## Retention
+
+An Akuma whose latest durable life or activity is older than fifteen days may be
+retired after a later successful `call` or `fork`. Retention keeps any running
+Akuma, any current alias target, any Akuma dispatched to a Contract that is not
+yet `claimed` or `abandoned`, unborn or stillborn allocations, and unreadable
+entries. It removes only the Akuma's recognized runtime custody; it never kills
+a worker and never rewrites another Akuma, Contract, Debt, or alias. Its final
+Heart re-read keeps a pending Tell it observes; a Tell admitted immediately
+after that read is best-effort, not atomic. There is no timer and no prune
+command. Observation and Tell commands (`status`, `ls`, `history`, `wait`,
+`tell`, `ask`) never trigger retention; without a later successful
+`call`/`fork`, old entries simply remain.
+
 ## Stop and branch
 
 ```bash

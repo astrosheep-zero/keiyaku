@@ -54,6 +54,43 @@ not retire; it permanently refuses same-identity succession even after physical
 leash release. A later body may supersede untidy history but never hung history.
 Stopping a Body preserves Soul, sessions, history, pending tells, and requests.
 
+## Inactive Retention
+
+The default retention age for an inactive Akuma is fifteen days. No setting,
+command, timer, daemon, persisted schedule, or new lifecycle state introduces
+it. Semantic age is the later durable life or activity instant already retained
+by Heart, never directory metadata; a missing or unreadable instant never proves
+staleness. Unborn and stillborn allocations are outside this policy.
+
+Only a born, readable, stopped entry can be retired. A held execution seat, an
+admitted pending Tell, a current Alias binding, or a Dispatch association whose
+Contract is not terminal keeps the Akuma. A Contract in `claimed` or `abandoned`
+is terminal; every other phase, a missing Contract, and any failed, corrupt, or
+unavailable Git, Dispatch, or Contract observation keep the candidate.
+Unrecognized bytes and noncanonical run directories are never adopted or
+removed.
+
+Before removal, the final judgment holds the Alias authority lock and, in a Git
+World, the same private-state publication seat Dispatch publication uses. Alias
+and Dispatch observations are read under that custody and removal happens
+before it is released, so a new reference cannot commit between the final
+judgment and deletion. The last step under that custody re-reads Heart: an
+admitted pending Tell, a changed life, or a changed age retains the entry. Tell
+admission does not take that cross-authority custody, so a Tell observed by the
+final read is preserved while an admission immediately after it is a documented
+best-effort boundary rather than an atomic guarantee. A busy authority also
+retains the candidate. Dispatch and Contract observation uses the World's Git
+repository; a World without one has no Dispatch authority.
+
+Retention is a best-effort maintenance pass triggered only after a successful
+call or fork has made its new Akuma durable. It runs outside the birth
+transaction and never changes, rolls back, or replaces that birth result. List,
+status, history, wait, tell, ask, and every other observation path never retire
+bytes. One sweep removes only recognized per-entry custody, never signals or
+kills an Akuma, and a failure in one candidate never affects another candidate
+or the operation that triggered the pass. If no later successful call or fork
+occurs, eligible entries simply remain.
+
 ## Archetype And Placement
 
 An Archetype is call-time personality and provider configuration. Publicly these are Akuma names; the word Archetype never appears on the CLI face. Its exact
@@ -129,3 +166,6 @@ Requests, publication, and Settings. Body drives providers and writes typed
 Heart facts. Request service composes Heart, identity, provider recipe, and
 publication. Provider adapters depend on the provider-neutral boundary, never
 on public or lifecycle projections. Kanshi consumes public values only.
+Inactive retirement follows the same split: the Akuma owner reads Heart, leash,
+and filesystem state and removes recognized custody, while the World
+composition supplies Alias and read-only Dispatch and Contract associations.

@@ -9,6 +9,7 @@ import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
+import { sweepInactiveAkumas } from "./akuma-retention.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 import type { CallInput, CallResult, CallWaitHead, DispatchStage, ForkInput, ForkResult } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
@@ -70,6 +71,7 @@ class AkumasHandle {
   #execution: ExecutionContext;
   #selection: SelectionSeam;
   #reportDiagnostic: AkumaHostOptions["reportDiagnostic"];
+  #maintenance: Promise<void> | undefined;
 
   constructor(world: WorldRoot, execution: ExecutionContext, host?: AkumaHostOptions) {
     this.#world = world;
@@ -88,11 +90,19 @@ class AkumasHandle {
   }
 
   call(input: CallInput): Promise<CallResult> {
-    return callAkumas(this.withWorld(input, "Akumas.call input"), this.#execution, this.#reportDiagnostic);
+    const pending = callAkumas(this.withWorld(input, "Akumas.call input"), this.#execution, this.#reportDiagnostic);
+    return pending.then(async (result) => {
+      await this.maintain(this.#world);
+      return result;
+    });
   }
 
   fork(input: ForkInput): Promise<ForkResult> {
-    return forkAkumas(this.withWorld(input, "Akumas.fork input"));
+    const pending = forkAkumas(this.withWorld(input, "Akumas.fork input"));
+    return pending.then(async (result) => {
+      if (result.kind === "forked") await this.maintain(this.#world);
+      return result;
+    });
   }
 
   status(input: AkumaAddressInput): Promise<AkumaObservation> {
@@ -117,6 +127,36 @@ class AkumasHandle {
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
     return historyAkuma(this.withWorld(input, "Akumas.history input"), this.#reportDiagnostic);
+  }
+
+  /**
+   * The one write-side maintenance point: a successful birth is already durable,
+   * so one best-effort sweep may follow it. Only an in-flight sweep is
+   * coalesced; a completed or failed sweep leaves the next successful birth free
+   * to start a fresh one. It never changes the birth result or any observation.
+   */
+  private maintain(world: WorldRoot): Promise<void> {
+    const inFlight = this.#maintenance;
+    if (inFlight !== undefined) return inFlight;
+    const pending = this.sweep(world).finally(() => {
+      this.#maintenance = undefined;
+    });
+    this.#maintenance = pending;
+    return pending;
+  }
+
+  private async sweep(world: WorldRoot): Promise<void> {
+    try {
+      await sweepInactiveAkumas(world);
+    } catch (error) {
+      try {
+        this.#reportDiagnostic?.(
+          `akuma retention sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } catch {
+        // A diagnostic sink failure cannot change the ordinary operation.
+      }
+    }
   }
 
   private withWorld<Input>(input: Input, label: string): Input & Readonly<{ path: WorldRoot }> {

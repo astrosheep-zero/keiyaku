@@ -2,7 +2,10 @@ import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { parseAkuId, type AkuId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
-import { acquireSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
+import {
+  acquireSqliteTransactionLock,
+  tryAcquireSqliteTransactionLock,
+} from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { parseAkumaAlias, parseReadableAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
@@ -120,6 +123,29 @@ export async function nukeAliases(world: WorldRoot): Promise<void> {
 
 export async function readAliases(world: WorldRoot): Promise<readonly AliasBinding[]> {
   return await read(paths(world).authority);
+}
+
+export type HeldAliasCustody = Readonly<{
+  bindings: readonly AliasBinding[];
+  release(): void;
+}>;
+
+/**
+ * Take the same authority lock Alias writers use and read the current bindings
+ * under it. A holder keeps the lock across its cross-authority decision and
+ * effect, so no Alias move can commit between them. Null means another writer
+ * holds the authority; the caller must leave its subject untouched.
+ */
+export async function tryAcquireAliasCustody(world: WorldRoot): Promise<HeldAliasCustody | null> {
+  const location = paths(world);
+  const held = await tryAcquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
+  if (held === null) return null;
+  try {
+    return { bindings: await read(location.authority), release: () => held.close() };
+  } catch (error) {
+    held.close();
+    throw error;
+  }
 }
 
 export async function moveAlias(

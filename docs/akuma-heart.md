@@ -74,10 +74,12 @@ Recent roster observations derive their activity order and bounded extent solely
 from that Heart projection. Custody metadata may conservatively bound which
 unread Hearts need opening, but it is never returned, treated as activity, used
 for lifecycle judgment, or allowed to choose membership, order, or extent.
-Heart gains no durable activity index, cache, daemon, or migration for that
-read. When those private bounds cannot prove the semantic observation, the
-remaining candidates are observed through fixed bounded concurrency before it
-is returned.
+Default inactive retirement uses the same Heart timestamps and life projection
+as its semantic age; filesystem metadata only bounds which Hearts need opening
+and never decides staleness. Heart gains no durable activity index, cache,
+daemon, or migration for that read or for retention. When those private bounds
+cannot prove the semantic observation, the remaining candidates are observed
+through fixed bounded concurrency before the roster observation is returned.
 
 ## Durable Facts And Judges
 

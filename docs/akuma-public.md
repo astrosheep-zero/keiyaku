@@ -198,9 +198,10 @@ it neither mutates lifecycle facts nor retains execution custody afterward.
 This is not a frozen view of subsequent activity or a barrier to future Bodies.
 
 The roster is a compact bounded recent-activity observation, not a smaller status
-view. Its order is the later of each readable Heart's life and activity evidence,
-with complete identity breaking equal activity and untimestamped rows following
-timestamped rows. The observation says whether another readable member lies
+view. Reading it, status, history, wait, tell, ask, or any other observation
+never retires an entry. Its order is the later of each readable Heart's life and
+activity evidence, with complete identity breaking equal activity and
+untimestamped rows following timestamped rows. The observation says whether another readable member lies
 beyond its bounded result without claiming a total or a frozen continuation.
 It exposes born identity, frozen descriptive snapshots, the World's current
 alias bindings naming each member, life evidence, recent
