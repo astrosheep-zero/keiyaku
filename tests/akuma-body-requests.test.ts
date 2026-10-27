@@ -357,16 +357,17 @@ test("forwarded ordinary and schema Tells retain the submitting initiator at the
   assert.deepEqual(received, ["Bob", "Bob"]);
 });
 
-test("forwarded observation identity is internal requester authority, not wire input", async () => {
-  const observers: string[] = [];
+test("forwarded observation captures semantic identity without granting participant authority", async () => {
+  let waits = 0;
+  const historyIds: string[] = [];
   const port: SelectionRequestPort = {
     ...unusedSelectionPort,
-    wait: async (input) => {
-      observers.push(input.observer);
+    wait: async () => {
+      waits++;
       return {} as never;
     },
     ask: async (input) => {
-      observers.push(input.observer);
+      await input.outcomeObserved(input.target, ["turn/7"]);
       return {} as never;
     },
   };
@@ -386,9 +387,16 @@ test("forwarded observation identity is internal requester authority, not wire i
     assert.equal(command.protocol.decodeRequest({ ...payload, observer: "ForgedObserver" }), null);
     const request = command.protocol.decodeRequest(payload);
     assert.ok(request);
-    await command.execute(request, facts);
+    const served = await command.execute(request, facts);
+    if (action === "akuma.ask" && served.kind === "served") {
+      historyIds.push(...(served.result as { historyIds: readonly string[] }).historyIds);
+      assert.deepEqual(served.service, { action, target: "aku/worker/22222222", tellId: facts.id });
+    }
   }
-  assert.deepEqual(observers, [facts.requester, facts.requester]);
+  assert.equal(waits, 1);
+  assert.deepEqual(historyIds, ["turn/7"]);
+  assert.throws(() => selectionRequestProtocol("akuma.ask").decodeResult({ result: {}, historyIds: ["not-a-turn"] }),
+    /invalid live result/u);
 });
 
 test("selection request permissions stay separated by action", () => {
@@ -1919,7 +1927,9 @@ test("bounded forwarded interrupt Ask admits once under the request identity", a
     const returned = outcomes.find((value) => value.kind === "returned");
     assert.equal(returned?.kind, "returned");
     if (returned?.kind === "returned") {
-      const result = selectionResultSchemas.ask.parse(returned.result);
+      const envelope = selectionRequestProtocol("akuma.ask").decodeResult(returned.result) as { result: unknown; historyIds: readonly string[] };
+      const result = selectionResultSchemas.ask.parse(envelope.result);
+      assert.deepEqual(envelope.historyIds, []);
       assert.equal(result.tell.admission.tellId, id);
       assert.deepEqual(result.tell.interruption, { kind: "pending", bodySequence: body.sequence });
       assert.deepEqual(result.observation, { reason: "deadline" });
@@ -1976,7 +1986,11 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     const outcome = await pending;
     assert.equal(outcome.kind, "returned");
     if (outcome.kind !== "returned") throw new Error("expected a returned waited Tell result");
-    const result = selectionResultSchemas.ask.parse(outcome.result);
+    const envelope = selectionRequestProtocol("akuma.ask").decodeResult(outcome.result) as { result: unknown; historyIds: readonly string[] };
+    const result = selectionResultSchemas.ask.parse(envelope.result);
+    assert.throws(() => selectionRequestProtocol("akuma.ask").decodeResult({ ...envelope, historyIds: ["not-a-turn"] }),
+      /invalid live result/u);
+    assert.deepEqual(envelope.historyIds, [`turn/${result.tell.row.deliveries.at(-1)!.turnSequence}`]);
     assert.deepEqual(result.observation, { reason: "answered", answer: "delayed direct answer" });
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {

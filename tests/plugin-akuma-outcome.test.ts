@@ -260,7 +260,7 @@ test("all-wait observes final snapshot outcomes once per operation", { timeout: 
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
 });
 
-test("forwarded wait and ask have exactly one serving observer", { timeout: 15_000 }, async (t) => {
+test("forwarded wait and ask have exactly one requesting observer", { timeout: 15_000 }, async (t) => {
   const root = temporaryDirectory(t, "keiyaku-outcome-forwarded-");
   const source = await bornWorld(root, "0b500006");
   const world = source.world;
@@ -277,7 +277,7 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
   const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
   const bodies: Promise<unknown>[] = [];
   const restore = installTellRuntime(fixtureRuntime(bodies, new Map([
-    [source.allocated.paths.directory, { adapter: answering("forwarded answer"), now: AT }],
+    [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
   ])));
   const pump = await BodyRequestPump.open({
     paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT,
@@ -288,18 +288,22 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
     const api = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }), {
       reportDiagnostic: (message) => { submittingDiagnostics.push(message); },
     });
-    const asked = await api.ask({ akuma: source.allocated.id, body: "work", signal: t.signal });
-    assert.deepEqual(asked.observation, { reason: "answered", answer: "forwarded answer" });
+    const schema = Schema.json({ type: "object" }, () => {
+      assert.equal(recorded.signals().length, 1, "observation precedes caller answer decoding");
+      throw new Error("caller decode refused");
+    });
+    const asked = await api.ask({ akuma: source.allocated.id, body: "work", schema, signal: t.signal });
+    assert.equal(asked.observation.reason, "invalid-output");
+    assert.equal("historyIds" in asked, false, "the transport envelope never becomes public");
     const tell = await readTell(source.allocated.paths, asked.tell.admission.tellId);
     assert.ok(tell?.binding);
-    assert.deepEqual(recorded.signals(), [{ ...signal(source.allocated.id, tell.binding.turnSequence), observer: parent.soul.id }]);
+    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
     recorded.reset();
     const waited = await api.wait({ akuma: [source.allocated.id], timeoutMs: 5_000 });
     assert.equal(waited.reason, "completed");
-    assert.deepEqual(recorded.signals(), [{ ...signal(source.allocated.id, tell.binding.turnSequence), observer: parent.soul.id }]);
-    assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2,
-      "the serving operation owns diagnostics for ask and wait, without submitting-side delivery");
-    assert.deepEqual(submittingDiagnostics, [], "serving diagnostics never reach the submitting callback");
+    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
+    assert.deepEqual(diagnostics, [], "the serving executor captures identity without plugin emission");
+    assert.equal(submittingDiagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
   } finally {
     restore();
     await settleFixtureBodies(bodies);
@@ -307,12 +311,15 @@ test("forwarded wait and ask have exactly one serving observer", { timeout: 15_0
   }
 });
 
-test("forwarded wait acknowledges real Square notice for the requesting Soul, not the serving session", async (t) => {
+test("forwarded wait acknowledges a real Square notice using the requester's local ownership", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-forwarded-"));
-  const prior = { SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT };
-  process.env.SQUARE_PARTICIPANT_NAME = "ServingSession";
-  process.env.SQUARE_HOST_LEDGER_ROOT = join(world, "ledger");
+  const identityVariables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID", "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION"];
+  const prior = { ...Object.fromEntries(identityVariables.map((key) => [key, process.env[key]])),
+    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME, SQUARE_INDEX: process.env.SQUARE_INDEX };
+  for (const key of identityVariables) delete process.env[key];
+  process.env.SQUARE_PARTICIPANT_NAME = "Requester";
+  process.env.PI_SESSION_ID = "requester-session";
+  process.env.SQUARE_INDEX = join(world, "index.ndjsonl");
   t.after(() => restoreEnvironmentValues(prior));
   const target = await bornBody(world, "0b500009", AT);
   t.after(() => target.holder.release());
@@ -323,16 +330,17 @@ test("forwarded wait acknowledges real Square notice for the requesting Soul, no
   const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
   const path = join(world, ".square", "KEIYAKU.square");
   mkdirSync(join(world, ".square"), { recursive: true });
-  const square = await Square.build({ path, markdown: "", env: {} });
+  const square = await Square.build({ path, markdown: "", body: { channel: "pi", session: "requester-session" } });
   t.after(() => square.close());
-  await square.join(parent.soul.id);
-  await square.join("ServingSession");
+  await square.join("Requester");
+  const serving = await Square.at({ path, body: { channel: "pi", session: "serving-session" } });
+  try { await serving.join("ServingSession"); } finally { await serving.close(); }
   const observer = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
   await observer.signals?.["akuma.turn-outcome"]?.({
     kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
-    turnSequence: turn.sequence, participants: [parent.soul.id, "ServingSession"], outcome: { kind: "answered", text: "known answer" },
+    turnSequence: turn.sequence, participants: ["Requester", "ServingSession"], outcome: { kind: "answered", text: "known answer" },
   });
-  const notice = (await square.history({ from: [target.allocated.id], limit: null })).activities.find((item) => item.kind === "say")!;
+  const notice = (await square.history({ from: ["keiyaku-notice"], limit: null })).activities.find((item) => item.kind === "say")!;
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(join(world, "plugins", "square.mjs"),
     `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);
@@ -347,7 +355,7 @@ test("forwarded wait acknowledges real Square notice for the requesting Soul, no
       .wait({ akuma: [target.allocated.id], timeoutMs: 5_000, signal: t.signal });
     assert.equal(waited.reason, "completed");
     const snapshot = await square.snapshot();
-    assert.equal(snapshot.delivered(parent.soul.id, notice.id), true);
+    assert.equal(snapshot.delivered("Requester", notice.id), true);
     assert.equal(snapshot.delivered("ServingSession", notice.id), false);
     assert.deepEqual(diagnostics, []);
   } finally { await pump.close(); }

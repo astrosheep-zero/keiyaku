@@ -48,18 +48,20 @@ Plugin-owned paths are outside Keiyaku management custody unless an owner later
 adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
-The Square observer shares Square's host-wide session registry with native
-harness integrations. Caller registration and outcome observation use that same
-registry across execution directories; a worktree-local registry cannot stand in
-for it. Square activity remains World-local, and worktree disposal does not
-relocate it to the primary World. The submitting integration edge owns which
-participant a session speaks as: an explicit name stays authoritative, an
+The Square observer uses Square's artifact-owned participant custody, shared
+with native harness integrations. Opening a resource captures the actual
+integration execution identity; recognition reads the current seats held by that
+identity, and a participant name alone never grants write authority. The optional
+host discovery index is not ownership evidence. Square activity remains
+World-local, and worktree disposal does not relocate it to the primary World.
+The submitting integration edge owns which participant a session speaks as:
+an explicit name stays authoritative, an
 already-established participant of that session is reused unchanged, and a
 session with no identity here derives one stable name from its own provider
 session coordinate. Square remains the owner of standing, ownership, and
-lifecycle, so an ambiguous identity, a name another session holds, or an
-unavailable registry selects nothing rather than inventing, migrating, or taking
-over a participant. Recognition is a read of Square's own registry and never
+lifecycle, so an ambiguous identity, a name another execution holds, or an
+unavailable or incompatible artifact selects nothing rather than inventing,
+migrating, or taking over a participant. Recognition is read-only and never
 rejoins, renames, or migrates a finished participant.
 
 A generic integration initiator supplied by the caller outranks the Square
@@ -70,32 +72,37 @@ process sends an attributed Akuma input, the optional initiation observation
 lets Square establish that initiator's callable route
 in the submitting session. This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
-Birth observation expresses only as its explicitly carried initiator, using the
-route already prepared by the submitting session. It never borrows the child
-process's identity or registers the child's harness route for that initiator.
-Without an initiator it is silent. Turn outcomes and abnormal Body endings are
-not expressed by the subject Akuma: one World-local notification participant
+Birth observation remains produced by the child's Body at the established birth
+boundary, but its Square notice is authored by the shared notification identity,
+not by the initiator. The notice visibly distinguishes the explicit initiator,
+the born Akuma, and any caller attribution; only the explicit initiator is
+addressed. Without an initiator it is silent. No initiating-session ownership or
+wake route is borrowed by the child. Turn outcomes and abnormal Body endings are
+also not expressed by the subject Akuma: one World-local notification participant
 authors every such notice for the World, so the notice no longer depends on a
 worker participant that may have already stepped out. That author is a logical
 integration identity with a stable session of its own, not a harness session
 for the producing process: it registers no recipient wake route and borrows no
-ambient session ownership. Square's public host-wide ownership ledger is its
-only custody; before each send it acquires or reuses that ownership and joins
-ordinarily, reusing active standing and receiving an ordinary rejoin after it
-has stepped out. It never takes over a foreign claim and never marks itself
-done after a send. Turn outcomes address every participant carried by the
+ambient session ownership. Its explicit logical execution identity joins through
+Square's ordinary public boundary before each send, reusing active standing and
+receiving an ordinary rejoin after it has stepped out. The artifact alone owns
+that custody; Keiyaku never claims or releases Square ownership storage directly.
+It never takes over a foreign claim and never marks itself done after a send.
+Turn outcomes address every participant carried by the
 Turn's signal, never a caller captured from the producing process. The opening
 initiator remains the owner, not the entire audience. No participants produces
 an unaddressed outcome rather than a fallback mention.
-Local outcome observation acknowledges notices for the participant the producing
-session is recognized as standing, and for an explicitly named participant when
-no standing binding exists. A notice is recognized through the shared author or
+Local outcome observation acknowledges notices only for a current participant
+held by the observing execution. An explicit name may select among that
+execution's established voices but never grants another execution's authority.
+A notice is recognized through the shared author or
 the former per-Akuma author, and the subject Akuma's own standing is irrelevant.
 The operation never computes a substitute identity, joins a participant, or
 creates a route merely to acknowledge; missing standing, notice, or availability
 to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
-notice is never consumed. An explicitly forwarded observer names its own
-participant and never acquires the serving session's identity or wake route.
+notice is never consumed. An explicitly attributed observer never acquires
+another execution's identity or wake route; a name alone cannot delegate
+acknowledgment authority.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention
@@ -200,14 +207,19 @@ the exact admission's committed outcome. A wait delivers for its final status
 observations without consuming answer text; completion-only
 probes remain completion-only. Outcomes established together receive concurrent
 bounded delivery attempts; the operation awaits them without a detached queue
-or a timeout interval multiplied by the number of results. Forwarded wait and ask observe
-in their serving process; their submitting process does not emit again. Bounded
-call answer observation belongs to the submitting process, after call admission. These are ephemeral observations, not Keiyaku acknowledgment facts or
-cross-operation delivery receipts. An observation may identify its actual
-observer independently of the producing process. Forwarded wait and ask use
-the requesting Body's authenticated identity, never the serving environment;
-local observations may use the observer plugin's current participant identity.
-This attribution grants no permission and changes no public operation result.
+or a timeout interval multiplied by the number of results. Forwarded wait and
+ask observe once in their requesting process,
+after a concrete live result establishes the exact outcome identity. The serving
+executor supplies semantic evidence but does not deliver that plugin signal.
+Wait uses the returned status frontier; ask carries the exact semantic identity
+alongside its private live result. No later read reconstructs an earlier
+observation, and expired transport or durable service evidence never replays one.
+Answer-schema decoding follows observation, so an invalid answer remains an
+observed committed outcome. Bounded call answer observation belongs to the
+submitting process, after call admission. These are ephemeral observations, not
+Keiyaku acknowledgment facts or cross-operation delivery receipts. The observing
+integration uses its own actual local ownership; semantic observer attribution
+grants no permission and changes no public operation result.
 
 Square may acknowledge only already-existing outcome notices corresponding to
 the observed Akuma and exact retained outcome, for that observer alone. A

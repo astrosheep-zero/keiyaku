@@ -1,4 +1,5 @@
 /** @architectureCompositionRoot */
+import { observeStatusOutcome } from "../akuma/akuma-observe.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
@@ -78,14 +79,16 @@ export function selectionSeam(
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): SelectionSeam {
   const channel = executionChannel(execution);
-  return channel.kind === "body-request" ? forwardedSelection(channel.directory) : localSelection(reportDiagnostic);
+  return channel.kind === "body-request"
+    ? forwardedSelection(channel.directory, reportDiagnostic)
+    : localSelection(reportDiagnostic);
 }
 
-function forwardedSelection(directory: string): SelectionSeam {
+function forwardedSelection(directory: string, reportDiagnostic: (message: string) => void): SelectionSeam {
   return {
     addressOne: resolveAkuma,
     addressSet: resolveAkumaSet,
-    wait: async (addressed, mode) => await forwardedWait(addressed, { ...mode, directory }),
+    wait: async (addressed, mode) => await forwardedWait(addressed, { ...mode, directory }, reportDiagnostic),
     kill: async (addressed, abort) =>
       await requestForwardedSelectionKill({
         directory,
@@ -102,7 +105,7 @@ function forwardedSelection(directory: string): SelectionSeam {
         ...(abort === undefined ? {} : { signal: abort }),
       }),
     ask: async <T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, abort: AbortSignal | undefined) => {
-      const result = await requestForwardedSelectionAsk({
+      const { result, historyIds } = await requestForwardedSelectionAsk({
         directory,
         target: addressed.id,
         body: input.body,
@@ -112,6 +115,7 @@ function forwardedSelection(directory: string): SelectionSeam {
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
         ...(abort === undefined ? {} : { signal: abort }),
       });
+      await outcomePluginObserver({ world: addressed.path, reportDiagnostic })(result.akuma, historyIds);
       return (
         input.schema === undefined
           ? result
@@ -409,18 +413,18 @@ async function forwardedWait(
     signal?: AbortSignal;
     repo?: Repo;
   }>,
+  reportDiagnostic: (message: string) => void,
 ): Promise<AkumaWaitResult> {
-  return await attachWaitAssociations(
-    addressed.path,
-    input.repo,
-    await requestForwardedSelectionWait({
-      directory: input.directory,
-      targets: addressed.orderedIds,
-      completion: input.completion,
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    }),
-  );
+  const result = await requestForwardedSelectionWait({
+    directory: input.directory,
+    targets: addressed.orderedIds,
+    completion: input.completion,
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+  const observer = outcomePluginObserver({ world: addressed.path, reportDiagnostic });
+  await Promise.all(result.observations.map(({ status }) => observeStatusOutcome(status, observer)));
+  return await attachWaitAssociations(addressed.path, input.repo, result);
 }
 
 async function localWait(

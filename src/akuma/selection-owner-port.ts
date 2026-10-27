@@ -1,6 +1,5 @@
 import { AkumaSelfInterruptError } from "./akuma-errors.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver } from "../plugin/akuma-signals.js";
 import { requireBornAkuma } from "./akuma-probe.js";
 import { executeAskAkuma, executeKillAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
@@ -19,14 +18,14 @@ import type { SelectionRequestPort } from "./selection-request.js";
  */
 export function selectionRequestPort(
   world: WorldRoot,
-  reportDiagnostic: (message: string) => void,
+  _reportDiagnostic: (message: string) => void,
   servingBodyId?: AkumaStatus["id"],
 ): SelectionRequestPort {
   const prove = async (targets: readonly AkumaStatus["id"][]): Promise<void> => {
     for (const id of targets) await requireBornAkuma(world, id);
   };
   return {
-    wait: async ({ targets, observer, ...request }) => {
+    wait: async ({ targets, ...request }) => {
       await prove(targets);
       // The lower wait owner returns association-free native evidence; the
       // actual request crossing composes its canonical transport shape.
@@ -34,7 +33,6 @@ export function selectionRequestPort(
         path: world,
         ids: targets,
         ...request,
-        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }, observer),
       });
       return { ...native, observations: native.observations.map(akumaObservationOf) };
     },
@@ -43,14 +41,13 @@ export function selectionRequestPort(
       await prove([target]);
       return await executeTellAkuma({ path: world, id: target, ...request });
     },
-    ask: async ({ target, observer, ...request }) => {
+    ask: async ({ target, ...request }) => {
       if (request.interrupt === true && servingBodyId === target) throw new AkumaSelfInterruptError(target);
       await prove([target]);
       return await executeAskAkuma({
         path: world,
         id: target,
         ...request,
-        outcomeObserved: outcomePluginObserver({ world, reportDiagnostic }, observer),
       });
     },
     kill: async ({ targets, ...request }) => {

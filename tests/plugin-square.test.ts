@@ -2,20 +2,32 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { createHostLedgerPort, Square, squareAssignedParticipantName, type Activity } from "@astrosheep/square";
+import { createHash } from "node:crypto";
+import { Square, type Activity, type Body } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import { squareSeat } from "../src/cli/square-identity.js";
 import type { PluginHooks } from "../src/plugin/public.js";
 import type { WorldRoot } from "../src/world.js";
 import { deferred as promiseBarrier, restoreEnvironmentValues } from "./support/process.js";
 
+const testIndexRoot = mkdtempSync(join(tmpdir(), "keiyaku-square-index-"));
+const previousIndex = process.env.SQUARE_INDEX;
+process.env.SQUARE_INDEX = join(testIndexRoot, "index.ndjsonl");
+after(() => {
+  restoreEnvironmentValues({ SQUARE_INDEX: previousIndex });
+  rmSync(testIndexRoot, { recursive: true, force: true });
+});
+
 const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.square");
 // One World-local notifier authors every outcome and abnormal Body notice.
 const NOTIFIER = "keiyaku-notice";
 const NOTIFIER_SESSION = "keiyaku:square-notifier";
 const NOTIFIER_CHANNEL = "unknown";
+const notifierBody: Body = { channel: NOTIFIER_CHANNEL, session: NOTIFIER_SESSION };
+const squarePrototype = Object.getPrototypeOf(Square.inMemory({ markdown: "" })) as Square;
+const legacyPiName = (session: string): string => `pi-${createHash("sha256").update(session).digest("hex").slice(0, 12)}`;
 
 function activateSquare(world: string): ReturnType<typeof squarePlugin.activate> {
   return squarePlugin.activate({
@@ -68,29 +80,30 @@ async function withHeldSquareExpression<T>(
 ): Promise<T> {
   // The shared notifier authors every send, so the subject Akuma survives only
   // in the expression's envelope; hold exactly that send.
-  const originalJoin = Square.prototype.join;
+  const originalJoin = squarePrototype.join;
   const { promise: sent, resolve: markSent } = promiseBarrier<void>();
   const { promise: released, resolve: release } = promiseBarrier<void>();
-  Square.prototype.join = async function (...arguments_: Parameters<typeof originalJoin>) {
+  squarePrototype.join = async function (...arguments_: Parameters<typeof originalJoin>) {
     const joined = await originalJoin.call(this, ...arguments_);
     const express = joined.participant.express.bind(joined.participant);
     return {
       ...joined,
       participant: {
         ...joined.participant,
-        express: async (...expressArguments: Parameters<typeof express>) => {
-          if (!String(expressArguments[0]).startsWith(`${akumaId} `)) return express(...expressArguments);
+        express: (async (...expressArguments: unknown[]) => {
+          const send = () => Reflect.apply(express, undefined, expressArguments) as ReturnType<typeof express>;
+          if (!String(expressArguments[0]).startsWith(`${akumaId} `)) return send();
           if (!holdAfterSend) {
             markSent();
             await released;
           }
-          const result = await express(...expressArguments);
+          const result = await send();
           if (holdAfterSend) {
             markSent();
             await released;
           }
           return result;
-        },
+        }) as typeof express,
       },
     };
   };
@@ -98,7 +111,7 @@ async function withHeldSquareExpression<T>(
     return await callback({ sent, release });
   } finally {
     release();
-    Square.prototype.join = originalJoin;
+    squarePrototype.join = originalJoin;
   }
 }
 type SquareNotificationFixture = Readonly<{
@@ -133,7 +146,7 @@ type SquareNotificationFixture = Readonly<{
   expressions(): Promise<readonly CapturedExpression[]>;
   bodies(): Promise<readonly string[]>;
   observe(akumaId: string, historyId: string, observer?: string, cancellation?: AbortSignal): Promise<void>;
-  square<T>(operation: (square: Square) => Promise<T>): Promise<T>;
+  square<T>(operation: (square: Square) => Promise<T>, body?: Body): Promise<T>;
   withHeldExpression<T>(
     akumaId: string,
     callback: (barrier: HeldExpression) => Promise<T>,
@@ -147,13 +160,14 @@ async function withSquareNotificationFixture<T>(
   initiators?: readonly string[],
 ): Promise<T> {
   const root = mkdtempSync(join(tmpdir(), `keiyaku-square-${name}-`));
-  const prior = {
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
-    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
-  };
+  const prior = { ...ambientSessionIdentity(), SQUARE_INDEX: process.env.SQUARE_INDEX };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  process.env.PI_SESSION_ID = `fixture-${name}`;
+  process.env.SQUARE_INDEX = join(root, "index.ndjsonl");
+  const fixtureEnvironment = { ...process.env };
+  const fixtureBody: Body = { channel: "pi", session: fixtureEnvironment.PI_SESSION_ID! };
   try {
     mkdirSync(join(root, ".square"), { recursive: true });
-    process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
     const instance = await activateSquare(root);
     const turn = instance.signals?.["akuma.turn-outcome"];
     const bodyEnd = instance.signals?.["akuma.body-ended"];
@@ -210,11 +224,17 @@ async function withSquareNotificationFixture<T>(
         );
       },
       async observe(akumaId, historyId, observer, cancellation) {
-        await observed({ kind: "akuma.outcome-observed", akumaId, historyId,
-          ...(observer === undefined ? {} : { observer }) }, cancellation);
+        // Select an already-owned voice using its actual fixture session.
+        const savedName = process.env.SQUARE_PARTICIPANT_NAME;
+        if (observer === undefined) delete process.env.SQUARE_PARTICIPANT_NAME;
+        else process.env.SQUARE_PARTICIPANT_NAME = observer;
+        let selected;
+        try { selected = await activateSquare(root); }
+        finally { restoreEnvironmentValues({ SQUARE_PARTICIPANT_NAME: savedName }); }
+        await selected.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId, historyId }, cancellation);
       },
-      async square(operation) {
-        const square = await Square.at({ path: squarePath(root), env: {}, hostLedger: createHostLedgerPort() });
+      async square(operation, body = fixtureBody) {
+        const square = await Square.at({ path: squarePath(root), env: fixtureEnvironment, body });
         try { return await operation(square); } finally { await square.close(); }
       },
       expressions: () => expressions(squarePath(root)),
@@ -265,7 +285,6 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     mkdirSync(join(root, ".square"), { recursive: true });
     process.env.CODEX_THREAD_ID = "caller";
-    process.env.PI_SESSION_ID = "fixture-pi-session";
     process.env.PASEO_AGENT_ID = "";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
     process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
@@ -335,7 +354,7 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     });
     assert.equal(existsSync(squarePath(root)), true);
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
+      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
       outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
       outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
     ]);
@@ -348,12 +367,6 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
       assert.match(queued[0]?.at(-1) ?? "", /<square-activity [^>]*as="Alice" id="act\/\d+" from="keiyaku-notice">/u);
-      const evidence = await createHostLedgerPort({ rootPath: join(root, "square-ledger") }).listWakeAttempts();
-      assert.equal(
-        evidence.filter((row) => row.kind === "wake" && row.outcome === "accepted" && ["Alice", "Bob"].includes(row.participant))
-          .length,
-        2,
-      );
     }
 
     delete process.env.CODEX_THREAD_ID;
@@ -379,10 +392,10 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressions(squarePath(root)), [
-      { actor: "Alice", body: "aku/caller called aku/called\nignore if you have already seen this.", mentions: [] },
+      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
       outcome("aku/answered turn/1 (@Alice) kei/example\ndone\nignore if you have already seen this.", ["Alice"]),
       outcome("aku/answered turn/2 (@Bob) kei/example\nadjusted\nignore if you have already seen this.", ["Bob"]),
-      { actor: "Bob", body: "called aku/external\nignore if you have already seen this.", mentions: [] },
+      outcome("Bob called aku/external\nignore if you have already seen this.", ["Bob"]),
       outcome("aku/failed turn/3\n× provider failed\nignore if you have already seen this."),
     ]);
     const square = await Square.at({ path: squarePath(root) });
@@ -432,7 +445,7 @@ test("the shared notifier reuses active custody and rejoins only after it is don
     await fixture.answeredTurn("aku/one", 1, 1, "Alice", "one");
     await fixture.answeredTurn("aku/two", 1, 1, "Bob", "two");
     assert.equal(await joinCount(), 1, "an active notifier is reused without another join");
-    await fixture.square(async (square) => { await (await square.participant(NOTIFIER)).done(); });
+    await fixture.square(async (square) => { await (await square.participant(NOTIFIER)).done(); }, notifierBody);
     await fixture.answeredTurn("aku/three", 1, 1, "Alice", "three");
     assert.equal(await joinCount(), 2, "a done notifier receives an ordinary rejoin");
     assert.deepEqual((await fixture.expressions()).map(({ actor }) => actor), [NOTIFIER, NOTIFIER, NOTIFIER]);
@@ -440,48 +453,36 @@ test("the shared notifier reuses active custody and rejoins only after it is don
 });
 
 test("an ending harness session never retires the shared notifier", async () => {
-  const prior = process.env.PI_SESSION_ID;
-  process.env.PI_SESSION_ID = "ambient-parent";
-  try {
-    await withSquareNotificationFixture("notifier-session", async (fixture) => {
-      const ledger = createHostLedgerPort({ rootPath: process.env.SQUARE_HOST_LEDGER_ROOT! });
-      const notifierPresence = async () => (await ledger.listPresence({ participant: NOTIFIER }))[0];
-      await fixture.answeredTurn("aku/session", 1, 1, "Alice", "kept");
-      const before = await notifierPresence();
-      assert.equal(before?.session, NOTIFIER_SESSION);
-      assert.equal(before?.channel, NOTIFIER_CHANNEL);
-      await fixture.square(async (square) => { await square.endOwnedSession("Alice", "ambient-parent"); });
-      // The ambient session's own binding is gone; the integration identity is not.
-      assert.deepEqual(await ledger.listPresence({ session: "ambient-parent", participant: "Alice" }), []);
-      assert.deepEqual(await notifierPresence(), before);
-      await fixture.answeredTurn("aku/session", 1, 2, "Bob", "still there");
-      const joins = await fixture.square(async (square) =>
-        (await square.history({ from: [NOTIFIER], limit: null })).activities.filter(({ kind }) => kind === "join").length);
-      assert.equal(joins, 1, "an ambient session end neither retires nor re-owns the notifier");
+  await withSquareNotificationFixture("notifier-session", async (fixture) => {
+    await fixture.answeredTurn("aku/session", 1, 1, "Alice", "kept");
+    await fixture.square(async (square) => {
+      await (await square.participant("Alice")).done();
+      assert.equal((await square.recognize()).some(({ name }) => name === NOTIFIER), false);
     });
-  } finally {
-    if (prior === undefined) delete process.env.PI_SESSION_ID;
-    else process.env.PI_SESSION_ID = prior;
-  }
+    await fixture.answeredTurn("aku/session", 1, 2, "Bob", "still there");
+    const joins = await fixture.square(async (square) =>
+      (await square.history({ from: [NOTIFIER], limit: null })).activities.filter(({ kind }) => kind === "join").length);
+    assert.equal(joins, 1);
+    await fixture.square(async (square) => {
+      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
+    }, notifierBody);
+  });
 });
 
-test("shared notifier custody is owned through Square's public ledger", async () => {
-  await withSquareNotificationFixture("notifier-ledger", async (fixture) => {
-    const ledger = createHostLedgerPort({ rootPath: process.env.SQUARE_HOST_LEDGER_ROOT! });
-    await fixture.answeredTurn("aku/owned", 1, 1, "Alice", "owned");
-    const [row] = await ledger.listPresence({ participant: NOTIFIER });
-    assert.equal(row?.session, NOTIFIER_SESSION);
-    assert.equal(row?.channel, NOTIFIER_CHANNEL);
-    const claim = { location: row!.location, participant: NOTIFIER, session: NOTIFIER_SESSION, channel: NOTIFIER_CHANNEL, epoch: 1 } as const;
-    assert.equal((await ledger.claimPresence(claim)).status, "owned", "an owned chain is reused");
-    await ledger.removePresence({ location: row!.location, participant: NOTIFIER, session: NOTIFIER_SESSION, channel: NOTIFIER_CHANNEL });
-    const intruder = { ...claim, session: "keiyaku:square-notifier-intruder" };
-    assert.equal((await ledger.claimPresence(intruder)).status, "acquired");
+test("shared notifier ownership refuses a foreign Body without takeover", async () => {
+  await withSquareNotificationFixture("notifier-foreign", async (fixture) => {
+    const foreignBody = { channel: "test", session: "foreign-notifier" };
+    await fixture.square(async (square) => { await square.join(NOTIFIER); }, foreignBody);
     await assert.rejects(fixture.answeredTurn("aku/foreign", 1, 1, "Alice", "refused"), { code: "already_joined" });
-    assert.equal((await fixture.bodies()).some((body) => body.startsWith("aku/foreign ")), false);
-    await ledger.removePresence({ location: row!.location, participant: NOTIFIER, session: intruder.session, channel: NOTIFIER_CHANNEL });
-    await fixture.answeredTurn("aku/owned-again", 1, 1, "Alice", "owned again");
-    assert.ok((await fixture.bodies()).some((body) => body.startsWith("aku/owned-again turn/1 ")));
+    assert.deepEqual(await fixture.expressions(), []);
+    await fixture.square(async (square) => {
+      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
+      await (await square.participant(NOTIFIER)).done();
+    }, foreignBody);
+    await fixture.answeredTurn("aku/owned", 1, 1, "Alice", "owned");
+    await fixture.square(async (square) => {
+      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
+    }, notifierBody);
   });
 });
 
@@ -567,8 +568,8 @@ test("outcome observation acknowledges every exact duplicate beyond the default 
       }
       return ids;
     });
-    const forbidJoin = t.mock.method(Square.prototype, "join", async () => { throw new Error("observation must not join"); });
-    const forbidImplicitJoin = t.mock.method(Square.prototype, "implicitJoin", async () => { throw new Error("observation must not reenter"); });
+    const forbidJoin = t.mock.method(squarePrototype, "join", async () => { throw new Error("observation must not join"); });
+    const forbidImplicitJoin = t.mock.method(squarePrototype, "implicitJoin", async () => { throw new Error("observation must not reenter"); });
     await fixture.observe("aku/repeated", "turn/1", "Bob");
     forbidJoin.mock.restore();
     forbidImplicitJoin.mock.restore();
@@ -640,7 +641,7 @@ test("local observation uses captured identity and cancellation prevents acknowl
   try {
     process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "ledger");
     const noIdentity = await activateSquare(root);
-    process.env.SQUARE_PARTICIPANT_NAME = "Alice";
+    process.env.PI_SESSION_ID = "local-observer";
     const instance = await activateSquare(root);
     await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Alice" });
     await instance.signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: "aku/local",
@@ -655,8 +656,8 @@ test("local observation uses captured identity and cancellation prevents acknowl
       const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const interrupted = new AbortController();
-      const originalHistory = Square.prototype.history;
-      const historyMock = t.mock.method(Square.prototype, "history", async function (this: Square,
+      const originalHistory = squarePrototype.history;
+      const historyMock = t.mock.method(squarePrototype, "history", async function (this: Square,
         ...[query, control]: Parameters<typeof originalHistory>) {
         assert.equal(control?.signal, interrupted.signal);
         const result = await originalHistory.call(this, query, control);
@@ -669,7 +670,7 @@ test("local observation uses captured identity and cancellation prevents acknowl
       process.env.SQUARE_PARTICIPANT_NAME = "WrongLaterIdentity";
       await instance.signals?.["akuma.outcome-observed"]?.(event);
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), true);
-      t.mock.method(square.constructor as typeof Square, "at", async () => { throw new Error("broken Square read"); });
+      t.mock.method(Square, "at", async () => { throw new Error("broken Square read"); });
       await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event)), /broken Square read/u);
     } finally { await square.close(); }
   } finally {
@@ -881,7 +882,7 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
   }
 });
 
-test("Pi caller registration and outcomes share the harness ledger across execution directories", async () => {
+test("Pi caller registration and outcomes share artifact ownership across execution directories", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-square-pi-inbox-"));
   const world = join(root, "world");
   const cwd = join(root, "execution");
@@ -901,19 +902,19 @@ test("Pi caller registration and outcomes share the harness ledger across execut
     process.env.PI_SESSION_ID = "fixture-pi-caller";
     process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "shared-ledger");
     const callerEnv = { ...process.env };
-    const initiator = squareAssignedParticipantName(callerEnv)!;
+    const initiator = (await squareSeat({ path: world as WorldRoot, environment: callerEnv }))!;
     const submitter = await activateSquare(world);
     const initiating = submitter.signals?.["akuma.initiating"];
     assert.ok(initiating);
     await initiating({ kind: "akuma.initiating", initiator });
 
-    // A native harness creates its own ledger port, not the plugin's captured port.
-    const ledger = createHostLedgerPort();
-    const bindings = await ledger.listPresence({ session: callerEnv.PI_SESSION_ID! });
-    assert.equal(bindings.length, 1);
-    assert.equal(bindings[0]?.location, realpathSync(squarePath(world)));
-    assert.equal(bindings[0]?.participant, initiator);
-    assert.equal(existsSync(join(cwd, ".square", "host-ledger")), false);
+    const bodyIdentity = { channel: "pi", session: callerEnv.PI_SESSION_ID! };
+    const native = await Square.at({ path: squarePath(world), env: callerEnv, body: bodyIdentity });
+    try {
+      assert.equal(realpathSync(native.location), realpathSync(squarePath(world)));
+      assert.deepEqual((await native.recognize()).map(({ name }) => name), [initiator]);
+    } finally { await native.close(); }
+    assert.equal(existsSync(join(cwd, ".square")), false);
 
     process.chdir(world);
     process.env.PI_SESSION_ID = "fixture-pi-body";
@@ -928,7 +929,7 @@ test("Pi caller registration and outcomes share the harness ledger across execut
       outcome: { kind: "answered", text: "done" },
     });
 
-    const square = await Square.at({ path: bindings[0]!.location, env: callerEnv, hostLedger: ledger });
+    const square = await Square.at({ path: squarePath(world), env: callerEnv, body: bodyIdentity });
     try {
       const joined = await square.implicitJoin(initiator);
       assert.ok(joined.participant);
@@ -960,10 +961,10 @@ test("local observation acknowledges the recognized seat, never the former provi
     await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: seat });
 
     // The identity the former edge would have recomputed from this same session.
-    const former = squareAssignedParticipantName(serving)!;
+    const former = legacyPiName(serving.PI_SESSION_ID!);
     assert.match(former, /^pi-/u);
     process.env.PI_SESSION_ID = "elsewhere";
-    const elsewhere = await Square.at({ path: squarePath(root), env: { ...process.env } });
+    const elsewhere = await Square.at({ path: squarePath(root), env: { ...process.env }, body: { channel: "pi", session: "elsewhere" } });
     try {
       await elsewhere.implicitJoin(former);
     } finally {
@@ -1049,17 +1050,19 @@ test("an explicit forwarded observer never borrows the serving session's identit
     try {
       const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities
         .find((activity) => activity.kind === "say")!;
-      assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), true, "the forwarded requester is served");
+      assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), false, "a forwarded name grants no authority");
+      await requester.signals?.["akuma.outcome-observed"]?.({
+        kind: "akuma.outcome-observed", akumaId: "aku/forwarded", historyId: "turn/1",
+      });
+      assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), true, "the actual requester observes locally");
       assert.equal((await square.snapshot()).delivered(seat, notice.id), false, "the serving session is not the observer");
     } finally {
       await square.close();
     }
-    const bindings = await createHostLedgerPort().listPresence({ session: serving.PI_SESSION_ID! });
-    assert.deepEqual(
-      bindings.map(({ participant }) => participant),
-      [seat],
-      "the serving session keeps its own single binding and gains nothing from forwarding",
-    );
+    const servingSquare = await Square.at({ path: squarePath(root), env: serving, body: { channel: "pi", session: serving.PI_SESSION_ID! } });
+    try {
+      assert.deepEqual((await servingSquare.recognize()).map(({ name }) => name), [seat]);
+    } finally { await servingSquare.close(); }
   } finally {
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
@@ -1075,7 +1078,8 @@ test("a declared name resolves an ambiguous session binding in local acknowledgm
     mkdirSync(join(root, ".square"), { recursive: true });
     // One session that joined twice: Square can no longer name it on its own.
     process.env.PI_SESSION_ID = "ambiguous-session";
-    const joined = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env } });
+    const joined = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env },
+      body: { channel: "pi", session: "ambiguous-session" } });
     try {
       await (await joined.implicitJoin("Stale")).participant?.catch();
       await (await joined.implicitJoin("Declared")).participant?.catch();

@@ -61,11 +61,15 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics. Public selection observations explicitly
 participate in identified-outcome observation, while association reads and
-roster expansion do not. Forwarded wait and ask leave delivery with the serving
-observer on behalf of the authenticated requesting Body, not the serving
-session; bounded call answer observation stays with the submitting observer.
-Composition never rereads later state to infer the identity of an earlier
-observed answer.
+roster expansion do not. Forwarded wait and ask leave plugin delivery with the
+requesting observer after it receives concrete live outcome evidence, using that
+integration's actual local ownership. The server supplies semantic identities
+without emitting the signal. Wait uses its returned status outcomes; ask carries
+private live observation evidence that never changes the public result. Delivery
+precedes caller-side answer decoding, and neither expired transport nor durable
+service evidence reconstructs or replays it. Bounded call answer observation
+stays with the submitting observer. Composition never rereads later state to
+infer the identity of an earlier observed answer.
 
 A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake for both local and forwarded calls;

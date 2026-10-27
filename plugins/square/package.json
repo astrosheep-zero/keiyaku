@@ -21,6 +21,6 @@
     "@astrosheep/keiyaku": "^4.5.11"
   },
   "dependencies": {
-    "@astrosheep/square": "^0.3.81"
+    "@astrosheep/square": "^0.3.88"
   }
 }

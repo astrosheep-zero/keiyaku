@@ -47,7 +47,13 @@ transport discretion.
 A forwarded selection operation composes its canonical result shape at the
 actual transport crossing, after the lower owner returns association-free
 native evidence; the requesting side then composes the World associations it
-owns. Completion kind is a static descriptor fact: a command completes either with a child reference or with opaque service evidence,
+owns. An operation may accompany its concrete live answer with exact semantic
+observation evidence for the requesting integration. This evidence grants no
+participant authority, changes no public result, and belongs only to that live
+receipt: it is never retained as service evidence, reconstructed by a later read,
+or replayed after transport expires. The serving executor captures it without
+performing the requester's external observation. Completion kind is a static
+descriptor fact: a command completes either with a child reference or with opaque service evidence,
 and its descriptor exposes only that kind's projection.
 
 Transport claims and receipts are ephemeral bytes, not facts. Heart request facts

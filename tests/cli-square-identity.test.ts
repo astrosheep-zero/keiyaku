@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { createHostLedgerPort, inbox, Square, squareAssignedParticipantName, type Participant } from "@astrosheep/square";
+import { createHash } from "node:crypto";
+import { Square, type Participant, type Body } from "@astrosheep/square";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { squareSeat } from "../src/cli/square-identity.js";
 import type { WorldRoot } from "../src/world.js";
@@ -42,12 +43,12 @@ function seatWorld(t: TestContext): SeatWorld {
     ...Object.fromEntries(SESSION_VARIABLES.map((name) => [name, process.env[name]])),
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
-    SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
+    SQUARE_INDEX: process.env.SQUARE_INDEX,
   };
   for (const name of SESSION_VARIABLES) delete process.env[name];
   process.env.HOME = home;
   process.env.USERPROFILE = home;
-  process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "host-ledger");
+  process.env.SQUARE_INDEX = join(root, "index.ndjsonl");
   t.after(() => restoreEnvironmentValues(prior));
   return {
     root,
@@ -66,15 +67,25 @@ function installSession(t: TestContext, session: NodeJS.ProcessEnv): void {
 }
 
 /** Open the fixture Square, building it once exactly as the shipped observer would. */
+function bodyFor(environment: NodeJS.ProcessEnv): Body {
+  for (const [variable, channel] of [["PI_SESSION_ID", "pi"], ["CODEX_THREAD_ID", "codex"],
+    ["CLAUDE_CODE_SESSION_ID", "claude-code"], ["OPENCODE_SESSION_ID", "opencode"], ["PASEO_AGENT_ID", "paseo"]]) {
+    const session = environment[variable!];
+    if (session) return { channel: channel!, session };
+  }
+  return { channel: "fixture", session: "read-only" };
+}
+
 async function openSquareFile(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<Square> {
+  const env = world.environment(session);
+  const identity = { env, body: bodyFor(env) };
   try {
-    return await Square.at({ path: world.squareFile, env: world.environment(session) });
+    return await Square.at({ path: world.squareFile, ...identity });
   } catch {
     try {
-      return await Square.build({ path: world.squareFile, markdown: "", env: world.environment(session) });
+      return await Square.build({ path: world.squareFile, markdown: "", ...identity });
     } catch {
-      // A concurrent preparation may have built it first.
-      return await Square.at({ path: world.squareFile, env: world.environment(session) });
+      return await Square.at({ path: world.squareFile, ...identity });
     }
   }
 }
@@ -99,7 +110,8 @@ async function withJoined<T>(
 async function recognize(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<string | undefined> {
   const square = await openSquareFile(world, session);
   try {
-    return (await square.recognize(world.environment(session)))?.name;
+    const recognized = await square.recognize();
+    return recognized.length === 1 ? recognized[0]!.name : undefined;
   } finally {
     await square.close();
   }
@@ -135,6 +147,14 @@ test("a fresh supported session derives one keiyaku-assigned name and no provide
     undefined,
     "no native identity selects nothing",
   );
+});
+
+test("a managed session reuses its established voice without inventing a fresh name", async (t) => {
+  const world = seatWorld(t);
+  const session = { PASEO_AGENT_ID: "managed-only" };
+  assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), undefined);
+  await withJoined(world, session, "Managed", async () => undefined);
+  assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), "Managed");
 });
 
 test("an explicit Square name is authoritative and an unusable one selects nothing", async (t) => {
@@ -185,63 +205,39 @@ test("an existing old-prefix participant is reused and never replaced after fini
   assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), undefined);
 });
 
-test("a finished seat stays this session's name and Square refuses to rejoin it", async (t) => {
+test("a finished seat is not proposed again or implicitly rejoined", async (t) => {
   const world = seatWorld(t);
   const session = { PI_SESSION_ID: "finished" };
   const seat = await squareSeat({ path: world.world, environment: world.environment(session) });
   await withJoined(world, session, seat!, async (participant) => await participant.done());
   assert.equal(
     await squareSeat({ path: world.world, environment: world.environment(session) }),
-    seat,
-    "a finished seat is not replaced by another identity",
+    undefined,
+    "a finished seat selects no fresh candidate",
   );
   const square = await openSquareFile(world, session);
   try {
     assert.equal((await square.implicitJoin(seat!)).state, "done", "standing stays Square's decision");
-    assert.equal(await square.recognize(world.environment(session)), null);
+    assert.deepEqual(await square.recognize(), []);
   } finally {
     await square.close();
   }
 });
 
-test("an incomplete inbox view cannot establish absence", async (t) => {
+test("recognition ambiguity is artifact-owned even when the discovery index is absent", async (t) => {
   const world = seatWorld(t);
   const session = { PI_SESSION_ID: "crowded" };
-  const environment = world.environment(session);
-  // Twenty-five bindings that sort before this World's Square, plus two here:
-  // the page cannot show this session's own standing in the target Square.
-  for (let index = 0; index < 25; index += 1) {
-    const directory = join(world.root, `.elsewhere-${String(index).padStart(2, "0")}`, ".square");
-    mkdirSync(directory, { recursive: true });
-    const square = await Square.build({ path: join(directory, "KEIYAKU.square"), markdown: "", env: environment });
-    try {
-      await square.implicitJoin(`Elsewhere${index}`);
-    } finally {
-      await square.close();
-    }
-  }
   await withJoined(world, session, "Alpha", async () => undefined);
   await withJoined(world, session, "Beta", async () => undefined);
-
-  const view = await inbox({ env: environment }, "crowded");
-  assert.ok(view.total > view.rows.length, "the fixture must produce a truncated inbox page");
-  assert.deepEqual(
-    view.rows.filter(({ name }) => name === "Alpha" || name === "Beta"),
-    [],
-    "this World's own bindings are outside the page",
-  );
-  assert.equal(await recognize(world, session), undefined, "Square refuses to name an ambiguous session");
-  assert.equal(
-    await squareSeat({ path: world.world, environment }),
-    undefined,
-    "a truncated view selects no identity instead of inventing one",
-  );
+  writeFileSync(process.env.SQUARE_INDEX!, "");
+  assert.equal(await recognize(world, session), undefined);
+  assert.equal(await squareSeat({ path: world.world, environment: world.environment(session) }), undefined);
 });
 
 test("a finished legacy participant is not replaced by a new seat", async (t) => {
   const world = seatWorld(t);
   const session = { PI_SESSION_ID: "legacy-done" };
-  const former = squareAssignedParticipantName(world.environment(session));
+  const former = `pi-${createHash("sha256").update(session.PI_SESSION_ID).digest("hex").slice(0, 12)}`;
   assert.match(former ?? "", /^pi-/u);
   await withJoined(world, session, former!, async (participant) => await participant.done());
 
@@ -347,7 +343,7 @@ test("the shipped Square observer prepares the seat this session is then recogni
       [seat],
       "preparation created exactly the selected participant",
     );
-    assert.equal((await square.recognize(environment))?.name, seat, "native resolution finds that one binding");
+    assert.deepEqual((await square.recognize()).map(({ name }) => name), [seat], "native resolution finds that one binding");
   } finally {
     await square.close();
   }
@@ -362,12 +358,11 @@ test("concurrent same-session preparations converge on one standing participant"
     withJoined(world, session, seat!, async () => undefined),
   ]);
   assert.equal(await recognize(world, session), seat);
-  const bindings = await createHostLedgerPort().listPresence({ location: world.squareFile, session: "concurrent" });
-  assert.deepEqual(
-    bindings.map(({ participant }) => participant),
-    [seat],
-    "one session keeps one binding and one name",
-  );
+  const square = await openSquareFile(world, session);
+  try {
+    assert.deepEqual((await square.recognize()).map(({ name }) => name), [seat]);
+    assert.equal((await square.history({ from: [seat!], limit: null })).activities.filter(({ kind }) => kind === "join").length, 1);
+  } finally { await square.close(); }
 });
 
 test("a genuinely absent Square selects the deterministic candidate", async (t) => {
@@ -390,10 +385,10 @@ test("an existing but unusable Square selects no fresh identity", async (t) => {
 test("the captured environment decides which registry is read, not this process's own", async (t) => {
   const world = seatWorld(t);
   const elsewhere = join(world.root, "submitted-ledger");
-  const environment = { ...world.environment({ PI_SESSION_ID: "captured-session" }), SQUARE_HOST_LEDGER_ROOT: elsewhere };
+  const environment = { ...world.environment({ PI_SESSION_ID: "captured-session" }), SQUARE_INDEX: elsewhere };
   const square = await openSquareFile(world, {
     PI_SESSION_ID: "captured-session",
-    SQUARE_HOST_LEDGER_ROOT: elsewhere,
+    SQUARE_INDEX: elsewhere,
   });
   try {
     await square.implicitJoin("ExistingCustom");

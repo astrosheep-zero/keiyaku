@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CreateAgentSessionOptions, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import { squareAssignedParticipantName } from "@astrosheep/square";
+import { squareSeat } from "../src/cli/square-identity.js";
+import type { WorldRoot } from "../src/world.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
@@ -124,20 +125,17 @@ test("the Pi request channel preserves the native session identity instead of an
   }
 });
 
-test("parent and child native Pi environments resolve distinct Square initiators", (t) => {
+test("parent and child native Pi environments resolve distinct Square initiators", async (t) => {
   t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
-  const parent = squareAssignedParticipantName({ PI_SESSION_ID: "parent-session" });
-  const child = squareAssignedParticipantName({ PI_SESSION_ID: "child-session" });
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-square-")) as WorldRoot;
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const seat = (environment: NodeJS.ProcessEnv) => squareSeat({ path: root, environment });
+  const parent = await seat({ PI_SESSION_ID: "parent-session" });
+  const child = await seat({ PI_SESSION_ID: "child-session" });
   assert.equal(typeof parent, "string");
   assert.equal(typeof child, "string");
   assert.notEqual(parent, child);
-  assert.equal(parent, squareAssignedParticipantName({ PI_SESSION_ID: "parent-session" }));
-  assert.equal(
-    squareAssignedParticipantName({ PI_SESSION_ID: "parent-session", SQUARE_PARTICIPANT_NAME: "Alice" }),
-    "Alice",
-  );
-  assert.equal(
-    squareAssignedParticipantName({ PI_SESSION_ID: "child-session", SQUARE_PARTICIPANT_NAME: "Alice" }),
-    "Alice",
-  );
+  assert.equal(parent, await seat({ PI_SESSION_ID: "parent-session" }));
+  assert.equal(await seat({ PI_SESSION_ID: "parent-session", SQUARE_PARTICIPANT_NAME: "Alice" }), "Alice");
+  assert.equal(await seat({ PI_SESSION_ID: "child-session", SQUARE_PARTICIPANT_NAME: "Alice" }), "Alice");
 });
