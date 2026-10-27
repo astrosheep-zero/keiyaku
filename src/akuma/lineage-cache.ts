@@ -28,20 +28,16 @@ export function akumaLineageCachePath(world: WorldRoot): string {
   return join(akumaRunRoot(world), CACHE_FILE);
 }
 
-function decodedEdge(akuId: AkuId, caller: AkumaCaller | null): readonly [AkuId, AkumaCaller | null] {
-  return [akuId, caller];
-}
-
 function readCachedEdge(row: unknown): readonly [AkuId, AkumaCaller | null] {
   const value = row as Readonly<{ aku_id?: unknown; caller_json?: unknown }> | null;
   if (value === null || typeof value !== "object") throw new Error("Akuma lineage cache row is not an object");
   if (typeof value.aku_id !== "string") throw new Error("Akuma lineage cache row has no identity");
   const akuId = parseAkuId(value.aku_id).id;
-  if (value.caller_json === null) return decodedEdge(akuId, null);
+  if (value.caller_json === null) return [akuId, null];
   if (typeof value.caller_json !== "string") throw new Error("Akuma lineage cache row has no caller evidence");
   const caller = decodeAkumaCaller(JSON.parse(value.caller_json));
   if (caller === undefined) throw new Error("Akuma lineage cache row has an empty caller");
-  return decodedEdge(akuId, caller);
+  return [akuId, caller];
 }
 
 /** A readable cache, an empty map for a cache that was never written, or null when unusable. */
@@ -107,22 +103,16 @@ async function writeLineageCache(
 async function directEdge(member: LineageMember): Promise<readonly [AkuId, AkumaCaller | null] | null> {
   try {
     const soul = await readSoul(member.paths);
-    return soul === null ? null : decodedEdge(member.id, soul.caller ?? null);
+    return soul === null ? null : [member.id, soul.caller ?? null];
   } catch {
     // A hard Heart read failure stays an omitted member, never an empty roster claim.
     return null;
   }
 }
 
-async function directLineage(members: readonly LineageMember[]): Promise<AkumaLineage> {
-  const edges = new Map<AkuId, AkumaCaller | null>();
-  for (const entry of (await boundedMap(members, directEdge)).filter((edge) => edge !== null)) edges.set(...entry);
-  return edges;
-}
-
 /** Authoritative lineage read: every known born Soul, with no cache consultation. */
 export async function readDirectAkumaLineage(members: readonly LineageMember[]): Promise<AkumaLineage> {
-  return await directLineage(members);
+  return new Map((await boundedMap(members, directEdge)).filter((edge) => edge !== null));
 }
 
 /**
@@ -166,14 +156,14 @@ export async function recordAkumaLineage(
 export async function readAkumaLineage(world: WorldRoot, members: readonly LineageMember[]): Promise<AkumaLineage> {
   const path = akumaLineageCachePath(world);
   const cached = await readLineageCache(path);
-  if (cached === null) return await directLineage(members);
+  if (cached === null) return await readDirectAkumaLineage(members);
   const known = new Set(members.map((member) => member.id));
   const stale = [...cached.keys()].filter((id) => !known.has(id));
-  // A vanished directory never contributes an edge even if its prune write fails.
-  const edges = new Map([...cached].filter(([id]) => known.has(id)));
   const missing = members.filter((member) => !cached.has(member.id));
   const fresh = (await boundedMap(missing, directEdge)).filter((edge) => edge !== null);
-  for (const [akuId, caller] of fresh) edges.set(akuId, caller);
+  // A vanished directory never contributes an edge even if its prune write fails.
+  for (const id of stale) cached.delete(id);
+  for (const [akuId, caller] of fresh) cached.set(akuId, caller);
   if (fresh.length > 0 || stale.length > 0) await writeLineageCache(path, fresh, stale);
-  return edges;
+  return cached;
 }
