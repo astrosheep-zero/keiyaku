@@ -1,5 +1,5 @@
 import { lstat } from "node:fs/promises";
-import type { AkumaListRow, KnownAkuma, UnbornAkumaListRow } from "./akuma.js";
+import type { KnownAkuma } from "./akuma.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { removeAkumaCustody } from "./custody.js";
 import { HeldAkumaLeash, life, lifeAt, readHeart } from "./heart/index.js";
@@ -12,8 +12,6 @@ export function retentionNow(): number {
   return new Date().getTime();
 }
 
-export type AkumaRetentionCandidate = Readonly<{ entry: KnownAkuma; activityAt: number }>;
-
 export type AkumaRetentionReceipt = "retired" | "retained" | "busy";
 
 /** A cross-authority custody decision that may hold its locks across the effect. */
@@ -25,19 +23,14 @@ export type AkumaRetirementCustody = (retire: () => Promise<boolean>) => Promise
  * malformed one means this observation cannot prove age.
  */
 export function latestRetentionActivity(lifeAtValue: string | null, lastActivityAt: string | null): number | null {
-  const instants: number[] = [];
-  for (const value of [lifeAtValue, lastActivityAt]) {
-    if (value === null) continue;
-    const parsed = Date.parse(value);
-    if (!Number.isFinite(parsed)) return null;
-    instants.push(parsed);
-  }
+  const instants = [lifeAtValue, lastActivityAt].flatMap((value) => (value === null ? [] : [Date.parse(value)]));
+  if (instants.some((instant) => !Number.isFinite(instant))) return null;
   return instants.length === 0 ? null : Math.max(...instants);
 }
 
-function retentionRowActivity(row: AkumaListRow | UnbornAkumaListRow): number | null {
-  if (!("lifeAt" in row)) return null;
-  return latestRetentionActivity(row.lifeAt, row.lastActivityAt);
+/** The strict age cutoff shared by candidate reading and final revalidation. */
+function isStale(now: number, activityAt: number | null): boolean {
+  return activityAt !== null && now - activityAt > AKUMA_RETENTION_MAX_IDLE_MS;
 }
 
 /**
@@ -64,12 +57,10 @@ export async function retentionCandidateBound(paths: KnownAkuma["paths"], now: n
  * than the default retention age. Unborn, stillborn, running, pending-input,
  * malformed, and missing-age entries never become candidates.
  */
-export async function readRetentionCandidate(entry: KnownAkuma, now: number): Promise<AkumaRetentionCandidate | null> {
+export async function readRetentionCandidate(entry: KnownAkuma, now: number): Promise<KnownAkuma | null> {
   const row = await rosterListRow(entry.paths, entry.id);
   if (!("lifeAt" in row) || row.life === "running" || row.pending.length > 0) return null;
-  const activityAt = retentionRowActivity(row);
-  if (activityAt === null || now - activityAt <= AKUMA_RETENTION_MAX_IDLE_MS) return null;
-  return { entry, activityAt };
+  return isStale(now, latestRetentionActivity(row.lifeAt, row.lastActivityAt)) ? entry : null;
 }
 
 function currentStoppedActivity(snapshot: Awaited<ReturnType<typeof readHeart>>): number | null {
@@ -108,19 +99,17 @@ export async function retireInactiveAkuma(
   const leash = await HeldAkumaLeash.try(input.entry.paths);
   if (leash === null) return "busy";
   try {
-    const retire = async (): Promise<boolean> => {
+    const eligible = async (): Promise<boolean> => {
       const snapshot = await readHeart(input.entry.paths);
       if (snapshot.soul === null || snapshot.soul.id !== input.entry.id) return false;
-      const activityAt = currentStoppedActivity(snapshot);
-      if (activityAt === null || input.now - activityAt <= AKUMA_RETENTION_MAX_IDLE_MS) return false;
+      return isStale(input.now, currentStoppedActivity(snapshot));
+    };
+    if (!(await eligible())) return "retained";
+    return await input.retireUnderCustody(async () => {
+      if (!(await eligible())) return false;
       await removeAkumaCustody(input.entry);
       return true;
-    };
-    const snapshot = await readHeart(input.entry.paths);
-    if (snapshot.soul === null || snapshot.soul.id !== input.entry.id) return "retained";
-    const activityAt = currentStoppedActivity(snapshot);
-    if (activityAt === null || input.now - activityAt <= AKUMA_RETENTION_MAX_IDLE_MS) return "retained";
-    return await input.retireUnderCustody(retire);
+    });
   } finally {
     leash.release();
   }

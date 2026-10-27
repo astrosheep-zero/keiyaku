@@ -306,7 +306,7 @@ test("removal holds Alias custody across the effect so a concurrent move cannot 
 
   let moving: Promise<unknown> | undefined;
   const receipt = await retireInactiveAkuma({
-    entry: candidate.entry,
+    entry: candidate,
     now,
     retireUnderCustody: async (retire) => {
       assert.equal(await HeldAkumaLeash.try(allocated.paths), null, "retention must hold the execution seat");
@@ -340,7 +340,7 @@ test("a pending Tell observed by the final read prevents removal", async (contex
   assert.ok(candidate !== null);
 
   const receipt = await retireInactiveAkuma({
-    entry: candidate.entry,
+    entry: candidate,
     now,
     retireUnderCustody: async (retire) => {
       assert.equal(
@@ -365,7 +365,7 @@ test("a wake holding the execution seat keeps the candidate", async (context) =>
   try {
     assert.equal(
       await retireInactiveAkuma({
-        entry: candidate.entry,
+        entry: candidate,
         now,
         retireUnderCustody: async () => {
           throw new Error("custody must not run while a wake holds the execution seat");

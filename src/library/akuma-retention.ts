@@ -9,7 +9,7 @@ import {
   retentionCandidateBound,
   retentionNow,
   retireInactiveAkuma,
-  type AkumaRetentionCandidate,
+  type AkumaRetentionReceipt,
 } from "../akuma/retention.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
@@ -58,22 +58,23 @@ async function dispatchAssociationIsRetirable(
 async function retireCandidate(
   world: WorldRoot,
   repository: Repository | undefined,
-  candidate: AkumaRetentionCandidate,
+  entry: KnownAkuma,
   now: number,
 ): Promise<boolean> {
   try {
     const receipt = await retireInactiveAkuma({
-      entry: candidate.entry,
+      entry,
       now,
       retireUnderCustody: async (retire) => {
+        const retireOrRetain = async (): Promise<AkumaRetentionReceipt> => ((await retire()) ? "retired" : "retained");
         // Alias writers use this same authority lock. Holding it across the
         // Dispatch judgment and removal means an Alias cannot appear between
         // the final check and the deletion.
         const aliases = await tryAcquireAliasCustody(world);
         if (aliases === null) return "retained";
         try {
-          if (aliases.bindings.some((binding) => binding.akuId === candidate.entry.id)) return "retained";
-          if (repository === undefined) return (await retire()) ? "retired" : "retained";
+          if (aliases.bindings.some((binding) => binding.akuId === entry.id)) return "retained";
+          if (repository === undefined) return await retireOrRetain();
           try {
             // Dispatch publication takes this same private-state seat. Holding
             // it across the judgment and removal means a Dispatch cannot appear
@@ -81,10 +82,10 @@ async function retireCandidate(
             const retired = await withPrivateStatePublicationSeat(
               repository,
               async () => {
-                const associations = await observeDispatchAssociations(repository, [candidate.entry.id]);
-                if (!(await dispatchAssociationIsRetirable(repository, associations.get(candidate.entry.id)!)))
+                const associations = await observeDispatchAssociations(repository, [entry.id]);
+                if (!(await dispatchAssociationIsRetirable(repository, associations.get(entry.id)!)))
                   return "retained" as const;
-                return (await retire()) ? ("retired" as const) : ("retained" as const);
+                return await retireOrRetain();
               },
               { timeoutMs: 0 },
             );
@@ -119,36 +120,29 @@ export async function sweepInactiveAkumas(
   const now = options.now ?? retentionNow();
   const known = await knownAkuma(world);
   if (known.rows.length === 0) return [];
-  const bounded = await boundedMap(known.rows, async (entry): Promise<KnownAkuma | null> => {
-    try {
-      return (await retentionCandidateBound(entry.paths, now)) ? entry : null;
-    } catch {
-      return null;
-    }
-  });
-  const prefiltered = bounded.filter((entry): entry is KnownAkuma => entry !== null);
-  if (prefiltered.length === 0) return [];
-  const loaded = await boundedMap(prefiltered, async (entry) => {
-    try {
-      return await readRetentionCandidate(entry, now);
-    } catch {
-      return null;
-    }
-  });
-  const candidates = loaded.filter((candidate): candidate is AkumaRetentionCandidate => candidate !== null);
+  const candidates = (
+    await boundedMap(known.rows, async (entry): Promise<KnownAkuma | null> => {
+      try {
+        if (!(await retentionCandidateBound(entry.paths, now))) return null;
+        return await readRetentionCandidate(entry, now);
+      } catch {
+        return null;
+      }
+    })
+  ).filter((entry): entry is KnownAkuma => entry !== null);
   if (candidates.length === 0) return [];
 
   const aliases = new Set((await readAliases(world)).map((binding) => binding.akuId));
   const repository = await retentionRepository(world);
   const associations = await observeDispatchAssociations(
     repository,
-    candidates.map((candidate) => candidate.entry.id),
+    candidates.map((entry) => entry.id),
   );
   const retired: AkuId[] = [];
-  for (const candidate of candidates) {
-    if (aliases.has(candidate.entry.id)) continue;
-    if (!(await dispatchAssociationIsRetirable(repository, associations.get(candidate.entry.id)!))) continue;
-    if (await retireCandidate(world, repository, candidate, now)) retired.push(candidate.entry.id);
+  for (const entry of candidates) {
+    if (aliases.has(entry.id)) continue;
+    if (!(await dispatchAssociationIsRetirable(repository, associations.get(entry.id)!))) continue;
+    if (await retireCandidate(world, repository, entry, now)) retired.push(entry.id);
   }
   return retired;
 }
