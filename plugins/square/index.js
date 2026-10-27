@@ -13,6 +13,8 @@ const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
  */
 const NOTIFIER = "keiyaku-notice";
 const NOTIFIER_BODY = { channel: "unknown", session: "keiyaku:square-notifier" };
+const WAIT_DEFERRAL_TTL_MS = 5 * 60_000;
+const WAIT_DEFERRAL_RENEW_MS = 2 * 60_000;
 function errorCode(error) {
     return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
@@ -188,11 +190,139 @@ const plugin = {
         const localObserver = async (square) => {
             const recognized = await square.recognize();
             if (recognized.length === 1)
-                return recognized[0].name;
+                return recognized[0];
             const declared = environment.SQUARE_PARTICIPANT_NAME?.trim();
-            return recognized.find(({ name }) => name === declared)?.name;
+            return recognized.find(({ name }) => name === declared);
+        };
+        const waitDeferral = async (input, cancellation) => {
+            cancellation?.throwIfAborted();
+            if (input.akumaIds.length === 0)
+                return undefined;
+            const identity = squareIdentity(environment);
+            if (identity.body === undefined)
+                return undefined;
+            let square;
+            try {
+                // The resource outlives acquisition. Do not capture its expiring signal
+                // in Square's connection; individual lease operations carry it instead.
+                square = await Square.at({ path, env: environment, ...identity });
+            }
+            catch (error) {
+                cancellation?.throwIfAborted();
+                if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable")
+                    return undefined;
+                throw error;
+            }
+            const acquired = [];
+            const expired = new Set();
+            let closing;
+            let renewalTimer;
+            let renewalWork;
+            let renewalDiagnostic;
+            let participant;
+            const renewalController = new AbortController();
+            // Partial acquisition also closes here, before the runtime has a scope.
+            // Cancellation must still reach Square.close if a lease operation stalls.
+            const cleanup = (cleanupSignal = AbortSignal.timeout(5_000)) => {
+                if (closing !== undefined)
+                    return closing;
+                renewalController.abort();
+                if (renewalTimer !== undefined)
+                    clearTimeout(renewalTimer);
+                closing = (async () => {
+                    let abort;
+                    const cancelled = new Promise((resolve) => {
+                        abort = resolve;
+                        if (cleanupSignal.aborted)
+                            resolve();
+                        else
+                            cleanupSignal.addEventListener("abort", abort, { once: true });
+                    });
+                    const releases = (async () => {
+                        await renewalWork;
+                        if (participant === undefined)
+                            return;
+                        const results = await Promise.allSettled(acquired.map(async (id) => await participant.releaseDeliveryDeferral(id, { signal: cleanupSignal })));
+                        const failure = results.find((result) => result.status === "rejected");
+                        if (failure !== undefined)
+                            throw failure.reason;
+                    })();
+                    try {
+                        await Promise.race([releases, cancelled]);
+                        cleanupSignal.throwIfAborted();
+                        if (renewalDiagnostic !== undefined)
+                            throw new Error(renewalDiagnostic);
+                    }
+                    finally {
+                        cleanupSignal.removeEventListener("abort", abort);
+                        await square.close();
+                    }
+                })();
+                return closing;
+            };
+            try {
+                cancellation?.throwIfAborted();
+                const observer = await localObserver(square);
+                if (observer === undefined) {
+                    await cleanup();
+                    return undefined;
+                }
+                const captured = observer;
+                if (typeof captured.deferDelivery !== "function" ||
+                    typeof captured.renewDeliveryDeferral !== "function" ||
+                    typeof captured.releaseDeliveryDeferral !== "function") {
+                    await cleanup();
+                    return undefined;
+                }
+                participant = captured;
+                const leases = await Promise.allSettled(input.akumaIds.map(async (akumaId) => {
+                    cancellation?.throwIfAborted();
+                    const lease = await participant.deferDelivery({
+                        match: {
+                            fields: [
+                                { path: ["keiyaku", "kind"], equals: "akuma.turn-outcome" },
+                                { path: ["keiyaku", "akumaId"], equals: akumaId },
+                            ],
+                        },
+                        durationMs: WAIT_DEFERRAL_TTL_MS,
+                    }, cancellation === undefined ? {} : { signal: cancellation });
+                    acquired.push(lease.id);
+                }));
+                const failure = leases.find((lease) => lease.status === "rejected");
+                if (failure !== undefined)
+                    throw failure.reason;
+                cancellation?.throwIfAborted();
+                const renew = () => {
+                    if (renewalController.signal.aborted)
+                        return;
+                    const signal = AbortSignal.any([renewalController.signal, AbortSignal.timeout(5_000)]);
+                    renewalWork = Promise.allSettled(acquired.filter(id => !expired.has(id)).map(async (id) => {
+                        const renewed = await participant.renewDeliveryDeferral(id, WAIT_DEFERRAL_TTL_MS, { signal });
+                        if (renewed === null) {
+                            expired.add(id);
+                            throw new Error(`Square wait deferral ${id} expired before renewal`);
+                        }
+                    })).then((results) => {
+                        const failed = results.find((result) => result.status === "rejected");
+                        if (failed === undefined && expired.size === 0)
+                            renewalDiagnostic = undefined;
+                        if (!renewalController.signal.aborted && failed !== undefined)
+                            renewalDiagnostic ??= `Square wait deferral renewal failed: ${String(failed.reason)}`;
+                    }).finally(() => {
+                        if (!renewalController.signal.aborted && expired.size < acquired.length)
+                            renewalTimer = setTimeout(renew, WAIT_DEFERRAL_RENEW_MS);
+                    });
+                };
+                renewalTimer = setTimeout(renew, WAIT_DEFERRAL_RENEW_MS);
+                return { close: cleanup };
+            }
+            catch (error) {
+                await cleanup().catch(() => { });
+                throw error;
+            }
         };
         return {
+            waitDeferral,
             signals: {
                 async "akuma.initiating"(signal, cancellation) {
                     const control = cancellation === undefined ? {} : { signal: cancellation };
@@ -232,7 +362,7 @@ const plugin = {
                     try {
                         cancellation?.throwIfAborted();
                         const observer = signal.observer === undefined
-                            ? await localObserver(square)
+                            ? (await localObserver(square))?.name
                             : (await square.recognize()).find(({ name }) => name === signal.observer)?.name;
                         if (observer === undefined)
                             return;

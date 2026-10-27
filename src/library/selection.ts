@@ -35,7 +35,7 @@ import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { observeCreatedDebtObservations, type CreatedDebtObservation } from "../debt/created-observation.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
+import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import {
   addressAkuma,
   addressAkumaSet,
@@ -79,16 +79,32 @@ export function selectionSeam(
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): SelectionSeam {
   const channel = executionChannel(execution);
-  return channel.kind === "body-request"
-    ? forwardedSelection(channel.directory, reportDiagnostic)
-    : localSelection(reportDiagnostic);
+  const routed =
+    channel.kind === "body-request"
+      ? forwardedSelection(channel.directory, reportDiagnostic)
+      : localSelection(reportDiagnostic);
+  return {
+    ...routed,
+    wait: async (addressed, mode) =>
+      await withAkumaWaitDeferrals(
+        { world: addressed.path, reportDiagnostic },
+        addressed.orderedIds,
+        mode.signal,
+        async () => {
+          const result = await routed.wait(addressed, mode);
+          const observer = outcomePluginObserver({ world: addressed.path, reportDiagnostic });
+          await Promise.all(result.observations.map(({ status }) => observeStatusOutcome(status, observer)));
+          return result;
+        },
+      ),
+  };
 }
 
 function forwardedSelection(directory: string, reportDiagnostic: (message: string) => void): SelectionSeam {
   return {
     addressOne: resolveAkuma,
     addressSet: resolveAkumaSet,
-    wait: async (addressed, mode) => await forwardedWait(addressed, { ...mode, directory }, reportDiagnostic),
+    wait: async (addressed, mode) => await forwardedWait(addressed, { ...mode, directory }),
     kill: async (addressed, abort) =>
       await requestForwardedSelectionKill({
         directory,
@@ -129,7 +145,7 @@ function localSelection(reportDiagnostic: (message: string) => void): SelectionS
   return {
     addressOne: addressAkuma,
     addressSet: addressAkumaSet,
-    wait: async (addressed, mode) => await localWait(addressed, mode, reportDiagnostic),
+    wait: async (addressed, mode) => await localWait(addressed, mode),
     kill: async (addressed, abort) =>
       await executeKillAkuma({
         path: addressed.path,
@@ -413,7 +429,6 @@ async function forwardedWait(
     signal?: AbortSignal;
     repo?: Repo;
   }>,
-  reportDiagnostic: (message: string) => void,
 ): Promise<AkumaWaitResult> {
   const result = await requestForwardedSelectionWait({
     directory: input.directory,
@@ -422,8 +437,6 @@ async function forwardedWait(
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  const observer = outcomePluginObserver({ world: addressed.path, reportDiagnostic });
-  await Promise.all(result.observations.map(({ status }) => observeStatusOutcome(status, observer)));
   return await attachWaitAssociations(addressed.path, input.repo, result);
 }
 
@@ -435,7 +448,6 @@ async function localWait(
     signal?: AbortSignal;
     repo?: Repo;
   }>,
-  reportDiagnostic: (message: string) => void,
 ): Promise<AkumaWaitResult> {
   try {
     return await composeWaitResult(
@@ -445,7 +457,6 @@ async function localWait(
         path: addressed.path,
         ids: addressed.orderedIds,
         completion: input.completion,
-        outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       }),

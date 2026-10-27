@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { after } from "node:test";
+import test, { after, type TestContext } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { Square, type Activity, type ActivityMetadata, type Body } from "@astrosheep/square";
@@ -296,6 +296,210 @@ async function outcomeNotice(fixture: SquareNotificationFixture, akumaId: string
   assert.ok(found !== undefined, `expected the structured Turn notice for ${akumaId} turn/${sequence}`);
   return found;
 }
+
+async function waitScopeFixture(t: TestContext, participant: object) {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-lease-lifetime-"));
+  const prior = { ...ambientSessionIdentity(), PI_SESSION_ID: process.env.PI_SESSION_ID };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  process.env.PI_SESSION_ID = "requester-fixture";
+  t.after(() => { restoreEnvironmentValues(prior); rmSync(root, { recursive: true, force: true }); });
+  let closes = 0;
+  t.mock.method(Square, "at", async () => ({
+    recognize: async () => [participant], close: async () => { closes++; },
+  }) as unknown as Square);
+  const instance = await activateSquare(root);
+  assert.ok(instance.waitDeferral);
+  return { acquire: instance.waitDeferral, closes: () => closes };
+}
+
+test("partial Square acquisition keeps late peer custody and preserves its original failure", async (t) => {
+  const { promise: bothStarted, resolve: started } = promiseBarrier<void>();
+  const { promise: finishPeer, resolve: finish } = promiseBarrier<void>();
+  const original = new Error("second acquisition failed");
+  const released: string[] = [];
+  let attempts = 0;
+  const fixture = await waitScopeFixture(t, {
+    async deferDelivery() {
+      if (++attempts === 2) { started(); throw original; }
+      await finishPeer;
+      return { id: "own-lease" };
+    },
+    async renewDeliveryDeferral() { assert.fail("partial acquisition must not start renewal"); },
+    async releaseDeliveryDeferral(id: string, { signal }: { signal: AbortSignal }) {
+      assert.equal(signal.aborted, false, "partial cleanup uses fresh cancellation");
+      released.push(id);
+      throw new Error("release failed");
+    },
+  });
+  const pending = assert.rejects(Promise.resolve(fixture.acquire({ akumaIds: ["aku/one", "aku/two"] })), error => error === original);
+  await bothStarted;
+  assert.deepEqual(released, []);
+  finish();
+  await pending;
+  assert.deepEqual(released, ["own-lease"]);
+  assert.equal(fixture.closes(), 1);
+});
+
+test("Square renewal recovers transient diagnostics, retains proven loss, and closes without overlap or stranded leases", async (t) => {
+  const { promise: firstBatch, resolve: finishFirst } = promiseBarrier<void>();
+  const { promise: firstStarted, resolve: startedFirst } = promiseBarrier<void>();
+  const { promise: nextStarted, resolve: startedNext } = promiseBarrier<void>();
+  let acquired = 0;
+  let renewals = 0;
+  let recovering = true;
+  const renewedIds: string[] = [];
+  const released: string[] = [];
+  const fixture = await waitScopeFixture(t, {
+    async deferDelivery() { return { id: `own-${++acquired}` }; },
+    async renewDeliveryDeferral(id: string, _duration: number, { signal }: { signal: AbortSignal }) {
+      const attempt = ++renewals;
+      renewedIds.push(id);
+      if (recovering) {
+        if (attempt === 1) throw new Error("temporary renewal failure");
+        return {};
+      }
+      if (attempt === 2) startedFirst();
+      if (attempt === 4) startedNext();
+      if (attempt <= 2) { await firstBatch; return id === "own-1" ? null : {}; }
+      if (attempt === 3) return {};
+      return await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    },
+    async releaseDeliveryDeferral(id: string, { signal }: { signal: AbortSignal }) {
+      assert.equal(signal.aborted, false);
+      released.push(id);
+      return true;
+    },
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const recovered = await fixture.acquire({ akumaIds: ["aku/one", "aku/two"] });
+  assert.ok(recovered);
+  t.mock.timers.tick(120_000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(renewals, 2);
+  t.mock.timers.tick(120_000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(renewals, 4);
+  await recovered.close();
+  assert.deepEqual(released.sort(), ["own-1", "own-2"], "recovered renewal closes cleanly and releases both leases");
+  assert.equal(fixture.closes(), 1);
+  recovering = false;
+  acquired = renewals = 0;
+  renewedIds.length = released.length = 0;
+  const scope = await fixture.acquire({ akumaIds: ["aku/one", "aku/two"] });
+  assert.ok(scope);
+  t.mock.timers.tick(120_000);
+  await firstStarted;
+  t.mock.timers.tick(120_000);
+  assert.equal(renewals, 2, "a pending batch never schedules an overlapping renewal");
+  finishFirst();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  t.mock.timers.tick(120_000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(renewedIds, ["own-1", "own-2", "own-2"], "only the still-live lease renews after proven loss");
+  t.mock.timers.tick(120_000);
+  await nextStarted;
+  const closing = scope.close();
+  assert.equal(scope.close(), closing, "repeat close shares the same cleanup");
+  await assert.rejects(Promise.resolve(closing), /expired before renewal/u);
+  assert.deepEqual(released.sort(), ["own-1", "own-2"]);
+  assert.equal(fixture.closes(), 2);
+  t.mock.timers.tick(600_000);
+  assert.equal(renewals, 4, "close leaves no renewal timer or detached batch");
+});
+
+test("wait scopes defer only the requester's selected Turn notices, acknowledge exactly, and release independently", {
+  skip: process.platform === "win32" ? "the queue fixture is a POSIX executable" : false,
+}, async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-wait-"));
+  const prior = { ...ambientSessionIdentity(),
+    SQUARE_CODEX_BIN: process.env.SQUARE_CODEX_BIN, SQUARE_CODEX_QUEUE_LOG: process.env.SQUARE_CODEX_QUEUE_LOG,
+    SQUARE_CODEX_BOUNDARIES: process.env.SQUARE_CODEX_BOUNDARIES, SQUARE_INDEX: process.env.SQUARE_INDEX,
+  };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  const scopes: { close(signal?: AbortSignal): Promise<void> | void }[] = [];
+  try {
+    mkdirSync(join(root, ".square"), { recursive: true });
+    const log = join(root, "queue.jsonl");
+    const bin = join(root, "codex-fixture");
+    writeFileSync(bin, '#!/usr/bin/env node\nrequire("node:fs").appendFileSync(process.env.SQUARE_CODEX_QUEUE_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");');
+    chmodSync(bin, 0o755);
+    process.env.SQUARE_CODEX_BIN = bin;
+    process.env.SQUARE_CODEX_QUEUE_LOG = log;
+    process.env.SQUARE_CODEX_BOUNDARIES = join(root, "boundaries.json");
+    process.env.SQUARE_INDEX = join(root, "index.ndjsonl");
+    process.env.CODEX_THREAD_ID = "requester";
+    process.env.SQUARE_PARTICIPANT_NAME = "Alice";
+    const env = { ...process.env };
+    const square = await Square.build({ path: squarePath(root), markdown: "", env,
+      body: { channel: "codex", session: "requester" },
+      wakeAddress: { kind: "codex-queue", address: { threadId: "requester" } },
+    });
+    const alice = (await square.join("Alice")).participant;
+    const peer = await Square.at({ path: squarePath(root), env,
+      body: { channel: "codex", session: "other-recipient" },
+      wakeAddress: { kind: "codex-queue", address: { threadId: "other-recipient" } },
+    });
+    try {
+      await peer.join("Bob");
+      writeFileSync(process.env.SQUARE_CODEX_BOUNDARIES, JSON.stringify({ v: 1, nextSequence: 1, threads: {
+        requester: { lastStop: 1, lastNonStop: 0 }, "other-recipient": { lastStop: 1, lastNonStop: 0 },
+      } }));
+      const instance = await activateSquare(root);
+      assert.ok(instance.waitDeferral);
+      const first = await instance.waitDeferral({ akumaIds: ["aku/one", "aku/two"] });
+      if (first === undefined) {
+        assert.equal("deferDelivery" in alice, false, "only the published missing capability permits a no-op");
+        t.diagnostic("published Square: wait deferral capability absent, graceful no-op verified");
+        return;
+      }
+      scopes.push(first);
+      const second = await instance.waitDeferral({ akumaIds: ["aku/one"] });
+      assert.ok(second);
+      scopes.push(second);
+      const queues = (): string[][] => existsSync(log)
+        ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+      const turn = async (id: string, sequence: number, participants = ["Alice"]) => {
+        await instance.signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: id,
+          bodySequence: 1, turnSequence: sequence, participants, outcome: { kind: "answered", text: `answer ${sequence}` } });
+        const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities
+          .find(activity => isTurnNotice(activity, id, sequence));
+        assert.ok(notice);
+        return notice;
+      };
+      const selected = await turn("aku/one", 1, ["Alice", "Bob"]);
+      assert.deepEqual(queues().map(args => args[2]), ["other-recipient"], "another recipient wakes normally");
+      assert.equal((await square.snapshot()).delivered("Alice", selected.id), false);
+      await instance.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId: "aku/one", historyId: "turn/1" });
+      assert.equal((await square.snapshot()).delivered("Alice", selected.id), true, "exact acknowledgment precedes release");
+      const pending = await turn("aku/one", 2);
+      await turn("aku/two", 1);
+      assert.equal(queues().length, 1, "all selected Akumas are held");
+      await turn("aku/unselected", 1);
+      await instance.signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: "aku/one", bodySequence: 1,
+        origin: { kind: "direct" }, caller: { kind: "unknown" }, initiator: "Alice" });
+      await instance.signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: "aku/one", bodySequence: 1,
+        end: "broke-off", participants: ["Alice"] });
+      assert.deepEqual(queues().slice(1).map(args => args[2]), ["requester", "requester", "requester"],
+        "nonselected outcomes, births, and Body endings bypass Turn deferral");
+      await first.close();
+      await first.close();
+      await turn("aku/one", 3);
+      assert.equal(queues().length, 4, "one close cannot release the overlapping scope");
+      await turn("aku/two", 2);
+      assert.equal(queues().length, 5, "the nonoverlapping lease was released");
+      await second.close();
+      await turn("aku/one", 4);
+      assert.equal(queues().length, 6, "ordinary delivery resumes after the last scope closes");
+      assert.equal((await square.snapshot()).delivered("Alice", pending.id), false,
+        "deferral and release never acknowledge an unobserved outcome");
+      t.diagnostic("accepted Square: real adapter acquire/suppress/exact ack/independent release verified");
+    } finally { await peer.close(); await square.close(); }
+  } finally {
+    await Promise.all(scopes.map(scope => scope.close()));
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("the Square plugin attributes calls to their caller and expresses every Turn outcome", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-plugin-square-"));
@@ -1005,14 +1209,19 @@ test("Square notification authority survives rejection and cancellation boundari
 
 test("Turn mentions follow the signal initiator, never the Body environment", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-square-initiator-"));
+  const ambient = ambientSessionIdentity();
   const prior = {
+    ...ambient,
+    PI_SESSION_ID: process.env.PI_SESSION_ID,
     SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME,
     SQUARE_HOST_LEDGER_ROOT: process.env.SQUARE_HOST_LEDGER_ROOT,
   };
+  for (const name of Object.keys(ambient)) delete process.env[name];
   try {
     process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
     mkdirSync(join(root, ".square"), { recursive: true });
     for (const initiator of ["Alice", "Bob"]) {
+      process.env.PI_SESSION_ID = `fixture-${initiator}`;
       process.env.SQUARE_PARTICIPANT_NAME = initiator;
       const submitter = await activateSquare(root);
       await submitter.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator });

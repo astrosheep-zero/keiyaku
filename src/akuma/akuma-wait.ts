@@ -4,9 +4,7 @@ import {
   createLiveStatusReader,
   defaultWaitComplete,
   readWaitComplete,
-  observeStatusOutcome,
   waitForObservation,
-  type OutcomeObserver,
   type LiveStatusObservation,
   type WaitReason,
 } from "./akuma-observe.js";
@@ -22,7 +20,6 @@ type WaitExecutionInput = Readonly<{
   signal?: AbortSignal;
   /** Internal custom completion judge over the full final observation where supplied. */
   predicate?: (status: AkumaStatus) => boolean;
-  outcomeObserved?: OutcomeObserver;
 }>;
 
 /** One wait's association-free native evidence; upper composition attaches cross-product context. */
@@ -108,9 +105,6 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
         : {}),
       observe: async () => await observeWaitRound(input.ids, readerFor, input.signal),
       complete: (round) => roundComplete(round, input.completion, input.predicate),
-      onObserve: async (round) => {
-        await Promise.all(round.observations.map(({ status }) => observeStatusOutcome(status, input.outcomeObserved)));
-      },
     });
     return {
       mode: input.completion,

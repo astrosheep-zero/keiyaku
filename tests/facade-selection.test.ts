@@ -40,7 +40,14 @@ import { Debts, type DebtId } from "../src/debt/index.js";
 import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
 import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
-import { bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { Akuma as NativeAkuma } from "../src/akuma/index.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
+import { bodyRequestExecution } from "../src/akuma/requests.js";
+import { selectionRequestCommands } from "../src/akuma/selection-request.js";
+import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
+import { akumasWithExecution } from "../src/library/akumas.js";
+import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import {
   answering,
   bornWorld,
@@ -206,6 +213,73 @@ test("facade ask refuses path selection and invalid timeout before addressing", 
     /Akumas\.ask input has unknown field: extra/u,
   );
 });
+
+for (const route of ["local", "forwarded", "idle"] as const) {
+  test(`${route} wait owns one scope through only its final outcome observation`, { timeout: 15_000 }, async (t) => {
+    const world = await World.at(fixtureRoot(t, "keiyaku-wait-scope-"));
+    const output = join(world, "wait-trace.jsonl");
+    mkdirSync(join(world, "plugins"), { recursive: true });
+    writeFileSync(join(world, "plugins", "wait.mjs"), `
+      import { appendFileSync } from "node:fs";
+      export default { manifest: { id: "wait", apiVersion: 1 }, activate() {
+        const record = value => appendFileSync(${JSON.stringify(output)}, JSON.stringify(value) + "\\n");
+        return {
+          waitDeferral({ akumaIds }, signal) {
+            record(["acquire", akumaIds]);
+            return { close(cleanup) { record(["close", cleanup.aborted, signal.aborted]); } };
+          },
+          signals: { "akuma.outcome-observed": signal => record(["observe", signal.akumaId, signal.historyId]) }
+        };
+      } };
+    `);
+    writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      wait: { package: "./plugins/wait.mjs" },
+    } }));
+    const values = await Promise.all(["0def0001", "0def0002"].map(draw => bornBody(world, draw, WAIT_AT)));
+    t.after(() => values.forEach(value => value.holder.release()));
+    for (const value of values) {
+      const turn = await beginTurn(value.allocated.paths, {
+        bodySequence: value.body.sequence, startedAt: WAIT_AT, call: "work",
+      });
+      await endTurn(value.allocated.paths, {
+        turnSequence: turn.sequence, completedAt: WAIT_AT,
+        outcome: { kind: "answered", answer: "done", historyId: "native-result", session: { sessionId: "fixture" } },
+      });
+      await finishBodyIfIdle(value.allocated.paths, { sequence: value.body.sequence, at: WAIT_AT });
+      value.holder.release();
+    }
+    const ids = values.map(value => value.allocated.id);
+    let pump: BodyRequestPump | undefined;
+    if (route === "forwarded") {
+      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0def0003", createdAt: WAIT_AT });
+      t.after(() => parent.leash.release());
+      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAIT_AT });
+      const port = selectionRequestPort(world, message => assert.fail(message));
+      pump = await BodyRequestPump.open({
+        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        now: () => WAIT_AT, signal: t.signal,
+        commands: selectionRequestCommands({ ...port, wait: async request => {
+          const trace = readFileSync(output, "utf8").trim().split("\n").map(line => JSON.parse(line));
+          assert.deepEqual(trace, [["acquire", ids]], "requester acquires before forwarding; server acquires nothing");
+          return await port.wait(request);
+        } }),
+      });
+    }
+    try {
+      const result = route === "idle"
+        ? await NativeAkuma.select(world, ids[0]!).idle({ timeoutMs: 0, signal: t.signal })
+        : await (pump === undefined ? Akumas.of(world) : akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory })))
+          .wait({ akuma: ids, completion: "all", timeoutMs: 0, signal: t.signal });
+      assert.equal(result.reason, "completed");
+      const selected = route === "idle" ? ids.slice(0, 1) : ids;
+      const trace: unknown[][] = readFileSync(output, "utf8").trim().split("\n").map(line => JSON.parse(line));
+      assert.deepEqual(trace[0], ["acquire", selected]);
+      assert.deepEqual(trace.slice(1, -1).sort(), selected.map(id => ["observe", id, "turn/1"]).sort());
+      assert.deepEqual(trace.at(-1), ["close", false, false]);
+    } finally { await pump?.close(); }
+  });
+}
 
 test("facade wait refuses the retired live observer input before addressing", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-refusal-");

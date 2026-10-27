@@ -205,6 +205,8 @@ export type {
   PluginInstance,
   PluginManifest,
   PluginOutcome,
+  PluginWaitDeferral,
+  PluginWaitDeferralInput,
   PluginSignal,
   PluginSignalMap,
 } from "./plugin/public.js";

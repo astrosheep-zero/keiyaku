@@ -1,17 +1,267 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { emitPluginSignal } from "../src/plugin/akuma-signals.js";
+import { emitPluginSignal, withAkumaWaitDeferrals } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues } from "./support/process.js";
 import { runCli } from "./support/cli-fixtures.js";
+
+test("wait-scoped plugin resources surround one route and close after its final observation", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "alpha",
+      [
+        'import { appendFileSync } from "node:fs";',
+        'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
+        "  return { waitDeferral(input) {",
+        '    appendFileSync(context.config.trace, `acquire:${input.akumaIds.join(",")}:${Object.isFrozen(input.akumaIds)}\\n`);',
+        "    return { close(cleanup) { appendFileSync(context.config.trace, `close:${cleanup.aborted}\\n`); } };",
+        "  } };",
+        "} };",
+      ].join("\n"),
+    );
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const world = await World.at(value.root);
+    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    await runtime.withWaitDeferrals(["aku/one", "aku/two"], undefined, async () => {
+      appendFileSync(output, "route-and-final-observation\n");
+    });
+    assert.deepEqual(trace(output), ["acquire:aku/one,aku/two:true", "route-and-final-observation", "close:false"]);
+  } finally {
+    value.close();
+  }
+});
+
+test("timed-out acquisition closes a scope that arrives later", async (context) => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(value.root, "alpha", [
+      'import { appendFileSync } from "node:fs";',
+      'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
+      '  return { waitDeferral() {',
+      '    appendFileSync(context.config.trace, "started\\n");',
+      '    return new Promise(resolve => setTimeout(() => resolve({ close() { appendFileSync(context.config.trace, "late-close\\n"); } }), 6000));',
+      '  } };',
+      '} };',
+    ].join("\n"));
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const world = await World.at(value.root);
+    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    const advance = deadlineClock(context);
+    const pending = runtime.withWaitDeferrals(["aku/one"], undefined, async () => {
+      appendFileSync(output, "route\n");
+    });
+    await eventually(() => trace(output).includes("started"));
+    advance(5000);
+    await pending;
+    assert.ok(trace(output).includes("route"));
+    advance(1000);
+    await eventually(() => trace(output).includes("late-close"));
+    assert.equal(trace(output).filter(line => line === "late-close").length, 1);
+  } finally {
+    value.close();
+  }
+});
+
+test("pre-aborted wait acquires nothing; rejected cleanup preserves both result and original error", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(
+      value.root,
+      "alpha",
+      [
+        'import { appendFileSync } from "node:fs";',
+        'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
+        "  return { waitDeferral() {",
+        '    appendFileSync(context.config.trace, "acquire\\n");',
+        '    return { close() { appendFileSync(context.config.trace, "close\\n"); throw new Error("close rejected"); } };',
+        "  } };",
+        "} };",
+      ].join("\n"),
+    );
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const world = await World.at(value.root);
+    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    const aborted = new AbortController();
+    aborted.abort();
+    await assert.rejects(
+      runtime.withWaitDeferrals(["aku/one"], aborted.signal, async () => assert.fail("route must not run")),
+    );
+    const result = {};
+    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => result), result);
+    await assert.rejects(
+      runtime.withWaitDeferrals(["aku/one"], undefined, async () => {
+        throw new Error("wait failed");
+      }),
+      /wait failed/u,
+    );
+    assert.deepEqual(trace(output), ["acquire", "close", "acquire", "close"]);
+  } finally {
+    value.close();
+  }
+});
+
+test("cancellation cleans immediate and late scopes without diagnosing cooperating aborts or duplicating timeouts", async (context) => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    for (const name of ["alpha", "beta", "gamma"]) writePlugin(value.root, name, `
+      import { appendFileSync } from "node:fs";
+      export default { manifest: { id: "${name}", apiVersion: 1 }, activate(context) {
+        const record = text => appendFileSync(context.config.trace, text + "\\n");
+        return { waitDeferral(input, signal) {
+          if (input.akumaIds[0] === "aku/timeout" && "${name}" !== "gamma") return undefined;
+          const resource = { close(cleanup) {
+            record("${name}:close:" + cleanup.aborted);
+            throw new Error("cleanup deliberately failed");
+          } };
+          record("${name}:started");
+          return ${name === "alpha" ? "resource" : name === "beta"
+            ? 'new Promise(resolve => signal.addEventListener("abort", () => resolve(resource), { once: true }))'
+            : 'new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }))'};
+        } };
+      } };
+    `);
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+      beta: { package: "./plugins/beta.mjs", config: { trace: output } },
+      gamma: { package: "./plugins/gamma.mjs", config: { trace: output } },
+    });
+    const diagnostics: string[] = [];
+    const world = await World.at(value.root);
+    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }),
+      reportDiagnostic: message => diagnostics.push(message) });
+    const caller = new AbortController();
+    const reason = new Error("caller cancelled");
+    const pending = runtime.withWaitDeferrals(["aku/one"], caller.signal, async () => assert.fail("must not start"));
+    const rejected = assert.rejects(pending, error => error === reason);
+    await eventually(() => trace(output).includes("gamma:started"));
+    caller.abort(reason);
+    await rejected;
+    await eventually(() => diagnostics.length === 2);
+    assert.deepEqual(trace(output).filter(line => line.includes(":close:")).sort(), ["alpha:close:false", "beta:close:false"]);
+    assert.ok(diagnostics.every(message => message.includes("cleanup deliberately failed")));
+    diagnostics.length = 0;
+    writeFileSync(output, "");
+    const advance = deadlineClock(context);
+    const timed = runtime.withWaitDeferrals(["aku/timeout"], undefined, async () => "result");
+    await eventually(() => trace(output).includes("gamma:started"));
+    advance(5000);
+    assert.equal(await timed, "result");
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.deepEqual(diagnostics, ["plugin gamma wait deferral: timed out after 5000ms"]);
+  } finally { value.close(); }
+});
+
+test("caller abort outranks concurrent runtime acquisition failure", async () => {
+  const value = fixture();
+  try {
+    const caller = new AbortController();
+    const reason = new Error("caller cancelled");
+    const selected = await settings({ root: value.root, home: value.home });
+    const failing = { ...selected, namespace() {
+      caller.abort(reason);
+      throw new Error("runtime failed concurrently");
+    } };
+    await assert.rejects(withAkumaWaitDeferrals({
+      world: await World.at(value.root), settings: failing, reportDiagnostic: () => assert.fail("abort is not a plugin failure"),
+    }, ["aku/one"], caller.signal, async () => assert.fail("aborted operation must not run")), error => error === reason);
+  } finally { value.close(); }
+});
+
+test("wait with no selected plugins preserves its result", async () => {
+  const value = fixture();
+  try {
+    writeProjectPlugins(value.root, { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } });
+    const runtime = await pluginRuntime({ world: await World.at(value.root),
+      settings: await settings({ root: value.root, home: value.home }) });
+    const result = {};
+    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => result), result);
+  } finally { value.close(); }
+});
+
+test("wait cleanup has a fresh bound and cannot replace the original error", async (context) => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(value.root, "alpha", `
+      import { appendFileSync } from "node:fs";
+      export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {
+        return { waitDeferral(input, acquisition) { return { close(cleanup) {
+          appendFileSync(context.config.trace, "close:" + cleanup.aborted + ":" + acquisition.aborted + "\\n");
+          return new Promise((resolve, reject) => cleanup.addEventListener("abort", () => {
+            appendFileSync(context.config.trace, "cleanup-aborted\\n");
+            reject(new Error("cleanup failed"));
+          }, { once: true }));
+        } }; } };
+      } };
+    `);
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({ world: await World.at(value.root),
+      settings: await settings({ root: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
+    const advance = deadlineClock(context);
+    const caller = new AbortController();
+    const primary = new Error("original operation failed");
+    let settled = false;
+    const pending = runtime.withWaitDeferrals(["aku/one"], caller.signal, async () => { throw primary; });
+    const rejected = assert.rejects(pending, error => error === primary).then(() => { settled = true; });
+    await eventually(() => trace(output).length === 1);
+    caller.abort(new Error("caller cancelled after operation"));
+    advance(4999);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(settled, false);
+    assert.deepEqual(trace(output), ["close:false:false"]);
+    advance(1);
+    await rejected;
+    assert.deepEqual(trace(output), ["close:false:false", "cleanup-aborted"]);
+    assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0]!, /wait deferral cleanup/u);
+  } finally { value.close(); }
+});
+
+test("malformed wait resources diagnose without changing the route result", async () => {
+  const value = fixture();
+  try {
+    writePlugin(value.root, "alpha", 'export default { manifest: { id: "alpha", apiVersion: 1 }, activate() { return { waitDeferral() { return { close: 42 }; } }; } };');
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs" },
+    });
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({ world: await World.at(value.root),
+      settings: await settings({ root: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
+    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => "result"), "result");
+    assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0]!, /wait deferral validation: resource close must be a function/u);
+  } finally { value.close(); }
+});
 
 test("one outcome observation batch bounds concurrent attempts rather than multiplying timeouts", async (context) => {
   const value = fixture();

@@ -84,6 +84,16 @@ export type KeiyakuPlugin = Readonly<{
   activate(context: PluginContext, cancellation?: AbortSignal): Promise<PluginInstance> | PluginInstance;
 }>;
 
+export type PluginWaitDeferralInput = Readonly<{ akumaIds: readonly string[] }>;
+
+export type PluginWaitDeferral = Readonly<{
+  close(cancellation?: AbortSignal): Promise<void> | void;
+}>;
+
 export type PluginInstance = Readonly<{
   signals?: PluginHooks;
+  waitDeferral?: (
+    input: PluginWaitDeferralInput,
+    cancellation?: AbortSignal,
+  ) => Promise<PluginWaitDeferral | undefined> | PluginWaitDeferral | undefined;
 }>;

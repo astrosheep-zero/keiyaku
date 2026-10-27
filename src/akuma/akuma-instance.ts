@@ -1,7 +1,7 @@
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
+import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
@@ -178,11 +178,18 @@ export class Akuma {
       throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
     }
     const signal = signalOption(options.signal);
-    const waited = await this.owner(true).waitReceipt(defaultWaitComplete, {
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    return { reason: waited.reason, status: waited.status };
+    return await withAkumaWaitDeferrals(
+      { world: this.root, reportDiagnostic: this.reportDiagnostic },
+      [this.id],
+      signal,
+      async () => {
+        const waited = await this.owner(true).waitReceipt(defaultWaitComplete, {
+          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          ...(signal === undefined ? {} : { signal }),
+        });
+        return { reason: waited.reason, status: waited.status };
+      },
+    );
   }
 
   async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {

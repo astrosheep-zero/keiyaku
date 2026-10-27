@@ -116,8 +116,9 @@ validation, activation, or handler failure is attributed to that plugin through
 the producing process's diagnostic channel, is bounded by the five-second
 attempt limit, and does not prevent other selected plugins from proceeding. The
 host supplies each activation and handler attempt its own cancellation signal; a
-non-cooperative attempt that outlives its limit loses all authority except its
-diagnostic evidence. A signal that arrives while a selected plugin is still
+non-cooperative attempt that outlives its limit loses authority to participate in
+the operation; an invocation resource returned late receives only bounded cleanup.
+A signal that arrives while a selected plugin is still
 activating remains eligible only when that activation settles successfully
 within the signal producer's own bounded delivery; a pending activation holds
 back only that plugin's handlers, and an emission it misses is dropped with a
@@ -140,6 +141,24 @@ diagnostics belong to that delivery invocation. A later host destination does
 not replay or inherit earlier diagnostics. A destination that throws or rejects
 asynchronously cannot change product results or hold execution custody.
 Diagnostics create no persistence, retry, or cross-process callback channel.
+
+A selected plugin may also expose an invocation-local resource for a wait. The
+requesting edge freezes its selected Akuma identities, acquires each plugin's
+optional resource before local or forwarded observation, and retains it through
+acknowledgment of only the exact outcomes in the final returned statuses. It
+closes those resources afterward, including on failure or cancellation.
+Acquisition, cleanup, and any late acquisition remain bounded and
+diagnostic-only; they do not change the wait result. The plugin resource owns
+renewal and releases only its own custody. Serving Bodies do not acquire
+requester resources, and Keiyaku adds no shared lease registry or cross-process
+capability. Square's optional wait resource defers selected Turn-outcome notices
+only for the requesting execution's recognized participant. It neither establishes
+standing nor borrows a serving execution's identity. Other recipients and notice
+kinds remain unaffected; independent waits retain independent custody. Exact
+observation may acknowledge an existing notice while deferral is held, but never
+records an intent for a notice not yet present. Closing releases only that
+invocation's deferrals, and expiry bounds abandoned custody. An installed Square
+without this optional capability leaves ordinary delivery unchanged.
 
 ## Signals And Boundaries
 

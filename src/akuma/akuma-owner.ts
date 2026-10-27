@@ -260,12 +260,13 @@ export class AkumaOwner {
       path: this.worldPath,
       ids: [this.id],
       completion: "all",
-      ...(this.outcomeObserved === undefined ? {} : { outcomeObserved: this.outcomeObserved }),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(predicate === defaultWaitComplete ? {} : { predicate }),
     });
-    return { reason: waited.reason, status: waited.observations[0]! };
+    const status = waited.observations[0]!;
+    await observeStatusOutcome(status, this.outcomeObserved);
+    return { reason: waited.reason, status };
   }
 
   async wait(
