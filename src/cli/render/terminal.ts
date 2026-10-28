@@ -136,17 +136,8 @@ export function truncateMiddleDisplayText(value: string, maximum: number): strin
   const headColumns = Math.ceil(available / 2);
   const tailColumns = available - headColumns;
   const head = takeDisplayColumns(clean, headColumns).text.replace(/…+$/u, "");
-  const characters = [...GRAPHEMES.segment(clean)].map(({ segment }) => segment);
-  let tailStart = characters.length;
-  let used = 0;
-  while (tailStart > 0) {
-    const candidate = characters[tailStart - 1]!;
-    const width = displayColumns(candidate);
-    if (used + width > tailColumns) break;
-    used += width;
-    tailStart -= 1;
-  }
-  return `${head}…${characters.slice(tailStart).join("").replace(/^…+/u, "")}`;
+  const tail = takeDisplayColumnsFromEnd(clean, tailColumns).text.replace(/^…+/u, "");
+  return `${head}…${tail}`;
 }
 
 export function renderBoundedTextBlock(

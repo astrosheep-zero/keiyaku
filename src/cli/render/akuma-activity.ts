@@ -296,43 +296,23 @@ function tailAnswerPreview(first: string, text: string, columns: number): readon
   return [`${first}${preview}`];
 }
 
-type ToolOverflow = Readonly<{
-  tool: ToolRepr | undefined;
-  value: ReturnType<typeof rowText>;
-  first: string;
-  continuation: string;
-  context: TextRenderContext;
-  compactRun: boolean;
-}>;
-
-function toolOverflowPreview(input: ToolOverflow): readonly string[] | undefined {
-  const { tool, value, first, continuation, context, compactRun } = input;
-  if (tool?.overflow !== "command") return undefined;
-  if (!compactRun) return renderRunCommand(first, continuation, value.text, value.suffix ?? "", context.columns);
-  const remaining = context.columns - displayColumns(first);
-  const suffix = value.suffix ?? "";
-  const withSuffix = remaining - displayColumns(suffix);
-  const showSuffix = suffix.length > 0 && withSuffix >= 6;
-  return [
-    `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
-  ];
-}
-
 /** Every selected timeline row renders through here: one prefix family per row class. */
 function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const value = rowText(row, tool);
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
   const compact = view.compact === true;
-  const overflow = toolOverflowPreview({
-    tool,
-    value,
-    first,
-    continuation,
-    context,
-    compactRun: compact || view.history === true,
-  });
-  if (overflow !== undefined) return overflow;
+  if (tool?.overflow === "command") {
+    const suffix = value.suffix ?? "";
+    if (!compact && view.history !== true)
+      return renderRunCommand(first, continuation, value.text, suffix, context.columns);
+    const remaining = context.columns - displayColumns(first);
+    const withSuffix = remaining - displayColumns(suffix);
+    const showSuffix = suffix.length > 0 && withSuffix >= 6;
+    return [
+      `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
+    ];
+  }
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
   if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
     return tailAnswerPreview(first, value.text, context.columns);
@@ -665,12 +645,7 @@ export function activityStream(context: TextRenderContext): ActivityStream {
     state.liveRows.clear();
     return emissions;
   };
-  const render = (emissions: readonly StreamEmission[]): readonly string[] =>
-    emissions.flatMap((emission) =>
-      emission.kind === "gap"
-        ? [omissionMarker(`${emission.count} omitted`, context.columns)]
-        : renderRow(emission.row, context),
-    );
+  const render = (emissions: readonly StreamEmission[]): readonly string[] => groupedEntries(emissions, context);
   const frame = (): readonly string[] =>
     groupedEntries(
       [...state.liveRows.values()]
