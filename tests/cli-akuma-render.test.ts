@@ -187,11 +187,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     result: { akuma: result.result.akuma, tell: result.result.tell },
   };
   const standalone = tellText(ordinary.result, undefined, context);
-  assert.match(
-    standalone,
-    /^✓ told aku\/worker\/deadbeef\n {2}"continue"$/u,
-    "verdict and subject, payload beneath it",
-  );
+  assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
   const progress = waitedTellProgress(result.result, undefined, context);
   assert.match(progress, /✓ told +"continue"/u, "the panel keeps its timeline row for admitted input");
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
@@ -211,14 +207,17 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     },
   };
   const receipt = tellText(long.result, undefined, context).split("\n");
-  assert.equal(receipt.length, 2, "a verdict line and one bounded payload line");
-  assert.equal(receipt[0], "✓ told aku/worker/deadbeef");
-  assert.match(receipt[1]!, /^ {2}"one line of caller input .*…"$/u);
-  assert.doesNotMatch(receipt.join("\n"), /running|completed|pending tell|─/u, "an action receipt has no frame");
-  assert.ok(displayColumns(receipt[1]!) <= 80);
+  assert.equal(receipt.length, 1, "one receipt line even past the terminal width");
+  assert.match(receipt[0]!, /^✓ told aku\/worker\/deadbeef — one line of caller input .*…$/u);
+  assert.doesNotMatch(
+    receipt.join("\n"),
+    /running|completed|pending tell|─|"$/u,
+    "an action receipt has no frame and adds no quotes",
+  );
+  assert.ok(displayColumns(receipt[0]!) <= 80);
   assert.match(
     tellText({ ...long.result, tell: { ...long.result.tell, wake: { kind: "held" as const } } }, undefined, context),
-    /^⧗ tell aku\/worker\/deadbeef\n {2}"one line of caller input .*…"$/u,
+    /^⧗ tell aku\/worker\/deadbeef — one line of caller input .*…$/u,
     "a held Tell keeps neutral vocabulary and the pending mark",
   );
   assert.equal(
@@ -230,7 +229,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
       undefined,
       context,
     ),
-    ["! tell aku/worker/deadbeef", '  "continue"', "  ! tell delivery failed · wake refused"].join("\n"),
+    ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed · wake refused"].join("\n"),
     "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
   );
   assert.equal(killResultText(result.result.akuma, "killed"), `✓ killed ${result.result.akuma}`);
@@ -715,14 +714,42 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
   const context = { columns: 100, color: false };
   assert.deepEqual(
     tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("go", "told", { kind: "told" }) }, undefined, context).split("\n"),
-    ["✓ told aku/worker/1234abcd", '  "go"'],
-    "the submitted payload appears once beneath its delivery verdict",
+    ["✓ told aku/worker/1234abcd — go"],
+    "the submitted payload appears once inline with its delivery verdict",
+  );
+  assert.equal(
+    tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("  go  ", "told", { kind: "told" }) }, "@tired", context),
+    "✓ told aku/worker/1234abcd (@tired) — go",
+    "whitespace folds, the alias stays a parenthetical supplement, and no quote is added",
+  );
+  assert.equal(
+    tellText(
+      { akuma: SPECIMEN_ID, tell: tellReceipt('  he said "wait"\n', "told", { kind: "told" }) },
+      undefined,
+      context,
+    ),
+    '✓ told aku/worker/1234abcd — he said "wait"',
+    "literal source quotes survive and folding invents no others",
+  );
+  assert.equal(
+    tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("   ", "told", { kind: "told" }) }, undefined, context),
+    "✓ told aku/worker/1234abcd",
+    "an empty input adds no invented text or trailing separator",
+  );
+  const cramped = tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("go", "told", { kind: "told" }) }, undefined, {
+    columns: 12,
+    color: false,
+  });
+  assert.equal(
+    cramped,
+    "✓ told aku/worker/1234abcd — …",
+    "a verdict and identity wider than the terminal stay whole and the input keeps its visible ellipsis",
   );
   assert.deepEqual(
     tellText({ akuma: SPECIMEN_ID, tell: tellReceipt("go", "pending", { kind: "held" }) }, undefined, context).split(
       "\n",
     ),
-    ["⧗ tell aku/worker/1234abcd", '  "go"'],
+    ["⧗ tell aku/worker/1234abcd — go"],
     "a held Tell keeps the pending mark and asserts no delivery",
   );
   assert.deepEqual(
@@ -731,7 +758,7 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
       undefined,
       context,
     ).split("\n"),
-    ["! tell aku/worker/1234abcd", '  "go"', "  ! tell delivery failed · wake refused"],
+    ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed · wake refused"],
     "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
   );
   assert.equal(

@@ -1257,7 +1257,7 @@ export function historyText(
   return [...head, ...(content.length === 0 ? [] : [frameRule(head, context.columns), ...content])].join("\n");
 }
 
-/** One bounded preview of a submitted Tell, indented once beneath its verdict or evidence. */
+/** One bounded, quoted preview of a Tell an outer receipt already admitted, indented beneath it. */
 export function tellPayloadLines(text: string, context: TextRenderContext): readonly string[] {
   return renderBoundedPayload({
     text,
@@ -1283,25 +1283,32 @@ export function tellAdmissionRow(tell: AkumaTellResult["tell"], context: TextRen
 }
 
 /**
- * One Tell action receipt: the delivery verdict and complete subject, then the submitted payload
- * once. A held Tell keeps neutral vocabulary; a failed delivery keeps its own concrete diagnosis.
+ * One Tell action receipt: the delivery verdict and complete subject stand whole on the first line
+ * with the submitted payload folded onto that same line, bounded so only its preview truncates. A
+ * held Tell keeps neutral vocabulary; a failed delivery keeps its concrete diagnosis and native log
+ * coordinates as separate supporting facts.
  */
 export function tellText(result: AkumaTellResult, alias: string | undefined, context: TextRenderContext): string {
   const wake = result.tell.wake;
   const mark = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
   const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
-  const verdict = actionReceipt({
+  const head = actionReceipt({
     mark,
     verb,
     id: result.akuma,
     ...(alias === undefined ? {} : { alias }),
-  });
-  if (wake.kind !== "failed") return [...verdict, ...tellPayloadLines(result.tell.row.text, context)].join("\n");
+  })[0]!;
+  const preview = safeText(result.tell.row.text).replace(/\s+/gu, " ").trim();
+  const prefix = `${head} — `;
+  // The verdict and identity never truncate, so an over-wide identity still keeps one visible
+  // ellipsis for the input it could not show.
+  const room = Math.max(1, context.columns - displayColumns(prefix));
+  const verdict = preview.length === 0 ? head : `${prefix}${truncateDisplayText(preview, room)}`;
+  if (wake.kind !== "failed") return verdict;
   const child = "child" in wake ? wake.child : undefined;
   const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
   return [
-    ...verdict,
-    ...tellPayloadLines(result.tell.row.text, context),
+    verdict,
     ...subordinateLines(
       renderBoundedTextBlock(failure, {
         first: "",

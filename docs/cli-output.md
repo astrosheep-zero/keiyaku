@@ -157,18 +157,23 @@ One Akuma action family covers detached and prompt-free calls, forks, tells, and
 kills, including plural kills and partial failures. Every action receipt leads
 with the action verdict and the complete Akuma identity, with an existing alias
 only as a parenthetical supplement; no action receipt hangs facts from an
-identity tree. Contract association, source identity, execution directory, the
-submitted Tell payload, and a stage diagnosis are indented supporting facts;
-distinct fact kinds never collapse into one punctuation run, and an absent fact
-adds no line. Birth and integration are admitted facts, so a receipt never
-prints an unqualified success over a stage that failed: the verdict carries the
-partial failure and each concrete cause stays copyable and attached to its
-subject. A Tell is evidence of admission and delivery, not of work finished: its
-submitted input appears once beneath the verdict, and held evidence stays
-distinct from a failed delivery. Admitted input survives a later failure, so a
-call whose Tell stage failed still names the admitted child, the resolved
-execution directory, that submitted input, and the native cause. Kill keeps
-killed, already-killed, already-stopped, hung, untidy, and unavailable distinct
+identity tree. Contract association, source identity, execution directory, and
+a stage diagnosis are indented supporting facts; a Tell admitted as part of a
+wider call carries its submitted input there too, while a receipt's own Tell
+states that input inline. Distinct fact kinds never collapse into one
+punctuation run, and an absent fact adds no line. Birth and integration are
+admitted facts, so a receipt never prints an unqualified success over a stage
+that failed: the verdict carries the partial failure and each concrete cause
+stays copyable and attached to its subject. A Tell is evidence of admission and
+delivery, not of work finished: its own receipt states the submitted input
+once, folded onto the receipt line after the complete identity and bounded so
+only that preview yields to the terminal's width; added quotation marks never
+replace the source's own, empty input adds no text, and held evidence stays
+distinct from a failed delivery, whose diagnosis and log coordinates remain
+separate supporting facts. Admitted input survives a later failure, so a call
+whose Tell stage failed still names the admitted child, the resolved execution
+directory, that submitted input, and the native cause. Kill keeps killed,
+already-killed, already-stopped, hung, untidy, and unavailable distinct
 outcomes in frozen selection order, one compact block per member, using native
 failure evidence rather than one generic verdict. Opaque configuration and
 observation values retain exact names, scalar types, collection membership,
