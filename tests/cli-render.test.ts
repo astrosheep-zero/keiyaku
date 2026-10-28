@@ -180,7 +180,10 @@ function acceptedDeliver(envelope: AcceptedEnvelope, value: DeliveryValue): Acce
 function acceptedReview(envelope: AcceptedEnvelope, value: AcceptedOf<"review">["value"]): AcceptedOf<"review"> {
   return acceptedReceipt({ operation: "review", ...envelope, value });
 }
-function acceptedPreview(envelope: AcceptedEnvelope, value: AcceptedOf<"deliver-preview">["value"]): AcceptedOf<"deliver-preview"> {
+function acceptedPreview(
+  envelope: AcceptedEnvelope,
+  value: AcceptedOf<"deliver-preview">["value"],
+): AcceptedOf<"deliver-preview"> {
   return acceptedReceipt({ operation: "deliver-preview", ...envelope, value });
 }
 function acceptedArc(envelope: AcceptedEnvelope): AcceptedOf<"arc"> {
@@ -271,12 +274,6 @@ function recoverySnapshotEffect(contract: ContractId, snapshot: SnapshotId): Acc
 }
 
 const worldRoot = "/world" as WorldRoot;
-
-/** The terminal clock a moment renders as, matching the renderer's local-time clock. */
-function clockAt(at: number): string {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
 
 /** Rows carried by a live observation; focused renderer fixtures need no second projection. */
 function activityRows(timeline: AkumaStatus["timeline"]): readonly ActivityRow[] {
@@ -1115,9 +1112,9 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     columns: 60,
     color: false,
   }).join("\n");
-  assert.match(answer, /“/u);
-  assert.match(answer, /│ /u);
-  assert.match(answer, /…”/u);
+  assert.match(answer, /^✓ 👩‍💻/mu);
+  assert.match(answer, /^ {2}👩‍💻/mu);
+  assert.match(answer, /…$/mu);
   const abandoned = show({ ...base, phase: "abandoned", disposition: "terminal", abandonNote: long });
   assert.match(abandoned, /× abandoned/u);
   assert.match(abandoned, /note  “/u);
@@ -1243,7 +1240,12 @@ test("preview verification summary names declarations without changing raw evide
     { contract: contractId("kei/missing") },
     {
       candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: contractId("kei/missing") } },
-      verification: { kind: "recorded", entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"), verdict: "unsatisfied", summary },
+      verification: {
+        kind: "recorded",
+        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        verdict: "unsatisfied",
+        summary,
+      },
       target: { kind: "not-observed" },
     },
   );
@@ -2450,7 +2452,7 @@ test("World roster reuses snapshot activity rendering for concrete tool work", (
     roster.slice(-bounded.length),
     bounded.map((line) => `  ${line}`),
   );
-  assert.match(roster.at(-1)!, /✓ run    \$ npm test -- tests\/cli-render\.test\.ts/u);
+  assert.match(roster.at(-1)!, /run +\$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
@@ -2462,12 +2464,12 @@ test("World answer previews keep the conclusion, while detail keeps its opening"
     akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
     context,
   ).join("\n");
-  assert.match(board, /answer “\u2026/u);
-  assert.match(board, /conclusion: ship the fix”/u);
+  assert.match(board, /✓ …/u);
+  assert.match(board, /conclusion: ship the fix$/mu);
   assert.doesNotMatch(board, /premise premise premise premise premise premise/u);
   const detail = snapshotActivityLines(snapshot, context).join("\n");
-  assert.match(detail, /“premise premise/u);
-  assert.doesNotMatch(detail, /“\.\.\./u);
+  assert.match(detail, /^✓ premise premise/mu);
+  assert.doesNotMatch(detail, /^✓ …/mu);
 });
 
 test("long read and edit previews keep path tails with range and diffstat detail", () => {
@@ -2543,18 +2545,18 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(roster, /✓ custom-tool/u);
+  assert.match(roster, /^ {5}custom-tool$/mu);
 });
 
 test("the output law names the current mark vocabulary and retires the one-check sentence", () => {
   const law = readFileSync(fileURLToPath(new URL("../docs/cli-output.md", import.meta.url)), "utf8");
   assert.doesNotMatch(law, /at most once per stream/u, "the retired one-check law is gone");
   assert.doesNotMatch(law, /settled intermediate activity uses the plain/u);
-  assert.match(law, /`✓` marks a\s+successfully completed action row/u, "the replacement law exists");
-  assert.match(law, /`│` is the neutral rail for voice rows and told Tells/u);
+  assert.match(law, /A settled\s+successful action row spends no mark/u, "the replacement law exists");
+  assert.match(law, /Voice rows carry\s+their own rail/u);
 });
 
-test("a settled successful tool wears ✓ again while voice rows and told Tells stay on the rail", () => {
+test("a settled successful tool spends no mark while voice and input rows keep their own leads", () => {
   const id = "aku/worker/abcd0040";
   const status = akumaStatusSchema.parse({
     birth: DIRECT_BIRTH,
@@ -2582,10 +2584,10 @@ test("a settled successful tool wears ✓ again while voice rows and told Tells 
     ]),
   });
   const text = snapshotText({ status, contract: { kind: "none" } }, { columns: 100, color: false });
-  assert.match(text, /✓ read/u, "a settled tool action affirms success");
-  assert.match(text, /│ spoken$/mu, "speech sits directly on the rail without a label or quotes");
-  assert.match(text, /│ told/u, "a told Tell stays on the rail");
-  assert.ok((text.match(/✓/gu) ?? []).length >= 2, "multiple success marks are normal on one stream");
+  assert.match(text, /^ {3}read +src\/a\.ts · L0-0$/mu, "a settled tool affirms success by spending no mark");
+  assert.match(text, /^▎ spoken$/mu, "speech sits on its own rail without a label or quotes");
+  assert.match(text, /^▸ told direction$/mu, "a told input keeps its input lead");
+  assert.equal((text.match(/✓/gu) ?? []).length, 1, "the only check is the status closer");
 });
 
 test("generic tool rows preserve semantic and common summaries", () => {
@@ -2620,7 +2622,7 @@ test("generic tool rows preserve semantic and common summaries", () => {
   assert.doesNotMatch(text, /newest first · 20 rows/u);
   for (const name of ["mystery", "silent", "get_context_remaining"])
     assert.ok(
-      lines.some((line) => new RegExp(`✓ ${name}$`, "u").test(line)),
+      lines.some((line) => new RegExp(`^ {3}${name}$`, "u").test(line)),
       `${name} with empty or absent arguments renders no summary`,
     );
 });
@@ -2631,7 +2633,7 @@ test("generic tool rows preserve whole-field and indivisible-value omission", ()
       columns: 40,
       name: "future_tool",
       input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
-      expected: /future_tool\s+\{"a":1\} \+5 fields$/u,
+      expected: /future_tool\s+\{"a":1,"b":2\} \+4 fields$/u,
       absent: undefined,
       message: "leading whole fields survive with an explicit trailing-field count",
     },
@@ -2647,9 +2649,9 @@ test("generic tool rows preserve whole-field and indivisible-value omission", ()
       columns: 30,
       name: "ft",
       input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
-      expected: /…$/u,
+      expected: /\{"a":1\} \+5 fields$/u,
       absent: /"f":6/u,
-      message: "an unfittable field count still shows omission",
+      message: "a narrow row keeps the explicit trailing-field count",
     },
     {
       columns: 24,
@@ -2738,12 +2740,16 @@ test("generic tool rows preserve name, width, and grapheme behavior", () => {
   assert.ok(lines[1]!.includes("🙂"), "a wide name keeps whole graphemes");
   assert.doesNotMatch(lines[1]!, /\uFFFD/u, "no grapheme is split into a replacement");
   assert.ok(lines[3]!.includes(exact), "an exact-fit name is not truncated");
-  assert.doesNotMatch(lines[3]!, /\{/u, "its arguments trim away entirely");
+  assert.ok(lines[3]!.endsWith("…"), "the argument preview truncates visibly instead of vanishing");
   for (const line of lines.slice(4, 6)) {
     assert.ok(line.includes(family), "a ZWJ family stays whole");
     assert.doesNotMatch(line, /\uFFFD/u, "ZWJ is never replaced by a replacement character");
   }
-  assert.equal(lines[6]!.indexOf("{"), 16, "a name longer than six cells uses its own action width");
+  assert.equal(
+    lines[6]!.indexOf("{"),
+    3 + "ok_tool".length + 1,
+    "a name longer than six cells uses its own action width",
+  );
   assert.ok(lines[7]!.includes("a_very_long_tool_name_here"), "an over-long name stays complete");
   assert.ok(lines[7]!.endsWith("…"), "args truncate before the name does");
   assert.ok(lines[8]!.includes("🙂") && lines[8]!.endsWith("…"), "a truncated emoji argument stays grapheme-safe");
@@ -2768,7 +2774,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /\? run    \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /\?  run +\$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -2778,7 +2784,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(failedRoster, /! run    \$ npm test — exit 1/u);
+  assert.match(failedRoster, /!  run +\$ npm test — exit 1/u);
 
   const truncated = openAkumaSnapshot([
     snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
@@ -2802,7 +2808,7 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
   });
   const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
-  assert.match(snapshot, /✓ answer “the answer”$/u, "the timeline ends at its outcome row");
+  assert.match(snapshot, /✓ the answer$/u, "the timeline ends at its outcome row");
   assert.doesNotMatch(snapshot, /✓ completed/u, "the answered outcome is already the ending");
   assert.equal((snapshot.match(/✓/gu) ?? []).length, 1, "one check on one stream");
 
@@ -2900,7 +2906,7 @@ test("status renders selected activity evidence while preserving history and com
   );
   assert.deepEqual(
     providerGaps.filter((line) => line.includes("omitted")),
-    [`${" ".repeat(5)} ⋮ 2 omitted`],
+    ["   ···    2 omitted"],
   );
 
   const adjacentGaps = snapshotActivityLines(
@@ -2913,7 +2919,7 @@ test("status renders selected activity evidence while preserving history and com
   );
   assert.deepEqual(
     adjacentGaps.filter((line) => line.includes("omitted")),
-    [`${" ".repeat(5)} ⋮ 3 omitted`],
+    ["   ···    3 omitted"],
   );
 
   const separatedGaps = snapshotActivityLines(
@@ -2926,7 +2932,7 @@ test("status renders selected activity evidence while preserving history and com
   );
   assert.deepEqual(
     separatedGaps.filter((line) => line.includes("omitted")),
-    [`${" ".repeat(5)} ⋮ 1 omitted`, `${" ".repeat(5)} ⋮ 2 omitted`],
+    ["   ···    1 omitted", "   ···    2 omitted"],
   );
 
   const focusedEntries = [
@@ -2958,8 +2964,8 @@ test("status renders selected activity evidence while preserving history and com
       1,
       `selected ${command} renders once`,
     );
-  assert.match(statusText, /\? run    \$ c9/u, "the active final tool remains visible as unsettled");
-  assert.doesNotMatch(statusText, /● run\s+\$/u, "status never asserts live activity");
+  assert.match(statusText, /\?  run +\$ c9/u, "the active final tool remains visible as unsettled");
+  assert.doesNotMatch(statusText, /●  run/u, "status never asserts live activity");
   assert.doesNotMatch(statusText, /omitted/u, "status does not re-fold the selected tool evidence");
   assert.ok(statusText.indexOf("$ c4") < statusText.indexOf("between"));
   assert.ok(statusText.indexOf("between") < statusText.indexOf("$ c5"));
@@ -3042,7 +3048,7 @@ test("status renders selected activity evidence while preserving history and com
     DEFAULT_CONTEXT,
   );
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
-  assert.match(historyText, /      ⋮ 55 earlier events · showing last 12/u);
+  assert.match(historyText, /^ {3}··· +55 earlier events · showing last 12/mu);
   assert.doesNotMatch(historyText, /earlier turns/u);
   assert.doesNotMatch(historyText, /●/u, "history never asserts live activity");
   for (const command of ["c4", "c5", "c6", "c7"])
@@ -3099,16 +3105,16 @@ test("open full snapshots preserve projected evidence order", () => {
 
   assertEvidenceOrder(snapshotActivityLines(callSnapshot, context).join("\n"), [
     "initial commission",
-    "⋮ 2 omitted",
+    "···    2 omitted",
     "$ after-call-gap",
-    "⋮ 3 omitted",
+    "···    3 omitted",
     "$ call-active",
   ]);
   assertEvidenceOrder(snapshotActivityLines(tellSnapshot, context).join("\n"), [
     "initial launch direction",
-    "⋮ 1 omitted",
+    "···    1 omitted",
     "$ after-tell-gap",
-    "⋮ 4 omitted",
+    "···    4 omitted",
     "$ tell-active",
   ]);
 });
@@ -3126,14 +3132,14 @@ test("current attempt boundaries lead live streams exactly once", () => {
   const active = snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-running" }));
   const initial = { ...openAkumaSnapshot([call, tool, active]), openingSequence: 1 };
   const snapshot = snapshotActivityLines(initial, context).join("\n");
-  assert.match(snapshot, /^\d{2}:\d{2} │ call +initial commission/mu);
+  assert.match(snapshot, /^▸ initial commission/mu);
   assert.ok(snapshot.indexOf("initial commission") < snapshot.indexOf("after-boundary"));
   assert.equal((snapshot.match(/initial commission/gu) ?? []).length, 1);
   assert.match(snapshotActivityLines(initial, context, { latest: true }).join("\n"), /still-running/u);
 
   const live = activityStream(context);
   const liveRows = [...live(liveActivity(initial)), ...live(liveActivity(initial)), ...live.flush()].join("\n");
-  assert.match(liveRows, /^\d{2}:\d{2} │ call +initial commission/mu);
+  assert.match(liveRows, /^▸ initial commission/mu);
   assert.ok(liveRows.indexOf("initial commission") < liveRows.indexOf("after-boundary"));
   assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
 
@@ -3160,7 +3166,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
     openingSequence: 4,
   };
   const wakeSnapshot = snapshotActivityLines(woken, context).join("\n");
-  assert.match(wakeSnapshot, /^\d{2}:\d{2} │ told +“resume with the new direction”/mu);
+  assert.match(wakeSnapshot, /^▸ resume with the new direction/mu);
   assert.ok(wakeSnapshot.indexOf("resume with the new direction") < wakeSnapshot.indexOf("after-wake"));
   assert.equal((wakeSnapshot.match(/resume with the new direction/gu) ?? []).length, 1);
   const wakeStatusText = snapshotText(
@@ -3195,7 +3201,7 @@ test("current attempt boundaries consume the projection opening identity", () =>
   const seeded = activityStream(context).seed(liveActivity(namedSnapshot)).join("\n");
   assert.match(seeded, /named opening/u);
   assert.doesNotMatch(seeded, /after-opening/u);
-  assert.match(seeded, /⋮ 1 omitted/u, "a seeded opening marks its skipped settled successor");
+  assert.match(seeded, /··· +1 omitted/u, "a seeded opening marks its skipped settled successor");
   assert.equal((seeded.match(/named opening/gu) ?? []).length, 1);
 
   assert.deepEqual(activityStream(context).seed(liveActivity(openAkumaSnapshot([named, activity]))), []);
@@ -3278,8 +3284,6 @@ test("call and ask stream projected overlapping tool completions once in complet
     const a = observe(projection(third)).join("\n");
     assert.match(b, /\$ B[\s\S]*between tools/u);
     assert.match(a, /\$ A/u);
-    assert.match(b, new RegExp(clockAt(Date.parse(at(6))), "u"));
-    assert.match(a, new RegExp(clockAt(Date.parse(at(8))), "u"));
     assert.deepEqual(observe(projection(third)), []);
   }
 });
@@ -3324,17 +3328,17 @@ test("live activity keeps unsettled rows in the frame and accounts for them on c
   const stream = activityStream({ columns: 120, color: false });
 
   assert.deepEqual(stream(liveActivity(openAkumaSnapshot([active]))), []);
-  assert.match(stream.frame().join("\n"), /● run +\$ slow/u);
+  assert.match(stream.frame().join("\n"), /●  run +\$ slow/u);
 
   const settled = stream(liveActivity(idleAkumaSnapshot([complete]))).join("\n");
-  assert.match(settled, /✓ run +\$ slow/u);
+  assert.match(settled, /^ {3}run +\$ slow$/mu);
   assert.equal(stream.frame().length, 0);
   assert.deepEqual(stream.flush(), []);
 
   const unresolved = activityStream({ columns: 120, color: false });
   unresolved(liveActivity(openAkumaSnapshot([active])));
   const closing = unresolved.flush().join("\n");
-  assert.match(closing, /\? run +\$ slow/u);
+  assert.match(closing, /\?  run +\$ slow/u);
   assert.equal((closing.match(/\$ slow/gu) ?? []).length, 1);
   assert.deepEqual(unresolved.flush(), []);
 });
@@ -3399,7 +3403,7 @@ test("thoughts do not consume a live stream's tool or omission budgets", () => {
   const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
   for (const sequence of [1, 3, 4]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
   for (const sequence of [6, 7, 8, 10, 11, 12]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.equal((text.match(/⋮ 6 omitted/gu) ?? []).length, 1, "only six eligible tools are omitted");
+  assert.equal((text.match(/··· +6 omitted/gu) ?? []).length, 1, "only six eligible tools are omitted");
   assert.doesNotMatch(text, /hidden-[123]/u);
 });
 
@@ -3440,10 +3444,10 @@ test("each say or Tell reopens the tool budget and failed tools always print", (
   assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
   for (const sequence of [2, 3, 4, 11, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
   assert.doesNotMatch(text, /src\/middle\.ts/u);
-  assert.match(text, /! edit   src\/selected\.ts — \+4 -2 — error · refused/u);
-  assert.match(text, /! edit   src\/last\.ts — \+4 -2 — error · refused/u);
+  assert.match(text, /!  edit +src\/selected\.ts — \+4 -2 — error · refused/u);
+  assert.match(text, /!  edit +src\/last\.ts — \+4 -2 — error · refused/u);
   for (const sequence of [6, 7, 8]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /⋮ 4 omitted[\s\S]*selected[\s\S]*flush-now[\s\S]*last\.ts/u);
+  assert.match(text, /··· +4 omitted[\s\S]*selected[\s\S]*flush-now[\s\S]*last\.ts/u);
   assert.doesNotMatch(observed.split("flush-now")[1] ?? "", /omitted/u);
   assert.equal(text.split("flush-now").length - 1, 1);
 });
@@ -3476,7 +3480,7 @@ test("multiple says each print their first three tools as they settle", () => {
   for (const sequence of [1, 2, 3, 5, 6, 7, 10, 11, 12])
     assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
   for (const sequence of [8, 13]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*⋮ 1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*⋮ 1 omitted/u);
+  assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*··· +1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*··· +1 omitted/u);
 });
 
 test("a plural wait text renders every observation's status snapshot and its unreadable peers", () => {
@@ -3517,7 +3521,7 @@ test("a plural wait text renders every observation's status snapshot and its unr
   );
   assert.doesNotMatch(text, /of \d+ done/u, "no completion count and no scoreboard");
   assert.doesNotMatch(text, /waited/u, "wait text asserts no elapsed wait");
-  assert.match(text, /✓ answer “the answer”$/mu, "an answer is visible only as the snapshot's outcome row");
+  assert.match(text, /✓ the answer$/mu, "an answer is visible only as the snapshot's outcome row");
 });
 
 test("an observing call's conclusion asserts real waiting", () => {
@@ -3530,7 +3534,7 @@ test("an observing call's conclusion asserts real waiting", () => {
     { now: () => settledAtMs + 10_000 },
   );
   const conclusion = answered.conclude(callObservation({ reason: "answered", answer: "the answer" }));
-  assert.equal(conclusion.split("\n").at(-3), `${clockAt(settledAtMs)} ✓ answered`);
+  assert.equal(conclusion.split("\n").at(-3), "✓ answered");
   assert.ok(conclusion.endsWith("\n\n"), "the progress channel owns the answer separator");
 
   // A deadline carries the observed elapsed wait rather than manufacturing an ending.
@@ -3685,12 +3689,12 @@ test("a streamed observing call opens one framed head and never replays a settle
   const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
   const text = stream.observe(live(growing)).join("\n");
   assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
-  assert.match(text, /✓ run +\$ first/u);
+  assert.match(text, /^ {3}run +\$ first$/mu);
   assert.doesNotMatch(text, /second|@scout|kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
   const conclusion = stream.conclude(callObservation({ reason: "answered", answer: "the answer" }));
-  assert.equal(conclusion, `      ? run    \$ second\n${clockAt(settledAtMs)} ✓ answered — 4s\n\n`);
+  assert.equal(conclusion, `?  run    \$ second\n✓ answered — 4s\n\n`);
   assert.doesNotMatch(conclusion, /the answer|kei\/demo|@scout/u, "no head or answer replay");
 });
 
@@ -3702,7 +3706,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
   now = 40_000;
   const opened = runningStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(opened.at(-3), `${clockAt(40_000)} ⧗ pending tell — waited 30s`);
+  assert.equal(opened.at(-3), "⧗ pending tell — waited 30s");
   assert.ok(runningStream.opened());
 
   const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
@@ -3721,7 +3725,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
   const observed = observedStream.conclude(callObservation({ reason: "deadline" })).split("\n");
   assert.equal(
     observed.at(-3),
-    `${clockAt(55_000)} ● running — waited 15s`,
+    "● running — waited 15s",
     "a caller deadline states the observed life rather than naming the deadline",
   );
 
@@ -3734,10 +3738,10 @@ test("a streamed observing call concludes truthfully when its stream never opene
     })
     .split("\n");
   assert.deepEqual(failed.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(failed.at(-3), "! error window lost");
+  assert.equal(failed.at(-3), "! window lost");
 
   const outcomeStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
   const outcomeText = outcomeStream.conclude(callObservation({ reason: "failed", diagnostic: "provider 503" }));
   assert.match(outcomeText, /! failed — /u);
-  assert.match(outcomeText, /! error provider 503/u);
+  assert.match(outcomeText, /! provider 503/u);
 });

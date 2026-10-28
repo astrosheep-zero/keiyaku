@@ -141,7 +141,7 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
         evidence: callEvidence(result, head),
       }),
       ...(admittedTell === undefined ? [] : tellPayloadLines(admittedTell.row.text, context)),
-      ...subordinateLines([`! error ${safeText(result.observation.failure.diagnostic)}`]),
+      ...subordinateLines([`! ${safeText(result.observation.failure.diagnostic)}`]),
     ].join("\n");
   }
   const inputObservation = result.observation;

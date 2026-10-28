@@ -179,17 +179,87 @@ export function renderBoundedTextBlock(
   return lines.length === 0 ? [input.first.trimEnd()] : lines;
 }
 
-export function renderBoundedPayload(
-  input: Readonly<{
-    text: string;
-    first: string;
-    continuation: string;
-    columns: number;
-    maxLines: number;
-    quote: string;
-    truncated: boolean;
-  }>,
-): readonly string[] {
+type BoundedPayload = Readonly<{
+  text: string;
+  first: string;
+  continuation: string;
+  columns: number;
+  maxLines: number;
+  quote: string;
+  truncated: boolean;
+  /** Keep source line breaks and indentation; single-line previews fold whitespace instead. */
+  preserveLines?: true;
+}>;
+
+export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
+  return input.preserveLines === true ? renderPreservedPayload(input) : renderFoldedPayload(input);
+}
+
+/**
+ * Paragraph-preserving payload: source line breaks and leading indentation stay,
+ * each line wraps at a word boundary where one exists, and the last rendered
+ * line carries either the closing quote or the one truncation mark.
+ */
+function renderPreservedPayload(input: BoundedPayload): readonly string[] {
+  const closing = input.quote === "" ? "" : input.quote === "“" ? "”" : input.quote;
+  if (input.text.length === 0)
+    return [input.quote === "" ? input.first.trimEnd() : `${input.first}${input.quote}${closing}`];
+  const source = input.text.split(/\r?\n/u).map((line) => safeText(line).replace(/\s+$/u, ""));
+  const lines: string[] = [];
+  let truncated = input.truncated;
+  let done = false;
+  /** Paragraph breaks are deferred so they never spend the preview's last usable line. */
+  let pendingBlanks = 0;
+  for (const line of source) {
+    if (done) break;
+    if (line.length === 0) {
+      if (lines.length > 0) pendingBlanks += 1;
+      continue;
+    }
+    // A paragraph break never spends the preview's last line: content wins over a blank.
+    const room = input.maxLines - lines.length - 1;
+    for (let count = 0; count < Math.min(pendingBlanks, Math.max(0, room)); count += 1)
+      lines.push(input.continuation.trimEnd());
+    pendingBlanks = 0;
+    const indent = /^ */u.exec(line)![0];
+    let rest = line.slice(indent.length);
+    while (rest.length > 0) {
+      if (lines.length >= input.maxLines) {
+        truncated = true;
+        done = true;
+        break;
+      }
+      const prefix = lines.length === 0 ? input.first : input.continuation;
+      const opening = input.quote !== "" && lines.length === 0 ? input.quote : "";
+      // One cell stays reserved for a closing quote or an omission mark.
+      const budget = Math.max(1, input.columns - displayColumns(prefix) - displayColumns(opening) - 1);
+      const fragment = wrapFragment(rest, budget);
+      if (fragment.body.length === 0) {
+        truncated = true;
+        done = true;
+        break;
+      }
+      lines.push(`${prefix}${opening}${indent}${fragment.body}`);
+      rest = fragment.remaining;
+    }
+  }
+  if (lines.length === 0) return [input.first.trimEnd()];
+  if (truncated) lines[lines.length - 1] = truncateDisplayText(`${lines[lines.length - 1]}…`, input.columns);
+  else if (closing !== "") lines[lines.length - 1] += closing;
+  return lines;
+}
+
+/** One wrapped fragment: a word boundary is preferred over splitting a word. */
+function wrapFragment(rest: string, budget: number): Readonly<{ body: string; remaining: string }> {
+  const taken = takeDisplayColumns(rest, budget);
+  if (taken.rest.length === 0) return { body: taken.text, remaining: "" };
+  const split = taken.text.lastIndexOf(" ");
+  if (split <= 0 || split < Math.floor(taken.text.length / 2)) return { body: taken.text, remaining: taken.rest };
+  return { body: taken.text.slice(0, split), remaining: `${taken.text.slice(split + 1)}${taken.rest}` };
+}
+
+/** Single-line and bounded summaries fold whitespace into one grapheme-safe stream. */
+function renderFoldedPayload(input: BoundedPayload): readonly string[] {
   let rest = safeText(input.text).replace(/\s+/gu, " ").trim();
   const lines: string[] = [];
   for (let index = 0; index < input.maxLines; index += 1) {

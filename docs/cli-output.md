@@ -92,12 +92,12 @@ re-derive it. The checkbox trio `[ ]`, `[✓]`, and `[×]` belongs only to state
 surfaces: it names the current requirement fill-state, including delivery and
 gates against the current candidate. Event surfaces such as history, timelines,
 and receipts use bare marks instead; in a causal history skeleton the mark
-itself carries the verdict, without a satisfied/unsatisfied word. `✓` marks a
-successfully completed action row (a tool settlement or an answered outcome);
-`│` is the neutral rail for voice rows and told Tells; `●` reports an observed
-in-motion state such as a running Akuma, and asserts
-continuing liveness only inside a redrawable live frame; `!` is failure; `?` is
-unresolved activity. History never contains `●`.
+itself carries the verdict, without a satisfied/unsatisfied word. A settled
+successful action row spends no mark; `!` is failure; `●` reports an observed
+in-motion state such as a running Akuma, and asserts continuing liveness only
+inside a redrawable live frame; `?` is unresolved activity. Voice rows carry
+their own rail and told inputs their input mark, so neither borrows an action
+verdict. History never contains `●`.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
@@ -192,9 +192,9 @@ them — indented beneath it. A static coordinate appears once, above the conten
 boundary, and an unknown coordinate is omitted rather than filled in. One
 width-aware rule opens the content only when timeline or observed conclusion
 content follows, and it never exceeds the terminal. Chronological activity
-retains the owner's selection, event order, payloads, omissions, labels,
-timestamps, marks, and input attribution. One truthful observed conclusion
-closes that activity; the timeline's own terminal outcome may already be that
+retains the owner's selection, event order, payloads, omissions, labels, marks,
+and input attribution. One truthful observed conclusion closes that activity;
+the timeline's own terminal outcome may already be that
 conclusion, and it is then not restated. Reported changes and created Debts
 follow as indented dynamic output, then indented diagnostics such as a failed
 association — a diagnostic never becomes an unlabeled static property and stays
@@ -206,12 +206,22 @@ outstanding Tell. Only an observed input wait can justify elapsed-duration text,
 and an unknown change size remains unknown rather than implying additions or
 removals. Across observations, including Contract testimony and Akuma snapshot, history,
 compact, and attributed activity, free text uses one bounded payload discipline
-with body-aligned continuations. Akuma speech sits directly on the timeline rail
-without an action label or added quotation marks; tool actions and final answers
-retain their explicit labels. Other quoted payloads retain one quote boundary.
+with body-aligned continuations. Activity text carries no wall-clock timestamp,
+though a tool or wait duration remains its own evidence. Two left-flowing
+families share one grammar: top-level input, speech, and outcome rows keep their
+own lead, while indented action rows spend one state margin and one verb cell
+whose continuation aligns with the actual content start, even for a name longer
+than the default cell. Multiline payloads keep their paragraphs and
+indentation; single-line previews fold whitespace, and a row-omission marker
+sits in verb position. Akuma speech sits on its own rail without an action
+label or added quotation marks; a submitted input and a terminal answer are
+recognised by their own leads rather than a verb. Thought narration is its verb
+and natural text, without an added quote boundary; payloads quoted elsewhere
+retain one.
 This distinction changes presentation only, never event order or selection.
-Payloads slice by whole grapheme cells without word-sensitive rearrangement and
-expose truncation at the end. World-board answer previews alone anchor to the tail with a leading
+Payloads slice by whole grapheme cells and expose truncation at the end; where
+content wraps, a word boundary is preferred over splitting a word. World-board
+answer previews alone anchor to the tail with a leading
 omission mark when the head is cut; the selected Akuma detail keeps head-first
 wrapping. Selected Contract status foregrounds the phase's outcome or current
 work judgment; terminal status does not repeat delivery mechanics, workspace
@@ -249,9 +259,10 @@ An observing call and an ask share one input-wait
 presentation discipline, defined once: the shared observation head opens on the
 progress channel, eligible timeline rows stream once each in retained order, active
 activity stays in the redrawable frame until it settles, and one truthful
-conclusion follows the shared clock, mark, verb, and duration grammar. Closing
-accounts for every row still in flight with `?`; history and status never assert
-liveness. For an ask, live activity begins at its already-rendered Tell
+conclusion follows the shared mark, verb, and duration grammar. Closing
+accounts for every row still in flight: an unresolved tool keeps `?` and
+speech keeps its rail; history and status never assert liveness. For an ask,
+live activity begins at its already-rendered Tell
 admission; earlier work remains available through status and history. A caller
 deadline concludes on the target's observed
 life rather than naming the deadline; the explicit reason stays in JSON. The
@@ -261,8 +272,8 @@ carries that answer once, byte-exact, and nothing else on deadline or failure.
 The stream restates the timeline's own rows rather than inventing a private
 vocabulary and never replays a settled row; omissions between evidence spans
 are marked opaquely rather than rewritten. Each settled row is decided once,
-when first observed: it prints or joins an omission count, and no timestamped
-row is held for a later observation. After each spoken update or Tell, the
+when first observed: it prints or joins an omission count, and no settled row
+is held for a later observation. After each spoken update or Tell, the
 first three settled tools print; later tools until the next such checkpoint
 fold into one untimed omission marker, released before that source's next
 visible row or at closing. A failed tool always prints.

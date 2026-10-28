@@ -241,11 +241,7 @@ test(
       assert.equal(unfinished.stdout, "", "an unfinished observing call writes no stdout");
       const lines = unfinished.stderr.split("\n");
       assert.match(lines[0]!, /^aku\/worker\/[0-9a-f]{8} \(@notes\)$/u, "one identity frame opens the session");
-      assert.equal(
-        lines[1],
-        `  ${await realpath(world)}`,
-        "the known execution directory is static context",
-      );
+      assert.equal(lines[1], `  ${await realpath(world)}`, "the known execution directory is static context");
       assert.equal(lines[2], ruleFor(lines[0]!, lines[1]!), "the shared rule underlines the identity head");
       assert.doesNotMatch(unfinished.stderr, /cwd/u, "the directory is a bare coordinate, not a labelled row");
       assert.equal(
@@ -303,11 +299,7 @@ test(
       const answerNarration = answered.stderr.split("\n").filter((line) => line.includes("the answer"));
       assert.ok(answerNarration.length <= 1, `the stream never repeats answer narration:\n${answered.stderr}`);
       for (const row of answerNarration)
-        assert.match(
-          row,
-          /^(?:\d{2}:\d{2}| {5}) \? the answer$/u,
-          "only unresolved narration may contain answer text",
-        );
+        assert.match(row, /^▎ the answer$/u, "only unresolved narration may contain answer text");
       assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");
       const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
       assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
@@ -318,7 +310,7 @@ test(
       assert.equal(tell.code, 0, tell.stderr);
       assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
       assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
-      assert.equal(tell.stderr.match(/tell +"continue"/gu)?.length, 1, "the admission row appears once");
+      assert.equal(tell.stderr.match(/▸ continue/gu)?.length, 1, "the admission row appears once");
       assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
       assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 
@@ -349,8 +341,8 @@ test("packaged observing call bounds nine eligible tools across polling callback
     // The terminal plan note advances the open frontier; its preceding nine completed tools are
     // eligible during the following polling turn, while the current frontier itself is not rendered.
     assert.deepEqual(tools, [1, 2, 3], `one command prints the first three settled tools:\n${result.stderr}`);
-    assert.equal(result.stderr.match(/⋮ 6 omitted/gu)?.length, 1, result.stderr);
-    assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("⋮ 6 omitted"));
+    assert.equal(result.stderr.match(/··· +6 omitted/gu)?.length, 1, result.stderr);
+    assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("6 omitted"));
     assert.match(result.stderr, /✓ answered — \d+s/u, "the final conclusion remains on stderr");
   } finally {
     await removeTempDirectory(root);
@@ -577,7 +569,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
       1,
       "failure opens the known child identity once",
     );
-    assert.match(failed.stderr, /! error .*fixture initial Tell admission failed/u);
+    assert.match(failed.stderr, /! .*fixture initial Tell admission failed/u);
     assert.doesNotMatch(failed.stderr, /● tell/u, "a birth reference does not claim Tell admission");
   } finally {
     await pump.close();

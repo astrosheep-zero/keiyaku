@@ -143,7 +143,7 @@ test("a detached call keeps its born child, execution directory, and failed stag
   );
   assert.equal(
     text,
-    [`! called ${akuma} (@ship)`, "  kei/msys-receipt", `  ${world}`, '  "prompt"', "  ! error window lost"].join("\n"),
+    [`! called ${akuma} (@ship)`, "  kei/msys-receipt", `  ${world}`, '  "prompt"', "  ! window lost"].join("\n"),
     "a failed Tell stage stays an action receipt over the admitted child, its directory, and its Tell input",
   );
   assert.equal((text.match(/"prompt"/gu) ?? []).length, 1, "the submitted Tell payload is not replayed");

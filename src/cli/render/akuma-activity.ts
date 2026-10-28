@@ -28,8 +28,19 @@ import {
 } from "./terminal.js";
 
 export const DEFAULT_CONTEXT: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false };
-const TIME_WIDTH = 5;
-const VERB_WIDTH = 6;
+
+/** The action family's fixed 3-cell state margin and minimum verb cell. */
+const ACTION_MARGIN = "   ";
+const ACTION_VERB_WIDTH = 6;
+/** Top-level rows: one mark plus its separator, and two spaces beneath it. */
+const TOP_SPEAK = "▎ ";
+const TOP_INPUT = "▸ ";
+const TOP_PENDING = "⧗ ";
+const TOP_ANSWER = "✓ ";
+const TOP_FAILURE = "! ";
+const TOP_CONTINUATION = "  ";
+/** The one row-omission glyph, in verb position. */
+const OMISSION = "···";
 
 /**
  * The one blessed ruler: a run of U+2500 as wide as the frame head's widest line,
@@ -118,34 +129,11 @@ function unobservedText(id: string, diagnostic: string): string {
   return `× Akuma observation failed  ${safeText(id)} — ${safeText(diagnostic)}`;
 }
 
-function clock(at: string): string {
-  const date = new Date(at);
-  return Number.isFinite(date.getTime())
-    ? `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
-    : "unknown";
-}
-
-function label(row: RenderRow, tool?: ToolRepr): string {
-  if (row.kind === "said") return "";
-  if (row.kind === "thought") return "think";
-  if (row.kind === "note") return "note";
-  if (row.kind === "call") return "call";
-  if (row.kind === "tell") return row.state === "told" ? "told" : "tell";
-  if (row.kind === "outcome") return row.outcome.kind === "answered" ? "answer" : "error";
-  if (row.kind === "turn") return "call";
-  if (row.kind !== "tool") return row.kind;
-  return tool!.label;
-}
-
-function mark(row: RenderRow, live = false): "│" | "●" | "⧗" | "✓" | "!" | "?" {
-  if (row.kind === "outcome") return row.outcome.kind === "answered" ? "✓" : "!";
-  if (row.kind === "tell" && row.state === "pending") return "⧗";
-  if (row.kind === "tool") {
-    if (row.state === "active") return live ? "●" : "?";
-    if (row.state === "unsettled") return "?";
-    return row.state.status === "ok" ? "✓" : "!";
-  }
-  return "│";
+/** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
+function toolMargin(row: Extract<RenderRow, { kind: "tool" }>, live: boolean): string {
+  if (row.state === "active") return live ? "●  " : "?  ";
+  if (row.state === "unsettled") return "?  ";
+  return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
 }
 
 function rowText(
@@ -183,70 +171,47 @@ function rowText(
   };
 }
 
-function eventPrefix(glyph: string, verb: string, time: string | undefined, columns: number): string {
-  const gutter = time === undefined ? " ".repeat(TIME_WIDTH) : time.padEnd(TIME_WIDTH);
-  return actionCell(`${gutter} ${glyph}`, verb, columns);
-}
-
-/** The action column one row spends: six cells by default, or the name's own width when longer. */
-function verbColumn(verb: string): number {
-  return Math.max(VERB_WIDTH, displayColumns(verb));
-}
-
 /**
- * Attach the action cell after one row prefix. A name wider than the row's
- * remaining columns truncates grapheme-safely, spending every column the row
- * leaves after the separator so an exact-fit name stays whole and args trim first.
+ * The action family's one prefix: a state margin, a verb cell at least six cells wide and as wide as a
+ * longer name, then one space. Continuation lines align with the actual content start.
  */
-function actionCell(head: string, verb: string, columns: number): string {
-  const prefix = `${head} `;
-  if (verb === "") return prefix;
-  const available = Math.max(0, columns - displayColumns(prefix) - 1);
-  const width = Math.min(verbColumn(verb), available);
-  return `${prefix}${padToDisplay(truncateDisplayText(verb, width), width)} `;
+function actionPrefix(
+  margin: string,
+  verb: string,
+  columns: number,
+): Readonly<{ first: string; continuation: string }> {
+  const available = Math.max(0, columns - displayColumns(margin) - 1);
+  const width = Math.min(Math.max(ACTION_VERB_WIDTH, displayColumns(verb)), available);
+  const label = truncateDisplayText(verb, width);
+  return { first: `${margin}${padToDisplay(label, width)} `, continuation: `${margin}${" ".repeat(width + 1)}` };
 }
 
-function continuationPrefix(verb: string): string {
-  return " ".repeat(TIME_WIDTH) + " │ " + (verb === "" ? "" : " ".repeat(VERB_WIDTH + 1));
-}
-
-/**
- * The one place row prefixes live: time, mark, verb, content.
- */
-type RowLayout = Readonly<{
-  head: (time: string | undefined, glyph: string, verb: string, columns: number) => string;
-  continuation: (verb: string) => string;
-  marker: (count: number) => string;
-  history?: true;
-  compactRun?: true;
-  /** A one-row receipt keeps that row on one line; speech can use its two-line budget. */
-  singleLine?: true;
+/** One row's rendered view: the shared prefix family and the two compact callers. */
+type RowView = Readonly<{
+  /** Live frame: only an active tool asserts in-motion state. */
+  live?: true;
+  /** Single-line preview: whitespace folds. */
+  compact?: true;
   /** World-board answer previews keep the conclusion at the tail. */
   tailAnswer?: true;
+  /** History is expanded and folds a long command into one line. */
+  history?: true;
 }>;
 
-function timelineMarker(text: string): string {
-  return `${" ".repeat(TIME_WIDTH)} ⋮ ${text}`;
-}
-
-function plainLayout(): RowLayout {
-  return {
-    head: (time, glyph, verb, columns) => eventPrefix(glyph, verb, time, columns),
-    continuation: continuationPrefix,
-    marker: (count) => timelineMarker(`${count} omitted`),
-  };
-}
-
-function compactLayout(): RowLayout {
-  return { ...plainLayout(), compactRun: true };
-}
-
-function historyLayout(): RowLayout {
-  return { ...compactLayout(), history: true };
-}
-
-function quotedBody(row: RenderRow): boolean {
-  return row.kind === "thought" || row.kind === "tell" || (row.kind === "outcome" && row.outcome.kind === "answered");
+function rowPrefix(
+  row: RenderRow,
+  tool: ToolRepr | undefined,
+  columns: number,
+  view: RowView,
+): Readonly<{ first: string; continuation: string }> {
+  if (row.kind === "tool") return actionPrefix(toolMargin(row, view.live === true), tool!.label, columns);
+  if (row.kind === "thought") return actionPrefix(ACTION_MARGIN, "think", columns);
+  if (row.kind === "note") return actionPrefix(ACTION_MARGIN, "note", columns);
+  if (row.kind === "outcome")
+    return { first: row.outcome.kind === "answered" ? TOP_ANSWER : TOP_FAILURE, continuation: TOP_CONTINUATION };
+  if (row.kind === "said") return { first: TOP_SPEAK, continuation: TOP_SPEAK };
+  if (row.kind === "tell" && row.state === "pending") return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
+  return { first: TOP_INPUT, continuation: TOP_CONTINUATION };
 }
 
 function pathTail(path: string, maximum: number): string {
@@ -317,12 +282,9 @@ function renderRunCommand(
   return [`${first}$ ${head}…`, `${continuation}…${tail}${keptSuffix}`];
 }
 
-type RowRenderOptions = Readonly<{
-  layout: RowLayout;
-  first: string;
-  continuation: string;
-  tool?: ToolRepr | undefined;
-}>;
+function omissionMarker(text: string, columns: number): string {
+  return `${actionPrefix(ACTION_MARGIN, OMISSION, columns).first}${text}`;
+}
 
 function rowBody(row: RenderRow, text: string, columns: number): string {
   if (row.kind !== "tool" || row.call.kind !== "other") return text;
@@ -331,22 +293,27 @@ function rowBody(row: RenderRow, text: string, columns: number): string {
 
 function tailAnswerPreview(first: string, text: string, columns: number): readonly string[] {
   const readable = safeText(text).replace(/\s+/gu, " ").trim();
-  const budget = Math.max(0, columns - displayColumns(first + "“”"));
+  const budget = Math.max(0, columns - displayColumns(first));
   const tail = takeDisplayColumnsFromEnd(readable, budget).text;
   const preview =
     tail.length === readable.length ? tail : `…${takeDisplayColumnsFromEnd(readable, Math.max(0, budget - 1)).text}`;
-  return [`${first}“${preview}”`];
+  return [`${first}${preview}`];
 }
 
-function toolOverflowPreview(
-  options: RowRenderOptions,
-  value: ReturnType<typeof rowText>,
-  columns: number,
-): readonly string[] | undefined {
-  const { tool, layout, first, continuation } = options;
+type ToolOverflow = Readonly<{
+  tool: ToolRepr | undefined;
+  value: ReturnType<typeof rowText>;
+  first: string;
+  continuation: string;
+  context: TextRenderContext;
+  compactRun: boolean;
+}>;
+
+function toolOverflowPreview(input: ToolOverflow): readonly string[] | undefined {
+  const { tool, value, first, continuation, context, compactRun } = input;
   if (tool?.overflow !== "command") return undefined;
-  if (layout.compactRun !== true) return renderRunCommand(first, continuation, value.text, value.suffix ?? "", columns);
-  const remaining = columns - displayColumns(first);
+  if (!compactRun) return renderRunCommand(first, continuation, value.text, value.suffix ?? "", context.columns);
+  const remaining = context.columns - displayColumns(first);
   const suffix = value.suffix ?? "";
   const withSuffix = remaining - displayColumns(suffix);
   const showSuffix = suffix.length > 0 && withSuffix >= 6;
@@ -355,100 +322,59 @@ function toolOverflowPreview(
   ];
 }
 
-function renderRow(row: RenderRow, context: TextRenderContext, options: RowRenderOptions): readonly string[] {
-  const { layout, first, continuation, tool } = options;
+/** Every selected timeline row renders through here: one prefix family per row class. */
+function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
+  const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const value = rowText(row, tool);
-  const overflow = toolOverflowPreview(options, value, context.columns);
+  const { first, continuation } = rowPrefix(row, tool, context.columns, view);
+  const compact = view.compact === true;
+  const overflow = toolOverflowPreview({
+    tool,
+    value,
+    first,
+    continuation,
+    context,
+    compactRun: compact || view.history === true,
+  });
   if (overflow !== undefined) return overflow;
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
-  if (layout.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
+  if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
     return tailAnswerPreview(first, value.text, context.columns);
   const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
+  const singleLine = compact || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
   return renderBoundedPayload({
     text: rowBody(row, value.text, available),
     first,
     continuation,
     columns: context.columns,
-    maxLines:
-      layout.singleLine === true && row.kind !== "said"
-        ? 1
-        : layout.history === true
-          ? Number.MAX_SAFE_INTEGER
-          : value.lines,
-    quote: quotedBody(row) ? (layout.singleLine === true ? '"' : "“") : "",
+    maxLines: singleLine ? 1 : view.history === true ? Number.MAX_SAFE_INTEGER : value.lines,
+    quote: "",
     truncated: "truncated" in row && row.truncated === true,
+    ...(singleLine || row.kind === "tool" ? {} : { preserveLines: true as const }),
   });
 }
-
-/** Snapshot and live streams select different rows, but render each selected row identically. */
-type TimelineRenderOptions = Readonly<{
-  inFlightSay?: boolean;
-  live?: boolean;
-  unsettled?: boolean;
-}>;
-
-function renderTimelineRow(
-  row: RenderRow,
-  context: TextRenderContext,
-  layout: RowLayout,
-  time: string | undefined,
-  options: TimelineRenderOptions = {},
-): readonly string[] {
-  const { inFlightSay = false, live = false, unsettled = false } = options;
-  const tool = row.kind === "tool" ? toolRepr(row) : undefined;
-  const glyph = inFlightSay ? (live ? "●" : "?") : unsettled ? "?" : mark(row, live);
-  const verb = label(row, tool);
-  return renderRow(row, context, {
-    layout,
-    first: layout.head(time, glyph, verb, context.columns),
-    continuation: layout.continuation(verb),
-    tool,
-  });
-}
-
-type GroupedEntryOptions = Readonly<{
-  live?: boolean;
-  inFlightSay?: (row: RenderRow) => boolean;
-  unsettled?: (row: RenderRow) => boolean;
-}>;
 
 function groupedEntries(
   entries: readonly RenderEntry[],
   context: TextRenderContext,
-  layout: RowLayout = plainLayout(),
-  options: GroupedEntryOptions = {},
+  view: RowView = {},
 ): readonly string[] {
   const lines: string[] = [];
-  let previousClock: string | undefined;
   for (const entry of entries) {
     if (entry.kind === "gap") {
-      lines.push(layout.marker(entry.count));
+      lines.push(omissionMarker(`${entry.count} omitted`, context.columns));
       continue;
     }
-    const row = entry.row;
-    const at = clock(row.at);
-    const changed = previousClock === undefined || at !== previousClock;
-    lines.push(
-      ...renderTimelineRow(row, context, layout, changed ? at : undefined, {
-        inFlightSay: options.inFlightSay?.(row) ?? false,
-        live: options.live === true,
-        unsettled: options.unsettled?.(row) ?? false,
-      }),
-    );
-    previousClock = at;
+    lines.push(...renderRow(entry.row, context, view));
   }
   return lines;
 }
 
-function groupedRows(
-  rows: readonly RenderRow[],
-  context: TextRenderContext,
-  layout: RowLayout = plainLayout(),
-): readonly string[] {
+function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, view: RowView = {}): readonly string[] {
   return groupedEntries(
     rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })),
     context,
-    layout,
+    view,
   );
 }
 
@@ -515,7 +441,7 @@ export function snapshotActivityLines(
   return latest === undefined
     ? []
     : groupedEntries([latest], context, {
-        ...compactLayout(),
+        compact: true,
         ...(selection.tailAnswer === true ? { tailAnswer: true as const } : {}),
       });
 }
@@ -532,15 +458,12 @@ export type ActivityStream = ((activity: RenderedActivity) => readonly string[])
   }>;
 
 /** One decided piece of append-only output: a settled row, or an untimed omission count. */
-type StreamEmission =
-  | Readonly<{ kind: "gap"; count: number }>
-  | Readonly<{ kind: "row"; row: RenderRow; inFlightSay?: boolean; unsettled?: boolean }>;
+type StreamEmission = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 
 type ActivityStreamState = {
   newestSettledSequence: number | undefined;
   admissionSequence: number | undefined;
   pendingTellSequences: Set<number>;
-  previousClock: string | undefined;
   renderedBoundaries: Set<number>;
   admittedTellSequences: Set<number>;
   checkpointTools: number;
@@ -587,31 +510,6 @@ function baselineOmissionCount(activity: RenderedActivity, after: number, before
   return activity.rows.filter(
     (row) => row.sequence > after && (before === undefined || row.sequence < before) && isSettledStreamRow(row),
   ).length;
-}
-
-type StreamRowRenderOptions = Readonly<{
-  context: TextRenderContext;
-  layout: RowLayout;
-  inFlightSay?: boolean;
-  unsettled?: boolean;
-}>;
-
-function renderStreamRow(
-  state: ActivityStreamState,
-  row: RenderRow,
-  lines: string[],
-  options: StreamRowRenderOptions,
-): void {
-  const { context, layout, inFlightSay = false, unsettled = false } = options;
-  const at = clock(row.at);
-  const changed = state.previousClock === undefined || at !== state.previousClock;
-  lines.push(
-    ...renderTimelineRow(row, context, layout, changed ? at : undefined, {
-      inFlightSay,
-      unsettled,
-    }),
-  );
-  state.previousClock = at;
 }
 
 /**
@@ -706,29 +604,9 @@ function observeActivitySnapshot(state: ActivityStreamState, activity: RenderedA
       }
       state.checkpointTools += 1;
     } else if (row.kind === "said" || row.kind === "tell") state.checkpointTools = 0;
-    emitRow(state, emissions, { kind: "row", row, inFlightSay: inFlightSay(activity, row) });
+    emitRow(state, emissions, { kind: "row", row });
   }
   return emissions;
-}
-
-function renderEmissions(
-  state: ActivityStreamState,
-  emissions: readonly StreamEmission[],
-  context: TextRenderContext,
-  layout: RowLayout,
-): readonly string[] {
-  const lines: string[] = [];
-  for (const emission of emissions) {
-    if (emission.kind === "gap") lines.push(layout.marker(emission.count));
-    else
-      renderStreamRow(state, emission.row, lines, {
-        context,
-        layout,
-        ...(emission.inFlightSay === undefined ? {} : { inFlightSay: emission.inFlightSay }),
-        ...(emission.unsettled === undefined ? {} : { unsettled: emission.unsettled }),
-      });
-  }
-  return lines;
 }
 
 /**
@@ -737,12 +615,11 @@ function renderEmissions(
  * tools until the next checkpoint fold into one omission marker. Failed tools
  * always print.
  */
-export function activityStream(context: TextRenderContext, layout: RowLayout = plainLayout()): ActivityStream {
+export function activityStream(context: TextRenderContext): ActivityStream {
   const state: ActivityStreamState = {
     newestSettledSequence: undefined,
     admissionSequence: undefined,
     pendingTellSequences: new Set(),
-    previousClock: undefined,
     renderedBoundaries: new Set(),
     admittedTellSequences: new Set(),
     checkpointTools: 0,
@@ -787,21 +664,24 @@ export function activityStream(context: TextRenderContext, layout: RowLayout = p
     state.omitted = 0;
     for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
       const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;
-      emissions.push({ kind: "row", row: unresolved, unsettled: true });
+      emissions.push({ kind: "row", row: unresolved });
     }
     state.liveRows.clear();
     return emissions;
   };
   const render = (emissions: readonly StreamEmission[]): readonly string[] =>
-    renderEmissions(state, emissions, context, layout);
+    emissions.flatMap((emission) =>
+      emission.kind === "gap"
+        ? [omissionMarker(`${emission.count} omitted`, context.columns)]
+        : renderRow(emission.row, context),
+    );
   const frame = (): readonly string[] =>
     groupedEntries(
       [...state.liveRows.values()]
         .sort((left, right) => left.sequence - right.sequence)
         .map((row) => ({ kind: "row", row })),
       context,
-      layout,
-      { live: true, inFlightSay: (row) => row.kind === "said" },
+      { live: true },
     );
   const observe = (activity: RenderedActivity): readonly string[] => render(observeActivitySnapshot(state, activity));
   return Object.assign(observe, {
@@ -832,10 +712,6 @@ function conclusionMarkVerb(
   return { mark: "!", verb: "stranded" };
 }
 
-function clockFromMs(at: number): string {
-  return clock(new Date(at).toISOString());
-}
-
 function durationText(durationMs: number): string {
   const seconds = Math.max(0, Math.round(durationMs / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -843,30 +719,19 @@ function durationText(durationMs: number): string {
 }
 
 /**
- * A conclusion clause asserts real waiting: a target that settled at or after
- * this wait began keeps its duration, a target already settled names no
- * duration, and an unfinished target carries the elapsed wait.
+ * One wait-style conclusion for every observer of an input-bound Tell. A target
+ * that settled at or after this wait began keeps its duration, a target already
+ * settled names no duration, and an unfinished target carries the elapsed wait.
  */
-function conclusionClause(at: number, startedAt: number, complete: boolean, end: number): string {
-  if (!complete) return ` — waited ${durationText(Math.max(0, end - startedAt))}`;
-  return at >= startedAt ? ` — ${durationText(Math.max(0, at - startedAt))}` : "";
-}
-
-/** One wait-style conclusion for every observer of an input-bound Tell. */
 function waitConclusionRow(
-  input: Readonly<{
-    at?: number;
-    startedAt: number;
-    complete: boolean;
-    end: number;
-    mark: string;
-    verb: string;
-    target?: string;
-  }>,
+  input: Readonly<{ at?: number; startedAt: number; complete: boolean; end: number; mark: string; verb: string }>,
 ): string {
-  const time = input.at === undefined ? "unknown" : clockFromMs(input.at);
-  const duration = input.at === undefined ? "" : conclusionClause(input.at, input.startedAt, input.complete, input.end);
-  return `${time}${input.target ?? ""} ${input.mark} ${input.verb}${duration}`;
+  const duration = input.complete
+    ? input.at !== undefined && input.at >= input.startedAt
+      ? ` — ${durationText(Math.max(0, input.at - input.startedAt))}`
+      : ""
+    : ` — waited ${durationText(Math.max(0, input.end - input.startedAt))}`;
+  return `${input.mark} ${input.verb}${duration}`;
 }
 
 export function inputWaitConclusion(
@@ -896,7 +761,7 @@ export function inputWaitConclusion(
       ...conclusion,
     }),
     ...(observation.reason === "failed" || observation.reason === "invalid-output"
-      ? [`! error ${safeText(observation.diagnostic)}`]
+      ? [`! ${safeText(observation.diagnostic)}`]
       : []),
   ];
 }
@@ -1009,7 +874,7 @@ export function inputWaitStream(
     open(lines, result.kind === "failed");
     if (result.kind === "failed" && result.evidence !== undefined) lines.push(...result.evidence);
     lines.push(...activity.flush());
-    if (result.kind === "failed") lines.push(`! error ${safeText(result.diagnostic)}`);
+    if (result.kind === "failed") lines.push(`! ${safeText(result.diagnostic)}`);
     else
       lines.push(
         ...inputWaitConclusion(result.observation, {
@@ -1079,7 +944,7 @@ function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[
     ...snapshot.reportedChanges.map(
       (change) => `  ${renderDiffstat(change.diffstat).padEnd(width)}  ${safeText(change.path)}`,
     ),
-    ...(snapshot.reportedChangesOmitted > 0 ? [`  ⋮ ${snapshot.reportedChangesOmitted} more files`] : []),
+    ...(snapshot.reportedChangesOmitted > 0 ? [`  ${OMISSION} ${snapshot.reportedChangesOmitted} more files`] : []),
   ];
 }
 
@@ -1136,12 +1001,11 @@ function snapshotCore(
 
 function snapshotConclusion(status: AkumaObservation["status"]): string {
   const timeline = status.timeline;
-  // The outcome row (`✓ answer` / `! error`) is already the ending; a closer would be a second mark
-  // carrying no new information, so it is absent exactly then.
+  // The outcome row (`✓` / `!`) is already the ending; a closer would be a second mark carrying no
+  // new information, so it is absent exactly then.
   if (timeline.kind === "idle" && timeline.outcome !== undefined) return "";
-  const last = [...timeline.entries].reverse().find((entry) => entry.kind === "row")?.row;
   const { mark, verb } = conclusionMarkVerb(status, "life");
-  return `${last === undefined ? "unknown" : clock(last.at)} ${mark} ${verb}`;
+  return `${mark} ${verb}`;
 }
 
 export function snapshotText(
@@ -1239,14 +1103,15 @@ export function historyText(
   }
   if (presentation.last === true) return result.kind === "last" ? result.answer : "no answer retained";
   if (result.kind !== "history") throw new Error("history result lacks page");
-  const rows = groupedRows(result.history.rows, context, historyLayout());
+  const rows = groupedRows(result.history.rows, context, { history: true });
   const paging =
     result.history.omitted > 0
       ? [
-          timelineMarker(
+          omissionMarker(
             result.history.hasLater
               ? `${result.history.omitted} later events · showing first ${result.history.rows.length}`
               : `${result.history.omitted} earlier events · showing last ${result.history.rows.length}`,
+            context.columns,
           ),
         ]
       : [];
@@ -1270,16 +1135,18 @@ export function tellPayloadLines(text: string, context: TextRenderContext): read
   });
 }
 
-/** One admitted Tell as a timeline row inside a shared input panel; the panel owns the identity. */
+/** One admitted Tell as a timeline input row inside a shared panel; the panel owns the identity. */
 export function tellAdmissionRow(tell: AkumaTellResult["tell"], context: TextRenderContext): string {
-  const wake = tell.wake;
-  const glyph = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
-  const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
-  return groupedRows([tell.row], context, {
-    ...plainLayout(),
-    head: (time, _glyph, _verb, columns) => eventPrefix(glyph, verb, time, columns),
-    singleLine: true,
-  }).join("\n");
+  const lead = tell.wake.kind === "failed" ? TOP_FAILURE : tell.wake.kind === "held" ? TOP_PENDING : TOP_INPUT;
+  return renderBoundedPayload({
+    text: tell.row.text,
+    first: lead,
+    continuation: TOP_CONTINUATION,
+    columns: context.columns,
+    maxLines: 1,
+    quote: "",
+    truncated: false,
+  })[0]!;
 }
 
 /**

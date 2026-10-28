@@ -7,6 +7,7 @@ import {
   callObservationStream,
   DEFAULT_CONTEXT,
   frameRule,
+  historyText,
   killResultText,
   snapshotActivityLines,
   snapshotText,
@@ -32,9 +33,11 @@ import type { DebtRow } from "../src/debt/board.js";
 import { displayColumns, padToDisplay } from "../src/cli/render/terminal.js";
 import {
   activeTool,
+  answeredOutcome,
   completedTool,
   idleAkumaSnapshot,
   openAkumaSnapshot,
+  snapshotRow,
   AKUMA_ACTIVITY_AT,
   reportedFileChange,
 } from "./support/kanshi-activity.js";
@@ -78,7 +81,7 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
     "one rule divides context from activity",
   );
   assert.match(lines[4]!, /note +edited$/u);
-  assert.match(lines[5]!, /^\d{2}:\d{2} ● running$/u);
+  assert.match(lines[5]!, /^● running$/u);
   assert.ok(lines.indexOf("  changes 1") > 5, "reported changes follow the conclusion, subordinate");
   assert.ok(lines.some((line) => /^ {4}~ +\/work\/file$/u.test(line)));
   assert.equal(
@@ -101,10 +104,117 @@ test("speech uses the rail without a label or quotes and wraps at a grapheme bou
   const lines = snapshotActivityLines(openAkumaSnapshot([{ kind: "row", row }]), { columns: 40, color: false });
   assert.equal(lines.length, 2);
   assert.doesNotMatch(lines.join("\n"), /say|[“”]/u);
-  assert.match(lines[0]!, /^\d{2}:\d{2} │ 👩‍💻/u);
-  assert.match(lines[1]!, /^ {5} │ 👩‍💻/u);
+  assert.match(lines[0]!, /^▎ 👩‍💻/u);
+  assert.match(lines[1]!, /^▎ 👩‍💻/u);
   assert.match(lines[1]!, /…$/u);
   for (const line of lines) assert.ok(displayColumns(line) <= 40);
+});
+
+test("the shared timeline grammar renders input, speech, actions, outcomes, and gaps left-flowing", () => {
+  const entries = [
+    snapshotRow({
+      kind: "call" as const,
+      sequence: 1,
+      turnSequence: 1,
+      at: AKUMA_ACTIVITY_AT,
+      text: "first input",
+    }),
+    snapshotRow({
+      kind: "said" as const,
+      sequence: 2,
+      turnSequence: 1,
+      at: AKUMA_ACTIVITY_AT,
+      text: "spoken line\n  indented line",
+    }),
+    snapshotRow({
+      kind: "thought" as const,
+      sequence: 3,
+      turnSequence: 1,
+      at: AKUMA_ACTIVITY_AT,
+      text: "hidden reasoning",
+    }),
+    snapshotRow({ kind: "note" as const, sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "a note" }),
+    snapshotRow(completedTool(5, "bash", { kind: "run", command: "echo ok" })),
+    snapshotRow(completedTool(6, "bash", { kind: "run", command: "false" }, { status: "error", exitCode: 1 })),
+    snapshotRow({
+      kind: "tell" as const,
+      sequence: 7,
+      at: AKUMA_ACTIVITY_AT,
+      tellId: "tell/grammar",
+      text: "held input",
+      state: "pending" as const,
+      deliveries: [],
+    }),
+    { kind: "gap" as const, count: 2 },
+  ];
+  const lines = snapshotActivityLines(idleAkumaSnapshot(entries, answeredOutcome(8, "the answer")), {
+    columns: 72,
+    color: false,
+  });
+  assert.deepEqual(lines, [
+    "▸ first input",
+    "▎ spoken line",
+    "▎   indented line",
+    "   think  hidden reasoning",
+    "   note   a note",
+    "   run    $ echo ok",
+    "!  run    $ false — exit 1",
+    "⧗ held input",
+    "   ···    2 omitted",
+    "✓ the answer",
+  ]);
+});
+
+test("bounded paragraph previews never spend their last line on a blank", () => {
+  const context = { columns: 40, color: false };
+  const answer =
+    "the first paragraph wraps across two lines before the blank\n\nthe second paragraph begins after a blank source line and keeps going";
+  const lines = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(1, answer)), context);
+  assert.equal(lines.length, 3, "the preview stays inside its three-line budget");
+  for (const line of lines) {
+    assert.ok(displayColumns(line) <= 40, line);
+    assert.notEqual(line.replace(/…$/u, "").trim(), "", "a content-carrying line is never blank");
+  }
+  assert.match(lines[2]!, /^ {2}the second paragraph/u, "content wins the final line over the paragraph break");
+  assert.match(lines[2]!, /…$/u, "the bounded preview names its truncation");
+});
+
+test("history keeps long call and Tell inputs to one bounded input line", () => {
+  const text = "Final minimal correction ".repeat(12);
+  const rows: ActivityRow[] = [
+    { kind: "call", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text },
+    {
+      kind: "tell",
+      sequence: 2,
+      at: AKUMA_ACTIVITY_AT,
+      tellId: "tell/long-input",
+      text,
+      state: "pending",
+      deliveries: [],
+    },
+  ];
+  const lines = historyText(
+    {
+      kind: "history",
+      id: parseAkuId("aku/elite/b9977141").id,
+      contract: { kind: "none" },
+      history: {
+        rows,
+        omitted: 0,
+        hasEarlier: false,
+        hasLater: false,
+        historyLost: false,
+        lowestRetained: 1,
+        highest: 2,
+      },
+    },
+    {},
+    { columns: 64, color: false },
+  ).split("\n");
+  assert.equal(lines.length, 4, "identity, rule, and exactly one line per input");
+  assert.match(lines[2]!, /^▸ Final minimal correction .*…$/u);
+  assert.match(lines[3]!, /^⧗ Final minimal correction .*…$/u);
+  for (const line of lines) assert.ok(displayColumns(line) <= 64, line);
 });
 
 test("sleeping with a pending Tell concludes pending, not completed", () => {
@@ -124,10 +234,7 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
     allowed: [],
     timeline: idleAkumaSnapshot([{ kind: "row", row: pending }]),
   });
-  assert.match(
-    snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT),
-    /⧗ tell +“follow up”\n\d{2}:\d{2} ⧗ pending tell$/u,
-  );
+  assert.match(snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT), /⧗ follow up\n⧗ pending tell$/u);
 });
 
 test("Akuma observation failures name the target and reason without carrier words", () => {
@@ -189,9 +296,9 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   const standalone = tellText(ordinary.result, undefined, context);
   assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
   const progress = waitedTellProgress(result.result, undefined, context);
-  assert.match(progress, /✓ told +"continue"/u, "the panel keeps its timeline row for admitted input");
+  assert.match(progress, /▸ continue/u, "the panel keeps its timeline input row for admitted input");
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
-  assert.equal(progress.match(/✓ told +"continue"/gu)?.length, 1, "the admission row is not replayed");
+  assert.equal(progress.match(/▸ continue/gu)?.length, 1, "the admission row is not replayed");
   assert.match(progress, /✓ answered\n\n$/u, "the progress conclusion separates stdout answer bytes");
   const long = {
     ...ordinary,
@@ -289,11 +396,11 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
   const callTranscript = [...callFrame, callConclusion].join("\n");
   assert.equal(admission[0], id, "the shared stream opens the identity frame before the Tell receipt");
   assert.equal(admission[1], "─".repeat(displayColumns(id)));
-  assert.equal(tellTranscript.match(/told +"continue"/gu)?.length, 1);
-  assert.ok(tellTranscript.indexOf("told") > tellTranscript.indexOf(`${id}\n`));
+  assert.equal(tellTranscript.match(/▸ continue/gu)?.length, 1);
+  assert.ok(tellTranscript.indexOf("continue") > tellTranscript.indexOf(`${id}\n`));
   assert.equal(tellTranscript.split(id).length - 1, 1, "the transcript contains exactly one identity frame");
-  assert.equal(callTranscript.match(/told +“continue”/gu)?.length, 1);
-  assert.ok(callTranscript.indexOf("told") > callTranscript.indexOf(`${id}\n`));
+  assert.equal(callTranscript.match(/▸ continue/gu)?.length, 1);
+  assert.ok(callTranscript.indexOf("continue") > callTranscript.indexOf(`${id}\n`));
   assert.equal(callTranscript.split(id).length - 1, 1, "the call transcript contains exactly one identity frame");
   assert.equal(tellFrame.length, 0, "the admitted Tell receipt is not replayed by observation");
   assert.equal(tellConclusion.length, 1);
@@ -333,10 +440,10 @@ test("ask activity starts at admission and includes a later settlement of an old
     });
   const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
   const admission = stream.admitted(tell, id);
-  assert.match(admission.join("\n"), /✓ told +"new question"/u, "the receipt is returned before observation");
+  assert.match(admission.join("\n"), /▸ new question/u, "the receipt is returned before observation");
   const firstRows = [opening, oldNote, oldActive, tell.row, later];
   const first = stream.observe(liveObservation(status(firstRows), firstRows));
-  assert.deepEqual(first, ["      ⋮ 1 omitted"], "only post-admission settled evidence counts as omitted");
+  assert.deepEqual(first, ["   ···    1 omitted"], "only post-admission settled evidence counts as omitted");
   const secondRows = [opening, oldNote, tell.row, later, next, oldSettled];
   const second = stream.observe(liveObservation(status(secondRows), secondRows));
   assert.match(second.join("\n"), /new activity/u);
@@ -400,9 +507,9 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
   const receipt = stream.admitted(tell, id);
   const baseline = stream.observe(liveObservation(status(rows), rows));
   assert.equal(baseline.length, 3);
-  assert.match(baseline[0]!, /⋮ 1 omitted/u);
-  assert.match(baseline[1]!, /call +next turn/u);
-  assert.match(baseline[2]!, /⋮ 1 omitted/u);
+  assert.match(baseline[0]!, /··· +1 omitted/u);
+  assert.match(baseline[1]!, /▸ next turn/u);
+  assert.match(baseline[2]!, /··· +1 omitted/u);
   const later = stream.observe(liveObservation(status([...rows, live]), [...rows, live]));
   assert.match(later.join("\n"), /live update/u);
   assert.deepEqual(stream.observe(liveObservation(status([...rows, live]), [...rows, live])), []);
@@ -460,25 +567,25 @@ test("an open turn settles old says on the rail and only its trailing say flushe
     rows,
   });
   assert.ok(
-    settled.some((line) => line.includes("old settled say") && line.includes("│")),
+    settled.some((line) => line.includes("▎ old settled say")),
     "a say with a successor settles on the rail",
   );
   assert.ok(!settled.some((line) => line.includes("?")), "a settled say never prints as unresolved");
   const live = stream.frame();
   assert.ok(!live.some((line) => line.includes("old settled say")), "a settled say never enters the live frame");
   const liveSay = live.find((line) => line.includes("still streaming"))!;
-  assert.match(liveSay, /● still streaming$/u, "only the open turn's trailing say stays live");
+  assert.match(liveSay, /^▎ still streaming$/u, "only the open turn's trailing say stays live");
   assert.ok(liveSay.includes("still streaming"), "the trailing say's text is live");
   assert.doesNotMatch(liveSay, /[“”]/u, "live speech has no added quote boundary");
   const flushed = stream.flush();
   assert.ok(
-    flushed.some((line) => line.includes("still streaming") && line.includes("?")),
-    "only the trailing say flushes unresolved",
+    flushed.some((line) => line === "▎ still streaming"),
+    "only the trailing say flushes, on its rail",
   );
   assert.ok(!flushed.some((line) => line.includes("old settled say")), "a settled say is never flushed");
   assert.ok(!flushed.some((line) => line.includes("after-say-6")), "an in-flight final say omits prior tail tools");
   assert.ok(
-    flushed.some((line) => line.includes("⋮ 1 omitted")),
+    flushed.some((line) => line.includes("···    1 omitted")),
     "the earlier tool stays accounted for",
   );
 });
@@ -644,7 +751,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
       false,
       context,
     ).split("\n"),
-    ["! called aku/worker/1234abcd", "  /work/repo", "  ! error window lost"],
+    ["! called aku/worker/1234abcd", "  /work/repo", "  ! window lost"],
     "a detached failure with no admitted Tell stays an action receipt over the born child",
   );
   assert.deepEqual(
@@ -658,7 +765,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
       false,
       context,
     ).split("\n"),
-    ["! called aku/worker/1234abcd", "  /work/repo", '  "exact prompt"', "  ! error window lost"],
+    ["! called aku/worker/1234abcd", "  /work/repo", '  "exact prompt"', "  ! window lost"],
     "an admitted Tell input stays visible beneath the failed call verdict",
   );
   assert.deepEqual(
@@ -810,7 +917,7 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
   assert.deepEqual(lines.slice(0, 2), head, "identity carries its Contract inline and context sits beneath it");
   assert.equal(lines[2], frameRule(head, context.columns), "one rule divides context from content");
   assert.match(lines[3]!, /note +edited$/u);
-  assert.match(lines[4]!, /^\d{2}:\d{2} ● running$/u, "the activity closes on one truthful conclusion");
+  assert.equal(lines[4], "● running", "the activity closes on one truthful conclusion");
   assert.deepEqual(
     lines.slice(5),
     ["  changes 1", "    ~  /work/file", "  debts 1", "    ○ debt/example · close the rake · ready · P2"],
@@ -878,8 +985,8 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
     [...headLines, frameRule(headLines, context.columns)],
     "the failure panel states the known directory above the boundary and fabricates nothing",
   );
-  assert.match(lines[3]!, /^\d{2}:\d{2} ✓ told +"exact prompt"$/u, "the admitted input is the panel's first evidence");
-  assert.equal(lines[4], "! error window lost");
+  assert.match(lines[3]!, /^▸ exact prompt$/u, "the admitted input is the panel's first evidence");
+  assert.equal(lines[4], "! window lost");
 
   // A Tell row that already settled on the timeline is that evidence; the close must not replay it.
   const observedStream = callObservationStream(context, head);
@@ -892,7 +999,7 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
     observedStream.conclude(failedObservation(tellReceipt("exact prompt", "told", { kind: "told" }))),
   ].join("\n");
   assert.equal((observedText.match(/exact prompt/gu) ?? []).length, 1, "a settled admission row is never replayed");
-  assert.match(observedText, /! error window lost\n*$/u);
+  assert.match(observedText, /! window lost\n*$/u);
 
   // An admission that never settled was never printed, so closing on it prints it once.
   const pending = tellReceipt("exact prompt", "pending", { kind: "held" });
@@ -903,5 +1010,5 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
   });
   const pendingText = [...pendingSettled, pendingStream.conclude(failedObservation(pending))].join("\n");
   assert.equal((pendingText.match(/exact prompt/gu) ?? []).length, 1);
-  assert.match(pendingText, /⧗ tell +"exact prompt"/u);
+  assert.match(pendingText, /⧗ exact prompt/u);
 });
