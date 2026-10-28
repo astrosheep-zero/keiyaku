@@ -73,11 +73,12 @@ lets Square establish that initiator's callable route
 in the submitting session. This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
 Birth observation remains produced by the child's Body at the established birth
-boundary, but its Square notice is authored by the shared notification identity,
-not by the initiator. The notice visibly distinguishes the explicit initiator,
-the born Akuma, and any caller attribution; only the explicit initiator is
-addressed. Without an initiator it is silent. No initiating-session ownership or
-wake route is borrowed by the child. Turn outcomes and abnormal Body endings are
+boundary, but its Square record is authored by the shared notification identity,
+not by the initiator. The record visibly distinguishes the explicit initiator,
+the born Akuma, and any caller attribution while addressing no one: a birth
+never wakes or interrupts the submitting session. Without an initiator it is
+silent. No initiating-session ownership or wake route is borrowed by the child.
+Turn outcomes and abnormal Body endings are
 also not expressed by the subject Akuma: one World-local notification participant
 authors every such notice for the World, so the notice no longer depends on a
 worker participant that may have already stepped out. That author is a logical

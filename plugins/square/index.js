@@ -342,7 +342,7 @@ const plugin = {
                     cancellation?.throwIfAborted();
                     if (signal.initiator === undefined)
                         return;
-                    await expressAsNotifier(birthExpression(signal), [signal.initiator], cancellation);
+                    await expressAsNotifier(birthExpression(signal), undefined, cancellation);
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();

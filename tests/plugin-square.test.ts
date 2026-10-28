@@ -477,19 +477,23 @@ test("wait scopes defer only the requester's selected Turn notices, acknowledge 
       await turn("aku/unselected", 1);
       await instance.signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: "aku/one", bodySequence: 1,
         origin: { kind: "direct" }, caller: { kind: "unknown" }, initiator: "Alice" });
+      const birth = (await square.history({ from: [NOTIFIER], limit: null })).activities
+        .find(activity => activity.kind === "say" && activity.body?.includes("called aku/one"));
+      assert.ok(birth, "the birth record is still expressed");
+      assert.deepEqual(birth.mentions ?? [], [], "the birth record addresses no one");
       await instance.signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: "aku/one", bodySequence: 1,
         end: "broke-off", participants: ["Alice"] });
-      assert.deepEqual(queues().slice(1).map(args => args[2]), ["requester", "requester", "requester"],
-        "nonselected outcomes, births, and Body endings bypass Turn deferral");
+      assert.deepEqual(queues().slice(1).map(args => args[2]), ["requester", "requester"],
+        "nonselected outcomes and Body endings bypass Turn deferral; an unaddressed birth wakes no one");
       await first.close();
       await first.close();
       await turn("aku/one", 3);
-      assert.equal(queues().length, 4, "one close cannot release the overlapping scope");
+      assert.equal(queues().length, 3, "one close cannot release the overlapping scope");
       await turn("aku/two", 2);
-      assert.equal(queues().length, 5, "the nonoverlapping lease was released");
+      assert.equal(queues().length, 4, "the nonoverlapping lease was released");
       await second.close();
       await turn("aku/one", 4);
-      assert.equal(queues().length, 6, "ordinary delivery resumes after the last scope closes");
+      assert.equal(queues().length, 5, "ordinary delivery resumes after the last scope closes");
       assert.equal((await square.snapshot()).delivered("Alice", pending.id), false,
         "deferral and release never acknowledge an unobserved outcome");
       t.diagnostic("accepted Square: real adapter acquire/suppress/exact ack/independent release verified");
@@ -594,8 +598,11 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       contractId: "kei/example",
     });
     assert.equal(existsSync(squarePath(root)), true);
-    assert.deepEqual(await expressions(squarePath(root)), [
-      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
+    const recorded = await expressions(squarePath(root));
+    const birthRecord = recorded.find(expression => expression.body.startsWith("Alice called aku/called"));
+    assert.deepEqual(birthRecord?.mentions, [], "the birth record stays visible and addresses no initiator");
+    assert.deepEqual(recorded, [
+      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this."),
       turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
       turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
     ]);
@@ -633,10 +640,10 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressions(squarePath(root)), [
-      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this.", ["Alice"]),
+      outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this."),
       turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
       turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
-      outcome("Bob called aku/external\nignore if you have already seen this.", ["Bob"]),
+      outcome("Bob called aku/external\nignore if you have already seen this."),
       turnOutcome("× aku/failed came back\nturn/3 failed\n\n---\n\nprovider failed", "aku/failed", 3),
     ]);
     const square = await Square.at({ path: squarePath(root) });
