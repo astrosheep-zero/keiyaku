@@ -68,6 +68,7 @@ export function renderContractCatalogue(list: ContractList): string {
         : row.phase === "abandoned"
           ? row.abandonNote
           : undefined;
+    const testimonyLead = `  ${row.phase === "claimed" ? "review" : "note"}  `;
     const lines = [
       `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, list.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
       `  ${terminal ? outcome : progressStrip(row)}`,
@@ -75,11 +76,11 @@ export function renderContractCatalogue(list: ContractList): string {
         ? []
         : renderBoundedPayload({
             text: testimony,
-            first: `  ${row.phase === "claimed" ? "review" : "note"}  `,
-            continuation: "    │ ",
+            first: testimonyLead,
+            continuation: " ".repeat(testimonyLead.length),
             columns: 100,
             maxLines: 3,
-            quote: "“",
+            quote: "",
             truncated: false,
           })),
     ];

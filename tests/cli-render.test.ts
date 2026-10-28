@@ -984,6 +984,31 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   assert.doesNotMatch(disappeared, /candidate|predecessor|content identity|behind/u);
 });
 
+test("Contract catalogue testimony keeps source quotes and body-aligned bounded continuations", () => {
+  const summary = `“Source,” she said.\n${"x".repeat(400)}`;
+  for (const phase of ["claimed", "abandoned"] as const) {
+    const row = contractRow({
+      phase,
+      abandonNote: summary,
+      gates: {
+        satisfied: true,
+        reports: [{
+          gate: "reviewed",
+          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary },
+        }],
+      },
+    });
+    const text = renderContractCatalogue(contractCatalog([row]));
+    const payload = text.split("\n").slice(4);
+    const lead = `  ${phase === "claimed" ? "review" : "note"}  `;
+    assert.equal(payload.length, 3);
+    assert.ok(payload[0]!.startsWith(`${lead}“Source,” she said. x`));
+    for (const continuation of payload.slice(1))
+      assert.ok(continuation.startsWith(`${" ".repeat(lead.length)}x`));
+    assert.ok(payload.at(-1)!.endsWith("…"));
+  }
+});
+
 test("Contract status cards collapse terminal mechanics and bound testimony like Akuma answers", () => {
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));

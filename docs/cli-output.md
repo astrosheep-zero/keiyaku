@@ -216,8 +216,8 @@ indentation; single-line previews fold whitespace, and a row-omission marker
 sits in verb position. Akuma speech sits on its own rail without an action
 label or added quotation marks; a submitted input and a terminal answer are
 recognised by their own leads rather than a verb. Thought narration is its verb
-and natural text, without an added quote boundary; payloads quoted elsewhere
-retain one.
+and natural text, without an added quote boundary; Contract catalogue testimony
+and chapter bodies follow the same unquoted, body-aligned discipline.
 This distinction changes presentation only, never event order or selection.
 Payloads slice by whole grapheme cells and expose truncation at the end; where
 content wraps, a word boundary is preferred over splitting a word. World-board

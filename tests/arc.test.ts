@@ -274,7 +274,7 @@ test("stored old-shape arc bytes normalize at decode and render as one chapter b
     assert.match(text, /Objective 1[\s\S]*Brief 1/);
     assert.doesNotMatch(text, /## Objective|## Brief/);
   }
-  assert.match(history, /  body\n  \u2502 Objective 1/);
+  assert.match(history, /  body\n  Objective 1/);
   assert.doesNotMatch(history, /\nobjective\n|\nbrief\n|\n\n$/);
 });
 
@@ -296,15 +296,22 @@ test("freeform and empty chapters render as one bounded history payload", () => 
     },
     { full: true },
   );
-  assert.match(history, /  title  Freeform\n  body\n  \u2502 ## Delivery\n  \u2502/);
-  assert.match(history, /  \u2502 First line\.\n  \u2502 Second line\./);
+  assert.match(history, /  title  Freeform\n  body\n  ## Delivery\n\n/);
+  assert.match(history, /  First line\.\n  Second line\./);
   assert.match(history, /  title  Empty$/);
   assert.doesNotMatch(history, /  title  Empty\n  body/);
   assert.doesNotMatch(history, /\n\n\n/);
   assert.match(renderContractGuidance(foldJournal(id, [bind(), freeform])), /### Body\n\n## Delivery/);
+  const causal = renderContractHistory({
+    id,
+    state: initial,
+    events: [{ source: "journal", fact: freeform }, { source: "journal", fact: empty }],
+  });
+  assert.match(causal, /^00:00 arc Freeform · 4 lines$/mu);
+  assert.match(causal, /^00:00 arc Empty$/mu);
 });
 
-test("legacy arc blank runs collapse to one blank rail line in the rendered full view", () => {
+test("legacy arc blank runs collapse to one blank line in the rendered full view", () => {
   const chapter = entry("arc", { seq: 1, title: "Blank runs", body: "line one\n\n\nline two\n\n\n\nline three" }, "AD");
   const history = renderContractHistory(
     { id, state: initial, events: [{ source: "journal", fact: chapter }] },
@@ -312,8 +319,8 @@ test("legacy arc blank runs collapse to one blank rail line in the rendered full
   );
   assert.match(
     history,
-    /  │ line one\n  │\n  │ line two\n  │\n  │ line three/u,
-    "a run of blank payload lines is one rail line",
+    /  line one\n\n  line two\n\n  line three/u,
+    "a run of blank payload lines is one blank line",
   );
-  assert.doesNotMatch(history, /\n  │\n  │\n/u, "no adjacent blank rails survive");
+  assert.doesNotMatch(history, /\n\n\n/u, "no adjacent blank lines survive");
 });

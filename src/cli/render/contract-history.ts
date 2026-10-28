@@ -87,7 +87,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
     case "arc": {
       const lines = [`  sequence  ${String(fact.data.seq)}`, `  title  ${fact.data.title}`];
       const body = fact.data.body.replace(/^(?:\r?\n)+/u, "").trimEnd();
-      if (body.length > 0) lines.push("  body", ...renderOpaqueBlock(body, "  │ ", DEFAULT_CLI_COLUMNS));
+      if (body.length > 0) lines.push("  body", ...renderOpaqueBlock(body, "  ", DEFAULT_CLI_COLUMNS));
       return lines;
     }
     case "abandoned": {
@@ -210,7 +210,7 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
     }
     case "arc": {
       const body = fact.data.body.replace(/^(?:\r?\n)+/u, "").trimEnd();
-      const folded = body.length === 0 ? [] : renderOpaqueBlock(body, "  │ ", DEFAULT_CLI_COLUMNS);
+      const folded = body.length === 0 ? [] : renderOpaqueBlock(body, "  ", DEFAULT_CLI_COLUMNS);
       return [`${clock(first)} arc ${fact.data.title}${payloadSuffix(folded)}`];
     }
     case "claimed":
