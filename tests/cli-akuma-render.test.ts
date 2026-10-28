@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
-import { type ActivityRow, type OpenSnapshotRow } from "../src/akuma/projection.js";
+import { type ActivityRow, type OpenSnapshotRow, type OutcomeRow } from "../src/akuma/projection.js";
 import {
   activityStream,
   callObservationStream,
@@ -254,11 +254,130 @@ test("Akuma observation failures name the target and reason without carrier word
       {},
       DEFAULT_CONTEXT,
     ),
-    [
-      `× Akuma observation failed  ${first} — heart locked`,
-      `× Akuma observation failed  ${second} — permission denied`,
-    ].join("\n"),
+    [`! ${first} — observation failed · heart locked`, `! ${second} — observation failed · permission denied`].join(
+      "\n",
+    ),
   );
+});
+
+function waitObservation(status: AkumaStatus) {
+  return { status, contract: { kind: "none" as const }, createdDebts: { kind: "present" as const, rows: [] } };
+}
+
+function waitStatus(
+  id: string,
+  life: AkumaStatus["life"],
+  timeline: AkumaStatus["timeline"],
+  extra: { strandedReason?: "resume-unsupported" } = {},
+): AkumaStatus {
+  return akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life, allowed: [], timeline, ...extra });
+}
+
+function failedOutcome(sequence: number, diagnostic: string): OutcomeRow {
+  return {
+    kind: "outcome",
+    sequence,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    outcome: { kind: "failed", historyId: "history-1", diagnostic },
+  };
+}
+
+function pendingTellRow(sequence: number): Extract<ActivityRow, { kind: "tell" }> {
+  return {
+    kind: "tell",
+    sequence,
+    at: AKUMA_ACTIVITY_AT,
+    tellId: `tell/pending-${sequence}`,
+    text: "still waiting",
+    state: "pending",
+    deliveries: [],
+  };
+}
+
+function singleWait(status: AkumaStatus, columns = 120, alias?: string): string {
+  return waitText(
+    { mode: "all", reason: "completed", observations: [waitObservation(status)], unobserved: [] },
+    { ...(alias === undefined ? {} : { alias }) },
+    { columns, color: false },
+  );
+}
+
+test("wait renders one compact line per member from its final public snapshot", () => {
+  const members = [
+    waitStatus("aku/worker/abcd0101", "asleep", idleAkumaSnapshot([], answeredOutcome(1, "the answer"))),
+    waitStatus("aku/worker/abcd0102", "asleep", idleAkumaSnapshot([])),
+    waitStatus("aku/worker/abcd0103", "asleep", idleAkumaSnapshot([], failedOutcome(1, "provider 503"))),
+    waitStatus("aku/worker/abcd0104", "running", openAkumaSnapshot([])),
+    waitStatus("aku/worker/abcd0105", "killed", idleAkumaSnapshot([], answeredOutcome(1, "stale answer"))),
+    waitStatus("aku/worker/abcd0106", "hung", openAkumaSnapshot([])),
+    waitStatus("aku/worker/abcd0107", "untidy", openAkumaSnapshot([])),
+    waitStatus("aku/worker/abcd0108", "stranded", openAkumaSnapshot([]), { strandedReason: "resume-unsupported" }),
+    waitStatus("aku/worker/abcd0109", "asleep", idleAkumaSnapshot([snapshotRow(pendingTellRow(1))])),
+    waitStatus("aku/worker/abcd0110", "running", openAkumaSnapshot([snapshotRow(pendingTellRow(1))])),
+  ];
+  const text = waitText(
+    { mode: "all", reason: "completed", observations: members.map(waitObservation), unobserved: [] },
+    {},
+    { columns: 120, color: false },
+  );
+  assert.equal(
+    text,
+    [
+      "✓ aku/worker/abcd0101 — the answer",
+      "✓ aku/worker/abcd0102 — completed",
+      "! aku/worker/abcd0103 — provider 503",
+      "● aku/worker/abcd0104 — running",
+      "× aku/worker/abcd0105 — killed",
+      "? aku/worker/abcd0106 — hung",
+      "! aku/worker/abcd0107 — untidy",
+      "! aku/worker/abcd0108 — stranded · resume-unsupported",
+      "⧗ aku/worker/abcd0109 — pending tell",
+      "● aku/worker/abcd0110 — running · pending tell",
+    ].join("\n"),
+    "one left-flowing line per member, in result order, with a stopped life over any older answer",
+  );
+  assert.doesNotMatch(text, /\n\n/u, "no blank block separators");
+  assert.doesNotMatch(text, /\d{2}:\d{2}/u, "no wall clocks");
+  assert.doesNotMatch(text, /─|changes|debts|stale answer/u, "no frame, timeline, change, Debt, or stale answer dump");
+});
+
+test("wait bounds its summary to the terminal and never truncates identity", () => {
+  const id = "aku/worker/abcd0111";
+  const status = waitStatus(
+    id,
+    "asleep",
+    idleAkumaSnapshot([], answeredOutcome(1, "a very long answered preview that cannot fit")),
+  );
+  const narrow = singleWait(status, 40);
+  assert.ok(narrow.startsWith(`✓ ${id} — `), "the mark, complete identity, and separator survive");
+  assert.ok(displayColumns(narrow) <= 40, "the summary never exceeds the terminal");
+  assert.match(narrow, /…$/u, "a bounded summary exposes its own truncation");
+  const wide = singleWait(status, 200);
+  assert.equal(
+    wide,
+    `✓ ${id} — a very long answered preview that cannot fit`,
+    "available width keeps the whole preview",
+  );
+});
+
+test("wait keeps a single-target alias and none in plural output", () => {
+  const status = waitStatus("aku/worker/abcd0112", "asleep", idleAkumaSnapshot([]));
+  assert.equal(singleWait(status, 120, "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
+  const plural = waitText(
+    {
+      mode: "all",
+      reason: "completed",
+      observations: [
+        waitObservation(status),
+        waitObservation(waitStatus("aku/worker/abcd0113", "asleep", idleAkumaSnapshot([]))),
+      ],
+      unobserved: [],
+    },
+    { alias: "@scout" },
+    DEFAULT_CONTEXT,
+  );
+  assert.doesNotMatch(plural, /@scout/u, "an ambiguous alias is not attached to any member");
 });
 
 test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {

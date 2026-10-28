@@ -125,10 +125,6 @@ function contractFacts(contract: DispatchAssociation): readonly string[] {
   return contract.kind === "failed" ? [`! contract failed ${safeText(contract.diagnostic)}`] : [];
 }
 
-function unobservedText(id: string, diagnostic: string): string {
-  return `× Akuma observation failed  ${safeText(id)} — ${safeText(diagnostic)}`;
-}
-
 /** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
 function toolMargin(row: Extract<RenderRow, { kind: "tool" }>, live: boolean): string {
   if (row.state === "active") return live ? "●  " : "?  ";
@@ -1074,19 +1070,80 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
   return outcome.kind === "answered" ? outcome.answer : outcome.diagnostic;
 }
 
+/** One compact wait result line: an observed life mark, the complete identity, a bounded summary. */
+const WAIT_SUMMARY_SEPARATOR = " — ";
+type WaitState = Readonly<{ mark: string; state: string }>;
+const WAIT_LIFE: Partial<Record<AkumaStatus["life"], WaitState>> = {
+  running: { mark: "●", state: "running" },
+  killed: { mark: "×", state: "killed" },
+  hung: { mark: "?", state: "hung" },
+  untidy: { mark: "!", state: "untidy" },
+  stranded: { mark: "!", state: "stranded" },
+};
+
+function foldedSummary(value: string): string {
+  return safeText(value).replace(/\s+/gu, " ").trim();
+}
+
+function preview(value: string, fallback: string): string {
+  return foldedSummary(value) || fallback;
+}
+
+function waitLine(mark: string, subject: string, summary: string, columns: number): string {
+  const head = `${mark} ${subject}`;
+  const room = columns - displayColumns(head) - displayColumns(WAIT_SUMMARY_SEPARATOR);
+  const folded = foldedSummary(summary);
+  return room < 1 || folded.length === 0
+    ? head
+    : `${head}${WAIT_SUMMARY_SEPARATOR}${truncateDisplayText(folded, room)}`;
+}
+
 /**
- * One wait's final text: each observed Akuma's own status snapshot, then one
- * failure fact per member the wait could not read. A wait observes to its
- * completion judgment and streams nothing, so an answer is visible only as the
- * snapshot's own outcome row.
+ * The final public snapshot as one wait summary. A stopped life stays explicit over any older
+ * outcome; pending input stays visible beside the life it belongs to; a sleeping member without
+ * pending input shows its current answered preview or failed diagnostic, else completion. The
+ * mark reports the observed life, never continuing liveness.
+ */
+function waitSummary(status: AkumaStatus): WaitState & Readonly<{ summary: string }> {
+  const pending = status.timeline.entries.some(
+    (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+  );
+  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome?.outcome : undefined;
+  const observed =
+    WAIT_LIFE[status.life] ??
+    (pending
+      ? { mark: "⧗", state: "pending tell" }
+      : outcome === undefined
+        ? { mark: "✓", state: "completed" }
+        : outcome.kind === "answered"
+          ? { mark: "✓", state: preview(outcome.answer, "answered") }
+          : { mark: "!", state: preview(outcome.diagnostic, "failed") });
+  return {
+    ...observed,
+    summary: [
+      observed.state,
+      ...(pending && status.life !== "asleep" ? ["pending tell"] : []),
+      ...(status.strandedReason === undefined ? [] : [status.strandedReason]),
+    ].join(FACT_SEPARATOR),
+  };
+}
+
+/**
+ * One wait's final text: one compact line per observed member, then one failure line per member
+ * the wait could not read. A wait opens no frame and extracts no separate answer, so an answer is
+ * visible only as the snapshot's own bounded summary.
  */
 export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation, context: TextRenderContext): string {
   const alias = result.observations.length === 1 && result.unobserved.length === 0 ? presentation.alias : undefined;
-  const blocks = result.observations.map((observation) =>
-    snapshotText(observation, context, { ...(alias === undefined ? {} : { alias }) }),
-  );
-  const unobserved = result.unobserved.map((member) => unobservedText(member.id, member.diagnostic));
-  return [...blocks, ...(unobserved.length === 0 ? [] : [unobserved.join("\n")])].join("\n\n");
+  return [
+    ...result.observations.map((observation) => {
+      const { mark, summary } = waitSummary(observation.status);
+      return waitLine(mark, identity(observation.status.id, alias), summary, context.columns);
+    }),
+    ...result.unobserved.map((member) =>
+      waitLine("!", safeText(member.id), `observation failed${FACT_SEPARATOR}${member.diagnostic}`, context.columns),
+    ),
+  ].join("\n");
 }
 
 export function historyText(

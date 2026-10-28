@@ -61,6 +61,7 @@ import {
   completedTool,
   idleAkumaSnapshot,
   openAkumaSnapshot,
+  reportedFileChange,
   snapshotRow,
   AKUMA_ACTIVITY_AT,
   type ActivityToolCall,
@@ -2835,9 +2836,8 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     {},
     { columns: 80, color: false },
   );
-  assert.equal(returned, snapshot, "wait text is the member's own status snapshot");
-  assert.doesNotMatch(returned, /^✓ answered/mu, "wait extracts no separate answer block");
-  assert.doesNotMatch(returned, /came back/u, "the retired life label is absent");
+  assert.equal(returned, `✓ ${sleeping.id} — the answer`, "wait prints its own compact result, not the status panel");
+  assert.doesNotMatch(returned, /─|✓ answer|came back/u, "no panel, no separate answer row, no retired life label");
 });
 
 test("status text and JSON report the Akuma execution workdir", () => {
@@ -3483,7 +3483,7 @@ test("multiple says each print their first three tools as they settle", () => {
   assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*··· +1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*··· +1 omitted/u);
 });
 
-test("a plural wait text renders every observation's status snapshot and its unreadable peers", () => {
+test("a plural wait text renders one compact line per observation and unreadable peer", () => {
   const first = "aku/worker/abcd0006";
   const second = "aku/worker/abcd0007";
   const missing = parseAkuId("aku/worker/abcd0008").id;
@@ -3512,16 +3512,12 @@ test("a plural wait text renders every observation's status snapshot and its unr
   );
   assert.equal(
     text,
-    [
-      snapshotText({ status: answered(first), contract: { kind: "none" } }, { columns: 120, color: false }),
-      snapshotText({ status: running(second), contract: { kind: "none" } }, { columns: 120, color: false }),
-      `× Akuma observation failed  ${missing} — window lost`,
-    ].join("\n\n"),
-    "each member renders its own status snapshot, then one honest failure fact",
+    [`✓ ${first} — the answer`, `● ${second} — running`, `! ${missing} — observation failed · window lost`].join("\n"),
+    "one compact result line per member, then one honest failure line",
   );
   assert.doesNotMatch(text, /of \d+ done/u, "no completion count and no scoreboard");
-  assert.doesNotMatch(text, /waited/u, "wait text asserts no elapsed wait");
-  assert.match(text, /✓ the answer$/mu, "an answer is visible only as the snapshot's outcome row");
+  assert.doesNotMatch(text, /waited|\d{2}:\d{2}|─/u, "no elapsed wait, clock, or status panel");
+  assert.doesNotMatch(text, /\n\n/u, "no blank block separators");
 });
 
 test("an observing call's conclusion asserts real waiting", () => {
@@ -3592,35 +3588,49 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
   );
   assert.equal(
     text,
-    [
-      snapshotText({ status: complete, contract: { kind: "none" } }, { columns: 120, color: false }),
-      snapshotText({ status: pending, contract: { kind: "none" } }, { columns: 120, color: false }),
-    ].join("\n\n"),
-    "each peer keeps its own frozen state",
+    [`✓ ${complete.id} — completed`, `⧗ ${pending.id} — pending tell`].join("\n"),
+    "each peer keeps its own final state on one line",
   );
-  assert.match(text, /✓ completed/u);
-  assert.match(text, /⧗ pending tell/u);
 });
 
-test("a text wait keeps its snapshot without a completion count", () => {
+test("a text wait omits activity, changes, Debts, and a failed association", () => {
+  const id = "aku/worker/abcd0013";
   const running = akumaStatusSchema.parse({
     birth: DIRECT_BIRTH,
-    id: "aku/worker/abcd0013",
+    id,
     life: "running",
+    cwd: "/work/secret",
     allowed: [],
-    timeline: openAkumaSnapshot([]),
+    timeline: openAkumaSnapshot(
+      [
+        snapshotRow(completedTool(1, "bash", { kind: "run", command: "secret-command" })),
+        snapshotRow(activeTool(2, "bash", { kind: "run", command: "still-running" })),
+      ],
+      [reportedFileChange(1, "update", "/work/secret.ts")],
+    ),
   });
   const text = nativeWaitText(
     {
       mode: "all",
       reason: "deadline",
-      observations: [{ status: running, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }],
+      observations: [
+        {
+          status: running,
+          contract: { kind: "failed", diagnostic: "association lost" },
+          createdDebts: { kind: "failed", diagnostic: "debt board lost" },
+        },
+      ],
       unobserved: [],
     },
     {},
     { columns: 120, color: false },
   );
-  assert.doesNotMatch(text, /done/u);
+  assert.equal(text, `● ${id} — running`);
+  assert.doesNotMatch(
+    text,
+    /secret|association lost|debt board lost|changes|debts|─|\d{2}:\d{2}/u,
+    "the compact result carries no coordinate, timeline, change, Debt, or failure detail",
+  );
 });
 
 test("terminal width counts grapheme clusters rather than code points", () => {

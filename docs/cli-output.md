@@ -184,7 +184,7 @@ and wrap for the terminal but cannot truncate a copyable identity or replace a
 public discriminant with decoration.
 
 One Akuma observation panel orders its facts the same way wherever they exist,
-for selected status, wait, observing call, ask progress, and history: the
+for selected status, observing call, ask progress, and history: the
 complete identity with an optional alias parenthetical and any known associated
 Contract on one line, then static context — the execution directory when
 supplied, and effective allowed actions only on surfaces that already expose
@@ -279,12 +279,19 @@ fold into one untimed omission marker, released before that source's next
 visible row or at closing. A failed tool always prints.
 
 A wait is not a stream. It observes each selected Akuma to its completion
-judgment or the caller deadline and then renders one status projection per
-observed member — the same projection an ordinary status read uses — on stdout,
-followed by one failure fact per member it could not read, which keeps that
-member's complete identity. It opens no live frame, redraws no progress, and
-extracts no separate answer: an answer is visible only as the snapshot's own
-outcome row.
+judgment or the caller deadline and then prints one compact result line per
+member, in the result's own order, on stdout: an observed life mark, that
+member's complete identity with any single-target alias as a parenthetical, and
+the final public snapshot's own summary, folded and bounded to the terminal
+without truncating identity. The summary names a stopped life even when an
+older answer exists, keeps pending input and a resume-unsupported strand
+visible, and otherwise reads the current answered preview, failure diagnostic,
+or completion; a running member stays running. The mark reports an observed
+state, never continuing liveness or successful work. No wall clock, static
+coordinate, tool timeline, reported change, Debt, or separately extracted
+answer appears. Members the wait could not read follow as one failure line each,
+retaining complete identity and diagnostic. A wait opens no live frame and
+redraws no progress.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report; it groups by related Contract and renders
