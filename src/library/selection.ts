@@ -240,7 +240,7 @@ function observationError(id: AkumaStatus["id"], error: unknown): Error {
   return new AkumaObservationError(id, observationDiagnostic(error));
 }
 
-async function dispatchAssociations(
+export async function dispatchAssociations(
   repo: Repo | undefined,
   ids: readonly AkumaStatus["id"][],
 ): Promise<ReadonlyMap<AkumaStatus["id"], DispatchAssociation>> {

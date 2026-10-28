@@ -83,6 +83,7 @@ observes existing Akuma-wide work, not the answer to a newly admitted Tell.
 ## Inspect and retrieve results
 
 ```bash
+keiyaku whoami
 keiyaku status
 keiyaku status @reviewer
 keiyaku ls aku/
@@ -92,7 +93,9 @@ keiyaku history @reviewer --last
 keiyaku history @reviewer --id turn/3
 ```
 
-`status` shows the roster or one Akuma's workdir and effective actions.
+`whoami` shows this caller's identity and, for an Akuma, its own profile without
+creating a World or changing Square. `status` shows the roster or one Akuma's
+workdir and effective actions.
 `ls aku/` shows callable names; `ls "aku/*/*"` shows born workers.
 `ls --mine` narrows that roster to Akumas this process's caller called and their
 transitive descendants in this World; `--caller <integration>:<id>` or
@@ -113,8 +116,8 @@ entries. It removes only the Akuma's recognized runtime custody; it never kills
 a worker and never rewrites another Akuma, Contract, Debt, or alias. Its final
 Heart re-read keeps a pending Tell it observes; a Tell admitted immediately
 after that read is best-effort, not atomic. There is no timer and no prune
-command. Observation and Tell commands (`status`, `ls`, `history`, `wait`,
-`tell`, `ask`) never trigger retention; without a later successful
+command. Observation and Tell commands (`whoami`, `status`, `ls`, `history`,
+`wait`, `tell`, `ask`) never trigger retention; without a later successful
 `call`/`fork`, old entries simply remain.
 
 ## Stop and branch

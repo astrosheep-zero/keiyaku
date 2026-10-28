@@ -41,6 +41,7 @@ import {
   isBlankInput,
   ROOT_USAGE_GUIDE,
   unknownCommandGuide,
+  usageLine,
   type CliUsageGuide,
 } from "./usage.js";
 export { CliUsageError } from "./usage.js";
@@ -54,6 +55,8 @@ const ROOT_USAGE = [
 ].join("\n");
 
 const INVOCATION_PATH_OPTIONS = new Set(["-C", "--cwd", "--repo", "--workdir"]);
+const WHOAMI_USAGE = "whoami [--json]";
+const WHOAMI_PURPOSE = "Observe this caller's identity and own Akuma profile.";
 
 export function renderRootHelp(columns?: number): string {
   return renderHelpText(
@@ -76,6 +79,7 @@ export function renderRootHelp(columns?: number): string {
       "Workspace",
       `  ${"install".padEnd(10)} ${INSTALL_ROOT_PURPOSE}`,
       `  ${"settings".padEnd(10)} ${CONTRACT_COMMAND_SPECS.settings.purpose}`,
+      `  ${"whoami".padEnd(10)} ${WHOAMI_PURPOSE}`,
       "",
       "Package",
       "  --version  Print the running package version.",
@@ -108,6 +112,7 @@ function renderHelpText(help: string, columns: number | undefined): string {
 }
 
 export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
+  if (command.command === "whoami") return commandGuide("whoami", WHOAMI_USAGE);
   if (command.command === "install") return commandGuide("install", INSTALL_USAGE);
   if (command.command === "debt") return debtUsageGuide(command.action);
   if (isAkumaAction(command.command)) return akumaUsageGuide(command.command);
@@ -125,6 +130,8 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
         return renderDebtHelp(coordinate.action);
       case "install":
         return renderInstallHelp();
+      case "whoami":
+        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only; absent, invalid, and unavailable facts remain explicit.`;
       case "akuma":
         return renderAkumaHelp(coordinate.action);
     }
@@ -132,13 +139,20 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
   return renderHelpText(help, columns);
 }
 
-export type ParsedCommand = ParsedContractCommand | ParsedInstallCommand | ParsedAkumaCommand | ParsedDebtCommand;
+export type ParsedWhoamiCommand = Readonly<{ command: "whoami"; output: "text" | "json" }>;
+export type ParsedCommand =
+  | ParsedContractCommand
+  | ParsedInstallCommand
+  | ParsedAkumaCommand
+  | ParsedDebtCommand
+  | ParsedWhoamiCommand;
 
 type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
   | Readonly<{ kind: "contract"; command: Command }>
   | Readonly<{ kind: "debt"; action?: DebtAction }>
   | Readonly<{ kind: "install" }>
+  | Readonly<{ kind: "whoami" }>
   | Readonly<{ kind: "akuma"; action: AkumaAction }>;
 
 export type ParsedInvocation =
@@ -164,6 +178,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
     case "ls":
       return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };
     case "status":
+    case "whoami":
     case "tell":
     case "ask":
       return { use: "optional", acceptsExplicit: false };
@@ -310,11 +325,25 @@ function helpCoordinate(argv: readonly string[]): CliHelpCoordinate | null {
     return { kind: "debt", ...(action === undefined ? {} : { action }) };
   }
   if (root === "install") return { kind: "install" };
+  if (root === "whoami") return { kind: "whoami" };
   if (isAkumaAction(root)) return { kind: "akuma", action: root };
   if (root !== undefined && Object.hasOwn(CONTRACT_COMMAND_SPECS, root)) {
     return { kind: "contract", command: root as Command };
   }
   return { kind: "root" };
+}
+
+function parseWhoami(argv: readonly string[]): ParsedWhoamiCommand {
+  const fail = (message: string): never => {
+    throw new CliUsageError(message, commandGuide("whoami", WHOAMI_USAGE));
+  };
+  const scanned = scanArgs(
+    argv,
+    { subject: "whoami", flags: { json: "boolean" }, stdinRefusal: "whoami reads no stdin" },
+    fail,
+  );
+  if (scanned.positionals.length > 0) fail("whoami accepts no arguments");
+  return { command: "whoami", output: scanned.flags.json === true ? "json" : "text" };
 }
 
 export function parseArgv(argv: readonly string[]): ParsedInvocation {
@@ -325,11 +354,12 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
   if (invocation.commandArgv.length === 0) return { help: { kind: "root" } };
   if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "debt") return { help: { kind: "debt" } };
   if (invocation.commandArgv.length === 1 && invocation.commandArgv[0] === "--version") return { version: true };
+  const whoami = invocation.commandArgv[0] === "whoami" ? parseWhoami(invocation.commandArgv) : undefined;
   const debt = invocation.commandArgv[0] === "debt" ? parseDebtCommand(invocation.commandArgv.slice(1)) : undefined;
   const install =
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
-  const command = debt ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
+  const command = whoami ?? debt ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
   if (invocation.workdir !== undefined && command.command !== "call") {
     throw new CliUsageError(`option --workdir is not valid for ${command.command}`, usageGuideForCommand(command));
   }

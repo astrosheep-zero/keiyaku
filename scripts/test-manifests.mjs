@@ -78,6 +78,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/cli-bind-target.test.ts",
   "tests/cli-gates.test.ts",
   "tests/cli-verification.test.ts",
+  "tests/cli-whoami.test.ts",
   "tests/contract-completion.test.ts",
   "tests/contract-fork.test.ts",
   "tests/contract-lifecycle.test.ts",

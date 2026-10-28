@@ -1,5 +1,5 @@
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { executionForEnvironment, type LibraryExecution } from "../akuma/requests.js";
+import { executionForEnvironment, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 import { AkumaArchetypeError, type ActorId } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
@@ -13,6 +13,7 @@ import {
   type InstallInvocationResult,
 } from "./commands/install.js";
 import { runDebtCommand } from "./commands/debt.js";
+import { runWhoami } from "./commands/whoami.js";
 import { resolveInvocationCoordinates } from "./coordinates.js";
 import { BindDraftError } from "./draft.js";
 import {
@@ -255,6 +256,16 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<num
   return error instanceof CliUsageError ? 64 : 3;
 }
 
+function executionForCommand(
+  command: ParsedCommand,
+  environment: NodeJS.ProcessEnv,
+  signal: AbortSignal,
+): Promise<LibraryExecution> {
+  return command.command === "whoami"
+    ? Promise.resolve(localExecutionContext())
+    : executionForEnvironment(environment, signal);
+}
+
 export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
   const command = invocation.command;
   assertExplicitRepoUse(command, invocation.repo);
@@ -265,7 +276,7 @@ export async function runCliCommand(invocation: ParsedCommandInvocation, input: 
   try {
     const runtime: CliRuntime = {
       environment,
-      execution: await executionForEnvironment(environment, cancellation.signal),
+      execution: await executionForCommand(command, environment, cancellation.signal),
       ...(home === undefined ? {} : { home }),
       readStdin: memoized(input.readStdin ?? processStdin),
       signal: cancellation.signal,
@@ -284,6 +295,7 @@ export async function runCliCommand(invocation: ParsedCommandInvocation, input: 
       },
       environment,
     );
+    if (command.command === "whoami") return await runWhoami(command, coordinates, environment, cancellation.signal);
     if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);
     if (command.command === "history" && "contract" in command)

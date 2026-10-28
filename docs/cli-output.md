@@ -113,7 +113,8 @@ where they are not. Absent facts are absent rows: an empty catalogue prints
 one shared surface-named `none` state without a bare header, while an empty
 world keeps its blessed world state; neither shape prints an observed timestamp,
 a zero count, or an empty container, and a present-but-empty section omits its
-header.
+header. The whoami identity observation instead names requested absence and
+unknowns explicitly, distinguishing those facts from unreported information.
 
 A bounded catalogue signals its one public fact — that more rows exist —
 without adding counts, an exhaustive-mode claim, or a continuation
