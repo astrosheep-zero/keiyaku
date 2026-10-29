@@ -154,10 +154,6 @@ function deliverRefusalProjection(refusal: RenderableRefusal): RenderableRefusal
   return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
 }
 
-function contractOutcome(answer: ContractOutcome): CliOutcome {
-  return answer.kind === "refused" ? "refused" : answer.kind === "retry" ? "retryable" : "accepted";
-}
-
 function renderContractAnswer(
   answer: ContractOutcome,
   project: ((refusal: RenderableRefusal) => RenderableRefusal) | undefined,
@@ -180,8 +176,8 @@ async function finishContractAnswer(
   output: "text" | "json",
   project?: (refusal: RenderableRefusal) => RenderableRefusal,
 ): Promise<CliOutcome> {
-  const text = () => renderContractAnswer(answer, project, displayContext());
-  return emit(output, answer, text, contractOutcome(answer));
+  const outcome = answer.kind === "refused" ? "refused" : answer.kind === "retry" ? "retryable" : "accepted";
+  return emit(output, answer, () => renderContractAnswer(answer, project, displayContext()), outcome);
 }
 
 async function selectedContract(
@@ -207,23 +203,6 @@ async function existingSeat(
     contract: library.select({ repo, id }),
     ...(actor === undefined ? {} : { actor }),
   };
-}
-
-/** One composition for every mutation leaf; gates, hooks, and freshness derive lazily inside it. */
-async function contractLibrary(
-  command: ParsedContractCommand,
-  execution: ExecutionContext,
-  configuration: Settings | undefined,
-  runtime: CliRuntime,
-): Promise<KeiyakuLibrary> {
-  const actor =
-    executionChannel(execution).kind === "local" && ["deliver", "review"].includes(command.command)
-      ? actorFromEdge(undefined, runtime.environment)
-      : undefined;
-  return composeContractLibrary(execution, createKeiyakuHandle, {
-    ...(configuration === undefined ? {} : { settings: configuration }),
-    ...(actor === undefined ? {} : { actor }),
-  });
 }
 
 async function runBind(
@@ -295,20 +274,26 @@ async function runDeliver(
   runtime: CliRuntime,
   seat: ExistingSeat,
 ): Promise<CliOutcome> {
-  if (command.dryRun) return await runDeliveryPreview(command, runtime, seat);
   const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: DeliverOutcome;
+  let answer: DeliverOutcome | DeliveryPreviewOutcome;
   try {
-    answer = await seat.contract.deliver(
-      {
-        ...(command.message === undefined ? {} : { message: command.message }),
-        includeDirty: command.includeDirty,
-        materializeConflict: command.materializeConflict,
-        overwrite: command.overwrite,
-        ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-      },
-      { ...(driver === undefined ? {} : { observe: driver.observe }) },
-    );
+    const progress = { ...(driver === undefined ? {} : { observe: driver.observe }) };
+    const signal = { ...(runtime.signal === undefined ? {} : { signal: runtime.signal }) };
+    answer = command.dryRun
+      ? await seat.contract.previewDelivery(
+          { includeDirty: command.includeDirty, showDiff: command.showDiff, ...signal },
+          progress,
+        )
+      : await seat.contract.deliver(
+          {
+            ...(command.message === undefined ? {} : { message: command.message }),
+            includeDirty: command.includeDirty,
+            materializeConflict: command.materializeConflict,
+            overwrite: command.overwrite,
+            ...signal,
+          },
+          progress,
+        );
   } finally {
     if (driver !== undefined) await driver.finish().catch(() => undefined);
   }
@@ -374,30 +359,16 @@ async function runAbandon(
   return await finishContractAnswer(answer, command.output);
 }
 
-async function runDeliveryPreview(
-  command: Extract<ContractMutation, { command: "deliver" }>,
-  runtime: CliRuntime,
-  seat: ExistingSeat,
-): Promise<CliOutcome> {
-  const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: DeliveryPreviewOutcome;
-  try {
-    answer = await seat.contract.previewDelivery(
-      {
-        includeDirty: command.includeDirty,
-        showDiff: command.showDiff,
-        ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-      },
-      { ...(driver === undefined ? {} : { observe: driver.observe }) },
-    );
-  } finally {
-    if (driver !== undefined) await driver.finish().catch(() => undefined);
-  }
-  return await finishContractAnswer(answer, command.output, deliverRefusalProjection);
-}
-
 async function runContractMutation(command: ContractMutation, input: ContractMutationInput): Promise<CliOutcome> {
-  const library = await contractLibrary(command, input.execution, input.configuration, input.runtime);
+  const { execution, configuration, runtime } = input;
+  const actor =
+    executionChannel(execution).kind === "local" && ["deliver", "review"].includes(command.command)
+      ? actorFromEdge(undefined, runtime.environment)
+      : undefined;
+  const library = composeContractLibrary(execution, createKeiyakuHandle, {
+    ...(configuration === undefined ? {} : { settings: configuration }),
+    ...(actor === undefined ? {} : { actor }),
+  });
   if (command.command === "bind") return await runBind(command, input, library);
   const seat = await existingSeat(command, input.coordinates, input.runtime, library);
   switch (command.command) {

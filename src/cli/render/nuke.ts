@@ -24,9 +24,6 @@ export function renderNukeText(result: NukeResult): string {
 }
 
 export function nukeOutcome(result: NukeResult): CliOutcome {
-  return result.kind === "refused"
-    ? "refused"
-    : result.pending.some((surface) => surface.required)
-      ? "retryable"
-      : "accepted";
+  if (result.kind === "refused") return "refused";
+  return result.pending.some((surface) => surface.required) ? "retryable" : "accepted";
 }

@@ -47,12 +47,10 @@ export type CliRuntimeInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-function processStdin(): Promise<string> {
-  return (async () => {
-    const chunks: Buffer[] = [];
-    for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    return Buffer.concat(chunks).toString("utf8");
-  })();
+async function processStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function memoized(reader: () => Promise<string>): () => Promise<string> {
@@ -96,29 +94,6 @@ function cliCancellation(signal: AbortSignal | undefined): Readonly<{ signal: Ab
       process.removeListener("SIGTERM", cancel);
     },
   };
-}
-
-/** Bind's document admission runs before coordinate resolution so a malformed document refuses first. */
-async function admitBindInput(
-  command: ParsedCommand,
-  invocation: ParsedCommandInvocation,
-  runtime: CliRuntime,
-  processCwd: string,
-): Promise<void> {
-  if (command.command !== "bind" || command.forkOf !== undefined) return;
-  await admitBindMarkdown({
-    markdown: await runtime.readStdin(),
-    processCwd,
-    ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-  });
-}
-
-async function runInstall(
-  command: Extract<ParsedCommand, { command: "install" }>,
-  environment: NodeJS.ProcessEnv,
-): Promise<CliOutcome> {
-  const result = await installHarnesses(command.harnesses, environment);
-  return emit(command.output, result, () => renderInstallText(result), installOutcome(result));
 }
 
 type AkumaFailureProjection = Readonly<{ body: string; outcome: CliOutcome }>;
@@ -247,16 +222,6 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
   return error instanceof CliUsageError ? "usage" : "failed";
 }
 
-function executionForCommand(
-  command: ParsedCommand,
-  environment: NodeJS.ProcessEnv,
-  signal: AbortSignal,
-): Promise<LibraryExecution> {
-  return command.command === "whoami"
-    ? Promise.resolve(localExecutionContext())
-    : executionForEnvironment(environment, signal);
-}
-
 export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
   return cliExitCode(await runCommand(invocation, input));
 }
@@ -271,15 +236,27 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   try {
     const runtime: CliRuntime = {
       environment,
-      execution: await executionForCommand(command, environment, cancellation.signal),
+      execution:
+        command.command === "whoami"
+          ? localExecutionContext()
+          : await executionForEnvironment(environment, cancellation.signal),
       ...(home === undefined ? {} : { home }),
       readStdin: memoized(input.readStdin ?? processStdin),
       signal: cancellation.signal,
       progress: () => (progress ??= writeExecutionProgress()),
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     };
-    if (command.command === "install") return await runInstall(command, environment);
-    await admitBindInput(command, invocation, runtime, input.cwd ?? process.cwd());
+    if (command.command === "install") {
+      const result = await installHarnesses(command.harnesses, environment);
+      return emit(command.output, result, () => renderInstallText(result), installOutcome(result));
+    }
+    if (command.command === "bind" && command.forkOf === undefined) {
+      await admitBindMarkdown({
+        markdown: await runtime.readStdin(),
+        processCwd: input.cwd ?? process.cwd(),
+        ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+      });
+    }
     const coordinates = await resolveInvocationCoordinates(
       {
         processCwd: input.cwd ?? process.cwd(),

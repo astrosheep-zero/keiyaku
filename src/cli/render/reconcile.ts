@@ -175,8 +175,6 @@ function appendReport(
   }
 }
 
-type CompletedRepoReport = Extract<RepoReconcileReport, { kind: "completed" }>;
-
 function isRepoReport(report: ReconcileReport | RepoReconcileReport): report is RepoReconcileReport {
   return "kind" in report && (report.kind === "completed" || report.kind === "world-observation-failed");
 }
@@ -184,14 +182,7 @@ function isRepoReport(report: ReconcileReport | RepoReconcileReport): report is 
 export function reconcileHasFailure(report: ReconcileReport | RepoReconcileReport): boolean {
   if (isRepoReport(report)) {
     if (report.kind === "world-observation-failed") return true;
-    const completed: CompletedRepoReport = report;
-    return completed.contracts.some((item) => {
-      return (
-        item.report.lag.some((lag) => reconcileLagIsFailure(lag)) ||
-        item.report.settlement.lags.length > 0 ||
-        (item.report.settlement.seatClose?.length ?? 0) > 0
-      );
-    });
+    return report.contracts.some((item) => reconcileHasFailure(item.report));
   }
   return (
     report.lag.some((lag) => reconcileLagIsFailure(lag)) ||

@@ -208,13 +208,12 @@ async function runCall(
       writeStderr(renderFailedCallObservation(result, resultContext()));
       streamed = true;
     }
-    if (command.output === "json") {
-      writeJson(result);
-      return callOutcome(result);
+    if (command.output === "json") writeJson(result);
+    else {
+      const raw = callRawAnswer(result, streamed);
+      if (raw === undefined) emitAnswer(renderCallText(result, streamed, displayContext()), false);
+      else emitAnswer(raw, true);
     }
-    const raw = callRawAnswer(result, streamed);
-    if (raw === undefined) emitAnswer(renderCallText(result, streamed, displayContext()), false);
-    else emitAnswer(raw, true);
     return callOutcome(result);
   } finally {
     driver.close(stream?.flush() ?? []);
@@ -234,11 +233,8 @@ async function runWait(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const outcome = result.unobserved.length === 0 ? "accepted" : "failed";
-  if (command.output === "json") {
-    writeJson(result);
-    return outcome;
-  }
-  emitAnswer(waitText(result, { ...(alias === undefined ? {} : { alias }) }, displayContext()), false);
+  if (command.output === "json") writeJson(result);
+  else emitAnswer(waitText(result, { ...(alias === undefined ? {} : { alias }) }, displayContext()), false);
   return outcome;
 }
 
@@ -298,11 +294,8 @@ async function runAsk(
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
     else if (command.output === "text" && channel.kind === "body-request")
       writeStderr(waitedTellProgress(result, alias, resultContext()));
-    if (command.output === "json") {
-      writeJson(result);
-      return askOutcome(result);
-    }
-    emitAnswer(askRawAnswer(result, schema !== undefined) ?? "", true);
+    if (command.output === "json") writeJson(result);
+    else emitAnswer(askRawAnswer(result, schema !== undefined) ?? "", true);
     return askOutcome(result);
   } finally {
     driver.close(progress?.flush() ?? []);
