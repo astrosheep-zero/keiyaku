@@ -123,7 +123,10 @@ export function installTellRuntime(runtime: TellWakeRuntime): () => void {
 export async function bornWorld(root: string, suffix: string) {
   const world = await World.at(root);
   mkdirSync(join(root, ".keiyaku"), { recursive: true });
-  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
+  );
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;

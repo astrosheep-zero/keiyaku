@@ -297,23 +297,31 @@ function tailAnswerPreview(first: string, text: string, columns: number): readon
   return [`${first}${preview}`];
 }
 
+function renderCommandOverflow(
+  first: string,
+  continuation: string,
+  value: ReturnType<typeof rowText>,
+  columns: number,
+  view: RowView,
+): readonly string[] {
+  const suffix = value.suffix ?? "";
+  if (view.compact !== true && view.history !== true)
+    return renderRunCommand(first, continuation, value.text, suffix, columns);
+  const remaining = columns - displayColumns(first);
+  const withSuffix = remaining - displayColumns(suffix);
+  const showSuffix = suffix.length > 0 && withSuffix >= 6;
+  return [
+    `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
+  ];
+}
+
 /** Every selected timeline row renders through here: one prefix family per row class. */
 function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const value = rowText(row, tool);
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
   const compact = view.compact === true;
-  if (tool?.overflow === "command") {
-    const suffix = value.suffix ?? "";
-    if (!compact && view.history !== true)
-      return renderRunCommand(first, continuation, value.text, suffix, context.columns);
-    const remaining = context.columns - displayColumns(first);
-    const withSuffix = remaining - displayColumns(suffix);
-    const showSuffix = suffix.length > 0 && withSuffix >= 6;
-    return [
-      `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
-    ];
-  }
+  if (tool?.overflow === "command") return renderCommandOverflow(first, continuation, value, context.columns, view);
   if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
   if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
     return tailAnswerPreview(first, value.text, context.columns);

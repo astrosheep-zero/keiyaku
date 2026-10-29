@@ -226,6 +226,23 @@ export async function runCliCommand(invocation: ParsedCommandInvocation, input: 
   return cliExitCode(await runCommand(invocation, input));
 }
 
+function invocationCoordinates(
+  invocation: ParsedCommandInvocation,
+  input: CliRuntimeInput,
+  environment: NodeJS.ProcessEnv,
+) {
+  return resolveInvocationCoordinates(
+    {
+      processCwd: input.cwd ?? process.cwd(),
+      ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+      ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+      ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
+      command: invocation.command,
+    },
+    environment,
+  );
+}
+
 async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
   assertExplicitRepoUse(command, invocation.repo);
@@ -257,16 +274,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });
     }
-    const coordinates = await resolveInvocationCoordinates(
-      {
-        processCwd: input.cwd ?? process.cwd(),
-        ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
-        ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
-        ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
-        command,
-      },
-      environment,
-    );
+    const coordinates = await invocationCoordinates(invocation, input, environment);
     if (command.command === "whoami") return await runWhoami(command, coordinates, environment);
     if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);

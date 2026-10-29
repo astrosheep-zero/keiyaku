@@ -306,7 +306,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
       { environment: {}, readStdin: async () => "" },
     );
     assert.equal(invalidResult.value.observation.reason, "invalid-output");
-    assert.equal(invalidResult.exit, 2, "invalid schema output fails like an invalid call answer");
+    assert.equal(invalidResult.exit, 3, "invalid schema output fails like an invalid call answer");
 
     const interrupt = await born("a1000012", answering("unused"));
     context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
