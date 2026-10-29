@@ -42,6 +42,7 @@ import type { IntegrationConflictMaterialized, ReconciliationLag, RegionOverlap 
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiCategoryText, renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
+  diagnosticLines,
   displayColumns,
   orderRefusalFacts,
   renderOpaqueBlock,
@@ -3662,6 +3663,20 @@ test("a text wait omits activity, changes, Debts, and a failed association", () 
     /secret|association lost|debt board lost|changes|debts|─|\d{2}:\d{2}/u,
     "the compact result carries no coordinate, timeline, change, Debt, or failure detail",
   );
+});
+
+test("diagnostic payloads fold whitespace, wrap body-aligned, and expose bounded grapheme-safe omission", () => {
+  assert.deepEqual(
+    diagnosticLines("created debts", "  Unmigrated\tledger\n authority: /tmp/tasks  ", 32),
+    ["! created debts unavailable", "  Unmigrated ledger authority:", "  /tmp/tasks"],
+    "the subject never borrows the cause, and wrapping prefers a word boundary",
+  );
+  const lines = diagnosticLines("contract association", "👩‍💻".repeat(100), 32);
+  assert.equal(lines[0], "! contract association unavailable");
+  const payload = lines.slice(1);
+  assert.equal(payload.length, 3, "diagnostics use the existing bounded payload budget");
+  assert.ok(payload.every((line) => displayColumns(line) <= 32 && /^ {2}(?:👩‍💻)+…?$/u.test(line)));
+  assert.match(payload.at(-1)!, /…$/u, "omission stays on the cause, not its subject");
 });
 
 test("terminal width counts grapheme clusters rather than code points", () => {

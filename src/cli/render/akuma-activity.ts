@@ -16,6 +16,7 @@ import { dispositionText } from "./debt.js";
 import { debtDispositionMark } from "./marks.js";
 import {
   DEFAULT_CLI_COLUMNS,
+  diagnosticLines,
   displayColumns,
   padToDisplay,
   renderBoundedPayload,
@@ -122,8 +123,8 @@ export function actionReceipt(
   return [`${input.mark} ${input.verb} ${identity(input.id, input.alias)}`, ...subordinateLines(input.evidence ?? [])];
 }
 
-function contractFacts(contract: DispatchAssociation): readonly string[] {
-  return contract.kind === "failed" ? [`! contract failed ${safeText(contract.diagnostic)}`] : [];
+function contractFacts(contract: DispatchAssociation, columns: number): readonly string[] {
+  return contract.kind === "failed" ? diagnosticLines("contract association", contract.diagnostic, columns) : [];
 }
 
 /** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
@@ -946,7 +947,7 @@ function renderDebtRow(row: CreatedDebtRow, columns: number): readonly string[] 
 
 function renderDebtContextLines(created: CreatedDebtObservation | undefined, columns: number): readonly string[] {
   if (created === undefined) return [];
-  if (created.kind === "failed") return [`! debts failed ${safeText(created.diagnostic)}`];
+  if (created.kind === "failed") return diagnosticLines("created debts", created.diagnostic, columns);
   if (created.rows.length === 0) return [];
   return [`debts ${created.rows.length}`, ...created.rows.flatMap((row) => renderDebtRow(row, columns))];
 }
@@ -974,7 +975,10 @@ function snapshotCore(
     ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
     ...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)]),
   ];
-  const facts = [...contractFacts(view.contract), ...(options.facts ?? [])];
+  const facts = [
+    ...contractFacts(view.contract, context.columns - SUBORDINATE_INDENT.length),
+    ...(options.facts ?? []),
+  ];
   return {
     activity,
     head: panelHead(view.status.id, options.alias, view.contract, contextFacts),
@@ -1221,15 +1225,12 @@ export function tellText(result: AkumaTellResult, alias: string | undefined, con
   const verdict = preview.length === 0 ? head : `${prefix}${truncateDisplayText(preview, room)}`;
   if (wake.kind !== "failed") return verdict;
   const child = "child" in wake ? wake.child : undefined;
-  const failure = `! tell delivery failed · ${safeText(wake.diagnostic)}${child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`}`;
   return [
     verdict,
     ...subordinateLines(
-      renderBoundedTextBlock(failure, {
-        first: "",
-        continuation: "",
-        columns: context.columns - SUBORDINATE_INDENT.length,
-        lines: Number.MAX_SAFE_INTEGER,
+      diagnosticLines("tell delivery", wake.diagnostic, context.columns - SUBORDINATE_INDENT.length, {
+        state: "failed",
+        suffix: child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`,
       }),
     ),
   ].join("\n");

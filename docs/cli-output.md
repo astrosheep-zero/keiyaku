@@ -203,10 +203,14 @@ and input attribution. One truthful observed conclusion closes that activity;
 the timeline's own terminal outcome may already be that
 conclusion, and it is then not restated. Reported changes and created Debts
 follow as indented dynamic output, then indented diagnostics such as a failed
-association — a diagnostic never becomes an unlabeled static property and stays
-attached to its subject. History is an immutable timeline: it takes the same
-identity, static context, and content boundary, but adds no fabricated
-current-state conclusion and reads no extra state to fill the panel. Status uses
+association. An observation diagnostic's subject row names only the observation
+subject and its unavailable state, plus any subject-owned coordinates; its cause
+follows as an indented, bounded payload, never inline after the subject. A delivery
+diagnostic retains its delivery verdict and coordinates in that same separation.
+A diagnostic never becomes an unlabeled static property. History is an immutable
+timeline: it takes the same identity, static context, and content boundary, but
+adds no fabricated current-state conclusion and reads no extra state to fill the
+panel. Status uses
 the same completion judgment as wait, including a sleeping Akuma with an
 outstanding Tell. Only an observed input wait can justify elapsed-duration text,
 and an unknown change size remains unknown rather than implying additions or

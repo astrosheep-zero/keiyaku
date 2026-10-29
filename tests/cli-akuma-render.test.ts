@@ -92,7 +92,8 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
     1,
     "no static coordinate is repeated below the timeline",
   );
-  assert.ok(lines.indexOf("  ! contract failed lookup refused") > lines.indexOf("  changes 1"));
+  assert.ok(lines.indexOf("  ! contract association unavailable") > lines.indexOf("  changes 1"));
+  assert.deepEqual(lines.slice(-2), ["  ! contract association unavailable", "    lookup refused"]);
   assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
 });
 
@@ -458,7 +459,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
       undefined,
       context,
     ),
-    ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed · wake refused"].join("\n"),
+    ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed", "    wake refused"].join("\n"),
     "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
   );
   assert.equal(killResultText(result.result.akuma, "killed"), `✓ killed ${result.result.akuma}`);
@@ -998,7 +999,7 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
       undefined,
       context,
     ).split("\n"),
-    ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed · wake refused"],
+    ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed", "    wake refused"],
     "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
   );
   assert.equal(
@@ -1021,6 +1022,30 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     ].join("\n"),
     "plural kill keeps one compact block per member in frozen order",
   );
+});
+
+test("Tell delivery keeps copyable log coordinates on its subject and bounds the cause beneath", () => {
+  const context = { columns: 40, color: false };
+  const path = "/work/long-execution-directory/body.log";
+  const lines = tellText(
+    {
+      akuma: SPECIMEN_ID,
+      tell: tellReceipt("go", "told", {
+        kind: "failed",
+        diagnostic: `  wake\nrefused\t\u001b ${"👩‍💻".repeat(100)}`,
+        child: { code: 1, signal: null, log: { path, from: 12, to: 345 } },
+      }),
+    },
+    undefined,
+    context,
+  ).split("\n");
+  assert.equal(lines[1], `  ! tell delivery failed · log ${path} 12..345`);
+  const payload = lines.slice(2);
+  assert.equal(payload.length, 3, "the cause retains the shared bounded line budget");
+  assert.match(payload[0]!, /^ {4}wake refused � 👩‍💻/u, "cause text is terminal-safe and whitespace-folded");
+  assert.ok(payload.every((line) => line.startsWith("    ") && displayColumns(line) <= context.columns));
+  assert.match(payload.at(-1)!, /…$/u, "the cause names its own omission");
+  assert.match(payload.slice(1).join("\n"), /^(?: {4}(?:👩‍💻)+…?\n?)+$/u, "wrapping keeps whole graphemes");
 });
 
 test("created Debt observations use the shared dropped disposition", () => {
@@ -1066,11 +1091,28 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     ["  changes 1", "    ~  /work/file", "  debts 1", "    ○ debt/example · close the rake · ready · P2"],
     "dynamic outputs stay subordinate and no diagnostic is reported",
   );
-  const failedContract = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, context);
-  assert.equal(
-    failedContract.split("\n").at(-1),
-    "  ! contract failed lookup refused",
-    "a lookup that failed is a subordinate diagnostic, not a free Contract",
+  const failedReads = snapshotText(
+    {
+      status,
+      contract: { kind: "failed", diagnostic: "lookup refused" },
+      createdDebts: {
+        kind: "failed",
+        diagnostic: "Unmigrated ledger authority: /Users/astrosheep/.keiyaku/tasks",
+      },
+    },
+    context,
+  );
+  assert.deepEqual(
+    failedReads.split("\n").slice(5),
+    [
+      "  changes 1",
+      "    ~  /work/file",
+      "  ! created debts unavailable",
+      "    Unmigrated ledger authority: /Users/astrosheep/.keiyaku/tasks",
+      "  ! contract association unavailable",
+      "    lookup refused",
+    ],
+    "failed reads name their observation subjects beneath outputs, with each cause in its own payload",
   );
 });
 

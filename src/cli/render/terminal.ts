@@ -170,6 +170,19 @@ export function renderBoundedTextBlock(
   return lines.length === 0 ? [input.first.trimEnd()] : lines;
 }
 
+/** A tool diagnostic names its subject first; only its bounded payload carries the cause. */
+export function diagnosticLines(
+  subject: string,
+  cause: string,
+  columns: number,
+  options: Readonly<{ state?: "unavailable" | "failed"; suffix?: string }> = {},
+): readonly string[] {
+  return [
+    `! ${safeText(subject)} ${options.state ?? "unavailable"}${safeText(options.suffix ?? "")}`,
+    ...renderBoundedTextBlock(cause, { first: "  ", continuation: "  ", columns }),
+  ];
+}
+
 type BoundedPayload = Readonly<{
   text: string;
   first: string;
