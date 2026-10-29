@@ -617,8 +617,7 @@ test("ls help names Akuma names and states the catalog-vs-fleet mapping", () => 
   assert.ok(help.includes('ls "aku/<name>/*"'));
   assert.ok(help.includes('ls "aku/*/*"'));
   assert.ok(help.includes("callable Akuma-name catalog"));
-  assert.ok(help.includes("living Akumas under one name"));
-  assert.ok(help.includes("every living Akuma"));
+  assert.ok(help.includes("recent retained Akuma instances"));
 });
 
 test("rendered Akuma catalog header names Akuma names, never archetype", () => {

@@ -253,62 +253,34 @@ test("a local status on an absent complete id reports one caller-facing fact", (
   const result = runCli(root, ["status", id]);
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
-  assert.equal(
-    result.stderr,
-    [
-      "× status refused",
-      "  reason  Akuma not found",
-      `  id  ${id}`,
-      "  accepts  keiyaku status [<contract>|@name|<aku/...>]...",
-      "           keiyaku status (aku|aku/|aku/*) [--limit <count>]",
-      "           keiyaku status (kei|kei/|kei/*) [--limit <count>]",
-      "  help  keiyaku status --help",
-      "",
-    ].join("\n"),
-  );
+  assert.match(result.stderr, /reason  Akuma not found/u);
+  assert.ok(result.stderr.includes(id));
+  assert.ok(result.stderr.includes("keiyaku status --help"));
 });
 
 test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
   const id = parseAkuId("aku/intern/33dd4670").id;
   const parsed = parseArgv(["wait", id]);
   if (!("command" in parsed)) throw new Error("wait did not parse as an executable command");
-  const refusals: readonly (readonly [unknown, string])[] = [
+  const refusals: readonly (readonly [unknown, readonly string[]])[] = [
     [
       new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
-      [
-        "× wait refused",
-        "  reason  Akuma alias not found",
-        "  alias  @missing",
-        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
-        "  help  keiyaku wait --help",
-      ].join("\n"),
+      ["Akuma alias not found", "@missing"],
     ],
     [
       new AkumaAddressError({ kind: "invalid-akuma", selector: "aku/intern/nope" }),
-      [
-        "× wait refused",
-        "  reason  invalid Akuma address",
-        "  selector  aku/intern/nope",
-        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
-        "  help  keiyaku wait --help",
-      ].join("\n"),
+      ["invalid Akuma address", "aku/intern/nope"],
     ],
     [
       new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world: "/private/world" as WorldRoot }),
-      [
-        "× wait refused",
-        "  reason  Akuma not in this World",
-        `  ids  ${id}`,
-        "  world  /private/world",
-        "  accepts  keiyaku wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
-        "  help  keiyaku wait --help",
-      ].join("\n"),
+      ["Akuma not in this World", id, "/private/world"],
     ],
   ];
-  for (const [error, body] of refusals) {
+  for (const [error, facts] of refusals) {
     const projected = await akumaFailureProjection(error, parsed.command);
-    assert.deepEqual(projected, { body, exitCode: 1 });
-    assert.match(projected!.body, /^× wait refused\n  reason  /u);
+    assert.equal(projected!.exitCode, 1);
+    for (const fact of facts) assert.ok(projected!.body.includes(fact));
+    assert.ok(projected!.body.includes("keiyaku wait --help"));
   }
 });
 

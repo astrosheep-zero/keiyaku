@@ -63,8 +63,8 @@ test("namespace and leaf help identify an executable command", () => {
   assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
   assert.match(renderAkumaHelp("wait"), /default mode is any/u);
   const lsHelp = renderContractHelp("ls");
-  assert.match(lsHelp, /ls \["aku\/\*\/\*"\] --mine/u);
-  assert.match(lsHelp, /--caller <integration>:<id> \| aku\/<name>\/<suffix>/u);
+  assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
+  assert.match(lsHelp, /ls debt\/<namespace>\/ \[--limit <count>\]/u);
   assert.match(lsHelp, /direct and transitive descendants in this World/u);
   const settingsHelp = renderContractHelp("settings");
   assert.match(settingsHelp, /"url": "ws:\/\/127\.0\.0\.1:6767\/ws"/u);
@@ -77,6 +77,47 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(settingsHelp, /session-wide/u);
   assert.match(settingsHelp, /never cancels later work/u);
   assert.match(settingsHelp, /Socket closure does not prove native cancellation/u);
+});
+
+test("leaf help and usage refusals share accepted invocation options", () => {
+  for (const help of [
+    renderContractHelp("show"),
+    renderContractHelp("status"),
+    renderDebtHelp("show"),
+    renderAkumaHelp("tell"),
+    renderInstallHelp(),
+    renderHelp({ kind: "whoami" }),
+  ]) {
+    assert.match(help, /\[--json\]/u);
+    assert.match(help, /-C <path> \| --cwd <path>/u);
+  }
+  for (const args of [
+    ["show", "--bad"],
+    ["debt", "show"],
+    ["tell", "@worker"],
+  ]) {
+    assert.throws(
+      () => parseArgv(args),
+      (error: unknown) => {
+        assert.ok(error instanceof CliUsageError);
+        assert.match(error.guide!.accepts, /\[--json\]/u);
+        assert.match(error.guide!.accepts, /-C <path> \| --cwd <path>/u);
+        return true;
+      },
+    );
+  }
+  assert.match(renderContractHelp("show"), /\[--repo <path>\]/u);
+  assert.match(renderAkumaHelp("history"), /history <kei\/\.\.\.> \[--full\] \[--repo <path>\]/u);
+});
+
+test("Akuma help distinguishes schema contracts, exact results, and fork points", () => {
+  for (const action of ["call", "ask"] as const) {
+    assert.match(renderAkumaHelp(action), /JSON Schema answer contract to the provider/u);
+    assert.match(renderAkumaHelp(action), /does not independently validate schema conformance/u);
+  }
+  assert.match(renderAkumaHelp("call"), /status <aku\/\.\.\.\|@alias> --json to inspect status\.allowed/u);
+  assert.match(renderAkumaHelp("history"), /answer or failure diagnostic/u);
+  assert.match(renderAkumaHelp("fork"), /history <aku\/\.\.\.\|@alias> --json/u);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {

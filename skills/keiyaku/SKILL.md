@@ -27,7 +27,7 @@ keiyaku -C <repo> debt add "title"
 keiyaku -C <repo> bind [--debt <debt-id>] -
 keiyaku -C <repo> status
 keiyaku -C <repo> deliver [<contract>|@<contract>]
-keiyaku -C <repo> review [<contract>|@<contract>] --satisfied
+keiyaku -C <repo> review [<contract>|@<contract>] --satisfied --summary "<evidence>"
 ```
 
 `-C` selects the invocation cwd and therefore the World. `--repo <path>` only

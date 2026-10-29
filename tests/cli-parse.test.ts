@@ -3,7 +3,7 @@ import test from "node:test";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { decodeJournal } from "../src/core/facts/codec.js";
 import { contractId, documentKey, entryUlid, gateWord, snapshotId } from "../src/core/facts/types.js";
-import { CliUsageError, parseArgv, type ParsedCommand } from "../src/cli/parse.js";
+import { assertExplicitRepoUse, CliUsageError, parseArgv, type ParsedCommand } from "../src/cli/parse.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 
 function command(argv: readonly string[]): ParsedCommand {
@@ -425,6 +425,22 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
+test("wait and kill select Contracts and Akuma globs with conditional repo coordinates", () => {
+  for (const action of ["wait", "kill"] as const) {
+    const parsed = parseArgv([action, "kei/example", "aku/work*/12*", "--repo", "/repo", "--json"]);
+    assert.ok("command" in parsed);
+    assert.deepEqual(parsed.command, {
+      command: action,
+      akuma: ["kei/example", "aku/work*/12*"],
+      output: "json",
+    });
+    assert.doesNotThrow(() => assertExplicitRepoUse(parsed.command, parsed.repo));
+    const akumaOnly = parseArgv([action, "aku/*/*", "--repo", "/repo"]);
+    assert.ok("command" in akumaOnly);
+    assert.throws(() => assertExplicitRepoUse(akumaOnly.command, akumaOnly.repo), /--repo has no consumer/u);
+  }
+});
+
 test("tell admits; ask parses optional observation windows and schema", () => {
   assert.deepEqual(command(["tell", "@worker", "continue"]), {
     command: "tell",
@@ -634,6 +650,16 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.throws(() => parseArgv(["arc", "kei/example"]), /arc requires stdin/u);
   assert.throws(() => parseArgv(["bind", "-", "-C", "/one", "--cwd", "/two"]), /-C\/--cwd may appear only once/u);
   assert.throws(() => parseArgv(["bind", "-", "--repo"]), /--repo requires a path/u);
+});
+
+test("history accepts separate paged, exact, last, and Contract forms", () => {
+  for (const args of [
+    ["history", "@worker", "--since", "2", "--limit", "4"],
+    ["history", "@worker", "--id", "turn/3"],
+    ["history", "@worker", "--last"],
+    ["history", "kei/example", "--full", "--json"],
+  ]) assert.doesNotThrow(() => parseArgv(args));
+  assert.throws(() => parseArgv(["history", "@worker", "--last", "--limit", "4"]), /cannot be combined/u);
 });
 
 test("history keeps the id conflict ahead of an invalid limit and id", () => {

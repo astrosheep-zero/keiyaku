@@ -61,8 +61,9 @@ keiyaku ask @reviewer --schema verdict.schema.json - < question.md
 
 `tell` admits the next instruction and returns its admission receipt; it does
 not await an answer. `ask` admits a Tell and observes that exact answer,
-unbounded unless `--wait` limits observation. Both require a prompt and accept
-`--interrupt` to put down current work before admitting the new Tell. Schema
+unbounded unless `--wait` limits observation. Both require a prompt. With
+`--interrupt`, the Tell is admitted while current work is asked to yield; an
+admitted Tell remains recoverable even if settlement cannot be proven. Schema
 belongs only to `ask`; `tell --schema` and `tell --wait` refuse and point to
 `ask`. A deadline never withdraws an admitted Tell. Read `tell --help` and
 `ask --help` for the complete flag grammar.
@@ -95,16 +96,17 @@ keiyaku history @reviewer --id turn/3
 
 `whoami` shows this caller's identity and, for an Akuma, its own profile without
 creating a World or changing Square. `status` shows the roster or one Akuma's
-workdir and effective actions.
-`ls aku/` shows callable names; `ls "aku/*/*"` shows born workers.
+workdir; use `keiyaku status <aku/...|@alias> --json` to inspect `status.allowed`.
+`ls aku/` shows callable names; `ls "aku/*/*"` shows recent retained instances.
 `ls --mine` narrows that roster to Akumas this process's caller called and their
 transitive descendants in this World; `--caller <integration>:<id>` or
 `--caller aku/<name>/<suffix>` names the same selection explicitly. Descendant
 rows show their immediate caller as `· by <akuId>`. The selection is World-local
 and refuses for Contract, Debt, and Akuma-name catalogues.
 `history --last` reads the latest complete answer; `history --id` reads an
-exact result named by status or wait. Use the complete AkuId when an alias may
-move; see `history --help` for paging.
+exact retained terminal turn's answer or failure diagnostic. Find its `historyId`
+in paged `keiyaku history <aku/...|@alias> --json`. Use the complete AkuId when
+an alias may move; see `history --help` for paging.
 
 ## Retention
 

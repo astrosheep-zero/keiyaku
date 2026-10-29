@@ -25,7 +25,7 @@ export const CONTRACT_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "bind [--debt <debt/...>] [--target <ref> | --no-target] [--after <kei/...> ...] [--gates <name,...>] [--actor <actor>] - | bind --fork-of <kei/...> [--target <ref> | --no-target] [--actor <actor>]",
+      "bind [--debt <debt/...>] [--target <ref> | --no-target] [--after <kei/...>]... [--gates <name,...>] [--actor <actor>] [--repo <path>] -\nbind --fork-of <kei/...> [--target <ref> | --no-target] [--actor <actor>] [--repo <path>]",
     purpose: "Create a Contract from stdin Markdown or copy an existing Contract as a starting point.",
     details: [
       "--target names one existing local branch literally; it is never created and never",
@@ -77,7 +77,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "optional",
     flags: { actor: "value", after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
     usage:
-      "amend [<contract>|@<contract>] [--after <kei/...> ... | --clear-after] [--gates <name,...>] [--actor <actor>] [-]",
+      "amend [<contract>|@<contract>] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--actor <actor>] [--repo <path>] [-]",
     purpose: "Change a Contract's document, prerequisites, or acceptance gates.",
     details: [
       "Gates are acceptance obligations checked at placement: reviewed awaits a",
@@ -111,7 +111,7 @@ export const CONTRACT_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--overwrite] | deliver [<contract>|@<contract>] --dry-run [--include-dirty] [--show-diff]",
+      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--overwrite] [--repo <path>]\ndeliver [<contract>|@<contract>] --dry-run [--include-dirty] [--show-diff] [--repo <path>]",
     purpose: "Submit work for a Contract and integrate it when its requirements are met.",
     details: [
       "The Contract, not the current Arc, sets what delivery must satisfy. An Arc records progress; it does not narrow acceptance.",
@@ -136,7 +136,8 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "optional",
     flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-    usage: "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>]",
+    usage:
+      "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--repo <path>]",
     purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",
@@ -150,7 +151,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "required",
     flags: { actor: "value", json: "boolean" },
-    usage: "arc [<contract>|@<contract>] [--actor <actor>] -",
+    usage: "arc [<contract>|@<contract>] [--actor <actor>] [--repo <path>] -",
     purpose: "Name the current chapter of a Contract's story (a story arc).",
     details: [
       "stdin is one nonblank H1 chapter name followed by any Markdown body, including none:",
@@ -163,14 +164,14 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { actor: "value", note: "value", json: "boolean" },
-    usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>]",
-    purpose: "End work on a Contract without delivering it; optionally record why.",
+    usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--repo <path>]",
+    purpose: "End work on a Contract without accepting it; optionally record why.",
   },
   show: {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "show [<contract>|@<contract>]",
+    usage: "show [<contract>|@<contract>] [--repo <path>]",
     purpose: "Read one Contract's guidance.",
     details: [
       "Accepts a complete Contract identity or exact @<contract> short selector.",
@@ -199,12 +200,12 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value" },
     usage:
-      'ls debt[/] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls ["aku/*/*"] --mine\nls ["aku/*/*"] --caller <integration>:<id> | aku/<name>/<suffix>',
+      'ls debt[/] [--limit <count>]\nls debt/<namespace>/ [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
-      "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists the living Akumas under one name.",
-      'ls "aku/<name>/*" is the same living set in glob form; ls "aku/*/*" lists every living Akuma.',
+      "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
+      'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',
       "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
       "--caller selects an explicit caller instead; both selectors are World-local and refuse for Contract, Debt, or Akuma-name catalogues.",
       "Descendant rows name their immediate calling Akuma beside the row.",
@@ -214,7 +215,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { "retry-hooks": "boolean", json: "boolean" },
-    usage: "reconcile [<contract>|@<contract>] [--retry-hooks]",
+    usage: "reconcile [<contract>|@<contract>] [--retry-hooks] [--repo <path>]",
     purpose: "Restore a Contract's Git workspace from its recorded state, or all of this World's.",
     details:
       "--retry-hooks reruns configured setup commands even when a Contract workspace already exists; otherwise they run when reconciliation creates it.",
@@ -239,7 +240,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { path: "repeat", json: "boolean" },
-    usage: "region [<contract>]\nregion --path <pattern> [--path <pattern> ...]",
+    usage: "region [<contract>] [--repo <path>]\nregion --path <pattern> [--path <pattern>]... [--repo <path>]",
     purpose: "Show declared Contract write patterns — all, one Contract's, or those overlapping given paths.",
     details: "Check overlap before starting parallel work.",
   },

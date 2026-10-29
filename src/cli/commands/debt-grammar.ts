@@ -1,4 +1,10 @@
-import { CliUsageError, DEBT_FAMILY_USAGE_GUIDE, unknownCommandGuide, type CliUsageGuide } from "../usage.js";
+import {
+  CliUsageError,
+  commonInvocationOptions,
+  DEBT_FAMILY_USAGE_GUIDE,
+  unknownCommandGuide,
+  type CliUsageGuide,
+} from "../usage.js";
 import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
 import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import { parseDebtId } from "../../debt/identity.js";
@@ -210,26 +216,19 @@ export function renderDebtHelp(action?: DebtAction): string {
 }
 
 function renderDebtUsage(action: DebtAction): string {
-  return DEBT_COMMAND_SPECS[action].usage
+  return debtUsage(action)
     .split("\n")
-    .map((line, index) => {
-      if (index === 0 || line.trimStart().startsWith("debt ")) {
-        const command = line.trimStart().startsWith("debt ") ? `keiyaku ${line.trim()}` : `keiyaku ${line}`;
-        return `${index === 0 ? "usage  " : "      "}${command}`;
-      }
-      return `      ${line.trim()}`;
-    })
+    .map((line, index) => `${index === 0 ? "usage  " : "      "}${line.trimStart()}`)
     .join("\n");
 }
 
 function debtUsage(action: DebtAction): string {
-  const lines = DEBT_COMMAND_SPECS[action].usage.split("\n");
-  return lines
-    .map((line, index) => {
-      if (index === 0 || line.trimStart().startsWith("debt ")) return `keiyaku ${line.trim()}`;
-      return `           ${line.trim()}`;
-    })
-    .join("\n");
+  const usage = DEBT_COMMAND_SPECS[action].usage;
+  const lines = usage.split("\n").map((line, index) => {
+    if (index === 0 || line.trimStart().startsWith("debt ")) return `keiyaku ${line.trim()}`;
+    return line.trim();
+  });
+  return [...lines, commonInvocationOptions(usage)].join("\n");
 }
 
 export function debtUsageGuide(action: DebtAction): CliUsageGuide {

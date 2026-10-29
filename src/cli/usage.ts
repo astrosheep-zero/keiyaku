@@ -29,10 +29,14 @@ export function acceptsFromUsage(usage: string): string {
     .join("\n");
 }
 
+export function commonInvocationOptions(usage: string): string {
+  return `common options: ${usage.includes("[--json]") ? "" : "[--json] "}[-C <path> | --cwd <path>]`;
+}
+
 export function commandGuide(commandPath: string, usage: string): CliUsageGuide {
   return {
     scope: `keiyaku ${commandPath}`,
-    accepts: acceptsFromUsage(usage),
+    accepts: `${acceptsFromUsage(usage)}\n${commonInvocationOptions(usage)}`,
     help: `keiyaku ${commandPath} --help`,
   };
 }
@@ -89,12 +93,10 @@ export function isBlankInput(value: string): boolean {
 }
 
 export function usageLine(usage: string): string {
-  return usage
-    .split("\n")
-    .map((line, index) => {
-      if (index === 0) return `usage  keiyaku ${line}`;
-      const continuation = line.trimStart();
-      return `      keiyaku ${continuation.startsWith("keiyaku ") ? continuation.slice("keiyaku ".length) : continuation}`;
-    })
-    .join("\n");
+  const lines = usage.split("\n").map((line, index) => {
+    if (index === 0) return `usage  keiyaku ${line}`;
+    const continuation = line.trimStart();
+    return `      keiyaku ${continuation.startsWith("keiyaku ") ? continuation.slice("keiyaku ".length) : continuation}`;
+  });
+  return [...lines, `      ${commonInvocationOptions(usage)}`].join("\n");
 }

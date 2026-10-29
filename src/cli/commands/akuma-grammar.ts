@@ -60,6 +60,11 @@ type AkumaCommandSpec = Readonly<{
 }>;
 
 const EXTRA_ALLOWED_ACTIONS = ALLOWED_ACTIONS.filter((action) => !DEFAULT_ALLOWED_ACTIONS.includes(action));
+const SET_SELECTORS = '(<aku/...> | @alias | <kei/...> | "aku/<name-pattern>/<hex-pattern>")...';
+const SET_DETAILS =
+  "Globs contain * and use lowercase hex digits or * in the suffix. --repo requires at least one Contract (kei/...) selector.";
+const SCHEMA_DETAILS =
+  "--schema supplies a JSON Schema answer contract to the provider; on observation the CLI parses JSON but does not independently validate schema conformance.";
 
 const AKUMA_COMMAND_SPECS = {
   call: {
@@ -74,25 +79,24 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
+      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
     purpose: "Call an Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
       "--schema and --wait require a prompt.",
       "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
-      "--contract assigns the Akuma work from that Contract; it does not choose where the Akuma works.",
-      "--workdir selects where the Akuma works; relative paths start from your current directory. Without it, the current directory is used.",
-      "--alias <name> gives the new Akuma the selector @name; use it instead of aku/<id>.",
+      "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
+      "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
+      "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
       `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
       ...(EXTRA_ALLOWED_ACTIONS.length === 0
         ? []
         : [`Also available with --allowed: ${EXTRA_ALLOWED_ACTIONS.join(", ")}.`]),
       "Repeated --allowed adds actions to the selected Akuma's allowed actions; it cannot remove inherited permissions.",
       "If no actions are configured, defaults apply; an explicitly empty list allows none.",
-      "An Akuma started by another Akuma can use only actions its parent can use. status <aku/...|@alias> shows that Akuma's allowed actions.",
-      "--schema checks the Akuma's answer against a JSON Schema file; stdin is still the prompt source.",
-      "On success, the Akuma is assigned to the Contract; if @name is already in use, --alias reassigns it to this Akuma.",
+      "An Akuma started by another Akuma can use only actions its parent can use. Use keiyaku status <aku/...|@alias> --json to inspect status.allowed.",
+      SCHEMA_DETAILS,
       "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
@@ -100,10 +104,11 @@ const AKUMA_COMMAND_SPECS = {
     arity: "one-or-more",
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
-    usage: "wait <aku/...|@alias>... [--any | --all] [--timeout <duration>]",
+    usage: `wait ${SET_SELECTORS} [--any | --all] [--timeout <duration>] [--repo <path>]`,
     purpose: "Wait for one or more Akumas to finish work.",
     details: [
       "The default mode is any; --all waits until every selected Akuma completes.",
+      SET_DETAILS,
       "An already completed member counts immediately, so repeating a selection can return at once.",
       "Text prints each selected Akuma's status snapshot, then one failure fact for any Akuma it could not read.",
       "An answer is part of that snapshot; wait writes no separate copy of it to stdout.",
@@ -131,7 +136,7 @@ const AKUMA_COMMAND_SPECS = {
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt durably admits the new Tell while asking the current Body to yield; admission remains even if completion cannot be proven.",
-      "--schema reads a JSON Schema file for the answer contract; stdin remains the prompt source.",
+      SCHEMA_DETAILS,
       "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
       "Completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
@@ -149,10 +154,10 @@ const AKUMA_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "history <aku/...|@alias> [--id <historyId> | --before <index> | --since <index>] [--limit <count>] [--last]\nhistory <kei/...> [--full]",
+      "history <aku/...|@alias> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@alias> --id <historyId>\nhistory <aku/...|@alias> --last\nhistory <kei/...> [--full] [--repo <path>]",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
-      "--id reads the exact retained answered turn (turn/<number>).",
+      "--id reads an exact retained terminal turn (turn/<number>): its answer or failure diagnostic.",
       "--before <index> pages older rows before that sequence; --since <index> pages newer rows after it.",
       "--limit bounds page size (default 12); without --since, the latest rows are shown.",
       "With --since, paging starts at the earliest newer rows.",
@@ -164,16 +169,18 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: false,
     flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...|@alias> --at <historyId>",
+    usage: "fork <aku/...|@alias> --at <historyId> [--repo <path>]",
     purpose: "Create a new Akuma from an answered turn.",
-    details: "--at takes a retained answered turn id (turn/<n>); find one with history.",
+    details:
+      "--at takes a retained answered turn id (turn/<n>); find its historyId in paged keiyaku history <aku/...|@alias> --json. Fork also requires a retained provider fork point.",
   },
   kill: {
     arity: "one-or-more",
     stdin: false,
     flags: { json: "boolean" },
-    usage: "kill <aku/...|@alias>...",
+    usage: `kill ${SET_SELECTORS} [--repo <path>]`,
     purpose: "Stop the selected Akuma's current work; it can be woken again with tell.",
+    details: SET_DETAILS,
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
 
