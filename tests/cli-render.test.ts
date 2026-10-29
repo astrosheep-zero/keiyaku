@@ -460,7 +460,7 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
   );
   assert.doesNotMatch(text, /journal/u);
   assert.equal((text.match(/^\d{4}-\d{2}-\d{2}$/gmu) ?? []).length, 2, "one bare day divider per day");
-  assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · @intern$/mu);
+  assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · aku\/intern\/33dd4670$/mu);
   assert.match(text, /^16:00 delivered bbbbbbb · × verification · \d+ lines$/mu, "a denied fused deliver beat");
   assert.match(text, /^16:11 amended · gates$/mu, "amend names its facets");
   assert.match(text, /^16:18 delivered ddddddd · ✓ verification · \d+ lines$/mu, "a satisfied fused deliver beat");
@@ -1446,7 +1446,7 @@ test("reconcile renders a healthy no-op compactly", () => {
 
 test("reconcile failure renders mark and facts", () => {
   const result = reconcile({ lag: [{ kind: "reconcile-failed", stage: "effect", diagnostic: "git failed" }] });
-  assert.equal(renderReconcile(result), "✓ reconcile\n! reconcile  effect  git failed");
+  assert.equal(renderReconcile(result), "! reconcile incomplete\n! reconcile  effect  git failed");
 });
 
 test("reconcile renders worktree hook failure as attention", () => {
@@ -1548,7 +1548,7 @@ test("reconcile renders contract-file and settlement failures", () => {
 
 test("world reconcile failure renders its diagnostic", () => {
   const result = { kind: "world-observation-failed", diagnostic: "git failed" } as const;
-  assert.equal(renderReconcile(result), "✓ reconcile\n! reconcile  git failed");
+  assert.equal(renderReconcile(result), "! reconcile failed\n! reconcile  git failed");
 });
 
 test("Verification create action names are safe in text receipts", () => {
@@ -1880,12 +1880,12 @@ test("a gates-refused placement awaits each not-yet-happened requirement as a pl
   );
 });
 
-test("four or more awaited requirements bound the margin line", () => {
+test("four or more awaited requirements still name every event", () => {
   const text = blockedText(
     "kei/many-missing",
     ["a", "b", "c", "d"].map((name) => ({ gate: gate(name), current: { kind: "missing" as const } })),
   );
-  assert.equal(text.split("\n").at(-1), "⧗ awaiting 4 gates");
+  assert.equal(text.split("\n").at(-1), "⧗ awaiting a, b, c, d");
 });
 
 test("a gates-refused placement whose unmet requirements all hold verdicts omits the await line", () => {
@@ -2289,7 +2289,7 @@ test("deliver renders accepted and stopped continuations from the accepted resul
       "  target  5555555..6666666  refs/heads/main",
       "✓ accepted",
       "✓ dependent  complete  kei/claimed-dependent",
-      "⧗ kei/stopped-dependent  ·  gates unmet",
+      "⧗ kei/stopped-dependent  ·  awaiting review",
     ].join("\n"),
   );
 });

@@ -16,6 +16,9 @@ import {
 } from "../src/cli/render/akuma-activity.js";
 import {
   askProgressStream,
+  askOutcome,
+  callOutcome,
+  tellOutcome,
   renderCallText,
   renderForkText,
   renderKillText,
@@ -827,6 +830,17 @@ function createdDebtRow(): DebtRow {
   };
 }
 
+test("Akuma outcomes distinguish admission from failed execution", () => {
+  const tell = tellReceipt("go", "told", { kind: "told" });
+  assert.equal(callOutcome(called({ kind: "born" })), "accepted");
+  assert.equal(tellOutcome({ akuma: SPECIMEN_ID, tell }), "accepted");
+  assert.equal(tellOutcome({ akuma: SPECIMEN_ID, tell: { ...tell, wake: { kind: "failed", diagnostic: "wake refused" } } }), "failed");
+  const observation = { reason: "failed" as const, diagnostic: "provider stopped" };
+  assert.equal(callOutcome(called({ kind: "observed", tell, observation })), "failed");
+  assert.equal(askOutcome({ akuma: SPECIMEN_ID, tell, observation }), "failed");
+  assert.equal(askOutcome({ akuma: SPECIMEN_ID, tell, observation: { reason: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" } }), "failed");
+});
+
 test("every action receipt leads with a verdict and subject, then indented evidence", () => {
   const context = { columns: 100, color: false };
   assert.deepEqual(
@@ -1007,6 +1021,16 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     ].join("\n"),
     "plural kill keeps one compact block per member in frozen order",
   );
+});
+
+test("created Debt observations use the shared dropped disposition", () => {
+  const status = waitStatus("aku/worker/abcd1234", "asleep", idleAkumaSnapshot([]));
+  const text = snapshotText({
+    status,
+    contract: { kind: "none" },
+    createdDebts: { kind: "present", rows: [{ ...createdDebtRow(), state: "drop", disposition: "drop" }] },
+  }, DEFAULT_CONTEXT);
+  assert.match(text, /debt\/example · close the rake · dropped · P2/u);
 });
 
 test("an observation panel orders identity, context, activity, conclusion, outputs, and diagnostics", () => {

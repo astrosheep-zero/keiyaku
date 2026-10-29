@@ -12,6 +12,7 @@ import type { AkumaObservation, CreatedDebtObservation, DispatchAssociation } fr
 import type { CallObservation, CallResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
+import { dispositionText } from "./debt.js";
 import { debtDispositionMark } from "./marks.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -921,7 +922,7 @@ function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[
 
 function renderDebtRow(row: CreatedDebtRow, columns: number): readonly string[] {
   const prefix = `  ${debtDispositionMark(row.disposition)} ${row.id} · `;
-  const body = `${safeText(row.title)} · ${row.disposition} · P${row.priority}`;
+  const body = `${safeText(row.title)} · ${dispositionText(row.disposition)} · P${row.priority}`;
   const inline = `${prefix}${body}`;
   if (displayColumns(inline) <= columns) return [inline];
   return renderBoundedTextBlock(body, {

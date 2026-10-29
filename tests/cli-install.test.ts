@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { installExitCode, installHarnesses, renderInstallText } from "../src/cli/commands/install.js";
+import { installOutcome, installHarnesses, renderInstallHelp, renderInstallText } from "../src/cli/commands/install.js";
 import type { ProcessInput, ProcessOutcome } from "../src/runtime/proc/run.js";
 
 // The install recipes name the built marketplace root relative to the module that holds them, so the
@@ -63,7 +63,7 @@ test("Codex and Claude use their native marketplace recipes", async () => {
     ["claude", "plugin", "install", "keiyaku@keiyaku", "--scope", "user"],
     ["claude", "plugin", "update", "keiyaku@keiyaku", "--scope", "user"],
   ]);
-  assert.equal(installExitCode(result), 0);
+  assert.equal(installOutcome(result), "accepted");
 });
 
 test("--all records failure and continues in fixed harness order", async () => {
@@ -88,7 +88,8 @@ test("--all records failure and continues in fixed harness order", async () => {
   );
   assert.deepEqual(calls[3], ["opencode", "plugin", join(assetsRoot, "opencode"), "--global", "--force"]);
   assert.deepEqual(calls[4], ["pi", "install", "npm:@astrosheep/keiyaku"]);
-  assert.equal(installExitCode(result), 1);
+  assert.equal(installOutcome(result), "failed");
+  assert.match(renderInstallHelp(), /any failure exits 3\./u);
   assert.match(renderInstallText(result), /claude failed: claude exited 7: not configured/);
 });
 

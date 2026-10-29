@@ -14,7 +14,7 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { main } from "../src/cli/main.js";
-import { nukeExitCode, renderNukeText } from "../src/cli/render/nuke.js";
+import { nukeOutcome, renderNukeText } from "../src/cli/render/nuke.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -748,9 +748,9 @@ test("nuke receipt names confirmed removals and retained coordination locks", ()
   assert.match(text, /locks  may remain · SQLite coordination files cannot be removed safely/u);
 });
 
-test("CLI nuke exit code reports owner failure", () => {
+test("CLI nuke outcome retains required pending work", () => {
   assert.equal(
-    nukeExitCode({
+    nukeOutcome({
       operation: "nuke",
       kind: "accepted",
       world: "/world" as never,
@@ -758,10 +758,10 @@ test("CLI nuke exit code reports owner failure", () => {
       pending: [{ surface: "reset", required: true }],
       value: { removed: { refs: 1, worktrees: 0, debts: 0 } },
     }),
-    2,
+    "retryable",
   );
   assert.equal(
-    nukeExitCode({
+    nukeOutcome({
       operation: "nuke",
       kind: "accepted",
       world: "/world" as never,
@@ -769,10 +769,10 @@ test("CLI nuke exit code reports owner failure", () => {
       pending: [],
       value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
     }),
-    0,
+    "accepted",
   );
   assert.equal(
-    nukeExitCode({
+    nukeOutcome({
       operation: "nuke",
       kind: "refused",
       world: "/world" as never,
@@ -780,7 +780,7 @@ test("CLI nuke exit code reports owner failure", () => {
       pending: [],
       refusal: { kind: "nuke-confirmation-required", world: "/world" as never },
     }),
-    1,
+    "refused",
   );
 });
 

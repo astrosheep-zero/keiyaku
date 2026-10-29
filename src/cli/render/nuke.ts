@@ -1,3 +1,4 @@
+import type { CliOutcome } from "../streams.js";
 import type { NukeResult } from "../../index.js";
 import { renderRefusal } from "./refusal.js";
 
@@ -22,6 +23,10 @@ export function renderNukeText(result: NukeResult): string {
   return "";
 }
 
-export function nukeExitCode(result: NukeResult): number {
-  return result.kind === "refused" ? 1 : result.pending.some((surface) => surface.required) ? 2 : 0;
+export function nukeOutcome(result: NukeResult): CliOutcome {
+  return result.kind === "refused"
+    ? "refused"
+    : result.pending.some((surface) => surface.required)
+      ? "retryable"
+      : "accepted";
 }

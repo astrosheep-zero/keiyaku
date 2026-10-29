@@ -62,10 +62,13 @@ function renderDirtyRefusal(
     lines.push(...collectionLines(name, refusal[name], indent));
   }
   wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
-  if (refusal.option?.available === false) {
-    lines.push(`${indent}option  --include-dirty · unavailable with submodule changes`);
+  if (refusal.option === undefined) {
+    if (refusal.submodules.length > 0)
+      wrap(lines, "reason  submodule changes cannot be captured for review", indent, columns);
+  } else if (!refusal.option.available) {
+    lines.push(`${indent}option  ${refusal.option.flag} · unavailable with submodule changes`);
   } else {
-    lines.push(`${indent}option  --include-dirty · captures complete non-ignored worktree bytes`);
+    lines.push(`${indent}option  ${refusal.option.flag} · captures complete non-ignored worktree bytes`);
     lines.push(`${indent}capture index  private · real index unchanged, including any unmerged entries`);
     lines.push(`${indent}staging  not required for --include-dirty`);
   }

@@ -126,7 +126,7 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   assert.equal(stderr, "");
 });
 
-test("worktree hook failure reports exit 1 at the CLI boundary", async () => {
+test("worktree hook failure reports failure at the CLI boundary", async () => {
   const report: ReconcileReport = {
     effects: [],
     lag: [
@@ -144,7 +144,7 @@ test("worktree hook failure reports exit 1 at the CLI boundary", async () => {
   assert.equal(reconcileHasFailure(report), true);
 });
 
-test("target checkout retention reports exit 1 at the CLI boundary", async () => {
+test("target checkout retention reports failure at the CLI boundary", async () => {
   const report: ReconcileReport = {
     effects: [],
     lag: [
@@ -160,7 +160,7 @@ test("target checkout retention reports exit 1 at the CLI boundary", async () =>
   assert.equal(reconcileHasFailure(report), true);
 });
 
-test("private-state seat-close failure reports exit 1 at the CLI boundary", async () => {
+test("private-state seat-close failure reports failure at the CLI boundary", async () => {
   const report: ReconcileReport = {
     effects: [],
     lag: [],
@@ -173,7 +173,7 @@ test("private-state seat-close failure reports exit 1 at the CLI boundary", asyn
   assert.equal(reconcileHasFailure(report), true);
 });
 
-test("reconcile failure reports exit 1 at the CLI boundary", async () => {
+test("reconcile failure reports failure at the CLI boundary", async () => {
   const report: ReconcileReport = {
     effects: [],
     lag: [{ kind: "contract-file-failed", worktree: "/tmp/wt", path: "KEIYAKU.md", diagnostic: "write failed" }],
@@ -278,7 +278,7 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
   ];
   for (const [error, facts] of refusals) {
     const projected = await akumaFailureProjection(error, parsed.command);
-    assert.equal(projected!.exitCode, 1);
+    assert.equal(projected!.outcome, "refused");
     for (const fact of facts) assert.ok(projected!.body.includes(fact));
     assert.ok(projected!.body.includes("keiyaku wait --help"));
   }

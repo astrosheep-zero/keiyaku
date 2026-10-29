@@ -16,7 +16,15 @@ import { World, type WorldRoot } from "../../world.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
-import { displayContext, emit, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import {
+  type CliOutcome,
+  displayContext,
+  emit,
+  resultContext,
+  writeJson,
+  writeStderr,
+  writeStdout,
+} from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import { callObservationStream } from "../render/akuma-activity.js";
 import {
@@ -28,18 +36,18 @@ import {
   waitText,
 } from "../render/akuma-activity.js";
 import {
-  askExitCode,
+  askOutcome,
   askProgressStream,
-  callExitCode,
+  callOutcome,
   callObservationHead,
-  forkExitCode,
-  historyExitCode,
-  killExitCode,
+  forkOutcome,
+  historyOutcome,
+  killOutcome,
   renderCallText,
   renderFailedCallObservation,
   renderForkText,
   renderKillText,
-  tellExitCode,
+  tellOutcome,
   waitedTellProgress,
 } from "../render/akuma.js";
 export { isParsedAkumaCommand, renderAkumaHelp } from "./akuma-grammar.js";
@@ -123,7 +131,7 @@ function emitAnswer(body: string, exact: boolean): void {
 async function runCall(
   command: Extract<InvokedAkumaCommand, { command: "call" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const declaredCaller =
@@ -185,12 +193,12 @@ async function runCall(
     }
     if (command.output === "json") {
       writeJson(result);
-      return callExitCode(result);
+      return callOutcome(result);
     }
     const raw = callRawAnswer(result, streamed);
     if (raw === undefined) emitAnswer(renderCallText(result, streamed, displayContext()), false);
     else emitAnswer(raw, true);
-    return callExitCode(result);
+    return callOutcome(result);
   } finally {
     driver.close(stream?.flush() ?? []);
   }
@@ -199,7 +207,7 @@ async function runCall(
 async function runWait(
   command: Extract<InvokedAkumaCommand, { command: "wait" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   const result = await akumas(input).wait({
     akuma: command.akuma,
@@ -208,18 +216,19 @@ async function runWait(
     ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+  const outcome = result.unobserved.length === 0 ? "accepted" : "failed";
   if (command.output === "json") {
     writeJson(result);
-    return 0;
+    return outcome;
   }
   emitAnswer(waitText(result, { ...(alias === undefined ? {} : { alias }) }, displayContext()), false);
-  return 0;
+  return outcome;
 }
 
 async function runTell(
   command: Extract<InvokedAkumaCommand, { command: "tell" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const body = await promptBody("tell", command, input);
   const result = await akumas(input).tell({
     ...(await inputInitiator(input)),
@@ -230,10 +239,13 @@ async function runTell(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const text = () => tellText(result, inputAlias(command.akuma), displayContext());
-  return emit(command.output, result, text, tellExitCode(result));
+  return emit(command.output, result, text, tellOutcome(result));
 }
 
-async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>, input: InvokeInput): Promise<number> {
+async function runAsk(
+  command: Extract<InvokedAkumaCommand, { command: "ask" }>,
+  input: InvokeInput,
+): Promise<CliOutcome> {
   const body = await promptBody("ask", command, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const alias = inputAlias(command.akuma);
@@ -271,10 +283,10 @@ async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>,
       writeStderr(waitedTellProgress(result, alias, resultContext()));
     if (command.output === "json") {
       writeJson(result);
-      return askExitCode(result);
+      return askOutcome(result);
     }
     emitAnswer(askRawAnswer(result, schema !== undefined) ?? "", true);
-    return askExitCode(result);
+    return askOutcome(result);
   } finally {
     driver.close(progress?.flush() ?? []);
   }
@@ -283,7 +295,7 @@ async function runAsk(command: Extract<InvokedAkumaCommand, { command: "ask" }>,
 async function runHistory(
   command: Extract<InvokedAkumaCommand, { command: "history" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const result = await akumas(input).history({
     akuma: command.akuma,
     ...(input.repo === undefined ? {} : { repo: input.repo }),
@@ -295,7 +307,7 @@ async function runHistory(
   });
   if (command.output === "json") {
     writeJson(result);
-    return historyExitCode(result, command.id);
+    return historyOutcome(result, command.id);
   }
   const raw = historyRawAnswer(result, command.id);
   const presentation = {
@@ -306,13 +318,13 @@ async function runHistory(
   if (raw !== undefined) emitAnswer(raw, true);
   else if (command.last && result.kind === "last") emitAnswer(result.answer, true);
   else emitAnswer(historyText(result, presentation, displayContext()), false);
-  return historyExitCode(result, command.id);
+  return historyOutcome(result, command.id);
 }
 
 async function runFork(
   command: Extract<InvokedAkumaCommand, { command: "fork" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const caller = await akumaCallerFromEnvironment(input.environment);
   const receipt = await akumas(input).fork({
     ...(await inputInitiator(input)),
@@ -321,13 +333,13 @@ async function runFork(
     at: command.at,
     ...(input.repo === undefined ? {} : { repo: input.repo }),
   });
-  return emit(command.output, receipt, () => renderForkText(receipt), forkExitCode(receipt));
+  return emit(command.output, receipt, () => renderForkText(receipt), forkOutcome(receipt));
 }
 
 async function runKill(
   command: Extract<InvokedAkumaCommand, { command: "kill" }>,
   input: InvokeInput,
-): Promise<number> {
+): Promise<CliOutcome> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
   const result = await akumas(input).kill({
     akuma: command.akuma,
@@ -335,7 +347,7 @@ async function runKill(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
   const text = () => renderKillText(result, alias, displayContext());
-  return emit(command.output, result, text, killExitCode(result));
+  return emit(command.output, result, text, killOutcome(result));
 }
 
 async function akumaWorld(command: InvokedAkumaCommand, coordinates: CliCoordinates): Promise<WorldRoot> {
@@ -394,7 +406,7 @@ export async function runAkumaCommand(
   coordinates: CliCoordinates,
   workdir: string | undefined,
   runtime: CliRuntime,
-): Promise<number> {
+): Promise<CliOutcome> {
   try {
     const input = await akumaInput(command, coordinates, workdir, runtime);
     switch (command.command) {

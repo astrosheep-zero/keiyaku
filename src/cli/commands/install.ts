@@ -1,3 +1,4 @@
+import { cliExitCode, type CliOutcome } from "../streams.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
@@ -64,7 +65,7 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
 }
 
 export function renderInstallHelp(): string {
-  return `${INSTALL_ROOT_PURPOSE}\n\n${usageLine(INSTALL_USAGE)}\n\n--all continues past failures; any failure exits 1.`;
+  return `${INSTALL_ROOT_PURPOSE}\n\n${usageLine(INSTALL_USAGE)}\n\n--all continues past failures; any failure exits ${cliExitCode("failed")}.`;
 }
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -135,6 +136,6 @@ export function renderInstallText(result: InstallInvocationResult): string {
     .join("\n");
 }
 
-export function installExitCode(result: InstallInvocationResult): number {
-  return result.results.some((item) => item.status === "failed") ? 1 : 0;
+export function installOutcome(result: InstallInvocationResult): CliOutcome {
+  return result.results.some((item) => item.status === "failed") ? "failed" : "accepted";
 }

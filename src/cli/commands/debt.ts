@@ -14,7 +14,7 @@ import {
   type DebtUpdateResult,
 } from "../../debt/index.js";
 import { installNamespaceContext, resolveDebtNamespaceContext } from "../../debt/context.js";
-import { displayContext, emit, writeJson } from "../streams.js";
+import { type CliOutcome, displayContext, emit, writeJson } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import type { CliCoordinates } from "../coordinates.js";
 import {
@@ -26,7 +26,7 @@ import {
   renderDebtShow,
   renderDebtTree,
   renderDebtUpdate,
-  debtExitCode,
+  debtOutcome,
   type DebtListScope,
   type DebtShowResult,
 } from "../render/debt.js";
@@ -178,20 +178,20 @@ function readScope(
 }
 
 /** One addressed read per caller-supplied id, in caller order; the native null survives to JSON. */
-async function runShow(command: ParsedDebtCommand, debts: DebtProduct): Promise<number> {
+async function runShow(command: ParsedDebtCommand, debts: DebtProduct): Promise<CliOutcome> {
   const handles = command.positionals.map((debtId) => debts.debt({ id: debtId }).id);
   const details: (DebtDetail | null)[] = [];
   for (const id of handles) details.push(await debts.debt({ id }).read());
   const missing = details.findIndex((detail) => detail === null);
-  const code = missing >= 0 ? 1 : 0;
+  const outcome = missing >= 0 ? "refused" : "accepted";
   const projected = handles.length === 1 ? details[0] : details;
   if (missing >= 0) {
     const refusal: DebtShowResult = { kind: "refused", refusal: { kind: "debt-missing", debtId: handles[missing]! } };
-    return emit(command.output, projected, () => renderDebtShow(refusal, displayContext()), code);
+    return emit(command.output, projected, () => renderDebtShow(refusal, displayContext()), outcome);
   }
   const found = details.filter((detail): detail is DebtDetail => detail !== null);
   const result: DebtShowResult = found.length === 1 ? found[0]! : found;
-  return emit(command.output, projected, () => renderDebtShow(result, displayContext()), code);
+  return emit(command.output, projected, () => renderDebtShow(result, displayContext()), outcome);
 }
 
 /** Presentation-only list scope the leaf acquired, never part of the native answer. */
@@ -201,7 +201,7 @@ function listPresentation(command: ParsedDebtCommand): DebtListScope {
   return command.action === "ls" && first !== undefined ? { namespace: first } : "current";
 }
 
-async function runRead(input: DebtInput): Promise<number> {
+async function runRead(input: DebtInput): Promise<CliOutcome> {
   const { debts, command, current } = input;
   const id = command.positionals[0]!;
   const scope = listPresentation(command);
@@ -218,7 +218,7 @@ async function runRead(input: DebtInput): Promise<number> {
         command.output,
         result,
         () => renderDebtList("ls", scope, result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     }
     case "ready":
@@ -233,7 +233,7 @@ async function runRead(input: DebtInput): Promise<number> {
         command.output,
         result,
         () => renderDebtList(action, scope, result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     }
     case "query": {
@@ -250,16 +250,16 @@ async function runRead(input: DebtInput): Promise<number> {
         command.output,
         result,
         () => renderDebtList("query", scope, result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     }
     case "tree": {
       const result = await debts.debt({ id }).tree();
-      return emit(command.output, result, () => renderDebtTree(result, displayContext()), debtExitCode(result));
+      return emit(command.output, result, () => renderDebtTree(result, displayContext()), debtOutcome(result));
     }
     case "doctor": {
       const result = await debts.doctor();
-      return emit(command.output, result, () => renderDoctor(result), debtExitCode(result));
+      return emit(command.output, result, () => renderDoctor(result), debtOutcome(result));
     }
     default:
       throw new Error(`debt action is not a read: ${command.action}`);
@@ -284,43 +284,38 @@ function missingDebt(id: string): Extract<DebtMutationResult, { kind: "refused" 
  * The one CLI edge mapping a Debt action with no World to its native refusal answer, then through
  * the matching action renderer and the native exit classifier.
  */
-function missingWorld(command: ParsedDebtCommand): number {
+function missingWorld(command: ParsedDebtCommand): CliOutcome {
   const output = command.output;
   if (command.action === "show") {
     // An addressed missing read keeps its native null in JSON; text refuses without partial output.
     if (output === "json") {
       writeJson(command.positionals.length === 1 ? null : command.positionals.map(() => null));
-      return 1;
+      return "refused";
     }
     const refusal: DebtShowResult = missingDebt(command.positionals[0]!);
-    return emit(output, refusal, () => renderDebtShow(refusal, displayContext()), 1);
+    return emit(output, refusal, () => renderDebtShow(refusal, displayContext()), "refused");
   }
   if (isWorldObservationAction(command)) {
-    return emit(output, { kind: "absent" }, () => "debt world absent", 1);
+    return emit(output, { kind: "absent" }, () => "debt world absent", "refused");
   }
   if (command.action === "context") {
     const result = { kind: "accepted" as const, value: { namespace: [], source: "default-root" as const } };
-    return emit(output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
+    return emit(output, result, () => renderDebtContext(result, displayContext()), debtOutcome(result));
   }
   if (command.action === "tree") {
     const result = missingDebt(command.positionals[0]!);
-    return emit(output, result, () => renderDebtTree(result, displayContext()), debtExitCode(result));
+    return emit(output, result, () => renderDebtTree(result, displayContext()), debtOutcome(result));
   }
   if (command.action === "update") {
     const result = missingDebt(command.positionals[0]!);
-    return emit(output, result, () => renderDebtUpdate(result, displayContext()), debtExitCode(result));
+    return emit(output, result, () => renderDebtUpdate(result, displayContext()), debtOutcome(result));
   }
   if (command.action !== "done" && command.action !== "drop")
     throw new Error(`debt action has no missing-world answer: ${command.action}`);
   const result = {
     items: command.positionals.map((id) => ({ id: id as DebtId, outcome: missingDebt(id) })),
   };
-  return emit(
-    output,
-    result,
-    () => renderDebtLifecycle(command.action, result, displayContext()),
-    debtExitCode(result),
-  );
+  return emit(output, result, () => renderDebtLifecycle(command.action, result, displayContext()), debtOutcome(result));
 }
 
 /** One plural Debt lifecycle answer: every verb shares the same batch shape and renderer. */
@@ -328,17 +323,17 @@ async function runBatchLifecycle(
   debts: DebtProduct,
   command: ParsedDebtCommand,
   verb: "done" | "drop",
-): Promise<number> {
+): Promise<CliOutcome> {
   const note = value(command, "note");
   const result = await debts.batch({
     verb,
     ids: command.positionals,
     ...(note === undefined ? {} : { note }),
   });
-  return emit(command.output, result, () => renderDebtLifecycle(verb, result, displayContext()), debtExitCode(result));
+  return emit(command.output, result, () => renderDebtLifecycle(verb, result, displayContext()), debtOutcome(result));
 }
 
-async function runMutation(input: DebtInput): Promise<number> {
+async function runMutation(input: DebtInput): Promise<CliOutcome> {
   const { debts, command } = input;
   if (isWorldObservationAction(command) || command.action === "tree") return await runRead(input);
   switch (command.action) {
@@ -348,12 +343,12 @@ async function runMutation(input: DebtInput): Promise<number> {
         command.output,
         result,
         () => renderDebtMutation("add", result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     }
     case "update": {
       const result = await invokeUpdate(input);
-      return emit(command.output, result, () => renderDebtUpdate(result, displayContext()), debtExitCode(result));
+      return emit(command.output, result, () => renderDebtUpdate(result, displayContext()), debtOutcome(result));
     }
     case "done":
     case "drop":
@@ -374,7 +369,7 @@ function establishesWorld(command: ParsedDebtCommand): boolean {
 function refuseNamespace(
   command: ParsedDebtCommand,
   refusal: Readonly<{ kind: "invalid-namespace-context"; path: string }>,
-): number {
+): CliOutcome {
   const result = { kind: "refused" as const, refusal };
   switch (command.action) {
     case "ls":
@@ -386,7 +381,7 @@ function refuseNamespace(
         command.output,
         result,
         () => renderDebtList(action, listPresentation(command), result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     }
     case "add":
@@ -394,7 +389,7 @@ function refuseNamespace(
         command.output,
         result,
         () => renderDebtMutation("add", result, displayContext()),
-        debtExitCode(result),
+        debtOutcome(result),
       );
     default:
       throw new Error(`debt action has no namespace refusal: ${command.action}`);
@@ -407,7 +402,7 @@ function refuseNamespace(
  * old bytes cannot block a deliberate change. The owner validates the supplied namespace, and every
  * answer is the readback of the default a later caller would resolve.
  */
-async function runContext(command: ParsedDebtCommand, context: DebtContext): Promise<number> {
+async function runContext(command: ParsedDebtCommand, context: DebtContext): Promise<CliOutcome> {
   const selected = namespace(command.positionals[0]);
   if (selected !== undefined) {
     try {
@@ -423,7 +418,7 @@ async function runContext(command: ParsedDebtCommand, context: DebtContext): Pro
     typeof resolved === "object" && "kind" in resolved
       ? { kind: "refused" as const, refusal: resolved }
       : { kind: "accepted" as const, value: resolved };
-  return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtExitCode(result));
+  return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtOutcome(result));
 }
 
 // eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
@@ -431,7 +426,7 @@ export async function runDebtCommand(
   command: ParsedDebtCommand,
   coordinates: CliCoordinates,
   runtime: CliRuntime,
-): Promise<number> {
+): Promise<CliOutcome> {
   validateDebtRowView(command);
   const stdinDiagnostic = debtStdinDiagnostic(command);
   const stdin = stdinDiagnostic === undefined ? undefined : await runtime.readStdin();

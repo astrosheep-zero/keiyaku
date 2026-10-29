@@ -202,7 +202,13 @@ export function reconcileHasFailure(report: ReconcileReport | RepoReconcileRepor
 
 export function renderReconcile(report: ReconcileReport | RepoReconcileReport, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const lines: string[] = ["✓ reconcile"];
+  const lines: string[] = [
+    isRepoReport(report) && report.kind === "world-observation-failed"
+      ? "! reconcile failed"
+      : reconcileHasFailure(report)
+        ? "! reconcile incomplete"
+        : "✓ reconcile",
+  ];
   const seen = new Set<string>();
   if (isRepoReport(report)) {
     if (report.kind === "world-observation-failed") {

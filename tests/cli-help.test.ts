@@ -1,3 +1,4 @@
+import { cliExitCode } from "../src/cli/streams.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -11,6 +12,11 @@ import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderDebtHelp } from "../src/cli/commands/debt-grammar.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
+
+test("the runtime maps the five process outcomes", () => {
+  const outcomes = ["accepted", "refused", "retryable", "failed", "usage"] as const;
+  assert.deepEqual(outcomes.map(cliExitCode), [0, 1, 2, 3, 64]);
+});
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {
   assert.deepEqual(parseArgv(["--help"]), { help: { kind: "root" } });
@@ -38,7 +44,7 @@ test("namespace and leaf help identify an executable command", () => {
   assert.match(renderRootHelp(), /Debt — unresolved-work ledger/u);
   assert.doesNotMatch(renderRootHelp(), /plan memory|keiyaku task/u);
   assert.match(renderRootHelp(), /--workdir <path>/u);
-  assert.match(renderRootHelp(), /Outcomes:  exit 0 accepted · 1 refused · 2 retry · 3 failed · 64 usage/u);
+  assert.match(renderRootHelp(), /Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 64 usage/u);
   assert.match(renderRootHelp(), /--version\s+Print the running package version\./u);
   assert.match(renderInstallHelp(), /install/u);
   assert.match(renderDebtHelp("add"), /usage  keiyaku debt add/u);

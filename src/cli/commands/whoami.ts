@@ -1,3 +1,4 @@
+import type { CliOutcome } from "../streams.js";
 import { AKUMA_REQUESTS_ENTRY_ENV, AKUMA_REQUESTS_ENV } from "../../akuma/providers/execution-environment.js";
 import { AkumaOwner } from "../../akuma/akuma-owner.js";
 import { readSoul } from "../../akuma/heart/index.js";
@@ -125,7 +126,7 @@ export async function runWhoami(
   coordinates: CliCoordinates,
   environment: NodeJS.ProcessEnv,
   signal?: AbortSignal,
-): Promise<number> {
+): Promise<CliOutcome> {
   const world = coordinates.world !== null && (await World.established(coordinates.world)) ? coordinates.world : null;
   const [caller, initiator, contract] = await Promise.all([
     callerFrom(environment),
@@ -148,5 +149,5 @@ export async function runWhoami(
     contract,
     ...(caller.kind === "akuma" ? { profile: await callerProfile(caller, coordinates, environment) } : {}),
   };
-  return emit(command.output, facts, () => renderWhoami(facts), 0);
+  return emit(command.output, facts, () => renderWhoami(facts), "accepted");
 }

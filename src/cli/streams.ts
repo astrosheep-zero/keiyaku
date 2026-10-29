@@ -1,5 +1,12 @@
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./render/terminal.js";
 
+const EXIT_CODES = { accepted: 0, refused: 1, retryable: 2, failed: 3, usage: 64 } as const;
+export type CliOutcome = keyof typeof EXIT_CODES;
+
+export function cliExitCode(outcome: CliOutcome): number {
+  return EXIT_CODES[outcome];
+}
+
 /** Append one complete line to a process stream unless the body already ends with a newline. */
 export function writeCliStream(stream: NodeJS.WritableStream, body: string): void {
   stream.write(body.endsWith("\n") ? body : `${body}\n`);
@@ -42,8 +49,13 @@ export function writeJson(value: unknown): void {
  * One product result: JSON writes the untouched native value, text writes the rendered projection,
  * and the native exit classifier's verdict follows.
  */
-export function emit<Result>(output: "text" | "json", result: Result, text: () => string, code: number): number {
+export function emit<Result>(
+  output: "text" | "json",
+  result: Result,
+  text: () => string,
+  outcome: CliOutcome,
+): CliOutcome {
   if (output === "json") writeJson(result);
   else writeStdout(text());
-  return code;
+  return outcome;
 }

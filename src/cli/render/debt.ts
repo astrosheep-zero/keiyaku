@@ -1,3 +1,4 @@
+import type { CliOutcome } from "../streams.js";
 import type {
   BlockedDebtList,
   BlockedDebtRow,
@@ -325,15 +326,15 @@ export function renderDebtLifecycle(
   return "items" in result ? renderBatch(verb, result, context.columns) : renderMutation(verb, result, context.columns);
 }
 
-export function debtExitCode(result: DebtNativeResult): number {
-  if ("issues" in result) return result.issues.length === 0 ? 0 : 1;
+export function debtOutcome(result: DebtNativeResult): CliOutcome {
+  if ("issues" in result) return result.issues.length === 0 ? "accepted" : "failed";
   if ("items" in result) {
     const kinds = result.items.map((item) => item.outcome.kind);
-    return kinds.includes("retry") ? 2 : kinds.includes("refused") ? 1 : 0;
+    return kinds.includes("retry") ? "retryable" : kinds.includes("refused") ? "refused" : "accepted";
   }
   if ("kind" in result) {
-    if (result.kind === "retry") return 2;
-    if (result.kind === "refused") return 1;
+    if (result.kind === "retry") return "retryable";
+    if (result.kind === "refused") return "refused";
   }
-  return 0;
+  return "accepted";
 }

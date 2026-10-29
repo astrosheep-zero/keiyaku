@@ -89,7 +89,7 @@ export function renderRootHelp(columns?: number): string {
       "  --repo <path>       Select the Git repository coordinate.",
       "  --workdir <path>    Set the execution directory for call only.",
       "",
-      "Outcomes:  exit 0 accepted · 1 refused · 2 retry · 3 failed · 64 usage",
+      "Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 64 usage",
     ].join("\n"),
     columns,
   );

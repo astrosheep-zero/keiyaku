@@ -6,12 +6,7 @@ import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
 import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
-import {
-  installExitCode,
-  installHarnesses,
-  renderInstallText,
-  type InstallInvocationResult,
-} from "./commands/install.js";
+import { installOutcome, installHarnesses, renderInstallText } from "./commands/install.js";
 import { runDebtCommand } from "./commands/debt.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveInvocationCoordinates } from "./coordinates.js";
@@ -27,7 +22,7 @@ import { createExecutionProgressRenderer } from "./render/execution-progress.js"
 import { executionFailureLines } from "./render/receipt.js";
 import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
-import { displayContext, emit, writeJson, writeStderr, writeStdout } from "./streams.js";
+import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
 
 export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
 
@@ -121,12 +116,12 @@ async function admitBindInput(
 async function runInstall(
   command: Extract<ParsedCommand, { command: "install" }>,
   environment: NodeJS.ProcessEnv,
-): Promise<number> {
-  const result: InstallInvocationResult = await installHarnesses(command.harnesses, environment);
-  return emit(command.output, result, () => renderInstallText(result), installExitCode(result));
+): Promise<CliOutcome> {
+  const result = await installHarnesses(command.harnesses, environment);
+  return emit(command.output, result, () => renderInstallText(result), installOutcome(result));
 }
 
-type AkumaFailureProjection = Readonly<{ body: string; exitCode: 1 | 3 }>;
+type AkumaFailureProjection = Readonly<{ body: string; outcome: CliOutcome }>;
 
 /** Projection of one native Akuma addressing/observation failure into its stated refusal body. */
 export async function akumaFailureProjection(
@@ -144,7 +139,7 @@ export async function akumaFailureProjection(
               [`id  ${safeText(error.id)}`],
               usageGuideForCommand(command),
             ),
-      exitCode: 1,
+      outcome: "refused",
     };
   }
   if (error instanceof AkumaAddressError) {
@@ -162,7 +157,7 @@ export async function akumaFailureProjection(
             [`selector  ${safeText(error.refusal.selector)}`],
             usageGuideForCommand(command),
           );
-    return { body: command.output === "json" ? error.message : body, exitCode: 1 };
+    return { body: command.output === "json" ? error.message : body, outcome: "refused" };
   }
   if (error instanceof AkumaWorldScopeError) {
     return {
@@ -178,7 +173,7 @@ export async function akumaFailureProjection(
               ],
               usageGuideForCommand(command),
             ),
-      exitCode: 1,
+      outcome: "refused",
     };
   }
   if (error instanceof AkumaObservationError) {
@@ -187,40 +182,23 @@ export async function akumaFailureProjection(
         command.output === "json"
           ? error.message
           : `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`,
-      exitCode: 3,
+      outcome: "failed",
     };
   }
   return undefined;
 }
 
-async function commandFailureText(error: unknown, command: ParsedCommand): Promise<string> {
-  const diagnostic = error instanceof Error ? error.message : String(error);
-  if (command.output === "json" || error instanceof CliUsageError) return diagnostic;
-  if (error instanceof AkumaArchetypeError) {
-    if (command.command === "call") {
-      return renderStructuredRefusal(
-        "call",
-        `Akuma not found · ${safeText(error.archetype)}`,
-        ["available  keiyaku ls aku/"],
-        usageGuideForCommand(command),
-      );
-    }
-    return `× ${command.command} failed\n  reason  ${safeText(error.message)}`;
-  }
-  return `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`;
-}
-
-function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): number {
+function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): CliOutcome {
   const refusal = {
     kind: "invalid-document" as const,
     diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
   };
   if (command.output === "json") writeJson({ kind: "refused", operation: "bind", refusal, draft: error.draft });
   else writeStdout(renderRefusal({ operation: "bind", refusal }, error.draft, displayContext()));
-  return error.original instanceof CliUsageError ? 64 : 1;
+  return error.original instanceof CliUsageError ? "usage" : "refused";
 }
 
-async function writeFailure(error: unknown, command: ParsedCommand): Promise<number> {
+async function writeFailure(error: unknown, command: ParsedCommand): Promise<CliOutcome> {
   if (error instanceof BindDraftError) return writeBindDraftFailure(error, command);
   if (error instanceof KeiyakuError) {
     const diagnostic = error.message;
@@ -230,30 +208,43 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<num
         executionFailureLines(error.outcome, error.category, diagnostic, displayContext().columns).join("\n"),
       );
     } else writeStderr(`× ${command.command} failed\n  reason  ${safeText(diagnostic)}`);
-    return 3;
+    return "failed";
   }
   const akumaFailure = await akumaFailureProjection(error, command);
   if (akumaFailure !== undefined) {
     writeStderr(akumaFailure.body);
-    return akumaFailure.exitCode;
+    return akumaFailure.outcome;
   }
   if (error instanceof AkumaArchetypeError && command.command === "call") {
+    const missing = error.reason === "was not found";
+    const diagnostic = missing ? "Akuma not found" : error.reason;
     return emit(
       command.output,
-      { kind: "refused", diagnostic: "Akuma not found", archetype: error.archetype, available: "keiyaku ls aku/" },
+      {
+        kind: "refused",
+        diagnostic,
+        archetype: error.archetype,
+        searched: error.searched,
+        ...(missing ? { available: "keiyaku ls aku/" } : {}),
+      },
       () =>
         renderStructuredRefusal(
           "call",
-          `Akuma not found · ${safeText(error.archetype)}`,
-          ["available  keiyaku ls aku/"],
+          `${diagnostic} · ${error.archetype}`,
+          [...error.searched.map((path) => `searched  ${path}`), ...(missing ? ["available  keiyaku ls aku/"] : [])],
           usageGuideForCommand(command),
         ),
-      1,
+      "refused",
     );
   }
   if (command.output === "json") writeJson(encodeFailureWire(error));
-  else writeStderr(await commandFailureText(error, command));
-  return error instanceof CliUsageError ? 64 : 3;
+  else {
+    const diagnostic = error instanceof Error ? error.message : String(error);
+    writeStderr(
+      error instanceof CliUsageError ? diagnostic : `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`,
+    );
+  }
+  return error instanceof CliUsageError ? "usage" : "failed";
 }
 
 function executionForCommand(
@@ -267,6 +258,10 @@ function executionForCommand(
 }
 
 export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
+  return cliExitCode(await runCommand(invocation, input));
+}
+
+async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
   assertExplicitRepoUse(command, invocation.repo);
   const environment = input.environment ?? process.env;

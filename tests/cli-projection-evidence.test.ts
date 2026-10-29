@@ -1,4 +1,7 @@
-import { acceptedReceipt, contractCatalog, contractRow, kanshiReport } from "./support/cli-fixtures.js";
+import { acceptedReceipt, contractCatalog, contractRow, kanshiReport, runCli } from "./support/cli-fixtures.js";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
@@ -32,6 +35,29 @@ import {
   reportedFileChange,
   snapshotRow,
 } from "./support/kanshi-activity.js";
+
+test("call preserves a definition failure instead of reporting a missing Akuma", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-cli-definition-");
+  const home = join(root, "home");
+  const definitions = join(home, "akuma");
+  mkdirSync(definitions, { recursive: true });
+  const invalidPath = join(definitions, "broken.md");
+  writeFileSync(invalidPath, "---\nprovider: false\n---\n");
+  const runtime = { cwd: root, environment: { KEIYAKU_HOME: home } };
+  const missing = await runCli(["call", "missing", "go"], runtime);
+  assert.equal(missing.exit, 1);
+  assert.match(missing.stdout, /reason  Akuma not found · missing/u);
+  assert.match(missing.stdout, /available  keiyaku ls aku\//u);
+  const invalid = await runCli(["call", "broken", "go"], runtime);
+  assert.equal(invalid.exit, 1);
+  assert.match(invalid.stdout, /reason  is invalid: Akuma provider must be a nonblank string · broken/u);
+  assert.ok(invalid.stdout.includes(`searched  ${invalidPath}`));
+  const json = await runCli(["call", "broken", "go", "--json"], runtime);
+  assert.equal(json.exit, 1);
+  assert.deepEqual(JSON.parse(json.stdout), {
+    kind: "refused", diagnostic: "is invalid: Akuma provider must be a nonblank string", archetype: "broken", searched: [invalidPath],
+  });
+});
 
 test("opaque text retains exact keys, types, empty collections, and array member boundaries", () => {
   assert.equal(
@@ -137,13 +163,16 @@ test("dirty refusal describes available capture without asserting a current unme
     submodules: [],
     shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
   };
-  const output = renderRefusalFacts(refusal, "  ", 120);
+  const output = renderRefusalFacts({ ...refusal, option: { flag: "--include-dirty", available: true } }, "  ", 120);
   assert.deepEqual(output.slice(-3), [
     "  option  --include-dirty · captures complete non-ignored worktree bytes",
     "  capture index  private · real index unchanged, including any unmerged entries",
     "  staging  not required for --include-dirty",
   ]);
   assert.doesNotMatch(output.join("\n"), /index  unmerged entries remain/u);
+  const review = renderRefusalFacts({ ...refusal, submodules: ["vendor"] }, "  ", 120);
+  assert.ok(review.includes("  reason  submodule changes cannot be captured for review"));
+  assert.ok(review.includes("    vendor"));
   const blocked = renderRefusalFacts({ ...refusal, option: { flag: "--include-dirty", available: false } }, "  ", 120);
   assert.equal(blocked.at(-1), "  option  --include-dirty · unavailable with submodule changes");
   assert.doesNotMatch(blocked.join("\n"), /captures complete/u);
@@ -248,12 +277,12 @@ test("Contract history keeps event evidence and commit labels without exposing d
       `${at} attestation · ${entries[3]} · reviewer`,
       "  gate  verified",
       "  verdict  satisfied",
-      `  subject  verification  · snapshot ${verificationSnapshot.slice(0, 7)}`,
+      `  snapshot  ${verificationSnapshot.slice(0, 7)}`,
     ].join("\n"),
   );
   assert.doesNotMatch(
     output,
-    /private-|\bdocument\b|segment:sha256|^\s+(?:snapshot|change) |\[\[|require-branches|next|then|please|key=/mu,
+    /private-|\bdocument\b|segment:sha256|^\s+change |\[\[|require-branches|next|then|please|key=/mu,
   );
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].fact.data.terms.document.key, "private-document-blob");
 });

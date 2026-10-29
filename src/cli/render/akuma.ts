@@ -1,3 +1,4 @@
+import type { CliOutcome } from "../streams.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkuId } from "../../akuma/identity.js";
@@ -199,37 +200,40 @@ export function renderKillText(result: AkumaKillResult, alias: string | undefine
   return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n");
 }
 
-export function callExitCode(result: CallResult): number {
+export function callOutcome(result: CallResult): CliOutcome {
   if (result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.observation.kind === "failed")
-    return 2;
-  if (result.observation.kind !== "observed") return 0;
+    return "failed";
+  if (result.observation.kind !== "observed") return "accepted";
   return result.observation.observation.reason === "failed" ||
     result.observation.observation.reason === "invalid-output"
-    ? 2
-    : 0;
+    ? "failed"
+    : "accepted";
 }
 
-export function killExitCode(result: AkumaKillResult): number {
+export function killOutcome(result: AkumaKillResult): CliOutcome {
   return result.results.some(
     (member) => member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy",
   )
-    ? 1
-    : 0;
+    ? "failed"
+    : "accepted";
 }
 
-export function tellExitCode(result: AkumaTellResult): number {
-  return result.tell.wake.kind === "failed" ? 2 : 0;
+export function tellOutcome(result: AkumaTellResult): CliOutcome {
+  return result.tell.wake.kind === "failed" ? "failed" : "accepted";
 }
 
-export function askExitCode(result: AkumaAskResult): number {
-  return result.observation.reason === "failed" || result.observation.reason === "invalid-output" ? 2 : 0;
+export function askOutcome(result: AkumaAskResult): CliOutcome {
+  return result.observation.reason === "failed" || result.observation.reason === "invalid-output"
+    ? "failed"
+    : "accepted";
 }
 
-export function forkExitCode(receipt: ForkResult): number {
-  return receipt.kind === "forked" ? 0 : receipt.kind === "upstream-forked" ? 2 : 1;
+export function forkOutcome(receipt: ForkResult): CliOutcome {
+  if (receipt.kind === "forked") return receipt.dispatch.kind === "failed" ? "failed" : "accepted";
+  return receipt.kind === "upstream-forked" || receipt.kind === "fork-failed" ? "failed" : "refused";
 }
 
-export function historyExitCode(result: AkumaHistoryResult, id: string | undefined): number {
-  if (id === undefined) return 0;
-  return result.kind === "exact" ? 0 : 1;
+export function historyOutcome(result: AkumaHistoryResult, id: string | undefined): CliOutcome {
+  if (id === undefined) return "accepted";
+  return result.kind === "exact" ? "accepted" : "refused";
 }

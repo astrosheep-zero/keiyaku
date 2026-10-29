@@ -140,7 +140,7 @@ export function gatesAwaitLines(placement: VerificationStop | PlacementStop | un
     .filter((report) => report.current.kind !== "attested")
     .map((report) => gateDisplayName(report.gate));
   if (events.length === 0) return [];
-  return [`⧗ awaiting ${events.length > 3 ? `${events.length} gates` : events.join(", ")}`];
+  return [`⧗ awaiting ${events.join(", ")}`];
 }
 
 function targetMovedDetail(stop: Extract<PlacementStop, { failure: "target-moved" }>): readonly ReceiptSegment[] {
@@ -243,8 +243,11 @@ function gatesUnsatisfiedStopLines(
   // carry the story, and the caller closes the receipt with the awaiting margin line.
   const lines: string[] = [];
   const target = stop.refusal.target;
-  if (dependent !== undefined) receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: "gates unmet" }], columns);
-  else if (target !== undefined)
+  if (dependent !== undefined) {
+    const awaiting = gatesAwaitLines(stop);
+    if (awaiting.length === 0) receiptRow(lines, " ", "dependent", [{ text: dependent, opaque: true }], columns);
+    for (const line of awaiting) receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: line.slice(2) }], columns);
+  } else if (target !== undefined)
     receiptRow(lines, " ", "target", [{ text: target, opaque: true }, { text: "· unchanged" }], columns);
   lines.push(...gateAlarmRows(stop, columns));
   return lines;

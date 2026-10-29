@@ -1,4 +1,3 @@
-import { parseAkuId } from "../../akuma/identity.js";
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
 import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
 import { receiptPayload } from "./receipt.js";
@@ -71,9 +70,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
       const lines = [
         `  gate  ${fact.data.gate}`,
         `  verdict  ${fact.data.verdict}`,
-        snapshot === undefined
-          ? "  subject  verification"
-          : `  subject  verification  · snapshot ${shortGitId(snapshot)}`,
+        ...(snapshot === undefined ? [] : [`  snapshot  ${shortGitId(snapshot)}`]),
       ];
       if (fact.data.summary !== undefined) {
         const clipped =
@@ -139,15 +136,8 @@ function bindLine(bind: Extract<Fact, { kind: "bind" }>, dispatch: ContractHisto
   const target = bind.data.coordinates.target?.replace(/^refs\/heads\//u, "") ?? "targetless";
   const gates = bind.data.terms.gates.map(gateDisplayName);
   const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
-  let alias = "";
-  if (dispatch?.source === "dispatch") {
-    try {
-      alias = ` · @${parseAkuId(dispatch.dispatch.akuId).archetype}`;
-    } catch {
-      alias = "";
-    }
-  }
-  return `bound to ${target} @ ${shortGitId(bind.data.coordinates.start)}${gateFact}${alias}`;
+  const caller = dispatch?.source === "dispatch" ? ` · ${dispatch.dispatch.akuId}` : "";
+  return `bound to ${target} @ ${shortGitId(bind.data.coordinates.start)}${gateFact}${caller}`;
 }
 
 /**
