@@ -2149,7 +2149,7 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
   }
 });
 
-test("list silently skips identities whose compact row cannot be read", async (context) => {
+test("list omits unreadable Hearts instead of reporting unborn, while direct status fails", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-list-schema-cut-");
   const heartCut = await allocateAkumaDirectory({
     worldRoot: root,
@@ -2166,6 +2166,7 @@ test("list silently skips identities whose compact row cannot be read", async (c
   });
 
   const world = await akumaAt(root);
+  await assert.rejects(world.of({ id: heartCut.id }).status(), (error: unknown) => !(error instanceof AkumaNotBornError));
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
   assert.equal(existsSync(noise), true);
 
@@ -2177,7 +2178,6 @@ test("list silently skips identities whose compact row cannot be read", async (c
   });
   await initializeHeart(leashCut.paths);
   unlinkSync(leashCut.paths.leash);
-  seedLegacySchema(leashCut.paths.leash, "leash_schema", 2);
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
 });
 

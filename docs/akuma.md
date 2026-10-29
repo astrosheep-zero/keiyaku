@@ -27,7 +27,11 @@ never a persisted process description. No successor reconstructs its
 predecessor's process authority.
 
 Birth becomes visible only when the child proves Soul under the leash. Failure
-before Soul seals the coordinate with durable birth evidence. An uncertain or crashed birth remains unborn until a contender pays the same leash judgment; age never decides it. A seal is permanent: stillborn cannot be reborn. Caller
+before Soul seals the coordinate with durable birth evidence. An uncertain or
+crashed birth remains unborn until a contender pays the same leash judgment; age
+never decides it. A present Heart that cannot be read is a hard observation
+failure, not evidence that the Akuma is unborn. A seal is permanent: stillborn
+cannot be reborn. Caller
 cancellation asks the publication owner to close only its retained unborn child;
 it cannot invent a third birth result. No blind cleaner adjudicates abandoned
 births.

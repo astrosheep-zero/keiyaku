@@ -4,6 +4,7 @@ import {
   createStatusFactReader,
   readLifeSnapshot,
   HeldAkumaLeash,
+  heartExists,
   isHeartAbsent,
   life,
   lifeAt,
@@ -63,7 +64,7 @@ export async function rosterListRow(
       ? { id: expected, life: "unborn", aliases }
       : { id: expected, life: "stillborn", seal, aliases };
   } catch (error) {
-    if (isHeartAbsent(error)) return { id: expected, life: "unborn", aliases };
+    if (isHeartAbsent(error) && !(await heartExists(paths))) return { id: expected, life: "unborn", aliases };
     throw error;
   }
 }
