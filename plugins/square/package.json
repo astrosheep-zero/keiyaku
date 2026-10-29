@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku-plugin-square",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
