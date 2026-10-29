@@ -10,8 +10,10 @@ import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { scopeForRepo } from "../src/library/repo.js";
+import { contractId } from "../src/core/facts/types.js";
 import { main } from "../src/cli/main.js";
 import type { WhoamiFacts } from "../src/cli/commands/whoami.js";
+import { renderWhoami } from "../src/cli/render/whoami.js";
 import { allocatedHeart } from "./support/akuma-fixtures.js";
 import { captureOutput, cliJson, runCli } from "./support/cli-fixtures.js";
 import { repositoryWithCommit } from "./support/git.js";
@@ -185,30 +187,47 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const text = await runCli(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(text.exit, 0, text.stderr);
   assert.equal(text.stdout, [
-    `${allocated.id} (@backup · @worker)`,
+    `${allocated.id} (@backup · @worker) · ${bound.contract}`,
+    `  ${row.worktreePath}`,
     "  initiator   CurrentSeat",
     "  parent      fixture:parent",
     `  world       ${world}`,
-    `  workdir     ${row.worktreePath}`,
-    `  context     ${bound.contract}`,
-    `  dispatch    ${bound.contract}`,
     "  requests    parent",
-    "  archetype   worker",
-    "  provider    claude",
-    "  model       fixture-model",
-    "  origin      direct",
-    `  born        ${AT}`,
-    "  allowed     akuma.call · contract.deliver",
+    "  runtime     claude · fixture-model",
     "",
   ].join("\n"));
   assert.doesNotMatch(text.stdout, /running|asleep|elapsed|timeline/u);
   assert.equal(readFileSync(trace, "utf8"), signalsBefore, "neither outcome nor initiating signal was emitted");
+
+  assert.ok(result.value.profile?.kind === "available");
+  const alternateContext = contractId("kei/different");
+  assert.ok(renderWhoami({ ...result.value, contract: { kind: "resolved", id: alternateContext } })
+    .includes(`\n  context     ${alternateContext}\n`));
+  assert.equal(renderWhoami({
+    ...result.value,
+    contract: { kind: "unavailable", reason: "missing\nstate" },
+    profile: {
+      ...result.value.profile, workdir: null, provider: null, model: null,
+      birth: { ...result.value.profile.birth, origin: { kind: "request", parent: allocated.id, requestId: "request\nid" } },
+    },
+  }), [
+    `${allocated.id} (@backup · @worker) · ${bound.contract}`,
+    "  initiator   CurrentSeat",
+    "  parent      fixture:parent",
+    `  world       ${world}`,
+    "  context     unavailable · missing state",
+    "  requests    parent",
+    "  runtime     unknown · unknown",
+    `  origin      request · ${allocated.id} · request id`,
+  ].join("\n"));
 
   const elsewhere = temporaryDirectory(t, "keiyaku-whoami-other-world-");
   const crossWorld = await cliJson<WhoamiFacts>(["-C", elsewhere, "whoami"], { environment });
   assert.equal(crossWorld.value.world, null);
   assert.equal(crossWorld.value.contract.kind, "none");
   assert.deepEqual(crossWorld.value.profile, result.value.profile, "profile and dispatch belong to the caller's World");
+  const crossWorldText = await runCli(["-C", elsewhere, "whoami"], { environment });
+  assert.ok(crossWorldText.stdout.includes("\n  context     none\n"));
   const missing = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], {
     environment: { ...environment, KEIYAKU_ACTOR_ID: "aku/worker/ffffffff" },
   });
@@ -238,7 +257,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   t.after(() => freeLeash.release());
   await freeLeash.birth(free.paths, {
     id: free.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {}, cwd: row.worktreePath, origin: { kind: "direct" }, allowed: [], createdAt: AT,
+    options: {}, cwd: row.worktreePath, origin: { kind: "fork", parent: allocated.id, at: "turn/1" }, allowed: [], createdAt: AT,
   });
   const freeEnvironment = { ...environment, KEIYAKU_ACTOR_ID: free.id };
   const freeFacts = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
@@ -246,7 +265,18 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   assert.equal(freeFacts.value.profile?.kind, "available");
   if (freeFacts.value.profile?.kind === "available") assert.deepEqual(freeFacts.value.profile.contracts, []);
   const freeText = await runCli(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
-  assert.ok(freeText.stdout.includes(`\n  context     ${bound.contract}\n  dispatch    none\n`));
+  assert.equal(freeText.stdout, [
+    `${free.id}`,
+    `  ${row.worktreePath}`,
+    "  initiator   none",
+    "  parent      unknown",
+    `  world       ${world}`,
+    `  context     ${bound.contract}`,
+    "  requests    parent",
+    "  runtime     claude · unknown",
+    `  origin      fork · ${allocated.id} · turn/1`,
+    "",
+  ].join("\n"));
 
   await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT, initiator: "OnlyWhileOpen" });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");

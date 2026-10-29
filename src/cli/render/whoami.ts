@@ -1,5 +1,6 @@
-import type { AkumaCaller, AkumaOrigin } from "../../index.js";
+import type { AkumaCaller, AkumaOrigin, ContractId } from "../../index.js";
 import type { WhoamiFacts } from "../commands/whoami.js";
+import { panelHead } from "./akuma-activity.js";
 import { safeText } from "./terminal.js";
 
 function callerText(caller: AkumaCaller | Readonly<{ kind: "unknown" }>): string {
@@ -7,29 +8,26 @@ function callerText(caller: AkumaCaller | Readonly<{ kind: "unknown" }>): string
   return caller.kind === "akuma" ? `${caller.akuId} · world ${caller.world}` : `${caller.integration}:${caller.id}`;
 }
 
-function originText(origin: AkumaOrigin): string {
-  switch (origin.kind) {
-    case "direct":
-      return "direct";
-    case "request":
-      return `request · ${origin.parent} · ${origin.requestId}`;
-    case "fork":
-      return `fork · ${origin.parent} · ${origin.at}`;
-  }
+function originText(origin: Exclude<AkumaOrigin, { kind: "direct" }>): string {
+  return origin.kind === "request"
+    ? `request · ${origin.parent} · ${origin.requestId}`
+    : `fork · ${origin.parent} · ${origin.at}`;
 }
 
-function list(values: readonly string[]): string {
-  return values.length === 0 ? "none" : values.join(" · ");
-}
-
-function selfText(facts: WhoamiFacts): string {
+function selfHead(facts: WhoamiFacts, dispatch: ContractId | undefined, workdir: string | null | undefined): string[] {
   const self = facts.self;
   if (self.kind === "akuma") {
     const aliases = facts.profile?.kind === "available" ? facts.profile.aliases : [];
-    return `${self.akuId}${aliases.length ? ` (${aliases.join(" · ")})` : ""}`;
+    const identity = `${self.akuId}${aliases.length ? ` (${aliases.join(" · ")})` : ""}`;
+    return panelHead(
+      identity,
+      undefined,
+      dispatch === undefined ? undefined : { kind: "associated", contractId: dispatch },
+      workdir == null ? [] : [workdir],
+    ).map(safeText);
   }
   const value = self.kind === "none" ? "none" : self.kind === "invalid" ? `invalid · ${self.reason}` : callerText(self);
-  return `${value} (not an akuma)`;
+  return [safeText(`${value} (not an akuma)`)];
 }
 
 function contextText(contract: WhoamiFacts["contract"]): string {
@@ -42,7 +40,8 @@ export function renderWhoami(facts: WhoamiFacts): string {
   const row = (label: string, value: string): string => `  ${label.padEnd(11)} ${safeText(value)}`;
   const self = facts.self;
   const profile = self.kind === "akuma" && facts.profile?.kind === "available" ? facts.profile : undefined;
-  const lines = [safeText(selfText(facts))];
+  const dispatch = profile?.contracts.length === 1 ? profile.contracts[0] : undefined;
+  const lines = selfHead(facts, dispatch, profile?.workdir);
   if (self.kind === "akuma") {
     lines.push(
       row(
@@ -55,21 +54,14 @@ export function renderWhoami(facts: WhoamiFacts): string {
     if (profile !== undefined) lines.push(row("parent", callerText(profile.birth.caller)));
   }
   lines.push(row("world", facts.world ?? "none"));
-  if (profile !== undefined) lines.push(row("workdir", profile.workdir ?? "unknown"));
-  lines.push(row("context", contextText(facts.contract)));
-  if (profile !== undefined) lines.push(row("dispatch", list(profile.contracts)));
+  const context = contextText(facts.contract);
+  if (context !== dispatch) lines.push(row("context", context));
   lines.push(row("requests", facts.requests));
   if (self.kind === "akuma" && facts.profile?.kind === "unavailable")
     lines.push(row("profile", `unavailable · ${facts.profile.reason}`));
   if (profile !== undefined) {
-    lines.push(
-      row("archetype", profile.archetype),
-      row("provider", profile.provider ?? "unknown"),
-      row("model", profile.model ?? "unknown"),
-      row("origin", originText(profile.birth.origin)),
-      row("born", profile.bornAt ?? "unknown"),
-      row("allowed", list(profile.allowed)),
-    );
+    lines.push(row("runtime", `${profile.provider ?? "unknown"} · ${profile.model ?? "unknown"}`));
+    if (profile.birth.origin.kind !== "direct") lines.push(row("origin", originText(profile.birth.origin)));
   }
   return lines.join("\n");
 }

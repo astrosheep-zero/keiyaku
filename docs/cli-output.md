@@ -115,9 +115,11 @@ world keeps its blessed world state; neither shape prints an observed timestamp,
 a zero count, or an empty container, and a present-but-empty section omits its
 header. The whoami identity observation leads with self and names requested
 absence and unknowns explicitly. Non-Akuma identity is marked as such and omits
-Akuma-only details; an Akuma's current initiator, birth caller, context, and
-Dispatch association remain distinct. JSON retains the complete typed facts
-while text omits inapplicable details.
+Akuma-only details. The Akuma head carries identity, aliases, Dispatch and the
+execution directory when known, as in status. Its current initiator, birth
+caller, context, and Dispatch remain distinct; text does not repeat context
+when it matches Dispatch, or show birth time, allowed actions, or direct origin.
+JSON retains the complete typed facts, including those omitted from text.
 
 A bounded catalogue signals its one public fact — that more rows exist —
 without adding counts, an exhaustive-mode claim, or a continuation
