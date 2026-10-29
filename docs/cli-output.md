@@ -113,8 +113,11 @@ where they are not. Absent facts are absent rows: an empty catalogue prints
 one shared surface-named `none` state without a bare header, while an empty
 world keeps its blessed world state; neither shape prints an observed timestamp,
 a zero count, or an empty container, and a present-but-empty section omits its
-header. The whoami identity observation instead names requested absence and
-unknowns explicitly, distinguishing those facts from unreported information.
+header. The whoami identity observation leads with self and names requested
+absence and unknowns explicitly. Non-Akuma identity is marked as such and omits
+Akuma-only details; an Akuma's current initiator, birth caller, context, and
+Dispatch association remain distinct. JSON retains the complete typed facts
+while text omits inapplicable details.
 
 A bounded catalogue signals its one public fact — that more rows exist —
 without adding counts, an exhaustive-mode claim, or a continuation

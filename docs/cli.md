@@ -59,7 +59,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
-| whoami | Observe the invoking process's declared identity, attribution, request context, and contextual Contract, with an Akuma caller's own profile when readable. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
+| whoami | Observe the invoking process's own identity, request context, and contextual Contract; for an Akuma, also observe its current Turn initiator and birth profile. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
@@ -95,10 +95,13 @@ rules, and parser recovery are executable interface detail, not CLI law.
 
 `whoami` is a read-only edge composition: it acquires process declarations once,
 uses the existing identity and contextual selection authorities, and never
-establishes a World, prepares a participant, emits a plugin signal, or forwards
-the observation. Its independent facts remain visible when another is absent,
-invalid, ambiguous, or unavailable. The Akuma profile is descriptive, not live
-execution status.
+establishes a World, reads Square, emits a plugin signal, or forwards the
+observation. An Akuma's current initiator comes only from the open Turn of its
+open current Body; an ended Body or Turn contributes no initiator. This is
+independent of its birth caller and of the identity used for future submissions.
+Its Dispatch association is independent of the contextual Contract. Independent
+facts remain visible when another is absent, invalid, ambiguous, or unavailable;
+the Akuma profile is descriptive, not live execution status.
 
 `show` alone reads one selected Contract's guidance, using the existing exact
 Contract selection context when selection is omitted. It refuses Akuma, plural,

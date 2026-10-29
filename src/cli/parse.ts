@@ -56,7 +56,7 @@ const ROOT_USAGE = [
 
 const INVOCATION_PATH_OPTIONS = new Set(["-C", "--cwd", "--repo", "--workdir"]);
 const WHOAMI_USAGE = "whoami [--json]";
-const WHOAMI_PURPOSE = "Observe this caller's identity and own Akuma profile.";
+const WHOAMI_PURPOSE = "Observe self, current Turn initiator, and Akuma profile.";
 
 export function renderRootHelp(columns?: number): string {
   return renderHelpText(
@@ -131,7 +131,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
       case "install":
         return renderInstallHelp();
       case "whoami":
-        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only; absent, invalid, and unavailable facts remain explicit.`;
+        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only; an Akuma's current initiator and birth parent are distinct. Absent, invalid, and unavailable facts remain explicit.`;
       case "akuma":
         return renderAkumaHelp(coordinate.action);
     }

@@ -94,7 +94,7 @@ keiyaku history @reviewer --last
 keiyaku history @reviewer --id turn/3
 ```
 
-`whoami` shows this caller's identity and, for an Akuma, its own profile without
+`whoami` shows self and, for an Akuma, its current Turn initiator and birth profile without
 creating a World or changing Square. `status` shows the roster or one Akuma's
 workdir; use `keiyaku status <aku/...|@alias> --json` to inspect `status.allowed`.
 `ls aku/` shows callable names; `ls "aku/*/*"` shows recent retained instances.

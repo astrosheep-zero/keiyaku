@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Square } from "@astrosheep/square";
 import { Akuma, Keiyaku, Repo, World } from "../src/index.js";
-import { HeldAkumaLeash, beginTurn, endTurn, finishBodyIfIdle } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, beginTurn, breakBody, endTurn } from "../src/akuma/heart/index.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -39,31 +40,34 @@ function writeSignalRecorder(root: string): string {
   return trace;
 }
 
-test("bare caller facts are explicit and leave a fresh directory untouched", async (t) => {
+test("non-Akuma self is explicit and leaves a fresh directory untouched", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-whoami-empty-");
   const before = readdirSync(root);
   const bare = await cliJson<WhoamiFacts>(["-C", root, "whoami"], { environment: {} });
   assert.equal(bare.exit, 0, bare.stderr);
   assert.deepEqual(bare.value, {
-    world: null, caller: { kind: "none" }, initiator: null, requests: "local", contract: { kind: "none" },
+    world: null, self: { kind: "none" }, initiator: null, requests: "local", contract: { kind: "none" },
   });
   const text = await runCli(["whoami"], { cwd: root, environment: {} });
   assert.equal(text.exit, 0, text.stderr);
-  assert.match(text.stdout, /^world\s+none\ncaller\s+none\ninitiator\s+none\nrequests\s+local\ncontract\s+none\n$/u);
+  assert.equal(text.stdout, "none (not an akuma)\n  world       none\n  context     none\n  requests    local\n");
 
-  const seat = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
+  const external = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
     environment: { PI_SESSION_ID: "fresh-seat", SQUARE_INDEX: join(root, "square-index") },
   });
-  assert.equal(seat.exit, 0, seat.stderr);
-  assert.deepEqual(seat.value.caller, { kind: "external", integration: "pi", id: "fresh-seat" });
-  assert.equal(seat.value.initiator?.source, "square");
-  assert.match(seat.value.initiator?.name ?? "", /^keiyaku-assigned-/u);
+  assert.equal(external.exit, 0, external.stderr);
+  assert.deepEqual(external.value.self, { kind: "external", integration: "pi", id: "fresh-seat" });
+  assert.equal(external.value.initiator, null);
+  assert.equal(external.value.profile, undefined);
+  assert.equal("caller" in external.value, false);
+  const externalText = await runCli(["-C", root, "whoami"], { environment: { PI_SESSION_ID: "fresh-seat" } });
+  assert.equal(externalText.stdout, "pi:fresh-seat (not an akuma)\n  world       none\n  context     none\n  requests    local\n");
   assert.deepEqual(readdirSync(root), before);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
   assert.equal(existsSync(join(root, ".square")), false);
 });
 
-test("an existing Square seat is observed without publishing an index or changing the artifact", async (t) => {
+test("whoami never reads an existing Square seat or publishes an index", async (t) => {
   const root = await World.at(temporaryDirectory(t, "keiyaku-whoami-seat-"));
   const trace = writeSignalRecorder(root);
   const squareDir = join(root, ".square");
@@ -73,40 +77,35 @@ test("an existing Square seat is observed without publishing an index or changin
     env: { SQUARE_INDEX: join(root, "setup-index") } });
   try { await square.implicitJoin("Existing"); } finally { await square.close(); }
   const before = readFileSync(path);
+  const open = t.mock.method(Square, "at");
+  const inMemory = t.mock.method(Square, "inMemory");
   const index = join(root, "uncreated", "index.ndjsonl");
   const result = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
     environment: { PI_SESSION_ID: "existing", SQUARE_INDEX: index },
   });
   assert.equal(result.exit, 0, result.stderr);
-  assert.deepEqual(result.value.initiator, { name: "Existing", source: "square" });
+  assert.equal(result.value.initiator, null);
+  assert.equal(open.mock.callCount(), 0, "whoami did not open Square");
+  assert.equal(inMemory.mock.callCount(), 0, "whoami did not validate a Square participant");
   assert.deepEqual(readFileSync(path), before);
-  assert.equal(existsSync(trace), false, "whoami did not prepare a participant");
-  assert.equal(existsSync(join(root, "uncreated")), false, "a read must not publish a Square discovery index");
-
-  const told = await runCli(["-C", root, "tell", "aku/worker/ffffffff", "hello"], {
-    environment: { PI_SESSION_ID: "existing", SQUARE_INDEX: index },
-  });
-  assert.equal(told.exit, 1, told.stderr);
-  assert.equal(existsSync(index), true, "a submitting command still publishes Square discovery as before");
-  assert.equal(readFileSync(trace, "utf8"), "initiating:Existing\n", "the submitter attributes the same seat");
+  assert.equal(existsSync(trace), false, "whoami did not emit a plugin signal");
+  assert.equal(existsSync(join(root, "uncreated")), false, "whoami did not publish a Square discovery index");
 });
 
-test("caller, initiator and request declarations remain independent", async (t) => {
+test("self and request declarations do not adopt outgoing attribution", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-whoami-env-");
   const declared = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
     environment: { CODEX_THREAD_ID: "session", KEIYAKU_INITIATOR: "  Integration  ", SQUARE_PARTICIPANT_NAME: "Other", AKUMA_REQUESTS: "/missing/route" },
   });
   assert.equal(declared.exit, 0, declared.stderr);
-  assert.deepEqual(declared.value.caller, { kind: "external", integration: "codex", id: "session" });
-  assert.deepEqual(declared.value.initiator, { name: "Integration", source: "declared" });
+  assert.deepEqual(declared.value.self, { kind: "external", integration: "codex", id: "session" });
+  assert.equal(declared.value.initiator, null);
   assert.equal(declared.value.requests, "parent");
   const text = await runCli(["-C", root, "whoami"], {
     environment: { KEIYAKU_EXTERNAL_CALLER: "slack:channel:thread", AKUMA_REQUESTS_ENTRY: "/missing/entry" },
   });
   assert.equal(text.exit, 0, text.stderr);
-  assert.match(text.stdout, /caller\s+slack:channel:thread/u);
-  assert.match(text.stdout, /initiator\s+none/u);
-  assert.match(text.stdout, /requests\s+parent/u);
+  assert.equal(text.stdout, "slack:channel:thread (not an akuma)\n  world       none\n  context     none\n  requests    parent\n");
 
   for (const [environment, message] of [
     [{ KEIYAKU_ACTOR_ID: "aku/worker/1234abcd" }, /both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD/u],
@@ -115,16 +114,18 @@ test("caller, initiator and request declarations remain independent", async (t) 
   ] as const) {
     const result = await cliJson<WhoamiFacts>(["-C", root, "whoami"], { environment });
     assert.equal(result.exit, 0, result.stderr);
-    assert.equal(result.value.caller.kind, "invalid");
-    if (result.value.caller.kind === "invalid") assert.match(result.value.caller.reason, message);
+    assert.equal(result.value.self.kind, "invalid");
+    assert.equal(result.value.initiator, null);
+    assert.equal(result.value.profile, undefined);
+    if (result.value.self.kind === "invalid") assert.match(result.value.self.reason, message);
     const readable = await runCli(["-C", root, "whoami"], { environment });
     assert.equal(readable.exit, 0, readable.stderr);
-    assert.match(readable.stdout, /caller\s+invalid/u);
+    assert.match(readable.stdout, /^invalid · .+ \(not an akuma\)\n  world       none\n  context     none\n  requests    local\n$/u);
     assert.match(readable.stdout, message);
   }
 });
 
-test("a born caller's profile reads its own World and the invocation's Contract without signals", async (t) => {
+test("Akuma self distinguishes open Turn, birth parent, context and dispatch without signals", async (t) => {
   const repository = repositoryWithCommit();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keiyaku.with().bind({
@@ -147,12 +148,17 @@ test("a born caller's profile reads its own World and the invocation's Contract 
     options: { model: "fixture-model" }, cwd: row.worktreePath, origin: { kind: "direct" },
     caller: { kind: "external", integration: "fixture", id: "parent" }, allowed: ["akuma.call", "contract.deliver"], createdAt: AT,
   });
+  const environment = {
+    KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world,
+    KEIYAKU_INITIATOR: "LaterOutgoing", SQUARE_PARTICIPANT_NAME: "OtherSeat",
+    AKUMA_REQUESTS_ENTRY: "/missing/channel",
+  };
   const body = await leash.recordBody(allocated.paths, { leashTakenAt: AT });
-  const turn = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT });
-  await endTurn(allocated.paths, { turnSequence: turn.sequence, completedAt: AT,
+  const beforeTurn = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
+  assert.equal(beforeTurn.value.initiator, null);
+  const previous = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT, initiator: "Previous" });
+  await endTurn(allocated.paths, { turnSequence: previous.sequence, completedAt: AT,
     outcome: { kind: "answered", answer: "done", session: { sessionId: "fixture" } } });
-  await finishBodyIfIdle(allocated.paths, { sequence: body.sequence, at: AT });
-  leash.release();
   await moveAlias({ world, alias: parseAkumaAlias("@worker"), akuId: allocated.id });
   await moveAlias({ world, alias: parseAkumaAlias("@backup"), akuId: allocated.id });
   assert.equal((await publishDispatch({ repository: scopeForRepo(repo), akuId: allocated.id, contractId: bound.contract })).kind, "dispatched");
@@ -161,11 +167,15 @@ test("a born caller's profile reads its own World and the invocation's Contract 
   await Akuma.select(world, allocated.id).status();
   const signalsBefore = readFileSync(trace, "utf8");
   assert.match(signalsBefore, /outcome/u);
-  const environment = { KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world, KEIYAKU_INITIATOR: "Fixture", AKUMA_REQUESTS_ENTRY: "/missing/channel" };
+  const squareOpen = t.mock.method(Square, "at");
+  const squareInMemory = t.mock.method(Square, "inMemory");
+  const turn = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT, initiator: "CurrentSeat" });
   const result = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.value.world, world);
-  assert.deepEqual(result.value.caller, { kind: "akuma", akuId: allocated.id, world });
+  assert.deepEqual(result.value.self, { kind: "akuma", akuId: allocated.id, world });
+  assert.equal(result.value.initiator, "CurrentSeat");
+  assert.equal("caller" in result.value, false);
   assert.deepEqual(result.value.contract, { kind: "resolved", id: bound.contract });
   assert.deepEqual(result.value.profile, {
     kind: "available", archetype: "worker", aliases: ["@backup", "@worker"], provider: "claude", model: "fixture-model",
@@ -174,9 +184,23 @@ test("a born caller's profile reads its own World and the invocation's Contract 
   });
   const text = await runCli(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(text.exit, 0, text.stderr);
-  for (const expected of [allocated.id, "@worker", "claude", "fixture-model", row.worktreePath, "fixture:parent", "akuma.call", bound.contract, AT]) {
-    assert.ok(text.stdout.includes(expected), text.stdout);
-  }
+  assert.equal(text.stdout, [
+    `${allocated.id} (@backup · @worker)`,
+    "  initiator   CurrentSeat",
+    "  parent      fixture:parent",
+    `  world       ${world}`,
+    `  workdir     ${row.worktreePath}`,
+    `  context     ${bound.contract}`,
+    `  dispatch    ${bound.contract}`,
+    "  requests    parent",
+    "  archetype   worker",
+    "  provider    claude",
+    "  model       fixture-model",
+    "  origin      direct",
+    `  born        ${AT}`,
+    "  allowed     akuma.call · contract.deliver",
+    "",
+  ].join("\n"));
   assert.doesNotMatch(text.stdout, /running|asleep|elapsed|timeline/u);
   assert.equal(readFileSync(trace, "utf8"), signalsBefore, "neither outcome nor initiating signal was emitted");
 
@@ -200,11 +224,64 @@ test("a born caller's profile reads its own World and the invocation's Contract 
   const outside = await cliJson<WhoamiFacts>(["-C", repository.path, "whoami"], { environment: {} });
   assert.equal(outside.value.contract.kind, "none");
 
+  await endTurn(allocated.paths, { turnSequence: turn.sequence, completedAt: AT,
+    outcome: { kind: "answered", answer: "done", session: { sessionId: "fixture" } } });
+  const endedTurn = await runCli(["-C", row.worktreePath, "whoami"], { environment });
+  assert.match(endedTurn.stdout, /\n  initiator   none\n/u);
+  const noInitiator = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT });
+  assert.equal((await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment })).value.initiator, null);
+  await endTurn(allocated.paths, { turnSequence: noInitiator.sequence, completedAt: AT,
+    outcome: { kind: "answered", answer: "done", session: { sessionId: "fixture" } } });
+
+  const free = await allocatedHeart(world, "worker", "5678abcd");
+  const freeLeash = (await HeldAkumaLeash.try(free.paths))!;
+  t.after(() => freeLeash.release());
+  await freeLeash.birth(free.paths, {
+    id: free.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
+    options: {}, cwd: row.worktreePath, origin: { kind: "direct" }, allowed: [], createdAt: AT,
+  });
+  const freeEnvironment = { ...environment, KEIYAKU_ACTOR_ID: free.id };
+  const freeFacts = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
+  assert.deepEqual(freeFacts.value.contract, { kind: "resolved", id: bound.contract });
+  assert.equal(freeFacts.value.profile?.kind, "available");
+  if (freeFacts.value.profile?.kind === "available") assert.deepEqual(freeFacts.value.profile.contracts, []);
+  const freeText = await runCli(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
+  assert.ok(freeText.stdout.includes(`\n  context     ${bound.contract}\n  dispatch    none\n`));
+
+  await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT, initiator: "OnlyWhileOpen" });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");
   const unreadableAliases = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(unreadableAliases.exit, 0, unreadableAliases.stderr);
   assert.equal(unreadableAliases.value.profile?.kind, "unavailable");
+  assert.equal(unreadableAliases.value.initiator, "OnlyWhileOpen");
   assert.deepEqual(unreadableAliases.value.contract, { kind: "resolved", id: bound.contract });
+  await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: AT });
+  const endedBody = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
+  assert.equal(endedBody.value.initiator, null, "an open historical Turn in an ended Body is not current");
+
+  leash.release();
+  const successor = (await HeldAkumaLeash.try(allocated.paths))!;
+  t.after(() => successor.release());
+  const newBody = await successor.recordBody(allocated.paths, { leashTakenAt: AT });
+  assert.equal((await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment })).value.initiator, null,
+    "a new Body does not inherit the predecessor's open historical Turn");
+  await beginTurn(allocated.paths, { bodySequence: newBody.sequence, startedAt: AT, initiator: "Successor" });
+  assert.equal((await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment })).value.initiator, "Successor");
+  await successor.recordBodyHung(allocated.paths, { sequence: newBody.sequence, diagnostic: "fixture", at: AT });
+  assert.equal((await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment })).value.initiator, null,
+    "a hung Body is terminal even when its end field is absent");
+
+  const corruptHeart = new DatabaseSync(free.paths.heart);
+  corruptHeart.exec("DELETE FROM akuma_schema");
+  corruptHeart.close();
+  const unreadableHeart = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
+  assert.equal(unreadableHeart.value.initiator, null);
+  assert.match(unreadableHeart.value.initiatorUnavailable ?? "", /heart schema version/u);
+  const unreadableText = await runCli(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });
+  assert.match(unreadableText.stdout, /\n  initiator   unavailable · .*heart schema version/u);
+  assert.deepEqual(unreadableHeart.value.contract, { kind: "resolved", id: bound.contract });
+  assert.equal(squareOpen.mock.callCount(), 0);
+  assert.equal(squareInMemory.mock.callCount(), 0);
   assert.equal(readFileSync(trace, "utf8"), signalsBefore);
 });
 
@@ -216,7 +293,7 @@ test("unreadable Contract authority is unavailable instead of inventing no conte
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.value.world, repository.path);
   assert.equal(result.value.contract.kind, "unavailable");
-  assert.deepEqual(result.value.caller, { kind: "none" });
+  assert.deepEqual(result.value.self, { kind: "none" });
 });
 
 test("an unestablished Git World is absent, and usage/help need no World", async (t) => {

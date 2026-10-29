@@ -1,7 +1,7 @@
 import type { CliOutcome } from "../streams.js";
 import { AKUMA_REQUESTS_ENTRY_ENV, AKUMA_REQUESTS_ENV } from "../../akuma/providers/execution-environment.js";
 import { AkumaOwner } from "../../akuma/akuma-owner.js";
-import { readSoul } from "../../akuma/heart/index.js";
+import { readHeart, readLatestTurnForBody } from "../../akuma/heart/index.js";
 import { parseAkuId, pathsForAkuId } from "../../akuma/identity.js";
 import { Keiyaku, NoGitWorldError, Repo, type AkumaCaller, type AkumaStatus, type ContractId } from "../../index.js";
 import { observeNamedAddress } from "../../library/address.js";
@@ -11,10 +11,9 @@ import { akumaCallerFromEnvironment } from "../akuma-caller.js";
 import type { CliCoordinates } from "../coordinates.js";
 import type { ParsedWhoamiCommand } from "../parse.js";
 import { renderWhoami } from "../render/whoami.js";
-import { submittingInitiator, type SubmittingInitiator } from "../square-identity.js";
 import { emit } from "../streams.js";
 
-type Caller = AkumaCaller | Readonly<{ kind: "none" }> | Readonly<{ kind: "invalid"; reason: string }>;
+type Self = AkumaCaller | Readonly<{ kind: "none" }> | Readonly<{ kind: "invalid"; reason: string }>;
 type Contract =
   | Readonly<{ kind: "resolved"; id: ContractId }>
   | Readonly<{ kind: "none" | "ambiguous" }>
@@ -36,8 +35,9 @@ type Profile =
 
 export type WhoamiFacts = Readonly<{
   world: WorldRoot | null;
-  caller: Caller;
-  initiator: SubmittingInitiator | null;
+  self: Self;
+  initiator: string | null;
+  initiatorUnavailable?: string;
   requests: "local" | "parent";
   contract: Contract;
   profile?: Profile;
@@ -47,7 +47,7 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function callerFrom(environment: NodeJS.ProcessEnv): Promise<Caller> {
+async function selfFrom(environment: NodeJS.ProcessEnv): Promise<Self> {
   try {
     return (await akumaCallerFromEnvironment(environment)) ?? { kind: "none" };
   } catch (error) {
@@ -84,18 +84,42 @@ async function callerRepo(
   }
 }
 
+type CurrentTurn = Readonly<{ initiator: string | null; bornAt: string | null; unavailable?: string }>;
+
+async function currentTurn(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<CurrentTurn> {
+  let bornAt: string | null = null;
+  try {
+    const paths = pathsForAkuId(self.world, self.akuId);
+    const heart = await readHeart(paths);
+    bornAt = heart.soul?.createdAt ?? null;
+    const body = heart.latestBody;
+    if (body === null || body.end !== undefined || body.hung !== undefined) return { initiator: null, bornAt };
+    const turn = await readLatestTurnForBody(paths, body.sequence);
+    if (turn === null || turn.end !== undefined) return { initiator: null, bornAt };
+    // Confirm that the Body was still current and open when this Turn was observed.
+    const latest = (await readHeart(paths)).latestBody;
+    const initiator =
+      latest?.sequence === body.sequence && latest.end === undefined && latest.hung === undefined
+        ? (turn.initiator ?? null)
+        : null;
+    return { initiator, bornAt };
+  } catch (error) {
+    return { initiator: null, bornAt, unavailable: reason(error) };
+  }
+}
+
 async function callerProfile(
   caller: Extract<AkumaCaller, { kind: "akuma" }>,
   coordinates: CliCoordinates,
   environment: NodeJS.ProcessEnv,
+  bornAt: string | null,
 ): Promise<Profile> {
   try {
     if (!(await World.established(caller.world))) throw new Error("caller World is not established");
     const id = parseAkuId(caller.akuId);
     // This is the same status owner as the public read, without its plugin outcome observer.
-    const [status, soul, aliases, repo] = await Promise.all([
+    const [status, aliases, repo] = await Promise.all([
       new AkumaOwner(id.id, caller.world).status(),
-      readSoul(pathsForAkuId(caller.world, id.id)),
       observeNamedAddress({ world: caller.world, repo: null }),
       callerRepo(caller.world, coordinates, environment),
     ]);
@@ -112,7 +136,7 @@ async function callerProfile(
       model: status.model ?? null,
       workdir: status.cwd ?? null,
       birth: status.birth,
-      bornAt: soul?.createdAt ?? null,
+      bornAt,
       allowed: status.allowed,
       contracts: dispatch.kind === "associated" ? [dispatch.contractId] : [],
     };
@@ -125,29 +149,23 @@ export async function runWhoami(
   command: ParsedWhoamiCommand,
   coordinates: CliCoordinates,
   environment: NodeJS.ProcessEnv,
-  signal?: AbortSignal,
 ): Promise<CliOutcome> {
   const world = coordinates.world !== null && (await World.established(coordinates.world)) ? coordinates.world : null;
-  const [caller, initiator, contract] = await Promise.all([
-    callerFrom(environment),
-    submittingInitiator({
-      ...(coordinates.candidateWorld === null ? {} : { path: coordinates.candidateWorld }),
-      environment,
-      readOnly: true,
-      ...(signal === undefined ? {} : { signal }),
-    }),
-    contextualContract(coordinates, world),
-  ]);
+  const [self, contract] = await Promise.all([selfFrom(environment), contextualContract(coordinates, world)]);
+  const turn = self.kind === "akuma" ? await currentTurn(self) : undefined;
   const facts: WhoamiFacts = {
     world,
-    caller,
-    initiator: initiator ?? null,
+    self,
+    initiator: turn?.initiator ?? null,
+    ...(turn?.unavailable === undefined ? {} : { initiatorUnavailable: turn.unavailable }),
     requests:
       environment[AKUMA_REQUESTS_ENV] !== undefined || environment[AKUMA_REQUESTS_ENTRY_ENV] !== undefined
         ? "parent"
         : "local",
     contract,
-    ...(caller.kind === "akuma" ? { profile: await callerProfile(caller, coordinates, environment) } : {}),
+    ...(self.kind === "akuma"
+      ? { profile: await callerProfile(self, coordinates, environment, turn?.bornAt ?? null) }
+      : {}),
   };
   return emit(command.output, facts, () => renderWhoami(facts), "accepted");
 }

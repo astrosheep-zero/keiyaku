@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { Square, SquareError, createSquareResourceOwner, type Body } from "@astrosheep/square";
+import { Square, SquareError, type Body } from "@astrosheep/square";
 import type { WorldRoot } from "../world.js";
 
 /**
@@ -81,21 +81,6 @@ type Standing =
   | Readonly<{ kind: "absent" }>
   | Readonly<{ kind: "indeterminate" }>;
 
-async function selectStanding(
-  square: Square,
-  environment: NodeJS.ProcessEnv,
-  recognized: readonly string[],
-  signal: AbortSignal,
-): Promise<Standing> {
-  if (recognized.length === 1) return { kind: "standing", name: recognized[0]! };
-  if (recognized.length > 1) return { kind: "indeterminate" };
-  const known = new Set(priorSeatNames(environment));
-  const participants = (await square.participants({}, { signal })).participants;
-  if (participants.some(({ name, state }) => known.has(name) && state !== "not joined"))
-    return { kind: "indeterminate" };
-  return { kind: "absent" };
-}
-
 async function standingAt(
   location: string,
   environment: NodeJS.ProcessEnv,
@@ -111,12 +96,14 @@ async function standingAt(
       : { kind: "indeterminate" };
   }
   try {
-    return await selectStanding(
-      square,
-      environment,
-      (await square.recognize()).map(({ name }) => name),
-      signal,
-    );
+    const recognized = await square.recognize();
+    if (recognized.length === 1) return { kind: "standing", name: recognized[0]!.name };
+    if (recognized.length > 1) return { kind: "indeterminate" };
+    const known = new Set(priorSeatNames(environment));
+    const participants = (await square.participants({}, { signal })).participants;
+    if (participants.some(({ name, state }) => known.has(name) && state !== "not joined"))
+      return { kind: "indeterminate" };
+    return { kind: "absent" };
   } catch {
     return { kind: "indeterminate" };
   } finally {
@@ -124,59 +111,9 @@ async function standingAt(
   }
 }
 
-/** Opening without a Body avoids Square's discovery publication; the artifact still recognizes that Body. */
-async function standingReadOnlyAt(
-  location: string,
-  environment: NodeJS.ProcessEnv,
-  body: Body,
-  signal: AbortSignal,
-): Promise<Standing> {
-  const owner = createSquareResourceOwner();
-  let square: Square | undefined;
-  try {
-    square = await Square.at({ path: location, env: environment, resources: owner }, { signal });
-    const recognized = (await owner.artifact(location).read((facts) => facts.seatsForBody(body), signal)).value;
-    return await selectStanding(
-      square,
-      environment,
-      recognized.map(({ participant }) => participant),
-      signal,
-    );
-  } catch (error) {
-    return error instanceof SquareError && error.code === "unavailable"
-      ? { kind: "absent" }
-      : { kind: "indeterminate" };
-  } finally {
-    await square?.close().catch(() => undefined);
-    await owner.close().catch(() => undefined);
-  }
-}
-
 export type SquareSeatInput = Readonly<{ path: WorldRoot; environment: NodeJS.ProcessEnv }>;
 
-export type SquareSeatControl = Readonly<{ signal?: AbortSignal; budgetMs?: number; readOnly?: boolean }>;
-export type SubmittingInitiator = Readonly<{ name: string; source: "declared" | "square" }>;
-
-/** The declared integration name outranks the optional, bounded Square selection. */
-export async function submittingInitiator(
-  input: Readonly<{ path?: WorldRoot; environment: NodeJS.ProcessEnv; signal?: AbortSignal; readOnly?: boolean }>,
-): Promise<SubmittingInitiator | undefined> {
-  const name = declared(input.environment, "KEIYAKU_INITIATOR");
-  if (name !== undefined) return { name, source: "declared" };
-  if (input.path === undefined) return undefined;
-  try {
-    const seat = await squareSeat(
-      { path: input.path, environment: input.environment },
-      {
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-        ...(input.readOnly ? { readOnly: true } : {}),
-      },
-    );
-    return seat === undefined ? undefined : { name: seat, source: "square" };
-  } catch {
-    return undefined;
-  }
-}
+export type SquareSeatControl = Readonly<{ signal?: AbortSignal; budgetMs?: number }>;
 
 async function bounded<T>(
   attempt: (signal: AbortSignal) => Promise<T>,
@@ -212,8 +149,7 @@ export async function squareSeat(input: SquareSeatInput, control: SquareSeatCont
   if (body === undefined) return undefined;
   const location = join(input.path, ".square", "KEIYAKU.square");
   const standing = await bounded(
-    async (signal) =>
-      await (control.readOnly ? standingReadOnlyAt : standingAt)(location, input.environment, body, signal),
+    async (signal) => await standingAt(location, input.environment, body, signal),
     control,
   );
   if (standing?.kind === "standing") return standing.name;

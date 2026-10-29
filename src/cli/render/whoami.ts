@@ -22,40 +22,54 @@ function list(values: readonly string[]): string {
   return values.length === 0 ? "none" : values.join(" · ");
 }
 
+function selfText(facts: WhoamiFacts): string {
+  const self = facts.self;
+  if (self.kind === "akuma") {
+    const aliases = facts.profile?.kind === "available" ? facts.profile.aliases : [];
+    return `${self.akuId}${aliases.length ? ` (${aliases.join(" · ")})` : ""}`;
+  }
+  const value = self.kind === "none" ? "none" : self.kind === "invalid" ? `invalid · ${self.reason}` : callerText(self);
+  return `${value} (not an akuma)`;
+}
+
+function contextText(contract: WhoamiFacts["contract"]): string {
+  if (contract.kind === "resolved") return contract.id;
+  if (contract.kind === "unavailable") return `unavailable · ${contract.reason}`;
+  return contract.kind;
+}
+
 export function renderWhoami(facts: WhoamiFacts): string {
-  const row = (label: string, value: string, indent = ""): string => `${indent}${label.padEnd(11)} ${safeText(value)}`;
-  const caller = facts.caller;
-  const callerValue =
-    caller.kind === "none" ? "none" : caller.kind === "invalid" ? `invalid · ${caller.reason}` : callerText(caller);
-  const lines = [row("world", facts.world ?? "none"), row("caller", callerValue)];
-  if (facts.profile?.kind === "unavailable") lines.push(row("profile", `unavailable · ${facts.profile.reason}`, "  "));
-  if (facts.profile?.kind === "available") {
-    const profile = facts.profile;
+  const row = (label: string, value: string): string => `  ${label.padEnd(11)} ${safeText(value)}`;
+  const self = facts.self;
+  const profile = self.kind === "akuma" && facts.profile?.kind === "available" ? facts.profile : undefined;
+  const lines = [safeText(selfText(facts))];
+  if (self.kind === "akuma") {
     lines.push(
-      row("archetype", profile.archetype, "  "),
-      row("aliases", list(profile.aliases), "  "),
-      row("provider", profile.provider ?? "unknown", "  "),
-      row("model", profile.model ?? "unknown", "  "),
-      row("workdir", profile.workdir ?? "unknown", "  "),
-      row("origin", originText(profile.birth.origin), "  "),
-      row("parent", callerText(profile.birth.caller), "  "),
-      row("born", profile.bornAt ?? "unknown", "  "),
-      row("allowed", list(profile.allowed), "  "),
-      row("contracts", list(profile.contracts), "  "),
+      row(
+        "initiator",
+        facts.initiatorUnavailable === undefined
+          ? (facts.initiator ?? "none")
+          : `unavailable · ${facts.initiatorUnavailable}`,
+      ),
+    );
+    if (profile !== undefined) lines.push(row("parent", callerText(profile.birth.caller)));
+  }
+  lines.push(row("world", facts.world ?? "none"));
+  if (profile !== undefined) lines.push(row("workdir", profile.workdir ?? "unknown"));
+  lines.push(row("context", contextText(facts.contract)));
+  if (profile !== undefined) lines.push(row("dispatch", list(profile.contracts)));
+  lines.push(row("requests", facts.requests));
+  if (self.kind === "akuma" && facts.profile?.kind === "unavailable")
+    lines.push(row("profile", `unavailable · ${facts.profile.reason}`));
+  if (profile !== undefined) {
+    lines.push(
+      row("archetype", profile.archetype),
+      row("provider", profile.provider ?? "unknown"),
+      row("model", profile.model ?? "unknown"),
+      row("origin", originText(profile.birth.origin)),
+      row("born", profile.bornAt ?? "unknown"),
+      row("allowed", list(profile.allowed)),
     );
   }
-  const contract = facts.contract;
-  lines.push(
-    row("initiator", facts.initiator === null ? "none" : `${facts.initiator.name} · ${facts.initiator.source}`),
-    row("requests", facts.requests),
-    row(
-      "contract",
-      contract.kind === "resolved"
-        ? contract.id
-        : contract.kind === "unavailable"
-          ? `unavailable · ${contract.reason}`
-          : contract.kind,
-    ),
-  );
   return lines.join("\n");
 }

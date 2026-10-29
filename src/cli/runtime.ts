@@ -290,7 +290,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       },
       environment,
     );
-    if (command.command === "whoami") return await runWhoami(command, coordinates, environment, cancellation.signal);
+    if (command.command === "whoami") return await runWhoami(command, coordinates, environment);
     if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);
     if (command.command === "history" && "contract" in command)
