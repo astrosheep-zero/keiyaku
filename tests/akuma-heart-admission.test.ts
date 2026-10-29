@@ -4,7 +4,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { bornBody, heartFixture } from "./support/akuma-fixtures.js";
 import { withReadOnlyHeart } from "../src/akuma/heart/storage.js";
-import { activitySlice, appendActivity, beginTurn } from "../src/akuma/heart/index.js";
+import {
+  activitySlice, appendActivity, beginTurn, bindTellsToTurn, cancelBodyTurns, endTurn, HeldAkumaLeash,
+  readHeart, readTurn, recordTell, recordTellDeliveries,
+} from "../src/akuma/heart/index.js";
 import { projectTurns } from "../src/akuma/projection.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
 
@@ -12,6 +15,67 @@ async function fixture() {
   const { allocated, close } = await heartFixture("keiyaku-heart-admission-");
   return { paths: allocated.paths, close };
 }
+
+test("controlled cancellation atomically closes all exact-Body open Turns and preserves winners and inputs", async (context) => {
+  const value = await heartFixture("keiyaku-heart-cancel-");
+  const { allocated, holder, body } = await bornBody(value.root, "ca1ce101", "2026-08-08T00:00:00.000Z");
+  const paths = allocated.paths;
+  const at = "2026-08-08T00:00:01.000Z";
+  try {
+    const unbound = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at, call: "direct call" });
+    const bound = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const answered = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const failed = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    await recordTell(paths, { kind: "tell", id: "pending", body: "retain", recordedAt: at });
+    await bindTellsToTurn(paths, { turnSequence: bound.sequence, tellIds: ["pending"], boundAt: at });
+    await recordTellDeliveries(paths, [{ tellId: "pending", turnSequence: bound.sequence, route: "live", receipt: "required", fence: "pending", deliveredAt: at }]);
+    await endTurn(paths, { turnSequence: answered.sequence, outcome: { kind: "answered", answer: "won", session: { sessionId: "native" } }, completedAt: at });
+    await endTurn(paths, { turnSequence: failed.sequence, outcome: { kind: "failed", diagnostic: "real failure" }, completedAt: at });
+    const before = await activitySlice(paths);
+    const exec = DatabaseSync.prototype.prepare;
+    const broken = context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+      if (sql.includes("outcome = 'canceled'")) throw new Error("cancellation write failed");
+      return exec.call(this, sql);
+    });
+    await assert.rejects(cancelBodyTurns(paths, { bodySequence: body.sequence, at }), /cancellation write failed/u);
+    broken.mock.restore();
+    assert.equal((await readHeart(paths)).latestBody?.end, undefined);
+    assert.deepEqual(await activitySlice(paths), before, "failed terminalization leaves neither Body end nor stray timeline row");
+    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [unbound.sequence, bound.sequence], disposition: null });
+    assert.deepEqual((await readTurn(paths, unbound.sequence))?.end?.outcome, { kind: "canceled" });
+    assert.equal((await readTurn(paths, answered.sequence))?.end?.outcome.kind, "answered");
+    assert.deepEqual((await readTurn(paths, failed.sequence))?.end?.outcome, { kind: "failed", diagnostic: "real failure" });
+    assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["pending"]);
+    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [], disposition: null }, "retry invents no second terminal");
+    holder.release();
+    const nextHolder = (await HeldAkumaLeash.try(paths))!;
+    try {
+      const nextBody = await nextHolder.recordBody(paths, { leashTakenAt: at });
+      const nextTurn = await beginTurn(paths, { bodySequence: nextBody.sequence, startedAt: at });
+      await assert.rejects(cancelBodyTurns(paths, { bodySequence: body.sequence, at }), /cannot settle/u);
+      assert.equal((await readTurn(paths, nextTurn.sequence))?.end, undefined, "old cancellation cannot touch successor work");
+    } finally { nextHolder.release(); }
+  } finally { holder.release(); value.close(); }
+});
+
+test("an answer committing at the stop boundary remains the single terminal winner", async () => {
+  const value = await heartFixture("keiyaku-heart-answer-stop-race-");
+  const at = "2026-08-08T00:00:00.000Z";
+  const { allocated, holder, body } = await bornBody(value.root, "ca1ce104", at);
+  const paths = allocated.paths;
+  try {
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    const answer = { kind: "answered" as const, answer: "won", session: { sessionId: "native" } };
+    const [, canceled] = await Promise.all([
+      endTurn(paths, { turnSequence: turn.sequence, outcome: answer, completedAt: at }),
+      cancelBodyTurns(paths, { bodySequence: body.sequence, at }),
+    ]);
+    assert.deepEqual(canceled, { canceled: [], disposition: null });
+    assert.deepEqual((await readTurn(paths, turn.sequence))?.end?.outcome, answer);
+    assert.equal((await activitySlice(paths)).rows.filter((row) => row.kind === "turn-end").length, 1);
+    assert.equal((await readHeart(paths)).latestBody?.end, "put-down");
+  } finally { holder.release(); value.close(); }
+});
 
 test("Heart read admission yields through an exclusive WAL reader lock and executes once", async () => {
   const value = await fixture();

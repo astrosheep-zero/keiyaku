@@ -156,7 +156,7 @@ function rowText(
   if (row.kind === "outcome")
     return row.outcome.kind === "answered"
       ? { text: row.outcome.answer, lines: 3 }
-      : { text: row.outcome.diagnostic, lines: 2 };
+      : { text: row.outcome.kind === "canceled" ? "canceled" : row.outcome.diagnostic, lines: 2 };
   if (row.kind === "turn") return { text: "", lines: 1 };
   if (row.kind !== "tool") return { text: "", lines: 1 };
   if (row.call.kind === "other") return { text: "", lines: 1 };
@@ -205,7 +205,10 @@ function rowPrefix(
   if (row.kind === "thought") return actionPrefix(ACTION_MARGIN, "think", columns);
   if (row.kind === "note") return actionPrefix(ACTION_MARGIN, "note", columns);
   if (row.kind === "outcome")
-    return { first: row.outcome.kind === "answered" ? TOP_ANSWER : TOP_FAILURE, continuation: TOP_CONTINUATION };
+    return {
+      first: row.outcome.kind === "answered" ? TOP_ANSWER : row.outcome.kind === "canceled" ? "○ " : TOP_FAILURE,
+      continuation: TOP_CONTINUATION,
+    };
   if (row.kind === "said") return { first: TOP_SPEAK, continuation: TOP_SPEAK };
   if (row.kind === "tell" && row.state === "pending") return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
   return { first: TOP_INPUT, continuation: TOP_CONTINUATION };
@@ -1051,7 +1054,7 @@ export function callRawAnswer(result: CallResult, streamed: boolean): string | u
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
   if (historyId === undefined || result.kind !== "exact") return undefined;
   const outcome = result.outcome.outcome;
-  return outcome.kind === "answered" ? outcome.answer : outcome.diagnostic;
+  return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
 }
 
 /** One compact wait result line: an observed life mark, the complete identity, a bounded summary. */
@@ -1101,7 +1104,9 @@ function waitSummary(status: AkumaStatus): WaitState & Readonly<{ summary: strin
         ? { mark: "✓", state: "completed" }
         : outcome.kind === "answered"
           ? { mark: "✓", state: preview(outcome.answer, "answered") }
-          : { mark: "!", state: preview(outcome.diagnostic, "failed") });
+          : outcome.kind === "canceled"
+            ? { mark: "○", state: "canceled" }
+            : { mark: "!", state: preview(outcome.diagnostic, "failed") });
   return {
     ...observed,
     summary: [
@@ -1140,7 +1145,9 @@ export function historyText(
       return `${result.kind === "unknown-history" ? result.historyId : "unknown"} has no matching retained outcome`;
     return result.outcome.outcome.kind === "answered"
       ? result.outcome.outcome.answer
-      : result.outcome.outcome.diagnostic;
+      : result.outcome.outcome.kind === "canceled"
+        ? "canceled"
+        : result.outcome.outcome.diagnostic;
   }
   if (presentation.last === true) return result.kind === "last" ? result.answer : "no answer retained";
   if (result.kind !== "history") throw new Error("history result lacks page");

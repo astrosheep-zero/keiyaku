@@ -35,6 +35,7 @@ import {
   insertSessionFact,
   insertStopControl,
   killFactForBody,
+  hasBodyHandoffControl,
   latestBodyFact,
   insertInterruptBarrier,
   isTellProtectedByPause,
@@ -46,6 +47,8 @@ import {
   sessionFactForCoordinate,
   stopFact,
   turnFact,
+  openTurnsForBody,
+  terminalTurnForTell,
 } from "./rows.js";
 import type { AgentEvent } from "./activity-schema.js";
 import {
@@ -287,7 +290,9 @@ export function createStatusFactReader(paths: AkumaPaths) {
     tellOutcome: (id: string, signal?: AbortSignal) =>
       reader.read((heart) => {
         const tell = tellFact(heart, id);
-        const end = tell?.binding === undefined ? undefined : turnFact(heart, tell.binding.turnSequence)?.end;
+        // A pending Tell may be retried by a successor after cancellation. Its
+        // first retained terminal still belongs to this exact admission.
+        const end = terminalTurnForTell(heart, id)?.end;
         return { tell, end };
       }, signal),
     clear(): void {
@@ -469,33 +474,40 @@ export type PendingTellDisposition = Readonly<{
   tellIds: readonly string[];
 }>;
 
+function decidePendingTellDispositionInHeart(
+  heart: DatabaseSync,
+  input: Readonly<{ bodySequence: number; at: string; handoff: boolean }>,
+): PendingTellDisposition | null {
+  const body = latestBodyFact(heart);
+  if (body === null || body.sequence !== input.bodySequence) return null;
+  if (tellDispositionResolved(heart, input.bodySequence) === true) return null;
+  if (hasBodyHandoffControl(heart, input.bodySequence)) {
+    if (input.handoff && body.end === undefined)
+      endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
+    return null;
+  }
+  const existing = openTellDispositionIds(heart, input.bodySequence);
+  if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
+  const tellIds = pendingTellFacts(heart).map((tell) => tell.id);
+  if (tellIds.length === 0) return null;
+  if (body.end === undefined) {
+    if (!input.handoff) return null;
+    endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
+  } else if (body.end === "broke-off") {
+    return null;
+  }
+  insertTellDispositionSnapshot(heart, input.bodySequence, tellIds, input.at);
+  return { bodySequence: input.bodySequence, tellIds };
+}
+
 export async function decidePendingTellDisposition(
   paths: AkumaPaths,
   input: Readonly<{ bodySequence: number; at: string; handoff: boolean }>,
 ): Promise<PendingTellDisposition | null> {
   return await withHeartTransaction(paths, (heart) => {
-    const body = latestBodyFact(heart);
-    if (body === null || body.sequence !== input.bodySequence) return null;
-    if (tellDispositionResolved(heart, input.bodySequence) === true) return null;
-    const existing = openTellDispositionIds(heart, input.bodySequence);
-    if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
-    if (pauseFact(heart)?.bodySequence === input.bodySequence) {
-      if (input.handoff && body.end === undefined)
-        endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-      return null;
-    }
-    const pending = pendingTellFacts(heart);
-    const tellIds = pending.map((tell) => tell.id);
-    if (tellIds.length === 0) return null;
-    if (body.end === undefined) {
-      if (!input.handoff) return null;
-      endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-    } else if (body.end === "broke-off") {
-      return null;
-    }
-    insertTellDispositionSnapshot(heart, input.bodySequence, tellIds, input.at);
+    const decided = decidePendingTellDispositionInHeart(heart, input);
     pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    return { bodySequence: input.bodySequence, tellIds };
+    return decided;
   });
 }
 
@@ -514,6 +526,11 @@ export async function resolvePendingTellDisposition(
     if (tellDispositionResolved(heart, bodySequence) === true) return true;
     const tellIds = openTellDispositionIds(heart, bodySequence);
     if (tellIds === null) throw new HeartAuthorityCorruptionError(`Akuma disposition ${bodySequence} is missing`);
+    if (hasBodyHandoffControl(heart, bodySequence)) {
+      resolveTellDispositionSnapshot(heart, bodySequence, at);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
+      return true;
+    }
     if (outcome === "undelivered") insertUndeliveredTellReceipts(heart, tellIds, at);
     if (!dispositionSnapshotProven(heart, tellIds)) return false;
     resolveTellDispositionSnapshot(heart, bodySequence, at);
@@ -547,6 +564,9 @@ export async function requestStop(
         // exited Body remains already-stopped, and hung custody is untouched.
         if (body.hung === undefined && body.end !== "exited") {
           insertKillFact(heart, body.sequence, at);
+          const released = tellDispositionResolved(heart, body.sequence) === false;
+          resolveTellDispositionSnapshot(heart, body.sequence, at);
+          pruneActivityFacts(heart, ACTIVITY_LIMIT, released);
           if (stopFact(heart)?.bodySequence === body.sequence) deleteStopControl(heart);
           return { kind: "witnessed", body };
         }
@@ -568,6 +588,35 @@ export async function breakBody(
   input: Readonly<{ sequence: number; end: Exclude<BodyEnd, "exited">; at: string }>,
 ): Promise<void> {
   await withHeartTransaction(paths, (heart) => endBodyFact(heart, input));
+}
+
+/** The owning Body calls this only after proving its provider custody retired. */
+export async function cancelBodyTurns(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; at: string; handoff?: boolean }>,
+): Promise<Readonly<{ canceled: readonly number[]; disposition: PendingTellDisposition | null }>> {
+  return await withHeartTransaction(paths, (heart) => {
+    const body = latestBodyFact(heart);
+    if (
+      body?.sequence !== input.bodySequence ||
+      body.hung !== undefined ||
+      (body.end !== undefined && body.end !== "put-down")
+    )
+      throw new Error(`Akuma Body ${input.bodySequence} cannot settle controlled cancellation`);
+    const sequences = openTurnsForBody(heart, input.bodySequence);
+    for (const turnSequence of sequences)
+      insertTurnEndFact(heart, {
+        kind: "turn-end",
+        turnSequence,
+        outcome: { kind: "canceled" },
+        completedAt: input.at,
+      });
+    endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
+    const disposition =
+      input.handoff === true ? decidePendingTellDispositionInHeart(heart, { ...input, handoff: true }) : null;
+    pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
+    return { canceled: sequences, disposition };
+  });
 }
 
 export async function beginTurn(
@@ -651,7 +700,6 @@ export async function finishBodyIfIdle(
 ): Promise<Readonly<{ kind: "controlled" | "finished" } | { kind: "pending"; tells: readonly string[] }>> {
   return await withHeartTransaction(paths, (heart) => {
     if (stopFact(heart)?.bodySequence === input.sequence || pauseFact(heart)?.bodySequence === input.sequence) {
-      endBodyFact(heart, { ...input, end: "put-down" });
       return { kind: "controlled" };
     }
     const pending = pendingTellFacts(heart);

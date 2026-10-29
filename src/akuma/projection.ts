@@ -89,6 +89,7 @@ const outcomeSchema = z.union([
     })
     .strict(),
   z.object({ kind: z.literal("failed"), historyId: nonblankTextSchema, diagnostic: z.string() }).strict(),
+  z.object({ kind: z.literal("canceled"), historyId: nonblankTextSchema }).strict(),
 ]);
 const outcomeRowSchema = z
   .object({
@@ -224,6 +225,7 @@ export type OutcomeRow = z.infer<typeof outcomeRowSchema>;
 function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
   const historyId = `turn/${turnSequence}`;
   if (outcome.kind === "answered") return { kind: "answered", historyId, answer: outcome.answer };
+  if (outcome.kind === "canceled") return { kind: "canceled", historyId };
   return { kind: "failed", historyId, diagnostic: outcome.diagnostic };
 }
 

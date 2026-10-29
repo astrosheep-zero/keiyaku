@@ -20,6 +20,8 @@ import {
   assertHeartSchemaVersion,
   assertLeashSchemaVersion,
   heartSchemaIsCurrent,
+  heartSchemaVersion,
+  upgradeHeartSchema,
 } from "./schema.js";
 import {
   deleteStopControl,
@@ -29,6 +31,7 @@ import {
   insertSealFact,
   insertSessionFact,
   killFactForBody,
+  hasBodyHandoffControl,
   latestBodyFact,
   latestKillFact,
   markBodyHung,
@@ -36,7 +39,7 @@ import {
   sealFact,
   stopFact,
 } from "./rows.js";
-import { insertTellFact } from "./tells.js";
+import { insertTellFact, resolveTellDispositionSnapshot, tellDispositionResolved } from "./tells.js";
 import { pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
 
@@ -82,15 +85,38 @@ async function openExistingDatabase(path: string, timeout?: number, mode: "rw" |
   }
 }
 
-async function openHeart(path: string, mode: "rw" | "ro"): Promise<DatabaseSync> {
+async function openHeart(path: string, mode: "rw" | "ro", signal?: AbortSignal): Promise<DatabaseSync> {
   const database = await openExistingDatabase(path, 0, mode);
   try {
     database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0");
-    return database;
+    const version = await acquire(() => {
+      const version = heartSchemaVersion(database);
+      if (version !== 29) assertHeartSchemaVersion(database);
+      return version;
+    }, signal);
+    if (version !== 29) return database;
   } catch (error) {
     database.close();
     throw error;
   }
+  database.close();
+  // Current-format reads never acquire a writer. Only this known predecessor
+  // needs one, and no read transaction survives across the conversion.
+  const writer = await openExistingDatabase(path, 0);
+  try {
+    // Dropping turns with FK enforcement enabled would cascade into its children.
+    // SQLite requires this switch outside the transaction; check before commit.
+    writer.exec("PRAGMA foreign_keys=OFF; PRAGMA busy_timeout=0");
+    await beginTransaction(writer, "write", signal, heartSchemaVersion);
+    finishTransaction(writer, () => upgradeHeartSchema(writer));
+  } finally {
+    try {
+      writer.exec("PRAGMA foreign_keys=ON");
+    } finally {
+      writer.close();
+    }
+  }
+  return await openHeart(path, mode, signal);
 }
 
 export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" | "unsupported"> {
@@ -108,19 +134,14 @@ export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" 
   }
 }
 
-async function beginTransaction(database: DatabaseSync, mode: "read" | "write", signal?: AbortSignal): Promise<void> {
+async function acquire<T>(operation: () => T, signal?: AbortSignal): Promise<T> {
   const deadline = performance.now() + TRANSACTION_ACQUISITION_MS;
   let delay = 10;
   for (;;) {
     signal?.throwIfAborted();
     try {
-      database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
-      // DEFERRED acquires its snapshot on the first read, not on BEGIN. WAL
-      // recovery and last-connection cleanup can make this read busy too.
-      assertHeartSchemaVersion(database);
-      return;
+      return operation();
     } catch (error) {
-      rollbackTransaction(database);
       // Only failed admission can be retried: no caller statement has run.
       const remaining = deadline - performance.now();
       if (!isBusy(error) || remaining <= 0) throw error;
@@ -134,13 +155,31 @@ async function beginTransaction(database: DatabaseSync, mode: "read" | "write", 
   }
 }
 
+async function beginTransaction(
+  database: DatabaseSync,
+  mode: "read" | "write",
+  signal?: AbortSignal,
+  validate: (database: DatabaseSync) => unknown = assertHeartSchemaVersion,
+): Promise<void> {
+  await acquire(() => {
+    try {
+      database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
+      // DEFERRED acquires its snapshot on the first read, not on BEGIN.
+      validate(database);
+    } catch (error) {
+      rollbackTransaction(database);
+      throw error;
+    }
+  }, signal);
+}
+
 export async function withReadOnlyHeart<T>(
   paths: AkumaPaths,
   body: (database: DatabaseSync) => T,
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
-  const database = await openHeart(paths.heart, "ro");
+  const database = await openHeart(paths.heart, "ro", signal);
   try {
     await beginTransaction(database, "read", signal);
     return finishTransaction(database, body);
@@ -193,7 +232,7 @@ export function createHeartReader(paths: AkumaPaths): HeartReader {
         });
         if (identity?.dev !== current.dev || identity?.ino !== current.ino) release();
         if (database === undefined) {
-          database = await openHeart(paths.heart, "ro");
+          database = await openHeart(paths.heart, "ro", signal);
           identity = current;
           opened += 1;
         }
@@ -216,7 +255,7 @@ export async function withHeartTransaction<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
-  const database = await openHeart(paths.heart, "rw");
+  const database = await openHeart(paths.heart, "rw", signal);
   try {
     await beginTransaction(database, "write", signal);
     return finishTransaction(database, body);
@@ -328,9 +367,20 @@ export class HeldAkumaLeash {
     return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected));
   }
 
-  async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
+  async recordBody(
+    paths: AkumaPaths,
+    input: Readonly<{ leashTakenAt: string; handoffFromBodySequence?: number }>,
+  ): Promise<BodyFact> {
     if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
     const sequence = await withHeartTransaction(paths, (heart) => {
+      const predecessor = input.handoffFromBodySequence;
+      if (
+        predecessor !== undefined &&
+        (latestBodyFact(heart)?.sequence !== predecessor ||
+          hasBodyHandoffControl(heart, predecessor) ||
+          tellDispositionResolved(heart, predecessor) !== false)
+      )
+        throw new BodyControlledError();
       const completion = judgeInterruptBarrier(heart);
       if (completion.kind === "unavailable") throw new BodyControlledError();
       return insertBodyFact(heart, input);
@@ -372,6 +422,9 @@ export class HeldAkumaLeash {
         latestKillFact(heart)?.bodySequence === target.bodySequence
           ? ("already-killed" as const)
           : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
+      const released = tellDispositionResolved(heart, target.bodySequence) === false;
+      resolveTellDispositionSnapshot(heart, target.bodySequence, target.requestedAt);
+      pruneActivityFacts(heart, ACTIVITY_LIMIT, released);
       deleteStopControl(heart);
       return { target, result };
     });

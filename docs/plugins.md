@@ -206,15 +206,16 @@ fast.
 
 Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
 is durable, including Turns driven by later Tells. The signal identifies the
-Akuma and Turn sequence and carries the committed answered or failed outcome
-and the Turn's optional owner and participant audience; it does not expose
+Akuma and Turn sequence and carries the committed answered, failed, or canceled
+outcome and the Turn's optional owner and participant audience; cancellation is its own
+terminal meaning, with neither answer text nor failure reason. It does not expose
 provider or continuation custody. Plugins cannot participate in providers, generic lifecycle verbs, operation inputs, or Settlement. In
 particular, plugin delivery does not make birth reversible, add a pre-Body
 listener, or create rollback or cross-process continuation behavior.
 
 Public Akuma observation emits `akuma.outcome-observed` when it establishes a
-specific retained committed outcome identity, whether answered or failed. This
-means knowing that result exists, not consuming its body, acknowledging it, or
+specific retained committed outcome identity, whether answered, failed, or
+canceled. This means knowing that result exists, not consuming its body, acknowledging it, or
 judging the Akuma idle. Status, wait and idle, history, stream, ask, and bounded call
 answer observation participate; roster and board reads, incidental internal
 reads, and lifecycle production do not. A running Akuma may have an observed
@@ -271,6 +272,6 @@ observer needs to name the latest admitted input, it may use only the owner and
 participants of the latest admitted Turn belonging to that exact Body. A missing
 Turn or one with no participants remains unaddressed; an earlier Turn,
 process environment, and launch context are not fallback owners. Square's
-interruption notice is best-effort and suppresses already-notified failed-Turn
-recipients individually within one process activation, without a durable receipt
-or replay guarantee.
+interruption notice is best-effort and suppresses already-notified failed or
+canceled Turn recipients individually within one process activation, without a
+durable receipt or replay guarantee.

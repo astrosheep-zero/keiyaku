@@ -7,8 +7,15 @@ native session and custody described by [akuma-provider.md](akuma-provider.md).
 ## Body, Turns, And Wake
 
 A Body holds one leash and may drive successive Turns. It admits a Turn before
-provider work, writes the one terminal outcome only after provider evidence, and
-leaves interrupted or lost Turns open rather than inventing a result. A Body
+provider work and writes one terminal outcome. After a controlled stop proves
+retirement of its actual provider custody, the exact owned Body's put-down and
+cancellation of all its still-open Turns commit together, including Turns without
+Tell bindings. Existing terminals win unchanged. Cancellation supplies neither an
+answer nor a failure diagnostic; unproven execution loss leaves Turns open, while
+hung custody and genuine execution or cleanup failures remain failures. A failed
+cancellation cannot publish an ordinarily settled put-down. When provider
+retirement requires a handoff, that same Heart mutation also judges control and
+records the pending-input disposition before optional outcome observation. A Body
 uses the persisted Soul and latest valid session recipe; Heart loss makes it
 retire only provider custody it directly owns and exit.
 
@@ -88,9 +95,13 @@ that proof, those Tell identities remain pending and the disposition is not
 consumed. If spawn, release, or custody proof fails, the same session-end step
 records a Heart-owned undelivered terminal projection for exactly that snapshot.
 Concurrent Tells admitted after the snapshot remain pending for their own wake. A
-Body log line is never the disposition; it is at most evidence of one. No path
-leaves a disposition's Tell identities with neither a proven successor nor a
-Heart-owned undelivered projection. Successor creation is a consequence of that
+Body log line is never the disposition; it is at most evidence of one. Absent
+superseding control, no path leaves a disposition's Tell identities with neither
+a proven successor nor a Heart-owned undelivered projection. An admitted stop or
+interrupt supersedes that automatic disposition without terminalizing its
+pending input. A kill witness prevents that predecessor's delayed automatic
+launch from admitting a successor; a later ordinary Tell may still wake the
+retained input. Successor creation is a consequence of the exact still-authorized
 disposition, never a second decision, and duplicate wake must not create two
 dispositions. Admission failure remains terminal: it produces no automatic handoff
 or retry. There is no generalized retry loop and no change to provider tell

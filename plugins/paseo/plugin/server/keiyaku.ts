@@ -24,6 +24,7 @@ const row = z.union([
     z.object({ kind: z.literal("answered"), historyId: z.string().optional(), answer: z.string(),
       foldedSaidSequence: count.optional() }),
     z.object({ kind: z.literal("failed"), historyId: z.string().optional(), diagnostic: z.string() }),
+    z.object({ kind: z.literal("canceled"), historyId: z.string().optional() }),
   ]) }),
   base.extend({ kind: z.literal("tool"), ...turnFields, name: z.string(), toolId: z.string().optional(), call,
     state: z.union([z.enum(["active", "unsettled"]), z.object({ status: z.enum(["ok", "error"]),

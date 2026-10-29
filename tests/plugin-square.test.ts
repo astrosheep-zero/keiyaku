@@ -149,6 +149,7 @@ type SquareNotificationFixture = Readonly<{
     participants?: readonly string[],
     contractId?: string,
   ): Promise<void>;
+  canceledTurn(akumaId: string, bodySequence: number, turnSequence: number, initiator: string): Promise<void>;
   answeredTurn(
     akumaId: string,
     bodySequence: number,
@@ -221,6 +222,10 @@ async function withSquareNotificationFixture<T>(
           },
           cancellation,
         );
+      },
+      async canceledTurn(akumaId, bodySequence, turnSequence, initiator) {
+        await turn({ kind: "akuma.turn-outcome", akumaId, bodySequence, turnSequence,
+          initiator, participants: [initiator], outcome: { kind: "canceled" } });
       },
       async answeredTurn(akumaId, bodySequence, turnSequence, initiator, text, cancellation, participants, contractId) {
         await turn(
@@ -1124,6 +1129,21 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
       turnOutcome("× aku/different came back\nturn/3 failed · requested by @Alice\n\n---\n\nfailed for Alice", "aku/different", 3, ["Alice"]),
       outcome("aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
     ]);
+  });
+});
+
+test("Square canceled Turn notifies once, is exactly observed, and suppresses its Body interruption", async () => {
+  await withSquareNotificationFixture("canceled-turn", async (fixture) => {
+    await fixture.canceledTurn("aku/canceled", 1, 1, "Alice");
+    await fixture.bodyEnd("aku/canceled", 1, "put-down", "Alice");
+    assert.deepEqual(await fixture.expressions(), [
+      turnOutcome("○ aku/canceled came back\nturn/1 canceled · requested by @Alice", "aku/canceled", 1, ["Alice"]),
+    ]);
+    await fixture.observe("aku/canceled", "turn/1", "Alice");
+    const notice = await outcomeNotice(fixture, "aku/canceled", 1);
+    await fixture.square(async (square) => {
+      assert.equal((await square.snapshot()).delivered("Alice", notice.id), true);
+    });
   });
 });
 

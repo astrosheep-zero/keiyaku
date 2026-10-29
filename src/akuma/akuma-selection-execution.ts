@@ -53,6 +53,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
 function askObservation(observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>): AkumaAskObservation {
   if (observed.outcome === null)
     return observed.reason === "deadline" ? { reason: "deadline" } : { reason: "unanswered" };
+  if (observed.outcome.kind === "canceled") return { reason: "unanswered" };
   if (observed.outcome.kind === "answered")
     return { reason: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer };
   if (observed.outcome.kind === "failed") return { reason: "failed", diagnostic: observed.outcome.diagnostic };

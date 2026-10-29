@@ -20,6 +20,7 @@ import {
   beginTurn,
   bindTellsToTurn,
   breakBody,
+  cancelBodyTurns,
   decidePendingTellDisposition,
   resolvePendingTellDisposition,
   readOpenPendingTellDisposition,
@@ -865,12 +866,12 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 29 and leash schema version 4 hard-refuse old authority", async (context) => {
+test("heart schema version 30 and leash schema version 4 hard-refuse unknown authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
   seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
-  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 29/u);
+  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 30/u);
   await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });
 
@@ -1577,6 +1578,9 @@ test("Body idle settlement atomically obeys current control", async () => {
       }),
       { kind: "controlled" },
     );
+    assert.equal((await readHeart(value.allocated.paths)).latestBody?.end, undefined,
+      "control judgment alone is not provider closure proof");
+    await cancelBodyTurns(value.allocated.paths, { bodySequence: body.sequence, at: "2026-08-08T00:00:02.000Z" });
     assert.equal((await readHeart(value.allocated.paths)).latestBody?.end, "put-down");
     leash.release();
   } finally {

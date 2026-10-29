@@ -131,6 +131,27 @@ async function harness(t: TestContext, mock: MockTransport = {}) {
 const items = (events: ProviderEvent[]) => events.filter((e) => e.type === "timeline.item");
 const turns = (events: ProviderEvent[]) => events.filter((e) => e.type === "session.turn");
 
+test("durable cancellation from external control finishes only its Turn and reopens terminal without error", async (t) => {
+  const canceled: Row = { kind: "outcome", sequence: 3, turnSequence: 1, at, outcome: { kind: "canceled", historyId: "turn/1" } };
+  let rows: Row[] = [turn(1)];
+  const h = await harness(t, { window: async () => rows });
+  await h.open();
+  rows = [turn(1), canceled, turn(4, 4)];
+  h.push(rows);
+  await tick();
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
+    ["turn/1", "started"], ["turn/1", "canceled"], ["turn/4", "started"],
+  ]);
+  assert.equal(items(h.events).some((event) => event.item.type === "error"), false);
+  h.push(rows);
+  await tick();
+  assert.equal(turns(h.events).filter((event) => event.state === "canceled").length, 1);
+  const reopened = await harness(t, { window: async () => [turn(1), canceled] });
+  await reopened.open({ history: "skip" });
+  assert.deepEqual(turns(reopened.events), [], "seed does not restart the already-canceled Turn");
+  assert.equal(items(reopened.events).some((event) => event.item.type === "error"), false);
+});
+
 test("open, lifecycle-owned refresh, reply mapping, and persisted replay through the same session seam", async (t) => {
   let rows: Row[] = [turn(2), tell(1)];
   let reads = 0;

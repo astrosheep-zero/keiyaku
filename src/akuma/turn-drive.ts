@@ -600,7 +600,8 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
     outcome: Readonly<{ kind: "stopped" }> | Readonly<{ kind: "handoff" }>,
   ): Promise<TurnDriveResult> => {
     const retirement = await stopActiveDrive(input, active);
-    return retirement.kind === "hung" ? retirement : outcome;
+    if (retirement.kind === "hung") return retirement;
+    return input.supervisor.signal.aborted ? { kind: "stopped" } : outcome;
   };
 
   wakeups.event(iterator.next());

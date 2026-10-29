@@ -172,8 +172,12 @@ flagship's next action.
 
 Input-bound answer observation shares the execution-progress judgment, but never
 substitutes another input's outcome. An exact retained answer or failure wins;
-without one, stopped execution returns unanswered and retains the input. An
-invocation's unsettled wake preserves its launch gap; an explicitly failed wake
+without one, stopped execution returns unanswered and retains the input. An exact
+canceled Turn likewise returns unanswered immediately, even when successor work
+is already running; that later work never supplies the canceled Ask's answer.
+Cancellation is a retained terminal in status, history, and stream, with its own
+outcome identity but no answer and no fork point. An invocation's unsettled wake
+preserves its launch gap; an explicitly failed wake
 ends waiting when no execution is running and retains its admission diagnostic.
 Unexpected wake rejection remains an exceptional failure, not a fabricated
 provider outcome. Observation neither retries nor changes Tell facts. Without

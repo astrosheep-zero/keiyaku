@@ -170,11 +170,11 @@ export function createMirror(sessionId: string, emit: Emit) {
         } else if (row.kind === "note") {
           item({ type: "notification", id: `keiyaku:note/${row.sequence}`, level: "info", message: row.text }, row.at);
         } else if (row.kind === "outcome") {
-          item(row.outcome.kind === "answered"
+          if (row.outcome.kind !== "canceled") item(row.outcome.kind === "answered"
             ? { type: "assistant_message", id: row.outcome.foldedSaidSequence === undefined
               ? `keiyaku:turn/${row.turnSequence}` : `keiyaku:said/${row.outcome.foldedSaidSequence}`, text: row.outcome.answer }
             : { type: "error", id: `keiyaku:turn/${row.turnSequence}`, message: row.outcome.diagnostic }, row.at);
-          finish(openTurns.get(row.turnSequence), row.outcome.kind === "answered" ? "completed" : "failed",
+          finish(openTurns.get(row.turnSequence), row.outcome.kind === "answered" ? "completed" : row.outcome.kind,
             row.outcome.kind === "failed" ? row.outcome.diagnostic : undefined);
         }
       }

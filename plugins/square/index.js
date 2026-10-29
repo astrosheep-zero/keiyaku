@@ -77,15 +77,16 @@ async function openSquare(path, environment, cancellation) {
 }
 function turnOutcomeBody(signal) {
     const context = [
-        `turn/${signal.turnSequence}${signal.outcome.kind === "failed" ? " failed" : ""}`,
+        `turn/${signal.turnSequence}${signal.outcome.kind === "answered" ? "" : ` ${signal.outcome.kind}`}`,
         signal.initiator === undefined ? undefined : `· requested by @${signal.initiator}`,
         signal.contractId === undefined ? undefined : `· ${signal.contractId}`,
     ]
         .filter((value) => value !== undefined)
         .join(" ");
-    const result = signal.outcome.kind === "failed" ? signal.outcome.reason : signal.outcome.text;
-    const marker = signal.outcome.kind === "failed" ? "×" : "✓";
-    return `${marker} ${signal.akumaId} came back\n${context}\n\n---\n\n${result}`;
+    const result = signal.outcome.kind === "failed" ? signal.outcome.reason
+        : signal.outcome.kind === "answered" ? signal.outcome.text : "";
+    const marker = signal.outcome.kind === "failed" ? "×" : signal.outcome.kind === "canceled" ? "○" : "✓";
+    return `${marker} ${signal.akumaId} came back\n${context}${signal.outcome.kind === "canceled" ? "" : `\n\n---\n\n${result}`}`;
 }
 function turnOutcomeMetadata(signal) {
     return {
@@ -152,7 +153,7 @@ function serializeBodyNotification(notifications, signal, operation) {
     const key = bodyNotificationKey(signal);
     let state = notifications.get(key);
     if (state === undefined) {
-        state = { tail: Promise.resolve(), failedRecipients: new Set() };
+        state = { tail: Promise.resolve(), terminalRecipients: new Set() };
         notifications.set(key, state);
     }
     const result = state.tail.then(() => operation(state));
@@ -394,13 +395,13 @@ const plugin = {
                 async "akuma.turn-outcome"(signal, cancellation) {
                     await serializeBodyNotification(bodyNotifications, signal, async (state) => {
                         const expressed = await expressTurnOutcome(signal, cancellation);
-                        if (signal.outcome.kind !== "failed" || !expressed)
+                        if (signal.outcome.kind === "answered" || !expressed)
                             return;
                         // A late express may resolve after this handler lost authority; without a
                         // revalidation it would suppress an authorized Body-end notice it never owned.
                         cancellation?.throwIfAborted();
                         for (const participant of signal.participants ?? [])
-                            state.failedRecipients.add(participant);
+                            state.terminalRecipients.add(participant);
                     });
                 },
                 async "akuma.body-ended"(signal, cancellation) {
@@ -409,7 +410,7 @@ const plugin = {
                         try {
                             if (signal.end === "exited" || signal.end === "put-down")
                                 return;
-                            const remaining = (signal.participants ?? []).filter((participant) => !state.failedRecipients.has(participant));
+                            const remaining = (signal.participants ?? []).filter((participant) => !state.terminalRecipients.has(participant));
                             if ((signal.participants?.length ?? 0) > 0 && remaining.length === 0)
                                 return;
                             await expressBodyEnd(signal, remaining, cancellation);

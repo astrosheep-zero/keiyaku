@@ -65,6 +65,7 @@ export type TurnOutcome =
       answer: string;
       answerJson?: string;
     }>
+  | Readonly<{ kind: "canceled" }>
   | Readonly<{ kind: "failed"; diagnostic: string }>
   | Readonly<{
       kind: "invalid-output";

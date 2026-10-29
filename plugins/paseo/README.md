@@ -169,6 +169,10 @@ that live speech identity, and Paseo suppresses the identical final upsert. The
 adapter never repeats the producer's text comparison. An installed producer that
 reports no such linkage publishes the outcome under its own identity instead of
 guessing which speech it replaces, so that final text appears a second time.
+A durable canceled outcome finishes its exact Turn as canceled without an error
+item. External kill and interrupt have this same meaning as app Stop; replay or
+reopen treats that outcome as already terminal rather than restarting it. Genuine
+failed outcomes still finish failed and display their error.
 
 Messages submitted in the app's Steer mode use one ordinary Tell and never
 request an interrupt. Confirmed durable Tell admission is a successful send,

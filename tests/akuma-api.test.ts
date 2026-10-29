@@ -10,7 +10,7 @@ import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
-  appendActivity, beginTurn, bindTellsToTurn, breakBody, decidePendingTellDisposition, endTurn, finishBodyIfIdle,
+  appendActivity, beginTurn, bindTellsToTurn, breakBody, cancelBodyTurns, decidePendingTellDisposition, endTurn, finishBodyIfIdle,
   HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellDeliveries, recordTellReceipt,
   resolvePendingTellDisposition,
 } from "../src/akuma/heart/index.js";
@@ -335,6 +335,42 @@ test("bounded interrupt Ask returns its own admitted Tell without awaiting prede
     }
   });
 });
+test("an exact canceled Ask is unanswered even after the same pending Tell binds a running successor", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-ask-canceled-");
+  const value = await bornWorld(root, "ca1ce103");
+  const paths = value.allocated.paths;
+  const holder = (await HeldAkumaLeash.try(paths))!;
+  const at = "2026-08-10T00:00:01.000Z";
+  const observed: string[][] = [];
+  try {
+    const body = await holder.recordBody(paths, { leashTakenAt: at });
+    await recordTell(paths, { kind: "tell", id: "exact", body: "original", recordedAt: at });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["exact"], boundAt: at });
+    await cancelBodyTurns(paths, { bodySequence: body.sequence, at });
+    holder.release();
+    const successor = (await HeldAkumaLeash.try(paths))!;
+    try {
+      const nextBody = await successor.recordBody(paths, { leashTakenAt: at });
+      const next = await beginTurn(paths, { bodySequence: nextBody.sequence, startedAt: at });
+      await bindTellsToTurn(paths, { turnSequence: next.sequence, tellIds: ["exact"], boundAt: at });
+      const result = await executeAskAkuma({ path: value.world, id: value.allocated.id, body: "original", tellId: "exact", recordedAt: at,
+        timeoutMs: 0, outcomeObserved: async (_id, identities) => { observed.push([...identities]); } });
+      assert.deepEqual(result.observation, { reason: "unanswered" });
+      assert.deepEqual(observed, [[`turn/${turn.sequence}`]]);
+      assert.equal((await readTurn(paths, next.sequence))?.end, undefined);
+      const page = await value.akuma.history();
+      assert.equal(page.rows.find((row) => row.kind === "outcome")?.outcome.kind, "canceled");
+      const stream = value.akuma.stream()[Symbol.asyncIterator]();
+      try {
+        const first = await stream.next();
+        assert.equal(first.done, false);
+        if (!first.done) assert.equal(first.value.rows.find((row) => row.kind === "outcome")?.outcome.kind, "canceled");
+      } finally { await stream.return?.(); }
+    } finally { successor.release(); }
+  } finally { holder.release(); }
+});
+
 test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
   await withWaitedTellFixture(async ({ born, withRuntime, settle }) => {
     const terminal = await born("a1000016", answering("edge answer"));

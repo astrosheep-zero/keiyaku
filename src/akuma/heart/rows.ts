@@ -58,7 +58,7 @@ export type TurnRow = Readonly<{
   body_sequence: number;
   started_at: string;
   end_sequence: number | null;
-  outcome: "answered" | "failed" | "invalid-output" | null;
+  outcome: "answered" | "failed" | "invalid-output" | "canceled" | null;
   history_id: string | null;
   session_json: string | null;
   answer: string | null;
@@ -165,6 +165,7 @@ function decodeTurnOutcome(row: TurnRow): TurnOutcome {
       ...(row.session_json === null ? {} : { session: resumeCoordinate(parsed<unknown>(row.session_json)) }),
     };
   }
+  if (row.outcome === "canceled") return { kind: "canceled" };
   return { kind: "failed", diagnostic: row.diagnostic! };
 }
 
@@ -343,6 +344,14 @@ export function pauseFact(database: DatabaseSync): PauseFact | null {
   };
 }
 
+export function hasBodyHandoffControl(database: DatabaseSync, bodySequence: number): boolean {
+  return (
+    killFactForBody(database, bodySequence) !== null ||
+    stopFact(database)?.bodySequence === bodySequence ||
+    pauseFact(database)?.bodySequence === bodySequence
+  );
+}
+
 export function bodyFact(database: DatabaseSync, sequence: number): BodyFact | null {
   const row = database
     .prepare(`SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at FROM bodies WHERE sequence = ?`)
@@ -417,6 +426,24 @@ export function insertTurnStartFact(
   };
 }
 
+export function openTurnsForBody(database: DatabaseSync, bodySequence: number): readonly number[] {
+  return database
+    .prepare("SELECT sequence FROM turns WHERE body_sequence = ? AND end_sequence IS NULL ORDER BY sequence")
+    .all(bodySequence)
+    .map((row) => Number(row.sequence));
+}
+
+export function terminalTurnForTell(database: DatabaseSync, tellId: string): TurnFact | null {
+  const row = database
+    .prepare(
+      `SELECT t.sequence FROM tell_bindings b
+    JOIN turns t ON t.sequence = b.turn_sequence
+    WHERE b.tell_id = ? AND t.end_sequence IS NOT NULL ORDER BY b.sequence LIMIT 1`,
+    )
+    .get(tellId);
+  return row === undefined ? null : turnFact(database, Number(row.sequence));
+}
+
 export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFact, "sequence">): TurnEndFact {
   const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('turn-end')").run().lastInsertRowid);
   const result =
@@ -451,12 +478,19 @@ export function insertTurnEndFact(database: DatabaseSync, input: Omit<TurnEndFac
               input.completedAt,
               input.turnSequence,
             )
-        : database
-            .prepare(
-              `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
+        : input.outcome.kind === "canceled"
+          ? database
+              .prepare(
+                `UPDATE turns SET end_sequence = ?, outcome = 'canceled', completed_at = ?
+                WHERE sequence = ? AND end_sequence IS NULL`,
+              )
+              .run(sequence, input.completedAt, input.turnSequence)
+          : database
+              .prepare(
+                `UPDATE turns SET end_sequence = ?, outcome = 'failed', diagnostic = ?, completed_at = ?
           WHERE sequence = ? AND end_sequence IS NULL`,
-            )
-            .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
+              )
+              .run(sequence, input.outcome.diagnostic, input.completedAt, input.turnSequence);
   if (result.changes !== 1) throw new Error(`Akuma Turn ${input.turnSequence} is not open`);
   return { ...input, kind: "turn-end", sequence };
 }

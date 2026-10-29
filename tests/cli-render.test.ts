@@ -84,6 +84,13 @@ import type { ContractHistoryEvent } from "../src/index.js";
 import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 
+test("canceled outcomes render as canceled in CLI history and snapshots", () => {
+  const row: OutcomeRow = { kind: "outcome", sequence: 2, turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT, outcome: { kind: "canceled", historyId: "turn/1" } };
+  assert.equal(nativeHistoryText({ kind: "exact", id: parseAkuId("aku/claude/1234abcd").id, contract: { kind: "none" }, outcome: row }, { id: "turn/1" }, DEFAULT_CONTEXT), "canceled");
+  assert.match(snapshotActivityLines(idleAkumaSnapshot([], row), DEFAULT_CONTEXT).join("\n"), /canceled/u);
+});
+
 const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
 
 const fixtureEntry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV");

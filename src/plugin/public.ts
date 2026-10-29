@@ -6,7 +6,10 @@ export type PluginManifest = Readonly<{
   writablePaths?: readonly Readonly<{ name: string; path: string }>[];
 }>;
 
-export type PluginOutcome = Readonly<{ kind: "answered"; text: string }> | Readonly<{ kind: "failed"; reason: string }>;
+export type PluginOutcome =
+  | Readonly<{ kind: "answered"; text: string }>
+  | Readonly<{ kind: "failed"; reason: string }>
+  | Readonly<{ kind: "canceled" }>;
 
 export type PluginBodyEnd = "exited" | "broke-off" | "put-down" | "hung";
 

@@ -23,7 +23,13 @@ const hooks: PluginHooks = {
   "akuma.turn-outcome": (turn) => {
     turn.turnSequence.toFixed();
     if (turn.outcome.kind === "answered") turn.outcome.text.toUpperCase();
-    else turn.outcome.reason.toUpperCase();
+    else if (turn.outcome.kind === "failed") turn.outcome.reason.toUpperCase();
+    else {
+      const canceled: "canceled" = turn.outcome.kind;
+      void canceled;
+      // @ts-expect-error Cancellation carries no failure diagnostic.
+      turn.outcome.reason;
+    }
   },
 };
 const rootHooks = hooks as RootHooks;

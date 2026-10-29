@@ -20,8 +20,13 @@ wakes execution only when its control or pending-input facts change. These
 implementation boundaries do not create synchronous public APIs, a daemon,
 a queue, or a persistent cache. Existing Heart custody is opened without
 creating it; only a true absence becomes absence. Corruption and unsupported
-schema are hard failures, never partial reading, silent repair, migration, or
-compatibility decoding.
+schema are hard failures, never partial reading, silent repair, or compatibility
+decoding. The one explicitly supported predecessor format upgrades automatically
+at ordinary open, including first observation. Its structural conversion and
+version publication are atomic, preserve all retained facts and relationships,
+and serialize concurrent openers under Heart's existing mutation custody. A
+failed conversion leaves the old authority intact and fails the open. Other
+versions remain unsupported; current-format observation stays read-only.
 
 Contended mutation admission waits without blocking unrelated observations or
 control handling, within a bounded acquisition interval. Cancellation may stop
@@ -31,12 +36,13 @@ or commit failure rather than treating it as permission to repeat business work.
 
 The retained timeline is the sole durable execution order. A Body can drive
 multiple Turns; every admitted Turn starts before provider work and either ends
-once with an answer or typed failure, or remains open after interruption or
-loss. Heart never fabricates a provider outcome. Sessions record a provider
-native resume promise when granted. A later Body resumes only that promise; it
+once with an answer, typed failure, or proven controlled cancellation, or remains
+open after unproven execution loss. Cancellation invents neither an answer nor a
+failure diagnostic. Heart never fabricates a provider outcome. Sessions record a
+provider native resume promise when granted. A later Body resumes only that promise; it
 never reconstructs a broken native session or treats a missing session as a
-resume claim. An answered Turn may retain an exact provider fork point; failure
-and an answer without such a point remain non-forkable.
+resume claim. An answered Turn may retain an exact provider fork point; failure,
+cancellation, and an answer without such a point remain non-forkable.
 
 Activity is bounded retained provider narration, not a raw payload log or a
 recovery authority. Where a native adapter admitted a bounded preview of a
@@ -54,10 +60,14 @@ required structure, while old closed groups can become permanently unavailable. 
 pending-Tell disposition retains its frozen Tell identities and the delivery
 structure needed to prove them, including Tells already witnessed as told.
 Proof consumption and release of those dependencies are one Heart mutation.
-The resolved decision remains evidence of that Body's one decision; duplicate
-resolution does not reread retired members or capture later Tells. A protected
-backlog is not itself a new reason to compact: maintenance is amortized over new
-history and runs when protected work is released. Maintenance progress can only
+Control can instead supersede an automatic disposition without settling or
+discarding its Tell identities. Successor admission judges that exact decision
+against current control and kill evidence under Heart mutation custody; an old
+automatic launch cannot cross a witnessed kill. The resolved decision remains
+evidence of that Body's one decision; duplicate resolution does not reread
+retired members or capture later Tells. A protected backlog is not itself a new
+reason to compact: maintenance is amortized over new history and runs when
+protected work is released. Maintenance progress can only
 avoid repeated work; it cannot decide a fact's liveness or replace the retained
 history window. The public
 timeline projector is pure and derives snapshots, gaps, history loss, activity

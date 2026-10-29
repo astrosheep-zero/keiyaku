@@ -1753,7 +1753,7 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     assert.ok(performance.now() - requestedAt < CONTROL_RESPONSE_MS);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
-    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
     assert.equal(await probeLeash(allocated.paths), "free");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1827,6 +1827,178 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
   }
 });
 
+test("kill publishes cancellation only after provider closure and emits that committed terminal once", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-proven-cancel-");
+  const { promise: closed, resolve: close } = promiseBarrier<void>();
+  const { promise: aborting, resolve: abort } = promiseBarrier<void>();
+  const { promise: started, resolve: start } = promiseBarrier<void>();
+  let driven: Promise<unknown> | undefined;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "ca1ce102");
+    configureTurnOutcomePlugins(root);
+    const recorder = installTurnOutcomeRecorder(allocated.paths);
+    driven = driveAkumaBody(claudeBodyLaunch(allocated, root, "direct call", { initiator: "Alice" }),
+      scenarioProvider(() => {
+        start();
+        return {
+        result: Promise.resolve({ admission: { fence: "proven" }, events: { async *[Symbol.asyncIterator]() { await unresolved(); } }, completion: unresolved<TurnResult>() }),
+        closed,
+        async abort() { abort(); },
+        async forceDispose() { close(); },
+      }; }), { now: () => new Date().toISOString() });
+    await started;
+    const current = (await readHeart(allocated.paths)).latestBody!;
+    const killing = Akuma.select(await World.at(root), allocated.id).kill({ signal: AbortSignal.timeout(5_000) });
+    await aborting;
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, undefined);
+    assert.deepEqual(await outcomes(allocated.paths), [], "stop request and abort acknowledgement are not closure proof");
+    close();
+    assert.equal(await killing, "killed");
+    await driven;
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, current.sequence);
+    assert.equal(recorder.observations.length, 1);
+    const signal = recorder.observations[0]?.signal;
+    assert.equal(signal?.kind, "akuma.turn-outcome");
+    if (signal?.kind === "akuma.turn-outcome") assert.deepEqual(signal.outcome, { kind: "canceled" });
+    assert.deepEqual(recorder.observations[0]?.outcomes, [{ kind: "canceled" }]);
+    const status = await Akuma.select(await World.at(root), allocated.id).status();
+    assert.equal(status.timeline.kind, "idle");
+    if (status.timeline.kind === "idle") assert.equal(status.timeline.outcome?.outcome.kind, "canceled");
+  } finally {
+    close();
+    await driven?.catch(() => undefined);
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kill arriving during provider handoff retirement preserves pending input without waking a successor", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-kill-handoff-");
+  const { promise: closed, resolve: close } = promiseBarrier<void>();
+  const { promise: started, resolve: start } = promiseBarrier<void>();
+  const { promise: retiring, resolve: retire } = promiseBarrier<void>();
+  const { promise: controlled, resolve: control } = promiseBarrier<void>();
+  let driven: Promise<unknown> | undefined;
+  let spawns = 0;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "ca1ce105");
+    driven = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), scenarioProvider((input) => {
+      input.signal.addEventListener("abort", () => control(), { once: true });
+      return {
+        result: Promise.resolve({ admission: { fence: "handoff" }, events: {
+          async *[Symbol.asyncIterator]() { start(); await unresolved(); },
+        }, completion: unresolved<TurnResult>() }),
+        closed,
+        async abort() { retire(); await closed; },
+        async forceDispose() { close(); },
+      };
+    }), { now: () => new Date().toISOString(), async spawnBody() { spawns++; throw new Error("unexpected successor"); } });
+    await started;
+    await recordTell(allocated.paths, { id: "pending", body: "later", recordedAt: new Date().toISOString() });
+    await retiring;
+    const killing = Akuma.select(await World.at(root), allocated.id).kill({ signal: AbortSignal.timeout(5_000) });
+    await controlled;
+    close();
+    assert.equal(await killing, "killed");
+    await driven;
+    assert.equal(spawns, 0);
+    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["pending"]);
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
+  } finally { close(); await driven?.catch(() => undefined); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("kill in the handoff observer gap cancels automatic succession and preserves pending input", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-handoff-observer-kill-");
+  const { promise: started, resolve: start } = promiseBarrier<void>();
+  const { promise: observing, resolve: observe } = promiseBarrier<void>();
+  const { promise: released, resolve: release } = promiseBarrier<void>();
+  let driven: Promise<unknown> | undefined;
+  let spawns = 0;
+  try {
+    const allocated = await allocatedHeart(root, "claude", "ca1ce106");
+    configureTurnOutcomePlugins(root);
+    const recorder = installTurnOutcomeRecorder(allocated.paths);
+    recorder.observe = async (signal) => {
+      if (signal.kind === "akuma.turn-outcome" && signal.outcome.kind === "canceled") {
+        observe();
+        await released;
+      }
+    };
+    driven = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), hangingAdapter("handoff-observer", undefined, start), {
+      now: () => new Date().toISOString(),
+      async spawnBody() { spawns++; throw new Error("a killed handoff must not spawn"); },
+    });
+    await started;
+    await recordTell(allocated.paths, { id: "pending", body: "later", recordedAt: new Date().toISOString() });
+    await observing;
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
+    assert.deepEqual((await readOpenPendingTellDisposition(allocated.paths))?.tellIds, ["pending"], "the handoff snapshot precedes optional cancellation observation");
+    assert.equal(await Akuma.select(await World.at(root), allocated.id).kill({ signal: AbortSignal.timeout(2_000) }), "killed");
+    release();
+    await driven;
+    assert.equal(spawns, 0);
+    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["pending"]);
+    assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
+  } finally {
+    release();
+    await driven?.catch(() => undefined);
+    delete turnOutcomePluginGlobal.__keiyakuTurnOutcomePluginRecorder;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("kill after a handoff launch starts fences successor admission but permits a later ordinary wake", async () => {
+  const root = bodyTestDirectory("keiyaku-akuma-handoff-launch-kill-");
+  const { promise: started, resolve: start } = promiseBarrier<void>();
+  const { promise: spawning, resolve: spawn } = promiseBarrier<void>();
+  const { promise: released, resolve: release } = promiseBarrier<void>();
+  let driven: Promise<unknown> | undefined;
+  const starts: Parameters<typeof adapter>[0]["starts"] = [];
+  const successor = adapter({ starts, events: [{ type: "session", coordinate: { sessionId: "continued" } }], result: { kind: "answered", answer: "continued" } });
+  const now = () => new Date().toISOString();
+  try {
+    const allocated = await allocatedHeart(root, "claude", "ca1ce107");
+    driven = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), hangingAdapter("handoff-launch", undefined, start), {
+      now,
+      async spawnBody(launch) {
+        assert.deepEqual((await readOpenPendingTellDisposition(allocated.paths))?.tellIds, ["pending"]);
+        spawn();
+        await released;
+        assert.equal(await runAkumaBody(launch, bodyAdapter(successor), { now }), "held");
+        return {
+          pid: 1,
+          exited: Promise.resolve({ code: LEASH_HELD_EXIT, signal: null, log: { path: allocated.paths.log, from: 0, to: 0 } }),
+          async terminate() {},
+          release() {},
+        } satisfies OwnedProcess;
+      },
+    });
+    await started;
+    await recordTell(allocated.paths, { id: "pending", body: "retained", recordedAt: now() });
+    await spawning;
+    const predecessor = (await readHeart(allocated.paths)).latestBody!;
+    assert.equal(await Akuma.select(await World.at(root), allocated.id).kill({ signal: AbortSignal.timeout(2_000) }), "killed");
+    release();
+    await driven;
+    assert.equal(starts.length, 0, "a delayed automatic launch cannot start native work after kill");
+    assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, predecessor.sequence);
+    assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), ["pending"]);
+    assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
+    await recordTell(allocated.paths, { id: "wake", body: "ordinary wake", recordedAt: now() });
+    await driveAkumaBody({ paths: allocated.paths, refuseIfHeld: true }, successor, { now });
+    assert.equal(starts.length, 1);
+    assert.deepEqual(starts[0]?.launchTells.map((tell) => tell.id), ["pending", "wake"]);
+    assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
+    assert.deepEqual((await readHeart(allocated.paths)).pending, []);
+  } finally {
+    release();
+    await driven?.catch(() => undefined);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("public kill supervises an answered Turn until Attempt closure proof", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-kill-after-answer-");
   const { promise: closed, resolve: releaseClosed } = promiseBarrier<void>();
@@ -1877,7 +2049,7 @@ test("public kill supervises an answered Turn until Attempt closure proof", asyn
     await body;
     assert.equal(aborted, 1);
     assert.equal(forced, 1);
-    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
   } finally {
     releaseClosed();
@@ -1945,7 +2117,7 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
     assert.equal(interrupted.interruption?.kind, "completed");
     await body;
     assert.equal(aborted, 1);
-    assert.deepEqual(await outcomes(allocated.paths), []);
+    assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
     assert.equal(interrupted.wake.kind, "held");
@@ -2260,7 +2432,7 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
   }
 });
 
-test("schema Turn malformed JSON is invalid-output and open bound Turns fail when Body is put down", async () => {
+test("schema Turn malformed JSON is invalid-output and open bound Turns cancel when Body is put down", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-invalid-output-");
   try {
     const allocated = await allocatedHeart(root, "claude", "bad00001");
@@ -2325,8 +2497,9 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns fail whe
     const current = (await readHeart(allocated.paths)).latestBody!;
     await insertLegacyPauseControl(allocated.paths, current.sequence, "2026-08-08T00:00:05.000Z");
     await expectBodySettles(hanging, "Body did not put down open bound Turn");
-    const failed = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
-    assert.equal(failed?.end?.outcome.kind, "failed");
+    const canceled = bound?.binding === undefined ? null : await readTurn(allocated.paths, bound.binding.turnSequence);
+    assert.deepEqual(canceled?.end?.outcome, { kind: "canceled" });
+    assert.equal((await readTurn(allocated.paths, turn!.sequence))?.end?.outcome.kind, "invalid-output");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

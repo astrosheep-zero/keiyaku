@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 29;
+const HEART_SCHEMA_VERSION = 30;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -19,23 +19,83 @@ export function assertLeashSchemaVersion(database: DatabaseSync): void {
   assertSchemaVersion(database, "leash_schema", LEASH_SCHEMA_VERSION);
 }
 
+export function heartSchemaVersion(database: DatabaseSync): number | undefined {
+  return (
+    database.prepare("SELECT version FROM akuma_schema WHERE singleton = 1").get() as { version: number } | undefined
+  )?.version;
+}
+
 export function heartSchemaIsCurrent(database: DatabaseSync): boolean {
   try {
-    const row = database.prepare(`SELECT version FROM akuma_schema WHERE singleton = 1`).get() as
-      | { version: number }
-      | undefined;
-    return row?.version === HEART_SCHEMA_VERSION;
+    return heartSchemaVersion(database) === HEART_SCHEMA_VERSION;
   } catch {
     return false;
   }
 }
 
-export const HEART_SCHEMA = `
+const VERSION_SCHEMA = `
   CREATE TABLE IF NOT EXISTS akuma_schema (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     version INTEGER NOT NULL CHECK (version = ${HEART_SCHEMA_VERSION})
   ) STRICT;
   INSERT OR IGNORE INTO akuma_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
+`;
+
+function turnSchema(table: "turns" | "turns_upgrade"): string {
+  return `
+  CREATE TABLE ${table === "turns" ? "IF NOT EXISTS " : ""}${table} (
+    sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
+    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
+    started_at TEXT NOT NULL,
+    initiator TEXT,
+    end_sequence INTEGER UNIQUE REFERENCES timeline(sequence) ON DELETE SET NULL,
+    outcome TEXT CHECK (outcome IN ('answered', 'failed', 'invalid-output', 'canceled')),
+    history_id TEXT UNIQUE,
+    session_json TEXT CHECK (session_json IS NULL OR json_valid(session_json)),
+    answer TEXT,
+    answer_json TEXT CHECK (answer_json IS NULL OR json_valid(answer_json)),
+    schema_json TEXT CHECK (schema_json IS NULL OR json_valid(schema_json)),
+    diagnostic TEXT,
+    completed_at TEXT,
+    CHECK (
+      (outcome = 'answered' AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL
+        AND ((schema_json IS NULL AND answer_json IS NULL) OR (schema_json IS NOT NULL AND answer_json IS NOT NULL)))
+      OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
+        AND answer_json IS NULL AND diagnostic IS NOT NULL)
+      OR (outcome = 'invalid-output' AND answer IS NOT NULL AND answer_json IS NULL
+        AND diagnostic IS NOT NULL AND schema_json IS NOT NULL)
+      OR (outcome = 'canceled' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
+        AND answer_json IS NULL AND diagnostic IS NULL)
+      OR (outcome IS NULL AND end_sequence IS NULL AND history_id IS NULL AND session_json IS NULL
+        AND answer IS NULL AND answer_json IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
+    )
+  ) STRICT;`;
+}
+
+/** Called only under the open boundary's write transaction, with foreign keys disabled. */
+export function upgradeHeartSchema(database: DatabaseSync): void {
+  // Another opener may have completed the fixed conversion while this one waited.
+  if (heartSchemaVersion(database) !== 29) {
+    assertHeartSchemaVersion(database);
+    return;
+  }
+  database.exec(turnSchema("turns_upgrade"));
+  database.exec(`
+    INSERT INTO turns_upgrade (sequence, body_sequence, started_at, initiator, end_sequence,
+      outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at)
+    SELECT sequence, body_sequence, started_at, initiator, end_sequence,
+      outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns;
+    DROP TABLE turns;
+    ALTER TABLE turns_upgrade RENAME TO turns;
+    DROP TABLE akuma_schema;
+    ${VERSION_SCHEMA}
+  `);
+  if (database.prepare("PRAGMA foreign_key_check").get() !== undefined)
+    throw new Error("Akuma Heart upgrade found broken foreign key relationships");
+}
+
+export const HEART_SCHEMA = `
+  ${VERSION_SCHEMA}
   CREATE TABLE IF NOT EXISTS soul (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     soul_json TEXT NOT NULL CHECK (json_valid(soul_json))
@@ -58,31 +118,7 @@ export const HEART_SCHEMA = `
     options_json TEXT NOT NULL CHECK (json_valid(options_json)),
     admitted_at TEXT NOT NULL
   ) STRICT;
-  CREATE TABLE IF NOT EXISTS turns (
-    sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
-    body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
-    started_at TEXT NOT NULL,
-    initiator TEXT,
-    end_sequence INTEGER UNIQUE REFERENCES timeline(sequence) ON DELETE SET NULL,
-    outcome TEXT CHECK (outcome IN ('answered', 'failed', 'invalid-output')),
-    history_id TEXT UNIQUE,
-    session_json TEXT CHECK (session_json IS NULL OR json_valid(session_json)),
-    answer TEXT,
-    answer_json TEXT CHECK (answer_json IS NULL OR json_valid(answer_json)),
-    schema_json TEXT CHECK (schema_json IS NULL OR json_valid(schema_json)),
-    diagnostic TEXT,
-    completed_at TEXT,
-    CHECK (
-      (outcome = 'answered' AND session_json IS NOT NULL AND answer IS NOT NULL AND diagnostic IS NULL
-        AND ((schema_json IS NULL AND answer_json IS NULL) OR (schema_json IS NOT NULL AND answer_json IS NOT NULL)))
-      OR (outcome = 'failed' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
-        AND answer_json IS NULL AND diagnostic IS NOT NULL)
-      OR (outcome = 'invalid-output' AND answer IS NOT NULL AND answer_json IS NULL
-        AND diagnostic IS NOT NULL AND schema_json IS NOT NULL)
-      OR (outcome IS NULL AND end_sequence IS NULL AND history_id IS NULL AND session_json IS NULL
-        AND answer IS NULL AND answer_json IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
-    )
-  ) STRICT;
+  ${turnSchema("turns")}
   CREATE TABLE IF NOT EXISTS timeline (
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end'))
