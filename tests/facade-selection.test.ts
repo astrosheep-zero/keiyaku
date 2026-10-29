@@ -884,9 +884,9 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
     const source = await answered(root, "worker", "00000001");
     const debt = await Debts.of(await World.at(root)).add({ title: "Catalog debt" });
     assert.equal(debt.kind, "accepted");
-    mkdirSync(join(home, "akuma"));
+    mkdirSync(join(home, "akumas"));
     writeFileSync(
-      join(home, "akuma", "reviewer.md"),
+      join(home, "akumas", "reviewer.md"),
       [
         "---",
         "provider: missing",

@@ -39,7 +39,7 @@ import {
 test("call preserves a definition failure instead of reporting a missing Akuma", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-cli-definition-");
   const home = join(root, "home");
-  const definitions = join(home, "akuma");
+  const definitions = join(home, "akumas");
   mkdirSync(definitions, { recursive: true });
   const invalidPath = join(definitions, "broken.md");
   writeFileSync(invalidPath, "---\nprovider: false\n---\n");

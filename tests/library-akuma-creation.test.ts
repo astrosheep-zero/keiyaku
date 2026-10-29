@@ -71,10 +71,10 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
   const home = join(root, ".direct-settings");
   const executable = join(root, "fake-codex");
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
-  mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
-  writeFileSync(join(home, "akuma", "restricted.md"), "---\nprovider: local\nallowed:\n  - debt.add\n---\nWork.\n");
-  writeFileSync(join(home, "akuma", "empty.md"), "---\nprovider: local\nallowed: []\n---\nWork.\n");
+  mkdirSync(join(home, "akumas"), { recursive: true });
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  writeFileSync(join(home, "akumas", "restricted.md"), "---\nprovider: local\nallowed:\n  - debt.add\n---\nWork.\n");
+  writeFileSync(join(home, "akumas", "empty.md"), "---\nprovider: local\nallowed: []\n---\nWork.\n");
   writeFileSync(
     join(home, "settings.json"),
     JSON.stringify({
@@ -1178,13 +1178,13 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
 
 test("Archetype base chains refuse missing providers, malformed names, and cycles", async (context) => {
   const home = temporaryDirectory(context, "keiyaku-akuma-archetype-invalid-base-");
-  mkdirSync(join(home, "akuma"));
-  writeFileSync(join(home, "akuma", "missing.md"), "---\nbase: absent\n---\n");
-  writeFileSync(join(home, "akuma", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
-  writeFileSync(join(home, "akuma", "a.md"), "---\nbase: b\n---\n");
-  writeFileSync(join(home, "akuma", "b.md"), "---\nbase: a\n---\n");
-  writeFileSync(join(home, "akuma", "noprov.md"), "---\nbase: empty\n---\n");
-  writeFileSync(join(home, "akuma", "empty.md"), "---\n{}\n---\n");
+  mkdirSync(join(home, "akumas"));
+  writeFileSync(join(home, "akumas", "missing.md"), "---\nbase: absent\n---\n");
+  writeFileSync(join(home, "akumas", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
+  writeFileSync(join(home, "akumas", "a.md"), "---\nbase: b\n---\n");
+  writeFileSync(join(home, "akumas", "b.md"), "---\nbase: a\n---\n");
+  writeFileSync(join(home, "akumas", "noprov.md"), "---\nbase: empty\n---\n");
+  writeFileSync(join(home, "akumas", "empty.md"), "---\n{}\n---\n");
   const settingsValue = await settings({ home });
   await assert.rejects(
     loadPreparedArchetype({ name: "missing", home, settings: settingsValue }),
@@ -1208,18 +1208,18 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
 test("Archetype and call allowed inputs refuse malformed values before allocation", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-allowed-input-");
   const home = join(root, "home");
-  mkdirSync(join(home, "akuma"), { recursive: true });
+  mkdirSync(join(home, "akumas"), { recursive: true });
   const value = await settings({ root, home });
   const world = await World.at(root);
   const runtime = Akuma.of(world, { home, settings: value });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   for (const [allowed, expected] of [
     [["akuma.unknown"], /unknown action/u],
     [["akuma.call", "akuma.call"], /duplicate action/u],
     [[1], /unknown action/u],
   ] as const) {
     const yaml = allowed.map((action) => `  - ${action}\n`).join("");
-    writeFileSync(join(home, "akuma", "invalid.md"), `---\nprovider: claude\nallowed:\n${yaml}---\nWork.\n`);
+    writeFileSync(join(home, "akumas", "invalid.md"), `---\nprovider: claude\nallowed:\n${yaml}---\nWork.\n`);
     await assert.rejects(loadPreparedArchetype({ name: "invalid", home, settings: value }), expected);
     await assert.rejects(runtime.call({ archetype: "worker", body: "invalid", allowed: allowed as never }), expected);
   }
@@ -1231,9 +1231,9 @@ test("Archetype and call allowed inputs refuse malformed values before allocatio
 test("a local call reports unsupported Archetype options as an Archetype failure before allocation", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-local-unsupported-option-");
   const home = join(root, "home");
-  mkdirSync(join(home, "akuma"), { recursive: true });
+  mkdirSync(join(home, "akumas"), { recursive: true });
   const value = await settings({ root, home });
-  const archetypePath = join(home, "akuma", "greedy.md");
+  const archetypePath = join(home, "akumas", "greedy.md");
   writeFileSync(archetypePath, "---\nprovider: claude\nnetwork: enabled\n---\nWork.\n");
   await assert.rejects(
     Akumas.of(await World.at(root)).call({ archetype: "greedy", body: "hello", home, settings: value }),

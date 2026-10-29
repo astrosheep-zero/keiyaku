@@ -28,12 +28,12 @@ function catalogueFixture(
     rmSync(home, { recursive: true, force: true });
   });
   for (const [name, markdown] of Object.entries(files.root ?? {})) {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    writeFileSync(join(root, ".keiyaku", "akuma", `${name}.md`), markdown);
+    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+    writeFileSync(join(root, ".keiyaku", "akumas", `${name}.md`), markdown);
   }
   for (const [name, markdown] of Object.entries(files.home ?? {})) {
-    mkdirSync(join(home, "akuma"), { recursive: true });
-    writeFileSync(join(home, "akuma", `${name}.md`), markdown);
+    mkdirSync(join(home, "akumas"), { recursive: true });
+    writeFileSync(join(home, "akumas", `${name}.md`), markdown);
   }
   return { root, home };
 }
@@ -128,7 +128,7 @@ test("the native Archetype error keeps its class, kind, reason and searched path
     assert.equal(error.name, "AkumaArchetypeError");
     assert.equal(error.kind, "akuma-archetype");
     assert.equal(error.archetype, "broken");
-    assert.deepEqual(error.searched, [join(root, ".keiyaku", "akuma", "broken.md")]);
+    assert.deepEqual(error.searched, [join(root, ".keiyaku", "akumas", "broken.md")]);
     assert.equal(error.reason, "is invalid: Akuma hidden must be a boolean");
     assert.match(error.message, /`broken` is invalid/u);
     return true;

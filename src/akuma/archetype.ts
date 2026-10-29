@@ -72,11 +72,11 @@ export class AkumaArchetypeError extends Error {
 type ArchetypeCoordinates = Readonly<{ project?: string; home?: string }>;
 
 function projectArchetypeDirectory(project?: string): string | undefined {
-  return project === undefined ? undefined : join(project, ".keiyaku", "akuma");
+  return project === undefined ? undefined : join(project, ".keiyaku", "akumas");
 }
 
 function homeArchetypeDirectory(home?: string): string {
-  return join(home ?? join(homedir(), ".keiyaku"), "akuma");
+  return join(home ?? join(homedir(), ".keiyaku"), "akumas");
 }
 
 function archetypeDirectories(input: ArchetypeCoordinates): readonly string[] {

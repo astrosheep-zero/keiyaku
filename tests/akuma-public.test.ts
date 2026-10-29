@@ -2054,15 +2054,15 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-home-"));
   try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(join(root, ".keiyaku", "akuma", "project-only.md"), "---\nprovider: claude\n---\nProject only.\n");
-    writeFileSync(join(home, "akuma", "home-only.md"), "---\nprovider: claude\n---\nHome only.\n");
+    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+    mkdirSync(join(home, "akumas"));
+    writeFileSync(join(root, ".keiyaku", "akumas", "project-only.md"), "---\nprovider: claude\n---\nProject only.\n");
+    writeFileSync(join(home, "akumas", "home-only.md"), "---\nprovider: claude\n---\nHome only.\n");
     writeFileSync(
-      join(root, ".keiyaku", "akuma", "shared.md"),
+      join(root, ".keiyaku", "akumas", "shared.md"),
       "---\nprovider: claude\ndescription: Project\n---\nProject body.\n",
     );
-    writeFileSync(join(home, "akuma", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
+    writeFileSync(join(home, "akumas", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
 
     const settingsValue = await settings({ root, home });
     const world = await akumaAt(root, { home, settings: settingsValue });
@@ -2080,17 +2080,17 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     assert.deepEqual(cli.value, { rows: catalog.rows, hasMore: false });
 
     const shared = await loadPreparedArchetype({ name: "shared", project: root, home, settings: settingsValue });
-    assert.equal(shared.path, join(root, ".keiyaku", "akuma", "shared.md"));
+    assert.equal(shared.path, join(root, ".keiyaku", "akumas", "shared.md"));
     assert.equal(shared.description, "Project");
     const fallback = await loadPreparedArchetype({ name: "home-only", project: root, home, settings: settingsValue });
-    assert.equal(fallback.path, join(home, "akuma", "home-only.md"));
+    assert.equal(fallback.path, join(home, "akumas", "home-only.md"));
 
     await assert.rejects(
       loadPreparedArchetype({ name: "missing", project: root, home, settings: settingsValue }),
       (error: unknown) =>
         error instanceof AkumaArchetypeError &&
         error.searched.join("\n") ===
-          [join(root, ".keiyaku", "akuma", "missing.md"), join(home, "akuma", "missing.md")].join("\n"),
+          [join(root, ".keiyaku", "akumas", "missing.md"), join(home, "akumas", "missing.md")].join("\n"),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -2102,18 +2102,18 @@ test("dotted archetype file stems join the catalogue as canonical names", async 
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-root-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-home-"));
   try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(join(home, "akuma", "review.v2.md"), "---\nprovider: claude\n---\nDotted.\n");
-    writeFileSync(join(home, "akuma", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
-    writeFileSync(join(home, "akuma", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+    mkdirSync(join(home, "akumas"));
+    writeFileSync(join(home, "akumas", "review.v2.md"), "---\nprovider: claude\n---\nDotted.\n");
+    writeFileSync(join(home, "akumas", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+    writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
     assert.deepEqual(catalog, { rows: [{ name: "review.v2" }], hasMore: false });
 
     const settingsValue = await settings({ root, home });
     const dotted = await loadPreparedArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
-    assert.equal(dotted.path, join(home, "akuma", "review.v2.md"));
+    assert.equal(dotted.path, join(home, "akumas", "review.v2.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -2124,11 +2124,11 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-root-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-home-"));
   try {
-    mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
-    mkdirSync(join(home, "akuma"));
-    writeFileSync(join(home, "akuma", "visible.md"), "---\nprovider: claude\n---\nVisible.\n");
-    writeFileSync(join(home, "akuma", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
-    writeFileSync(join(home, "akuma", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
+    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+    mkdirSync(join(home, "akumas"));
+    writeFileSync(join(home, "akumas", "visible.md"), "---\nprovider: claude\n---\nVisible.\n");
+    writeFileSync(join(home, "akumas", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
+    writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
     assert.deepEqual(catalog, { rows: [{ name: "child" }, { name: "visible" }], hasMore: false });
@@ -2139,9 +2139,9 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
 
     const settingsValue = await settings({ root, home });
     const hidden = await loadPreparedArchetype({ name: "secret", project: root, home, settings: settingsValue });
-    assert.equal(hidden.path, join(home, "akuma", "secret.md"));
+    assert.equal(hidden.path, join(home, "akumas", "secret.md"));
 
-    writeFileSync(join(home, "akuma", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
+    writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
     await assert.rejects(listArchetypeDefinitions({ project: root, home }), /hidden must be a boolean/u);
   } finally {
     rmSync(root, { recursive: true, force: true });

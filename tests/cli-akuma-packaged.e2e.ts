@@ -118,7 +118,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
   const world = join(root, "world");
   const home = join(root, ".home");
   mkdirSync(join(world, ".keiyaku"), { recursive: true });
-  mkdirSync(join(home, "akuma"), { recursive: true });
+  mkdirSync(join(home, "akumas"), { recursive: true });
   const agent = join(root, "fake-acp.mjs");
   writeFileSync(agent, fakeAgentSource());
   for (const [archetype, provider] of [
@@ -129,7 +129,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
     ["finisher", "fake-answer"],
     ["silent", "fake-empty"],
   ] as const) {
-    writeFileSync(join(home, "akuma", `${archetype}.md`), `---\nprovider: ${provider}\n---\nWork.\n`);
+    writeFileSync(join(home, "akumas", `${archetype}.md`), `---\nprovider: ${provider}\n---\nWork.\n`);
   }
   writeFileSync(
     join(world, ".keiyaku", "settings.json"),
@@ -445,8 +445,8 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
   );
   const home = join(root, ".home");
-  mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  mkdirSync(join(home, "akumas"), { recursive: true });
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
 
   const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
   await initializeHeart(parent.paths);

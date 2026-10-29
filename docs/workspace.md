@@ -42,8 +42,9 @@ The workspace owner atomically creates or repairs its guidance, namespace
 context, and narrow local ignore protection after an active managed worktree
 exists. These files keep derived management material out of ordinary status and
 delivery capture without hiding project-owned data. Primary management ignore
-protection excludes the local Debt ledger while leaving shared Settings
-eligible for version control. Namespace context is the
+protection excludes the local Debt ledger and runtime custody while leaving
+shared Settings and project Archetype definitions eligible for version control.
+Namespace context is the
 Contract-derived coordinate for active Debt work; a valid local override remains
 intact. The complete Contract coordinate is split into segments, so `kei/<slug>`
 provides Debt namespace `kei/<slug>` and identities under `debt/kei/<slug>/...`.

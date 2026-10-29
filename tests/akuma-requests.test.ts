@@ -480,8 +480,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const previousHome = process.env.HOME;
   const home = join(value.root, "home");
-  mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
-  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  mkdirSync(join(home, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(home, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   process.env.HOME = home;
   const first = await openCallPump(value, async (launch) => await settlePromptFreeChild(launch, "2026-08-09T00:00:02.000Z"));
   try {
@@ -742,10 +742,10 @@ test("a drive serves Body Requests through transport while Heart remains authori
   const priorHome = process.env.HOME;
   const priorRequests = process.env[AKUMA_REQUESTS_ENV];
   const home = join(value.root, "home");
-  mkdirSync(join(home, ".keiyaku", "akuma"), { recursive: true });
-  writeFileSync(join(home, ".keiyaku", "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  mkdirSync(join(home, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(home, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(
-    join(home, ".keiyaku", "akuma", "codex.md"),
+    join(home, ".keiyaku", "akumas", "codex.md"),
     "---\nprovider: codex-app-server\n---\nWork.\n",
   );
   process.env.HOME = home;

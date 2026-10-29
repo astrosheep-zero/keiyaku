@@ -171,10 +171,10 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
   const restoreSquareLedger = isolateSquareFixtureLedger(root);
   let operationFailed = true;
   try {
-    mkdirSync(join(home, "akuma"), { recursive: true });
+    mkdirSync(join(home, "akumas"), { recursive: true });
     mkdirSync(piHome);
     writeFileSync(
-      join(home, "akuma", "fixture.md"),
+      join(home, "akumas", "fixture.md"),
       "---\nprovider: pi\nmodel: fixture/fixture-chat\n---\n",
     );
     writeFileSync(

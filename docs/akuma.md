@@ -101,11 +101,12 @@ its stem is one canonical name under [model.md](model.md); when the spelling
 rule widens, previously inadmissible files become live Archetypes unchanged. A missing native resume promise never authorizes
 reconstructing one.
 
-Archetype definitions may come from both the current project and Home. A
-project definition shadows a Home definition with the same canonical name;
-Home remains the fallback when the project has no definition. This precedence
-applies only to call-time definition configuration and never changes World
-runtime custody, Heart evidence, or leash ownership.
+Archetype definitions are configuration kept apart from World runtime custody.
+Project definitions are eligible for version control. Definitions may come from
+both the current project and Home. A project definition shadows a Home definition
+with the same canonical name; Home remains the fallback when the project has no
+definition. This precedence applies only to call-time definition configuration
+and never changes World runtime custody, Heart evidence, or leash ownership.
 
 An Archetype may name one `base` Archetype at load time. The base is resolved
 using the same project-over-Home precedence, then the child is merged into one

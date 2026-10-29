@@ -23,7 +23,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-settings-"));
   const home = join(root, "home");
   const project = join(root, "project");
-  mkdirSync(join(home, "akuma"), { recursive: true });
+  mkdirSync(join(home, "akumas"), { recursive: true });
   mkdirSync(join(project, ".keiyaku"), { recursive: true });
   return { root, home, project, close: () => rmSync(root, { recursive: true, force: true }) };
 }
@@ -239,7 +239,7 @@ test("Archetype resolves the OpenCode V1 provider execution as one frozen recipe
         },
       }),
     );
-    writeFileSync(join(value.home, "akuma", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
+    writeFileSync(join(value.home, "akumas", "builder.md"), "---\nprovider: local\nmodel: openai/test\n---\n");
     const loaded = await loadNamed(value, "builder");
     assert.deepEqual(loaded.provider, {
       name: "local",
@@ -259,13 +259,13 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
   const value = fixture();
   try {
     writeFileSync(
-      join(value.home, "akuma", "pi-worker.md"),
+      join(value.home, "akumas", "pi-worker.md"),
       "---\nprovider: pi\nmodel: openai/gpt\neffort: high\n---\nWork.\n",
     );
     let loaded = await loadNamed(value, "pi-worker");
     assert.deepEqual(loaded.provider, { name: "pi", kind: "pi" });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "pi", env: {} } } }));
-    writeFileSync(join(value.home, "akuma", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
+    writeFileSync(join(value.home, "akumas", "pi-worker.md"), "---\nprovider: local\nmodel: openai/gpt\n---\nWork.\n");
     loaded = await loadNamed(value, "pi-worker");
     assert.deepEqual(loaded.provider, { name: "local", kind: "pi", env: {} });
     writeFileSync(
@@ -292,24 +292,24 @@ test("Archetype omission uses the delegation baseline while explicit allowed set
       "debt.drop",
       "debt.update",
     ]);
-    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: codex-app-server\n---\n");
+    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: codex-app-server\n---\n");
     assert.deepEqual((await loadNamed(value, "worker")).allowed, DEFAULT_ALLOWED_ACTIONS);
     assert.equal((await loadNamed(value, "worker")).allowed.includes("contract.review"), false);
 
     writeFileSync(
-      join(value.home, "akuma", "full.md"),
+      join(value.home, "akumas", "full.md"),
       `---\nprovider: codex-app-server\nallowed:\n${ALLOWED_ACTIONS.map((action) => `  - ${action}\n`).join("")}---\n`,
     );
     assert.deepEqual((await loadNamed(value, "full")).allowed, ALLOWED_ACTIONS);
 
     writeFileSync(
-      join(value.home, "akuma", "reviewer.md"),
+      join(value.home, "akumas", "reviewer.md"),
       "---\nprovider: codex-app-server\nallowed:\n  - contract.review\n---\n",
     );
-    writeFileSync(join(value.home, "akuma", "reviewer-child.md"), "---\nbase: reviewer\n---\n");
+    writeFileSync(join(value.home, "akumas", "reviewer-child.md"), "---\nbase: reviewer\n---\n");
     assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, ["contract.review"]);
 
-    writeFileSync(join(value.home, "akuma", "reviewer-child.md"), "---\nbase: reviewer\nallowed: []\n---\n");
+    writeFileSync(join(value.home, "akumas", "reviewer-child.md"), "---\nbase: reviewer\nallowed: []\n---\n");
     assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, []);
   } finally {
     value.close();
@@ -320,7 +320,7 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
   const value = fixture();
   try {
     writeFileSync(
-      join(value.home, "akuma", "grok.md"),
+      join(value.home, "akumas", "grok.md"),
       "---\nprovider: grok-build\nmodel: grok-4\neffort: high\n---\n",
     );
     const loaded = await loadNamed(value, "grok");
@@ -330,7 +330,7 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
       executable: "grok",
     });
     assert.deepEqual(loaded.options, { model: "grok-4", effort: "high" });
-    writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
+    writeFileSync(join(value.home, "akumas", "grok.md"), "---\nprovider: grok-build\n---\nBuild.\n");
     const prompted = await loadNamed(value, "grok");
     assert.deepEqual(prompted.options, { systemPrompt: "Build.\n", systemPromptMode: "append" });
     writeFileSync(
@@ -341,7 +341,7 @@ test("Archetype resolves grok-build as its own builtin protocol execution", asyn
         },
       }),
     );
-    writeFileSync(join(value.home, "akuma", "grok.md"), "---\nprovider: private\neffort: high\n---\n");
+    writeFileSync(join(value.home, "akumas", "grok.md"), "---\nprovider: private\neffort: high\n---\n");
     const custom = await loadNamed(value, "grok");
     assert.deepEqual(custom.provider, {
       name: "private",
@@ -359,7 +359,7 @@ test("Archetype resolves Kimi ACP model and thinking selectors without a custom 
   const value = fixture();
   try {
     writeFileSync(
-      join(value.home, "akuma", "kimi.md"),
+      join(value.home, "akumas", "kimi.md"),
       "---\nprovider: kimi\nmodel: kimi-code/kimi-for-coding\neffort: low\n---\n",
     );
     const loaded = await loadNamed(value, "kimi");
@@ -397,7 +397,7 @@ test("Archetype resolves a second configured ACP execution without registry chan
         },
       }),
     );
-    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\nmodel: test-model\n---\nBuild.\n");
+    writeFileSync(join(value.home, "akumas", "local.md"), "---\nprovider: local\nmodel: test-model\n---\nBuild.\n");
     const loaded = await loadNamed(value, "local");
     assert.deepEqual(loaded.provider, {
       name: "local",
@@ -421,13 +421,13 @@ test("Archetype resolves a second configured ACP execution without registry chan
 test("Archetype systemPromptMode defaults to append and rejects invalid definitions", async () => {
   const value = fixture();
   try {
-    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
     assert.deepEqual((await loadNamed(value, "worker")).options, {
       systemPrompt: "Work.\n",
       systemPromptMode: "append",
     });
     writeFileSync(
-      join(value.home, "akuma", "worker.md"),
+      join(value.home, "akumas", "worker.md"),
       "---\nprovider: claude\nsystemPromptMode: append\n---\nWork.\n",
     );
     assert.deepEqual((await loadNamed(value, "worker")).options, {
@@ -435,19 +435,19 @@ test("Archetype systemPromptMode defaults to append and rejects invalid definiti
       systemPromptMode: "append",
     });
     writeFileSync(
-      join(value.home, "akuma", "worker.md"),
+      join(value.home, "akumas", "worker.md"),
       "---\nprovider: claude\nsystemPromptMode: replace\n---\nWork.\n",
     );
     assert.deepEqual((await loadNamed(value, "worker")).options, {
       systemPrompt: "Work.\n",
       systemPromptMode: "replace",
     });
-    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\n---\n");
+    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\n---\n");
     assert.deepEqual((await loadNamed(value, "worker")).options, {});
-    writeFileSync(join(value.home, "akuma", "worker.md"), "---\nprovider: claude\nsystemPromptMode: replace\n---\n");
+    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: claude\nsystemPromptMode: replace\n---\n");
     await assert.rejects(loadNamed(value, "worker"), /systemPromptMode requires a nonempty Markdown body/u);
     writeFileSync(
-      join(value.home, "akuma", "worker.md"),
+      join(value.home, "akumas", "worker.md"),
       "---\nprovider: claude\nsystemPromptMode: merge\n---\nWork.\n",
     );
     await assert.rejects(loadNamed(value, "worker"), /systemPromptMode must be one of append, replace/u);
@@ -483,10 +483,10 @@ test("generic ACP prompt argument mode matches only the configured mapping", asy
       systemPromptArg: "--prompt",
     });
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: historical } }));
-    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\n---\nBuild.\n");
+    writeFileSync(join(value.home, "akumas", "local.md"), "---\nprovider: local\n---\nBuild.\n");
     await assert.rejects(loadNamed(value, "local"), /does not match the configured argument mode/u);
     writeFileSync(
-      join(value.home, "akuma", "local.md"),
+      join(value.home, "akumas", "local.md"),
       "---\nprovider: local\nsystemPromptMode: replace\n---\nBuild.\n",
     );
     assert.deepEqual((await loadNamed(value, "local")).options, {
@@ -504,7 +504,7 @@ test("generic ACP prompt argument mode matches only the configured mapping", asy
         },
       }),
     );
-    writeFileSync(join(value.home, "akuma", "local.md"), "---\nprovider: local\n---\nBuild.\n");
+    writeFileSync(join(value.home, "akumas", "local.md"), "---\nprovider: local\n---\nBuild.\n");
     assert.deepEqual((await loadNamed(value, "local")).options, {
       systemPrompt: "Build.\n",
       systemPromptMode: "append",

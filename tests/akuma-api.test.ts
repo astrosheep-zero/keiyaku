@@ -131,8 +131,8 @@ test("Akuma.birth has no prompt and select is synchronous", async (context) => {
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   try {
     const home = join(root, "home");
-    mkdirSync(join(home, "akuma"), { recursive: true });
-    writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+    mkdirSync(join(home, "akumas"), { recursive: true });
+    writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
     const world = await World.at(root);
     const born = await Akuma.birth("worker", { root: world, home, cwd: root });
     const selected = Akuma.select(world, born.id);

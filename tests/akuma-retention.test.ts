@@ -94,8 +94,8 @@ async function callSettings(root: string) {
   const home = join(root, ".call-settings");
   const executable = join(root, "fake-codex");
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
-  mkdirSync(join(home, "akuma"), { recursive: true });
-  writeFileSync(join(home, "akuma", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  mkdirSync(join(home, "akumas"), { recursive: true });
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: local\n---\nWork.\n");
   writeFileSync(
     join(home, "settings.json"),
     JSON.stringify({ providers: { local: { kind: "codex-app-server", executable } } }),

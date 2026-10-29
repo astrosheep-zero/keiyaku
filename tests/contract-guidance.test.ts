@@ -146,14 +146,21 @@ test("projection batches each index as generated files grow and preserves bytes 
           ...generated.map(([path], index) => [join(worktree, path), index < 2 ? "unchanged" : "created"]),
         ],
       );
-      assert.equal(readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"), "*\n!settings.json\n");
+      assert.equal(
+        readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"),
+        "*\n!settings.json\n!akumas/\n!akumas/*.md\n",
+      );
       mkdirSync(join(repository.path, ".keiyaku", "debts"), { recursive: true });
       writeFileSync(join(repository.path, ".keiyaku", "debts", "local.md"), "Local ledger material\n");
+      mkdirSync(join(repository.path, ".keiyaku", "akumas"), { recursive: true });
+      writeFileSync(join(repository.path, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+      writeFileSync(join(repository.path, ".keiyaku", "akumas", "private.txt"), "Not a definition\n");
+      mkdirSync(join(repository.path, ".keiyaku", "akuma", "run"), { recursive: true });
+      writeFileSync(join(repository.path, ".keiyaku", "akuma", "run", "private.md"), "Runtime custody\n");
       writeFileSync(join(repository.path, ".keiyaku", "settings.json"), "{}\n");
-      assert.equal(repository.run(["check-ignore", ".keiyaku/debts/local.md"]).trimEnd(), ".keiyaku/debts/local.md");
       assert.equal(
-        repository.run(["status", "--porcelain", "--untracked-files=all", "--", ".keiyaku/settings.json"]).trimEnd(),
-        "?? .keiyaku/settings.json",
+        repository.run(["status", "--porcelain", "--untracked-files=all", "--", ".keiyaku"]).trimEnd(),
+        "?? .keiyaku/akumas/worker.md\n?? .keiyaku/settings.json",
       );
       for (const [path, bytes] of generated) assert.equal(readFileSync(join(worktree, path), "utf8"), bytes);
       const retried = await projectContractWorktree(capability, current, register);
