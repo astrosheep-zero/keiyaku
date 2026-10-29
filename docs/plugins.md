@@ -49,28 +49,33 @@ adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
 The Square observer uses Square's artifact-owned participant custody, shared
-with native harness integrations. Opening a resource captures the actual
-integration execution identity; recognition reads the current seats held by that
-identity, and a participant name alone never grants write authority. The optional
-host discovery index is not ownership evidence. Square activity remains
-World-local, and worktree disposal does not relocate it to the primary World.
+with native harness integrations. A Square resource itself carries no identity:
+each operation supplies the integration execution's own opaque owner, derived
+from that execution's harness coordinate, and a participant name alone never
+grants write authority. Seat selection reads only attached standing seats held
+by that exact owner; a detached, finished, or foreign seat is never selected.
+The optional host discovery index is not ownership evidence. Square activity
+remains World-local, and worktree disposal does not relocate it to the primary
+World.
 The submitting integration edge owns which participant a session speaks as:
 an explicit name stays authoritative, an
 already-established participant of that session is reused unchanged, and a
 session with no identity here derives one stable name from its own provider
 session coordinate. Square remains the owner of standing, ownership, and
-lifecycle, so an ambiguous identity, a name another execution holds, or an
+lifecycle, so an ambiguous owner, a name another execution holds, or an
 unavailable or incompatible artifact selects nothing rather than inventing,
-migrating, or taking over a participant. Recognition is read-only and never
+migrating, or taking over a participant. Selection is read-only and never
 rejoins, renames, or migrates a finished participant.
 
 A generic integration initiator supplied by the caller outranks the Square
-integration's own selection and is forwarded unchanged; Square-specific
-recognition belongs to the integration adapter rather than the generic caller
+integration's own selection and is forwarded unchanged; Square-specific seat
+selection belongs to the integration adapter rather than the generic caller
 decoder or the Akuma domain. Before a submitting
 process sends an attributed Akuma input, the optional initiation observation
-lets Square establish that initiator's callable route
-in the submitting session. This is identity preparation, not evidence of
+lets Square establish that initiator's callable route in the submitting session.
+It reuses or reattaches that session's own standing seat, joins only an absent
+one, and never revives a finished participant or takes over a foreign seat.
+This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
 Birth observation remains produced by the child's Body at the established birth
 boundary, but its Square record is authored by the shared notification identity,
@@ -82,7 +87,7 @@ Turn outcomes and abnormal Body endings are
 also not expressed by the subject Akuma: one World-local notification participant
 authors every such notice for the World, so the notice no longer depends on a
 worker participant that may have already stepped out. That author is a logical
-integration identity with a stable session of its own, not a harness session
+integration identity with a stable owner of its own, not a harness session
 for the producing process: it registers no recipient wake route and borrows no
 ambient session ownership. Its explicit logical execution identity joins through
 Square's ordinary public boundary before each send, reusing active standing and
@@ -153,13 +158,13 @@ diagnostic-only; they do not change the wait result. The plugin resource owns
 renewal and releases only its own custody. Serving Bodies do not acquire
 requester resources, and Keiyaku adds no shared lease registry or cross-process
 capability. Square's optional wait resource defers selected Turn-outcome notices
-only for the requesting execution's recognized participant. It neither establishes
+only for the requesting execution's own attached standing seat. It neither establishes
 standing nor borrows a serving execution's identity. Other recipients and notice
 kinds remain unaffected; independent waits retain independent custody. Exact
 observation may acknowledge an existing notice while deferral is held, but never
 records an intent for a notice not yet present. Closing releases only that
-invocation's deferrals, and expiry bounds abandoned custody. An installed Square
-without this optional capability leaves ordinary delivery unchanged.
+invocation's deferrals, and expiry bounds abandoned custody. An observing
+execution with no attached seat leaves ordinary delivery unchanged.
 
 ## Signals And Boundaries
 
@@ -248,8 +253,9 @@ abnormal-Body notices keep their human-readable markers. Current Turn identity
 comes from structured metadata, independent of presentation prose. Historical
 body-only Turn notices remain recognizable through a separate legacy path;
 legacy recognition never overrides malformed or mismatched metadata.
-Explicit observer attribution takes precedence over ambient participant identity and
-never borrows the producing session's ownership or route. Square owns the
+Explicit observer attribution takes precedence over the observing execution's
+own seat selection and never borrows the producing session's ownership or route.
+Square owns the
 acknowledgment; core owns only the semantic observation. Missing Square,
 observer, standing participant, corresponding notice, or availability to that
 participant is silence, not permission to create, join, take over, consume other

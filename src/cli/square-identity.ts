@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { Square, SquareError, type Body } from "@astrosheep/square";
+import { Square, SquareError, harnessOwner, localUserOwner, type Owner } from "@astrosheep/square";
 import type { WorldRoot } from "../world.js";
 
 /**
  * The submitting-edge identity policy. Every Square read is rooted in the
- * submitted environment's actual Body, never this process's ambient identity.
+ * submitted environment's actual owner, never this process's ambient identity.
  */
 
 const HARNESS_SESSIONS = [
@@ -35,13 +35,13 @@ function sessionCoordinates(environment: NodeJS.ProcessEnv): readonly SessionCoo
   });
 }
 
-function squareBody(environment: NodeJS.ProcessEnv): Body | undefined {
+function squareOwner(environment: NodeJS.ProcessEnv): Owner | undefined {
   if (environment.CLAUDE_CODE_CHILD_SESSION === "1") return undefined;
   const coordinates = sessionCoordinates(environment);
   const native = coordinates.filter(({ provider }) => provider !== undefined);
   if (native.length > 1) return undefined;
   const coordinate = native[0] ?? coordinates.find(({ channel }) => channel === "paseo");
-  return coordinate === undefined ? undefined : { channel: coordinate.channel, session: coordinate.session };
+  return coordinate === undefined ? undefined : harnessOwner(coordinate);
 }
 
 function squareSeatName(provider: string, session: string): string {
@@ -69,7 +69,7 @@ function priorSeatNames(environment: NodeJS.ProcessEnv): readonly string[] {
 
 async function usableName(name: string): Promise<boolean> {
   try {
-    await Square.inMemory({ markdown: "" }).participant(name);
+    await Square.inMemory({ markdown: "" }).join(name, { owner: localUserOwner() });
     return true;
   } catch {
     return false;
@@ -84,24 +84,24 @@ type Standing =
 async function standingAt(
   location: string,
   environment: NodeJS.ProcessEnv,
-  body: Body,
+  owner: Owner,
   signal: AbortSignal,
 ): Promise<Standing> {
   let square: Square;
   try {
-    square = await Square.at({ path: location, env: environment, body }, { signal });
+    square = await Square.at({ path: location, env: environment }, { signal });
   } catch (error) {
     return error instanceof SquareError && error.code === "unavailable"
       ? { kind: "absent" }
       : { kind: "indeterminate" };
   }
   try {
-    const recognized = await square.recognize();
-    if (recognized.length === 1) return { kind: "standing", name: recognized[0]!.name };
-    if (recognized.length > 1) return { kind: "indeterminate" };
+    const standing = (await square.seatsOf(owner)).filter(({ attachment }) => attachment === "attached");
+    if (standing.length === 1) return { kind: "standing", name: standing[0]!.name };
+    if (standing.length > 1) return { kind: "indeterminate" };
     const known = new Set(priorSeatNames(environment));
     const participants = (await square.participants({}, { signal })).participants;
-    if (participants.some(({ name, state }) => known.has(name) && state !== "not joined"))
+    if (participants.some(({ name, presence }) => known.has(name) && presence !== "never-joined"))
       return { kind: "indeterminate" };
     return { kind: "absent" };
   } catch {
@@ -144,12 +144,12 @@ function whenAborted(signal: AbortSignal): Promise<undefined> {
 export async function squareSeat(input: SquareSeatInput, control: SquareSeatControl = {}): Promise<string | undefined> {
   const name = declared(input.environment, "SQUARE_PARTICIPANT_NAME");
   if (name !== undefined) return (await usableName(name)) ? name : undefined;
-  const body = squareBody(input.environment);
+  const owner = squareOwner(input.environment);
   const candidate = seatCandidate(input.environment);
-  if (body === undefined) return undefined;
+  if (owner === undefined) return undefined;
   const location = join(input.path, ".square", "KEIYAKU.square");
   const standing = await bounded(
-    async (signal) => await standingAt(location, input.environment, body, signal),
+    async (signal) => await standingAt(location, input.environment, owner, signal),
     control,
   );
   if (standing?.kind === "standing") return standing.name;

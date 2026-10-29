@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Square } from "@astrosheep/square";
+import { Square, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { after } from "node:test";
 import { Akuma, Akumas, Schema, World, type WorldRoot } from "../src/index.js";
@@ -330,11 +330,13 @@ test("forwarded wait acknowledges a real Square notice using the requester's loc
   const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
   const path = join(world, ".square", "KEIYAKU.square");
   mkdirSync(join(world, ".square"), { recursive: true });
-  const square = await Square.build({ path, markdown: "", body: { channel: "pi", session: "requester-session" } });
+  const square = await Square.build({ path, markdown: "" });
   t.after(() => square.close());
-  await square.join("Requester");
-  const serving = await Square.at({ path, body: { channel: "pi", session: "serving-session" } });
-  try { await serving.join("ServingSession"); } finally { await serving.close(); }
+  await square.join("Requester", { owner: harnessOwner({ channel: "pi", session: "requester-session" }) });
+  const serving = await Square.at({ path });
+  try {
+    await serving.join("ServingSession", { owner: harnessOwner({ channel: "pi", session: "serving-session" }) });
+  } finally { await serving.close(); }
   const observer = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
   await observer.signals?.["akuma.turn-outcome"]?.({
     kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,

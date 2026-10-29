@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test, { after, type TestContext } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
-import { Square, type Activity, type ActivityMetadata, type Body } from "@astrosheep/square";
+import { Square, harnessOwner, type Activity, type ActivityMetadata, type Owner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import { squareSeat } from "../src/cli/square-identity.js";
 import type { PluginHooks } from "../src/plugin/public.js";
@@ -25,7 +25,7 @@ const squarePath = (root: string): string => join(root, ".square", "KEIYAKU.squa
 const NOTIFIER = "keiyaku-notice";
 const NOTIFIER_SESSION = "keiyaku:square-notifier";
 const NOTIFIER_CHANNEL = "unknown";
-const notifierBody: Body = { channel: NOTIFIER_CHANNEL, session: NOTIFIER_SESSION };
+const notifierOwner: Owner = harnessOwner({ channel: NOTIFIER_CHANNEL, session: NOTIFIER_SESSION });
 const squarePrototype = Object.getPrototypeOf(Square.inMemory({ markdown: "" })) as Square;
 const legacyPiName = (session: string): string => `pi-${createHash("sha256").update(session).digest("hex").slice(0, 12)}`;
 
@@ -171,7 +171,8 @@ type SquareNotificationFixture = Readonly<{
   expressions(): Promise<readonly CapturedExpression[]>;
   bodies(): Promise<readonly string[]>;
   observe(akumaId: string, historyId: string, observer?: string, cancellation?: AbortSignal): Promise<void>;
-  square<T>(operation: (square: Square) => Promise<T>, body?: Body): Promise<T>;
+  square<T>(operation: (square: Square) => Promise<T>): Promise<T>;
+  owner: Owner;
   withHeldExpression<T>(
     akumaId: string,
     callback: (barrier: HeldExpression) => Promise<T>,
@@ -190,7 +191,7 @@ async function withSquareNotificationFixture<T>(
   process.env.PI_SESSION_ID = `fixture-${name}`;
   process.env.SQUARE_INDEX = join(root, "index.ndjsonl");
   const fixtureEnvironment = { ...process.env };
-  const fixtureBody: Body = { channel: "pi", session: fixtureEnvironment.PI_SESSION_ID! };
+  const fixtureOwner: Owner = harnessOwner({ channel: "pi", session: fixtureEnvironment.PI_SESSION_ID! });
   try {
     mkdirSync(join(root, ".square"), { recursive: true });
     const instance = await activateSquare(root);
@@ -260,8 +261,8 @@ async function withSquareNotificationFixture<T>(
         finally { restoreEnvironmentValues({ SQUARE_PARTICIPANT_NAME: savedName }); }
         await selected.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId, historyId }, cancellation);
       },
-      async square(operation, body = fixtureBody) {
-        const square = await Square.at({ path: squarePath(root), env: fixtureEnvironment, body });
+      async square(operation) {
+        const square = await Square.at({ path: squarePath(root), env: fixtureEnvironment });
         try { return await operation(square); } finally { await square.close(); }
       },
       expressions: () => expressions(squarePath(root)),
@@ -269,6 +270,7 @@ async function withSquareNotificationFixture<T>(
         return (await expressions(squarePath(root))).map(({ body }) => body);
       },
       withHeldExpression: withHeldSquareExpression,
+      owner: fixtureOwner,
     };
     for (const initiator of initiators ?? ["Alice", "Bob"]) await fixture.admit(initiator);
     return await callback(fixture);
@@ -305,7 +307,9 @@ async function waitScopeFixture(t: TestContext, participant: object) {
   t.after(() => { restoreEnvironmentValues(prior); rmSync(root, { recursive: true, force: true }); });
   let closes = 0;
   t.mock.method(Square, "at", async () => ({
-    recognize: async () => [participant], close: async () => { closes++; },
+    seatsOf: async () => [{ name: "Requester", generation: "act/1", attachment: "attached" }],
+    participant: async () => participant,
+    close: async () => { closes++; },
   }) as unknown as Square);
   const instance = await activateSquare(root);
   assert.ok(instance.waitDeferral);
@@ -430,17 +434,18 @@ test("wait scopes defer only the requester's selected Turn notices, acknowledge 
     process.env.CODEX_THREAD_ID = "requester";
     process.env.SQUARE_PARTICIPANT_NAME = "Alice";
     const env = { ...process.env };
-    const square = await Square.build({ path: squarePath(root), markdown: "", env,
-      body: { channel: "codex", session: "requester" },
+    const requesterOwner = harnessOwner({ channel: "codex", session: "requester" });
+    const square = await Square.build({ path: squarePath(root), markdown: "", env });
+    const alice = (await square.join("Alice", {
+      owner: requesterOwner,
       wakeAddress: { kind: "codex-queue", address: { threadId: "requester" } },
-    });
-    const alice = (await square.join("Alice")).participant;
-    const peer = await Square.at({ path: squarePath(root), env,
-      body: { channel: "codex", session: "other-recipient" },
-      wakeAddress: { kind: "codex-queue", address: { threadId: "other-recipient" } },
-    });
+    })).participant;
+    const peer = await Square.at({ path: squarePath(root), env });
     try {
-      await peer.join("Bob");
+      await peer.join("Bob", {
+        owner: harnessOwner({ channel: "codex", session: "other-recipient" }),
+        wakeAddress: { kind: "codex-queue", address: { threadId: "other-recipient" } },
+      });
       writeFileSync(process.env.SQUARE_CODEX_BOUNDARIES, JSON.stringify({ v: 1, nextSequence: 1, threads: {
         requester: { lastStop: 1, lastNonStop: 0 }, "other-recipient": { lastStop: 1, lastNonStop: 0 },
       } }));
@@ -664,7 +669,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
 
 test("one shared notifier sends after its worker is done and needs no worker participant", async () => {
   await withSquareNotificationFixture("notifier-shared", async (fixture) => {
-    await fixture.square(async (square) => { await (await square.implicitJoin("aku/gone")).participant!.done(); });
+    await fixture.square(async (square) => {
+      await (await square.join("aku/gone", { owner: fixture.owner })).participant.done();
+    });
     await fixture.answeredTurn("aku/gone", 1, 1, "Alice", "after shutdown");
     // No participant ever stood for this Akuma.
     await fixture.answeredTurn("aku/absent", 2, 1, "Bob", "no worker at all");
@@ -678,7 +685,7 @@ test("one shared notifier sends after its worker is done and needs no worker par
     await fixture.observe("aku/absent", "turn/1", "Bob");
     await fixture.square(async (square) => {
       const roster = (await square.participants()).participants;
-      assert.equal(roster.find(({ name }) => name === "aku/gone")?.state, "done");
+      assert.equal(roster.find(({ name }) => name === "aku/gone")?.presence, "done");
       assert.equal(roster.some(({ name }) => name === "aku/absent"), false);
       assert.equal((await square.snapshot()).delivered("Bob", absentNotice.id), true);
       assert.equal((await square.snapshot()).delivered("Alice", absentNotice.id), false);
@@ -693,7 +700,9 @@ test("the shared notifier reuses active custody and rejoins only after it is don
     await fixture.answeredTurn("aku/one", 1, 1, "Alice", "one");
     await fixture.answeredTurn("aku/two", 1, 1, "Bob", "two");
     assert.equal(await joinCount(), 1, "an active notifier is reused without another join");
-    await fixture.square(async (square) => { await (await square.participant(NOTIFIER)).done(); }, notifierBody);
+    await fixture.square(async (square) => {
+      await (await square.participant(NOTIFIER, { owner: notifierOwner })).done();
+    });
     await fixture.answeredTurn("aku/three", 1, 1, "Alice", "three");
     assert.equal(await joinCount(), 2, "a done notifier receives an ordinary rejoin");
     assert.deepEqual((await fixture.expressions()).map(({ actor }) => actor), [NOTIFIER, NOTIFIER, NOTIFIER]);
@@ -704,33 +713,33 @@ test("an ending harness session never retires the shared notifier", async () => 
   await withSquareNotificationFixture("notifier-session", async (fixture) => {
     await fixture.answeredTurn("aku/session", 1, 1, "Alice", "kept");
     await fixture.square(async (square) => {
-      await (await square.participant("Alice")).done();
-      assert.equal((await square.recognize()).some(({ name }) => name === NOTIFIER), false);
+      await (await square.participant("Alice", { owner: fixture.owner })).done();
+      assert.equal((await square.seatsOf(fixture.owner)).some(({ name }) => name === NOTIFIER), false);
     });
     await fixture.answeredTurn("aku/session", 1, 2, "Bob", "still there");
     const joins = await fixture.square(async (square) =>
       (await square.history({ from: [NOTIFIER], limit: null })).activities.filter(({ kind }) => kind === "join").length);
     assert.equal(joins, 1);
     await fixture.square(async (square) => {
-      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
-    }, notifierBody);
+      assert.deepEqual((await square.seatsOf(notifierOwner)).map(({ name }) => name), [NOTIFIER]);
+    });
   });
 });
 
-test("shared notifier ownership refuses a foreign Body without takeover", async () => {
+test("shared notifier ownership refuses a foreign owner without takeover", async () => {
   await withSquareNotificationFixture("notifier-foreign", async (fixture) => {
-    const foreignBody = { channel: "test", session: "foreign-notifier" };
-    await fixture.square(async (square) => { await square.join(NOTIFIER); }, foreignBody);
+    const foreignOwner = harnessOwner({ channel: "test", session: "foreign-notifier" });
+    await fixture.square(async (square) => { await square.join(NOTIFIER, { owner: foreignOwner }); });
     await assert.rejects(fixture.answeredTurn("aku/foreign", 1, 1, "Alice", "refused"), { code: "already_joined" });
     assert.deepEqual(await fixture.expressions(), []);
     await fixture.square(async (square) => {
-      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
-      await (await square.participant(NOTIFIER)).done();
-    }, foreignBody);
+      assert.deepEqual((await square.seatsOf(foreignOwner)).map(({ name }) => name), [NOTIFIER]);
+      await (await square.participant(NOTIFIER, { owner: foreignOwner })).done();
+    });
     await fixture.answeredTurn("aku/owned", 1, 1, "Alice", "owned");
     await fixture.square(async (square) => {
-      assert.deepEqual((await square.recognize()).map(({ name }) => name), [NOTIFIER]);
-    }, notifierBody);
+      assert.deepEqual((await square.seatsOf(notifierOwner)).map(({ name }) => name), [NOTIFIER]);
+    });
   });
 });
 
@@ -741,7 +750,7 @@ test("outcome observation catches exact notices only for the explicit observer",
     await fixture.failedTurn("aku/worker", 1, 2, "Alice", "failed", undefined, ["Alice", "Bob"]);
     await fixture.bodyEnd("aku/worker", 2, "hung", "Alice");
     await fixture.square(async (square) => {
-      const worker = (await square.implicitJoin("aku/worker")).participant!;
+      const worker = (await square.join("aku/worker", { owner: fixture.owner })).participant;
       await worker.express("incidental aku/worker turn/1", { mentions: ["Alice", "Bob"], noMention: true, force: true });
       await worker.express("aku/worker turn/1 extra\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
@@ -750,7 +759,7 @@ test("outcome observation catches exact notices only for the explicit observer",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
       await worker.express("aku/worker turn/2 (@Alice)\n× failed\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
-      const other = (await square.implicitJoin("aku/other")).participant!;
+      const other = (await square.join("aku/other", { owner: fixture.owner })).participant;
       await other.express("aku/worker turn/1\ndone\nignore if you have already seen this.",
         { mentions: ["Alice", "Bob"], noMention: true, force: true });
     });
@@ -778,7 +787,7 @@ test("outcome observation catches exact notices only for the explicit observer",
         assert.equal(snapshot.delivered("Alice", notice.id), false);
         assert.equal(snapshot.delivered("Bob", notice.id), delivered.has(notice.id));
       }
-      const pending = await (await square.participant("Bob")).catch();
+      const pending = await (await square.participant("Bob", { owner: fixture.owner })).catch();
       assert.ok(pending.activities.some((item) => item.body?.startsWith("incidental")));
       assert.ok(pending.activities.some((item) => item.actor === "aku/other"));
     });
@@ -835,7 +844,7 @@ test("answer and failure notices preserve exact results and structured identity"
 test("current Turn acknowledgment trusts exact structured identity, never current prose or malformed metadata", async () => {
   await withSquareNotificationFixture("metadata-ack", async (fixture) => {
     const notices = await fixture.square(async (square) => {
-      const notifier = (await square.implicitJoin(NOTIFIER)).participant!;
+      const notifier = (await square.join(NOTIFIER, { owner: notifierOwner })).participant;
       const current = await notifier.express({
         body: "prose has no outcome identity at all",
         metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/1" } },
@@ -928,7 +937,7 @@ test("current Turn acknowledgment trusts exact structured identity, never curren
 test("outcome observation acknowledges every exact duplicate beyond the default history page without joining", async (t) => {
   await withSquareNotificationFixture("ack-full-archive", async (fixture) => {
     const notices = await fixture.square(async (square) => {
-      const notifier = (await square.implicitJoin(NOTIFIER)).participant!;
+      const notifier = (await square.join(NOTIFIER, { owner: notifierOwner })).participant;
       const ids: Activity["id"][] = [];
       for (let index = 0; index < 12; index++) {
         const result = await notifier.express("aku/repeated turn/1\nack\nignore if you have already seen this.",
@@ -938,10 +947,10 @@ test("outcome observation acknowledges every exact duplicate beyond the default 
       return ids;
     });
     const forbidJoin = t.mock.method(squarePrototype, "join", async () => { throw new Error("observation must not join"); });
-    const forbidImplicitJoin = t.mock.method(squarePrototype, "implicitJoin", async () => { throw new Error("observation must not reenter"); });
+    const forbidReattach = t.mock.method(squarePrototype, "reattach", async () => { throw new Error("observation must not reenter"); });
     await fixture.observe("aku/repeated", "turn/1", "Bob");
     forbidJoin.mock.restore();
-    forbidImplicitJoin.mock.restore();
+    forbidReattach.mock.restore();
     await fixture.square(async (square) => {
       const snapshot = await square.snapshot();
       for (const id of notices) {
@@ -958,7 +967,7 @@ test("outcome observation catches an unmentioned listener's notice without consu
       for (const name of ["Alice", "Bob"]) {
         // The shared notifier is the author, so listening to the subject worker
         // no longer addresses its notices.
-        await (await square.implicitJoin(name)).participant!.listen(NOTIFIER);
+        await (await square.join(name, { owner: fixture.owner })).participant.listen(NOTIFIER);
       }
     });
     await fixture.answeredTurn("aku/listened", 1, 1, undefined, "public to listeners");
@@ -989,7 +998,7 @@ test("observation does not create missing Square custody or anticipate a later n
     await fixture.square(async (square) => {
       const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
-      const alice = (await square.implicitJoin("Alice")).participant!;
+      const alice = (await square.join("Alice", { owner: fixture.owner })).participant;
       await alice.done();
     });
     await fixture.observe("aku/late", "turn/1", "Alice");
@@ -997,7 +1006,7 @@ test("observation does not create missing Square custody or anticipate a later n
       const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
       const snapshot = await square.snapshot();
       assert.equal(snapshot.delivered("Alice", notice.id), false);
-      assert.equal(snapshot.participants.find((item) => item.name === "Alice")?.state, "done");
+      assert.equal(snapshot.participants.find((item) => item.name === "Alice")?.presence, "done");
       assert.equal(snapshot.participants.some((item) => item.name === "Ghost"), false);
     });
   });
@@ -1079,9 +1088,9 @@ test("Square cancellation stops a contended open and never joins after the lock 
 
 test("Square notifications refuse while held and cancelled expressions cannot land later", async () => {
   await withSquareNotificationFixture("bounded-express", async (fixture) => {
-    await fixture.square(async (square) => { await (await square.participant("Alice")).hold("paused"); });
+    await fixture.square(async (square) => { await (await square.participant("Alice", { owner: fixture.owner })).hold("paused"); });
     await assert.rejects(fixture.answeredTurn("aku/held", 1, 1, "Alice", "held"));
-    await fixture.square(async (square) => { await (await square.participant("Alice")).resume(); });
+    await fixture.square(async (square) => { await (await square.participant("Alice", { owner: fixture.owner })).resume(); });
     assert.deepEqual(await fixture.expressions(), []);
     await fixture.withHeldExpression("aku/cancel-before-send", async ({ sent, release }) => {
       const controller = new AbortController();
@@ -1287,11 +1296,14 @@ test("Pi caller registration and outcomes share artifact ownership across execut
     assert.ok(initiating);
     await initiating({ kind: "akuma.initiating", initiator });
 
-    const bodyIdentity = { channel: "pi", session: callerEnv.PI_SESSION_ID! };
-    const native = await Square.at({ path: squarePath(world), env: callerEnv, body: bodyIdentity });
+    const callerOwner = harnessOwner({ channel: "pi", session: callerEnv.PI_SESSION_ID! });
+    const native = await Square.at({ path: squarePath(world), env: callerEnv });
     try {
       assert.equal(realpathSync(native.location), realpathSync(squarePath(world)));
-      assert.deepEqual((await native.recognize()).map(({ name }) => name), [initiator]);
+      assert.deepEqual(
+        (await native.seatsOf(callerOwner)).filter(({ attachment }) => attachment === "attached").map(({ name }) => name),
+        [initiator],
+      );
     } finally { await native.close(); }
     assert.equal(existsSync(join(cwd, ".square")), false);
 
@@ -1308,10 +1320,9 @@ test("Pi caller registration and outcomes share artifact ownership across execut
       outcome: { kind: "answered", text: "done" },
     });
 
-    const square = await Square.at({ path: squarePath(world), env: callerEnv, body: bodyIdentity });
+    const square = await Square.at({ path: squarePath(world), env: callerEnv });
     try {
-      const joined = await square.implicitJoin(initiator);
-      assert.ok(joined.participant);
+      const joined = await square.join(initiator, { owner: callerOwner });
       const caught = await joined.participant.catch();
       assert.ok(caught.activities.some((item) => item.body?.includes("\n\n---\n\ndone")));
     } finally {
@@ -1343,9 +1354,9 @@ test("local observation acknowledges the recognized seat, never the former provi
     const former = legacyPiName(serving.PI_SESSION_ID!);
     assert.match(former, /^pi-/u);
     process.env.PI_SESSION_ID = "elsewhere";
-    const elsewhere = await Square.at({ path: squarePath(root), env: { ...process.env }, body: { channel: "pi", session: "elsewhere" } });
+    const elsewhere = await Square.at({ path: squarePath(root), env: { ...process.env } });
     try {
-      await elsewhere.implicitJoin(former);
+      await elsewhere.join(former, { owner: harnessOwner({ channel: "pi", session: "elsewhere" }) });
     } finally {
       await elsewhere.close();
     }
@@ -1438,9 +1449,13 @@ test("an explicit forwarded observer never borrows the serving session's identit
     } finally {
       await square.close();
     }
-    const servingSquare = await Square.at({ path: squarePath(root), env: serving, body: { channel: "pi", session: serving.PI_SESSION_ID! } });
+    const servingSquare = await Square.at({ path: squarePath(root), env: serving });
     try {
-      assert.deepEqual((await servingSquare.recognize()).map(({ name }) => name), [seat]);
+      const servingOwner = harnessOwner({ channel: "pi", session: serving.PI_SESSION_ID! });
+      assert.deepEqual(
+        (await servingSquare.seatsOf(servingOwner)).filter(({ attachment }) => attachment === "attached").map(({ name }) => name),
+        [seat],
+      );
     } finally { await servingSquare.close(); }
   } finally {
     restoreEnvironmentValues(prior);
@@ -1457,11 +1472,11 @@ test("a declared name resolves an ambiguous session binding in local acknowledgm
     mkdirSync(join(root, ".square"), { recursive: true });
     // One session that joined twice: Square can no longer name it on its own.
     process.env.PI_SESSION_ID = "ambiguous-session";
-    const joined = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env },
-      body: { channel: "pi", session: "ambiguous-session" } });
+    const ambiguousOwner = harnessOwner({ channel: "pi", session: "ambiguous-session" });
+    const joined = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env } });
     try {
-      await (await joined.implicitJoin("Stale")).participant?.catch();
-      await (await joined.implicitJoin("Declared")).participant?.catch();
+      await (await joined.join("Stale", { owner: ambiguousOwner })).participant.catch();
+      await (await joined.join("Declared", { owner: ambiguousOwner })).participant.catch();
     } finally {
       await joined.close();
     }

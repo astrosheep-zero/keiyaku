@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { createHash } from "node:crypto";
-import { Square, type Participant, type Body } from "@astrosheep/square";
+import { Square, harnessOwner, type Participant, type Owner } from "@astrosheep/square";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { squareSeat } from "../src/cli/square-identity.js";
 import type { WorldRoot } from "../src/world.js";
@@ -66,26 +66,25 @@ function installSession(t: TestContext, session: NodeJS.ProcessEnv): void {
   t.after(() => restoreEnvironmentValues(prior));
 }
 
-/** Open the fixture Square, building it once exactly as the shipped observer would. */
-function bodyFor(environment: NodeJS.ProcessEnv): Body {
+/** The owner the shipped observer derives from one fixture session. */
+function ownerFor(environment: NodeJS.ProcessEnv): Owner {
   for (const [variable, channel] of [["PI_SESSION_ID", "pi"], ["CODEX_THREAD_ID", "codex"],
     ["CLAUDE_CODE_SESSION_ID", "claude-code"], ["OPENCODE_SESSION_ID", "opencode"], ["PASEO_AGENT_ID", "paseo"]]) {
     const session = environment[variable!];
-    if (session) return { channel: channel!, session };
+    if (session) return harnessOwner({ channel: channel!, session });
   }
-  return { channel: "fixture", session: "read-only" };
+  return harnessOwner({ channel: "fixture", session: "read-only" });
 }
 
 async function openSquareFile(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<Square> {
   const env = world.environment(session);
-  const identity = { env, body: bodyFor(env) };
   try {
-    return await Square.at({ path: world.squareFile, ...identity });
+    return await Square.at({ path: world.squareFile, env });
   } catch {
     try {
-      return await Square.build({ path: world.squareFile, markdown: "", ...identity });
+      return await Square.build({ path: world.squareFile, markdown: "", env });
     } catch {
-      return await Square.at({ path: world.squareFile, ...identity });
+      return await Square.at({ path: world.squareFile, env });
     }
   }
 }
@@ -99,8 +98,7 @@ async function withJoined<T>(
 ): Promise<T> {
   const square = await openSquareFile(world, session);
   try {
-    const joined = await square.implicitJoin(name);
-    assert.ok(joined.participant, `fixture joined ${name}`);
+    const joined = await square.join(name, { owner: ownerFor(world.environment(session)) });
     return await operation(joined.participant);
   } finally {
     await square.close();
@@ -110,8 +108,9 @@ async function withJoined<T>(
 async function recognize(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<string | undefined> {
   const square = await openSquareFile(world, session);
   try {
-    const recognized = await square.recognize();
-    return recognized.length === 1 ? recognized[0]!.name : undefined;
+    const seats = (await square.seatsOf(ownerFor(world.environment(session))))
+      .filter(({ attachment }) => attachment === "attached");
+    return seats.length === 1 ? seats[0]!.name : undefined;
   } finally {
     await square.close();
   }
@@ -217,8 +216,13 @@ test("a finished seat is not proposed again or implicitly rejoined", async (t) =
   );
   const square = await openSquareFile(world, session);
   try {
-    assert.equal((await square.implicitJoin(seat!)).state, "done", "standing stays Square's decision");
-    assert.deepEqual(await square.recognize(), []);
+    const owner = ownerFor(world.environment(session));
+    assert.deepEqual(await square.seatsOf(owner), [], "standing stays Square's decision");
+    assert.equal(await square.reattach(seat!, { owner }), null, "a finished seat is never restored");
+    assert.equal(
+      (await square.participants()).participants.find(({ name }) => name === seat)?.presence,
+      "done",
+    );
   } finally {
     await square.close();
   }
@@ -337,13 +341,17 @@ test("the shipped Square observer prepares the seat this session is then recogni
   assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stderr}`);
   const square = await openSquareFile(world, {});
   try {
-    const active = (await square.participants()).participants.filter(({ state }) => state === "active");
+    const active = (await square.participants()).participants.filter(({ presence }) => presence === "active");
     assert.deepEqual(
       active.map(({ name }) => name),
       [seat],
       "preparation created exactly the selected participant",
     );
-    assert.deepEqual((await square.recognize()).map(({ name }) => name), [seat], "native resolution finds that one binding");
+    assert.deepEqual(
+      (await square.seatsOf(ownerFor(world.environment()))).map(({ name }) => name),
+      [seat],
+      "native resolution finds that one attached seat",
+    );
   } finally {
     await square.close();
   }
@@ -360,7 +368,7 @@ test("concurrent same-session preparations converge on one standing participant"
   assert.equal(await recognize(world, session), seat);
   const square = await openSquareFile(world, session);
   try {
-    assert.deepEqual((await square.recognize()).map(({ name }) => name), [seat]);
+    assert.deepEqual((await square.seatsOf(ownerFor(world.environment(session)))).map(({ name }) => name), [seat]);
     assert.equal((await square.history({ from: [seat!], limit: null })).activities.filter(({ kind }) => kind === "join").length, 1);
   } finally { await square.close(); }
 });
@@ -391,7 +399,9 @@ test("the captured environment decides which registry is read, not this process'
     SQUARE_INDEX: elsewhere,
   });
   try {
-    await square.implicitJoin("ExistingCustom");
+    await square.join("ExistingCustom", {
+      owner: ownerFor(world.environment({ PI_SESSION_ID: "captured-session" })),
+    });
   } finally {
     await square.close();
   }
@@ -407,7 +417,7 @@ test("a name another session already holds is never replaced by a seat", async (
   installSession(t, { PI_SESSION_ID: "holder" });
   const holder = await openSquareFile(world, {});
   try {
-    await holder.implicitJoin("Held");
+    await holder.join("Held", { owner: ownerFor(world.environment()) });
   } finally {
     await holder.close();
   }

@@ -1,9 +1,11 @@
 import {
   Square,
   SquareError,
+  harnessOwner,
+  selectOwnSeat,
   type Activity,
   type ActivityMetadata,
-  type Body,
+  type Owner,
   type Participant,
   type WakeAddress,
 } from "@astrosheep/square";
@@ -17,27 +19,14 @@ const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
 /**
  * One World-local notification participant authors every committed outcome and
  * abnormal Body ending, so a resulting notice never depends on whether the
- * subject worker still stands. It is a logical integration custody identity:
- * a stable session of its own, no native harness session, and therefore no
- * recipient wake route of its own.
+ * subject worker still stands. Its owner is a logical integration custody
+ * coordinate: a stable session of its own, not a native harness session, and
+ * therefore no recipient wake route of its own.
  */
 const NOTIFIER = "keiyaku-notice";
-const NOTIFIER_BODY: Body = { channel: "unknown", session: "keiyaku:square-notifier" };
+const NOTIFIER_OWNER: Owner = harnessOwner({ channel: "unknown", session: "keiyaku:square-notifier" });
 const WAIT_DEFERRAL_TTL_MS = 5 * 60_000;
 const WAIT_DEFERRAL_RENEW_MS = 2 * 60_000;
-
-type MetadataMatch = Readonly<{
-  fields: readonly Readonly<{ path: readonly string[]; equals: string }>[];
-}>;
-
-type DeliveryDeferringParticipant = Readonly<{
-  deferDelivery(
-    input: Readonly<{ match: MetadataMatch; durationMs: number }>,
-    control?: { signal?: AbortSignal },
-  ): Promise<Readonly<{ id: string }>>;
-  renewDeliveryDeferral(id: string, durationMs: number, control?: { signal?: AbortSignal }): Promise<unknown | null>;
-  releaseDeliveryDeferral(id: string, control?: { signal?: AbortSignal }): Promise<boolean>;
-}>;
 
 function errorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
@@ -51,42 +40,48 @@ const HARNESS_SESSIONS = [
   { variable: "PASEO_AGENT_ID", channel: "paseo" },
 ] as const;
 
-function squareIdentity(environment: NodeJS.ProcessEnv): Readonly<{ body?: Body; wakeAddress?: WakeAddress }> {
-  if (environment.CLAUDE_CODE_CHILD_SESSION === "1") return {};
+function squareIdentity(environment: NodeJS.ProcessEnv) {
+  if (environment.CLAUDE_CODE_CHILD_SESSION === "1") return undefined;
   const coordinates = HARNESS_SESSIONS.flatMap(({ variable, channel }) => {
     const session = environment[variable]?.trim();
     return session === undefined || session === "" ? [] : [{ channel, session }];
   });
   const native = coordinates.filter(({ channel }) => channel !== "paseo");
-  if (native.length > 1) return {};
+  if (native.length > 1) return undefined;
   const paseo = coordinates.find(({ channel }) => channel === "paseo");
-  const body = native[0] ?? paseo;
-  if (body === undefined) return {};
-  const wakeAddress: WakeAddress | undefined = body.channel === "codex"
-    ? { kind: "codex-queue", address: { threadId: body.session } }
+  const coordinate = native[0] ?? paseo;
+  if (coordinate === undefined) return undefined;
+  const wakeAddress: WakeAddress | undefined = coordinate.channel === "codex"
+    ? { kind: "codex-queue", address: { threadId: coordinate.session } }
     : paseo === undefined ? undefined : { kind: "paseo", address: { agentId: paseo.session } };
-  return { body, ...(wakeAddress === undefined ? {} : { wakeAddress }) };
+  return { owner: harnessOwner(coordinate), ...(wakeAddress === undefined ? {} : { wakeAddress }) };
 }
 
-async function openSquare(
-  path: string,
-  environment: NodeJS.ProcessEnv,
-  identity: Readonly<{ body?: Body; wakeAddress?: WakeAddress }>,
-  cancellation?: AbortSignal,
-) {
+/** The one attached standing seat this owner holds, by declared name or uniquely. */
+async function attachedSeat(
+  square: Square,
+  owner: Owner,
+  declared: string | undefined,
+): Promise<Participant | undefined> {
+  if (declared === undefined) return await selectOwnSeat(square, owner, undefined, { optional: true });
+  const attached = (await square.seatsOf(owner)).filter(({ attachment }) => attachment === "attached");
+  return attached.some(({ name }) => name === declared) ? await square.participant(declared, { owner }) : undefined;
+}
+
+async function openSquare(path: string, environment: NodeJS.ProcessEnv, cancellation?: AbortSignal) {
   const control = cancellation === undefined ? {} : { signal: cancellation };
   cancellation?.throwIfAborted();
   try {
-    return await Square.at({ path, env: environment, ...identity }, control);
+    return await Square.at({ path, env: environment }, control);
   } catch (error) {
     cancellation?.throwIfAborted();
     if (errorCode(error) !== "ENOENT" && errorCode(error) !== "unavailable") throw error;
     try {
-      return await Square.build({ path, markdown: "", env: environment, ...identity }, control);
+      return await Square.build({ path, markdown: "", env: environment }, control);
     } catch (buildError) {
       cancellation?.throwIfAborted();
       try {
-        return await Square.at({ path, env: environment, ...identity }, control);
+        return await Square.at({ path, env: environment }, control);
       } catch {
         throw buildError;
       }
@@ -207,6 +202,7 @@ const plugin: KeiyakuPlugin = {
   async activate(context) {
     const path = join(context.writablePath("square"), "KEIYAKU.square");
     const environment = { ...process.env };
+    const declaredParticipant = environment.SQUARE_PARTICIPANT_NAME?.trim();
     const bodyNotifications = new Map<string, BodyNotificationState>();
     const expressAsNotifier = async (
       expression: string | Readonly<{ body: string; metadata?: ActivityMetadata }>,
@@ -215,10 +211,10 @@ const plugin: KeiyakuPlugin = {
     ): Promise<boolean> => {
       cancellation?.throwIfAborted();
       const control = cancellation === undefined ? {} : { signal: cancellation };
-      const square = await openSquare(path, environment, { body: NOTIFIER_BODY }, cancellation);
+      const square = await openSquare(path, environment, cancellation);
       try {
         cancellation?.throwIfAborted();
-        const joined = await square.join(NOTIFIER, {}, control);
+        const joined = await square.join(NOTIFIER, { owner: NOTIFIER_OWNER }, control);
         cancellation?.throwIfAborted();
         const notice = typeof expression === "string" ? { body: expression } : expression;
         await joined.participant.express(
@@ -251,22 +247,16 @@ const plugin: KeiyakuPlugin = {
       participants: readonly string[],
       cancellation?: AbortSignal,
     ): Promise<boolean> => expressAsNotifier(bodyEndExpression(signal), participants, cancellation);
-    const localObserver = async (square: Square): Promise<Participant | undefined> => {
-      const recognized = await square.recognize();
-      if (recognized.length === 1) return recognized[0];
-      const declared = environment.SQUARE_PARTICIPANT_NAME?.trim();
-      return recognized.find(({ name }) => name === declared);
-    };
     const waitDeferral: NonNullable<PluginInstance["waitDeferral"]> = async (input, cancellation) => {
       cancellation?.throwIfAborted();
       if (input.akumaIds.length === 0) return undefined;
       const identity = squareIdentity(environment);
-      if (identity.body === undefined) return undefined;
+      if (identity === undefined) return undefined;
       let square: Square;
       try {
         // The resource outlives acquisition. Do not capture its expiring signal
         // in Square's connection; individual lease operations carry it instead.
-        square = await Square.at({ path, env: environment, ...identity });
+        square = await Square.at({ path, env: environment });
       } catch (error) {
         cancellation?.throwIfAborted();
         if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable") return undefined;
@@ -278,7 +268,7 @@ const plugin: KeiyakuPlugin = {
       let renewalTimer: NodeJS.Timeout | undefined;
       let renewalWork: Promise<void> | undefined;
       let renewalDiagnostic: string | undefined;
-      let participant: DeliveryDeferringParticipant | undefined;
+      let seat: Participant | undefined;
       const renewalController = new AbortController();
       // Partial acquisition also closes here, before the runtime has a scope.
       // Cancellation must still reach Square.close if a lease operation stalls.
@@ -295,9 +285,9 @@ const plugin: KeiyakuPlugin = {
           });
           const releases = (async () => {
             await renewalWork;
-            if (participant === undefined) return;
+            if (seat === undefined) return;
             const results = await Promise.allSettled(
-              acquired.map(async (id) => await participant!.releaseDeliveryDeferral(id, { signal: cleanupSignal })),
+              acquired.map(async (id) => await seat!.releaseDeliveryDeferral(id, { signal: cleanupSignal })),
             );
             const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
             if (failure !== undefined) throw failure.reason;
@@ -315,25 +305,15 @@ const plugin: KeiyakuPlugin = {
       };
       try {
         cancellation?.throwIfAborted();
-        const observer = await localObserver(square);
-        if (observer === undefined) {
+        seat = await attachedSeat(square, identity.owner, declaredParticipant);
+        if (seat === undefined) {
           await cleanup();
           return undefined;
         }
-        const captured = observer as unknown as Partial<DeliveryDeferringParticipant>;
-        if (
-          typeof captured.deferDelivery !== "function" ||
-          typeof captured.renewDeliveryDeferral !== "function" ||
-          typeof captured.releaseDeliveryDeferral !== "function"
-        ) {
-          await cleanup();
-          return undefined;
-        }
-        participant = captured as DeliveryDeferringParticipant;
         const leases = await Promise.allSettled(
           input.akumaIds.map(async (akumaId) => {
             cancellation?.throwIfAborted();
-            const lease = await participant!.deferDelivery(
+            const lease = await seat!.deferDelivery(
               {
                 match: {
                   fields: [
@@ -356,7 +336,7 @@ const plugin: KeiyakuPlugin = {
           const signal = AbortSignal.any([renewalController.signal, AbortSignal.timeout(5_000)]);
           renewalWork = Promise.allSettled(
             acquired.filter(id => !expired.has(id)).map(async (id) => {
-              const renewed = await participant!.renewDeliveryDeferral(id, WAIT_DEFERRAL_TTL_MS, { signal });
+              const renewed = await seat!.renewDeliveryDeferral(id, WAIT_DEFERRAL_TTL_MS, { signal });
               if (renewed === null) {
                 expired.add(id);
                 throw new Error(`Square wait deferral ${id} expired before renewal`);
@@ -385,11 +365,14 @@ const plugin: KeiyakuPlugin = {
         async "akuma.initiating"(signal, cancellation) {
           const control = cancellation === undefined ? {} : { signal: cancellation };
           const identity = squareIdentity(environment);
-          if (identity.body === undefined) return;
-          const square = await openSquare(path, environment, identity, cancellation);
+          if (identity === undefined) return;
+          const square = await openSquare(path, environment, cancellation);
           try {
             cancellation?.throwIfAborted();
-            await square.implicitJoin(signal.initiator, control);
+            const retired = (await square.participants({}, control)).participants.some(
+              ({ name, presence }) => name === signal.initiator && presence === "done",
+            );
+            if (!retired) await square.join(signal.initiator, identity, control);
           } finally {
             await square.close();
           }
@@ -402,20 +385,18 @@ const plugin: KeiyakuPlugin = {
         async "akuma.outcome-observed"(signal, cancellation) {
           cancellation?.throwIfAborted();
           const identity = squareIdentity(environment);
-          if (identity.body === undefined) return;
+          if (identity === undefined) return;
           const control = cancellation === undefined ? {} : { signal: cancellation };
           let square: Square;
           try {
-            square = await Square.at({ path, env: environment, ...identity }, control);
+            square = await Square.at({ path, env: environment }, control);
           } catch (error) {
             if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable") return;
             throw error;
           }
           try {
             cancellation?.throwIfAborted();
-            const observer = signal.observer === undefined
-              ? (await localObserver(square))?.name
-              : (await square.recognize()).find(({ name }) => name === signal.observer)?.name;
+            const observer = await attachedSeat(square, identity.owner, signal.observer ?? declaredParticipant);
             if (observer === undefined) return;
             const { participants } = await square.participants({}, control);
             const authored = (name: string): boolean => participants.some((item) => item.name === name);
@@ -437,12 +418,11 @@ const plugin: KeiyakuPlugin = {
                 ).activities,
               );
             }
-            const participant = await square.participant(observer);
             for (const notice of notices) {
               if (!isCurrentTurnNotice(notice, signal) && !isLegacyTurnNotice(notice, signal)) continue;
               cancellation?.throwIfAborted();
               try {
-                await participant.catch({ id: notice.id }, control);
+                await observer.catch({ id: notice.id }, control);
               } catch (error) {
                 // A notice can disappear or lose availability to this participant after history lookup.
                 if (!(error instanceof SquareError && error.code === "invalid_args" && error.facts?.reason === "not_addressed")) {

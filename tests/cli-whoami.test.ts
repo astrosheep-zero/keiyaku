@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { Square } from "@astrosheep/square";
+import { Square, harnessOwner } from "@astrosheep/square";
 import { Akuma, Keiyaku, Repo, World } from "../src/index.js";
 import { HeldAkumaLeash, beginTurn, breakBody, endTurn } from "../src/akuma/heart/index.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -75,9 +75,11 @@ test("whoami never reads an existing Square seat or publishes an index", async (
   const squareDir = join(root, ".square");
   mkdirSync(squareDir);
   const path = join(squareDir, "KEIYAKU.square");
-  const square = await Square.build({ path, markdown: "", body: { channel: "pi", session: "existing" },
+  const square = await Square.build({ path, markdown: "",
     env: { SQUARE_INDEX: join(root, "setup-index") } });
-  try { await square.implicitJoin("Existing"); } finally { await square.close(); }
+  try {
+    await square.join("Existing", { owner: harnessOwner({ channel: "pi", session: "existing" }) });
+  } finally { await square.close(); }
   const before = readFileSync(path);
   const open = t.mock.method(Square, "at");
   const inMemory = t.mock.method(Square, "inMemory");
