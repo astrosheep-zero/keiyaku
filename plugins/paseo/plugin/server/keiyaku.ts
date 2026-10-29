@@ -1,10 +1,5 @@
 import { z } from "zod";
 
-export const identityKeys = [
-  "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION", "CLAUDECODE", "CODEX_THREAD_ID",
-  "OPENCODE_SESSION_ID", "PI_SESSION_ID", "PI_SESSION_FILE", "PASEO_AGENT_ID",
-  "SQUARE_PARTICIPANT_NAME", "AKUMA_REQUESTS", "KEIYAKU_ACTOR_ID", "KEIYAKU_EXTERNAL_CALLER",
-] as const;
 const count = z.number().int().nonnegative();
 const base = z.object({ sequence: count, at: z.string() });
 const turnFields = { turnSequence: count };

@@ -69,6 +69,14 @@ fresh Akuma. If that unsupported reload removes the routing declaration from the
 native environment, this integration cannot promise routing isolation. It adds
 no registry, daemon, plugin, inferred retention proof, or automatic repair.
 
+The Paseo bridge uses the installed Keiyaku library in its plugin process and
+requires the current public observation surface; it does not emulate missing
+capabilities. A successfully loaded library remains in that process for its
+lifetime. Upgrading Keiyaku therefore requires a Paseo plugin reload, not a
+daemon restart: each plugin runs in its own forked child, and reload replaces
+that child. This plugin reload is separate from the unsupported native runtime
+reload above.
+
 ## Headless Permission Baseline
 
 An opencode-sdk spawn is headless: no channel can answer a native permission

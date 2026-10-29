@@ -2,18 +2,17 @@ import assert from "node:assert/strict";
 import { appendFile, cp, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
-import ts from "typescript";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
-import { historySchema, identityKeys, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { tellPresentation, tellReceiptSchema } from "../plugins/paseo/plugin/server/message.js";
-import { cleanEnvironment, createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
-import { WORKER_SOURCE } from "../plugins/paseo/plugin/server/sdk-worker.js";
+import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
   type ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import * as pluginRuntime from "@getpaseo/plugin";
@@ -37,8 +36,7 @@ const nodeRequire = createRequire(import.meta.url);
 
 /**
  * The public package's own admission, read directly. Comparing it with what the
- * worker returns is what makes the worker boundary transparent, whatever
- * producer fields the installed package reports.
+ * transport returns makes the boundary transparent to the producer's own values.
  */
 async function producer(): Promise<{ select(world: string, akuId: string): {
   history(options: Readonly<{ limit: number }>): Promise<History>;
@@ -58,11 +56,6 @@ async function producerModel(root: string, akuId: string): Promise<Readonly<{ pr
   const fields = await (await producer()).select(root, akuId).status() as Record<string, unknown>;
   return { ...(typeof fields.provider === "string" ? { provider: fields.provider } : {}),
     ...(typeof fields.model === "string" ? { model: fields.model } : {}) };
-}
-/** Whether the installed public package exposes the settled streaming surface. */
-async function producerSupportsStream(): Promise<boolean> {
-  const sdk = await import(PUBLIC_ENTRY) as unknown as { Akuma: { select(world: string, akuId: string): { stream?: unknown } } };
-  return typeof sdk.Akuma.select("/", "aku/none/00000000").stream === "function";
 }
 
 /** The host-supplied module surface Paseo's evaluator provides to a server bundle. */
@@ -102,57 +95,8 @@ async function consumerToolchain(): Promise<Readonly<{
   }
 }
 
-test("the worker environment drops every inherited identity without mutating its source", () => {
-  const source: NodeJS.ProcessEnv = { PATH: "/usr/bin", HOME: "/home/x" };
-  for (const key of identityKeys) source[key] = "inherited-participant";
-  const cleaned = cleanEnvironment(source);
-  for (const key of identityKeys) {
-    assert.equal(cleaned[key], undefined, key);
-    assert.equal(source[key], "inherited-participant", key);
-  }
-  assert.equal(cleaned.PATH, "/usr/bin");
-  assert.equal(cleaned.HOME, "/home/x");
-});
-
-test("the embedded worker type-checks as JavaScript against the installed public declarations", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "paseo-worker-check-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = join(directory, "sdk-worker.js");
-  await writeFile(file, WORKER_SOURCE);
-  const rootNames = [file];
-  // The worker reaches the streaming surface through a duck type, because an
-  // installed package may predate it. Where the installed declaration does
-  // declare the surface, this probe makes that duck type agree with the real
-  // one, so the shape the worker assumes cannot drift from the entry it runs
-  // against.
-  if (await producerSupportsStream()) {
-    const probe = join(directory, "stream-surface.ts");
-    await writeFile(probe, [
-      `import type { Akuma } from "@astrosheep/keiyaku";`,
-      `type WorkerView = { stream(options: { signal: AbortSignal }): AsyncIterable<unknown> };`,
-      `declare const selection: ReturnType<typeof Akuma.select>;`,
-      `const view: WorkerView = selection;`,
-      `export default view;`,
-    ].join("\n"));
-    rootNames.push(probe);
-  }
-  const program = ts.createProgram({
-    rootNames,
-    options: {
-      allowJs: true, checkJs: true, noEmit: true, strict: true, skipLibCheck: true,
-      target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      types: ["node"], typeRoots: [resolve("node_modules/@types")],
-      baseUrl: resolve("."), paths: { "@astrosheep/keiyaku": ["build/src/index.d.ts"] },
-      noUnusedLocals: false, noUnusedParameters: false, allowUnreachableCode: true,
-    },
-  });
-  const errors = ts.getPreEmitDiagnostics(program).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
-  assert.deepEqual(errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")), []);
-});
-
-test("the dedicated worker serves the real public package's own stream, status, and stop", async (t) => {
-  const value = await soulFixture("paseo-sdk-worker-");
+test("the in-process transport serves the real public package's own stream, status, and stop", async (t) => {
+  const value = await soulFixture("paseo-sdk-direct-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   let released = false;
   const release = () => { if (!released) { released = true; leash.release(); } };
@@ -163,7 +107,7 @@ test("the dedicated worker serves the real public package's own stream, status, 
   const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "printf hello" } } });
-  // The worker's own row validation must not silently drop the observed result
+  // The transport's own row validation must not silently drop the observed result
   // text and per-file patch the public projection carries.
   const patch = "@@ -1 +1 @@\n-old\n+new\n";
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
@@ -179,26 +123,26 @@ test("the dedicated worker serves the real public package's own stream, status, 
 
   const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
   const frame = await stream.next();
-  assert.ok(!frame.done, "the worker serves the real package's own bounded window");
+  assert.ok(!frame.done, "the transport serves the real package's own bounded window");
   const rows = frame.value.rows;
   const turn = rows.find((row) => row.kind === "turn" && row.turnSequence === started.sequence);
   assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
   const tool = rows.find((row) => row.kind === "tool" && row.name === "bash");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool, await producerRow(root, value.allocated.id, tool.sequence),
-    "the worker boundary is transparent to the producer's own record, identity included");
+    "the transport boundary is transparent to the producer's own record, identity included");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
   assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0, output: "hello" },
-    "the worker boundary keeps the observed result text");
+    "the transport boundary keeps the observed result text");
   const carried = rows.flatMap((row) => row.kind === "tool" && row.name === "edit" ? [row] : []);
   assert.equal(carried.length, 1, "the bounded window carries the observed edit record");
   assert.deepEqual(carried[0]?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] },
-    "the worker boundary keeps an observed per-file patch");
+    "the transport boundary keeps an observed per-file patch");
   await stream.return?.();
 
   assert.deepEqual(await transport.status(root, value.allocated.id, new AbortController().signal),
     await producerModel(root, value.allocated.id),
-    "the worker reports exactly the model configuration the public status admits");
+    "the transport reports exactly the model configuration the public status admits");
 
   // Kill waits for custody this fixture still holds; release it first so the
   // public stop path answers with the fixture's own real verdict.
@@ -253,62 +197,114 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
 });
 
 const FAKE_SDK = `import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 const control = async () => { try { return JSON.parse(await readFile(new URL("./control.json", import.meta.url), "utf8")); } catch { return {}; } };
 const empty = { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: null };
-const wait = async (milliseconds, signal) => await new Promise((settle, fail) => {
-  const timer = setTimeout(settle, milliseconds);
-  signal?.addEventListener("abort", () => { clearTimeout(timer); fail(signal.reason ?? new Error("aborted")); }, { once: true });
-});
-export const Akuma = {
-  select(_world, aku) {
-    return {
-      async tell(text, options) {
+const wait = (milliseconds, signal) => delay(milliseconds, undefined, { signal });
+export const tellStarted = Promise.withResolvers();
+export const streams = [];
+export class Akuma {
+  constructor(aku) { this.aku = aku; }
+  static select(_world, aku) { return new Akuma(aku); }
+  async tell(text, options) {
+    tellStarted.resolve(options.signal);
+    const values = await control();
+    // A non-cooperative Tell never settles on its own; close owns the outcome.
+    if (values.tellPending === true) await new Promise(() => {});
+    if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
+    if (values.tellMismatch === true) return { akuma: "aku/other/1", tell: values.tell.tell };
+    return values.tell ?? { akuma: this.aku, tell: { admission: { fact: "recorded", tellId: "tell/1" },
+      row: { kind: "tell", sequence: 1, at: "t", tellId: "tell/1", text, state: "pending", deliveries: [] },
+      wake: { kind: "told" } } };
+  }
+  async kill() { return (await control()).evidence ?? "already-stopped"; }
+  async status() { return (await control()).status ?? {}; }
+  stream(options) {
+    let opened = false;
+    const observation = { signal: options.signal, returned: false };
+    streams.push(observation);
+    return { [Symbol.asyncIterator]: () => ({
+      async next() {
         const values = await control();
-        // A pending Tell never settles on its own. No timer can finish it before
-        // the transport closes, so close -- not scheduling -- owns the outcome.
-        if (values.tellPending === true) await new Promise(() => {});
-        if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
-        if (values.tellMismatch === true) return { akuma: "aku/other/1", tell: values.tell.tell };
-        return values.tell ?? { akuma: aku, tell: { admission: { fact: "recorded", tellId: "tell/1" },
-          row: { kind: "tell", sequence: 1, at: "t", tellId: "tell/1", text, state: "pending", deliveries: [] },
-          wake: { kind: "told" } } };
+        if (!opened) { opened = true; return { done: false, value: values.streamHistory ?? empty }; }
+        await wait(values.streamDelayMs ?? 0, options.signal);
+        if (values.streamDone === true) return { done: true, value: undefined };
+        return { done: false, value: values.streamHistory ?? empty };
       },
-      async kill() { return (await control()).evidence ?? "already-stopped"; },
-      async status() { return (await control()).status ?? {}; },
-      stream(options) {
-        let opened = false;
-        return { [Symbol.asyncIterator]: () => ({
-          async next() {
-            const values = await control();
-            if (values.streamExit === true) process.exit(0);
-            if (!opened) { opened = true; return { done: false, value: values.streamHistory ?? empty }; }
-            await wait(values.streamDelayMs ?? 0, options?.signal);
-            if (values.streamDone === true) return { done: true, value: undefined };
-            if (values.streamFail === true) throw new Error("stream read failed");
-            return { done: false, value: values.streamHistory ?? empty };
-          },
-          async return() { return { done: true, value: undefined }; },
-        }) };
-      },
-    };
-  },
-};
+      async return() { observation.returned = true; return { done: true, value: undefined }; },
+    }) };
+  }
+}
 `;
 
-async function fakeWorker(t: TestContext, options: Readonly<{ timeoutMs?: number }> = {}) {
+async function fakeTransport(t: TestContext, options: Readonly<{ timeoutMs?: number }> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "paseo-sdk-fake-"));
-  await writeFile(join(directory, "sdk.mjs"), FAKE_SDK);
-  // The worker reads the control file from its own process: publishing it
-  // atomically is what keeps a read from ever seeing a half-written file.
+  const entry = join(directory, "sdk.mjs");
+  await writeFile(entry, FAKE_SDK);
+  const observed = await import(pathToFileURL(entry).href) as {
+    tellStarted: { promise: Promise<AbortSignal> };
+    streams: { signal: AbortSignal; returned: boolean }[];
+  };
+  // Publishing control atomically keeps each SDK read on a complete value.
   const set = async (values: unknown) => {
     const target = join(directory, "control.json");
     await writeFile(`${target}.next`, JSON.stringify(values));
     await rename(`${target}.next`, target);
   };
-  const transport = createSdkTransport({ entry: join(directory, "sdk.mjs"), ...options });
+  const transport = createSdkTransport({ entry, ...options });
   t.after(async () => { await transport.close(); await rm(directory, { recursive: true, force: true }); });
-  return { transport, set };
+  return { transport, set, tellStarted: observed.tellStarted.promise, streams: observed.streams };
 }
+
+test("PATH discovery retries failed loads, names incompatible versions, and caches success", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "paseo-sdk-load-"));
+  const previousPath = process.env.PATH;
+  const transport = createSdkTransport();
+  t.after(async () => {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    await transport.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  const install = async (version: string, source: string): Promise<void> => {
+    const root = join(directory, version, "package with spaces");
+    const bin = join(directory, version, "bin");
+    await mkdir(root, { recursive: true });
+    await mkdir(bin);
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "@astrosheep/keiyaku", version,
+      exports: { ".": { import: "./sdk.mjs", default: "./not-the-entry.mjs" } }, main: "./not-the-main.mjs" }));
+    await writeFile(join(root, "sdk.mjs"), source);
+    await writeFile(join(root, "cli.mjs"), "");
+    await symlink(join(root, "cli.mjs"), join(bin, "keiyaku"));
+    process.env.PATH = bin;
+  };
+  const signal = new AbortController().signal;
+  process.env.PATH = "";
+  await assert.rejects(transport.status("/world", "aku/test/1", signal), /executable is not on PATH/u);
+  await install("0.0.1", "export class Akuma { stream() {} }");
+  await assert.rejects(transport.status("/world", "aku/test/1", signal), /version 0\.0\.1.*Akuma\.select/u);
+  await install("0.0.2", "export class Akuma { static select() {} }");
+  await assert.rejects(transport.status("/world", "aku/test/1", signal), /version 0\.0\.2.*Akuma\.prototype\.stream/u);
+  await install("1.0.0", FAKE_SDK);
+  assert.deepEqual(await transport.status("/world", "aku/test/1", signal), {});
+  process.env.PATH = "";
+  assert.deepEqual(await transport.status("/world", "aku/test/1", signal), {}, "a successful load is retained for this plugin");
+});
+
+test("a bounded stream opening never submits a subscription after cancellation", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "paseo-sdk-opening-"));
+  const entry = join(directory, "sdk.mjs");
+  await writeFile(entry, `await new Promise((resolve) => setTimeout(resolve, 100));\n${FAKE_SDK}`);
+  const transport = createSdkTransport({ entry, timeoutMs: 20 });
+  t.after(async () => { await transport.close(); await rm(directory, { recursive: true, force: true }); });
+  const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
+  await assert.rejects(stream.next(), /timed out after 20ms; the observation was released/u);
+  const sdk = await import(pathToFileURL(entry).href) as { streams: unknown[] };
+  assert.deepEqual(sdk.streams, [], "late SDK setup cannot open the abandoned observation");
+  assert.equal((await stream.next()).done, true);
+  const next = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
+  assert.deepEqual(pulled(await next.next()), [], "the later caller can use the successfully loaded SDK");
+  await next.return?.();
+});
 
 /** The sequences one pulled frame reports; a done result is never a frame. */
 function pulled(result: IteratorResult<History>): number[] {
@@ -325,7 +321,7 @@ const RECEIPT = { akuma: "aku/test/1", tell: { admission: { fact: "recorded", te
   wake: { kind: "told" } } };
 
 test("the transport carries typed Tell admission, Stop evidence, and status", async (t) => {
-  const { transport, set } = await fakeWorker(t);
+  const { transport, set } = await fakeTransport(t);
   await set({ status: { provider: "pi", model: "kimi-coding/k3-256k" }, tell: RECEIPT });
   const signal = new AbortController().signal;
 
@@ -360,39 +356,48 @@ test("the transport carries typed Tell admission, Stop evidence, and status", as
 });
 
 test("a Tell receipt that does not name the submitted Tell is an uncertain outcome", async (t) => {
-  const { transport, set } = await fakeWorker(t);
+  const { transport, set } = await fakeTransport(t);
   await set({ tellMismatch: true, tell: RECEIPT });
   await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
     /outcome is uncertain/u);
 });
 
-test("cancellation settles only its own request, and close is the only thing that retires the worker", async (t) => {
-  const { transport, set } = await fakeWorker(t);
-  await set({ tellDelayMs: 5_000 });
+test("cancellation reaches only its own SDK request", async (t) => {
+  const { transport, set, tellStarted } = await fakeTransport(t);
+  await set({ tellPending: true, status: { provider: "pi" } });
   const controller = new AbortController();
   const abandoned = transport.tell("/world", "aku/test/1", controller.signal, "change direction")
     .then(() => "resolved", (error: Error) => error.message);
+  const requestSignal = await tellStarted;
   controller.abort(new Error("observation closed"));
-  assert.equal(await abandoned, "observation closed", "the cancelled read rejects with the caller's own reason");
-
-  await set({ status: { provider: "pi" } });
+  assert.equal(requestSignal.aborted, true, "cancellation reaches the actual SDK call");
+  assert.equal(await abandoned, "observation closed", "a non-cooperative operation still releases its caller");
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "one request's cancellation never terminates unrelated work");
+});
 
-  // One stable control value for the whole concurrent phase: publishing the
-  // stream settings afterwards could make the worker read a Tell configuration
-  // this phase never intended.
+test("close aborts every owned request and subscription and refuses new work", async (t) => {
+  const { transport, set, tellStarted, streams } = await fakeTransport(t);
   await set({ tellPending: true, streamHistory: frame(1), streamDelayMs: 5_000 });
   const inFlight = transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction")
     .then(() => "resolved", (error: Error) => error.message);
+  const requestSignal = await tellStarted;
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
-  assert.deepEqual(pulled(await stream.next()), [1], "the transport serves a stream to the same worker");
+  assert.deepEqual(pulled(await stream.next()), [1]);
+  const idle = transport.stream("/world", "aku/other/1", new AbortController().signal)[Symbol.asyncIterator]();
+  await idle.next();
   const inFlightFrame = stream.next().then(() => "resolved", (error: Error) => error.message);
   await transport.close();
+  await transport.close();
+  assert.equal(requestSignal.aborted, true);
+  assert.equal(streams.length, 2);
+  assert.ok(streams.every((observation) => observation.signal.aborted && observation.returned),
+    "close releases readers even when they have no pull in flight");
   assert.match(await inFlight, /closed while the request was in flight; its outcome is uncertain/u);
   assert.match(await inFlightFrame, /closed while the request was in flight; the observation was released/u,
     "close settles the frame in flight as a released observation, not an uncertain request");
   assert.equal((await stream.next()).done, true, "a closed transport serves no further frame");
+  assert.equal((await idle.next()).done, true);
   await assert.rejects(transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]().next(),
     /transport is closed/u);
   await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
@@ -400,7 +405,7 @@ test("cancellation settles only its own request, and close is the only thing tha
 });
 
 test("a subscription pulls one window at a time, opens on the current frame, and releases only its own observation", async (t) => {
-  const { transport, set } = await fakeWorker(t);
+  const { transport, set, streams } = await fakeTransport(t);
   const released = new AbortController();
   const sibling = new AbortController();
   t.after(() => { released.abort(); sibling.abort(); });
@@ -427,16 +432,43 @@ test("a subscription pulls one window at a time, opens on the current frame, and
   released.abort(new Error("observation released"));
   await assert.rejects(pending, /observation released/u, "abandoning a subscription settles its own pull");
   assert.equal((await stream.next()).done, true, "a released observation serves no further frame");
+  assert.equal(streams[0]?.signal.aborted, true);
+  assert.equal(streams[0]?.returned, true);
+  assert.equal(streams[1]?.signal.aborted, false, "the sibling SDK subscription is not cancelled");
   await set({ status: { provider: "pi" } });
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "ordinary requests proceed while an observation waits");
   await set({ streamHistory: frame(5) });
   assert.deepEqual(pulled(await other.next()), [5],
     "the unrelated subscription keeps pulling after its neighbour is released");
+  const returning = assert.rejects(other.next(), /observation was released/u, "return releases a pull already in flight");
+  await other.return?.();
+  await returning;
+  assert.equal(streams[1]?.signal.aborted, true);
+  assert.equal(streams[1]?.returned, true);
+  assert.equal((await other.next()).done, true);
+});
+
+test("ended and invalid streams release their readers without reopening", async (t) => {
+  const { transport, set, streams } = await fakeTransport(t);
+  const signal = new AbortController().signal;
+  const completed = transport.stream("/world", "aku/test/1", signal)[Symbol.asyncIterator]();
+  await completed.next();
+  await set({ streamDone: true });
+  assert.equal((await completed.next()).done, true);
+  assert.equal((await completed.next()).done, true);
+  assert.equal(streams.length, 1, "a completed observation never opens again");
+  assert.ok(streams[0]?.signal.aborted && streams[0]?.returned);
+
+  await set({ streamHistory: { rows: [] } });
+  const invalid = transport.stream("/world", "aku/test/1", signal)[Symbol.asyncIterator]();
+  await assert.rejects(invalid.next());
+  assert.equal((await invalid.next()).done, true);
+  assert.ok(streams[1]?.signal.aborted && streams[1]?.returned, "a malformed frame releases its SDK reader");
 });
 
 test("an idle frame is never bounded by the ordinary request timeout", async (t) => {
-  const { transport, set } = await fakeWorker(t, { timeoutMs: 400 });
+  const { transport, set } = await fakeTransport(t, { timeoutMs: 400 });
   await set({ streamHistory: frame(1) });
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
   assert.deepEqual(pulled(await stream.next()), [1], "opening the subscription is one bounded handshake");
@@ -449,21 +481,11 @@ test("an idle frame is never bounded by the ordinary request timeout", async (t)
     "an ordinary request still carries its own bound");
 });
 
-test("worker death rejects the frame in flight and ends its observations", async (t) => {
-  const { transport, set } = await fakeWorker(t);
-  await set({ streamHistory: frame(1) });
-  const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
-  await stream.next();
-  await set({ streamExit: true });
-  await assert.rejects(stream.next(), /worker exited/u, "a dead worker settles its pending pull");
-  assert.equal((await stream.next()).done, true, "a dead worker's observation never silently reopens");
-});
-
 /**
  * The real plugin bundle, compiled and evaluated exactly as the plugin process
- * loads it, with one appended export so this suite can reach the worker factory
+ * loads it, with one appended export so this suite can reach the transport factory
  * the plugin wires in. It runs against the public package under test through
- * production PATH discovery: the worker finds that package's own declared
+ * production PATH discovery: the transport finds that package's own declared
  * executable, never an injected entry. `undefined` only when the consumer's own
  * plugin compiler is unavailable.
  */
@@ -489,7 +511,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
   const exported = evaluate(bundles.serverBundle);
   assert.equal(typeof setup, "function");
   assert.equal(typeof exported.createSdkTransport, "function",
-    "the new worker module survives Paseo's bundling, including its embedded source");
+    "the new transport module survives Paseo's bundling, including its non-literal SDK import");
 
   const registrations: string[] = [];
   const handlers: number[] = [];
@@ -520,7 +542,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "shell", name: "bash", call: { kind: "run", command: "printf hello" } } });
 
-  // Production discovery: the plugin passes no entry. The worker locates the
+  // Production discovery: the plugin passes no entry. The transport locates the
   // public package through the `keiyaku` executable on PATH, then through that
   // package's own declared public entry.
   const pathDirectory = await mkdtemp(join(tmpdir(), "paseo-sdk-path-"));
@@ -528,7 +550,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
   await mkdir(bin);
   await symlink(PUBLIC_CLI, join(bin, "keiyaku"));
   const previousPath = process.env.PATH;
-  process.env.PATH = `${bin}:${previousPath ?? ""}`;
+  process.env.PATH = `${bin}${delimiter}${previousPath ?? ""}`;
   t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
     return rm(pathDirectory, { recursive: true, force: true }); });
 
@@ -543,7 +565,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
     bodySequence: body.sequence, turnSequence: started.sequence };
 }
 
-test("the installed Paseo compiler and evaluator run the plugin and its embedded SDK worker", async (t) => {
+test("the installed Paseo compiler and evaluator run the plugin and its in-process SDK transport", async (t) => {
   const consumer = await compiledConsumer(t);
   if (consumer === undefined) {
     t.skip("@getpaseo/server is not installed: the consumer's own plugin compiler is unavailable");
@@ -562,20 +584,6 @@ test("the installed Paseo compiler and evaluator run the plugin and its embedded
 });
 
 test("the evaluated bundle mirrors a real Akuma through the public streaming surface", async (t) => {
-  // Mirroring through the stream is what this Contract is for, so a package that
-  // declares the surface must be proven against it here -- including the
-  // producer identities the mirror publishes, which this test asserts outright
-  // rather than accepting whichever shape the producer happens to report. Only
-  // the lane's own build, which still predates its prerequisites, may report the
-  // gap: an explicitly chosen package may never pass by reporting a surface it
-  // lacks.
-  if (!(await producerSupportsStream())) {
-    if (EXPLICIT_PUBLIC_PACKAGE !== undefined)
-      assert.fail(`${PUBLIC_PACKAGE} declares no Akuma.stream, so it cannot prove the streaming surface`);
-    t.skip(`the lane build at ${PUBLIC_PACKAGE} carries no Akuma.stream yet; ` +
-      "set KEIYAKU_PUBLIC_PACKAGE to a build carrying the accepted core to exercise this path");
-    return;
-  }
   const consumer = await compiledConsumer(t);
   if (consumer === undefined) {
     t.skip("@getpaseo/server is not installed: the consumer's own plugin compiler is unavailable");
@@ -592,7 +600,7 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
   assert.deepEqual(events.filter((event) => event.type === "session.turn").map((event) => event.state), ["started"],
     "the evaluated bundle publishes the real open Turn the real core reports, not a fixture");
   assert.ok(items().some((item) => item.type === "reasoning" && item.text === "checking the real core"),
-    "a mid-turn record crosses the real worker boundary and Paseo's own bundling of it");
+    "a mid-turn record crosses the real transport boundary and Paseo's own bundling of it");
   assert.equal(items().some((item) => item.message !== undefined && /read surface unavailable/u.test(item.message)), false,
     "a package that declares the streaming surface mirrors through it instead of reporting it unavailable");
   assert.equal(events.filter((event) => event.type === "session.ready").length, 1);
@@ -636,7 +644,7 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
     `a later Turn (${later.sequence}) after an idle stretch arrives through the same observation, never a timer`);
 });
 
-test("the real public package admits one Tell through the worker while custody is held", async (t) => {
+test("the real public package admits one Tell through the transport while custody is held", async (t) => {
   const value = await soulFixture("paseo-sdk-tell-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   let released = false;
@@ -654,11 +662,11 @@ test("the real public package admits one Tell through the worker while custody i
   assert.deepEqual(admitted.row.deliveries, [], "held custody delivers nothing");
   assert.deepEqual(admitted.wake, { kind: "held" }, "a held leash is reported as held, not as a failed wake");
   assert.deepEqual(tellReceiptSchema.parse({ akuma: value.allocated.id, tell: admitted }).tell, admitted,
-    "the worker's admission is the public receipt verbatim");
+    "the transport's admission is the public receipt verbatim");
 
   const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
   const frame = await stream.next();
-  assert.ok(!frame.done, "the worker serves the real package's own bounded window");
+  assert.ok(!frame.done, "the transport serves the real package's own bounded window");
   const recorded = frame.value.rows.find((row) => row.kind === "tell");
   await stream.return?.();
   assert.ok(recorded?.kind === "tell");
