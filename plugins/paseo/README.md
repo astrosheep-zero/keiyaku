@@ -143,6 +143,12 @@ read-only display, not model switching. An unspecified model stays unknown;
 a failed status read reports a notice without blocking history. The global
 catalog remains the mirror attachment entry, not a catalogue of native models.
 
+Progress reports appear as informational notifications with stable report
+identity; they do not start or finish a Turn or constitute its answer.
+Unknown or malformed records with trustworthy identity produce a bounded
+incomplete-observation warning, without displaying their payload or blocking
+later records. Invalid window or record identity still fails the observation.
+
 Tool records map to native `tool_call` items with actual call, result, exit
 status, duration and truncation. Where the installed producer reports a tool
 result's own `output`, that text is what run, read and search display; the

@@ -15,8 +15,10 @@ const call = z.discriminatedUnion("kind", [
   })) }),
   z.object({ kind: z.literal("other"), display: z.string(), input: input.optional() }),
 ]);
-const row = z.union([
+const knownRow = z.union([
   base.extend({ kind: z.literal("turn"), ...turnFields, bodySequence: count.optional() }),
+  base.extend({ kind: z.literal("report"), ...turnFields, bodySequence: count, text: z.string(),
+    truncated: z.literal(true).optional() }),
   base.extend({ kind: z.literal("tell"), tellId: z.string(), text: z.string(), state: z.enum(["pending", "told"]),
     deliveries: z.array(z.object({ deliveredAt: z.string(), route: z.enum(["launch", "live"]),
       turnSequence: count, receipt: z.enum(["unavailable", "required"]).optional() })).optional() }),
@@ -33,6 +35,15 @@ const row = z.union([
   base.extend({ kind: z.enum(["said", "thought", "note", "call"]), ...turnFields, text: z.string(),
     truncated: z.literal(true).optional() }),
 ]);
+// Identity is the trust boundary. Never copy a rejected payload into the mirror.
+const identity = z.object({ kind: z.string().min(1), sequence: z.number().int().positive().safe(),
+  at: z.string().refine((value) => Number.isFinite(Date.parse(value))) }).passthrough();
+const row = identity.transform((value) => {
+  const decoded = knownRow.safeParse(value);
+  if (decoded.success) return decoded.data;
+  return { kind: "adapter-diagnostic" as const, sequence: value.sequence, at: value.at,
+    recordKind: value.kind.slice(0, 80).replace(/[^a-zA-Z0-9_.-]/gu, "?") };
+});
 export const historySchema = z.object({ rows: z.array(row), omitted: count,
   hasEarlier: z.boolean(), hasLater: z.boolean(), historyLost: z.boolean(),
   lowestRetained: count.nullable(), highest: count.nullable() });

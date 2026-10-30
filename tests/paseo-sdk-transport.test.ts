@@ -6,7 +6,7 @@ import { delimiter, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, endTurn, HeldAkumaLeash, recordReport } from "../src/akuma/heart/index.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
 import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
@@ -117,6 +117,9 @@ test("the in-process transport serves the real public package's own stream, stat
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "edit", name: "edit",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] } } });
+  const recorded = await recordReport(value.allocated.paths, { bodySequence: body.sequence,
+    turnSequence: started.sequence, text: "working", at });
+  assert.equal(recorded.kind, "recorded");
   const transport = createSdkTransport({ entry: PUBLIC_ENTRY });
   t.after(() => transport.close());
   const root = await realpath(value.root);
@@ -127,6 +130,17 @@ test("the in-process transport serves the real public package's own stream, stat
   const rows = frame.value.rows;
   const turn = rows.find((row) => row.kind === "turn" && row.turnSequence === started.sequence);
   assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
+  const report = rows.find((row) => row.kind === "report");
+  assert.ok(report?.kind === "report");
+  assert.deepEqual(report, await producerRow(root, value.allocated.id, report.sequence));
+  assert.equal(report.bodySequence, body.sequence);
+  assert.equal(report.turnSequence, started.sequence);
+  const events: ProviderEvent[] = [];
+  const mirror = createMirror("report-session", (event) => { ProviderEventSchema.parse(event); events.push(event); });
+  mirror.publish(frame.value);
+  mirror.publish(frame.value);
+  assert.equal(events.filter((event) => event.type === "timeline.item" && event.item.type === "notification" &&
+    event.item.id === `keiyaku:report/${report.sequence}` && event.item.message === "Progress report: working").length, 1);
   const tool = rows.find((row) => row.kind === "tool" && row.name === "bash");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool, await producerRow(root, value.allocated.id, tool.sequence),
@@ -138,7 +152,21 @@ test("the in-process transport serves the real public package's own stream, stat
   assert.equal(carried.length, 1, "the bounded window carries the observed edit record");
   assert.deepEqual(carried[0]?.call, { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] },
     "the transport boundary keeps an observed per-file patch");
+  await endTurn(value.allocated.paths, { turnSequence: started.sequence, completedAt: at,
+    outcome: { kind: "answered", answer: "finished", session: { sessionId: "sdk-report" } } });
+  const settled = await stream.next();
+  assert.ok(!settled.done);
+  assert.ok(settled.value.rows.some((row) => row.kind === "report" && row.sequence === report.sequence));
+  assert.ok(settled.value.rows.some((row) => row.kind === "outcome" && row.turnSequence === started.sequence));
+  mirror.publish(settled.value);
+  assert.ok(events.some((event) => event.type === "session.turn" && event.turnId === `turn/${started.sequence}` &&
+    event.state === "completed"));
   await stream.return?.();
+  const retained = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
+  const reopened = await retained.next();
+  assert.ok(!reopened.done && reopened.value.rows.some((row) => row.kind === "report") &&
+    reopened.value.rows.some((row) => row.kind === "outcome"));
+  await retained.return?.();
 
   assert.deepEqual(await transport.status(root, value.allocated.id, new AbortController().signal),
     await producerModel(root, value.allocated.id),
@@ -314,6 +342,43 @@ function pulled(result: IteratorResult<History>): number[] {
 /** One complete bounded window, as the public stream reports each frame. */
 const frame = (sequence: number): History => ({ rows: [{ kind: "said", sequence, turnSequence: 1, at, text: `frame ${sequence}` }],
   omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: sequence, highest: sequence });
+
+test("SDK isolates bad records within trusted windows and continues to a real outcome", async (t) => {
+  const { transport, set } = await fakeTransport(t);
+  const raw = { ...frame(1), rows: [
+    { kind: "turn", sequence: 1, turnSequence: 1, at },
+    { kind: "future_" + "x".repeat(200), sequence: 2, at, secret: "never expose" },
+    { kind: "outcome", sequence: 3, at, turnSequence: 1, outcome: { kind: "answered", answer: 42, secret: "never expose" } },
+  ], highest: 3 };
+  await set({ streamHistory: raw });
+  const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
+  const first = await stream.next();
+  assert.ok(!first.done);
+  assert.deepEqual(first.value.rows.map((row) => row.kind), ["turn", "adapter-diagnostic", "adapter-diagnostic"]);
+  assert.ok(!JSON.stringify(first.value).includes("never expose"));
+  const events: ProviderEvent[] = [];
+  const mirror = createMirror("isolation", (event) => { ProviderEventSchema.parse(event); events.push(event); });
+  mirror.publish(first.value); mirror.publish(first.value);
+  const notices = events.filter((event) => event.type === "timeline.item" && event.item.type === "notification");
+  assert.equal(notices.length, 2);
+  assert.ok(JSON.stringify(notices).length < 600 && !JSON.stringify(notices).includes("never expose"));
+  assert.equal(events.filter((event) => event.type === "session.turn" && event.state !== "started").length, 0);
+  await set({ streamHistory: { ...raw, highest: 4, rows: [...raw.rows,
+    { kind: "outcome", sequence: 4, turnSequence: 1, at, outcome: { kind: "answered", answer: "done" } }] } });
+  const next = await stream.next();
+  assert.ok(!next.done);
+  mirror.publish(next.value);
+  assert.ok(events.some((event) => event.type === "session.turn" && event.turnId === "turn/1" && event.state === "completed"));
+  assert.equal(events.filter((event) => event.type === "timeline.item" && event.item.type === "notification").length, 2);
+  await stream.return?.();
+
+  for (const invalid of [{ kind: "unknown", sequence: "2", at }, { kind: "unknown", sequence: 2, at: "invalid" },
+    { sequence: 2, at }]) {
+    await set({ streamHistory: { ...raw, rows: [invalid] } });
+    const broken = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
+    await assert.rejects(broken.next());
+  }
+});
 
 const RECEIPT = { akuma: "aku/test/1", tell: { admission: { fact: "recorded", tellId: "tell/7" },
   row: { kind: "tell", sequence: 7, at, tellId: "tell/7", text: "change direction", state: "pending",

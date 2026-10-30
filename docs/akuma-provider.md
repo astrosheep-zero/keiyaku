@@ -86,6 +86,13 @@ daemon restart: each plugin runs in its own forked child, and reload replaces
 that child. This plugin reload is separate from the unsupported native runtime
 reload above.
 
+The optional Paseo mirror requires trustworthy observation windows and record
+identity. An individual record it cannot interpret leaves observation visibly
+incomplete while later trustworthy records remain observable. The skipped record
+cannot establish or change execution state, and its payload is not retained in
+the diagnostic. A broken observation boundary remains a read failure; neither
+case authorizes inferred completion or automatic recovery.
+
 ## Headless Permission Baseline
 
 An opencode-sdk spawn is headless: no channel can answer a native permission

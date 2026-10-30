@@ -18,6 +18,10 @@ export function createMirror(sessionId: string, emit: Emit) {
   const item = (value: ProviderTimelineItem, timestamp?: string) => emit({
     type: "timeline.item", sessionId, item: value, ...(timestamp === undefined ? {} : { timestamp }),
   });
+  const observationWarning = (row: Extract<Row, { kind: "adapter-diagnostic" }>) => {
+    item({ type: "notification", id: `keiyaku:observation/${row.sequence}`, level: "warning",
+      message: `Observation incomplete: unsupported or malformed ${row.recordKind} record at sequence ${row.sequence}.` }, row.at);
+  };
   const finish = (target: Turn | undefined, state: "completed" | "failed" | "canceled", message?: string) => {
     if (!target || target.closed) return;
     target.closed = true;
@@ -36,7 +40,10 @@ export function createMirror(sessionId: string, emit: Emit) {
       const { rows } = history;
       covered = { high: history.highest ?? 0,
         signatures: new Map(rows.map((row) => [row.sequence, JSON.stringify(row)])) };
-      for (const row of rows) if (row.kind === "tell") displayedTells.set(row.tellId, row.sequence);
+      for (const row of rows) {
+        if (row.kind === "tell") displayedTells.set(row.tellId, row.sequence);
+        else if (row.kind === "adapter-diagnostic") observationWarning(row);
+      }
       const latest = rows.filter((row) => row.kind === "turn").sort((a, b) => a.sequence - b.sequence).at(-1);
       if (latest?.kind === "turn") {
         turn = { sequence: latest.turnSequence,
@@ -167,6 +174,11 @@ export function createMirror(sessionId: string, emit: Emit) {
           item({ type: "assistant_message", id: `keiyaku:said/${row.sequence}`, text: row.text }, row.at);
         } else if (row.kind === "thought") {
           item({ type: "reasoning", id: `keiyaku:thought/${row.sequence}`, text: row.text }, row.at);
+        } else if (row.kind === "adapter-diagnostic") {
+          observationWarning(row);
+        } else if (row.kind === "report") {
+          item({ type: "notification", id: `keiyaku:report/${row.sequence}`, level: "info",
+            message: `Progress report: ${row.text}` }, row.at);
         } else if (row.kind === "note") {
           item({ type: "notification", id: `keiyaku:note/${row.sequence}`, level: "info", message: row.text }, row.at);
         } else if (row.kind === "outcome") {

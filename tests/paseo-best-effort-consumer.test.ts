@@ -121,6 +121,71 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
 const page = (rows: Row[], metadata: Partial<Omit<History, "rows">> = {}): History => ({ rows, omitted: 0, hasEarlier: false,
   hasLater: false, historyLost: false, lowestRetained: rows[0]?.sequence ?? null,
   highest: Math.max(0, ...rows.map((row) => row.sequence)), ...metadata });
+
+test("a live report remains informational until its exact Turn outcome", async (t) => {
+  const h = await harness(t);
+  const report: Row = { kind: "report", sequence: 3, bodySequence: 1, turnSequence: 2,
+    text: "working [truncated]", truncated: true, at };
+  h.push([turn(2)]); await h.drain();
+  h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
+  const reports = () => h.events.filter((event) => event.type === "timeline" && event.item.type === "notification"
+    && event.item.message === "Progress report: working [truncated]");
+  assert.equal(reports().length, 1);
+  const observed = reports()[0];
+  assert.ok(observed?.type === "timeline" && observed.item.type === "notification");
+  assert.equal(observed.item.message, "Progress report: working [truncated]");
+  h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
+  assert.equal(reports().length, 1);
+  h.push(historySchema.shape.rows.parse([turn(2), report, answer(2, 4)])); await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
+  assert.equal(reports().length, 1);
+});
+
+test("bad records keep observation incomplete until a genuine outcome", async (t) => {
+  const h = await harness(t);
+  const rows = historySchema.shape.rows.parse([turn(2),
+    { kind: "future", sequence: 3, at, payload: "secret" },
+    { kind: "outcome", sequence: 4, turnSequence: 2, at, outcome: { kind: "answered", answer: 7 } }]);
+  h.push(rows); await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
+  const notices = () => h.events.filter((event) => event.type === "timeline" && event.item.type === "notification"
+    && event.item.message.startsWith("Observation incomplete:"));
+  assert.equal(notices().length, 2);
+  assert.ok(!JSON.stringify(notices()).includes("secret"));
+  h.push(rows); await h.drain();
+  assert.equal(notices().length, 2);
+  h.push([...rows, answer(2, 5)]); await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
+});
+
+test("skip opening exposes an incomplete observation without replaying retained history", async (t) => {
+  const rows = historySchema.shape.rows.parse([turn(2),
+    { kind: "said", sequence: 3, turnSequence: 2, at, text: "old speech" },
+    { kind: "future", sequence: 4, at, payload: "secret" }]);
+  const h = await harness(t, {}, rows);
+  const history = async () => {
+    const events: AgentStreamEvent[] = [];
+    for await (const event of h.agent.session!.streamHistory()) events.push(event);
+    return events;
+  };
+  const opening = await history();
+  const notices = opening.filter((event) => event.type === "timeline" && event.item.type === "notification"
+    && event.item.message === "Observation incomplete: unsupported or malformed future record at sequence 4.");
+  assert.equal(notices.length, 1);
+  assert.ok(!JSON.stringify(opening).includes("secret") && !JSON.stringify(opening).includes("old speech"));
+  assert.equal(opening.filter((event) => event.type === "turn_started" && event.turnId === "turn/2").length, 1);
+  assert.equal(opening.some((event) => event.type === "turn_completed" || event.type === "turn_canceled"), false);
+  await h.refresh();
+  assert.deepEqual(await history(), opening, "refresh deduplicates the seeded warning");
+  await h.sync();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
+  h.push([...rows, answer(2, 5)]); await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  assert.ok(h.events.some((event) => event.type === "turn_completed" && event.turnId === "turn/2"));
+});
 for (const failed of [false, true]) test(`recorded steer succeeds with ${failed ? "failed wake" : "no live receipt"}, one Tell and no interrupt`, async (t) => {
   const warnings = t.mock.method(console, "warn", () => {});
   let n = 0;
