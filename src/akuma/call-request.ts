@@ -54,6 +54,7 @@ const akumaCallPayloadSchema = z
     birthInitiator: z.string().optional(),
     contractId: z.string().optional(),
     cwd: absolutePathSchema.optional(),
+    writableDirectories: z.array(absolutePathSchema).readonly().optional(),
     recipe: akumaCallRecipeSchema,
   })
   .strict();
@@ -116,6 +117,7 @@ async function executeAkumaCall(
   const outcome = await executePreparedCall({
     archetype: request.archetype,
     cwd: request.cwd ?? parent.cwd,
+    ...(request.writableDirectories === undefined ? {} : { writableDirectories: request.writableDirectories }),
     ...(request.initialTell === undefined
       ? {}
       : {

@@ -10,7 +10,7 @@ import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
 import type { BodyLaunch, BodyLauncher } from "./body-launch.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
-import { bareOption, canonicalBirthCwd } from "./call-input.js";
+import { bareOption, canonicalBirthCwd, writableDirectoriesOption } from "./call-input.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { type AllocatedAkuma } from "./identity.js";
@@ -28,6 +28,7 @@ export type AkumaCallInput = Readonly<{
   body?: string;
   cwd?: string;
   allowed?: readonly AllowedAction[];
+  writableDirectories?: readonly string[];
   bare?: boolean;
   schema?: Schema<unknown>;
   initiator?: string;
@@ -81,6 +82,7 @@ async function admitBodyRequest(input: {
     archetype: input.name,
     ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
     ...(cwd === undefined ? {} : { cwd }),
+    ...(input.call.writableDirectories === undefined ? {} : { writableDirectories: input.call.writableDirectories }),
     recipe: input.recipe,
     ...(input.call.initiator === undefined ? {} : { birthInitiator: input.call.initiator }),
     ...(input.call.contractId === undefined ? {} : { contractId: input.call.contractId }),
@@ -119,6 +121,7 @@ async function admitDirect(input: {
     result = await executePreparedCall({
       archetype: input.archetype.name,
       cwd,
+      ...(input.call.writableDirectories === undefined ? {} : { writableDirectories: input.call.writableDirectories }),
       ...(input.call.caller === undefined ? {} : { caller: input.call.caller }),
       ...(input.call.initialTell === undefined ? {} : { initialTell: input.call.initialTell }),
       ...(input.call.signal === undefined ? {} : { signal: input.call.signal }),
@@ -197,6 +200,9 @@ export async function admitAkumaCall(
     input.allowed === undefined
       ? archetype.allowed
       : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
+  const writableDirectories = await writableDirectoriesOption(input.writableDirectories);
+  if (writableDirectories.length > 0 && archetype.provider.kind !== "codex-app-server")
+    throw new TypeError(`writableDirectories is unsupported by provider ${archetype.provider.kind}`);
   const execution = executionChannel(configuration.execution);
   const requestRecipe = Object.freeze({
     ...(archetype.description === undefined ? {} : { description: archetype.description }),

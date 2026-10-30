@@ -166,6 +166,7 @@ export function registerAkumaTools(pi: ExtensionAPI): void {
     akuma: string;
     body: string;
     workdir?: string;
+    writableDirectories?: readonly string[];
     bare?: boolean;
     wait?: boolean;
     timeoutMs?: number;
@@ -183,6 +184,12 @@ export function registerAkumaTools(pi: ExtensionAPI): void {
       body,
       workdir: { type: "string", minLength: 1, description: "Execution directory relative to Pi cwd (default Pi cwd)" },
       detach,
+      writableDirectories: {
+        type: "array",
+        items: { type: "string", minLength: 1 },
+        description:
+          "Additional existing canonical absolute writable directories (Codex only); preserves native sandbox/network policy. Separate from product actions.",
+      },
       bare,
       wait: { type: "boolean", description: "Observe first answer, independently of host choice (default false)" },
       timeoutMs,
@@ -195,6 +202,7 @@ export function registerAkumaTools(pi: ExtensionAPI): void {
         archetype: input.akuma,
         body: input.body,
         cwd: resolve(ctx.cwd, input.workdir ?? "."),
+        ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
         mode: input.wait ? "wait" : "detach",
         caller: caller(ctx),
         ...(input.bare === undefined ? {} : { bare: input.bare }),

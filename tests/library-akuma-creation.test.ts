@@ -97,7 +97,7 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
       "  const message = JSON.parse(line);",
       "  if (message.method === 'initialize') return reply(message, {});",
       "  if (message.method === 'initialized') return;",
-      "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
+      "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' }, sandbox: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true } });",
       "  if (message.method !== 'turn/start') return;",
       "  reply(message, { turn: { id: 'turn-1' } });",
       "  const answer = () => {",
@@ -260,6 +260,7 @@ test("prompt-free bare Akumas.call reports born without admitting a Tell", async
       archetype: "worker",
       cwd: world,
       bare: true,
+      writableDirectories: [world, world],
       ...configured.placement,
     });
     assert.deepEqual(result.observation, { kind: "born" });
@@ -268,6 +269,11 @@ test("prompt-free bare Akumas.call reports born without admitting a Tell", async
     const soul = await readSoul(pathsForAkuId(world, result.akuma));
     assert.equal(soul?.caller, undefined);
     assert.equal(soul?.bare, true);
+    assert.deepEqual(soul?.provider.config?.sandbox_workspace_write, {
+      writable_roots: [world], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true,
+    });
+    const source = await loadPreparedArchetype({ name: "worker", project: world, home: configured.home, settings: configured.value });
+    assert.equal(source.provider.config, undefined, "birth grant never mutates source recipe");
     assert.match(soul?.options.systemPrompt ?? "", /Work\./u);
     const history = await handle.history();
     assert.equal(history.rows.some((row) => row.kind === "tell"), false);
@@ -295,6 +301,22 @@ test("malformed explicit callers refuse before allocation on public call and for
   const caller = { kind: "unknown" } as never;
   await assert.rejects(Akumas.of(world).call({ archetype: "worker", caller }), /Invalid Akuma caller/u);
   await assert.rejects(Akumas.of(world).fork({ akuma: "aku/worker/1234abcd", at: "turn/1", caller }), /Invalid Akuma caller/u);
+  assert.deepEqual((await Akumas.of(world).list()).rows, []);
+});
+
+test("explicit writable directories refuse invalid public grants before allocation", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-directory-refusal-"));
+  const configured = await directArchetypeSettings(world);
+  const alias = join(world, "directory-alias");
+  symlinkSync(world, alias, "dir");
+  for (const value of [[""], ["relative"], [join(world, "missing")], [alias], [join(world, "fake-codex")], "not-an-array"]) {
+    await assert.rejects(Akumas.of(world).call({
+      archetype: "worker", ...configured.placement, writableDirectories: value as never,
+    }), /writableDirectories|not an existing directory/u);
+  }
+  await assert.rejects(PublicAkuma.birth("worker", {
+    root: world, ...configured.placement, writableDirectories: [alias],
+  }), /not canonical/u);
   assert.deepEqual((await Akumas.of(world).list()).rows, []);
 });
 
@@ -662,6 +684,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
       archetype: "worker",
       body: "forwarded-schema-call",
       bare: true,
+      writableDirectories: [world],
       cwd: world,
       ...configured.placement,
       mode: "wait",
@@ -670,6 +693,9 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
     const body = await slow.started;
     const whileHeld = await readHeart(body.paths);
     assert.equal(whileHeld.soul?.bare, true, "forwarding freezes the birth opt-out");
+    assert.deepEqual(whileHeld.soul?.provider.config?.sandbox_workspace_write, {
+      writable_roots: [world], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true,
+    });
     assert.equal(whileHeld.latestBody?.sequence, body.bodySequence);
     assert.equal(whileHeld.latestBody?.end, undefined);
     assert.deepEqual(whileHeld.pending, []);

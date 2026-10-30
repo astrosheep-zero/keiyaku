@@ -25,6 +25,7 @@ export type ParsedAkumaCommand = Output &
         mode: "wait" | "detach";
         timeoutMs?: number;
         allowed?: AllowedActions;
+        writableDirectories?: readonly string[];
         bare?: boolean;
         schema?: string;
       }> &
@@ -89,12 +90,13 @@ const AKUMA_COMMAND_SPECS = {
       alias: "value",
       wait: "value",
       allowed: "repeat",
+      "add-dir": "repeat",
       bare: "boolean",
       json: "boolean",
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
+      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
     purpose: "Call an Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
@@ -105,6 +107,7 @@ const AKUMA_COMMAND_SPECS = {
       "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
+      "--add-dir explicitly grants another existing writable directory to Codex native workspace-write tools; repeat for multiple roots. Relative paths resolve from the invocation directory. Other sandbox modes, permission profiles, and providers refuse nonempty grants instead of broadening policy. Existing network policy and writable roots are preserved. This is separate from --allowed product actions and never grants the repo or Home automatically.",
       "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
       `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
       ...(EXTRA_ALLOWED_ACTIONS.length === 0
@@ -470,6 +473,7 @@ function parseCall(
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(allowed === undefined ? {} : { allowed }),
+    ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
     ...(flags.bare === true ? { bare: true } : {}),
     ...(schema === undefined ? {} : { schema }),
     ...(prompt === undefined ? {} : { prompt }),

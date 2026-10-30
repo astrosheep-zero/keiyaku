@@ -215,6 +215,18 @@ adapter reports it. Compaction is execution housekeeping, not a Turn failure,
 retry, or lifecycle transition; a compaction error may be narrated separately
 when the provider supplies an error detail.
 
+Explicit additional writable directories are currently supported only by the
+Codex native workspace-write configuration. Other native sandbox modes and
+permission-profile policies refuse a grant they cannot represent without
+changing policy. Native configuration precedence is adjudicated before birth,
+without a model turn or retained session; no configuration files are written.
+The adapter folds them additively
+into the immutable birth recipe, retaining existing native writable roots,
+sandbox mode, and network policy. Other providers refuse nonempty grants before
+birth rather than silently ignoring them or inventing equivalent permissions.
+These grants expose the selected directories to native tools; they are not
+Keiyaku action permissions, live elevation, or a shared Settings mutation.
+
 Option admission happens once before identity allocation. Prompt and
 structured-answer changes apply only when the provider begins a new Turn,
 never as live-tell mutation. Persisted records are not rewritten during option

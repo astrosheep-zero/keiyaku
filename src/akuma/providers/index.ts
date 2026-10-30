@@ -22,6 +22,19 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
 }
 
+export async function withWritableDirectories(
+  execution: ProviderExecution,
+  cwd: string,
+  directories: readonly string[],
+  signal?: AbortSignal,
+): Promise<ProviderExecution> {
+  if (directories.length === 0) return execution;
+  if (execution.kind !== "codex-app-server")
+    throw new TypeError(`writableDirectories is unsupported by provider ${execution.kind}`);
+  const { withCodexWritableDirectories } = await import("./codex-app-server/configuration.js");
+  return await withCodexWritableDirectories(execution, cwd, directories, signal);
+}
+
 export async function resolveProviderExecution(execution: ProviderExecution): Promise<
   Readonly<{
     execution: ProviderExecution;

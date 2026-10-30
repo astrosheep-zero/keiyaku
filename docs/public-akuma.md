@@ -57,6 +57,13 @@ only an explicit selection or the effective invocation directory determines
 it. Allowed-action additions freeze in Soul. Exact public inputs, result fields,
 and timeout defaults belong to declarations and help.
 
+Birth and call also accept explicit additional writable directories. The SDK
+requires nonblank existing canonical absolute directories and rejects invalid
+or unsupported grants before allocating an Akuma. Omission leaves existing
+behavior unchanged. The Akuma/provider owner admits and freezes this additive
+native filesystem grant separately from product-action permissions; forwarding
+and native continuity use that same recipe, not a second permission authority.
+
 Creation accepts optional explicit caller and initiator attribution, including
 prompt-free births and forks. Either kind of caller declaration is
 nonauthoritative; the SDK never infers it from ambient process environment.

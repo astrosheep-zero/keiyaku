@@ -66,6 +66,7 @@ async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<S
 type InvokeInput = Readonly<{
   path: WorldRoot;
   executionCwd?: string;
+  writableDirectories?: readonly string[];
   home?: string;
   settings?: Settings;
   contract?: KeiyakuContract;
@@ -169,6 +170,7 @@ async function runCall(
     ...(input.contract === undefined ? {} : { contract: input.contract }),
     ...(command.alias === undefined ? {} : { alias: command.alias }),
     ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+    ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
     ...(command.bare === undefined ? {} : { bare: command.bare }),
     ...(schema === undefined ? {} : { schema }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -390,6 +392,15 @@ async function akumaInput(
 ): Promise<InvokeInput> {
   const path = await akumaWorld(command, coordinates);
   const executionCwd = await callExecutionCwd(command, coordinates.cwd, workdir);
+  const writableDirectories =
+    command.command !== "call" || command.writableDirectories === undefined
+      ? undefined
+      : await Promise.all(
+          command.writableDirectories.map((path) => {
+            if (path.trim() === "") throw new TypeError("--add-dir requires a nonblank directory");
+            return canonicalBirthCwd(resolve(coordinates.cwd, path));
+          }),
+        );
   const execution = runtime.execution;
   const home = command.command === "call" ? runtime.home : undefined;
   const configuration = command.command === "call" ? await settingsAt(path, home) : undefined;
@@ -402,6 +413,7 @@ async function akumaInput(
   return {
     path,
     ...(executionCwd === undefined ? {} : { executionCwd }),
+    ...(writableDirectories === undefined ? {} : { writableDirectories }),
     ...(home === undefined ? {} : { home }),
     ...(configuration === undefined ? {} : { settings: configuration }),
     ...(contract === undefined ? {} : { contract }),

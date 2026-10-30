@@ -7,7 +7,8 @@ import type { BodyLaunchEnd, LiveBodyLaunch } from "./body-launch.js";
 import { clipAllowedActions, type AllowedActions } from "./allowed.js";
 import type { RequestRecipe } from "./heart/facts.js";
 import type { CallInitialTell, CallInitialTellAdmission, TellResult } from "./call-initial-tell.js";
-import { resolveProviderExecution } from "./providers/index.js";
+import { resolveProviderExecution, withWritableDirectories } from "./providers/index.js";
+import { writableDirectoriesOption } from "./call-input.js";
 import { World, type WorldRoot } from "../world.js";
 
 const POLL_MS = 100;
@@ -362,6 +363,7 @@ type PreparedCallResult = Readonly<{
 type PreparedCallInput = Readonly<{
   archetype: string;
   cwd: string;
+  writableDirectories?: readonly string[];
   caller?: AkumaCaller;
   initialTell?: CallInitialTell;
   signal?: AbortSignal;
@@ -379,11 +381,14 @@ export function callDiagnostic(error: unknown): string {
  */
 async function admittedRecipe(
   recipe: PreparedCallRecipe,
+  input: Pick<PreparedCallInput, "cwd" | "writableDirectories" | "signal">,
   bounds: Readonly<{ ceiling?: AllowedActions; refuse?: (diagnostic: string) => Promise<void> }> = {},
 ): Promise<PreparedCallRecipe> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
-    selected = await resolveProviderExecution(recipe.provider);
+    const directories = await writableDirectoriesOption(input.writableDirectories);
+    const provider = await withWritableDirectories(recipe.provider, input.cwd, directories, input.signal);
+    selected = await resolveProviderExecution(provider);
   } catch (error) {
     if (error instanceof TypeError) throw new PreparedCallAdmissionError("resolve", error.message);
     throw error;
@@ -436,8 +441,8 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
   }
   const recipe =
     custody.kind === "request"
-      ? await admittedRecipe(custody.recipe, { ceiling: custody.parent.allowed, refuse: custody.refuse })
-      : await admittedRecipe(custody.recipe);
+      ? await admittedRecipe(custody.recipe, input, { ceiling: custody.parent.allowed, refuse: custody.refuse })
+      : await admittedRecipe(custody.recipe, input);
   const origin: Soul["origin"] =
     custody.kind === "request"
       ? { kind: "request", parent: custody.parent.id, requestId: custody.requestId }

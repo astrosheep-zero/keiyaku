@@ -65,6 +65,7 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  writableDirectories?: readonly string[];
   bare?: boolean;
   schema?: Schema<unknown>;
   initiator?: string;
@@ -300,6 +301,7 @@ const CALL_INPUT_KEYS = [
   "contract",
   "alias",
   "allowed",
+  "writableDirectories",
   "bare",
   "schema",
   "initiator",
@@ -319,6 +321,7 @@ type ParsedCallInput = Readonly<{
   settings?: Settings;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  writableDirectories?: readonly string[];
   bare?: boolean;
   seat: ReturnType<typeof callSeat>;
   caller?: AkumaCaller;
@@ -355,8 +358,7 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
       : {
           tellId: randomUUID(),
           body,
-          ...(schemaJson === undefined ? {} : { schemaJson }),
-          ...(schema === undefined ? {} : { schema }),
+          ...(schema === undefined ? {} : { schema, schemaJson: schemaJson! }),
           ...(initiator === undefined ? {} : { initiator }),
         };
   return {
@@ -370,6 +372,9 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
     ...(settings === undefined ? {} : { settings }),
     ...(alias === undefined ? {} : { alias }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
+    ...(values.writableDirectories === undefined
+      ? {}
+      : { writableDirectories: values.writableDirectories as readonly string[] }),
     ...(bare === undefined ? {} : { bare }),
     seat,
     ...(caller === undefined ? {} : { caller }),
@@ -403,6 +408,7 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
           },
         }),
     ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+    ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
     ...(input.bare === undefined ? {} : { bare: input.bare }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),

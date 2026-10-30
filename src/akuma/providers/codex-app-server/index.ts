@@ -13,6 +13,7 @@ import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
+import { initializeCodex } from "./configuration.js";
 
 export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
 
@@ -22,14 +23,6 @@ type Finish = (result: TurnResult) => void;
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function initialize(server: LineRpcProcess): Promise<void> {
-  await server.request("initialize", {
-    clientInfo: { name: "keiyaku", title: "keiyaku", version: "4" },
-    capabilities: { experimentalApi: true, requestAttestation: false },
-  });
-  server.notify("initialized");
 }
 
 function threadId(result: unknown, fallback?: string): string {
@@ -82,7 +75,7 @@ async function admitTurn(
   events: AgentEventChannel,
   config?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
-  await initialize(server);
+  await initializeCodex(server);
   const threadParams = {
     cwd: input.cwd,
     ...(config === undefined ? {} : { config }),
@@ -142,7 +135,7 @@ async function forkCodex(
     forceDispose: async () => await server.close(true),
   });
   try {
-    await initialize(server);
+    await initializeCodex(server);
     const child = threadId(
       await server.request("thread/fork", {
         threadId: input.session.sessionId,

@@ -125,6 +125,15 @@ test("global coordinates are independent of command position", () => {
   );
 });
 
+test("call repeats explicit directory grants separately from product actions", () => {
+  assert.deepEqual(command(["call", "worker", "--add-dir", "../runtime", "--add-dir", "/square", "--allowed", "contract.review"]), {
+    command: "call", archetype: "worker", mode: "detach", output: "text",
+    writableDirectories: ["../runtime", "/square"], allowed: ["contract.review"],
+  });
+  assert.throws(() => command(["call", "worker", "--add-dir"]), /--add-dir requires/u);
+  assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
+});
+
 test("root version is recognized only after coordinates and help", () => {
   assert.deepEqual(parseArgv(["--version"]), { version: true });
   assert.deepEqual(parseArgv(["-C", "/definitely/absent/keiyaku-world", "--version"]), { version: true });

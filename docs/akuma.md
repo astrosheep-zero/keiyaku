@@ -51,6 +51,15 @@ first-Tell failure after Soul carries the born child together with its native
 failure, and caller cancellation never discards a confirmed child or an exact
 admitted Tell. Only a birth that never proved Soul is a failed birth.
 
+Caller-selected additional writable directories are explicit birth-time filesystem
+grants, independent of forwarded product-action permissions. Admission requires
+existing canonical directories before allocating a child and deduplicates them.
+Only a provider with a verified native mapping accepts a nonempty grant. The
+admitted native recipe retains the grants across forwarding, wake, and fork;
+source definitions and shared Settings never change. No directory is granted
+automatically, and adding roots never selects a broader sandbox mode or network
+policy.
+
 Life is derived solely from leash and latest Heart evidence. A live Body is
 running; an explicitly completed one is asleep; an unsuccessful one is stranded;
 a witnessed stop is killed only while that Body remains latest. Free leash with

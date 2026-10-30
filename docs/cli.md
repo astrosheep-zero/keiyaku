@@ -35,6 +35,12 @@ execution and fork inheritance without narrowing any capability. A successful ca
 may perform best-effort inactive-Akuma maintenance after its new child is
 durable; list, status, history, wait, tell, and ask never retire bytes.
 
+The call edge resolves explicit additional writable directories relative to the
+effective invocation directory and canonicalizes existing directories before
+handing them to creation. This filesystem exposure is separate from forwarded
+product actions; it never automatically grants the World, repository, or Home.
+Native-provider support and immutable recipe composition belong to Akuma.
+
 Help is dependency-light, read-only, and available without an existing World.
 Package identification likewise reads the running package's own metadata before
 any World or product runtime is initialized. Help explains a command's purpose
