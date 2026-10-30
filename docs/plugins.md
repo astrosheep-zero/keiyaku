@@ -98,8 +98,8 @@ is silent. Notice delivery is best effort and does not alter report truth.
 Local outcome observation acknowledges notices only for a current participant
 held by the observing execution. An explicit name may select among that
 execution's established voices but never grants another execution's authority.
-A notice is recognized by its structured outcome identity, and the subject
-Akuma's own standing is irrelevant.
+A notice is recognized by its shared sender and structured outcome identity;
+the sender label and subject Akuma need no standing.
 The operation never computes a substitute identity, joins a participant, or
 creates a route merely to acknowledge; missing standing, notice, or availability
 to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's

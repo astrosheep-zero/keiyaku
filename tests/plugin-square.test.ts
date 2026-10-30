@@ -865,6 +865,8 @@ test("outcome acknowledgment uses structured identity independent of body or unr
       ]) {
         ids.push((await square.send({ from: NOTIFIER, to: "Alice", body: "arbitrary prose", metadata })).id);
       }
+      ids.push((await square.send({ from: "Other", to: "Alice", body: "same identity, different sender",
+        metadata: { keiyaku: { kind: "akuma.turn-outcome", akumaId: "aku/meta", historyId: "turn/1" } } })).id);
       return ids;
     });
     await fixture.observe("aku/meta", "turn/1", "Alice");

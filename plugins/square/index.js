@@ -323,7 +323,7 @@ const plugin = {
                                 { path: [NOTICE_METADATA_KEY, "historyId"], equals: signal.historyId },
                             ] };
                         for (;;) {
-                            const page = await observer.pending({ match }, control);
+                            const page = await observer.pending({ from: [NOTIFIER], match }, control);
                             if (page.activities.length === 0)
                                 break;
                             cancellation?.throwIfAborted();
