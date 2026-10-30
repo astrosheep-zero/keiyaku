@@ -3,7 +3,8 @@ import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaStatus } from "./akuma.js";
-import type { TellResult } from "./body.js";
+import { tellWakeRuntime, type TellResult } from "./body.js";
+import type { BodyLauncher } from "./body-launch.js";
 import type { Schema } from "./schema.js";
 import type { AkumaAskObservation, AkumaAskResult, AkumaKillResult, AkumaTellResult } from "./selection-observation.js";
 
@@ -13,6 +14,7 @@ export type AskObserver = Readonly<{
 }>;
 
 type TellExecutionInput = Readonly<{
+  spawn: BodyLauncher;
   path: WorldRoot;
   id: AkumaStatus["id"];
   body: string;
@@ -33,6 +35,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   let tell;
   if (input.interrupt === true) {
     const interrupted = await owner.interrupt(input.body, {
+      runtime: tellWakeRuntime(input.spawn),
       ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
       ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
@@ -41,7 +44,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     if ("kind" in interrupted) throw new AkumaProviderError(`Tell interrupt unavailable: ${interrupted.evidence}`);
     tell = interrupted;
   } else {
-    tell = await owner.tell(input.body, input.tellId, input.recordedAt, undefined, {
+    tell = await owner.tell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), {
       ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
@@ -168,7 +171,7 @@ async function executeInterruptAskAkuma(input: AskExecutionInput, owner: AkumaOw
     throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
   const observing = new AbortController();
   const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
-  const wake = owner.completeInterruptAdmission(admission, undefined, signal);
+  const wake = owner.completeInterruptAdmission(admission, tellWakeRuntime(input.spawn), signal);
   try {
     const receipt =
       admission.barrier === undefined
@@ -200,7 +203,7 @@ export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAs
   const owner = new AkumaOwner(input.id, input.path);
   if (input.interrupt === true) return await executeInterruptAskAkuma(input, owner);
 
-  const admission = await owner.admitTell(input.body, input.tellId, input.recordedAt, undefined, {
+  const admission = await owner.admitTell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), {
     ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -220,6 +223,7 @@ export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAs
 }
 
 type KillExecutionInput = Readonly<{
+  spawn: BodyLauncher;
   path: WorldRoot;
   ids: readonly AkumaStatus["id"][];
   signal?: AbortSignal;
@@ -229,7 +233,9 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   input.signal?.throwIfAborted();
   const owners = input.ids.map((id) => new AkumaOwner(id, input.path));
   const evidence = await Promise.all(
-    owners.map(async (owner) => await owner.kill(input.signal === undefined ? {} : { signal: input.signal })),
+    owners.map(
+      async (owner) => await owner.kill(input.spawn, input.signal === undefined ? {} : { signal: input.signal }),
+    ),
   );
   input.signal?.throwIfAborted();
   return {

@@ -7,7 +7,8 @@ import { readAkumaBirthCwd } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import { decodeAllowedActions, unionAllowedActions, type AllowedAction } from "./allowed.js";
 import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
-import { spawnAkumaBody, type BodyLaunch, type TellResult } from "./body.js";
+import type { BodyLaunch, BodyLauncher } from "./body-launch.js";
+import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
 import { bareOption, canonicalBirthCwd } from "./call-input.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
@@ -105,6 +106,7 @@ async function admitDirect(input: {
   path: WorldRoot;
   archetype: Awaited<ReturnType<typeof loadPreparedArchetype>>;
   recipe: AkumaCallRecipe;
+  spawn: BodyLauncher;
 }): Promise<AdmittedAkumaCall> {
   const initiatorCwd = input.context.initiatorCwd;
   const selectedCwd = input.call.cwd ?? initiatorCwd ?? input.path;
@@ -125,21 +127,21 @@ async function admitDirect(input: {
         world: input.path,
         recipe: input.recipe,
         spawn: async (launch) =>
-          await spawnAkumaBody({
-            paths: launch.paths,
-            seed: launch.seed,
+          await input.spawn({
+            ...launch,
             ...(input.call.initiator === undefined ? {} : { birthInitiator: input.call.initiator }),
             ...(input.call.contractId === undefined ? {} : { completion: { contractId: input.call.contractId } }),
           }),
         admitInitialTell: async ({ id, initialTell, signal }) =>
           await new AkumaOwner(id, input.path).admitInitialTell(initialTell, {
+            runtime: tellWakeRuntime(input.spawn),
             ...(signal === undefined ? {} : { signal }),
             ...(input.call.contractId === undefined
               ? {}
               : {
                   runtime: {
                     spawn: async (paths) =>
-                      await spawnAkumaBody({
+                      await input.spawn({
                         paths,
                         refuseIfHeld: true,
                         completion: { contractId: input.call.contractId },
@@ -184,6 +186,7 @@ export async function admitAkumaCall(
   configuration: AkumaConfiguration,
   input: AkumaCallLaunchInput,
   context: AkumaCallContext,
+  spawn: BodyLauncher,
 ): Promise<AdmittedAkumaCall> {
   decodeAkumaCaller(input.caller);
   const name = validateAkumaName(input.archetype);
@@ -204,5 +207,5 @@ export async function admitAkumaCall(
   });
   if (execution.kind === "body-request")
     return await admitBodyRequest({ call: input, context, path, name, recipe: requestRecipe, execution });
-  return await admitDirect({ call: input, context, path, archetype, recipe: requestRecipe });
+  return await admitDirect({ call: input, context, path, archetype, recipe: requestRecipe, spawn });
 }

@@ -361,11 +361,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/akuma-creation.ts",
       allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitPluginSignal", "outcomePluginObserver"])],
-      deny: libraryOwner.deny,
+      deny: [...libraryOwner.deny, any("akuma/detached-body.ts")],
     },
     {
       source: "library/akumas.ts",
-      allow: [...libraryOwner.allow, any("library/akuma-creation.ts")],
+      allow: [...libraryOwner.allow, any("library/akuma-creation.ts"), any("body-host.ts")],
       deny: [
         any("git/target-placement.ts"),
         any("protocol/attempt.ts"),
@@ -389,7 +389,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ...libraryOwner.allow,
         any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic", "withAkumaWaitDeferrals"]),
       ],
-      deny: libraryOwner.deny,
+      deny: [...libraryOwner.deny, any("akuma/detached-body.ts")],
     },
     { source: "library/**", ...libraryOwner },
     {
@@ -493,12 +493,32 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("identity/**"),
         any("library/**"),
         any("plugin/akuma-signals.ts", ["emitPluginSignal"]),
-        any("runtime/proc/**"),
         any("settings.ts"),
         any("debt/**"),
         any("world.ts"),
       ],
-      deny: [any("library/**")],
+      deny: [any("library/**"), any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
+    },
+    ...["akuma/body-launch.ts", "akuma/publication.ts", "akuma/call-request.ts", "akuma/turn-drive.ts"].map(
+      (source) => ({
+        source,
+        allow: [any("akuma/**"), any("identity/**"), any("world.ts")],
+        deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
+      }),
+    ),
+    {
+      source: "akuma/in-process-body.ts",
+      allow: [any("akuma/body.ts"), any("akuma/body-launch.ts"), any("akuma/abort.ts"), types("akuma/provider.ts")],
+    },
+    {
+      source: "akuma/detached-body.ts",
+      allow: [
+        any("akuma/body-launch.ts"),
+        any("akuma/heart/index.ts"),
+        any("akuma/identity.ts"),
+        any("akuma/providers/execution-environment.ts"),
+        any("runtime/proc/**"),
+      ],
     },
     { source: "akuma/dispatch-association.ts", allow: [runtime("git/identity.ts", ["contractIdSchema"])] },
     {
@@ -506,35 +526,41 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-owner.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-wait.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-selection-execution.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-call.ts",
       allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       source: "akuma/akuma-instance.ts",
       allow: [
         any("akuma/**"),
+        any("body-host.ts"),
         any("settings.ts"),
         any("world.ts"),
         any("plugin/akuma-signals.ts", [
@@ -548,6 +574,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/selection-owner-port.ts",
       allow: [any("akuma/**"), types("world.ts"), any("plugin/akuma-signals.ts", ["outcomePluginObserver"])],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     { source: "akuma/read-pool.ts", allow: [] },
     {
@@ -564,7 +591,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("debt/**"),
         any("world.ts"),
       ],
-      deny: [any("library/**")],
+      deny: [any("library/**"), any("akuma/detached-body.ts")],
     },
     { source: "runtime/proc/**", allow: [any("runtime/proc/**")] },
     {
@@ -596,12 +623,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "identity/**", allow: [any("identity/**")] },
     { source: "coordination/**", allow: [] },
     { source: "plugin/**", allow: [any("plugin/**"), any("settings.ts"), types("world.ts")] },
+    { source: "body-host.ts", allow: [any("akuma/**"), any("body-requests.ts")] },
     {
-      source: "akuma-body.ts",
+      source: "body-requests.ts",
       allow: [
         any("akuma/**"),
         any("dispatch/index.ts", ["readDispatch"]),
-        any("git/hooks.ts"),
         any("git/repository.ts", ["NoGitWorldError", "repositoryAt"]),
         any("library/**"),
         any("settings.ts"),
@@ -610,8 +637,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "akuma-body.ts",
+      allow: [any("body-requests.ts"), any("akuma/**")],
+    },
+    {
       source: "index.ts",
       allow: [
+        any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),
         any("kanshi/index.ts"),
         any("library/akumas.ts"),

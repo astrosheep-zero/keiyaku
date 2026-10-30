@@ -1,4 +1,4 @@
-const marker = "const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);";
+const marker = "pendingTellDisposition = await runPreparedBody({";
 const injected = `
 import { existsSync as __keiyakuBarrierExists, watch as __keiyakuBarrierWatch, writeFileSync as __keiyakuBarrierWrite } from "node:fs";
 import { join as __keiyakuBarrierJoin } from "node:path";

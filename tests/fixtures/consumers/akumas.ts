@@ -1,12 +1,14 @@
 import {
   Akuma,
   AkumaArchetypeError,
+  AkumaHost,
   Akumas,
   Keiyaku,
   listArchetypeDefinitions,
   nuke,
   type AkuId,
   type AkumaHostOptions,
+  type AkumaHostScope,
   type ArchetypeCatalog,
   type ArchetypeCatalogInput,
   type ArchetypeCatalogRow,
@@ -33,11 +35,26 @@ void [catalogue, catalogueRows];
 const contractPolicy: LocalContractComposition = { actor: "contract-owner" };
 Keiyaku.with(contractPolicy);
 
+const scope: AkumaHostScope = AkumaHost.inProcess({ reportDiagnostic: console.error });
+const scoped = Akumas.of(world, scope);
+const scopedSingle = Akuma.select(world, aku, scope);
+const closed: Promise<void> = scope.close();
+void [scoped, scopedSingle, closed];
+
 const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
 const plural = Akumas.of(world, host);
 const roster = plural.list({ limit: 25 });
 const status = plural.status({ akuma: aku });
 const single = Akuma.select(world, aku, host);
+const constructor: Function = Akuma;
+const prototype: Akuma = Akuma.prototype;
+if (nativeError instanceof Akuma) {
+  const narrowed: Akuma = nativeError;
+  void narrowed.id;
+}
+// @ts-expect-error the public class keeps its private construction boundary
+new Akuma(aku, world, console.error);
+void [constructor, prototype];
 const born = Akuma.birth("worker", { root: world, host });
 const reset = nuke({ world, confirm: world });
 

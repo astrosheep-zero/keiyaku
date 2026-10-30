@@ -14,7 +14,7 @@ import {
   type ExecutionFacts,
   type RequestProtocol,
 } from "./request-wire.js";
-import type { OwnedProcess } from "../runtime/proc/run.js";
+import type { LiveBodyLaunch } from "./body-launch.js";
 import { z } from "zod";
 import type { WorldRoot } from "../world.js";
 
@@ -79,7 +79,7 @@ type AkumaCallRequestCapabilities = Readonly<{
   world: WorldRoot;
   paths: AkumaPaths;
   parent: Soul;
-  spawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
+  spawn(launch: AkumaCallRequestChildLaunch): Promise<LiveBodyLaunch | void>;
   admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
 }>;
 

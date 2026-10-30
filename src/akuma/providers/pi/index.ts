@@ -134,6 +134,10 @@ async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: 
     cwd: input.cwd,
     agentDir: sdk.getAgentDir(),
     modelRuntimeSignal: input.signal,
+    // A positive restriction is applied after resource loading, before startup.
+    // If the optional shipped extension is absent Pi collects an unknown-option
+    // diagnostic; it is not a setup failure and must not disable other resources.
+    extensionFlagValues: new Map([["keiyaku-request-only", true]]),
     resourceLoaderOptions: {
       ...(personality === undefined || input.options.systemPromptMode === "append"
         ? {}
@@ -247,6 +251,7 @@ async function drivePi(
   let unsubscribeAgent: (() => void) | undefined;
   let unsubscribe: (() => void) | undefined;
   let binding: Promise<void> | undefined;
+  let prompting: Promise<void> | undefined;
   const settle = (result: TurnResult): Promise<void> => {
     if (state.settled) return closed;
     state.settled = true;
@@ -273,6 +278,10 @@ async function drivePi(
       } catch (error) {
         failure ??= error;
       }
+      // dispose() only requests abort. Owned tool/prompt work must actually
+      // finish before this attempt can certify retirement. The prompt callback
+      // initiates settlement without awaiting closed, so this cannot await itself.
+      await prompting;
       if (failure !== undefined) throw failure;
     })().then(settleRetired, failRetired);
     return closed;
@@ -323,8 +332,11 @@ async function drivePi(
   }
   const sessionModel = piSessionModel(native.model);
   if (sessionModel !== undefined) events.emit(modelEvent(sessionModel));
-  void runPiPrompt(native, input, eventState, state, (result) => {
-    void settle(result).catch(() => undefined);
+  prompting = Promise.resolve().then(async () => {
+    if (signal.aborted || state.settled) return;
+    await runPiPrompt(native, input, eventState, state, (result) => {
+      void settle(result).catch(() => undefined);
+    });
   });
   return {
     admission: { fence: native.sessionId },

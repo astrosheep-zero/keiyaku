@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { waitForCondition as waitFor, settlementProbe } from "./support/process.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -17,7 +18,7 @@ import { type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { AkumaNotBornError, AkumaObservationError, AkumaSelfInterruptError } from "../src/akuma/akuma-errors.js";
 import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
-import { externalRequestCommandsFor } from "../src/akuma-body.js";
+import { externalRequestCommandsFor } from "../src/body-requests.js";
 import { BodyRequestPump, settleBodyRequests } from "../src/akuma/request-serve.js";
 import {
   atomicJson,
@@ -30,7 +31,7 @@ import {
 import { REQUEST_PROGRESS_WINDOW } from "../src/akuma/request-observation.js";
 import { executeTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { AKUMA_REQUESTS_ENTRY_ENV, type ProviderAdapter } from "../src/akuma/provider.js";
-import { fixtureAdapter, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { selectionSeam, tellAkumaOn, waitAkumaOn } from "../src/library/selection.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
@@ -1696,7 +1697,7 @@ test("a forwarded wait omits its mode and reaches the parent as any", async () =
     },
   });
   try {
-    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), {
       path: root,
       akuma: ["aku/worker/00000001" as AkuId, "aku/worker/00000002" as AkuId],
     });
@@ -1717,7 +1718,7 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   const absent = "aku/intern/33dd4670" as AkuId;
-  const pump = await openSelectionPump(parent, selectionRequestPort(root, console.error));
+  const pump = await openSelectionPump(parent, selectionRequestPort(root, noBodyLaunch));
   const id = randomUUID();
   try {
     await assert.rejects(
@@ -1738,7 +1739,7 @@ test("a plural forwarded kill refuses before it requests any member's kill", asy
 test("a forwarded self-interrupt Tell and Ask refuse without product effects and leave the pump closable", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-self-interrupt-")));
   const parent = await born(root, "parent", "46464647");
-  const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {});
+  const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {}, noBodyLaunch);
   const pump = await openPump(parent, commands);
   const before = await readHeart(parent.paths);
   try {
@@ -1776,10 +1777,10 @@ test("a forwarded operation answers from the parent World without reading the ch
   const target = await born(parentWorld, "worker", "abcd0043");
   const local = await born(childWorld, "worker", "abcd0043");
   await writeFile(local.paths.heart, "this is not a database\n");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, noBodyLaunch));
   try {
     // The child's own Heart is unreadable here: a local probe would fail this.
-    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+    const result = await waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), {
       path: childWorld,
       akuma: [target.id],
       timeoutMs: 0,
@@ -1800,12 +1801,12 @@ test("a forwarded refusal keeps the parent's answer over the child's local birth
   const childWorld = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-refusal-child-")));
   const parent = await born(parentWorld, "parent", "44434343");
   const local = await born(childWorld, "intern", "33dd4670");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, noBodyLaunch));
   try {
     // The target is born only in the child's World, so a locally proved
     // operation would succeed instead of answering as the parent does.
     await assert.rejects(
-      waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), { path: childWorld, akuma: [local.id] }),
+      waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), { path: childWorld, akuma: [local.id] }),
       (error: unknown) => error instanceof AkumaNotBornError && error.id === local.id,
     );
   } finally {
@@ -1822,10 +1823,10 @@ test("a forwarded observation failure keeps the parent's reason", async () => {
   const target = await born(childWorld, "worker", "abcd0045");
   const mirrored = await born(parentWorld, "worker", "abcd0045");
   await writeFile(mirrored.paths.heart, "this is not a database\n");
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, console.error));
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentWorld, noBodyLaunch));
   try {
     await assert.rejects(
-      tellAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory)), {
+      tellAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), {
         path: childWorld,
         akuma: target.id,
         body: "hello",
@@ -1909,7 +1910,7 @@ test("bounded forwarded interrupt Ask admits once under the request identity", a
   const predecessor = (await HeldAkumaLeash.try(target.paths))!;
   const body = await predecessor.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
   let calls = 0;
-  const port = selectionRequestPort(root, console.error, parent.id);
+  const port = selectionRequestPort(root, noBodyLaunch, parent.id);
   const pump = await openSelectionPump(parent, {
     ...port,
     ask: async (input) => {
@@ -1972,8 +1973,8 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     })),
     now: "2026-08-18T00:00:02.000Z",
   });
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openSelectionPump(parent, selectionRequestPort(root, console.error));
+  const spawn = fixtureLauncher(bodies, fixtures);
+  const pump = await openSelectionPump(parent, selectionRequestPort(root, spawn));
   try {
     const pending = requestBodyAsk({
       directory: pump.directory,
@@ -1994,7 +1995,6 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     assert.deepEqual(result.observation, { reason: "answered", answer: "delayed direct answer" });
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
-    restoreTellRuntime();
     await pump.close();
     await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
@@ -2058,8 +2058,8 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     })),
     now: "2026-08-18T00:00:03.000Z",
   });
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
-  const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot, console.error));
+  const spawn = fixtureLauncher(bodies, fixtures);
+  const pump = await openSelectionPump(parent, selectionRequestPort(parentRoot, spawn));
   try {
     const pending = cliJson<AkumaAskResult>(["-C", callerRoot, "ask", target.id, "--wait", "10s", "facade delayed"], {
       environment: { [AKUMA_REQUESTS_ENTRY_ENV]: pump.entry },
@@ -2077,7 +2077,6 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
     );
     assert.equal((await readHeart(target.paths)).pending.length, 0);
   } finally {
-    restoreTellRuntime();
     await pump.close();
     await settleFixtureBodies(bodies);
     rmSync(parentRoot, { recursive: true, force: true });
@@ -2099,7 +2098,7 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     },
     tell: async (input) => {
       calls += 1;
-      return await executeTellAkuma({
+      return await executeTellAkuma({ spawn: noBodyLaunch,
         path: root,
         id: input.target,
         body: input.body,

@@ -139,6 +139,13 @@ observation.
 
 ## Handles And Lifecycle Evidence
 
+Native selection or birth captures its launch hosting for the resulting handle.
+Detached execution is the default; an explicit in-process choice runs future
+locally launched Bodies in that calling Node runtime. This selects neither a
+request route nor an observation bound, never persists in Soul, and never
+relocates existing execution. Shared-host lifetime and cancellation belong to
+[akuma-execution.md](akuma-execution.md).
+
 Native selection or birth may capture an immutable host diagnostic observer
 for the resulting handle. This observes plugin diagnostics produced by the
 handle's host, never remote Body logs. It is not routing, lifecycle authority,

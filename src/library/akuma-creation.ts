@@ -4,13 +4,14 @@ import { appendFile } from "node:fs/promises";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { admitAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
 import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
+import type { BodyLauncher } from "../akuma/body-launch.js";
 import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
+import type { ExecutionContext } from "../akuma/requests.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
@@ -497,14 +498,18 @@ async function observeCall(
       },
     };
   } catch (error) {
-    if (input.signal?.aborted) throw error;
+    if (input.signal?.aborted) throw knownChildFailure(error, input.akuma);
     return failedCall(input.result, input.initialTell.tellId, error, input.receipt);
   }
 }
 
 /** One failure that still names the child the invocation durably admitted. */
 function knownChildFailure(reason: unknown, akuma: AkuId): Error {
-  const error = reason instanceof Error ? reason : new Error(reason === undefined ? "call aborted" : String(reason));
+  const cause = reason instanceof Error ? reason : new Error(reason === undefined ? "call aborted" : String(reason));
+  // One AbortSignal may cancel several parallel calls. Never overwrite another
+  // invocation's leading birth on its shared reason object.
+  const error =
+    Object.isExtensible(cause) && !Object.hasOwn(cause, "akuma") ? cause : new Error(cause.message, { cause });
   Object.defineProperty(error, "akuma", { value: akuma, enumerable: false });
   return error;
 }
@@ -516,7 +521,8 @@ function asError(failure: unknown): Error {
 
 export async function callAkumas(
   input: CallInput & Readonly<{ path: WorldRoot }>,
-  execution: ExecutionContext = localExecutionContext(),
+  execution: ExecutionContext,
+  spawn: BodyLauncher,
   reportDiagnostic?: (message: string) => void,
 ): Promise<CallResult> {
   const parsed = await parseCallInput(input);
@@ -530,6 +536,7 @@ export async function callAkumas(
       ...(seat === undefined ? {} : { contractId: seat.id }),
     },
     selectedExecution === undefined ? {} : { cwdCanonical: true },
+    spawn,
   );
   const dispatch: DispatchStage =
     seat === undefined
@@ -580,7 +587,10 @@ export async function callAkumas(
       );
 }
 
-export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }>): Promise<ForkResult> {
+export async function forkAkumas(
+  input: ForkInput & Readonly<{ path: WorldRoot }>,
+  spawn: BodyLauncher,
+): Promise<ForkResult> {
   const values = requireInput(input, "Akumas.fork input");
   onlyKeys(values, ["path", "akuma", "at", "bare", "repo", "caller", "initiator"], "Akumas.fork input");
   const bare = bareOption(values.bare);
@@ -591,12 +601,15 @@ export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }
   const { path, id: akuma } = addressed;
   const repository = values.repo === undefined ? undefined : scopeForRepo(values.repo);
 
-  const receipt = await new AkumaOwner(akuma, path).fork({
-    at,
-    ...(bare === undefined ? {} : { bare }),
-    ...(caller === undefined ? {} : { caller }),
-    ...(initiator === undefined ? {} : { initiator }),
-  });
+  const receipt = await new AkumaOwner(akuma, path).fork(
+    {
+      at,
+      ...(bare === undefined ? {} : { bare }),
+      ...(caller === undefined ? {} : { caller }),
+      ...(initiator === undefined ? {} : { initiator }),
+    },
+    spawn,
+  );
   if (receipt.kind !== "forked") return { ...receipt, parent: akuma };
   const dispatch =
     repository === undefined

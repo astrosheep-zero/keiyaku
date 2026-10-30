@@ -17,6 +17,9 @@ import { type AkumaStatus } from "./akuma.js";
 import type { AllowedAction } from "./allowed.js";
 import { type KillEvidence } from "./heart/index.js";
 import type { ReportFact } from "./heart/facts.js";
+import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
+export type { AkumaHostOptions } from "../body-host.js";
+import type { BodyLauncher } from "./body-launch.js";
 import { parseAkuId, type AkuId } from "./identity.js";
 import type { ActivityHistory } from "./projection.js";
 import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
@@ -27,20 +30,9 @@ export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; statu
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
-/** Observes only plugin diagnostics produced in this host, never remote Body logs. */
-export type AkumaHostOptions = Readonly<{ reportDiagnostic?: (message: string) => void }>;
-
 /** Capture the observer capability, not the caller's mutable options object. */
 export function captureAkumaHostDiagnostic(host: AkumaHostOptions | undefined): AkumaHostOptions["reportDiagnostic"] {
-  if (host === undefined) return undefined;
-  if (typeof host !== "object" || host === null || Array.isArray(host))
-    throw new TypeError("Akuma host options must be an object");
-  const unknown = Object.keys(host).find((key) => key !== "reportDiagnostic");
-  if (unknown !== undefined) throw new TypeError(`Akuma host options has unknown field: ${unknown}`);
-  const reportDiagnostic = host.reportDiagnostic;
-  if (reportDiagnostic !== undefined && typeof reportDiagnostic !== "function")
-    throw new TypeError("Akuma host reportDiagnostic must be a function");
-  return reportDiagnostic;
+  return captureAkumaHost(host).reportDiagnostic;
 }
 
 export type AkumaBirthInput = Readonly<{
@@ -72,11 +64,12 @@ function signalOption(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-export class Akuma {
-  private constructor(
+class AkumaHandle {
+  constructor(
     readonly id: AkuId,
     private readonly root: WorldRoot,
     private readonly reportDiagnostic: (message: string) => void,
+    private readonly spawn: BodyLauncher,
   ) {
     Object.freeze(this);
   }
@@ -89,38 +82,6 @@ export class Akuma {
     );
   }
 
-  static async birth(archetype: string, input: AkumaBirthInput): Promise<Akuma> {
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      throw new TypeError("Akuma birth input must be an object");
-    }
-    if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
-    const reportDiagnostic = captureAkumaHostDiagnostic(input.host) ?? stderrPluginDiagnostic;
-    const admitted = await admitAkumaCall(
-      input.root,
-      {
-        ...(input.home === undefined ? {} : { home: input.home }),
-        ...(input.settings === undefined ? {} : { settings: input.settings }),
-      },
-      {
-        archetype,
-        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-        ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
-        ...(input.bare === undefined ? {} : { bare: input.bare }),
-        ...(input.caller === undefined ? {} : { caller: input.caller }),
-        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      },
-      {},
-    );
-    if (admitted.failure !== undefined) throw admitted.failure;
-    return new Akuma(admitted.id, input.root, reportDiagnostic);
-  }
-
-  static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {
-    if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
-    const reportDiagnostic = captureAkumaHostDiagnostic(host) ?? stderrPluginDiagnostic;
-    return new Akuma(parseAkuId(selector).id, root, reportDiagnostic);
-  }
-
   async tell(text: string, options: AkumaTellOptions = {}): Promise<AkumaTellResult> {
     if (typeof text !== "string") throw new TypeError("Akuma tell text must be a string");
     if (typeof options !== "object" || options === null || Array.isArray(options))
@@ -131,6 +92,7 @@ export class Akuma {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     return await executeTellAkuma({
+      spawn: this.spawn,
       path: this.root,
       id: this.id,
       body: text,
@@ -162,6 +124,7 @@ export class Akuma {
     signal?.throwIfAborted();
     const schema = options.schema === undefined ? undefined : schemaFromStandard(options.schema);
     const result = await executeAskAkuma({
+      spawn: this.spawn,
       path: this.root,
       id: this.id,
       outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }),
@@ -276,8 +239,59 @@ export class Akuma {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     return await abortable(
-      this.owner().kill(signal === undefined ? {} : { signal }),
+      this.owner().kill(this.spawn, signal === undefined ? {} : { signal }),
       signal ?? new AbortController().signal,
     );
   }
+}
+
+export class Akuma extends AkumaHandle {
+  private constructor(id: AkuId, root: WorldRoot, reportDiagnostic: (message: string) => void, spawn: BodyLauncher) {
+    super(id, root, reportDiagnostic, spawn);
+  }
+
+  static async birth(archetype: string, input: AkumaBirthInput): Promise<Akuma> {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+      throw new TypeError("Akuma birth input must be an object");
+    }
+    if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
+    const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(input.host);
+    const admitted = await admitAkumaCall(
+      input.root,
+      {
+        ...(input.home === undefined ? {} : { home: input.home }),
+        ...(input.settings === undefined ? {} : { settings: input.settings }),
+      },
+      {
+        archetype,
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+        ...(input.bare === undefined ? {} : { bare: input.bare }),
+        ...(input.caller === undefined ? {} : { caller: input.caller }),
+        ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
+      },
+      {},
+      spawn,
+    );
+    if (admitted.failure !== undefined) throw admitted.failure;
+    return new Akuma(admitted.id, input.root, reportDiagnostic, spawn);
+  }
+
+  static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {
+    if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
+    const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(host);
+    return new Akuma(parseAkuId(selector).id, root, reportDiagnostic, spawn);
+  }
+}
+
+/** Internal product composition; hosting is captured independently of public operation inputs. */
+export function akumaWithLauncher(
+  root: WorldRoot,
+  selector: string,
+  spawn: BodyLauncher,
+  host?: AkumaHostOptions,
+): Akuma {
+  if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
+  const reportDiagnostic = captureAkumaHostDiagnostic(host) ?? stderrPluginDiagnostic;
+  return new AkumaHandle(parseAkuId(selector).id, root, reportDiagnostic, spawn);
 }

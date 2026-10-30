@@ -3,6 +3,7 @@ import { observeStatusOutcome } from "../akuma/akuma-observe.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
+import type { BodyLauncher } from "../akuma/body-launch.js";
 import {
   decodeAskObservation,
   executeAskAkuma,
@@ -76,13 +77,14 @@ export type SelectionSeam = Readonly<{
 
 export function selectionSeam(
   execution: ExecutionContext,
+  spawn: BodyLauncher,
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): SelectionSeam {
   const channel = executionChannel(execution);
   const routed =
     channel.kind === "body-request"
       ? forwardedSelection(channel.directory, reportDiagnostic)
-      : localSelection(reportDiagnostic);
+      : localSelection(spawn, reportDiagnostic);
   return {
     ...routed,
     wait: async (addressed, mode) =>
@@ -141,19 +143,21 @@ function forwardedSelection(directory: string, reportDiagnostic: (message: strin
   };
 }
 
-function localSelection(reportDiagnostic: (message: string) => void): SelectionSeam {
+function localSelection(spawn: BodyLauncher, reportDiagnostic: (message: string) => void): SelectionSeam {
   return {
     addressOne: addressAkuma,
     addressSet: addressAkumaSet,
     wait: async (addressed, mode) => await localWait(addressed, mode),
     kill: async (addressed, abort) =>
       await executeKillAkuma({
+        spawn,
         path: addressed.path,
         ids: addressed.orderedIds,
         ...(abort === undefined ? {} : { signal: abort }),
       }),
     tell: async (addressed, input, abort) =>
       await executeTellAkuma({
+        spawn,
         path: addressed.path,
         id: addressed.id,
         body: input.body,
@@ -163,6 +167,7 @@ function localSelection(reportDiagnostic: (message: string) => void): SelectionS
       }),
     ask: async <T>(addressed: AddressedAkuma, input: AkumaAskInput<T>, abort: AbortSignal | undefined) => {
       const result = await executeAskAkuma({
+        spawn,
         path: addressed.path,
         id: addressed.id,
         outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),

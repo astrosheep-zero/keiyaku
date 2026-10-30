@@ -8,6 +8,8 @@
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
+export { AkumaHost } from "./body-host.js";
+export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
 /**
  * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,

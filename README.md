@@ -212,7 +212,10 @@ lists every recognized namespace.
 npm install -g @astrosheep/keiyaku
 ```
 
-Pi loads the extension from the package source and invokes the `keiyaku` CLI from `PATH`, so Pi users must have that command installed and available in the host environment.
+Pi's shipped extension provides native `akuma_*` tools through the public SDK,
+plus the `/keiyaku` status overlay. The overlay still invokes `keiyaku` from
+`PATH`; native tools do not. See [`plugins/pi/README.md`](plugins/pi/README.md)
+for host lifetime, detached work, and request-permission scope.
 
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 
@@ -224,8 +227,9 @@ into each host package so native installations are self-contained. The separate
 `plugins/square` workspace is Keiyaku's internal Square observer, not a coding
 harness plugin. Installation recipes and harness package metadata select the built
 assets under `build/plugins` and `build/skills`, except the Pi package metadata,
-which selects the source extension and `skills/` so a source checkout is loadable
-without a build.
+which selects the TypeScript extension and `skills/`. Build a source checkout
+before loading that extension so its package-root SDK is available; published
+packages already include the SDK build.
 
 Building from source also builds the Windows launcher with Zig 0.14.1 or later. Install
 that system tool separately and make `zig` available on `PATH`, or set

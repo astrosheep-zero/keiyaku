@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { selectionRequestProtocol } from "../src/akuma/selection-request.js";
 import { decodeAgentEvent } from "../src/akuma/heart/activity-schema.js";
@@ -34,7 +35,11 @@ import {
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { driveAkumaBody, LEASH_HELD_EXIT, type BodyLaunch } from "../src/akuma/body.js";
+import { driveAkumaBody, tellWakeRuntime } from "../src/akuma/body.js";
+import { spawnAkumaBody } from "../src/akuma/detached-body.js";
+import type { BodyLaunch, BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
+import { akumasWithLauncher } from "../src/library/akumas.js";
+import { localExecutionContext } from "../src/akuma/requests.js";
 import {
   activitySlice,
   appendActivity,
@@ -52,7 +57,6 @@ import {
 import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { AkumaArchetypeError, Akumas, listArchetypeDefinitions } from "../src/index.js";
@@ -486,7 +490,7 @@ test("turn owner folds a rejected completion while the event stream remains open
     const world = await World.at(root);
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
-    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
+    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
       now: () => "2026-08-24T00:00:00.000Z",
     });
     void driving.catch(() => undefined);
@@ -525,7 +529,7 @@ async function answeredSource(root: string, suffix: string, bare?: boolean) {
       initialBody: "work",
     },
     provider,
-    {
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     },
   );
@@ -1307,7 +1311,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       initialBody: "work",
     },
     noPointProvider,
-    {
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     },
   );
@@ -1321,7 +1325,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   });
   const exact = await handle.history({ id: "turn/1" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(await handle.fork({ at: "missing-point" }), { kind: "unknown-history", at: "missing-point" });
+  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history", at: "missing-point" });
 });
 
 test("SDK fork records its invoking caller independently of source lineage and emits born", async (t) => {
@@ -1363,6 +1367,23 @@ test("SDK fork records its invoking caller independently of source lineage and e
       assert.equal((await readHeart(pathsForAkuId(world, inherited.child))).soul?.bare, true,
         "false cannot undo a source's frozen opt-out");
     }
+    const launches: BodyLaunch[] = [];
+    const bodies: Promise<unknown>[] = [];
+    const spawn: BodyLauncher = async (launch) => {
+      launches.push(launch);
+      const body = driveAkumaBody(launch, provider, { spawn, requestSpawn: spawn, world });
+      bodies.push(body);
+      return { completed: body.then(() => ({ diagnostic: "fork launch completed" })), async cancel() {}, release() {} };
+    };
+    const second = await akumasWithLauncher(world, localExecutionContext(), spawn).fork({
+      akuma: source.id, at: "turn/1", caller,
+    });
+    await Promise.all(bodies);
+    assert.equal(second.kind, "forked");
+    assert.equal(launches.length, 1);
+    assert.equal(launches[0]?.birthSession?.coordinate.sessionId, "native-fork");
+    assert.deepEqual(launches[0]?.seed?.origin, { kind: "fork", parent: source.id, at: "turn/1" });
+    assert.equal((await readHeart(launches[0]!.paths)).latestBody?.end, "exited");
   } finally {
     mutable.fork = original;
   }
@@ -1377,7 +1398,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     const handle = (await akumaAt(root)).of({ id: source.id });
 
     delete mutable.fork;
-    assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "provider-cannot-fork", provider: "claude" });
+    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "provider-cannot-fork", provider: "claude" });
 
     let nativeCalls = 0;
     mutable.fork = () =>
@@ -1385,9 +1406,9 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         nativeCalls += 1;
         throw new Error("native refused");
       });
-    assert.deepEqual(await handle.fork({ at: "missing" }), { kind: "unknown-history", at: "missing" });
+    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "unknown-history", at: "missing" });
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(await handle.fork({ at: "turn/1" }), { kind: "fork-failed", diagnostic: "native refused" });
+    assert.deepEqual(await handle.fork({ at: "turn/1" }, spawnAkumaBody), { kind: "fork-failed", diagnostic: "native refused" });
 
     mutable.fork = () =>
       createProviderAttempt(undefined, async () => {
@@ -1396,7 +1417,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         writeFileSync(runRoot, "blocked");
         return { session: { sessionId: "orphan-upstream-session" } };
       });
-    const partial = await handle.fork({ at: "turn/1" });
+    const partial = await handle.fork({ at: "turn/1" }, spawnAkumaBody);
     assert.equal(partial.kind, "upstream-forked");
     if (partial.kind === "upstream-forked") {
       assert.deepEqual(partial.childSession, { sessionId: "orphan-upstream-session" });
@@ -1411,7 +1432,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         draw: () => "f0a10003",
       });
       await assert.rejects(
-        (await akumaAt(unbornRoot)).of({ id: unborn.id }).fork({ at: "anything" }),
+        (await akumaAt(unbornRoot)).of({ id: unborn.id }).fork({ at: "anything" }, spawnAkumaBody),
         AkumaNotBornError,
       );
     } finally {
@@ -1451,7 +1472,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     },
     initialBody: "work",
   };
-  await driveAkumaBody(launch, provider, {
+  await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
     now: () => "2026-08-08T00:00:00.000Z",
   });
 
@@ -1489,11 +1510,11 @@ test("public Akuma handles separate compact list rows from full status and wait"
     ),
     status,
   );
-  assert.equal(await handle.kill(), "already-stopped");
+  assert.equal(await handle.kill(noBodyLaunch), "already-stopped");
   assert.equal((await handle.status()).life, "asleep");
   const finalStatus = await handle.status();
   assert.equal(finalStatus.timeline.kind === "idle" && finalStatus.timeline.outcome?.outcome.kind === "answered", true);
-  assert.equal(await handle.kill(), "already-stopped");
+  assert.equal(await handle.kill(noBodyLaunch), "already-stopped");
   assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
     kind: "answered",
@@ -1630,7 +1651,7 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
       initialBody: "work",
     },
     provider,
-    { now: () => "2026-08-08T00:00:00.000Z" },
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   await waitForFile(cache);
@@ -1793,13 +1814,13 @@ test("kill settles a stranded dead Body and later observation presents the kille
   const world = await akumaAt(root);
   const handle = world.of({ id: allocated.id });
   assert.equal((await handle.status()).life, "stranded");
-  assert.equal(await handle.kill(), "killed");
+  assert.equal(await handle.kill(noBodyLaunch), "killed");
   const status = await handle.status();
   assert.equal(status.life, "killed");
   assert.equal("strandedReason" in status, false);
   const listed = (await world.list()).rows.find((row) => row.id === allocated.id);
   assert.equal(listed !== undefined && "life" in listed && listed.life, "killed");
-  assert.equal(await handle.kill(), "already-killed");
+  assert.equal(await handle.kill(noBodyLaunch), "already-killed");
 });
 
 test("interrupt atomically admits its Tell and frontier before predecessor completion", async (context) => {
@@ -1823,7 +1844,7 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
       initialBody: "first",
     },
     provider,
-    {
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     },
   );
@@ -1841,15 +1862,10 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   assert.deepEqual(admitted.pending.map((tell) => tell.id), [admission.tell.id]);
   held.release();
   const receipt = await owner.completeInterruptAdmission(admission, {
-    async spawn(paths) {
+    async spawn() {
       return {
-        pid: 0,
-        exited: Promise.resolve({
-          code: LEASH_HELD_EXIT,
-          signal: null,
-          log: { path: paths.log, from: 0, to: 0 },
-        }),
-        async terminate() {},
+        completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
+        async cancel() {},
         release() {},
       };
     },
@@ -1881,7 +1897,7 @@ test("interrupt completion refuses unexplained successor custody", async (contex
       insertBodyFact(heart, { leashTakenAt: "2026-08-08T00:00:03.000Z" });
     });
 
-    const receipt = await owner.completeInterruptAdmission(admission);
+    const receipt = await owner.completeInterruptAdmission(admission, tellWakeRuntime(noBodyLaunch));
     assert.deepEqual(receipt.interruption, {
       kind: "unavailable",
       bodySequence: body.sequence,
@@ -1910,11 +1926,10 @@ test("interrupt waits for leash release after a durable Body end beyond the defa
       at: "2026-08-08T00:00:02.000Z",
     });
     const runtime = {
-      async spawn(paths: typeof value.allocated.paths): Promise<OwnedProcess> {
+      async spawn(): Promise<LiveBodyLaunch> {
         return {
-          pid: 0,
-          exited: Promise.resolve({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-          async terminate() {},
+          completed: Promise.resolve({ diagnostic: "fixture Body completed" }),
+          async cancel() {},
           release() {},
         };
       },
@@ -1978,7 +1993,7 @@ test("interrupt cancellation after admission stops waiting but keeps Tell and fr
       witnessAdmission(result);
       return result;
     });
-    const operation = value.handle.interrupt("cancelled", {
+    const operation = value.handle.interrupt("cancelled", { runtime: tellWakeRuntime(noBodyLaunch),
       tellId: "cancelled-interrupt",
       signal: controller.signal,
     });
@@ -1999,7 +2014,7 @@ test("interrupt preserves an admitted Tell when predecessor custody is untidy", 
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unstoppable-");
   const { allocated, holder } = await bornBody(root, "1d1e0003", "2026-08-08T00:00:00.000Z");
   holder.release();
-  const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded", { tellId: "untidy-interrupt" });
+  const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded", { runtime: tellWakeRuntime(noBodyLaunch), tellId: "untidy-interrupt" });
   assert.equal("kind" in receipt, false);
   if ("kind" in receipt) throw new Error("untidy interruption was not admitted");
   assert.equal(receipt.admission.tellId, "untidy-interrupt");
@@ -2029,7 +2044,7 @@ test("interrupt reports hung when the Body does not release its held leash", asy
   });
   try {
     const handle = (await akumaAt(root)).of({ id: allocated.id });
-    assert.deepEqual(await handle.interrupt("never recorded"), {
+    assert.deepEqual(await handle.interrupt("never recorded", { runtime: tellWakeRuntime(noBodyLaunch) }), {
       kind: "unavailable",
       evidence: "hung",
     });
@@ -2037,7 +2052,7 @@ test("interrupt reports hung when the Body does not release its held leash", asy
     assert.equal((await readHeart(allocated.paths)).pause, null);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     holder.release();
-    assert.deepEqual(await handle.interrupt("still never recorded"), {
+    assert.deepEqual(await handle.interrupt("still never recorded", { runtime: tellWakeRuntime(noBodyLaunch) }), {
       kind: "unavailable",
       evidence: "hung",
     });
@@ -2053,7 +2068,7 @@ test("kill returns unavailable when an unsettled Body keeps the leash", async ()
   const value = await bornHistoryHandle(root, "1d1e0008");
   try {
     const started = performance.now();
-    assert.equal(await value.handle.kill(), "unavailable");
+    assert.equal(await value.handle.kill(noBodyLaunch), "unavailable");
     assert.ok(performance.now() - started < 3_000);
   } finally {
     value.holder.release();
@@ -2231,14 +2246,14 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     },
     initialBody: "keep working",
   };
-  const body = driveAkumaBody(launch, running, {
+  const body = driveAkumaBody(launch, running, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
     now: () => "2026-08-08T00:00:00.000Z",
   });
   await started;
 
   const handle = (await akumaAt(root)).of({ id: allocated.id });
   const waited = handle.wait();
-  assert.equal(await handle.kill(), "killed");
+  assert.equal(await handle.kill(noBodyLaunch), "killed");
   await body;
   assert.notEqual((await waited).life, "running");
   assert.equal(aborted, true);

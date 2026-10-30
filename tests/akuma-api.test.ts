@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -8,7 +9,7 @@ import test, { type TestContext } from "node:test";
 import { z } from "zod";
 import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/akuma/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { driveAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
+import { driveAkumaBody, tellWakeRuntime, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
   appendActivity, beginTurn, bindTellsToTurn, breakBody, cancelBodyTurns, decidePendingTellDisposition, endTurn, finishBodyIfIdle,
   HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellDeliveries, recordTellReceipt,
@@ -160,7 +161,7 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
     const brokenDebt = debtAuthorityFile(value.world, "debt/corrupt-authority");
     mkdirSync(join(value.world, ".keiyaku", "debts"), { recursive: true });
     writeFileSync(brokenDebt, "not a debt document\n");
-    const selected = Akuma.select(value.world, value.allocated.id);
+    const selected = akumaWithLauncher(value.world, value.allocated.id, value.spawn);
     assert.equal((await selected.status()).id, value.allocated.id);
     assert.equal(Array.isArray((await selected.history()).rows), true);
     assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
@@ -170,49 +171,44 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
   });
 });
 
-import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
+import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
+import type { BodyLauncher } from "../src/akuma/body-launch.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
+import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
+import { selectionRequestCommands } from "../src/akuma/selection-request.js";
 
 const WAITED_TELL_NOW = "2026-08-10T00:00:01.000Z";
-type WaitedTellWorld = Awaited<ReturnType<typeof bornWorld>>;
+type WaitedTellWorld = Awaited<ReturnType<typeof bornWorld>> & { spawn: BodyLauncher };
 type WaitedTellFixture = {
   root: string;
   born(suffix: string, adapter: ProviderAdapter, now?: string): Promise<WaitedTellWorld>;
   settle(): Promise<void>;
-  withRuntime<T>(runtime: TellWakeRuntime, run: () => Promise<T>): Promise<T>;
 };
-type WaitedTellOptions = Omit<Parameters<typeof executeAskAkuma>[0], "path" | "id">;
+type WaitedTellOptions = Omit<Parameters<typeof executeAskAkuma>[0], "path" | "id" | "spawn">;
 
 function waitTell(world: WaitedTellWorld, options: WaitedTellOptions) {
-  return executeAskAkuma({ path: world.world, id: world.allocated.id, ...options });
+  return executeAskAkuma({ spawn: world.spawn, path: world.world, id: world.allocated.id, ...options });
 }
 
 async function withWaitedTellFixture<T>(run: (fixture: WaitedTellFixture) => Promise<T>): Promise<T> {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-ask-"));
   const bodies: Promise<unknown>[] = [];
   const adapters = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restore = installTellRuntime(fixtureRuntime(bodies, adapters));
+  const spawn = fixtureLauncher(bodies, adapters);
   const settle = () => settleFixtureBodies(bodies);
   const born = async (suffix: string, adapter: ProviderAdapter, now = WAITED_TELL_NOW) => {
-    const fixture = await bornWorld(root, suffix);
+    const fixture = await bornWorld(root, suffix, spawn);
     adapters.set(fixture.allocated.paths.directory, { adapter, now });
-    return fixture;
+    return { ...fixture, spawn };
   };
   try {
     return await run({
       root,
       born,
       settle,
-      async withRuntime(runtime, action) {
-        const restoreRuntime = installTellRuntime(runtime);
-        try {
-          return await action();
-        } finally {
-          restoreRuntime();
-        }
-      },
     });
   } finally {
-    restore();
     await settle();
     rmSync(root, { recursive: true, force: true });
   }
@@ -234,7 +230,7 @@ function gatedAnswer(gate: Promise<string>, started?: () => void): ProviderAdapt
 
 const dormantTellRuntime: TellWakeRuntime = {
   async spawn() {
-    return { pid: 0, exited: new Promise(() => undefined), async terminate() {}, release() {} };
+    return { completed: new Promise(() => undefined), async cancel() {}, release() {} };
   },
 };
 
@@ -292,10 +288,18 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
       additionalProperties: false,
     }));
     const answered = await born("a1000013", answering('{"ok":true}'));
+    const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "a1000abc", createdAt: WAITED_TELL_NOW });
+    const parentBody = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAITED_TELL_NOW });
+    const pump = await BodyRequestPump.open({
+      paths: parent.paths, allowed: parent.soul.allowed, bodySequence: parentBody.sequence,
+      now: () => WAITED_TELL_NOW, signal: context.signal,
+      commands: selectionRequestCommands(selectionRequestPort(answered.world, answered.spawn)),
+    });
+    try {
     const argv = (akuma: string) =>
       ["-C", answered.world, "ask", akuma, "--schema", schemaPath, "--wait", "5s", "structured"] as const;
     const result = await cliJson<AkumaAskResult>(argv(answered.allocated.id), {
-      environment: {},
+      environment: { AKUMA_REQUESTS: pump.directory },
       readStdin: async () => "",
     });
     assert.deepEqual(result.value.observation, { reason: "answered", answer: { ok: true } });
@@ -303,15 +307,19 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     const invalid = await born("a1000014", answering("not-json"));
     const invalidResult = await cliJson<AkumaAskResult>(
       ["-C", invalid.world, "ask", invalid.allocated.id, "--schema", schemaPath, "--wait", "5s", "structured"],
-      { environment: {}, readStdin: async () => "" },
+      { environment: { AKUMA_REQUESTS: pump.directory }, readStdin: async () => "" },
     );
     assert.equal(invalidResult.value.observation.reason, "invalid-output");
     assert.equal(invalidResult.exit, 3, "invalid schema output fails like an invalid call answer");
+    } finally {
+      await pump.close();
+      parent.leash.release();
+    }
 
     const interrupt = await born("a1000012", answering("unused"));
     context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
     await assert.rejects(
-      executeAskAkuma({ path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
+      executeAskAkuma({ spawn: noBodyLaunch, path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
       (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
     );
   });
@@ -354,7 +362,7 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
       const nextBody = await successor.recordBody(paths, { leashTakenAt: at });
       const next = await beginTurn(paths, { bodySequence: nextBody.sequence, startedAt: at });
       await bindTellsToTurn(paths, { turnSequence: next.sequence, tellIds: ["exact"], boundAt: at });
-      const result = await executeAskAkuma({ path: value.world, id: value.allocated.id, body: "original", tellId: "exact", recordedAt: at,
+      const result = await executeAskAkuma({ spawn: noBodyLaunch, path: value.world, id: value.allocated.id, body: "original", tellId: "exact", recordedAt: at,
         timeoutMs: 0, outcomeObserved: async (_id, identities) => { observed.push([...identities]); } });
       assert.deepEqual(result.observation, { reason: "unanswered" });
       assert.deepEqual(observed, [[`turn/${turn.sequence}`]]);
@@ -372,19 +380,19 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
 });
 
 test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
-  await withWaitedTellFixture(async ({ born, withRuntime, settle }) => {
+  await withWaitedTellFixture(async ({ born, settle }) => {
     const terminal = await born("a1000016", answering("edge answer"));
     const handle = new AkumaOwner(terminal.allocated.id, terminal.world);
     const recordedAt = "2026-08-10T00:00:02.000Z";
-    const recorded = await handle.tell("edge", undefined, recordedAt);
+    const recorded = await handle.tell("edge", undefined, recordedAt, tellWakeRuntime(terminal.spawn));
     await settle();
     const observed = await handle.tellOutcome(recorded.admission.tellId, { timeoutMs: 0 });
     assert.equal(observed.reason, "completed", "a terminal result witnessed at the expired deadline wins");
     assert.equal(observed.outcome?.kind, "answered");
     if (observed.outcome?.kind === "answered") assert.equal(observed.outcome.answer, "edge answer");
 
-    await withRuntime(dormantTellRuntime, async () => {
-      const envelope = await waitTell(terminal, {
+    {
+      const envelope = await waitTell({ ...terminal, spawn: async (launch) => dormantTellRuntime.spawn(launch.paths) }, {
         body: "edge",
         tellId: recorded.admission.tellId,
         recordedAt,
@@ -399,7 +407,7 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
       const result = await waitTell(unanswered, { body: "gone", tellId, recordedAt, timeoutMs: 0 });
       assert.equal(result.tell.row.state, "told");
       assert.deepEqual(result.observation, { reason: "unanswered" });
-    });
+    }
   });
 });
 
@@ -466,7 +474,7 @@ test("tell refuses schema before admission; ask checks options before addressing
 
 test("plain Tell preserves its admission while caller cancellation releases the wake wait", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-tell-wake-cancel-"));
-  const { allocated, akuma } = await bornWorld(root, "a1000009");
+  const { allocated } = await bornWorld(root, "a1000009");
   const controller = new AbortController();
   const reason = new Error("cancel pending wake");
   let polls = 0;
@@ -474,9 +482,8 @@ test("plain Tell preserves its admission while caller cancellation releases the 
   const runtime: TellWakeRuntime = {
     async spawn() {
       return {
-        pid: 0,
-        exited: new Promise(() => undefined),
-        async terminate() {},
+        completed: new Promise(() => undefined),
+        async cancel() {},
         release() {
           released = true;
         },
@@ -497,9 +504,8 @@ test("plain Tell preserves its admission while caller cancellation releases the 
       });
     },
   };
-  const restoreTellRuntime = installTellRuntime(runtime);
   try {
-    const pending = akuma.tell("remain admitted", { signal: controller.signal });
+    const pending = new AkumaOwner(allocated.id, await World.at(root)).tell("remain admitted", undefined, undefined, runtime, { signal: controller.signal });
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.ok(polls > 0, "wake polling must have started before cancellation");
     controller.abort(reason);
@@ -514,7 +520,6 @@ test("plain Tell preserves its admission while caller cancellation releases the 
       "cancellation does not revoke the already admitted Tell",
     );
   } finally {
-    restoreTellRuntime();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -523,9 +528,8 @@ test("idle resolves the settling life with the final status", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-api-idle-"));
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
   try {
-    const { allocated, akuma } = await bornWorld(root, "a1000008");
+    const { allocated, akuma } = await bornWorld(root, "a1000008", fixtureLauncher(bodies, fixtures));
     fixtures.set(allocated.paths.directory, { adapter: answering("done"), now: "2026-08-10T00:00:01.000Z" });
     await akuma.tell("hello");
     await settleFixtureBodies(bodies);
@@ -534,7 +538,6 @@ test("idle resolves the settling life with the final status", async () => {
     assert.equal(settled.status.life, "asleep");
     assert.equal(settled.status.id, allocated.id);
   } finally {
-    restoreTellRuntime();
     await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
@@ -570,7 +573,7 @@ test("idle after kill names the killed life", async () => {
       body: "start",
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
-    body = driveAkumaBody({ paths: allocated.paths }, hanging, { now: () => "2026-08-10T00:00:02.000Z" });
+    body = driveAkumaBody({ paths: allocated.paths }, hanging, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-10T00:00:02.000Z" });
     await waitForSeedBinding(allocated.paths, body);
     assert.equal(await akuma.kill(), "killed");
     await body;

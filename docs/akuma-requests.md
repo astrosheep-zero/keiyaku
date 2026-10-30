@@ -39,6 +39,15 @@ selection owner runs. The refusal is effect-free and prevents the Body from
 waiting on retirement of its own request pump. This boundary requires known
 serving identity and does not invent one for an ordinary local SDK caller.
 
+An integration running inside an Akuma may not use local public composition to
+escape the authenticated direct-parent request boundary. The shipped Pi native
+Akuma tools serve ordinary external Pi sessions; within a provider-owned Pi
+session an explicit runtime-local declaration makes the extension refuse its own
+local tool calls, including nested tool calls. Such a session uses the existing request-aware CLI
+for delegation and control. This is an integration scope refusal, not a second
+permission check, and neither ambient host attribution nor extension discovery
+grants local product authority.
+
 Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
 execution carries only request-service facts and never transports product capabilities.
 Forwarded verbs carry their flags verbatim; a flag dropped in transport is a product bug, not

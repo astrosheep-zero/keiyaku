@@ -3,7 +3,7 @@ import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type So
 import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths, type AkuId } from "./identity.js";
 import { abortableDelay } from "./abort.js";
-import type { DetachedProcessExit, OwnedProcess } from "../runtime/proc/run.js";
+import type { BodyLaunchEnd, LiveBodyLaunch } from "./body-launch.js";
 import { clipAllowedActions, type AllowedActions } from "./allowed.js";
 import type { RequestRecipe } from "./heart/facts.js";
 import type { CallInitialTell, CallInitialTellAdmission, TellResult } from "./call-initial-tell.js";
@@ -14,11 +14,13 @@ const POLL_MS = 100;
 const CUSTODY_HANDOFF_MS = 1_000;
 export const BIRTH_TIMEOUT_MS = 30_000;
 
+class LaunchCompletedError extends Error {}
+
 export type BirthInput = Readonly<{ worldPath: string; archetype: string; signal?: AbortSignal }>;
 export type LaunchInput = Readonly<{
   allocated: AllocatedAkuma;
   awaitAsleep?: boolean;
-  launch(allocated: AllocatedAkuma): Promise<OwnedProcess | void>;
+  launch(allocated: AllocatedAkuma): Promise<LiveBodyLaunch | void>;
   signal?: AbortSignal;
 }>;
 
@@ -59,19 +61,13 @@ async function observedBirthFailure(paths: AkumaPaths): Promise<string | null> {
   }
 }
 
-function preAdmissionDiagnostic(exit: DetachedProcessExit): string {
-  return exit.code === null ? `pre-admission signal ${exit.signal ?? "unknown"}` : `pre-admission exit ${exit.code}`;
-}
-
 async function observeSettledExit(
-  owned: OwnedProcess | undefined,
-): Promise<
-  { kind: "pending" } | { kind: "exited"; exit: DetachedProcessExit } | { kind: "exit-error"; error: unknown }
-> {
+  owned: LiveBodyLaunch | undefined,
+): Promise<{ kind: "pending" } | { kind: "exited"; exit: BodyLaunchEnd } | { kind: "exit-error"; error: unknown }> {
   if (owned === undefined) return { kind: "pending" };
   const pending = Symbol("pending");
   try {
-    const exit = await Promise.race([owned.exited, Promise.resolve(pending)]);
+    const exit = await Promise.race([owned.completed, Promise.resolve(pending)]);
     return exit === pending ? { kind: "pending" } : { kind: "exited", exit };
   } catch (error) {
     return { kind: "exit-error", error };
@@ -79,13 +75,11 @@ async function observeSettledExit(
 }
 
 async function observeExitWithin(
-  owned: OwnedProcess,
+  owned: LiveBodyLaunch,
   milliseconds: number,
-): Promise<
-  { kind: "timeout" } | { kind: "exited"; exit: DetachedProcessExit } | { kind: "exit-error"; error: unknown }
-> {
+): Promise<{ kind: "timeout" } | { kind: "exited"; exit: BodyLaunchEnd } | { kind: "exit-error"; error: unknown }> {
   return await Promise.race([
-    owned.exited.then(
+    owned.completed.then(
       (exit) => ({ kind: "exited" as const, exit }),
       (error) => ({ kind: "exit-error" as const, error }),
     ),
@@ -93,10 +87,10 @@ async function observeExitWithin(
   ]);
 }
 
-async function attemptTermination(owned: OwnedProcess, force = false): Promise<unknown | undefined> {
+async function attemptTermination(owned: LiveBodyLaunch, force = false): Promise<unknown | undefined> {
   const outcome = await Promise.race([
     Promise.resolve()
-      .then(() => owned.terminate(force))
+      .then(() => owned.cancel(force))
       .then(
         () => ({ kind: "terminated" as const }),
         (error) => ({ kind: "error" as const, error }),
@@ -106,7 +100,7 @@ async function attemptTermination(owned: OwnedProcess, force = false): Promise<u
   return outcome.kind === "error" ? outcome.error : undefined;
 }
 
-async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, signal?: AbortSignal): Promise<Soul> {
+async function awaitBirth(paths: AkumaPaths, owned: LiveBodyLaunch | undefined, signal?: AbortSignal): Promise<Soul> {
   const deadline = performance.now() + BIRTH_TIMEOUT_MS;
   for (;;) {
     signal?.throwIfAborted();
@@ -115,7 +109,7 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
     const failure = await observedBirthFailure(paths);
     if (failure !== null) {
       const settled = await observeSettledExit(owned);
-      if (settled.kind === "exited") throw new Error(preAdmissionDiagnostic(settled.exit));
+      if (settled.kind === "exited") throw new LaunchCompletedError(settled.exit.diagnostic);
       if (settled.kind === "exit-error") throw new Error(diagnostic(settled.error));
       throw new Error(failure);
     }
@@ -131,7 +125,7 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
     }
     const outcome = await Promise.race([
       abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal).then(() => "poll" as const),
-      owned.exited.then(
+      owned.completed.then(
         (exit) => ({ kind: "exited" as const, exit }),
         (error) => ({ kind: "exit-error" as const, error }),
       ),
@@ -140,7 +134,7 @@ async function awaitBirth(paths: AkumaPaths, owned: OwnedProcess | undefined, si
     if (outcome.kind === "exited") {
       const settledSoul = await readSoul(paths);
       if (settledSoul !== null) return settledSoul;
-      throw new Error(preAdmissionDiagnostic(outcome.exit));
+      throw new LaunchCompletedError(outcome.exit.diagnostic);
     }
     throw new Error(diagnostic(outcome.error));
   }
@@ -165,7 +159,7 @@ function settlementEvidence(primary: unknown, terminationError: unknown, exitErr
 
 async function settleLaunch(
   allocated: AllocatedAkuma,
-  owned: OwnedProcess,
+  owned: LiveBodyLaunch,
   failure: unknown,
 ): Promise<"born" | "sealed" | "handoff"> {
   if ((await readSoul(allocated.paths)) !== null) {
@@ -183,14 +177,14 @@ async function settleLaunch(
   let terminationError: unknown;
   let exitError: unknown;
   let outcome: "born" | "sealed";
-  const preAdmissionExit = diagnostic(failure).startsWith("pre-admission ");
-  const settled = preAdmissionExit ? await observeSettledExit(owned) : { kind: "pending" as const };
+  const settled =
+    failure instanceof LaunchCompletedError ? await observeSettledExit(owned) : { kind: "pending" as const };
   if (settled.kind !== "exited") {
     terminationError = await attemptTermination(owned);
     const exit = await observeSettledExit(owned);
     if (exit.kind === "exit-error") exitError = exit.error;
   } else {
-    /* An already-settled pre-admission exit needs no second termination request. */
+    /* An already-observed launch completion needs no second cancellation request. */
   }
 
   if ((await readSoul(allocated.paths)) !== null) {
@@ -263,7 +257,7 @@ async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
 
 async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
   const { allocated } = input;
-  let owned: OwnedProcess | void = undefined;
+  let owned: LiveBodyLaunch | void = undefined;
   try {
     input.signal?.throwIfAborted();
     owned = await input.launch(allocated);
@@ -330,7 +324,7 @@ export type PreparedCallInitialTellAdmission = Readonly<{
 
 type PreparedCallPorts = Readonly<{
   /** Spawn one already-allocated child; publication already owns the allocated directory. */
-  spawn(launch: PreparedCallSpawn): Promise<OwnedProcess | void>;
+  spawn(launch: PreparedCallSpawn): Promise<LiveBodyLaunch | void>;
   /** Admit the optional initial Tell against the just-confirmed child. */
   admitInitialTell(input: PreparedCallInitialTellAdmission): Promise<CallInitialTellAdmission>;
 }>;
@@ -400,7 +394,7 @@ async function admittedRecipe(
     throw new PreparedCallAdmissionError("options", admission.diagnostic);
   }
   return Object.freeze({
-    ...(recipe.description === undefined ? {} : { description: recipe.description }),
+    ...recipe,
     provider: selected.execution,
     options: admission.options,
     allowed: bounds.ceiling === undefined ? recipe.allowed : clipAllowedActions(recipe.allowed, bounds.ceiling),

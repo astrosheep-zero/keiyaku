@@ -9,7 +9,7 @@ import { Schema, type StandardSchemaV1 } from "../src/akuma/index.js";
 import { schemaFromStandard } from "../src/akuma/schema.js";
 import { type ProviderAdapter } from "../src/akuma/provider.js";
 
-import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 
 function foreignSchema<T>(
   vendor: string,
@@ -48,16 +48,15 @@ test("tell accepts a bare zod schema and decodes by inference", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-direct-"));
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  const spawn = fixtureLauncher(bodies, fixtures);
   try {
-    const { allocated, akuma } = await bornWorld(root, "a2000001");
+    const { allocated, akuma } = await bornWorld(root, "a2000001", spawn);
     fixtures.set(allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-10T00:00:01.000Z" });
     const decoded = await akuma.ask("direct", { schema: z.object({ ok: z.boolean() }) });
     const typed: { ok: boolean } | undefined = decoded.observation.reason === "answered" ? decoded.observation.answer : undefined;
     assert.equal(typed?.ok, true);
     await settleFixtureBodies(bodies);
   } finally {
-    restoreTellRuntime();
     await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }
@@ -67,7 +66,7 @@ test("a foreign standard schema carrying a toJSONSchema method decodes", async (
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-schema-foreign-method-"));
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
-  const restoreTellRuntime = installTellRuntime(fixtureRuntime(bodies, fixtures));
+  const spawn = fixtureLauncher(bodies, fixtures);
   const foreign: StandardSchemaV1<{ ok: boolean }> & Readonly<{ toJSONSchema: () => unknown }> = {
     "~standard": {
       version: 1,
@@ -82,13 +81,12 @@ test("a foreign standard schema carrying a toJSONSchema method decodes", async (
     toJSONSchema: objectAnswer(),
   };
   try {
-    const { allocated, akuma } = await bornWorld(root, "a2000005");
+    const { allocated, akuma } = await bornWorld(root, "a2000005", spawn);
     fixtures.set(allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-10T00:00:01.000Z" });
     const decoded = await akuma.ask("foreign-method", { schema: foreign });
     assert.deepEqual(decoded.observation, { reason: "answered", answer: { ok: true } });
     await settleFixtureBodies(bodies);
   } finally {
-    restoreTellRuntime();
     await settleFixtureBodies(bodies);
     rmSync(root, { recursive: true, force: true });
   }

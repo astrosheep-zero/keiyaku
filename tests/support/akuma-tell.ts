@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Akuma } from "../../src/akuma/index.js";
+import { akumaWithLauncher, type Akuma } from "../../src/akuma/akuma-instance.js";
+import type { BodyLauncher } from "../../src/akuma/body-launch.js";
 import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
-import { AkumaOwner } from "../../src/akuma/akuma-owner.js";
-import { driveAkumaBody, type TellWakeRuntime } from "../../src/akuma/body.js";
+import { driveAkumaBody } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
 import {
@@ -12,7 +12,8 @@ import {
   type ProviderAdapter,
   type Session,
 } from "../../src/akuma/provider.js";
-import { World } from "../../src/world.js";
+import { World, type WorldRoot } from "../../src/world.js";
+import { noBodyLaunch } from "./akuma-fixtures.js";
 
 type FixtureResource = Readonly<{
   closed?: Promise<void>;
@@ -67,60 +68,32 @@ export async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): 
   await Promise.all(bodies.map((body) => body.catch(() => undefined)));
 }
 
-export function fixtureRuntime(
+export function fixtureLauncher(
   bodies: Promise<unknown>[],
   fixtures: ReadonlyMap<string, Readonly<{ adapter: ProviderAdapter; now: string }>>,
-): TellWakeRuntime {
-  return {
-    async spawn(paths) {
-      const fixture = fixtures.get(paths.directory);
-      if (fixture === undefined) throw new Error(`missing fixture adapter for ${paths.directory}`);
-      const body = driveAkumaBody({ paths }, fixture.adapter, { now: () => fixture.now });
-      bodies.push(body);
-      return {
-        pid: 0,
-        exited: body.then(
-          () => ({ code: 0, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-          () => ({ code: 1, signal: null, log: { path: paths.log, from: 0, to: 0 } }),
-        ),
-        async terminate() {},
-        release() {},
-      };
-    },
+): BodyLauncher {
+  return async (launch) => {
+    const fixture = fixtures.get(launch.paths.directory);
+    if (fixture === undefined) throw new Error(`missing fixture adapter for ${launch.paths.directory}`);
+    // This test host queues behind short observation custody instead of refusing a busy seat.
+    const body = driveAkumaBody({ ...launch, refuseIfHeld: false }, fixture.adapter, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => fixture.now });
+    bodies.push(body);
+    return {
+      completed: body.then(
+        (result) => ({ diagnostic: "fixture Body completed", held: result === "held" }),
+        (error: unknown) => ({ diagnostic: error instanceof Error ? error.message : String(error) }),
+      ),
+      async cancel() {},
+      release() {},
+    };
   };
 }
 
-export function installTellRuntime(runtime: TellWakeRuntime): () => void {
-  const originalTell = AkumaOwner.prototype.tell;
-  const originalAdmitTell = AkumaOwner.prototype.admitTell;
-  const originalInterrupt = AkumaOwner.prototype.interrupt;
-  const originalAdmitInterrupt = AkumaOwner.prototype.admitInterrupt;
-  const originalCompleteInterruptAdmission = AkumaOwner.prototype.completeInterruptAdmission;
-  AkumaOwner.prototype.tell = function (body, tellId, recordedAt, existingRuntime, options) {
-    return originalTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
-  };
-  AkumaOwner.prototype.admitTell = function (body, tellId, recordedAt, existingRuntime, options) {
-    return originalAdmitTell.call(this, body, tellId, recordedAt, existingRuntime ?? runtime, options);
-  };
-  AkumaOwner.prototype.interrupt = function (body, options) {
-    return originalInterrupt.call(this, body, { ...options, runtime: options?.runtime ?? runtime });
-  };
-  AkumaOwner.prototype.admitInterrupt = function (body, options) {
-    return originalAdmitInterrupt.call(this, body, options);
-  };
-  AkumaOwner.prototype.completeInterruptAdmission = function (admission, existingRuntime, signal) {
-    return originalCompleteInterruptAdmission.call(this, admission, existingRuntime ?? runtime, signal);
-  };
-  return () => {
-    AkumaOwner.prototype.tell = originalTell;
-    AkumaOwner.prototype.admitTell = originalAdmitTell;
-    AkumaOwner.prototype.interrupt = originalInterrupt;
-    AkumaOwner.prototype.admitInterrupt = originalAdmitInterrupt;
-    AkumaOwner.prototype.completeInterruptAdmission = originalCompleteInterruptAdmission;
-  };
-}
-
-export async function bornWorld(root: string, suffix: string) {
+export async function bornWorld(root: string, suffix: string, spawn: BodyLauncher = noBodyLaunch): Promise<{
+  world: WorldRoot;
+  allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>;
+  akuma: Akuma;
+}> {
   const world = await World.at(root);
   mkdirSync(join(root, ".keiyaku"), { recursive: true });
   writeFileSync(
@@ -144,7 +117,7 @@ export async function bornWorld(root: string, suffix: string) {
   } finally {
     holder.release();
   }
-  return { world, allocated, akuma: Akuma.select(world, allocated.id) };
+  return { world, allocated, akuma: akumaWithLauncher(world, allocated.id, spawn) };
 }
 
 /** A fresh admitting adapter; session custody still uses the real ProviderAttempt. */

@@ -51,6 +51,28 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["akuma/akuma-observe.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], false],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],
   ["akuma/body.ts", ["plugin/akuma-signals.ts", "pluginRuntime"], false],
+  ["akuma/body.ts", ["akuma/body-launch.ts", "observeBodyLaunch"], true],
+  ["akuma/body.ts", ["runtime/proc/run.ts", "OwnedProcess", true], false],
+  ["akuma/body-launch.ts", ["runtime/proc/run.ts", "DetachedProcessExit", true], false],
+  ["akuma/publication.ts", ["akuma/body-launch.ts", "LiveBodyLaunch", true], true],
+  ["akuma/publication.ts", ["runtime/proc/run.ts", "OwnedProcess", true], false],
+  ["akuma/call-request.ts", ["runtime/proc/run.ts", "OwnedProcess", true], false],
+  ["akuma/turn-drive.ts", ["runtime/proc/run.ts", "OwnedProcess", true], false],
+  ["akuma/detached-body.ts", ["runtime/proc/run.ts", "spawnDetachedProcess"], true],
+  ["akuma/in-process-body.ts", ["akuma/body.ts", "driveAkumaBody"], true],
+  ["akuma/in-process-body.ts", ["runtime/proc/run.ts", "spawnDetachedProcess"], false],
+  ["akuma/akuma-instance.ts", ["body-host.ts", "captureAkumaHost"], true],
+  ["library/akumas.ts", ["body-host.ts", "captureAkumaHost"], true],
+  ["index.ts", ["body-host.ts", "AkumaHost"], true],
+  ["index.ts", ["body-host.ts", "AkumaHostScope", true], true],
+  ["index.ts", ["body-host.ts", "captureAkumaHost"], false],
+  ["body-host.ts", ["body-requests.ts", "externalRequestCommandsFor"], true],
+  ["body-requests.ts", ["library/contract-composition.ts", "composeContractLibrary"], true],
+  ["akuma/akuma-instance.ts", ["akuma/detached-body.ts", "spawnAkumaBody"], true],
+  ["akuma-body.ts", ["akuma/detached-body.ts", "spawnAkumaBody"], true],
+  ["library/akumas.ts", ["akuma/detached-body.ts", "spawnAkumaBody"], true],
+  ["library/selection.ts", ["akuma/detached-body.ts", "spawnAkumaBody"], false],
+  ["library/akuma-creation.ts", ["akuma/detached-body.ts", "spawnAkumaBody"], false],
   ["cli/commands/contract.ts", ["core/verbs/bind.ts", "decideBind"], false],
   ["library/delivery-preview.ts", ["git/target-placement.ts", "observeTargetPlacement"], false],
   ["protocol/delivery-preview.ts", ["protocol/intent.ts", "currentVerifiedAttestation"], true],
@@ -102,8 +124,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract-creation.ts", ["library/bind.ts", "prepareMarkdownBind"], true],
   ["library/invocation.ts", ["protocol/completion.ts", "completeCandidate"], false],
   ["library/invocation.ts", ["protocol/progress.ts", "ProtocolProgress", true], true],
-  ["akuma-body.ts", ["dispatch/index.ts", "readDispatch"], true],
-  ["akuma-body.ts", ["git/repository.ts", "repositoryAt"], true],
+  ["body-requests.ts", ["dispatch/index.ts", "readDispatch"], true],
+  ["body-requests.ts", ["git/repository.ts", "repositoryAt"], true],
   ["akuma/akuma-owner.ts", ["dispatch/index.ts", "readDispatch"], false],
   ["akuma/akuma-wait.ts", ["alias/index.ts", "readAliases"], false],
   ["akuma/akuma-call.ts", ["library/akuma-creation.ts", "callAkumas"], false],
@@ -115,6 +137,29 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
 for (const [owner, edge, allowed] of directionCases) {
   test(`owner edge ${owner} -> ${edge[0]}:${edge[1]} (${edge[2] ? "type" : "value"})`, () => {
     assert.deepEqual(rules(graph(owner, [edge])), allowed ? [] : ["architecture/dependency-direction"]);
+  });
+}
+
+for (const owner of [
+  "body",
+  "body-launch",
+  "publication",
+  "call-request",
+  "turn-drive",
+  "akuma-owner",
+  "akuma-call",
+  "akuma-selection-execution",
+  "selection-owner-port",
+]) {
+  test(`${owner} consumes neutral launch capabilities, never concrete hosting`, () => {
+    assert.deepEqual(graph(`akuma/${owner}.ts`, [["akuma/body-launch.ts", "BodyLauncher", true]]), []);
+    for (const edge of [
+      ["akuma/detached-body.ts", "spawnAkumaBody"],
+      ["akuma/akuma-instance.ts", "Akuma"],
+      ["runtime/proc/run.ts", "spawnDetachedProcess"],
+    ] as const) {
+      assert.deepEqual(rules(graph(`akuma/${owner}.ts`, [edge])), ["architecture/dependency-direction"]);
+    }
   });
 }
 

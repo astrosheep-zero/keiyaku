@@ -18,13 +18,8 @@ import {
 import { executeWaitAkuma } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
 import type { AkumaStatus } from "./akuma.js";
-import {
-  handoffPendingTells,
-  spawnAkumaBody,
-  wakeRecordedTell,
-  type TellResult,
-  type TellWakeRuntime,
-} from "./body.js";
+import type { BodyLauncher } from "./body-launch.js";
+import { handoffPendingTells, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
 import { admitCallInitialTell, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { acquireLeash } from "./control.js";
 import {
@@ -146,6 +141,7 @@ export async function settleAkumaKill(
     if (settledBody?.sequence !== target.sequence) {
       return { evidence: (await readKill(paths, target.sequence)) === null ? "unavailable" : "killed" };
     }
+    if (settledBody.hung !== undefined) return { evidence: "hung" };
     if (settledBody.end !== "put-down") {
       await leash.clearStop(paths);
       return { evidence: "untidy" };
@@ -288,7 +284,7 @@ export class AkumaOwner {
 
   async admitInitialTell(
     initialTell: CallInitialTell,
-    options: Readonly<{ signal?: AbortSignal; runtime?: TellWakeRuntime }> = {},
+    options: Readonly<{ signal?: AbortSignal; runtime: TellWakeRuntime }>,
   ): Promise<InitialTellAdmission> {
     return await admitCallInitialTell({
       world: this.worldPath,
@@ -303,7 +299,7 @@ export class AkumaOwner {
     body: string,
     tellId: string = randomUUID(),
     recordedAt = new Date().toISOString(),
-    runtime?: TellWakeRuntime,
+    runtime: TellWakeRuntime,
     options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
   ): Promise<TellResult> {
     const admitted = await this.admitTell(body, tellId, recordedAt, runtime, options);
@@ -320,7 +316,7 @@ export class AkumaOwner {
     body: string,
     tellId: string = randomUUID(),
     recordedAt = new Date().toISOString(),
-    runtime?: TellWakeRuntime,
+    runtime: TellWakeRuntime,
     options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
   ): Promise<TellAdmission> {
     const { schemaJson, initiator, signal } = options;
@@ -413,8 +409,8 @@ export class AkumaOwner {
       schemaJson?: string;
       initiator?: string;
       signal?: AbortSignal;
-      runtime?: TellWakeRuntime;
-    }> = {},
+      runtime: TellWakeRuntime;
+    }>,
   ): Promise<InterruptReceipt> {
     const admitted = await this.admitInterrupt(body, options);
     if (admitted.kind === "unavailable") return admitted;
@@ -452,7 +448,7 @@ export class AkumaOwner {
   /** Complete only the exact admitted predecessor barrier, then wake the stable Tell. */
   async completeInterruptAdmission(
     admission: Extract<InterruptAdmission, { kind: "admitted" }>,
-    runtime?: TellWakeRuntime,
+    runtime: TellWakeRuntime,
     signal?: AbortSignal,
   ): Promise<TellResult> {
     if (admission.barrier === undefined) return await wakeRecordedTell(this.paths, admission.tell.id, runtime, signal);
@@ -481,6 +477,7 @@ export class AkumaOwner {
 
   async fork(
     input: Readonly<{ at: string; bare?: boolean; caller?: AkumaCaller; initiator?: string }>,
+    spawn: BodyLauncher,
   ): Promise<ForkReceipt> {
     const bare = bareOption(input.bare);
     const caller = decodeAkumaCaller(input.caller);
@@ -516,8 +513,8 @@ export class AkumaOwner {
         worldPath: this.worldPath,
         archetype: source.archetype,
         awaitAsleep: true,
-        launch: async (allocated) => {
-          return await spawnAkumaBody({
+        launch: async (allocated) =>
+          await spawn({
             paths: allocated.paths,
             seed: {
               id: allocated.id,
@@ -533,8 +530,7 @@ export class AkumaOwner {
             },
             birthSession,
             ...(input.initiator === undefined ? {} : { birthInitiator: input.initiator }),
-          });
-        },
+          }),
       });
       return { kind: "forked", child: child.id };
     } catch (error) {
@@ -546,8 +542,8 @@ export class AkumaOwner {
     }
   }
 
-  async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
-    return await killAkumaWithRecovery(this.paths, handoffPendingTells, options.signal);
+  async kill(spawn: BodyLauncher, options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
+    return await killAkumaWithRecovery(this.paths, (paths) => handoffPendingTells(paths, spawn), options.signal);
   }
 
   async lastAnswer(): Promise<LastAnswer> {

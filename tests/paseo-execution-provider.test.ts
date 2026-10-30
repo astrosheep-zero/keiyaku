@@ -22,8 +22,9 @@ import { deferred, settlementProbe, temporaryDirectory, expectBodySettles } from
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { World } from "../src/world.js";
-import { allocatedHeart } from "./support/akuma-fixtures.js";
-import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
+import { allocatedHeart, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
+import type { BodyLaunch, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import {
   readHeart,
@@ -35,7 +36,6 @@ import { executionForEnvironment, AkumaBodyRequestError } from "../src/akuma/req
 import { eraseRequestCommand } from "../src/akuma/request-wire.js";
 import { Debts, debtsWithExecution } from "../src/debt/index.js";
 import { debtMutationRequestCommand, type DebtMutationRequestPort } from "../src/debt/mutation.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
 
 type NativeClient = ReturnType<NonNullable<PaseoDependencies["createClient"]>>;
 type TimelineHandler = Parameters<DaemonClient["subscribeAgentTimeline"]>[1];
@@ -862,20 +862,20 @@ test(
       batch: unused,
     };
     const externalCommands = { "debt.add": eraseRequestCommand(debtMutationRequestCommand("debt.add", port)) };
-    const owned = (body: Promise<unknown>): OwnedProcess => ({
-      pid: 0,
-      exited: body.then(
-        () => ({ code: 0, signal: null, log: { path: allocated.paths.log, from: 0, to: 0 } }),
-        () => ({ code: 1, signal: null, log: { path: allocated.paths.log, from: 0, to: 0 } }),
+    const owned = (body: Promise<unknown>): LiveBodyLaunch => ({
+      completed: body.then(
+        () => ({ diagnostic: "fixture Body completed" }),
+        (error: unknown) => ({ diagnostic: error instanceof Error ? error.message : String(error) }),
       ),
-      terminate: async () => undefined,
+      cancel: async () => undefined,
       release: () => undefined,
     });
     const startBody = (launch: BodyLaunch): Promise<unknown> => {
       const body = driveAkumaBody(launch, adapter, {
         world: root,
         externalCommands,
-        spawnBody: async (next) => owned(startBody(next)),
+        spawn: async (next) => owned(startBody(next)),
+        requestSpawn: noBodyLaunch,
       });
       bodies.push(body);
       return body;

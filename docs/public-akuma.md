@@ -19,6 +19,14 @@ Dispatch, Debt, and Heart observation is awaited before its public Promise
 settles. Contract-local actor, hook, and branch-freshness configuration does
 not enter this composition.
 
+Construction captures a host choice independently of request routing and
+observation. Detached hosting remains the default; an explicit in-process choice
+runs locally admitted Bodies in the calling Node runtime. Changing the caller's
+options afterward changes nothing, and selection never relocates an already
+running Body. Host choice is not persisted, forwarded, or inherited by newly
+requested children. Shared-host lifetime and cancellation belong to
+[akuma-execution.md](akuma-execution.md).
+
 Construction may also capture an immutable host diagnostic observer. This
 capability is independent of execution routing: it sees only plugin diagnostics
 produced in that host, never remote Body logs, and cannot change public results.

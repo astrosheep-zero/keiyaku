@@ -165,14 +165,26 @@ export const capabilityPolicy = {
     { capability: "module-mutable-state", owners: ["plugin/runtime.ts"] },
     { capability: "date-now", owners: ["cli/**", "protocol/**"] },
     { capability: "new-date-current", owners: ["akuma/**", "dispatch/**", "kanshi/**", "protocol/**", "debt/**"] },
-    { capability: "process-argv", owners: ["akuma-body.ts", "akuma/body.ts", "cli/**", "git/hooks.ts", "scripts/**"] },
+    {
+      capability: "process-argv",
+      owners: ["akuma-body.ts", "akuma/detached-body.ts", "cli/**", "git/hooks.ts", "scripts/**"],
+    },
     {
       capability: "process-cwd",
       owners: ["akuma/**", "cli/**", "git/**", "kanshi/**", "library/**", "scripts/**", "debt/**"],
     },
     {
       capability: "process-environment",
-      owners: ["akuma-body.ts", "akuma/**", "cli/**", "git/**", "runtime/proc/**", "scripts/**", "verification/**"],
+      owners: [
+        "akuma-body.ts",
+        "body-requests.ts",
+        "akuma/**",
+        "cli/**",
+        "git/**",
+        "runtime/proc/**",
+        "scripts/**",
+        "verification/**",
+      ],
     },
     { capability: "process-output", owners: ["akuma-body.ts", "cli/**", "scripts/**"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
@@ -182,6 +194,8 @@ export const capabilityPolicy = {
       owners: [
         "akuma/**",
         "akuma-body.ts",
+        "body-host.ts",
+        "body-requests.ts",
         "alias/**",
         "body/**",
         "bounded-list.ts",

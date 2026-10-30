@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
-import type { BodyLaunch } from "../../src/akuma/body.js";
+import type { BodyLaunch, BodyLauncher } from "../../src/akuma/body-launch.js";
 import {
   HeldAkumaLeash,
   initializeHeart,
@@ -16,6 +16,9 @@ import type { AkumaCaller } from "../../src/akuma/caller.js";
 import { allocateAkumaDirectory, type AkumaPaths } from "../../src/akuma/identity.js";
 import { withHeartTransaction } from "../../src/akuma/heart/storage.js";
 import { World } from "../../src/world.js";
+
+/** Explicitly refuse launches in scenarios that own no child or successor. */
+export const noBodyLaunch: BodyLauncher = async () => { throw new Error("unexpected Body launch"); };
 
 type AllocatedAkuma = Awaited<ReturnType<typeof allocateAkumaDirectory>>;
 type ActivityFact = Extract<TimelineFact, { kind: "activity" }>;

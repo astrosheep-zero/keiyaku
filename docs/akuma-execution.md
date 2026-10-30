@@ -55,7 +55,43 @@ submitting initiator is independent of Turn ownership, including when no input
 was submitted.
 
 Process custody is a live handle, not a stored pid, process group, start token,
-or reconstructed identity. Graceful cancellation and forced disposal both require
+or reconstructed identity. Product composition selects Body hosting and supplies
+its launch capability to execution, publication, wake, delegation, and succession.
+Those algorithms never choose a host, including when a capability is missing;
+request routing conveys intent and permission, not hosting policy. Hosting is
+captured by the invoking composition, defaults to detached execution, and may
+instead run the Body in the calling host. It is never persisted in Soul or
+inferred from an observation bound. A Body's automatic succession uses that
+composition's hosting, but newly requested children do not inherit their parent's
+host choice; the existing direct-parent service launches them detached.
+
+Body launch custody is separate from provider-attempt custody. Launch completion
+is evidence only that the launch finished, never a product outcome or proof of
+birth, settlement, or successor custody; Heart and the leash judge those facts.
+Cancellation asks only resources owned by that launch to retire, without rollback.
+Forced cancellation requests supported disposal of those same owned resources,
+not termination of a shared host. Cancellation reaches preparation as well as
+provider execution, without permitting later preparation to start canceled work.
+Release relinquishes only the launch holder's custody: it neither kills execution nor
+guarantees host survival, and never substitutes for closure proof. An explicit
+in-process host scope independently retains cancellation of its exact live
+launches, including preparation and automatic succession, after publication
+releases its holder. Closing that scope is idempotent: it prevents new launches,
+requests retirement of its owned work, and awaits their execution and bounded
+plugin callbacks. It never stops by Akuma identity, follows a later foreign wake,
+or includes detached launches. A close racing setup prevents late execution;
+closing during succession refuses that successor rather than relocating it.
+Closure failure and hung custody remain visible, even if execution later retires;
+closure never claims that noncooperative native work physically stopped. There is
+no persisted scope, registry, scheduler, or recovery promise. In-process
+execution shares the caller's Node runtime, not a worker or a replacement
+process. Its active Body keeps ordinary host liveness until completion, but host
+exit still loses that execution without manufacturing settlement. An observation
+deadline neither cancels admitted work nor migrates it to a detached host. This
+is shared lifetime, not isolation from arbitrary extension code that exits or
+blocks that runtime. Native process interpretation belongs to the
+detached launch edge; its optional diagnostic evidence is not required of every
+launch. Graceful cancellation and forced disposal both require
 the current provider attempt's closure proof. If owned provider custody cannot
 retire, the Body records hung evidence, ends unsuccessfully, and releases its
 leash; it never sleeps holding custody or calls this an ordinary stop. No public

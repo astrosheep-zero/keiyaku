@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { accepted } from "./support/library-verbs.js";
 import { present } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -38,7 +39,9 @@ import {
 import { parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { driveAkumaBody, spawnAkumaBody, type TellWakeRuntime } from "../src/akuma/body.js";
+import { driveAkumaBody, tellWakeRuntime, type TellWakeRuntime } from "../src/akuma/body.js";
+import { spawnAkumaBody } from "../src/akuma/detached-body.js";
+import type { LiveBodyLaunch, BodyLaunchEnd } from "../src/akuma/body-launch.js";
 import { selectionRequestCommands, type SelectionRequestPort } from "../src/akuma/selection-request.js";
 import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
@@ -54,7 +57,6 @@ import {
   installAkumaBodyEmptyPublicationBarrier,
   installAkumaBodyPidReceipt,
 } from "./support/process.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import type { WorldRoot } from "../src/world.js";
 import { AkumaComposition as Akuma, AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -143,7 +145,7 @@ function slowEmptyPublicationBody() {
         bodySequence: number;
         leash: HeldAkumaLeash;
         paths: AkumaCallRequestChildLaunch["paths"];
-        resolveExit: (exit: Awaited<OwnedProcess["exited"]>) => void;
+        resolveExit: (end: BodyLaunchEnd) => void;
       }>
     | undefined;
   const { promise: started, resolve: resolveStarted } =
@@ -154,22 +156,21 @@ function slowEmptyPublicationBody() {
     released = true;
     await finishBodyIfIdle(held.paths, { sequence: held.bodySequence, at: "2026-09-10T00:00:02.000Z" });
     held.leash.release();
-    held.resolveExit({ code: 0, signal: null, log: { path: "/tmp/slow-empty-body.log", from: 0, to: 0 } });
+    held.resolveExit({ diagnostic: "fixture Body completed" });
   };
 
   return {
     started,
-    spawn: async (launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess> => {
+    spawn: async (launch: AkumaCallRequestChildLaunch): Promise<LiveBodyLaunch> => {
       const leash = (await HeldAkumaLeash.try(launch.paths))!;
       await leash.birth(launch.paths, { ...launch.seed, createdAt: "2026-09-10T00:00:00.000Z" });
       const body = await leash.recordBody(launch.paths, { leashTakenAt: "2026-09-10T00:00:01.000Z" });
-      const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
+      const { promise: completed, resolve: resolveExit } = promiseBarrier<BodyLaunchEnd>();
       held = { paths: launch.paths, bodySequence: body.sequence, leash, resolveExit };
       resolveStarted({ paths: launch.paths, bodySequence: body.sequence });
       return {
-        pid: 4242,
-        exited,
-        terminate: async () => await release(),
+        completed,
+        cancel: async () => await release(),
         release: () => {},
       };
     },
@@ -187,7 +188,7 @@ function slowEmptyPublicationBody() {
  * retains its bytes unless every launch is closed.
  */
 function trackedWakeLaunches() {
-  const launches: OwnedProcess[] = [];
+  const launches: LiveBodyLaunch[] = [];
   const runtime: TellWakeRuntime = {
     spawn: async (paths) => {
       const owned = await spawnAkumaBody({ paths, refuseIfHeld: true });
@@ -195,9 +196,8 @@ function trackedWakeLaunches() {
       // Borrowed port: the wake loop reads the exit and may terminate through the
       // fixture's retained custody, but releasing it must not release that handle.
       return {
-        pid: owned.pid,
-        exited: owned.exited,
-        terminate: async (force) => await owned.terminate(force),
+        completed: owned.completed,
+        cancel: async (force) => await owned.cancel(force),
         release: () => {},
       };
     },
@@ -211,7 +211,7 @@ function trackedWakeLaunches() {
       for (const owned of tracked) {
         let exitError: unknown;
         let exited = false;
-        const exit = owned.exited.then(
+        const exit = owned.completed.then(
           () => {
             exited = true;
           },
@@ -228,7 +228,7 @@ function trackedWakeLaunches() {
           // Retained custody still owns this launch: terminate it, then await the
           // real closure it produces rather than trusting the request.
           try {
-            await owned.terminate(true);
+            await owned.cancel(true);
           } catch (error) {
             failures.push(error);
           }
@@ -236,7 +236,7 @@ function trackedWakeLaunches() {
             exit.then(() => true),
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
           ]);
-          if (!closedAfterTerminate) failures.push(new Error(`wake launch pid ${owned.pid} survived termination`));
+          if (!closedAfterTerminate) failures.push(new Error("wake launch survived cancellation"));
         }
         if (exitError !== undefined) failures.push(exitError);
         if (exited) closed += 1;
@@ -941,7 +941,7 @@ async function defaultRequestSpawn(launch: AkumaCallRequestChildLaunch): Promise
   child.release();
 }
 
-type RequestSpawn = (launch: AkumaCallRequestChildLaunch) => Promise<OwnedProcess | void>;
+type RequestSpawn = (launch: AkumaCallRequestChildLaunch) => Promise<LiveBodyLaunch | void>;
 
 async function requestPump(
   root: WorldRoot,
@@ -969,7 +969,7 @@ async function requestPump(
         admitInitialTell:
           admitInitialTell ??
           (async ({ id, initialTell, signal }) =>
-            await new AkumaOwner(id, root).admitInitialTell(initialTell, { signal })),
+            await new AkumaOwner(id, root).admitInitialTell(initialTell, { signal, runtime: tellWakeRuntime(spawnAkumaBody) })),
       }),
       selectionRequestCommands({
         wait: async () => {
@@ -1103,7 +1103,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       kind: "akuma.born", akumaId: explicit.value.akuma, bodySequence: 1, origin: { kind: "direct" },
       caller: { kind: "akuma", world, akuId: "aku/delegator/abcd1234" }, initiator: "Submitter", contractId: managedId,
     });
-    const { pump, leash } = await requestPump(world, async (launch) => { await driveAkumaBody(launch); });
+    const { pump, leash } = await requestPump(world, async (launch) => { await driveAkumaBody(launch, undefined, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch }); });
     try {
       const forwarded = await cliJson<CallResult>(["-C", ".", "call", "worker", "--contract", managedId], {
         cwd: raw.path,

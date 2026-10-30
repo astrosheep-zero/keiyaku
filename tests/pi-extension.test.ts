@@ -28,8 +28,8 @@ const piSkills = packageJson.pi?.skills;
 if (!Array.isArray(piSkills) || piSkills.some((skill) => typeof skill !== "string")) {
   throw new Error("Pi package skills are missing");
 }
-// Every declared Pi resource loads straight from a source checkout: the manifest names it and the
-// npm package files carry it, so neither the loader nor the tarball needs build output.
+// Declared Pi resources ship as authored TypeScript/skills, while the tools
+// consume the package's built public SDK through its ordinary root export.
 const declaredPiResources: readonly string[] = [...piExtension, ...piSkills];
 const sourceExtension = fileURLToPath(new URL(piExtension[0], rootUrl));
 const { default: keiyakuExtension } = (await import(new URL(piExtension[0], rootUrl).href)) as {
@@ -311,9 +311,13 @@ test("Pi closure reports extension shutdown failure but still disposes native st
     },
   }));
   const attempt = provider.start({
-    body: "work", launchTells: [], cwd: root, options: {},
+    body: "work",
+    launchTells: [],
+    cwd: root,
+    options: {},
     requests: { dir: join(root, "requests") },
-    signal: new AbortController().signal, session: { kind: "fresh" },
+    signal: new AbortController().signal,
+    session: { kind: "fresh" },
   });
   const drive = await attempt.result;
   await drive.completion;
@@ -331,9 +335,13 @@ test("Pi reports extension load failures to stderr and Akuma activity", async (t
   const stderr = t.mock.method(console, "error", () => {});
   const provider = createPiProvider(undefined, async () => nativeSdk);
   const attempt = provider.start({
-    body: "work", launchTells: [], cwd: root, options: {},
+    body: "work",
+    launchTells: [],
+    cwd: root,
+    options: {},
     requests: { dir: join(root, "requests") },
-    signal: new AbortController().signal, session: { kind: "fresh" },
+    signal: new AbortController().signal,
+    session: { kind: "fresh" },
   });
   try {
     const drive = await attempt.result;
@@ -362,7 +370,7 @@ test("npm root package declares its Pi resources", () => {
     assert.equal(
       existsSync(fileURLToPath(new URL(resource, rootUrl))),
       true,
-      `Pi resource is missing without a build: ${resource}`,
+      `Pi resource is missing from the checkout: ${resource}`,
     );
     const target = resource.replace(/^\.\//u, "");
     assert.equal(
@@ -413,6 +421,11 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
     on(event: string, handler: Handler): void {
       handlers.set(event, handler);
     },
+    registerFlag(): void {},
+    getFlag(): boolean {
+      return false;
+    },
+    registerTool(): void {},
     registerCommand(name: string, options: { handler: CommandHandler }): void {
       assert.equal(name, "keiyaku");
       command = options.handler;
@@ -427,12 +440,12 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
   return { command, handlers };
 }
 
-test("Pi registers only the explicit Keiyaku command", () => {
+test("Pi registers session-scoped native tools alongside the explicit Keiyaku command", () => {
   const { handlers } = install(async () => {
     throw new Error("status must not run while loading");
   });
 
-  assert.deepEqual([...handlers.keys()], []);
+  assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown"]);
 });
 
 test("Pi command runs one text status and does not refresh when dismissed", async () => {

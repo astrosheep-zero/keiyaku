@@ -1,10 +1,12 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import http from "node:http";
 import type { Socket } from "node:net";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { driveAkumaBody, type BodyLaunch } from "../src/akuma/body.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
+import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { readHeart } from "../src/akuma/heart/index.js";
 import { allocatedHeart, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import { temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
@@ -238,7 +240,7 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
       },
       initialBody: "work",
     };
-    const body = driveAkumaBody(launch, provider, { now: () => "2026-08-08T00:00:00.000Z" });
+    const body = driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     // Iterator return, not elapsed time or prompt submission, proves this exact phase.
     await waitForCondition("whole closure entered unproven iterator return", () => returning, { budgetMs: 5_000 });
     if (control === "stop") {

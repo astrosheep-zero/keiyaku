@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -55,7 +56,7 @@ async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<All
       initialBody: "old work",
     },
     answering("done"),
-    { now: () => at },
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => at },
   );
   ageAkuma(allocated, at);
   return allocated;

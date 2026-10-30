@@ -1,5 +1,6 @@
 import { AkumaSelfInterruptError } from "./akuma-errors.js";
 import type { WorldRoot } from "../world.js";
+import type { BodyLauncher } from "./body-launch.js";
 import { requireBornAkuma } from "./akuma-probe.js";
 import { executeAskAkuma, executeKillAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
@@ -18,7 +19,7 @@ import type { SelectionRequestPort } from "./selection-request.js";
  */
 export function selectionRequestPort(
   world: WorldRoot,
-  _reportDiagnostic: (message: string) => void,
+  spawn: BodyLauncher,
   servingBodyId?: AkumaStatus["id"],
 ): SelectionRequestPort {
   const prove = async (targets: readonly AkumaStatus["id"][]): Promise<void> => {
@@ -39,12 +40,13 @@ export function selectionRequestPort(
     tell: async ({ target, ...request }) => {
       if (request.interrupt === true && servingBodyId === target) throw new AkumaSelfInterruptError(target);
       await prove([target]);
-      return await executeTellAkuma({ path: world, id: target, ...request });
+      return await executeTellAkuma({ path: world, id: target, spawn, ...request });
     },
     ask: async ({ target, ...request }) => {
       if (request.interrupt === true && servingBodyId === target) throw new AkumaSelfInterruptError(target);
       await prove([target]);
       return await executeAskAkuma({
+        spawn,
         path: world,
         id: target,
         ...request,
@@ -52,7 +54,7 @@ export function selectionRequestPort(
     },
     kill: async ({ targets, ...request }) => {
       await prove(targets);
-      return await executeKillAkuma({ path: world, ids: targets, ...request });
+      return await executeKillAkuma({ path: world, ids: targets, spawn, ...request });
     },
   };
 }

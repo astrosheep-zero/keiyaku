@@ -1,3 +1,6 @@
+import { akumasWithLauncher } from "../src/library/akumas.js";
+import { localExecutionContext } from "../src/akuma/requests.js";
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
 import { listArchetypeDefinitions } from "../src/index.js";
@@ -52,8 +55,7 @@ import {
   answering,
   bornWorld,
   fixtureAdapter,
-  fixtureRuntime,
-  installTellRuntime,
+  fixtureLauncher,
   settleFixtureBodies,
 } from "./support/akuma-tell.js";
 import { Schema } from "../src/akuma/index.js";
@@ -157,7 +159,7 @@ async function answered(root: string, archetype: string, suffix: string) {
       initialBody: "work",
     },
     provider,
-    {
+    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
       now: () => "2026-08-11T00:00:00.000Z",
     },
   );
@@ -171,16 +173,14 @@ test("facade ask admits, decodes, and addresses an alias through the World-bound
   await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akuId: source.allocated.id });
   const schema = Schema.json({ type: "object", properties: { ok: { type: "boolean" } } }, (value) => value as { ok: boolean });
   const bodies: Promise<unknown>[] = [];
-  const restore = installTellRuntime(
-    fixtureRuntime(
-      bodies,
-      new Map([[source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-11T00:00:00.000Z" }]]),
-    ),
+  const spawn = fixtureLauncher(
+    bodies,
+    new Map([[source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-11T00:00:00.000Z" }]]),
   );
   try {
     // This is an answer/admission test, not a deadline test. Let the test runner
     // bound and cancel a hang without racing loaded CI against a one-second observation.
-    const result = await Akumas.of(root).ask({ akuma: "@worker", body: "continue", signal: t.signal, schema });
+    const result = await akumasWithLauncher(root, localExecutionContext(), spawn).ask({ akuma: "@worker", body: "continue", signal: t.signal, schema });
     assert.equal(result.akuma, source.allocated.id);
     assert.equal(result.tell.row.text, "continue");
     assert.deepEqual(result.observation, { reason: "answered", answer: { ok: true } });
@@ -193,7 +193,6 @@ test("facade ask admits, decodes, and addresses an alias through the World-bound
       /use Akumas.ask/u,
     );
   } finally {
-    restore();
     await settleFixtureBodies(bodies);
   }
 });
@@ -255,7 +254,7 @@ for (const route of ["local", "forwarded", "idle"] as const) {
       const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0def0003", createdAt: WAIT_AT });
       t.after(() => parent.leash.release());
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAIT_AT });
-      const port = selectionRequestPort(world, message => assert.fail(message));
+      const port = selectionRequestPort(world, noBodyLaunch);
       pump = await BodyRequestPump.open({
         paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
         now: () => WAIT_AT, signal: t.signal,
@@ -807,13 +806,11 @@ test(
       };
     });
     const bodies: Promise<unknown>[] = [];
-    const restore = installTellRuntime(
-      fixtureRuntime(bodies, new Map([[allocated.paths.directory, { adapter, now: "2026-08-11T00:00:00.000Z" }]])),
-    );
+    const spawn = fixtureLauncher(bodies, new Map([[allocated.paths.directory, { adapter, now: "2026-08-11T00:00:00.000Z" }]]));
     const log = join(repository.path, "dispatch-channels.log");
     writeFileSync(log, "");
     try {
-      await Akumas.of(world).tell({ akuma: allocated.id, body: "wait for Dispatch" });
+      await akumasWithLauncher(world, localExecutionContext(), spawn).tell({ akuma: allocated.id, body: "wait for Dispatch" });
       await started.promise;
       await withGitShim(
         [
@@ -871,8 +868,7 @@ test(
       );
     } finally {
       finish.resolve();
-      restore();
-      await settleFixtureBodies(bodies);
+        await settleFixtureBodies(bodies);
     }
   },
 );

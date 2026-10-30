@@ -9,7 +9,10 @@ import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { LEASH_HELD_EXIT } from "../src/akuma/body.js";
+import type { LiveBodyLaunch } from "../src/akuma/body-launch.js";
+import { tellWakeRuntime } from "../src/akuma/body.js";
+import { spawnAkumaBody } from "../src/akuma/detached-body.js";
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import {
   HeldAkumaLeash,
   admitRequest,
@@ -45,7 +48,6 @@ import {
   requestStop,
   type Soul,
 } from "../src/akuma/heart/index.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
@@ -60,7 +62,7 @@ async function tellFixture(
     body: string;
     tellId: string;
     recordedAt?: string;
-    runtime?: Parameters<AkumaOwner["tell"]>[3];
+    runtime: Parameters<AkumaOwner["tell"]>[3];
   }>,
 ) {
   return await new AkumaOwner(value.allocated.id, value.root).tell(
@@ -145,8 +147,8 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
     const reason = new Error("caller stopped waiting");
     const handle = new AkumaOwner(value.allocated.id, value.root);
     const results = Promise.allSettled([
-      handle.interrupt("not admitted", { signal: controller.signal }),
-      handle.kill({ signal: controller.signal }),
+      handle.interrupt("not admitted", { runtime: tellWakeRuntime(noBodyLaunch), signal: controller.signal }),
+      handle.kill(noBodyLaunch, { signal: controller.signal }),
     ]);
     const timer = setTimeout(() => controller.abort(reason), 20);
     try {
@@ -367,6 +369,7 @@ test("wake names the missing frozen execution directory instead of a bare spawn 
     const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-missing-cwd",
+      runtime: tellWakeRuntime(spawnAkumaBody),
       recordedAt: value.soul.createdAt,
     });
     assert.equal(result.wake.kind, "failed");
@@ -399,6 +402,7 @@ test("wake names the missing waking executable instead of a bare spawn absence",
     const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-missing-executable",
+      runtime: tellWakeRuntime(spawnAkumaBody),
       recordedAt: value.soul.createdAt,
     });
     assert.equal(result.wake.kind, "failed");
@@ -433,6 +437,7 @@ test("wake names both missing pieces when the executable and frozen directory ar
     const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-missing-both",
+      runtime: tellWakeRuntime(spawnAkumaBody),
       recordedAt: value.soul.createdAt,
     });
     assert.equal(result.wake.kind, "failed");
@@ -466,16 +471,11 @@ test("Tell reports held only from its spawned child's private leash refusal", as
       tellId: "tell-held",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async spawn(): Promise<OwnedProcess> {
+        async spawn(): Promise<LiveBodyLaunch> {
           spawned += 1;
           return {
-            pid: 1,
-            exited: Promise.resolve({
-              code: LEASH_HELD_EXIT,
-              signal: null,
-              log: { path: value.allocated.paths.log, from: 0, to: 0 },
-            }),
-            async terminate() {},
+            completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
+            async cancel() {},
             release() {},
           };
         },
@@ -505,19 +505,14 @@ test("Tell lets a successor Body win when its child exit races Heart observation
       tellId: "tell-successor-race",
       recordedAt: value.soul.createdAt,
       runtime: {
-        async spawn(): Promise<OwnedProcess> {
+        async spawn(): Promise<LiveBodyLaunch> {
           const winner = (await HeldAkumaLeash.try(value.allocated.paths))!;
           const body = await winner.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
           winnerSequence = body.sequence;
           winner.release();
           return {
-            pid: 1,
-            exited: Promise.resolve({
-              code: 7,
-              signal: null,
-              log: { path: value.allocated.paths.log, from: 0, to: 0 },
-            }),
-            async terminate() {},
+            completed: Promise.resolve({ diagnostic: "fixture launch failed" }),
+            async cancel() {},
             release() {},
           };
         },

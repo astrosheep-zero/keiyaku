@@ -1,13 +1,9 @@
 import { projectAkumaBirth } from "./caller.js";
-import { z } from "zod";
-import { decodeSoulSeed } from "./heart/soul.js";
-import { sessionAdmissionSchema } from "./heart/rows.js";
-import { appendFile, stat } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { abortable, abortableDelay } from "./abort.js";
+import { appendFile } from "node:fs/promises";
+import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
-import type { AkumaCallRequestChildLaunch, InitialTellAdmissionRequest } from "./call-request.js";
-import { driveTurn, turnRecipe, type DrivenTurn } from "./turn-drive.js";
+import type { InitialTellAdmissionRequest } from "./call-request.js";
+import { driveTurn, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
   BodyControlledError,
@@ -36,7 +32,7 @@ import {
   type Soul,
   type TurnOutcome,
 } from "./heart/index.js";
-import { akumaPathsSchema, pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { recordAkumaLineage } from "./lineage-cache.js";
 import {
   admitCallInitialTell,
@@ -45,7 +41,6 @@ import {
   type TellWake,
 } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
-import { akumaExecutionEnvironment } from "./providers/execution-environment.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
@@ -53,50 +48,36 @@ import type { ExecutionAssociationReader } from "./execution-instructions.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
 import type { ErasedRequestCommand } from "./request-wire.js";
-import { spawnDetachedProcess, type DetachedProcessExit, type OwnedProcess } from "../runtime/proc/run.js";
+import {
+  observeBodyLaunch,
+  launchEndWake,
+  type BodyLaunch,
+  type BodyLauncher,
+  type LiveBodyLaunch,
+} from "./body-launch.js";
 
 const LEASH_RETRY_MS = 100;
-const WAKE_REREAD_MS = 100;
-export const LEASH_HELD_EXIT = 75;
 export { CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
-const launchSeedSchema = z.unknown().transform((value, context) => {
-  try {
-    return decodeSoulSeed(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid Body birth seed" });
-    return z.NEVER;
-  }
-});
-export const bodyLaunchSchema = z
-  .object({
-    paths: akumaPathsSchema,
-    seed: launchSeedSchema.optional(),
-    birthSession: sessionAdmissionSchema.optional(),
-    initialBody: z.string().optional(),
-    initiator: z.string().optional(),
-    birthInitiator: z.string().optional(),
-    initialSchemaJson: z.string().optional(),
-    refuseIfHeld: z.boolean().optional(),
-    handoffFromBodySequence: z.number().int().positive().optional(),
-    completion: z.object({ contractId: z.string().optional() }).strict().optional(),
-  })
-  .strict();
-export type BodyLaunch = z.infer<typeof bodyLaunchSchema>;
-
 export type TellWakeRuntime = Readonly<{
-  spawn(paths: AkumaPaths): Promise<OwnedProcess>;
+  spawn(paths: AkumaPaths): Promise<LiveBodyLaunch>;
   schedule?(milliseconds: number, signal: AbortSignal): Promise<void>;
 }>;
 
-type BodyRuntime = Readonly<{
+export type BodyRuntime = Readonly<{
   now(): string;
-  spawnChild?(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess>;
-  spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
+  spawn: BodyLauncher;
+  requestSpawn: BodyLauncher;
+  signal?: AbortSignal;
+  forceSignal?: AbortSignal;
   world: WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
   executionAssociation?: ExecutionAssociationReader;
 }>;
+
+export function tellWakeRuntime(spawn: BodyLauncher): TellWakeRuntime {
+  return { spawn: async (paths) => await spawn({ paths, refuseIfHeld: true }) };
+}
 
 function missing(error: unknown): boolean {
   return isHeartAbsent(error) || (error as NodeJS.ErrnoException).code === "ENOENT";
@@ -131,12 +112,17 @@ async function putDownIfControlled(
   now: () => string,
   turnOutcome?: TurnOutcomeEmitter,
 ): Promise<void> {
-  if (supervisor.reason === "control" && (await heartExists(paths)))
+  if ((supervisor.reason === "control" || supervisor.reason === "launch") && (await heartExists(paths)))
     await putDownBody(paths, bodySequence, now, turnOutcome);
 }
 
-async function takeLeash(paths: AkumaPaths, refuseIfHeld = false): Promise<HeldAkumaLeash | "held" | "absent"> {
+async function takeLeash(
+  paths: AkumaPaths,
+  refuseIfHeld = false,
+  signal?: AbortSignal,
+): Promise<HeldAkumaLeash | "held" | "absent"> {
   for (;;) {
+    signal?.throwIfAborted();
     try {
       const leash = await HeldAkumaLeash.try(paths);
       if (leash !== null) return leash;
@@ -145,7 +131,7 @@ async function takeLeash(paths: AkumaPaths, refuseIfHeld = false): Promise<HeldA
       if (missing(error)) return "absent";
       throw error;
     }
-    await abortableDelay(LEASH_RETRY_MS);
+    await abortableDelay(LEASH_RETRY_MS, signal);
   }
 }
 
@@ -165,13 +151,6 @@ async function bornSoul(
     throw new Error("Akuma birth identity does not match its directory");
   }
   return { soul: born, created: result === "born" };
-}
-
-async function launchCwd(launch: BodyLaunch): Promise<string> {
-  if (launch.seed !== undefined) return launch.seed.cwd;
-  const soul = (await readHeart(launch.paths)).soul;
-  if (soul === null) throw new Error("Akuma wake has no born soul");
-  return (await turnRecipe(launch.paths, soul)).cwd;
 }
 
 function parseSchemaAnswerJson(
@@ -197,6 +176,7 @@ async function persistTurn(
   const turn = await readTurn(paths, turnSequence);
   const schemaJson = turn?.schemaJson;
   if (result.kind === "answered" && result.session !== undefined) {
+    let answerJson: string | undefined;
     if (schemaJson !== undefined) {
       const parsed = parseSchemaAnswerJson(result.answer);
       if (parsed.kind === "invalid") {
@@ -210,18 +190,7 @@ async function persistTurn(
         await endTurn(paths, { turnSequence, outcome, completedAt });
         return { outcome: "failed", diagnostic: parsed.diagnostic };
       }
-      await endTurn(paths, {
-        turnSequence,
-        outcome: {
-          kind: "answered",
-          session: result.session,
-          answer: result.answer,
-          answerJson: parsed.json,
-          ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
-        },
-        completedAt,
-      });
-      return { outcome: "answered" };
+      answerJson = parsed.json;
     }
     await endTurn(paths, {
       turnSequence,
@@ -229,6 +198,7 @@ async function persistTurn(
         kind: "answered",
         session: result.session,
         answer: result.answer,
+        ...(answerJson === undefined ? {} : { answerJson }),
         ...(result.historyId === undefined ? {} : { historyId: result.historyId }),
       },
       completedAt,
@@ -255,91 +225,6 @@ export async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: stri
   }
 }
 
-const DEFAULT_RUNTIME: Omit<BodyRuntime, "world"> = {
-  now: () => new Date().toISOString(),
-  spawnChild: spawnAkumaBody,
-  externalCommands: {},
-  spawnBody: spawnAkumaBody,
-};
-
-/**
- * The Body spawn executable is the waking process's own executable, resolved
- * at use time. There is no recorded path and no re-resolution chain: when the
- * file is genuinely gone the spawn fails honestly and the wake diagnostic
- * names the missing piece.
- */
-async function executableMissing(path: string): Promise<boolean> {
-  try {
-    return !(await stat(path)).isFile();
-  } catch {
-    return true;
-  }
-}
-
-async function frozenCwdMissing(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Diagnose an ENOENT Body spawn failure by checking the attempted executable
- * and the frozen execution cwd separately. The message names the genuinely
- * missing piece(s) with the kill-and-call-fresh remedy; a missing cwd likely
- * means its Contract was accepted and the worktree cleaned up. When both
- * pieces still exist the original failure passes through unchanged, as does
- * any non-ENOENT spawn failure.
- */
-async function diagnoseSpawnEnoent(
-  input: Readonly<{ argv: readonly string[]; cwd: string }>,
-  cause: unknown,
-): Promise<Error> {
-  const executable = input.argv[0] ?? process.execPath;
-  const cwd = input.cwd;
-  const [noExecutable, noCwd] = await Promise.all([executableMissing(executable), frozenCwdMissing(cwd)]);
-  if (!noExecutable && !noCwd) return cause instanceof Error ? cause : new Error(String(cause));
-  const missing: string[] = [];
-  if (noCwd) missing.push(`frozen execution directory ${cwd} no longer exists`);
-  if (noExecutable)
-    missing.push(
-      `waking process executable ${executable} no longer exists (the host likely removed the running process binary)`,
-    );
-  const remedies: string[] = [];
-  if (noCwd)
-    remedies.push(
-      "a missing execution directory likely means its Contract was accepted and the worktree cleaned up, with deliverables already in Git",
-    );
-  if (noExecutable)
-    remedies.push(
-      "a missing executable likely means the host removed the running process binary: re-enter with a fresh CLI process and retry",
-    );
-  const remedy = `kill this Akuma and call a fresh one; ${remedies.join("; ")}`;
-  const error = new Error(`Body spawn failed: ${missing.join(" and ")}; ${remedy}`, { cause });
-  (error as NodeJS.ErrnoException).code = "ENOENT";
-  return error;
-}
-
-export async function bodyProcessInput(launch: BodyLaunch, bodyModuleUrl = import.meta.url) {
-  const encoded = Buffer.from(JSON.stringify(launch), "utf8").toString("base64url");
-  const actorId = launch.seed?.id ?? (await readHeart(launch.paths)).soul?.id;
-  if (actorId === undefined) throw new Error("Akuma wake has no born soul");
-  const executable = process.execPath;
-  const source = bodyModuleUrl.endsWith(".ts");
-  const entry = fileURLToPath(new URL(source ? "../akuma-body.ts" : "../akuma-body.js", bodyModuleUrl));
-  return {
-    argv: source ? [executable, "--import", import.meta.resolve("tsx"), entry, encoded] : [executable, entry, encoded],
-    cwd: await launchCwd(launch),
-    env: akumaExecutionEnvironment(process.env, {
-      KEIYAKU_ACTOR_ID: actorId,
-      KEIYAKU_ACTOR_WORLD: worldRootForAkumaPaths(launch.paths),
-    }),
-    log: launch.paths.log,
-  };
-}
-
 type BodyExecution = Readonly<{
   launch: BodyLaunch;
   soul: Soul;
@@ -357,7 +242,9 @@ async function prepareBodyExecution(
   runtime: BodyRuntime,
   adapter: ProviderAdapter | undefined,
 ): Promise<Readonly<{ soul: Soul; created: boolean; adapter: ProviderAdapter }> | null> {
+  runtime.signal?.throwIfAborted();
   const birth = await bornSoul(launch, leash, runtime.now());
+  runtime.signal?.throwIfAborted();
   if (birth === null) return null;
   // The immutable caller edge refreshes after Soul durability, best-effort.
   if (birth.created) void recordAkumaLineage(runtime.world, birth.soul);
@@ -367,18 +254,14 @@ async function prepareBodyExecution(
     const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
     if (heart.pending.length === 0 && requests.length === 0) return null;
   }
+  runtime.signal?.throwIfAborted();
   const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
+  runtime.signal?.throwIfAborted();
   return { ...birth, adapter: selected };
 }
 
 async function runPreparedBody(input: BodyExecution): Promise<BodyTurnEnd> {
-  let pendingTellDisposition: BodyTurnEnd;
-  try {
-    if (await recoverBodyRequests(input)) pendingTellDisposition = await runBodyTurns(input);
-  } finally {
-    await input.supervisor.close();
-  }
-  return pendingTellDisposition;
+  return (await recoverBodyRequests(input)) ? await runBodyTurns(input) : undefined;
 }
 
 async function preserveBodyFailure(
@@ -433,6 +316,25 @@ type TurnStartedEmitter = Readonly<{
 type TurnOutcomeEmitter = Readonly<{
   emit(turnSequence: number): Promise<void>;
 }>;
+
+async function emitBodyBirth(launch: BodyLaunch, soul: Soul, world: WorldRoot, bodySequence: number): Promise<void> {
+  await emitPluginSignal(
+    {
+      world,
+      reportDiagnostic: (message) => {
+        void recordPluginDiagnostic(launch.paths, "birth", message);
+      },
+    },
+    {
+      kind: "akuma.born",
+      akumaId: soul.id,
+      bodySequence,
+      ...projectAkumaBirth(soul),
+      ...(launch.birthInitiator === undefined ? {} : { initiator: launch.birthInitiator }),
+      ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+    },
+  );
+}
 
 function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnStartedEmitter {
   const reportDiagnostic = (message: string): void => {
@@ -546,7 +448,7 @@ async function admitInitialCallTell(
         tell.id,
         {
           spawn: async (tellPaths) =>
-            await (runtime.spawnBody ?? spawnAkumaBody)({
+            await runtime.requestSpawn({
               paths: tellPaths,
               refuseIfHeld: true,
               ...(input.contractId === undefined ? {} : { completion: { contractId: input.contractId } }),
@@ -590,7 +492,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       adapter,
       bodySequence,
       supervisor,
-      runtimeSpawn: runtime.spawnChild ?? spawnAkumaBody,
+      runtimeSpawn: runtime.requestSpawn,
       admitInitialTell: async (admission) => await admitInitialCallTell(runtime, admission),
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
@@ -657,73 +559,31 @@ async function consumeProvenDisposition(paths: AkumaPaths, disposition: PendingT
   return await resolvePendingTellDisposition(paths, disposition.bodySequence, new Date().toISOString());
 }
 
-/**
- * Wait for Heart custody proof of the frozen Tell-id snapshot, or for the
- * spawned child to exit without that proof. Sequence growth, spawn resolution,
- * and an unqualified held leash never consume the disposition.
- */
-async function awaitDispositionCustody(
-  paths: AkumaPaths,
-  disposition: PendingTellDisposition,
-  child: OwnedProcess,
-  schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>,
-): Promise<TellWake | Readonly<{ kind: "proven" }>> {
-  for (;;) {
-    if (await consumeProvenDisposition(paths, disposition)) {
-      child.release();
-      return { kind: "proven" };
-    }
-    const timerController = new AbortController();
-    const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
-    let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
-    try {
-      winner = await Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
-    } catch (error) {
-      timerController.abort();
-      await timer.catch(() => undefined);
-      throw error;
-    }
-    if (winner.kind === "timer") continue;
-    timerController.abort();
-    await timer.catch(() => undefined);
-    if (await consumeProvenDisposition(paths, disposition)) {
-      child.release();
-      return { kind: "proven" };
-    }
-    return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
-  }
-}
-
 async function resolveDecidedPendingTellDisposition(
   paths: AkumaPaths,
   disposition: PendingTellDisposition,
-  spawn: (launch: BodyLaunch) => Promise<OwnedProcess>,
+  spawn: BodyLauncher,
 ): Promise<void> {
   try {
     if (await consumeProvenDisposition(paths, disposition)) return;
-    const wake = await awaitDispositionCustody(
-      paths,
-      disposition,
-      await spawn({ paths, refuseIfHeld: true, handoffFromBodySequence: disposition.bodySequence }),
-      abortableDelay,
+    const child = await spawn({ paths, refuseIfHeld: true, handoffFromBodySequence: disposition.bodySequence });
+    const result = await observeBodyLaunch(child, async () =>
+      (await consumeProvenDisposition(paths, disposition)) ? true : null,
     );
-    if (wake.kind === "proven") return;
+    if (result.kind === "observed") {
+      child.release();
+      return;
+    }
+    const wake = launchEndWake(result.end);
     // Predecessor still holds the leash: leave the Heart disposition open.
     if (wake.kind === "held") return;
-    await settleUndeliveredDisposition(
-      paths,
-      disposition,
-      wake.kind === "failed" ? wake.diagnostic : "successor custody unproven",
-    );
+    await settleUndeliveredDisposition(paths, disposition, wake.diagnostic);
   } catch (error) {
     await settleUndeliveredDisposition(paths, disposition, error);
   }
 }
 
-export async function handoffPendingTells(
-  paths: AkumaPaths,
-  spawn: (launch: BodyLaunch) => Promise<OwnedProcess> = spawnAkumaBody,
-): Promise<void> {
+export async function handoffPendingTells(paths: AkumaPaths, spawn: BodyLauncher): Promise<void> {
   const open = await readOpenPendingTellDisposition(paths);
   if (open !== null) {
     await resolveDecidedPendingTellDisposition(paths, open, spawn);
@@ -746,11 +606,10 @@ export async function handoffPendingTells(
 async function finishBody(
   paths: AkumaPaths,
   bodySequence: number | undefined,
-  decided: BodyTurnEnd,
   emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined,
   now: () => string,
-): Promise<Readonly<{ decided: PendingTellDisposition | null; notification?: Promise<void> }>> {
-  if (bodySequence === undefined || !(await heartExists(paths))) return { decided: null };
+): Promise<Readonly<{ notification?: Promise<void>; hung?: true }> | null> {
+  if (bodySequence === undefined || !(await heartExists(paths))) return null;
   const body = (await readHeart(paths)).latestBody;
   if (body?.sequence === bodySequence && (body.hung !== undefined || body.end === "broke-off"))
     await failOpenBoundTurns(paths, {
@@ -759,24 +618,24 @@ async function finishBody(
       completedAt: now(),
     });
   const finalBody = (await readHeart(paths)).latestBody;
-  let notification: Promise<void> | undefined;
-  if (emitBodyEnd && finalBody?.sequence === bodySequence && (finalBody.end || finalBody.hung))
-    notification = emitBodyEnd(
-      bodySequence,
-      finalBody.hung === undefined ? finalBody.end! : "hung",
-      finalBody.hung?.diagnostic,
-    );
-  return { decided: decided ?? null, ...(notification === undefined ? {} : { notification }) };
+  if (finalBody?.sequence !== bodySequence) return {};
+  const hung = finalBody.hung !== undefined;
+  const notification =
+    emitBodyEnd && (finalBody.end || hung)
+      ? emitBodyEnd(bodySequence, hung ? "hung" : finalBody.end!, finalBody.hung?.diagnostic)
+      : undefined;
+  return { ...(notification === undefined ? {} : { notification }), ...(hung ? { hung: true } : {}) };
 }
 
 export async function driveAkumaBody(
   launch: BodyLaunch,
-  adapter?: ProviderAdapter,
-  runtimeInput: Partial<BodyRuntime> = {},
-): Promise<"held" | void> {
+  adapter: ProviderAdapter | undefined,
+  runtimeInput: Pick<BodyRuntime, "spawn" | "requestSpawn"> & Partial<Omit<BodyRuntime, "spawn" | "requestSpawn">>,
+): Promise<"held" | "hung" | void> {
+  runtimeInput.signal?.throwIfAborted();
   const world = runtimeInput.world ?? (await World.at(worldRootForAkumaPaths(launch.paths)));
-  const runtime: BodyRuntime = { ...DEFAULT_RUNTIME, ...runtimeInput, world };
-  const acquired = await takeLeash(launch.paths, launch.refuseIfHeld);
+  const runtime: BodyRuntime = { now: () => new Date().toISOString(), externalCommands: {}, ...runtimeInput, world };
+  const acquired = await takeLeash(launch.paths, launch.refuseIfHeld, runtime.signal);
   if (acquired === "held") return "held";
   if (acquired === "absent") return;
   const leash = acquired;
@@ -784,6 +643,8 @@ export async function driveAkumaBody(
   let bodySequence: number | undefined;
   let emitBodyEnd: ReturnType<typeof bodyEndEmitter> | undefined;
   let emitTurnOutcome: TurnOutcomeEmitter | undefined;
+  let supervisor: BodySupervisor | undefined;
+  let hung = false;
   try {
     const prepared = await prepareBodyExecution(launch, leash, runtime, adapter);
     if (prepared === null) {
@@ -793,6 +654,7 @@ export async function driveAkumaBody(
     emitBodyEnd = bodyEndEmitter(launch, prepared.soul, world);
     const emitTurnStarted = turnStartedEmitter(launch, prepared.soul, world);
     emitTurnOutcome = turnOutcomeEmitter(launch, prepared.soul, world);
+    runtime.signal?.throwIfAborted();
     const body = await leash.recordBody(launch.paths, {
       leashTakenAt: runtime.now(),
       ...(launch.handoffFromBodySequence === undefined
@@ -800,25 +662,8 @@ export async function driveAkumaBody(
         : { handoffFromBodySequence: launch.handoffFromBodySequence }),
     });
     bodySequence = body.sequence;
-    if (prepared.created) {
-      await emitPluginSignal(
-        {
-          world,
-          reportDiagnostic: (message) => {
-            void recordPluginDiagnostic(launch.paths, "birth", message);
-          },
-        },
-        {
-          kind: "akuma.born",
-          akumaId: prepared.soul.id,
-          bodySequence: body.sequence,
-          ...projectAkumaBirth(prepared.soul),
-          ...(launch.birthInitiator === undefined ? {} : { initiator: launch.birthInitiator }),
-          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-        },
-      );
-    }
-    const supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash);
+    supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash, runtime.signal, runtime.forceSignal);
+    if (prepared.created) await emitBodyBirth(launch, prepared.soul, world, body.sequence);
     pendingTellDisposition = await runPreparedBody({
       launch,
       soul: prepared.soul,
@@ -839,50 +684,21 @@ export async function driveAkumaBody(
   } finally {
     let finished: Awaited<ReturnType<typeof finishBody>>;
     try {
-      finished = await finishBody(launch.paths, bodySequence, pendingTellDisposition, emitBodyEnd, runtime.now);
+      await supervisor?.close();
+      finished = await finishBody(launch.paths, bodySequence, emitBodyEnd, runtime.now);
     } finally {
       leash.release();
     }
-    if (finished.decided !== null)
-      await resolveDecidedPendingTellDisposition(launch.paths, finished.decided, runtime.spawnBody ?? spawnAkumaBody);
-    if (finished.notification !== undefined) await finished.notification;
+    if (finished !== null && pendingTellDisposition !== undefined)
+      await resolveDecidedPendingTellDisposition(launch.paths, pendingTellDisposition, runtime.spawn);
+    if (finished?.notification !== undefined) await finished.notification;
+    hung = finished?.hung === true;
   }
+  if (hung) return "hung";
 }
-
-export async function spawnAkumaBody(launch: BodyLaunch): Promise<OwnedProcess> {
-  const input = await bodyProcessInput(launch, import.meta.url);
-  try {
-    return await spawnDetachedProcess(input);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
-    throw await diagnoseSpawnEnoent(input, error);
-  }
-}
-
-export async function runAkumaBody(
-  launch: BodyLaunch,
-  world: WorldRoot,
-  externalCommands: Readonly<Record<string, ErasedRequestCommand>>,
-  executionAssociation?: ExecutionAssociationReader,
-): Promise<"held" | void> {
-  return await driveAkumaBody(launch, undefined, {
-    world,
-    externalCommands,
-    ...(executionAssociation === undefined ? {} : { executionAssociation }),
-  });
-}
-
-const DIRECT_TELL_WAKE: TellWakeRuntime = {
-  spawn: async (paths) => await spawnAkumaBody({ paths, refuseIfHeld: true }),
-  schedule: abortableDelay,
-};
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function preAdmissionDiagnostic(exit: DetachedProcessExit): string {
-  return exit.code === null ? `pre-admission signal ${exit.signal ?? "unknown"}` : `pre-admission exit ${exit.code}`;
 }
 
 async function settledWake(
@@ -898,54 +714,27 @@ async function settledWake(
   return null;
 }
 
-function failedChild(exit: DetachedProcessExit): Extract<TellWake, { kind: "failed" }> {
-  return {
-    kind: "failed",
-    diagnostic: preAdmissionDiagnostic(exit),
-    child: { code: exit.code, signal: exit.signal, log: exit.log },
-  };
-}
-
 async function awaitWake(
   paths: AkumaPaths,
   input: Readonly<{
     tellId?: string;
     after: number;
-    child: OwnedProcess;
+    child: LiveBodyLaunch;
     schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>;
     signal?: AbortSignal;
   }>,
 ): Promise<TellWake> {
   const { tellId, after, child, schedule, signal } = input;
   try {
-    for (;;) {
-      signal?.throwIfAborted();
-      const settled = await settledWake(paths, tellId, after);
-      if (settled !== null) {
-        child.release();
-        return settled;
-      }
-      const timerController = new AbortController();
-      const timer = schedule(WAKE_REREAD_MS, timerController.signal).then(() => ({ kind: "timer" as const }));
-      let winner: Awaited<typeof timer> | { kind: "exited"; exit: DetachedProcessExit };
-      try {
-        const waited = Promise.race([child.exited.then((exit) => ({ kind: "exited" as const, exit })), timer]);
-        winner = signal === undefined ? await waited : await abortable(waited, signal);
-      } catch (error) {
-        timerController.abort();
-        await timer.catch(() => undefined);
-        throw error;
-      }
-      if (winner.kind === "timer") continue;
-      timerController.abort();
-      await timer.catch(() => undefined);
-      const final = await settledWake(paths, tellId, after);
-      if (final !== null) {
-        child.release();
-        return final;
-      }
-      return winner.exit.code === LEASH_HELD_EXIT ? { kind: "held" } : failedChild(winner.exit);
-    }
+    const result = await observeBodyLaunch(
+      child,
+      async () => await settledWake(paths, tellId, after),
+      schedule,
+      signal,
+    );
+    if (result.kind === "completed") return launchEndWake(result.end);
+    child.release();
+    return result.value;
   } catch (error) {
     child.release();
     throw error;
@@ -979,7 +768,7 @@ async function wakePendingTells(
 export async function wakeRecordedTell(
   paths: AkumaPaths,
   tellId: string,
-  runtime: TellWakeRuntime = DIRECT_TELL_WAKE,
+  runtime: TellWakeRuntime,
   signal?: AbortSignal,
 ): Promise<TellResult> {
   const wake = (await wakePendingTells(paths, tellId, runtime, signal))!;

@@ -1,4 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { registerAkumaTools } from "./akuma-tools.ts";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
 
@@ -37,6 +38,7 @@ function overlay(lines: readonly string[], theme: Theme, done: () => void) {
 }
 
 export default function keiyakuExtension(pi: ExtensionAPI): void {
+  registerAkumaTools(pi);
   pi.registerCommand("keiyaku", {
     description: "Open the Kanshi world status",
     handler: async (_args, ctx) => {

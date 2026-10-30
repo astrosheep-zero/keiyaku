@@ -1,4 +1,4 @@
-import { abortableDelay } from "./abort.js";
+import { abortable, abortableDelay } from "./abort.js";
 /* eslint-disable max-lines-per-function -- Turn setup and consumption each preserve one ordered lifecycle transaction. */
 import {
   appendActivity,
@@ -35,7 +35,7 @@ import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "./ca
 import { BodyRequestPump } from "./request-serve.js";
 import { composeRequestCommands, type ErasedRequestCommand } from "./request-wire.js";
 import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
-import type { OwnedProcess } from "../runtime/proc/run.js";
+import type { LiveBodyLaunch } from "./body-launch.js";
 
 type EffectSerializer = {
   <T>(effect: () => Promise<T> | T): Promise<T>;
@@ -101,7 +101,7 @@ export type DriveTurnInput = Readonly<{
   initiator?: string;
   schemaJson?: string;
   supervisor: BodySupervisor;
-  runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<OwnedProcess | void>;
+  runtimeSpawn(launch: AkumaCallRequestChildLaunch): Promise<LiveBodyLaunch | void>;
   admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
   world: import("../world.js").WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
@@ -233,8 +233,9 @@ function startProviderAttempt(
 }
 
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
+  if (input.supervisor.signal.aborted) return { kind: "stopped" };
   const recipe = await turnRecipe(input.paths, input.soul);
-  const { cwd, options, session } = recipe;
+  const { session } = recipe;
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
   const runtimeInstructions = keiyakuExecutionInstructions(
     input.soul,
@@ -258,6 +259,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     });
   }
   await input.turnStarted.emit(turn.sequence);
+  if (input.supervisor.signal.aborted) return { kind: "stopped" };
   const { world, paths, soul: parent, runtimeSpawn: spawn, externalCommands, admitInitialTell } = input;
   const commands = composeRequestCommands(
     akumaCallRequestCommands({ world, paths, parent, spawn, admitInitialTell }),
@@ -271,6 +273,26 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     commands,
     signal: input.supervisor.signal,
   });
+  return await establishTurnDrive(input, turn.sequence, requests, {
+    ...recipe,
+    boundTells,
+    ...(schemaJson === undefined ? {} : { schemaJson }),
+    ...(runtimeInstructions === undefined ? {} : { runtimeInstructions }),
+  });
+}
+
+async function establishTurnDrive(
+  input: DriveTurnInput,
+  turnSequence: number,
+  requests: BodyRequestPump,
+  recipe: Awaited<ReturnType<typeof turnRecipe>> &
+    Readonly<{
+      boundTells: readonly TellFact[];
+      schemaJson?: string;
+      runtimeInstructions?: string;
+    }>,
+): Promise<StartTurnResult> {
+  const { cwd, options, session, boundTells, schemaJson, runtimeInstructions } = recipe;
   const driveController = new AbortController();
   const cancelDrive = (): void => {
     if (!driveController.signal.aborted) driveController.abort(input.supervisor.signal.reason);
@@ -285,16 +307,19 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     tells: boundTells,
     requests,
     signal: driveController.signal,
-    turnSequence: turn.sequence,
+    turnSequence,
     schemaJson,
     runtimeInstructions,
   });
   const custodyFailure = observeFailure(attempt.closed);
   try {
-    const selected = await Promise.race([attempt.result, requests.failure, custodyFailure]);
+    const selected = await abortable(
+      Promise.race([attempt.result, requests.failure, custodyFailure]),
+      input.supervisor.signal,
+    );
     if (input.supervisor.signal.aborted) {
       try {
-        const retirement = await retireProviderCustody(input, turn.sequence, attempt);
+        const retirement = await retireProviderCustody(input, turnSequence, attempt);
         await requests.close();
         if (retirement.kind === "hung") return retirement;
       } finally {
@@ -308,7 +333,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
         boundTells.map((tell) => ({
           tellId: tell.id,
           route: "launch" as const,
-          turnSequence: turn.sequence,
+          turnSequence,
           fence: selected.admission.fence,
           deliveredAt: input.now(),
         })),
@@ -318,7 +343,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       () => undefined,
     );
     return {
-      turnSequence: turn.sequence,
+      turnSequence,
       attempt,
       drive: selected,
       requests,
@@ -328,7 +353,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       ...(session === undefined ? {} : { resume: session }),
     };
   } catch (error) {
-    const retirement = await retireProviderCustody(input, turn.sequence, attempt);
+    const retirement = await retireProviderCustody(input, turnSequence, attempt);
     if (retirement.kind === "hung") {
       try {
         await requests.close();
@@ -337,7 +362,7 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
       }
       return retirement;
     }
-    return await failedTurnSetup(input, turn.sequence, requests, cancelDrive, error);
+    return await failedTurnSetup(input, turnSequence, requests, cancelDrive, error);
   }
 }
 
@@ -366,7 +391,7 @@ async function retireProviderCustody(
         error: new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`),
       })),
     ]);
-  let outcome = await dispose(attempt.abort);
+  let outcome = await dispose(input.supervisor.forceSignal?.aborted ? attempt.forceDispose : attempt.abort);
   if (outcome.kind === "retired") return outcome;
   outcome = await dispose(attempt.forceDispose);
   if (outcome.kind === "retired") return outcome;

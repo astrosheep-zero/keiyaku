@@ -224,8 +224,13 @@ admitted model and effort choices before the first prompt of each new or
 resumed native session. Missing choices and unconfirmed selections fail that
 attempt rather than silently running with the agent's default.
 
-Each drive receives the one Body Request channel and its optional stable entry
-as provider transport setup. Persistent native environments may retain the
+Each drive receives the Body's exact execution actor and World independently of
+the host process environment, along with the one Body Request channel and its
+optional stable entry as provider transport setup. Adapters supply those explicit
+coordinates to their tool children without mutating process-global identity or
+working directory. A shared host's outer attribution cannot identify a Body's
+work. Native services and extension runtimes remain attempt-scoped; arbitrary
+extensions that consult or mutate globals are not isolated by in-process hosting. Persistent native environments may retain the
 stable entry under [akuma-requests.md](akuma-requests.md); other providers retain
 the direct channel. This does not alter Library routing or permit recursive
 service. New provider

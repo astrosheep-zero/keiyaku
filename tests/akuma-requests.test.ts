@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -32,7 +33,7 @@ import {
 import { AkumaBodyRequestError, bodyRequestExecutionContext, executionForEnvironment } from "../src/akuma/requests.js";
 import { BodyRequestPump, clearBodyRequestTransport, settleBodyRequests } from "../src/akuma/request-serve.js";
 import { World } from "../src/world.js";
-import type { OwnedProcess } from "../src/runtime/proc/run.js";
+import type { LiveBodyLaunch, BodyLaunchEnd } from "../src/akuma/body-launch.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 
 async function settlePromptFreeChild(launch: AkumaCallRequestChildLaunch, createdAt: string): Promise<void> {
@@ -68,7 +69,7 @@ async function fixture(allowed?: Soul["allowed"]) {
 function publishWorker(
   root: string,
   signal: AbortSignal | undefined,
-  launch: (allocated: Awaited<ReturnType<typeof allocatedHeart>>) => Promise<OwnedProcess | void>,
+  launch: (allocated: Awaited<ReturnType<typeof allocatedHeart>>) => Promise<LiveBodyLaunch | void>,
 ) {
   return publishAkuma({ worldPath: root, archetype: "worker", ...(signal === undefined ? {} : { signal }), launch });
 }
@@ -145,10 +146,9 @@ test("cancelled publication returns born when Soul appears during termination be
     const publication = publishWorker(root, controller.signal, async (allocated) => {
         childPaths = allocated.paths;
         const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-        const child: OwnedProcess = {
-          pid: 4246,
-          exited: Promise.resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
-          terminate: async () => {
+        const child: LiveBodyLaunch = {
+          completed: Promise.resolve({ diagnostic: "fixture Body canceled" }),
+          cancel: async () => {
             terminateCount += 1;
             await leash.birth(allocated.paths, {
               id: allocated.id,
@@ -191,7 +191,7 @@ test("cancelled publication waits for an already-born child to exit before relea
   const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-born-pending-exit-"));
   const controller = new AbortController();
   const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
-  const { promise: exited, resolve: resolveExit } = promiseBarrier<Awaited<OwnedProcess["exited"]>>();
+  const { promise: completed, resolve: resolveExit } = promiseBarrier<BodyLaunchEnd>();
   let terminated = false;
   let released = false;
   const publication = publishWorker(root, controller.signal, async (allocated) => {
@@ -207,10 +207,9 @@ test("cancelled publication waits for an already-born child to exit before relea
         createdAt: "2026-08-26T00:00:00.000Z",
       });
       leash.release();
-      const child: OwnedProcess = {
-        pid: 4249,
-        exited,
-        terminate: async () => {
+      const child: LiveBodyLaunch = {
+        completed,
+        cancel: async () => {
           terminated = true;
         },
         release: () => {
@@ -225,7 +224,7 @@ test("cancelled publication waits for an already-born child to exit before relea
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(terminated, false);
   assert.equal(released, false);
-  resolveExit({ code: 0, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+  resolveExit({ diagnostic: "fixture Body completed" });
   await publication;
   assert.equal(released, true);
 });
@@ -241,14 +240,9 @@ test("cancelled publication terminates its child, observes Seal, and then reject
   const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-      const child: OwnedProcess = {
-        pid: 4247,
-        exited: Promise.resolve({
-          code: null,
-          signal: "SIGTERM",
-          log: { path: "/tmp/request-child.log", from: 0, to: 0 },
-        }),
-        terminate: async () => {
+      const child: LiveBodyLaunch = {
+        completed: Promise.resolve({ diagnostic: "fixture Body canceled" }),
+        cancel: async () => {
           terminateCount += 1;
           leash.release();
         },
@@ -292,17 +286,15 @@ test("cancelled publication remains pending with child custody until termination
   const { promise: launchStarted, resolve: launched } = promiseBarrier<void>();
   const { promise: termination, resolve: confirmTermination } = promiseBarrier<void>();
   let confirmExit!: () => void;
-  const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-    confirmExit = () =>
-      resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+  const completed = new Promise<BodyLaunchEnd>((resolve) => {
+    confirmExit = () => resolve({ diagnostic: "fixture Body canceled" });
   });
   let releaseCount = 0;
   const publication = publishWorker(root, controller.signal, async (allocated) => {
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-      const child: OwnedProcess = {
-        pid: 4248,
-        exited,
-        terminate: async () => {
+      const child: LiveBodyLaunch = {
+        completed,
+        cancel: async () => {
           await termination;
           leash.release();
         },
@@ -442,13 +434,12 @@ test("publication releases process custody after bounded observation of unsettle
         held = (await HeldAkumaLeash.try(allocated.paths))!;
         started();
         return {
-          pid: 4253,
-          exited: new Promise<Awaited<OwnedProcess["exited"]>>(() => {}),
-          terminate: async () => await new Promise<void>(() => {}),
+          completed: new Promise<BodyLaunchEnd>(() => {}),
+          cancel: async () => await new Promise<void>(() => {}),
           release: () => {
             released = true;
           },
-        } satisfies OwnedProcess;
+        } satisfies LiveBodyLaunch;
     });
     await launchStarted;
     controller.abort(reason);
@@ -574,7 +565,7 @@ test("publication preserves a Body failure that occurs before birth", async (con
   await assert.rejects(
     publishWorker(root, undefined, async (allocated) => {
         childPaths = allocated.paths;
-        await assert.rejects(driveAkumaBody({ paths: allocated.paths }), /Akuma wake has no born soul/u);
+        await assert.rejects(driveAkumaBody({ paths: allocated.paths }, undefined, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch }), /Akuma wake has no born soul/u);
         assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
     }),
     /Akuma wake has no born soul/u,
@@ -589,10 +580,9 @@ test("publication observes an exited request child before Soul and releases with
   const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-exit-"));
   let released = false;
   let terminated = false;
-  const child: OwnedProcess = {
-    pid: 4242,
-    exited: Promise.resolve({ code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } }),
-    terminate: async () => {
+  const child: LiveBodyLaunch = {
+    completed: Promise.resolve({ diagnostic: "neutral launch ended before Soul" }),
+    cancel: async () => {
       terminated = true;
     },
     release: () => {
@@ -602,7 +592,7 @@ test("publication observes an exited request child before Soul and releases with
   const started = performance.now();
   await assert.rejects(
     publishAkuma({ worldPath: root, archetype: "worker", launch: async () => child }),
-    /pre-admission exit 7/u,
+    /neutral launch ended before Soul/u,
   );
   assert.ok(performance.now() - started < 1_000);
   assert.equal(released, true);
@@ -612,14 +602,13 @@ test("publication observes an exited request child before Soul and releases with
 test("publication prefers an already-settled parent exit over a pre-written non-exit Seal", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-publication-exit-prewritten-seal-"));
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
-  let resolveExit!: (exit: { code: number; signal: null; log: { path: string; from: number; to: number } }) => void;
-  const exit = { code: 7, signal: null, log: { path: "/tmp/request-child.log", from: 0, to: 0 } } as const;
-  const child: OwnedProcess = {
-    pid: 4245,
-    exited: new Promise((resolve) => {
+  let resolveExit!: (end: BodyLaunchEnd) => void;
+  const exit = { diagnostic: "neutral launch ended before Soul" };
+  const child: LiveBodyLaunch = {
+    completed: new Promise((resolve) => {
       resolveExit = resolve;
     }),
-    terminate: async () => {},
+    cancel: async () => {},
     release: () => {},
   };
   await assert.rejects(
@@ -631,7 +620,7 @@ test("publication prefers an already-settled parent exit over a pre-written non-
         resolveExit(exit);
         return child;
     }),
-    (error: unknown) => error instanceof Error && error.message === "pre-admission exit 7",
+    (error: unknown) => error instanceof Error && error.message === "neutral launch ended before Soul",
   );
   assert.equal((await readSeal(childPaths!))?.evidence, "body failure");
 });
@@ -643,18 +632,16 @@ test("cancelled publication closes a live child before releasing its custody", a
   let released = false;
   let terminated = false;
   let confirmExit!: () => void;
-  const exited = new Promise<Awaited<OwnedProcess["exited"]>>((resolve) => {
-    confirmExit = () =>
-      resolve({ code: null, signal: "SIGTERM", log: { path: "/tmp/request-child.log", from: 0, to: 0 } });
+  const completed = new Promise<BodyLaunchEnd>((resolve) => {
+    confirmExit = () => resolve({ diagnostic: "fixture Body canceled" });
   });
   let childPaths: Awaited<ReturnType<typeof allocateAkumaDirectory>>["paths"] | undefined;
   const publication = publishWorker(root, controller.signal, async (allocated) => {
       childPaths = allocated.paths;
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-      const child: OwnedProcess = {
-        pid: 4243,
-        exited,
-        terminate: async () => {
+      const child: LiveBodyLaunch = {
+        completed,
+        cancel: async () => {
           terminated = true;
           leash.release();
           confirmExit();
@@ -686,20 +673,15 @@ test("cancelled publication records a termination rejection and still seals befo
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       started();
       return {
-        pid: 4250,
-        exited: Promise.resolve({
-          code: null,
-          signal: "SIGTERM",
-          log: { path: "/tmp/request-child.log", from: 0, to: 0 },
-        }),
-        terminate: async () => {
+        completed: Promise.resolve({ diagnostic: "fixture Body canceled" }),
+        cancel: async () => {
           leash.release();
           throw new Error("terminate denied");
         },
         release: () => {
           released = true;
         },
-      } satisfies OwnedProcess;
+      } satisfies LiveBodyLaunch;
   });
   await launchStarted;
   controller.abort(reason);
@@ -720,15 +702,14 @@ test("cancelled publication records an exit rejection and still seals before rel
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       started();
       return {
-        pid: 4251,
-        exited: Promise.reject(new Error("exit evidence unavailable")),
-        terminate: async () => {
+        completed: Promise.reject(new Error("exit evidence unavailable")),
+        cancel: async () => {
           leash.release();
         },
         release: () => {
           released = true;
         },
-      } satisfies OwnedProcess;
+      } satisfies LiveBodyLaunch;
   });
   await launchStarted;
   controller.abort(reason);

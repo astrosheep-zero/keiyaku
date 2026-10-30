@@ -2,11 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
       "@astrosheep/keiyaku/plugin": ["src/plugin/public.ts"]
     }
   },
-  "include": ["tests/**/*.test.ts", "tests/**/*.e2e.ts"],
+  "include": ["tests/**/*.test.ts", "tests/**/*.e2e.ts", "plugins/pi/**/*.ts"],
   "exclude": []
 }

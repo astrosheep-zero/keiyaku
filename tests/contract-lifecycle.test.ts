@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -13,7 +14,7 @@ import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { renderReconcile } from "../src/cli/render/reconcile.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import { externalRequestCommandsFor } from "../src/akuma-body.js";
+import { externalRequestCommandsFor } from "../src/body-requests.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
 import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
@@ -74,7 +75,7 @@ function assertRuntimeStop(value: unknown): void {
 async function forwardedDeliverChannel(repositoryRoot: string) {
   const world = await World.at(repositoryRoot);
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "f0d0a001" });
-  const { commands } = await externalRequestCommandsFor({ paths: allocated.paths }, {});
+  const { commands } = await externalRequestCommandsFor({ paths: allocated.paths }, {}, noBodyLaunch);
   const command = commands["contract.deliver"];
   if (command === undefined || command.completion !== "service")
     throw new Error("contract.deliver is not a service request command");
@@ -145,7 +146,7 @@ describe("review actor testimony", () => {
       allowed: ["contract.review"],
       createdAt: "2026-09-28T10:00:00.000Z",
     });
-    const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {});
+    const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {}, noBodyLaunch);
     const pump = await BodyRequestPump.open({
       paths: parent.paths,
       allowed: parent.soul.allowed,

@@ -13,26 +13,41 @@ export class BodySupervisor {
   private readonly observer: Promise<void>;
   private waiter: ((snapshot: BodyControlSnapshot) => void) | undefined;
   private observation: BodyControlSnapshot;
-  private stopping?: "control" | "heart-gone";
+  private stopping?: "control" | "heart-gone" | "launch";
+  private readonly cancelLaunch = (): void => this.cancel("launch");
 
   private constructor(
-    private readonly paths: AkumaPaths,
-    private readonly bodySequence: number,
-    private readonly leash: HeldAkumaLeash,
+    private readonly body: Readonly<{ paths: AkumaPaths; sequence: number; leash: HeldAkumaLeash }>,
     private readonly reader: ReturnType<typeof createBodyHeartReader>,
     observation: BodyControlSnapshot,
+    private readonly launchSignal?: AbortSignal,
+    readonly forceSignal?: AbortSignal,
   ) {
     this.signal = this.controller.signal;
     this.observation = observation;
+    launchSignal?.addEventListener("abort", this.cancelLaunch, { once: true });
+    if (launchSignal?.aborted) this.cancelLaunch();
     this.observer = this.observe();
   }
 
-  static async open(paths: AkumaPaths, bodySequence: number, leash: HeldAkumaLeash): Promise<BodySupervisor> {
+  static async open(
+    paths: AkumaPaths,
+    bodySequence: number,
+    leash: HeldAkumaLeash,
+    signal?: AbortSignal,
+    forceSignal?: AbortSignal,
+  ): Promise<BodySupervisor> {
     const reader = createBodyHeartReader(paths);
-    return new BodySupervisor(paths, bodySequence, leash, reader, await reader.read());
+    return new BodySupervisor(
+      { paths, sequence: bodySequence, leash },
+      reader,
+      await reader.read(),
+      signal,
+      forceSignal,
+    );
   }
 
-  get reason(): "control" | "heart-gone" | undefined {
+  get reason(): "control" | "heart-gone" | "launch" | undefined {
     return this.stopping;
   }
   current(): BodyControlSnapshot {
@@ -40,7 +55,7 @@ export class BodySupervisor {
   }
 
   async recordHung(diagnostic: string, at: string): Promise<void> {
-    await this.leash.recordBodyHung(this.paths, { sequence: this.bodySequence, diagnostic, at });
+    await this.body.leash.recordBodyHung(this.body.paths, { sequence: this.body.sequence, diagnostic, at });
   }
 
   async refresh(): Promise<BodyControlSnapshot> {
@@ -60,18 +75,17 @@ export class BodySupervisor {
     });
   }
 
-  cancel(reason: "control" | "heart-gone"): void {
+  cancel(reason: "control" | "heart-gone" | "launch"): void {
     if (this.stopping !== undefined) return;
     this.stopping = reason;
-    this.controller.abort(
-      new Error(reason === "control" ? "Akuma Body interrupted by durable control" : "Akuma Heart disappeared"),
-    );
+    this.controller.abort(new Error(reason === "heart-gone" ? "Akuma Heart disappeared" : "Akuma Body interrupted"));
     this.waiter?.(this.observation);
     this.waiter = undefined;
   }
 
   async close(): Promise<void> {
     this.finished.abort();
+    this.launchSignal?.removeEventListener("abort", this.cancelLaunch);
     try {
       await this.observer;
     } finally {
@@ -84,7 +98,7 @@ export class BodySupervisor {
     for (;;) {
       const snapshot = this.observation;
       if (snapshot.soul === null) return this.cancel("heart-gone");
-      if (snapshot.stop?.bodySequence === this.bodySequence || snapshot.pause?.bodySequence === this.bodySequence) {
+      if (snapshot.stop?.bodySequence === this.body.sequence || snapshot.pause?.bodySequence === this.body.sequence) {
         return this.cancel("control");
       }
       try {

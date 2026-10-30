@@ -2169,15 +2169,22 @@ test("Pi returns turn-ended for an unmatched steer only after native prompt sett
   assert.equal(fake.seen.agentListeners, 0);
 });
 
-test("Pi disposal releases native live tell waiters", async () => {
-  const fake = fakePiSdk({ promptNeverSettles: true });
+test("Pi disposal releases live tell waiters but closure still waits for the native prompt", async () => {
+  const fake = fakePiSdk({ waitForRelease: true });
   const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
     freshInput("work", { cwd: tmpdir() }),
   );
   const drive = await attempt.result;
   const pending = drive.tell!({ id: "pending", text: "steer" });
-  await attempt.forceDispose();
+  const disposing = attempt.forceDispose();
   assert.deepEqual(await pending, { kind: "turn-ended" });
+  let closed = false;
+  void attempt.closed.then(() => { closed = true; });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(fake.seen.disposed, 1);
+  assert.equal(closed, false, "logical dispose is not native execution retirement");
+  fake.seen.finishPrompt();
+  await disposing;
   await attempt.closed;
   assert.equal(fake.seen.agentListeners, 0);
 });
@@ -2343,7 +2350,7 @@ test("Pi appends JSON Schema text when native structured output is unavailable",
 
 test("Pi attempt disposal closes events and completion before its sole closed proof", async () => {
   for (const dispose of ["abort", "forceDispose"] as const) {
-    const fake = fakePiSdk({ promptNeverSettles: true });
+    const fake = fakePiSdk({ waitForRelease: true });
     const attempt = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk).start(
       freshInput("wait", { cwd: "/work" }),
     );
@@ -2353,12 +2360,14 @@ test("Pi attempt disposal closes events and completion before its sole closed pr
       for await (const event of drive.events) events.push(event);
     })();
 
-    await attempt[dispose]();
+    const disposing = attempt[dispose]();
     assert.deepEqual(await drive.completion, {
       kind: "failed",
       diagnostic: dispose === "abort" ? "Pi session aborted" : "Pi session force-disposed",
     });
     await draining;
+    fake.seen.finishPrompt();
+    await disposing;
     await attempt.closed;
     assert.deepEqual(events, [
       { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },

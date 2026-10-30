@@ -1,3 +1,7 @@
+import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
+import { akumasWithLauncher } from "../src/library/akumas.js";
+import { localExecutionContext } from "../src/akuma/requests.js";
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,7 +19,7 @@ import { selectionRequestCommands } from "../src/akuma/selection-request.js";
 import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
 import { akumasWithExecution } from "../src/library/akumas.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
-import { answering, bornWorld, fixtureRuntime, installTellRuntime, settleFixtureBodies } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
@@ -276,12 +280,12 @@ test("forwarded wait and ask have exactly one requesting observer", { timeout: 1
   t.after(() => parent.leash.release());
   const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
   const bodies: Promise<unknown>[] = [];
-  const restore = installTellRuntime(fixtureRuntime(bodies, new Map([
+  const spawn = fixtureLauncher(bodies, new Map([
     [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-  ])));
+  ]));
   const pump = await BodyRequestPump.open({
     paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT,
-    commands: selectionRequestCommands(selectionRequestPort(world, (message) => { diagnostics.push(message); })), signal: t.signal,
+    commands: selectionRequestCommands(selectionRequestPort(world, spawn)), signal: t.signal,
   });
   try {
     const submittingDiagnostics: string[] = [];
@@ -305,7 +309,6 @@ test("forwarded wait and ask have exactly one requesting observer", { timeout: 1
     assert.deepEqual(diagnostics, [], "the serving executor captures identity without plugin emission");
     assert.equal(submittingDiagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
   } finally {
-    restore();
     await settleFixtureBodies(bodies);
     await pump.close();
   }
@@ -350,7 +353,7 @@ test("forwarded wait acknowledges a real Square notice using the requester's loc
   const diagnostics: string[] = [];
   const pump = await BodyRequestPump.open({
     paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
-    commands: selectionRequestCommands(selectionRequestPort(world, (message) => diagnostics.push(message))),
+    commands: selectionRequestCommands(selectionRequestPort(world, noBodyLaunch)),
   });
   try {
     const waited = await akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }))
@@ -370,20 +373,20 @@ test("ask retains the observed outcome through schema and plugin failure using i
   const peerRecorded = recordingPlugin(peer.world, true);
   const diagnostics: string[] = [];
   const bodies: Promise<unknown>[] = [];
-  const restore = installTellRuntime(fixtureRuntime(bodies, new Map([
+  const spawn = fixtureLauncher(bodies, new Map([
     [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
     [peer.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-  ])));
+  ]));
   try {
     const schema = Schema.json({ type: "object" }, () => { throw new Error("decode refused"); });
-    const result = await Akuma.select(source.world, source.allocated.id, {
+    const result = await akumaWithLauncher(source.world, source.allocated.id, spawn, {
       reportDiagnostic: (message) => { diagnostics.push(message); },
     }).ask("work", { schema, signal: t.signal });
     assert.equal(result.observation.reason, "invalid-output");
     const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
     assert.ok(tell?.binding);
     assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
-    const pluralResult = await Akumas.of(peer.world, {
+    const pluralResult = await akumasWithLauncher(peer.world, localExecutionContext(), spawn, {
       reportDiagnostic: (message) => { diagnostics.push(message); },
     }).ask({ akuma: peer.allocated.id, body: "work", schema, signal: t.signal });
     assert.equal(pluralResult.observation.reason, "invalid-output");
@@ -392,7 +395,6 @@ test("ask retains the observed outcome through schema and plugin failure using i
     assert.deepEqual(peerRecorded.signals(), [signal(peer.allocated.id, peerTell.binding.turnSequence)]);
     assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
   } finally {
-    restore();
     await settleFixtureBodies(bodies);
   }
 });

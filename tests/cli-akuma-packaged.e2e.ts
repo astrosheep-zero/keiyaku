@@ -1,3 +1,4 @@
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { deferred as promiseBarrier, removeTempDirectory, restoreEnvironmentValues } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -495,7 +496,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     },
   };
   const spawnChild = async (launch: AkumaCallRequestChildLaunch): Promise<void> => {
-    await driveAkumaBody(launch, provider, { now: () => "2026-08-15T00:00:02.000Z" });
+    await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-15T00:00:02.000Z" });
   };
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
@@ -520,7 +521,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
             now: () => "2026-08-15T00:00:03.000Z",
             wake: async (tell) => {
               const paths = pathsForAkuId(world, id);
-              await driveAkumaBody({ paths, refuseIfHeld: true }, provider, {
+              await driveAkumaBody({ paths, refuseIfHeld: true }, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
                 now: () => "2026-08-15T00:00:04.000Z",
               });
               const delivered = await readTell(paths, tell.id);
