@@ -77,49 +77,36 @@ It reuses or reattaches that session's own standing seat, joins only an absent
 one, and never revives a finished participant or takes over a foreign seat.
 This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
-When Square reports a new automatic join, the shared notification identity
-addresses that participant with its actual Square path and name using ordinary
-wake-capable delivery. Reuse and reattachment of standing are silent. Notice
-failure is diagnostic only and neither reverses standing nor gates admission.
-Birth observation remains produced by the child's Body at the established birth
-boundary, but its Square record is authored by the shared notification identity,
-not by the initiator. The record visibly distinguishes the explicit initiator,
-the born Akuma, and any caller attribution while addressing no one: a birth
-never wakes or interrupts the submitting session. Without an initiator it is
-silent. No initiating-session ownership or wake route is borrowed by the child.
-Turn outcomes and abnormal Body endings are
-also not expressed by the subject Akuma: one World-local notification participant
-authors every such notice for the World, so the notice no longer depends on a
-worker participant that may have already stepped out. That author is a logical
-integration identity with a stable owner of its own, not a harness session
-for the producing process: it registers no recipient wake route and borrows no
-ambient session ownership. Its explicit logical execution identity joins through
-Square's ordinary public boundary before each send, reusing active standing and
-receiving an ordinary rejoin after it has stepped out. The artifact alone owns
-that custody; Keiyaku never claims or releases Square ownership storage directly.
-It never takes over a foreign claim and never marks itself done after a send.
-Turn outcomes address every participant carried by the
-Turn's signal, never a caller captured from the producing process. The opening
-initiator remains the owner, not the entire audience. No participants produces
-an unaddressed outcome rather than a fallback mention.
-Committed Akuma progress reports use the same notification identity and
-wake-capable delivery, addressed only to the report's opening Turn initiator.
+Identity preparation is silent, including new joins and reattachment. Birth
+observation remains a core signal, but Square sends no birth notice: birth has
+no notification audience, and an absent audience never authorizes a broadcast
+or an inferred recipient. No initiating-session ownership or wake route is
+borrowed by the child.
+Turn outcomes, abnormal Body endings, and progress reports use direct messaging
+from one shared sender label. That label is not a participant: sending neither
+joins nor acquires a seat, owner, or wake route, and does not depend on the
+subject Akuma's standing. Square alone owns message and recipient custody.
+Turn outcomes address every participant carried by the Turn's signal, never a
+caller captured from the producing process. The opening initiator remains the
+owner, not the entire audience. An absent or empty audience is silent rather
+than broadcast or addressed through a fallback identity.
+Committed Akuma progress reports use the same sender and wake-capable delivery,
+addressed only to the report's opening Turn initiator.
 The notice carries the report's own content and correlation; it does not read
 the latest Turn or substitute an ambient caller. A report without an initiator
 is silent. Notice delivery is best effort and does not alter report truth.
 Local outcome observation acknowledges notices only for a current participant
 held by the observing execution. An explicit name may select among that
 execution's established voices but never grants another execution's authority.
-A notice is recognized through the shared author or
-the former per-Akuma author, and the subject Akuma's own standing is irrelevant.
+A notice is recognized by its structured outcome identity, and the subject
+Akuma's own standing is irrelevant.
 The operation never computes a substitute identity, joins a participant, or
 creates a route merely to acknowledge; missing standing, notice, or availability
 to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
 notice is never consumed. An explicitly attributed observer never acquires
 another execution's identity or wake route; a name alone cannot delegate
 acknowledgment authority.
-Outcome acknowledgment and wait deferral do not consume progress reports or
-automatic join notices.
+Outcome acknowledgment and wait deferral do not consume progress reports.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention
@@ -270,10 +257,12 @@ grants no permission and changes no public operation result.
 Square may acknowledge only already-existing outcome notices corresponding to
 the observed Akuma and exact retained outcome, for that observer alone. A
 successful Turn notice carries the exact committed answer, while failed-Turn and
-abnormal-Body notices keep their human-readable markers. Current Turn identity
-comes from structured metadata, independent of presentation prose. Historical
-body-only Turn notices remain recognizable through a separate legacy path;
-legacy recognition never overrides malformed or mismatched metadata.
+abnormal-Body notices keep their human-readable markers. Turn identity comes
+only from structured metadata, independent of presentation prose. The receiver
+queries its pending notices without consuming them, then acknowledges only the
+exact returned identities. It neither scans the archive
+nor interprets historical prose. Matching pages are drained until no pending
+notice remains; acknowledgment never extends beyond the exact queried IDs.
 Explicit observer attribution takes precedence over the observing execution's
 own seat selection and never borrows the producing session's ownership or route.
 Square owns the

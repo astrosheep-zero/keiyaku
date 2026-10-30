@@ -1,18 +1,10 @@
-import { Square, SquareError, harnessOwner, selectOwnSeat, } from "@astrosheep/square";
+import { Square, harnessOwner, selectOwnSeat, } from "@astrosheep/square";
 import { join } from "node:path";
 const DUPLICATE_HINT = "ignore if you have already seen this.";
 const NOTICE_METADATA_KEY = "keiyaku";
 const TURN_OUTCOME_KIND = "akuma.turn-outcome";
 const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
-/**
- * One World-local notification participant authors every committed outcome and
- * abnormal Body ending, so a resulting notice never depends on whether the
- * subject worker still stands. Its owner is a logical integration custody
- * coordinate: a stable session of its own, not a native harness session, and
- * therefore no recipient wake route of its own.
- */
 const NOTIFIER = "keiyaku-notice";
-const NOTIFIER_OWNER = harnessOwner({ channel: "unknown", session: "keiyaku:square-notifier" });
 const WAIT_DEFERRAL_TTL_MS = 5 * 60_000;
 const WAIT_DEFERRAL_RENEW_MS = 2 * 60_000;
 function errorCode(error) {
@@ -97,43 +89,6 @@ function turnOutcomeMetadata(signal) {
         },
     };
 }
-function metadataRecord(value) {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function isCurrentTurnNotice(activity, signal) {
-    if (activity.kind !== "say" || activity.actor !== NOTIFIER || !TURN_HISTORY.test(signal.historyId))
-        return false;
-    const metadata = activity.metadata;
-    if (!metadataRecord(metadata))
-        return false;
-    const identity = metadata[NOTICE_METADATA_KEY];
-    if (!metadataRecord(identity))
-        return false;
-    return (Object.keys(identity).length === 3 &&
-        identity.kind === TURN_OUTCOME_KIND &&
-        identity.akumaId === signal.akumaId &&
-        identity.historyId === signal.historyId);
-}
-function isLegacyTurnNotice(activity, signal) {
-    if (activity.metadata !== undefined ||
-        activity.kind !== "say" ||
-        activity.body === undefined ||
-        !TURN_HISTORY.test(signal.historyId) ||
-        (activity.actor !== NOTIFIER && activity.actor !== signal.akumaId))
-        return false;
-    const [header, ...lines] = activity.body.split("\n");
-    const identity = `${signal.akumaId} ${signal.historyId}`;
-    if (header !== identity && !header?.startsWith(`${identity} `))
-        return false;
-    const suffix = header.slice(identity.length);
-    if (!/^(?: \(@[^\n]+\))?(?: kei\/\S+)?$/u.test(suffix))
-        return false;
-    return lines.at(-1) === DUPLICATE_HINT;
-}
-function birthExpression(signal) {
-    const caller = signal.caller.kind === "akuma" ? ` (caller: ${signal.caller.akuId})` : "";
-    return `${signal.initiator} called ${signal.akumaId}${caller}\n${DUPLICATE_HINT}`;
-}
 function bodyNotificationKey(signal) {
     return JSON.stringify([signal.akumaId, signal.bodySequence]);
 }
@@ -171,31 +126,20 @@ const plugin = {
         const environment = { ...process.env };
         const declaredParticipant = environment.SQUARE_PARTICIPANT_NAME?.trim();
         const bodyNotifications = new Map();
-        const expressAsNotifier = async (expression, participants, cancellation) => {
+        const sendNotice = async (notice, participants, cancellation) => {
             cancellation?.throwIfAborted();
+            if (participants === undefined || participants.length === 0)
+                return false;
             const control = cancellation === undefined ? {} : { signal: cancellation };
             const square = await openSquare(path, environment, cancellation);
             try {
-                cancellation?.throwIfAborted();
-                const joined = await square.join(NOTIFIER, { owner: NOTIFIER_OWNER }, control);
-                cancellation?.throwIfAborted();
-                const notice = typeof expression === "string" ? { body: expression } : expression;
-                await joined.participant.express({
-                    body: notice.body,
-                    ...(notice.metadata === undefined ? {} : { metadata: notice.metadata }),
-                    noWait: true,
-                    noMention: true,
-                    force: true,
-                    ...(participants?.length ? { mentions: [...participants] } : {}),
-                }, control);
+                await square.send({ from: NOTIFIER, to: participants, ...notice, truncate: false }, control);
                 return true;
             }
             finally {
                 await square.close();
             }
         };
-        const expressTurnOutcome = (signal, cancellation) => expressAsNotifier({ body: turnOutcomeBody(signal), metadata: turnOutcomeMetadata(signal) }, signal.participants, cancellation);
-        const expressBodyEnd = (signal, participants, cancellation) => expressAsNotifier(bodyEndExpression(signal), participants, cancellation);
         const waitDeferral = async (input, cancellation) => {
             cancellation?.throwIfAborted();
             if (input.akumaIds.length === 0)
@@ -324,33 +268,22 @@ const plugin = {
                     if (identity === undefined)
                         return;
                     const square = await openSquare(path, environment, cancellation);
-                    let joinedName;
                     try {
                         cancellation?.throwIfAborted();
                         const retired = (await square.participants({}, control)).participants.some(({ name, presence }) => name === signal.initiator && presence === "done");
                         if (!retired) {
-                            const joined = await square.join(signal.initiator, identity, control);
-                            if (joined.kind === "joined")
-                                joinedName = joined.participant.name;
+                            await square.join(signal.initiator, identity, control);
                         }
                     }
                     finally {
                         await square.close();
                     }
-                    if (joinedName !== undefined)
-                        await expressAsNotifier(`Joined Square ${path} as ${joinedName}.`, [joinedName], cancellation);
-                },
-                async "akuma.born"(signal, cancellation) {
-                    cancellation?.throwIfAborted();
-                    if (signal.initiator === undefined)
-                        return;
-                    await expressAsNotifier(birthExpression(signal), undefined, cancellation);
                 },
                 async "akuma.reported"(signal, cancellation) {
                     cancellation?.throwIfAborted();
                     if (signal.initiator === undefined)
                         return;
-                    await expressAsNotifier({
+                    await sendNotice({
                         body: `▸ ${signal.akumaId} reported\nreport/${signal.reportSequence} · body/${signal.bodySequence} · turn/${signal.turnSequence}\n\n---\n\n${signal.text}`,
                         metadata: { keiyaku: {
                                 kind: signal.kind,
@@ -364,6 +297,8 @@ const plugin = {
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();
+                    if (!TURN_HISTORY.test(signal.historyId))
+                        return;
                     const identity = squareIdentity(environment);
                     if (identity === undefined)
                         return;
@@ -382,32 +317,17 @@ const plugin = {
                         const observer = await attachedSeat(square, identity.owner, signal.observer ?? declaredParticipant);
                         if (observer === undefined)
                             return;
-                        const { participants } = await square.participants({}, control);
-                        const authored = (name) => participants.some((item) => item.name === name);
-                        const notices = [];
-                        if (authored(NOTIFIER)) {
-                            notices.push(...(await square.history({ from: [NOTIFIER], limit: null }, control)).activities);
-                        }
-                        if (authored(signal.akumaId)) {
-                            notices.push(...(await square.history({
-                                from: [signal.akumaId],
-                                fixed: `${signal.akumaId} ${signal.historyId}`,
-                                limit: null,
-                            }, control)).activities);
-                        }
-                        for (const notice of notices) {
-                            if (!isCurrentTurnNotice(notice, signal) && !isLegacyTurnNotice(notice, signal))
-                                continue;
+                        const match = { fields: [
+                                { path: [NOTICE_METADATA_KEY, "kind"], equals: TURN_OUTCOME_KIND },
+                                { path: [NOTICE_METADATA_KEY, "akumaId"], equals: signal.akumaId },
+                                { path: [NOTICE_METADATA_KEY, "historyId"], equals: signal.historyId },
+                            ] };
+                        for (;;) {
+                            const page = await observer.pending({ match }, control);
+                            if (page.activities.length === 0)
+                                break;
                             cancellation?.throwIfAborted();
-                            try {
-                                await observer.catch({ id: notice.id }, control);
-                            }
-                            catch (error) {
-                                // A notice can disappear or lose availability to this participant after history lookup.
-                                if (!(error instanceof SquareError && error.code === "invalid_args" && error.facts?.reason === "not_addressed")) {
-                                    throw error;
-                                }
-                            }
+                            await observer.ack(page.activities.map(({ id }) => id), control);
                         }
                     }
                     finally {
@@ -416,10 +336,10 @@ const plugin = {
                 },
                 async "akuma.turn-outcome"(signal, cancellation) {
                     await serializeBodyNotification(bodyNotifications, signal, async (state) => {
-                        const expressed = await expressTurnOutcome(signal, cancellation);
-                        if (signal.outcome.kind === "answered" || !expressed)
+                        const sent = await sendNotice({ body: turnOutcomeBody(signal), metadata: turnOutcomeMetadata(signal) }, signal.participants, cancellation);
+                        if (signal.outcome.kind === "answered" || !sent)
                             return;
-                        // A late express may resolve after this handler lost authority; without a
+                        // A late send may resolve after this handler lost authority; without a
                         // revalidation it would suppress an authorized Body-end notice it never owned.
                         cancellation?.throwIfAborted();
                         for (const participant of signal.participants ?? [])
@@ -435,7 +355,7 @@ const plugin = {
                             const remaining = (signal.participants ?? []).filter((participant) => !state.terminalRecipients.has(participant));
                             if ((signal.participants?.length ?? 0) > 0 && remaining.length === 0)
                                 return;
-                            await expressBodyEnd(signal, remaining, cancellation);
+                            await sendNotice({ body: bodyEndExpression(signal) }, remaining, cancellation);
                         }
                         finally {
                             if (bodyNotifications.get(key) === state)

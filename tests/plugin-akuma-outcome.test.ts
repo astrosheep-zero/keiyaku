@@ -345,7 +345,10 @@ test("forwarded wait acknowledges a real Square notice using the requester's loc
     kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
     turnSequence: turn.sequence, participants: ["Requester", "ServingSession"], outcome: { kind: "answered", text: "known answer" },
   });
-  const notice = (await square.history({ from: ["keiyaku-notice"], limit: null })).activities.find((item) => item.kind === "say")!;
+  const requester = await square.participant("Requester", { owner: harnessOwner({ channel: "pi", session: "requester-session" }) });
+  const servingRecipient = await square.participant("ServingSession", { owner: harnessOwner({ channel: "pi", session: "serving-session" }) });
+  const notice = (await requester.pending()).activities[0]!;
+  assert.ok(notice);
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(join(world, "plugins", "square.mjs"),
     `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);
@@ -359,9 +362,8 @@ test("forwarded wait acknowledges a real Square notice using the requester's loc
     const waited = await akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }))
       .wait({ akuma: [target.allocated.id], timeoutMs: 5_000, signal: t.signal });
     assert.equal(waited.reason, "completed");
-    const snapshot = await square.snapshot();
-    assert.equal(snapshot.delivered("Requester", notice.id), true);
-    assert.equal(snapshot.delivered("ServingSession", notice.id), false);
+    assert.deepEqual((await requester.pending()).activities, []);
+    assert.deepEqual((await servingRecipient.pending()).activities.map(({ id }) => id), [notice.id]);
     assert.deepEqual(diagnostics, []);
   } finally { await pump.close(); }
 });
