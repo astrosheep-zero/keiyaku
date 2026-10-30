@@ -393,7 +393,7 @@ const plugin: KeiyakuPlugin = {
           cancellation?.throwIfAborted();
           if (signal.initiator === undefined) return;
           await expressAsNotifier({
-            body: `${signal.akumaId} report/${signal.reportSequence} (body/${signal.bodySequence}, turn/${signal.turnSequence})\n\n${signal.text}`,
+            body: `▸ ${signal.akumaId} reported\nreport/${signal.reportSequence} · body/${signal.bodySequence} · turn/${signal.turnSequence}\n\n---\n\n${signal.text}`,
             metadata: { keiyaku: {
               kind: signal.kind,
               akumaId: signal.akumaId,

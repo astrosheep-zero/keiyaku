@@ -368,7 +368,7 @@ test("Square reports address only the opening initiator and survive outcome obse
     const { initiator: _initiator, ...anonymous } = signal;
     await fixture.report(anonymous);
     assert.deepEqual(await fixture.expressions(), [captured(
-      NOTIFIER, "aku/report report/7 (body/2, turn/3)\n\nProgress\n@Bob\n\nexact text", ["Alice"],
+      NOTIFIER, "▸ aku/report reported\nreport/7 · body/2 · turn/3\n\n---\n\nProgress\n@Bob\n\nexact text", ["Alice"],
       { keiyaku: { kind: "akuma.reported", akumaId: "aku/report", bodySequence: 2,
         turnSequence: 3, reportSequence: 7, at: signal.at } },
     )]);
