@@ -139,6 +139,7 @@ async function withHeldSquareExpression<T>(
 }
 type SquareNotificationFixture = Readonly<{
   admit(initiator: string): Promise<void>;
+  report(signal: Parameters<NonNullable<PluginHooks["akuma.reported"]>>[0]): Promise<void>;
   failedTurn(
     akumaId: string,
     bodySequence: number,
@@ -199,12 +200,15 @@ async function withSquareNotificationFixture<T>(
     const turn = instance.signals?.["akuma.turn-outcome"];
     const bodyEnd = instance.signals?.["akuma.body-ended"];
     const initiating = instance.signals?.["akuma.initiating"];
+    const report = instance.signals?.["akuma.reported"];
     const observed = instance.signals?.["akuma.outcome-observed"];
     assert.ok(observed);
     assert.ok(turn);
     assert.ok(bodyEnd);
     assert.ok(initiating);
+    assert.ok(report);
     const fixture: SquareNotificationFixture = {
+      async report(signal) { await report(signal); },
       async admit(initiator) {
         await initiating({ kind: "akuma.initiating", initiator });
       },
@@ -284,6 +288,31 @@ async function withSquareNotificationFixture<T>(
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test("Square reports address only the opening initiator and survive outcome observation", async () => {
+  await withSquareNotificationFixture("report", async (fixture) => {
+    const signal = {
+      kind: "akuma.reported" as const, akumaId: "aku/report", bodySequence: 2,
+      turnSequence: 3, reportSequence: 7, text: "Progress\n@Bob\n\nexact text",
+      at: "2026-10-30T00:00:00.000Z", initiator: "Alice",
+    };
+    await fixture.report(signal);
+    const { initiator: _initiator, ...anonymous } = signal;
+    await fixture.report(anonymous);
+    assert.deepEqual(await fixture.expressions(), [captured(
+      NOTIFIER, "aku/report report/7 (body/2, turn/3)\n\nProgress\n@Bob\n\nexact text", ["Alice"],
+      { keiyaku: { kind: "akuma.reported", akumaId: "aku/report", bodySequence: 2,
+        turnSequence: 3, reportSequence: 7, at: signal.at } },
+    )]);
+    await fixture.observe("aku/report", "turn/3", "Alice");
+    await fixture.square(async (square) => {
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find(a => a.kind === "say")!;
+      const snapshot = await square.snapshot();
+      assert.equal(snapshot.delivered("Alice", notice.id), false);
+      assert.equal(snapshot.delivered("Bob", notice.id), false);
+    });
+  });
+});
 
 function isMetadataRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -468,6 +497,11 @@ test("wait scopes defer only the requester's selected Turn notices, acknowledge 
       scopes.push(second);
       const queues = (): string[][] => existsSync(log)
         ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+      await instance.signals?.["akuma.reported"]?.({ kind: "akuma.reported", akumaId: "aku/one",
+        bodySequence: 1, turnSequence: 1, reportSequence: 1, text: "progress", at: "2026-10-30T00:00:00Z",
+        initiator: "Alice" });
+      assert.deepEqual(queues().map(args => args[2]), ["requester"], "a report wakes through an active Turn deferral");
+      writeFileSync(log, "");
       const turn = async (id: string, sequence: number, participants = ["Alice"]) => {
         await instance.signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: id,
           bodySequence: 1, turnSequence: sequence, participants, outcome: { kind: "answered", text: `answer ${sequence}` } });

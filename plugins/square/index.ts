@@ -383,6 +383,21 @@ const plugin: KeiyakuPlugin = {
           if (signal.initiator === undefined) return;
           await expressAsNotifier(birthExpression(signal), undefined, cancellation);
         },
+        async "akuma.reported"(signal, cancellation) {
+          cancellation?.throwIfAborted();
+          if (signal.initiator === undefined) return;
+          await expressAsNotifier({
+            body: `${signal.akumaId} report/${signal.reportSequence} (body/${signal.bodySequence}, turn/${signal.turnSequence})\n\n${signal.text}`,
+            metadata: { keiyaku: {
+              kind: signal.kind,
+              akumaId: signal.akumaId,
+              bodySequence: signal.bodySequence,
+              turnSequence: signal.turnSequence,
+              reportSequence: signal.reportSequence,
+              at: signal.at,
+            } },
+          }, [signal.initiator], cancellation);
+        },
         async "akuma.outcome-observed"(signal, cancellation) {
           cancellation?.throwIfAborted();
           const identity = squareIdentity(environment);

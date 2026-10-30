@@ -98,6 +98,11 @@ Turn outcomes address every participant carried by the
 Turn's signal, never a caller captured from the producing process. The opening
 initiator remains the owner, not the entire audience. No participants produces
 an unaddressed outcome rather than a fallback mention.
+Committed Akuma progress reports use the same notification identity and
+wake-capable delivery, addressed only to the report's opening Turn initiator.
+The notice carries the report's own content and correlation; it does not read
+the latest Turn or substitute an ambient caller. A report without an initiator
+is silent. Notice delivery is best effort and does not alter report truth.
 Local outcome observation acknowledges notices only for a current participant
 held by the observing execution. An explicit name may select among that
 execution's established voices but never grants another execution's authority.
@@ -109,6 +114,7 @@ to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
 notice is never consumed. An explicitly attributed observer never acquires
 another execution's identity or wake route; a name alone cannot delegate
 acknowledgment authority.
+Outcome acknowledgment and wait deferral do not consume progress reports.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention
