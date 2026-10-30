@@ -1,7 +1,12 @@
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
+import {
+  emitPluginSignal,
+  outcomePluginObserver,
+  stderrPluginDiagnostic,
+  withAkumaWaitDeferrals,
+} from "../plugin/akuma-signals.js";
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
@@ -11,6 +16,7 @@ import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./akuma
 import { type AkumaStatus } from "./akuma.js";
 import type { AllowedAction } from "./allowed.js";
 import { type KillEvidence } from "./heart/index.js";
+import type { ReportFact } from "./heart/facts.js";
 import { parseAkuId, type AkuId } from "./identity.js";
 import type { ActivityHistory } from "./projection.js";
 import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
@@ -47,6 +53,11 @@ export type AkumaBirthInput = Readonly<{
   initiator?: string;
   host?: AkumaHostOptions;
 }>;
+
+export type AkumaReportOptions = AkumaSignalOptions & Readonly<{ bodySequence: number; turnSequence: number }>;
+export type AkumaReportResult =
+  | Readonly<{ kind: "recorded"; report: ReportFact }>
+  | Readonly<{ kind: "refused"; reason: "not-born" | "not-current-execution" }>;
 
 export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boolean; initiator?: string }>;
 export type AkumaAskOptions<T> = AkumaTellOptions &
@@ -162,6 +173,44 @@ export class Akuma {
     return (
       schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }
     ) as AkumaAskResult<string | T>;
+  }
+
+  async report(text: string, options: AkumaReportOptions): Promise<AkumaReportResult> {
+    if (typeof text !== "string" || text.trim() === "") throw new TypeError("Akuma report text must be nonblank");
+    if (typeof options !== "object" || options === null || Array.isArray(options))
+      throw new TypeError("Akuma report requires exact execution options");
+    const unknown = Object.keys(options).find((key) => !["bodySequence", "turnSequence", "signal"].includes(key));
+    if (unknown !== undefined) throw new TypeError(`Akuma report options has unknown field: ${unknown}`);
+    for (const key of ["bodySequence", "turnSequence"] as const) {
+      if (!Number.isSafeInteger(options[key]) || options[key] <= 0)
+        throw new TypeError(`Akuma report ${key} must be a positive safe integer`);
+    }
+    const signal = signalOption(options.signal);
+    const result = await this.owner().report(
+      {
+        bodySequence: options.bodySequence,
+        turnSequence: options.turnSequence,
+        text,
+        at: new Date().toISOString(),
+      },
+      signal,
+    );
+    if (result.kind !== "recorded") return result;
+    const { report, initiator } = result;
+    await emitPluginSignal(
+      { world: this.root, reportDiagnostic: this.reportDiagnostic },
+      {
+        kind: "akuma.reported",
+        akumaId: this.id,
+        bodySequence: report.bodySequence,
+        turnSequence: report.turnSequence,
+        reportSequence: report.sequence,
+        text: report.text,
+        at: report.at,
+        ...(initiator === undefined ? {} : { initiator }),
+      },
+    );
+    return { kind: "recorded", report };
   }
 
   async status(): Promise<AkumaStatus> {

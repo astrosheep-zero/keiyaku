@@ -1863,6 +1863,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
       launchTells: [{ id: "tell-1", text: "also" }],
       cwd: tmpdir(),
       requests: { dir: "/work/requests" },
+      execution: { akumaId: "aku/pi/1234abcd", world: "/work", bodySequence: 7, turnSequence: 19 },
     }),
   );
   const drive = await attempt.result;
@@ -1898,6 +1899,8 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
       PI_SESSION_ID: "native-session",
       PI_SESSION_FILE: "native-session-file",
       CODEX_THREAD_ID: "ancestor-codex",
+      KEIYAKU_BODY_SEQUENCE: "1",
+      KEIYAKU_TURN_SEQUENCE: "2",
     }),
   };
   assert.deepEqual(bash.options.spawnHook(context), {
@@ -1905,6 +1908,10 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     env: {
       SAFE: "keep",
       AKUMA_REQUESTS: "/work/requests",
+      KEIYAKU_ACTOR_ID: "aku/pi/1234abcd",
+      KEIYAKU_ACTOR_WORLD: "/work",
+      KEIYAKU_BODY_SEQUENCE: "7",
+      KEIYAKU_TURN_SEQUENCE: "19",
       PI_SESSION_ID: "native-session",
       PI_SESSION_FILE: "native-session-file",
     },

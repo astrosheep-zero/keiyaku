@@ -195,6 +195,15 @@ of provider startup, and cannot roll back birth. This deliberately replaces
 `akuma.called` without an alias or dual emission; the plugin contract version
 stays unchanged for this coordinated replacement.
 
+A committed explicit progress report emits `akuma.reported` once after its Heart
+admission. The signal carries that exact report's identity, content, time, and
+Akuma, Body, and Turn correlation, plus only the opening Turn initiator observed
+with admission. Attribution is optional signal metadata, never required report
+input. A missing initiator neither refuses the report nor supplies a fallback
+recipient. Delivery remains one bounded diagnostic-only attempt: no rollback,
+replay queue, receipt guarantee, or change to completion and outcome observation.
+Report custody belongs to Akuma, not to an observer plugin.
+
 A started Akuma Turn emits `akuma.turn-started` once its start fact and Tell
 bindings are durable and before provider work begins. The signal identifies the
 Akuma and Turn sequence and carries the Turn's optional initiator, so a

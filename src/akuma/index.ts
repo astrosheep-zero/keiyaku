@@ -11,6 +11,8 @@ export type {
   AkumaHostOptions,
   AkumaIdleOptions,
   AkumaIdleResult,
+  AkumaReportOptions,
+  AkumaReportResult,
   AkumaSignalOptions,
   AkumaTellOptions,
 } from "./akuma-instance.js";

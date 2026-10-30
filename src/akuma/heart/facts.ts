@@ -94,6 +94,23 @@ export type TurnEndFact = Readonly<{
 
 export type TurnFact = TurnStartFact & Readonly<{ end?: TurnEndFact }>;
 
+export const reportFactSchema = z
+  .object({
+    kind: z.literal("report"),
+    sequence: z.number().int().positive().safe(),
+    bodySequence: z.number().int().positive().safe(),
+    turnSequence: z.number().int().positive().safe(),
+    text: z.string().refine((value) => value.trim() !== "", "expected nonblank report text"),
+    at: z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected report timestamp"),
+  })
+  .strict();
+
+export type ReportFact = z.infer<typeof reportFactSchema>;
+
+export type ReportAdmission =
+  | Readonly<{ kind: "recorded"; report: ReportFact; initiator?: string }>
+  | Readonly<{ kind: "refused"; reason: "not-born" | "not-current-execution" }>;
+
 export type CallFact = Readonly<{
   kind: "call";
   sequence: number;

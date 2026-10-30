@@ -1,7 +1,16 @@
 export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
 export const AKUMA_REQUESTS_ENTRY_ENV = "AKUMA_REQUESTS_ENTRY";
 
+export type ExecutionCoordinate = Readonly<{
+  akumaId: string;
+  world: string;
+  bodySequence: number;
+  turnSequence: number;
+}>;
+
 const PARENT_HARNESS_IDENTITY_KEYS = [
+  "KEIYAKU_BODY_SEQUENCE",
+  "KEIYAKU_TURN_SEQUENCE",
   "CLAUDE_CODE_SESSION_ID",
   "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDECODE",
@@ -23,6 +32,7 @@ export function akumaExecutionEnvironment(
   overrides: Environment = {},
   requests?: string,
   nativeIdentity: readonly (typeof PARENT_HARNESS_IDENTITY_KEYS)[number][] = [],
+  execution?: ExecutionCoordinate,
 ): Record<string, string> {
   const preserved = Object.fromEntries(
     nativeIdentity.flatMap((key) => (inherited[key] === undefined ? [] : [[key, inherited[key]] as const])),
@@ -37,5 +47,12 @@ export function akumaExecutionEnvironment(
   delete environment[AKUMA_REQUESTS_ENV];
   delete environment[AKUMA_REQUESTS_ENTRY_ENV];
   if (requests !== undefined) environment[AKUMA_REQUESTS_ENV] = requests;
+  if (execution !== undefined)
+    Object.assign(environment, {
+      KEIYAKU_ACTOR_ID: execution.akumaId,
+      KEIYAKU_ACTOR_WORLD: execution.world,
+      KEIYAKU_BODY_SEQUENCE: String(execution.bodySequence),
+      KEIYAKU_TURN_SEQUENCE: String(execution.turnSequence),
+    });
   return environment;
 }

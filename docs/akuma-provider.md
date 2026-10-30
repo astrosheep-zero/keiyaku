@@ -69,6 +69,15 @@ fresh Akuma. If that unsupported reload removes the routing declaration from the
 native environment, this integration cannot promise routing isolation. It adds
 no registry, daemon, plugin, inferred retention proof, or automatic repair.
 
+The native execution's reporting context is frozen for its admitted Body and
+Turn, separate from its routing context. A retained native environment that
+cannot refresh that exact context keeps its execution and resume capabilities,
+but report admission refuses its obsolete coordinates. In particular, a later
+Paseo drive currently retains the creation drive's report context; progress
+reporting from that old environment is unavailable until a native per-turn
+context mechanism is supported. A stable request entry, latest Heart read, or
+model-visible instruction is never a substitute for exact execution custody.
+
 The Paseo bridge uses the installed Keiyaku library in its plugin process and
 requires the current public observation surface; it does not emulate missing
 capabilities. A successfully loaded library remains in that process for its

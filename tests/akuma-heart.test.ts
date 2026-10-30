@@ -866,12 +866,12 @@ test("unknown Body Request state is authority corruption", async () => {
   }
 });
 
-test("heart schema version 30 and leash schema version 4 hard-refuse unknown authority", async (context) => {
+test("heart schema version 31 and leash schema version 4 hard-refuse unknown authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
   seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
   seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
-  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 30/u);
+  await assert.rejects(readHeart(allocated.paths), /heart schema version must be 31/u);
   await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
 });
 

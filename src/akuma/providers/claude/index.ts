@@ -93,7 +93,7 @@ function claudeQueryOptions(
     abortController,
     ...(input.requests === undefined ? {} : { additionalDirectories: [input.requests.dir] }),
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir),
+    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir, [], input.execution),
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: ["user", "project", "local"],

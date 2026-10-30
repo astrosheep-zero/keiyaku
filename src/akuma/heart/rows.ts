@@ -9,6 +9,7 @@ import type {
   InterruptCompletion,
   KillFact,
   PauseFact,
+  ReportFact,
   ResumeCoordinate,
   SessionFact,
   StopFact,
@@ -17,7 +18,7 @@ import type {
   TurnStartFact,
   TurnEndFact,
 } from "./facts.js";
-import { HeartAuthorityCorruptionError } from "./facts.js";
+import { HeartAuthorityCorruptionError, reportFactSchema } from "./facts.js";
 import type { ProviderOptions } from "../provider-recipe.js";
 import { decodeResumeCoordinate, encodeResumeCoordinate as encodeCoordinate } from "../coordinate.js";
 import { agentEventSchema, type AgentEvent } from "./activity-schema.js";
@@ -193,6 +194,25 @@ export function decodeCallRow(row: CallRow): CallFact {
   return { kind: "call", sequence: row.sequence, turnSequence: row.turn_sequence, body: row.body, at: row.at };
 }
 
+export type ReportRow = Readonly<{
+  sequence: number;
+  body_sequence: number;
+  turn_sequence: number;
+  text: string;
+  at: string;
+}>;
+
+export function decodeReportRow(row: ReportRow): ReportFact {
+  return reportFactSchema.parse({
+    kind: "report",
+    sequence: row.sequence,
+    bodySequence: row.body_sequence,
+    turnSequence: row.turn_sequence,
+    text: row.text,
+    at: row.at,
+  });
+}
+
 export function encodeActivityEvent(event: unknown): string {
   return json(agentEventSchema.parse(event));
 }
@@ -246,6 +266,15 @@ export function insertSessionFact(database: DatabaseSync, input: Omit<SessionFac
     )
     .run(...encodeSessionRow(input));
   return Number(result.lastInsertRowid);
+}
+
+export function insertReportFact(database: DatabaseSync, input: Omit<ReportFact, "kind" | "sequence">): ReportFact {
+  const sequence = Number(database.prepare("INSERT INTO timeline(kind) VALUES ('report')").run().lastInsertRowid);
+  const fact = reportFactSchema.parse({ kind: "report", sequence, ...input });
+  database
+    .prepare("INSERT INTO reports(sequence, body_sequence, turn_sequence, text, at) VALUES (?, ?, ?, ?, ?)")
+    .run(sequence, input.bodySequence, input.turnSequence, input.text, input.at);
+  return fact;
 }
 
 export function insertActivityFact(

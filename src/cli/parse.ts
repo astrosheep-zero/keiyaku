@@ -198,6 +198,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
         use: command.contract === undefined ? "none" : "required",
         acceptsExplicit: command.contract !== undefined,
       };
+    case "report":
     case "settings":
     case "nuke":
     case "debt":

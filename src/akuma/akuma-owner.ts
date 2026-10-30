@@ -37,6 +37,7 @@ import {
   readLastAnsweredTurn,
   readSoul,
   readTell,
+  recordReport,
   recordTell,
   requestStop,
   type InterruptCompletion,
@@ -49,6 +50,7 @@ import {
   type PauseFact,
 } from "./heart/index.js";
 import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import type { ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectTurns, selectExactHistory, selectHistory } from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -200,6 +202,13 @@ export class AkumaOwner {
     if (parsePublicHistoryId(input.id) === null)
       throw new TypeError("Akuma history id must match turn/<positive safe integer>");
     return selectExactHistory((await this.projectHistoryTurns()).rows, input.id);
+  }
+
+  async report(
+    input: Readonly<{ bodySequence: number; turnSequence: number; text: string; at: string }>,
+    signal?: AbortSignal,
+  ): Promise<ReportAdmission> {
+    return await recordReport(this.paths, input, signal);
   }
 
   async status(): Promise<AkumaStatus> {

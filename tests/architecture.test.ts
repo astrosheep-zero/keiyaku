@@ -38,6 +38,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["git/repository.ts", ["git/internal/owner-state.ts", "readOwnerState"], true],
   ["library/selection.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
   ["library/selection.ts", ["plugin/akuma-signals.ts", "withAkumaWaitDeferrals"], true],
+  ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],
   ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
   ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "withAkumaWaitDeferrals"], true],
   ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "stderrPluginDiagnostic"], true],

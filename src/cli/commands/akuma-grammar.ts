@@ -28,6 +28,7 @@ export type ParsedAkumaCommand = Output &
         schema?: string;
       }> &
         Readonly<{ prompt?: AkumaPromptSource }>)
+    | (Readonly<{ command: "report" }> & Prompted)
     | Readonly<{ command: "kill"; akuma: readonly string[] }>
     | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
     | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
@@ -46,7 +47,10 @@ export type ParsedAkumaCommand = Output &
     | (Readonly<{ command: "fork"; at: string }> & Addressed)
   );
 
-export type InvokedAkumaCommand = Exclude<ParsedAkumaCommand, { command: "history"; contract: string }>;
+export type InvokedAkumaCommand = Exclude<
+  ParsedAkumaCommand,
+  { command: "history"; contract: string } | { command: "report" }
+>;
 
 export type AkumaAction = ParsedAkumaCommand["command"];
 type FlagValue = string | true | readonly string[];
@@ -67,6 +71,15 @@ const SCHEMA_DETAILS =
   "--schema supplies a JSON Schema answer contract to the provider; on observation the CLI parses JSON but does not independently validate schema conformance.";
 
 const AKUMA_COMMAND_SPECS = {
+  report: {
+    arity: 1,
+    stdin: true,
+    flags: { json: "boolean" },
+    usage: "report (<text> | -) [--json]",
+    purpose: "Record progress in the invoking Akuma's Heart without ending work.",
+    details:
+      "Give one nonblank text argument, or - to read stdin. Requires explicit Akuma, World, Body and Turn execution declarations; no recipient or parent forwarding. Recorded means persisted, not received.",
+  },
   call: {
     arity: 1,
     stdin: true,
@@ -189,7 +202,11 @@ export function isAkumaAction(value: string | undefined): value is AkumaAction {
 }
 
 export function isParsedAkumaCommand(command: Readonly<{ command: string }>): command is InvokedAkumaCommand {
-  return isAkumaAction(command.command) && !("contract" in command && command.command === "history");
+  return (
+    isAkumaAction(command.command) &&
+    command.command !== "report" &&
+    !("contract" in command && command.command === "history")
+  );
 }
 
 export function renderAkumaRootRows(): readonly string[] {
@@ -328,7 +345,7 @@ function parseAkumaHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "call" | "tell" | "ask">,
+  action: Exclude<AkumaAction, "call" | "tell" | "ask" | "report">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
@@ -453,6 +470,19 @@ function parseCall(
   };
 }
 
+function parseReport(
+  positionals: readonly string[],
+  stdin: boolean,
+  output: "text" | "json",
+  fail: (message: string) => never,
+): Extract<ParsedAkumaCommand, { command: "report" }> {
+  if (stdin ? positionals.length !== 0 : positionals.length !== 1)
+    fail("report requires one text argument or stdin, not both");
+  const value = positionals[0];
+  if (value !== undefined && value.trim() === "") fail("report requires nonblank text");
+  return { command: "report", output, prompt: stdin ? { kind: "stdin" } : { kind: "argument", value: value! } };
+}
+
 export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const candidate = argv[0];
   if (!isAkumaAction(candidate)) throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
@@ -463,6 +493,7 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   };
   const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
+  if (action === "report") return parseReport(positionals, stdin !== undefined, output, fail);
   if (action === "call" || action === "tell" || action === "ask") {
     const parsed = parsePrompted(action, positionals, stdin !== undefined, fail);
     return action === "call"

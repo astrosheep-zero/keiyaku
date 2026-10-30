@@ -8,6 +8,7 @@ import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
 import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
 import { installOutcome, installHarnesses, renderInstallText } from "./commands/install.js";
 import { runDebtCommand } from "./commands/debt.js";
+import { runReport } from "./commands/report.js";
 import { runWhoami } from "./commands/whoami.js";
 import { resolveInvocationCoordinates } from "./coordinates.js";
 import { BindDraftError } from "./draft.js";
@@ -253,10 +254,9 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   try {
     const runtime: CliRuntime = {
       environment,
-      execution:
-        command.command === "whoami"
-          ? localExecutionContext()
-          : await executionForEnvironment(environment, cancellation.signal),
+      execution: ["whoami", "report"].includes(command.command)
+        ? localExecutionContext()
+        : await executionForEnvironment(environment, cancellation.signal),
       ...(home === undefined ? {} : { home }),
       readStdin: memoized(input.readStdin ?? processStdin),
       signal: cancellation.signal,
@@ -274,6 +274,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });
     }
+    if (command.command === "report") return await runReport(command, runtime);
     const coordinates = await invocationCoordinates(invocation, input, environment);
     if (command.command === "whoami") return await runWhoami(command, coordinates, environment);
     if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);

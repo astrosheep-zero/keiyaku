@@ -1,4 +1,5 @@
 import { type ResumeCoordinate } from "./coordinate.js";
+import type { ExecutionCoordinate } from "./providers/execution-environment.js";
 import type { ProviderOptions } from "./provider-recipe.js";
 
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
@@ -579,6 +580,7 @@ export type DriveInput = Readonly<{
   cwd: string;
   options: ProviderOptions;
   signal: AbortSignal;
+  execution?: ExecutionCoordinate;
   requests: Readonly<{ dir: string; entry?: string }>;
   schemaJson?: string;
 }>;

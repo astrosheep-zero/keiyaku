@@ -87,7 +87,13 @@ function piCreateOptions(
           sdk.createBashToolDefinition(input.cwd, {
             spawnHook: (context) => ({
               ...context,
-              env: akumaExecutionEnvironment(context.env, {}, input.requests.dir, ["PI_SESSION_ID", "PI_SESSION_FILE"]),
+              env: akumaExecutionEnvironment(
+                context.env,
+                {},
+                input.requests.dir,
+                ["PI_SESSION_ID", "PI_SESSION_FILE"],
+                input.execution,
+              ),
             }),
           }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
         ];

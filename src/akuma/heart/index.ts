@@ -20,6 +20,7 @@ import type {
   TurnFact,
   TurnOutcome,
   TurnStartFact,
+  ReportAdmission,
 } from "./facts.js";
 import { BodyControlledError } from "./facts.js";
 import {
@@ -28,6 +29,7 @@ import {
   endBodyFact,
   finishBodyFact,
   deleteStopControl,
+  insertReportFact,
   insertActivityFact,
   insertTurnEndFact,
   insertTurnStartFact,
@@ -274,6 +276,7 @@ function sameStatusBatch(left: ReturnType<typeof readStatusBatch>, right: Return
     sameRawRows(left.rows, right.rows) &&
     sameRawRows(left.turns, right.turns) &&
     sameRawRows(left.calls, right.calls) &&
+    sameRawRows(left.reports, right.reports) &&
     sameRawRows(left.activity, right.activity) &&
     sameRawRows(left.tells.rows, right.tells.rows) &&
     sameRawRows(left.tells.deliveries, right.tells.deliveries) &&
@@ -433,6 +436,44 @@ export async function recordTell(
     },
     options.signal,
   );
+}
+
+export async function recordReport(
+  paths: AkumaPaths,
+  input: Readonly<{ bodySequence: number; turnSequence: number; text: string; at: string }>,
+  signal?: AbortSignal,
+): Promise<ReportAdmission> {
+  try {
+    return await withHeartTransaction(
+      paths,
+      (heart): ReportAdmission => {
+        if (soulFact(heart) === null) return { kind: "refused", reason: "not-born" };
+        const body = latestBodyFact(heart);
+        const turn = body === null ? null : latestTurnFactForBody(heart, body.sequence);
+        if (
+          body === null ||
+          body.sequence !== input.bodySequence ||
+          body.end !== undefined ||
+          body.hung !== undefined ||
+          turn === null ||
+          turn.sequence !== input.turnSequence ||
+          turn.end !== undefined
+        )
+          return { kind: "refused", reason: "not-current-execution" };
+        const report = insertReportFact(heart, input);
+        pruneActivityFacts(heart, ACTIVITY_LIMIT);
+        return {
+          kind: "recorded",
+          report,
+          ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+        };
+      },
+      signal,
+    );
+  } catch (error) {
+    if (isHeartAbsent(error)) return { kind: "refused", reason: "not-born" };
+    throw error;
+  }
 }
 
 export async function readTell(paths: AkumaPaths, id: string): Promise<TellFact | null> {

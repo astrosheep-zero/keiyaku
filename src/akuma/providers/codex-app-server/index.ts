@@ -162,7 +162,7 @@ function codexServer(execution: ProviderExecution, input: StartInput): LineRpcPr
   return new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
     cwd: input.cwd,
-    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir),
+    env: akumaExecutionEnvironment(process.env, execution.env, input.requests?.dir, [], input.execution),
   });
 }
 

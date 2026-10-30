@@ -248,7 +248,7 @@ export async function startAcpSession(
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
     cwd: input.cwd,
-    env: akumaExecutionEnvironment(globalThis.process.env, launch.env, input.requests?.dir),
+    env: akumaExecutionEnvironment(globalThis.process.env, launch.env, input.requests?.dir, [], input.execution),
   });
   let abortOwned = async (): Promise<void> => await child.close(true);
   let forceDisposeOwned = async (): Promise<void> => await child.close(true);

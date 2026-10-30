@@ -267,7 +267,10 @@ class PaseoDrive {
               provider: config.provider,
               cwd: input.cwd,
               ...(input.options.systemPrompt === undefined ? {} : { systemPrompt: input.options.systemPrompt }),
-              env: { ...akumaExecutionEnvironment(process.env, this.environment), [AKUMA_REQUESTS_ENTRY_ENV]: entry },
+              env: {
+                ...akumaExecutionEnvironment(process.env, this.environment, undefined, [], input.execution),
+                [AKUMA_REQUESTS_ENTRY_ENV]: entry,
+              },
               autoArchive: false,
             }),
           )

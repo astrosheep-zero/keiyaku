@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-const HEART_SCHEMA_VERSION = 30;
+const HEART_SCHEMA_VERSION = 31;
 const LEASH_SCHEMA_VERSION = 4;
 
 function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
@@ -74,25 +74,56 @@ function turnSchema(table: "turns" | "turns_upgrade"): string {
 
 /** Called only under the open boundary's write transaction, with foreign keys disabled. */
 export function upgradeHeartSchema(database: DatabaseSync): void {
+  const version = heartSchemaVersion(database);
   // Another opener may have completed the fixed conversion while this one waited.
-  if (heartSchemaVersion(database) !== 29) {
+  if (version !== 29 && version !== 30) {
     assertHeartSchemaVersion(database);
     return;
   }
-  database.exec(turnSchema("turns_upgrade"));
+  if (version === 29) {
+    database.exec(turnSchema("turns_upgrade"));
+    database.exec(`
+      INSERT INTO turns_upgrade (sequence, body_sequence, started_at, initiator, end_sequence,
+        outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at)
+      SELECT sequence, body_sequence, started_at, initiator, end_sequence,
+        outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns;
+      DROP TABLE turns;
+      ALTER TABLE turns_upgrade RENAME TO turns;
+    `);
+  }
+  const highWater = database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'timeline'").get() as
+    | { seq: number }
+    | undefined;
+  database.exec(timelineSchema("timeline_upgrade"));
   database.exec(`
-    INSERT INTO turns_upgrade (sequence, body_sequence, started_at, initiator, end_sequence,
-      outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at)
-    SELECT sequence, body_sequence, started_at, initiator, end_sequence,
-      outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns;
-    DROP TABLE turns;
-    ALTER TABLE turns_upgrade RENAME TO turns;
+    INSERT INTO timeline_upgrade SELECT sequence, kind FROM timeline;
+    DROP TABLE timeline;
+    ALTER TABLE timeline_upgrade RENAME TO timeline;
+    ${REPORT_SCHEMA}
     DROP TABLE akuma_schema;
     ${VERSION_SCHEMA}
   `);
+  if (highWater !== undefined)
+    database.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'timeline'").run(highWater.seq);
   if (database.prepare("PRAGMA foreign_key_check").get() !== undefined)
     throw new Error("Akuma Heart upgrade found broken foreign key relationships");
 }
+
+function timelineSchema(table: "timeline" | "timeline_upgrade"): string {
+  return `CREATE TABLE ${table === "timeline" ? "IF NOT EXISTS " : ""}${table} (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end', 'report'))
+  ) STRICT;`;
+}
+
+const REPORT_SCHEMA = `CREATE TABLE IF NOT EXISTS reports (
+  sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
+  body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
+  turn_sequence INTEGER NOT NULL REFERENCES turns(sequence) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  at TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS reports_by_turn ON reports(turn_sequence);`;
 
 export const HEART_SCHEMA = `
   ${VERSION_SCHEMA}
@@ -119,10 +150,8 @@ export const HEART_SCHEMA = `
     admitted_at TEXT NOT NULL
   ) STRICT;
   ${turnSchema("turns")}
-  CREATE TABLE IF NOT EXISTS timeline (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end'))
-  ) STRICT;
+  ${timelineSchema("timeline")}
+  ${REPORT_SCHEMA}
   CREATE TABLE IF NOT EXISTS activity_retention (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     checked_sequence INTEGER NOT NULL

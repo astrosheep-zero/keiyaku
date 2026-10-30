@@ -21,9 +21,10 @@ implementation boundaries do not create synchronous public APIs, a daemon,
 a queue, or a persistent cache. Existing Heart custody is opened without
 creating it; only a true absence becomes absence. Corruption and unsupported
 schema are hard failures, never partial reading, silent repair, or compatibility
-decoding. The one explicitly supported predecessor format upgrades automatically
-at ordinary open, including first observation. Its structural conversion and
-version publication are atomic, preserve all retained facts and relationships,
+decoding. The explicitly supported historical formats upgrade automatically
+at ordinary open, including first observation. Their fixed structural conversion and
+version publication are atomic, preserve all retained facts and relationships
+and the timeline's allocation high-water mark,
 and serialize concurrent openers under Heart's existing mutation custody. A
 failed conversion leaves the old authority intact and fails the open. Other
 versions remain unsupported; current-format observation stays read-only.
@@ -45,7 +46,16 @@ resume claim. An answered Turn may retain an exact provider fork point; failure,
 cancellation, and an answer without such a point remain non-forkable.
 
 Activity is bounded retained provider narration, not a raw payload log or a
-recovery authority. Where a native adapter admitted a bounded preview of a
+recovery authority. An explicit progress report is instead an Akuma-owned
+retained timeline fact: it preserves its exact text, time, and Body and Turn
+correlation without ending execution or becoming input or provider narration.
+Admission judges the caller's exact declared execution against the latest open
+Body and its latest open Turn in one transaction. Missing, ended, hung, or
+superseded execution refuses without recording; observing newer execution never
+repairs a stale declaration. The opening Turn initiator is observed in that same
+admission, and its absence does not refuse a report. Reports share ordinary
+timeline ordering, retention, and loss semantics, with no second inbox or cursor.
+Where a native adapter admitted a bounded preview of a
 generic tool's structured invocation arguments, Heart retains and projects that
 narration with the same bound, and older name-only activity decoding and
 presentation remain unchanged. A tool narration's native invocation identity is

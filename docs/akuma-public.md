@@ -10,6 +10,14 @@ and DebtHolder association, and plural request routing around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
 independent of Repo and selector composition.
 
+A selected Akuma may record an explicit progress report against caller-supplied
+exact current Body and Turn custody. The operation never infers execution from
+ambient state, forwards to a parent, or substitutes newer execution for a stale
+caller. Its result means recorded, not received; optional notification failure
+cannot undo the fact. Reports appear as distinct rows in the same public history
+and stream, under their existing sequence and retention meaning. They are not
+answers, and neither completion observation nor final-answer selection changes.
+
 ## One Public Timeline
 
 Status and history derive from one retained Heart timeline in durable sequence
@@ -68,8 +76,8 @@ invented when its qualifying evidence is unavailable. Consumers receive the
 selected row's typed identity and do not reconstruct Turn ownership from its
 content or delivery metadata.
 
-The ordinary current-work window is the open Turn's call and provider activity
-along with its retained settled delivered Tells, all in durable sequence order.
+The ordinary current-work window is the open Turn's call, explicit reports, and
+provider activity along with its retained settled delivered Tells, all in durable sequence order.
 Every settled say in that current Turn is protected from the ordinary status
 budget. File-change activity follows the same bounded selection as other tools;
 when selected it retains its typed operation and available path and diffstat. A

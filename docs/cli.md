@@ -59,6 +59,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
+| report | Record the invoking Akuma's explicit progress on its exact declared current execution; no recipient selection, parent forwarding, or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
 | whoami | Observe the invoking process's own identity, request context, and contextual Contract; for an Akuma, also observe its current Turn initiator and birth profile. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |

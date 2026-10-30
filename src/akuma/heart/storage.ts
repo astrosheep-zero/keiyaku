@@ -91,17 +91,17 @@ async function openHeart(path: string, mode: "rw" | "ro", signal?: AbortSignal):
     database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0");
     const version = await acquire(() => {
       const version = heartSchemaVersion(database);
-      if (version !== 29) assertHeartSchemaVersion(database);
+      if (version !== 29 && version !== 30) assertHeartSchemaVersion(database);
       return version;
     }, signal);
-    if (version !== 29) return database;
+    if (version !== 29 && version !== 30) return database;
   } catch (error) {
     database.close();
     throw error;
   }
   database.close();
-  // Current-format reads never acquire a writer. Only this known predecessor
-  // needs one, and no read transaction survives across the conversion.
+  // Current-format reads never acquire a writer. Only the known predecessors
+  // need one, and no read transaction survives across the conversion.
   const writer = await openExistingDatabase(path, 0);
   try {
     // Dropping turns with FK enforcement enabled would cascade into its children.

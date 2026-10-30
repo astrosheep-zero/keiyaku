@@ -537,7 +537,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/**"),
         any("settings.ts"),
         any("world.ts"),
-        any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic", "withAkumaWaitDeferrals"]),
+        any("plugin/akuma-signals.ts", [
+          "emitPluginSignal",
+          "outcomePluginObserver",
+          "stderrPluginDiagnostic",
+          "withAkumaWaitDeferrals",
+        ]),
       ],
     },
     {

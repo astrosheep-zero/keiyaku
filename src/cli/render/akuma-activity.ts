@@ -143,6 +143,7 @@ function rowText(
   suffix?: string;
 }> {
   if (
+    row.kind === "report" ||
     row.kind === "said" ||
     row.kind === "thought" ||
     row.kind === "note" ||
@@ -204,6 +205,7 @@ function rowPrefix(
 ): Readonly<{ first: string; continuation: string }> {
   if (row.kind === "tool") return actionPrefix(toolMargin(row, view.live === true), tool!.label, columns);
   if (row.kind === "thought") return actionPrefix(ACTION_MARGIN, "think", columns);
+  if (row.kind === "report") return actionPrefix(ACTION_MARGIN, "report", columns);
   if (row.kind === "note") return actionPrefix(ACTION_MARGIN, "note", columns);
   if (row.kind === "outcome")
     return {

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { appendActivity, cancelBodyTurns, classifyHeartSchema, readHeart, readTurn } from "../src/akuma/heart/index.js";
+import { appendActivity, recordReport, cancelBodyTurns, classifyHeartSchema, readHeart, readTurn } from "../src/akuma/heart/index.js";
 import { withReadOnlyHeart } from "../src/akuma/heart/storage.js";
 import { encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
@@ -13,12 +13,20 @@ const at = "2026-10-29T00:00:00.000Z";
 
 // This is deliberately the old DDL, including both CHECK constraints, not a
 // current Heart relabeled as old or a migration generated from current source.
-async function legacyFixture() {
+async function legacyFixture(version: 29 | 30 = 29) {
   const owner = await soulFixture("keiyaku-heart-upgrade-");
   const allocated = await allocateAkumaDirectory({ worldRoot: owner.root, archetype: "claude", draw: () => "29abcdef" });
   const database = new DatabaseSync(allocated.paths.heart);
   try {
-    database.exec(readFileSync("tests/fixtures/heart-v29.sql", "utf8"));
+    let schema = readFileSync("tests/fixtures/heart-v29.sql", "utf8");
+    if (version === 30) schema = schema
+      .replace("version = 29", "version = 30")
+      .replace("VALUES (1, 29)", "VALUES (1, 30)")
+      .replace("'answered', 'failed', 'invalid-output'", "'answered', 'failed', 'invalid-output', 'canceled'")
+      .replace("    OR (outcome IS NULL", `    OR (outcome = 'canceled' AND history_id IS NULL AND session_json IS NULL AND answer IS NULL
+      AND answer_json IS NULL AND diagnostic IS NULL)
+    OR (outcome IS NULL`);
+    database.exec(schema);
     database.exec("PRAGMA foreign_keys=ON; BEGIN IMMEDIATE");
     database.prepare("INSERT INTO soul VALUES (1, ?)").run(...encodeSoulRow({ ...owner.soul, id: allocated.id }));
     database.prepare("INSERT INTO bodies VALUES (1, ?, NULL, NULL, 'put-down', ?), (2, ?, NULL, NULL, NULL, NULL)").run(at, at, at);
@@ -54,8 +62,9 @@ async function legacyFixture() {
 }
 
 function contents(database: DatabaseSync) {
-  const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name != 'akuma_schema' ORDER BY name").all();
-  return tables.map(({ name }) => [name, database.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all()]);
+  // Added empty tables and SQLite's own bookkeeping row order are not historical facts.
+  const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT IN ('akuma_schema', 'reports') ORDER BY name").all();
+  return tables.map(({ name }) => [name, database.prepare(`SELECT * FROM ${name} ORDER BY ${name === "sqlite_sequence" ? "name" : "rowid"}`).all()]);
 }
 
 function raw(path: string) {
@@ -76,7 +85,7 @@ for (const entry of ["read", "write"] as const) test(`v29 upgrades at normal ${e
     assert.deepEqual(raw(value.paths.heart), before, "classification does not upgrade");
     if (entry === "read") await readHeart(value.paths);
     else await appendActivity(value.paths, { turnSequence: 11, event: { type: "note", text: "new" }, at });
-    assert.equal(raw(value.paths.heart).version, 30);
+    assert.equal(raw(value.paths.heart).version, 31);
     if (entry === "read") assert.deepEqual(raw(value.paths.heart).contents, before.contents);
     else {
       // The write adds only its declared activity and sequence, not rewritten history.
@@ -102,6 +111,30 @@ for (const entry of ["read", "write"] as const) test(`v29 upgrades at normal ${e
       assert.equal(database.prepare("SELECT * FROM calls").get(), undefined, "child cascade still targets the rebuilt turns table");
       assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
     } finally { database.close(); }
+  } finally { value.close(); }
+});
+
+test("v30 preserves canceled history and a pruned timeline's high-water when admitting the first report", async () => {
+  const value = await legacyFixture(30);
+  try {
+    const old = new DatabaseSync(value.paths.heart);
+    try {
+      old.exec("UPDATE turns SET outcome = 'canceled', diagnostic = NULL WHERE sequence = 6");
+      old.exec("UPDATE sqlite_sequence SET seq = 9000 WHERE name = 'timeline'");
+    } finally { old.close(); }
+    const before = raw(value.paths.heart).contents;
+    await readHeart(value.paths);
+    assert.equal(raw(value.paths.heart).version, 31);
+    assert.deepEqual(raw(value.paths.heart).contents, before);
+    assert.deepEqual((await readTurn(value.paths, 6))?.end?.outcome, { kind: "canceled" });
+    const report = await recordReport(value.paths, { bodySequence: 2, turnSequence: 11, text: "first report", at });
+    assert.equal(report.kind, "recorded");
+    if (report.kind !== "recorded") assert.fail("report refused");
+    assert.equal(report.report.sequence, 9001);
+    await withReadOnlyHeart(value.paths, database => {
+      assert.equal(database.prepare("SELECT COUNT(*) AS count FROM reports").get()?.count, 1);
+      assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+    });
   } finally { value.close(); }
 });
 
@@ -154,7 +187,7 @@ test("a failed upgrade commit rolls back and the next ordinary open can retry", 
     injected.mock.restore();
     assert.deepEqual(raw(value.paths.heart), before);
     await readHeart(value.paths);
-    assert.equal(raw(value.paths.heart).version, 30);
+    assert.equal(raw(value.paths.heart).version, 31);
     assert.deepEqual(raw(value.paths.heart).contents, before.contents);
   } finally { injected.mock.restore(); value.close(); }
 });

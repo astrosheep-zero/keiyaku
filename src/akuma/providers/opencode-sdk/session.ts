@@ -115,6 +115,7 @@ type LoadOpencodeInput = Readonly<{
   signal: AbortSignal;
   loader?: OpencodeSdkLoader;
   onRuntime?: (runtime: OpencodeRuntime) => void;
+  executionCoordinate?: import("../execution-environment.js").ExecutionCoordinate;
   requests?: string;
 }>;
 export async function loadOpencode(input: LoadOpencodeInput): Promise<OpencodeRuntime> {
@@ -128,7 +129,7 @@ async function loadInjectedOpencode(input: LoadOpencodeInput, loader: OpencodeSd
       cwd,
       {
         ...execution,
-        env: akumaExecutionEnvironment(process.env, execution.env, requests),
+        env: akumaExecutionEnvironment(process.env, execution.env, requests, [], input.executionCoordinate),
       },
       signal,
     ),
@@ -173,6 +174,8 @@ async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRun
         OPENCODE_SERVER_PASSWORD: password,
       },
       requests,
+      [],
+      input.executionCoordinate,
     ),
     log: `${cwd}/.opencode.log`,
   });

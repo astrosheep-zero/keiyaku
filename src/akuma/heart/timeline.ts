@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { CallFact, TellFact, TurnEndFact, TurnStartFact } from "./facts.js";
+import type { CallFact, ReportFact, TellFact, TurnEndFact, TurnStartFact } from "./facts.js";
 import {
+  decodeReportRow,
   decodeActivityRow,
   decodeCallRow,
   decodeTurnRow,
   type ActivityFact,
+  type ReportRow,
   type ActivityRow,
   type CallRow,
   type TurnRow,
@@ -17,7 +19,7 @@ import {
   pendingTellSequencesSql,
 } from "./tells.js";
 
-export type TimelineFact = TurnStartFact | CallFact | ActivityFact | TellFact | TurnEndFact;
+export type TimelineFact = TurnStartFact | CallFact | ReportFact | ActivityFact | TellFact | TurnEndFact;
 export type ActivityFactSlice = Readonly<{
   rows: readonly TimelineFact[];
   lowestRetained: number | null;
@@ -31,6 +33,7 @@ export function lastActivityAt(database: DatabaseSync): string | null {
       WHEN 'turn-start' THEN started_turn.started_at
       WHEN 'call' THEN calls.at
       WHEN 'activity' THEN activity.at
+      WHEN 'report' THEN reports.at
       WHEN 'tell' THEN tells.recorded_at
       WHEN 'turn-end' THEN ended_turn.completed_at
     END AS at
@@ -38,6 +41,7 @@ export function lastActivityAt(database: DatabaseSync): string | null {
     LEFT JOIN turns AS started_turn ON timeline.kind = 'turn-start' AND started_turn.sequence = timeline.sequence
     LEFT JOIN calls ON timeline.kind = 'call' AND calls.sequence = timeline.sequence
     LEFT JOIN activity ON timeline.kind = 'activity' AND activity.sequence = timeline.sequence
+    LEFT JOIN reports ON timeline.kind = 'report' AND reports.sequence = timeline.sequence
     LEFT JOIN tells ON timeline.kind = 'tell' AND tells.sequence = timeline.sequence
     LEFT JOIN turns AS ended_turn ON timeline.kind = 'turn-end' AND ended_turn.end_sequence = timeline.sequence
     ORDER BY timeline.sequence DESC LIMIT 1`,
@@ -70,6 +74,7 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
       SELECT sequence FROM turns WHERE end_sequence IS NULL
       UNION SELECT turn_sequence FROM calls WHERE sequence >= ?
       UNION SELECT turn_sequence FROM activity WHERE sequence >= ?
+      UNION SELECT turn_sequence FROM reports WHERE sequence >= ?
       UNION SELECT sequence FROM turns WHERE end_sequence >= ?
       UNION ${pendingTellProtectionSql}
     ), protected(sequence) AS (
@@ -80,18 +85,19 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
     )
     DELETE FROM timeline WHERE sequence < ? AND sequence NOT IN protected`,
     )
-    .run(cutoff.sequence, cutoff.sequence, cutoff.sequence, cutoff.sequence);
+    .run(cutoff.sequence, cutoff.sequence, cutoff.sequence, cutoff.sequence, cutoff.sequence);
 }
 
 type TimelineRow = Readonly<{
   sequence: number;
-  kind: "turn-start" | "call" | "activity" | "tell" | "turn-end";
+  kind: "turn-start" | "call" | "report" | "activity" | "tell" | "turn-end";
 }>;
 
 type TimelineBatch = Readonly<{
   rows: readonly TimelineRow[];
   turns: readonly TurnRow[];
   calls: readonly CallRow[];
+  reports: readonly ReportRow[];
   activity: readonly ActivityRow[];
   tells: ReturnType<typeof tellBatchAtSequences>;
 }>;
@@ -119,11 +125,17 @@ function readTimelineBatch(database: DatabaseSync, rows: readonly TimelineRow[])
     WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
     )
     .all(sequences("activity")) as unknown as readonly ActivityRow[];
+  const reports = database
+    .prepare(
+      `SELECT sequence, body_sequence, turn_sequence, text, at
+    FROM reports WHERE sequence IN (SELECT value FROM json_each(?)) ORDER BY sequence`,
+    )
+    .all(sequences("report")) as unknown as readonly ReportRow[];
   const tells = tellBatchAtSequences(
     database,
     rows.filter((row) => row.kind === "tell").map((row) => row.sequence),
   );
-  return { rows, turns, calls, activity, tells };
+  return { rows, turns, calls, reports, activity, tells };
 }
 
 export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact[] {
@@ -134,6 +146,7 @@ export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact
     if (end !== undefined) facts.set(end.sequence, end);
   }
   for (const row of batch.calls) facts.set(row.sequence, decodeCallRow(row));
+  for (const row of batch.reports) facts.set(row.sequence, decodeReportRow(row));
   for (const row of batch.activity) facts.set(row.sequence, decodeActivityRow(row));
   for (const fact of decodeTellBatch(batch.tells)) facts.set(fact.sequence, fact);
   return batch.rows.map((row) => {
@@ -157,6 +170,7 @@ export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) 
       SELECT sequence FROM turns WHERE sequence = ?
       UNION SELECT end_sequence FROM turns WHERE sequence = ? AND end_sequence IS NOT NULL
       UNION SELECT sequence FROM calls WHERE turn_sequence = ?
+      UNION SELECT sequence FROM reports WHERE turn_sequence = ?
       UNION SELECT sequence FROM activity WHERE turn_sequence = ?
       UNION SELECT tells.sequence FROM tells
       JOIN tell_deliveries ON tell_deliveries.tell_id = tells.id
@@ -166,6 +180,7 @@ export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) 
     ) SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence) ORDER BY sequence`,
     )
     .all(
+      frontier?.sequence ?? null,
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,

@@ -245,6 +245,12 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
     cwd,
     options,
     signal: driveController.signal,
+    execution: {
+      akumaId: input.soul.id,
+      world: input.world,
+      bodySequence: input.bodySequence,
+      turnSequence: turn.sequence,
+    },
     requests: { dir: requests.directory, entry: requests.entry },
     ...(schemaJson === undefined ? {} : { schemaJson }),
   };

@@ -7,7 +7,7 @@ import {
   type AgentEvent,
 } from "./heart/activity-schema.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
-import { projectTell, type TellDelivery, type TellRow } from "./heart/facts.js";
+import { projectTell, reportFactSchema, type TellDelivery, type TellRow } from "./heart/facts.js";
 import { z } from "zod";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
@@ -57,6 +57,7 @@ const callRowSchema = z
     text: z.string(),
   })
   .strict();
+const reportRowSchema = reportFactSchema;
 const textRowSchema = (kind: "said" | "thought" | "note") =>
   z
     .object({
@@ -141,6 +142,7 @@ const unsettledToolRowSchema = z
   })
   .strict();
 const snapshotFactRowSchema = z.union([
+  reportRowSchema,
   callRowSchema,
   textRowSchema("said"),
   textRowSchema("thought"),
@@ -218,7 +220,8 @@ type CallRow = z.infer<typeof callRowSchema>;
 type SaidRow = z.infer<ReturnType<typeof textRowSchema>>;
 type ThoughtRow = z.infer<ReturnType<typeof textRowSchema>>;
 type NoteRow = z.infer<ReturnType<typeof textRowSchema>>;
-type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow;
+export type ReportRow = z.infer<typeof reportRowSchema>;
+type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow | ReportRow;
 export type { TellRow } from "./heart/facts.js";
 export type OutcomeRow = z.infer<typeof outcomeRowSchema>;
 
@@ -524,6 +527,10 @@ export function projectTurns(
       const turn = state.turnsBySequence.get(fact.turnSequence);
       if (turn === undefined) state.orphanRows.push(row);
       else turn.rows.push(row);
+    } else if (fact.kind === "report") {
+      const turn = state.turnsBySequence.get(fact.turnSequence);
+      if (turn === undefined) state.orphanRows.push(fact);
+      else turn.rows.push(fact);
     } else if (fact.kind === "tell") {
       state.tells.push(projectTell(fact));
     } else {

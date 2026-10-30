@@ -70,6 +70,8 @@ export type {
   AkumaHostOptions,
   AkumaIdleOptions,
   AkumaIdleResult,
+  AkumaReportOptions,
+  AkumaReportResult,
   AkumaSignalOptions,
   AkumaStatus,
   AkumaStreamSnapshot,
