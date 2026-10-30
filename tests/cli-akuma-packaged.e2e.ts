@@ -212,7 +212,7 @@ test("packaged prompt-free call births without admitting a Tell", { timeout: 120
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    const born = await runPackagedCli(["-C", world, "call", "worker"], { cwd: world, env });
+    const born = await runPackagedCli(["-C", world, "call", "worker", "--bare"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
     assert.match(born.stdout, /^✓ called aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
     assert.ok(
@@ -235,7 +235,7 @@ test(
     const { root, world, env } = observingWorld();
     try {
       const unfinished = await runPackagedCli(
-        ["-C", world, "call", "worker", "--wait", "10s", "--alias", "@notes", "prompt"],
+        ["-C", world, "call", "worker", "--bare", "--wait", "10s", "--alias", "@notes", "prompt"],
         { cwd: world, env },
       );
       assert.equal(unfinished.code, 0, unfinished.stderr);
@@ -270,7 +270,7 @@ test(
 
       let detachedStarted = false;
       try {
-        const detached = await runPackagedCli(["-C", world, "call", "worker", "--alias", "@detached", "prompt"], {
+        const detached = await runPackagedCli(["-C", world, "call", "worker", "--bare", "--alias", "@detached", "prompt"], {
           cwd: world,
           env,
         });
@@ -288,7 +288,7 @@ test(
         if (detachedStarted) await killAndAwaitPluralTarget(await World.at(world), "@detached");
       }
 
-      const answered = await runPackagedCli(["-C", world, "call", "finisher", "--wait", "20s", "prompt"], {
+      const answered = await runPackagedCli(["-C", world, "call", "finisher", "--bare", "--wait", "20s", "prompt"], {
         cwd: world,
         env,
       });
@@ -311,11 +311,11 @@ test(
       assert.equal(tell.code, 0, tell.stderr);
       assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
       assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
-      assert.equal(tell.stderr.match(/▸ continue/gu)?.length, 1, "the admission row appears once");
+      assert.equal(tell.stderr.match(/^(?:▸|⧗) continue$/gmu)?.length, 1, `the admitted input appears once:\n${tell.stderr}`);
       assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
       assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 
-      const silent = await runPackagedCli(["-C", world, "call", "silent", "--wait", "20s", "prompt"], {
+      const silent = await runPackagedCli(["-C", world, "call", "silent", "--bare", "--wait", "20s", "prompt"], {
         cwd: world,
         env,
       });
@@ -332,7 +332,7 @@ test("packaged observing call bounds nine eligible tools across polling callback
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--wait", "20s", "prompt"], {
+    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--bare", "--wait", "20s", "prompt"], {
       cwd: world,
       env,
     });
@@ -357,18 +357,18 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
   const cleanupAliases: string[] = [];
   try {
     const running = await runPackagedCli(
-      ["-C", world, "call", "worker", "--wait", "1s", "--alias", "@notes", "prompt"],
+      ["-C", world, "call", "worker", "--bare", "--wait", "1s", "--alias", "@notes", "prompt"],
       { cwd: world, env },
     );
     cleanupAliases.push("@notes");
     assert.equal(running.code, 0, running.stderr);
     const settled = await runPackagedCli(
-      ["-C", world, "call", "finisher", "--wait", "20s", "--alias", "@done", "prompt"],
+      ["-C", world, "call", "finisher", "--bare", "--wait", "20s", "--alias", "@done", "prompt"],
       { cwd: world, env },
     );
     assert.equal(settled.code, 0, settled.stderr);
     const slow = await runPackagedCli(
-      ["-C", world, "call", "slowcoach", "--wait", "1s", "--alias", "@slow", "prompt"],
+      ["-C", world, "call", "slowcoach", "--bare", "--wait", "1s", "--alias", "@slow", "prompt"],
       { cwd: world, env },
     );
     cleanupAliases.push("@slow");
@@ -563,7 +563,7 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
       cwd: root,
       env,
     });
-    assert.equal(failed.code, 2, failed.stderr);
+    assert.equal(failed.code, 3, failed.stderr);
     assert.equal(failed.stdout, "", "a pre-admission failure keeps stdout byte-pure");
     assert.equal(
       failed.stderr.match(/^aku\/worker\/[0-9a-f]{8}$/gmu)?.length,
