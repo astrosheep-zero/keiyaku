@@ -103,6 +103,12 @@ test("global coordinates are independent of command position", () => {
     mode: "detach",
     output: "text",
   });
+  assert.deepEqual(command(["call", "worker", "--bare"]), {
+    command: "call", archetype: "worker", mode: "detach", bare: true, output: "text",
+  });
+  assert.deepEqual(command(["fork", "@worker", "--at", "turn/1", "--bare"]), {
+    command: "fork", akuma: "@worker", at: "turn/1", bare: true, output: "text",
+  });
   assert.throws(() => parseArgv(["call", "worker", "--schema", "answer.json"]), /call --schema requires a prompt/u);
   assert.throws(() => parseArgv(["call", "worker", "--wait", "1s"]), /call --wait requires a prompt/u);
 

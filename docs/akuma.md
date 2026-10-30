@@ -15,7 +15,9 @@ structural projection, not a second identity. Atomic allocation prevents reuse; 
 coordinate is never adopted as a different Akuma.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider
-recipe, execution cwd, origin, optional declared caller, and effective permissions.
+recipe, execution cwd, origin, optional declared caller, effective permissions,
+and the choice to omit Keiyaku execution instructions. That opt-out changes
+neither personality nor capabilities and remains frozen across wake and resume.
 Caller attribution is independent of origin and fork lineage. It names either
 an Akuma in its World or an external integration identity; absence is legal
 for both existing and new births. Attribution is not authentication and never

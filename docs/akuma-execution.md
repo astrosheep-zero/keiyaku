@@ -164,8 +164,11 @@ Fork reads one exact retained answered Turn with its native fork point. It never
 substitutes a nearby turn, latest session, or emulation. A provider without fork
 is categorically unable to fork. Upstream success followed by failed local birth
 is reported honestly without inventing a child Heart; a successful child copies
-the frozen parent Soul except its new identity, fork origin, and invocation's
-optional caller attribution. The source remains lineage, not an inferred caller.
+the frozen parent Soul except its new identity, fork origin, invocation's
+optional caller attribution, and an explicit instruction opt-out. A fork inherits
+an existing opt-out and cannot undo it. Runtime instructions are regenerated for
+the child rather than inherited as personality. The source remains lineage, not
+an inferred caller.
 
 Every committed terminal Turn, including one driven by a later Tell, is followed
 by an optional plugin signal carrying that Turn's sequence and outcome. That

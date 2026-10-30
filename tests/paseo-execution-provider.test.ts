@@ -349,6 +349,7 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
   const attempt = adapter.start({
     ...drive(),
     options: { model: "native-model", effort: "high", systemPrompt: "Work precisely.", systemPromptMode: "append" },
+    runtimeInstructions: "<keiyaku>own identity</keiyaku>",
     session: { kind: "fresh" },
   });
   let admitted = false;
@@ -380,7 +381,7 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
   assert.equal(fake.sendInput!.options!.activeTurnBehavior, "steer");
   assert.equal(fake.createInput!.initialPrompt, undefined);
   assert.equal(fake.createInput!.autoArchive, false);
-  assert.equal(fake.createInput!.systemPrompt, "Work precisely.");
+  assert.equal(fake.createInput!.systemPrompt, "Work precisely.\n\n<keiyaku>own identity</keiyaku>");
   assert.equal(fake.createInput!.env!.AKUMA_REQUESTS_ENTRY, drive().requests.entry);
   assert.equal(fake.createInput!.env!.AKUMA_REQUESTS, undefined);
   assert.equal(fake.createInput!.env!.PASEO_AGENT_ID, undefined);
@@ -426,6 +427,7 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
     options: { model: "native-model", effort: "high" },
     schemaJson: '{"type":"object","properties":{"ok":{"type":"boolean"}}}',
     requests: { dir: "/tmp/disposable/2", entry: drive().requests.entry! },
+    runtimeInstructions: "<keiyaku>own identity</keiyaku>",
     session: { kind: "resume", coordinate: { sessionId: "native-agent" } },
   });
   const next = await resumeAttempt.result;

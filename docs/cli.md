@@ -29,7 +29,9 @@ Akuma call execution is a separate coordinate from invocation scope. An
 explicit call execution directory is the only selection; otherwise the call
 uses the effective invocation directory. Contract association never supplies
 or displaces an execution directory, and selecting the invocation directory
-explicitly is equivalent to omitting that selection. A successful call or fork
+explicitly is equivalent to omitting that selection. Call and fork may omit only
+Keiyaku's runtime instruction section; this choice persists through later
+execution and fork inheritance without narrowing any capability. A successful call or fork
 may perform best-effort inactive-Akuma maintenance after its new child is
 durable; list, status, history, wait, tell, and ask never retire bytes.
 

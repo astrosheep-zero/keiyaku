@@ -125,18 +125,21 @@ async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: 
   if (execution.config !== undefined) {
     throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
   }
+  const personality = input.options.systemPrompt;
+  const append = [
+    ...(input.options.systemPromptMode === "append" && personality !== undefined ? [personality] : []),
+    ...(input.runtimeInstructions === undefined ? [] : [input.runtimeInstructions]),
+  ];
   const services = await sdk.createAgentSessionServices({
     cwd: input.cwd,
     agentDir: sdk.getAgentDir(),
     modelRuntimeSignal: input.signal,
-    ...(input.options.systemPrompt === undefined
-      ? {}
-      : {
-          resourceLoaderOptions:
-            input.options.systemPromptMode === "append"
-              ? { appendSystemPromptOverride: (base: string[]) => [...base, input.options.systemPrompt!] }
-              : { systemPromptOverride: () => input.options.systemPrompt },
-        }),
+    resourceLoaderOptions: {
+      ...(personality === undefined || input.options.systemPromptMode === "append"
+        ? {}
+        : { systemPromptOverride: () => personality }),
+      appendSystemPromptOverride: (base: string[]) => [...base, ...append],
+    },
   });
   const extensionErrors = services.resourceLoader.getExtensions().errors ?? [];
   for (const failure of extensionErrors) console.error(`Pi extension load failed: ${failure.path}\n${failure.error}`);

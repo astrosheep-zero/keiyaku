@@ -14,7 +14,8 @@ export type OpencodeSdkSession = Readonly<{
   create(input: { body: SessionCreateInput }): Promise<unknown>;
   get(input: { id: string }): Promise<unknown>;
   switchModel(input: { id: string; model: SessionSwitchModelInput["model"] }): Promise<unknown>;
-  instructions(input: { id: string; text: string }): Promise<unknown>;
+  instructions(input: { id: string; text: string; key?: string }): Promise<unknown>;
+  removeInstruction(input: { id: string; key: string }): Promise<unknown>;
   active(): Promise<unknown>;
   fork(input: { id: string; before: string }): Promise<unknown>;
   interrupt(input: { id: string }): Promise<unknown>;
@@ -188,8 +189,10 @@ async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRun
         create: async ({ body }) => ({ data: await native.sdk.session.create(body, options) }),
         get: async ({ id }) => ({ data: await native.sdk.session.get({ sessionID: id }, options) }),
         switchModel: ({ id, model }) => native.sdk.session.switchModel({ sessionID: id, model }, options),
-        instructions: ({ id, text }) =>
-          native.sdk.session.instructions.entry.put({ sessionID: id, key: "keiyaku.system", value: text }, options),
+        instructions: ({ id, text, key = "keiyaku.system" }) =>
+          native.sdk.session.instructions.entry.put({ sessionID: id, key, value: text }, options),
+        removeInstruction: ({ id, key }) =>
+          native.sdk.session.instructions.entry.remove({ sessionID: id, key }, options),
         active: async () => ({ data: await native.sdk.session.active(options) }),
         fork: async ({ id, before }) => ({ data: await native.sdk.session.fork({ sessionID: id, before }, options) }),
         interrupt: ({ id }) => native.sdk.session.interrupt({ sessionID: id, resume: false }),

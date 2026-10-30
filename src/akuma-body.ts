@@ -21,6 +21,9 @@ import { Debts, type Debt, type DebtMutationResult } from "./debt/index.js";
 import { debtMutationRequestCommands, type DebtLifecycleVerb, type DebtMutationRequestPort } from "./debt/mutation.js";
 import { World } from "./world.js";
 import { readSoul } from "./akuma/heart/index.js";
+import type { ExecutionAssociationReader } from "./akuma/execution-instructions.js";
+import { readDispatch } from "./dispatch/index.js";
+import { NoGitWorldError, repositoryAt } from "./git/repository.js";
 
 type BodyProcessConfiguration = Readonly<{ home?: string; gitPath?: string }>;
 
@@ -136,12 +139,29 @@ export async function externalRequestCommandsFor(
   Readonly<{
     world: Awaited<ReturnType<typeof World.prove>>;
     commands: Readonly<Record<string, import("./akuma/request-wire.js").ErasedRequestCommand>>;
+    executionAssociation: ExecutionAssociationReader;
   }>
 > {
   const world = await World.prove(worldRootForAkumaPaths(launch.paths));
   const servingBody = launch.seed?.id ?? (await readSoul(launch.paths))?.id;
   return {
     world,
+    executionAssociation: async () => {
+      if (servingBody !== undefined) {
+        try {
+          const dispatch = await readDispatch(await repositoryAt(world), servingBody);
+          if (dispatch !== null) return { contractId: dispatch.contractId };
+        } catch (error) {
+          if (!(error instanceof NoGitWorldError)) {
+            console.error(
+              `Keiyaku execution association unavailable for ${servingBody}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+      const contractId = launch.completion?.contractId;
+      return contractId === undefined ? undefined : { contractId };
+    },
     commands: composeRequestCommands(
       selectionRequestCommands(
         selectionRequestPort(
@@ -174,8 +194,12 @@ async function runBodyEntrypoint(): Promise<void> {
   const encoded = process.argv[2];
   if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
   const launch = bodyLaunchSchema.parse(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
-  const { world, commands } = await externalRequestCommandsFor(launch, bodyProcessConfiguration());
-  if ((await runAkumaBody(launch, world, commands)) === "held") process.exitCode = LEASH_HELD_EXIT;
+  const { world, commands, executionAssociation } = await externalRequestCommandsFor(
+    launch,
+    bodyProcessConfiguration(),
+  );
+  if ((await runAkumaBody(launch, world, commands, executionAssociation)) === "held")
+    process.exitCode = LEASH_HELD_EXIT;
 }
 
 /** Only the spawned entrypoint launches a Body; importing this module composes commands without side effects. */

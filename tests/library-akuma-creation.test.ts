@@ -248,7 +248,7 @@ function trackedWakeLaunches() {
   };
 }
 
-test("prompt-free Akumas.call reports born without admitting a Tell", async (t) => {
+test("prompt-free bare Akumas.call reports born without admitting a Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   // Existing Body receipt instrumentation is installed before the call and stays
@@ -259,12 +259,16 @@ test("prompt-free Akumas.call reports born without admitting a Tell", async (t) 
     const result = await Akumas.of(world).call({
       archetype: "worker",
       cwd: world,
+      bare: true,
       ...configured.placement,
     });
     assert.deepEqual(result.observation, { kind: "born" });
     const handle = PublicAkuma.select(world, result.akuma);
     assert.deepEqual((await handle.status()).birth, { origin: { kind: "direct" }, caller: { kind: "unknown" } });
-    assert.equal((await readSoul(pathsForAkuId(world, result.akuma)))?.caller, undefined);
+    const soul = await readSoul(pathsForAkuId(world, result.akuma));
+    assert.equal(soul?.caller, undefined);
+    assert.equal(soul?.bare, true);
+    assert.match(soul?.options.systemPrompt ?? "", /Work\./u);
     const history = await handle.history();
     assert.equal(history.rows.some((row) => row.kind === "tell"), false);
     // Soul may precede the first Body. The PID-receipt cleanup below awaits
@@ -657,6 +661,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
     const pending = routedAkumas.call({
       archetype: "worker",
       body: "forwarded-schema-call",
+      bare: true,
       cwd: world,
       ...configured.placement,
       mode: "wait",
@@ -664,6 +669,7 @@ test("forwarded schema Akumas.call waits for birth and answers its first Tell", 
     });
     const body = await slow.started;
     const whileHeld = await readHeart(body.paths);
+    assert.equal(whileHeld.soul?.bare, true, "forwarding freezes the birth opt-out");
     assert.equal(whileHeld.latestBody?.sequence, body.bodySequence);
     assert.equal(whileHeld.latestBody?.end, undefined);
     assert.deepEqual(whileHeld.pending, []);

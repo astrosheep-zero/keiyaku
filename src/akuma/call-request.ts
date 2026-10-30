@@ -34,6 +34,7 @@ const akumaCallRecipeSchema = z
     allowed: allowedActionsSchema,
     provider: providerRecipeSchema,
     options: providerOptionsSchema,
+    bare: z.boolean().optional(),
   })
   .strict();
 
@@ -70,6 +71,7 @@ export type AkumaCallRequestChildLaunch = Readonly<{
 export type InitialTellAdmissionRequest = Readonly<{
   id: AkuId;
   initialTell: CallInitialTell;
+  contractId?: string;
   signal: AbortSignal;
 }>;
 
@@ -134,6 +136,7 @@ async function executeAkumaCall(
         provider: request.recipe.provider,
         options: request.recipe.options,
         allowed: request.recipe.allowed,
+        ...(request.recipe.bare === undefined ? {} : { bare: request.recipe.bare }),
       },
       parent,
       requestId: facts.id,
@@ -150,7 +153,12 @@ async function executeAkumaCall(
           ...(request.birthInitiator === undefined ? {} : { birthInitiator: request.birthInitiator }),
           ...(request.contractId === undefined ? {} : { completion: { contractId: request.contractId } }),
         }),
-      admitInitialTell,
+      admitInitialTell: async (input) =>
+        await admitInitialTell({
+          ...input,
+          signal: facts.signal,
+          ...(request.contractId === undefined ? {} : { contractId: request.contractId }),
+        }),
     },
   });
   return {

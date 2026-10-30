@@ -37,6 +37,9 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   const provider = decodeProviderRecipe(soul.provider);
   const options = decodeProviderOptions(soul.options);
   const caller = decodeAkumaCaller(soul.caller);
+  if (soul.bare !== undefined && typeof soul.bare !== "boolean") {
+    throw new Error("Akuma soul bare must be a boolean");
+  }
   return {
     id,
     archetype,
@@ -47,6 +50,7 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
     origin: akumaOriginSchema.parse(soul.origin),
     ...(caller === undefined ? {} : { caller }),
     allowed: historicalAllowedActions(soul.allowed),
+    ...(soul.bare === undefined ? {} : { bare: soul.bare }),
   };
 }
 

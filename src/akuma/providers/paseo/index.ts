@@ -255,6 +255,9 @@ class PaseoDrive {
   }
 
   async establish(input: DriveInput, config: PaseoConfig, coordinate?: ResumeCoordinate): Promise<Session> {
+    const systemPrompt = [input.options.systemPrompt, input.runtimeInstructions]
+      .filter((part) => part !== undefined && part.length > 0)
+      .join("\n\n");
     const entry = input.requests.entry;
     if (entry === undefined || !isAbsolute(entry) || resolve(entry) !== entry)
       throw new Error("Paseo requires the Body's stable request entry");
@@ -266,7 +269,7 @@ class PaseoDrive {
             this.client.createAgent({
               provider: config.provider,
               cwd: input.cwd,
-              ...(input.options.systemPrompt === undefined ? {} : { systemPrompt: input.options.systemPrompt }),
+              ...(systemPrompt === "" ? {} : { systemPrompt }),
               env: {
                 ...akumaExecutionEnvironment(process.env, this.environment, undefined, [], input.execution),
                 [AKUMA_REQUESTS_ENTRY_ENV]: entry,

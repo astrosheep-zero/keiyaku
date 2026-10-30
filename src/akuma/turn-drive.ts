@@ -19,6 +19,7 @@ import {
   type TellFact,
 } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
+import { keiyakuExecutionInstructions, type ExecutionAssociationReader } from "./execution-instructions.js";
 import { withoutModel } from "./provider-recipe.js";
 import type { CallInitialTellAdmission } from "./call-initial-tell.js";
 import type { InitialTellAdmissionRequest } from "./call-request.js";
@@ -104,6 +105,7 @@ export type DriveTurnInput = Readonly<{
   admitInitialTell(input: InitialTellAdmissionRequest): Promise<CallInitialTellAdmission>;
   world: import("../world.js").WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
+  executionAssociation?: ExecutionAssociationReader;
   turnStarted: Readonly<{ emit(turnSequence: number): Promise<void> }>;
   now(): string;
 }>;
@@ -196,9 +198,48 @@ async function writeProviderEvent(
   await appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
 }
 
+function startProviderAttempt(
+  input: DriveTurnInput,
+  setup: Readonly<{
+    recipe: Awaited<ReturnType<typeof turnRecipe>>;
+    tells: readonly TellFact[];
+    requests: BodyRequestPump;
+    signal: AbortSignal;
+    turnSequence: number;
+    schemaJson: string | undefined;
+    runtimeInstructions: string | undefined;
+  }>,
+): ProviderAttempt<Session> {
+  const { cwd, options, session } = setup.recipe;
+  const driveInput = {
+    body: input.body,
+    launchTells: setup.tells.map((tell) => ({ id: tell.id, text: tell.body })),
+    cwd,
+    options,
+    signal: setup.signal,
+    execution: {
+      akumaId: input.soul.id,
+      world: input.world,
+      bodySequence: input.bodySequence,
+      turnSequence: setup.turnSequence,
+    },
+    requests: { dir: setup.requests.directory, entry: setup.requests.entry },
+    ...(setup.runtimeInstructions === undefined ? {} : { runtimeInstructions: setup.runtimeInstructions }),
+    ...(setup.schemaJson === undefined ? {} : { schemaJson: setup.schemaJson }),
+  };
+  return session === undefined
+    ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
+    : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
+}
+
 async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
-  const { cwd, options, session } = await turnRecipe(input.paths, input.soul);
+  const recipe = await turnRecipe(input.paths, input.soul);
+  const { cwd, options, session } = recipe;
   if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
+  const runtimeInstructions = keiyakuExecutionInstructions(
+    input.soul,
+    input.soul.bare !== false ? undefined : await input.executionAssociation?.(),
+  );
   const boundTells = drainPendingTells(input.launchTells);
   const schemaJson = input.schemaJson ?? boundTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
   const initiator = input.call === undefined ? boundTells[0]?.initiator : input.initiator;
@@ -239,25 +280,15 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   void requests.failure.catch((error: unknown) => {
     if (!driveController.signal.aborted) driveController.abort(error);
   });
-  const driveInput = {
-    body: input.body,
-    launchTells: boundTells.map((tell) => ({ id: tell.id, text: tell.body })),
-    cwd,
-    options,
+  const attempt = startProviderAttempt(input, {
+    recipe,
+    tells: boundTells,
+    requests,
     signal: driveController.signal,
-    execution: {
-      akumaId: input.soul.id,
-      world: input.world,
-      bodySequence: input.bodySequence,
-      turnSequence: turn.sequence,
-    },
-    requests: { dir: requests.directory, entry: requests.entry },
-    ...(schemaJson === undefined ? {} : { schemaJson }),
-  };
-  const attempt =
-    session === undefined
-      ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
-      : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
+    turnSequence: turn.sequence,
+    schemaJson,
+    runtimeInstructions,
+  });
   const custodyFailure = observeFailure(attempt.closed);
   try {
     const selected = await Promise.race([attempt.result, requests.failure, custodyFailure]);

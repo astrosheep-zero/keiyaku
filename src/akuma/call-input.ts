@@ -1,6 +1,11 @@
 import { realpath, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
+export function bareOption(value: unknown): boolean | undefined {
+  if (value !== undefined && typeof value !== "boolean") throw new TypeError("bare must be a boolean");
+  return value;
+}
+
 export async function canonicalBirthCwd(
   input: string,
   diagnostic = `cwd is not an existing directory: ${input}`,

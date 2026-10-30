@@ -49,6 +49,7 @@ import { akumaExecutionEnvironment } from "./providers/execution-environment.js"
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
+import type { ExecutionAssociationReader } from "./execution-instructions.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
 import type { ErasedRequestCommand } from "./request-wire.js";
@@ -94,6 +95,7 @@ type BodyRuntime = Readonly<{
   spawnBody?(launch: BodyLaunch): Promise<OwnedProcess>;
   world: WorldRoot;
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
+  executionAssociation?: ExecutionAssociationReader;
 }>;
 
 function missing(error: unknown): boolean {
@@ -544,7 +546,11 @@ async function admitInitialCallTell(
         tell.id,
         {
           spawn: async (tellPaths) =>
-            await (runtime.spawnBody ?? spawnAkumaBody)({ paths: tellPaths, refuseIfHeld: true }),
+            await (runtime.spawnBody ?? spawnAkumaBody)({
+              paths: tellPaths,
+              refuseIfHeld: true,
+              ...(input.contractId === undefined ? {} : { completion: { contractId: input.contractId } }),
+            }),
           schedule: abortableDelay,
         },
         input.signal,
@@ -593,6 +599,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       ...(schema === undefined ? {} : { schemaJson: schema }),
       world: runtime.world,
       externalCommands: runtime.externalCommands,
+      ...(runtime.executionAssociation === undefined ? {} : { executionAssociation: runtime.executionAssociation }),
       now: runtime.now,
       turnStarted,
     });
@@ -856,8 +863,13 @@ export async function runAkumaBody(
   launch: BodyLaunch,
   world: WorldRoot,
   externalCommands: Readonly<Record<string, ErasedRequestCommand>>,
+  executionAssociation?: ExecutionAssociationReader,
 ): Promise<"held" | void> {
-  return await driveAkumaBody(launch, undefined, { world, externalCommands });
+  return await driveAkumaBody(launch, undefined, {
+    world,
+    externalCommands,
+    ...(executionAssociation === undefined ? {} : { executionAssociation }),
+  });
 }
 
 const DIRECT_TELL_WAKE: TellWakeRuntime = {

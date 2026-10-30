@@ -88,24 +88,33 @@ function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {
 
 function grokSessionMeta(
   config: ProviderExecution["config"],
-  options: ProviderOptions,
+  input: AcpStartInput,
 ): Pick<AcpDependencies, "freshSessionMeta" | "loadSessionMeta"> {
-  // Keiyaku does not implement Grok's reverse ask_user_question request, so
-  // keep that unsupported tool out of every session's advertised toolset.
+  // Grok appends rules only when creating a session; ordinary load preserves
+  // that immutable execution context without requiring a hot-update channel.
+  const options = input.options;
   const sessionMeta = { ...(config ?? {}), askUserQuestion: false };
-  const configured = { freshSessionMeta: sessionMeta, loadSessionMeta: sessionMeta };
-  if (options.systemPrompt === undefined || options.systemPrompt.length === 0) return configured;
-  if (options.systemPromptMode === "append")
-    return { ...configured, freshSessionMeta: { ...sessionMeta, rules: options.systemPrompt } };
-  if (options.systemPromptMode === "replace") {
-    const meta = { systemPromptOverride: options.systemPrompt };
-    return {
-      ...configured,
-      freshSessionMeta: { ...sessionMeta, ...meta },
-      loadSessionMeta: { ...sessionMeta, ...meta },
+  const replacement =
+    options.systemPromptMode === "replace" && options.systemPrompt?.trim()
+      ? options.systemPrompt
+      : typeof config?.systemPromptOverride === "string" && config.systemPromptOverride.trim()
+        ? config.systemPromptOverride
+        : undefined;
+  if (replacement !== undefined) {
+    const meta = {
+      ...sessionMeta,
+      systemPromptOverride: [replacement, input.runtimeInstructions].filter((part) => part !== undefined).join("\n\n"),
     };
+    return { freshSessionMeta: meta, loadSessionMeta: meta };
   }
-  return configured;
+  const rules = options.systemPromptMode === "append" ? options.systemPrompt : config?.rules;
+  const appended = [typeof rules === "string" ? rules : undefined, input.runtimeInstructions]
+    .filter((part) => part !== undefined && part.length > 0)
+    .join("\n\n");
+  return {
+    freshSessionMeta: { ...sessionMeta, ...(appended === "" ? {} : { rules: appended }) },
+    loadSessionMeta: sessionMeta,
+  };
 }
 
 function argv(execution: ProviderExecution, options: ProviderOptions): readonly [string, ...string[]] {
@@ -154,7 +163,7 @@ export function createGrokBuildProvider(
       argv: argv(execution, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),
     };
-    const sessionMeta = grokSessionMeta(execution.config, input.options);
+    const sessionMeta = grokSessionMeta(execution.config, input);
     live = await startAcpSession(
       launch,
       input,

@@ -579,6 +579,8 @@ export type DriveInput = Readonly<{
   launchTells: readonly Readonly<{ id: string; text: string }>[];
   cwd: string;
   options: ProviderOptions;
+  /** Fresh execution context, never part of the persisted personality recipe. */
+  runtimeInstructions?: string;
   signal: AbortSignal;
   execution?: ExecutionCoordinate;
   requests: Readonly<{ dir: string; entry?: string }>;

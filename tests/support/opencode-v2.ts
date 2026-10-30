@@ -32,6 +32,9 @@ export function opencodeFixture() {
     async instructions(value) {
       calls.push({ method: "instructions", value });
     },
+    async removeInstruction(value) {
+      calls.push({ method: "removeInstruction", value });
+    },
     async active() {
       return { data: {} };
     },

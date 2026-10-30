@@ -8,7 +8,7 @@ import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from 
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { AllowedAction } from "../akuma/allowed.js";
 import type { TellResult } from "../akuma/body.js";
-import { canonicalBirthCwd } from "../akuma/call-input.js";
+import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
 import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
@@ -64,6 +64,7 @@ export type CallInput = Readonly<{
   contract?: Keiyaku;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  bare?: boolean;
   schema?: Schema<unknown>;
   initiator?: string;
   caller?: AkumaCaller;
@@ -100,6 +101,7 @@ type CallExecution = CallResult["execution"];
 export type ForkInput = Readonly<{
   akuma: string;
   at: string;
+  bare?: boolean;
   repo?: Repo;
   caller?: AkumaCaller;
   initiator?: string;
@@ -297,6 +299,7 @@ const CALL_INPUT_KEYS = [
   "contract",
   "alias",
   "allowed",
+  "bare",
   "schema",
   "initiator",
   "caller",
@@ -315,6 +318,7 @@ type ParsedCallInput = Readonly<{
   settings?: Settings;
   alias?: AkumaAlias;
   allowed?: readonly AllowedAction[];
+  bare?: boolean;
   seat: ReturnType<typeof callSeat>;
   caller?: AkumaCaller;
   initiator?: string;
@@ -330,6 +334,7 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
   const body = callBody(values.body);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const caller = decodeAkumaCaller(values.caller);
+  const bare = bareOption(values.bare);
   const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
   validateCallBodyOptions(body, values, mode);
@@ -364,6 +369,7 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
     ...(settings === undefined ? {} : { settings }),
     ...(alias === undefined ? {} : { alias }),
     ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
+    ...(bare === undefined ? {} : { bare }),
     seat,
     ...(caller === undefined ? {} : { caller }),
     ...(initiator === undefined ? {} : { initiator }),
@@ -396,6 +402,7 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
           },
         }),
     ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+    ...(input.bare === undefined ? {} : { bare: input.bare }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   };
@@ -575,7 +582,8 @@ export async function callAkumas(
 
 export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }>): Promise<ForkResult> {
   const values = requireInput(input, "Akumas.fork input");
-  onlyKeys(values, ["path", "akuma", "at", "repo", "caller", "initiator"], "Akumas.fork input");
+  onlyKeys(values, ["path", "akuma", "at", "bare", "repo", "caller", "initiator"], "Akumas.fork input");
+  const bare = bareOption(values.bare);
   const caller = decodeAkumaCaller(values.caller);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const at = nonblank(values.at, "at");
@@ -585,6 +593,7 @@ export async function forkAkumas(input: ForkInput & Readonly<{ path: WorldRoot }
 
   const receipt = await new AkumaOwner(akuma, path).fork({
     at,
+    ...(bare === undefined ? {} : { bare }),
     ...(caller === undefined ? {} : { caller }),
     ...(initiator === undefined ? {} : { initiator }),
   });

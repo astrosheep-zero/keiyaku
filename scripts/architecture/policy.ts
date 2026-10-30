@@ -600,7 +600,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "akuma-body.ts",
       allow: [
         any("akuma/**"),
+        any("dispatch/index.ts", ["readDispatch"]),
         any("git/hooks.ts"),
+        any("git/repository.ts", ["NoGitWorldError", "repositoryAt"]),
         any("library/**"),
         any("settings.ts"),
         any("debt/**"),

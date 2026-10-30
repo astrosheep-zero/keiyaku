@@ -9,7 +9,7 @@ import { decodeAllowedActions, unionAllowedActions, type AllowedAction } from ".
 import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
 import { spawnAkumaBody, type BodyLaunch, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
-import { canonicalBirthCwd } from "./call-input.js";
+import { bareOption, canonicalBirthCwd } from "./call-input.js";
 import { requestForwardedAkumaCall } from "./call-request.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { type AllocatedAkuma } from "./identity.js";
@@ -27,6 +27,7 @@ export type AkumaCallInput = Readonly<{
   body?: string;
   cwd?: string;
   allowed?: readonly AllowedAction[];
+  bare?: boolean;
   schema?: Schema<unknown>;
   initiator?: string;
   caller?: AkumaCaller;
@@ -133,6 +134,18 @@ async function admitDirect(input: {
         admitInitialTell: async ({ id, initialTell, signal }) =>
           await new AkumaOwner(id, input.path).admitInitialTell(initialTell, {
             ...(signal === undefined ? {} : { signal }),
+            ...(input.call.contractId === undefined
+              ? {}
+              : {
+                  runtime: {
+                    spawn: async (paths) =>
+                      await spawnAkumaBody({
+                        paths,
+                        refuseIfHeld: true,
+                        completion: { contractId: input.call.contractId },
+                      }),
+                  },
+                }),
           }),
       },
     });
@@ -187,6 +200,7 @@ export async function admitAkumaCall(
     provider: archetype.provider,
     options: archetype.options,
     allowed,
+    bare: bareOption(input.bare) ?? false,
   });
   if (execution.kind === "body-request")
     return await admitBodyRequest({ call: input, context, path, name, recipe: requestRecipe, execution });

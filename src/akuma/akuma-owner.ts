@@ -1,3 +1,4 @@
+import { bareOption } from "./call-input.js";
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
@@ -478,7 +479,10 @@ export class AkumaOwner {
     };
   }
 
-  async fork(input: Readonly<{ at: string; caller?: AkumaCaller; initiator?: string }>): Promise<ForkReceipt> {
+  async fork(
+    input: Readonly<{ at: string; bare?: boolean; caller?: AkumaCaller; initiator?: string }>,
+  ): Promise<ForkReceipt> {
+    const bare = bareOption(input.bare);
     const caller = decodeAkumaCaller(input.caller);
     const source = await readSoul(this.paths);
     if (source === null) throw new AkumaNotBornError(this.id);
@@ -522,6 +526,7 @@ export class AkumaOwner {
               provider: source.provider,
               options: source.options,
               allowed: source.allowed,
+              bare: source.bare === true || bare === true,
               cwd: source.cwd,
               origin: { kind: "fork", parent: this.id, at: input.at },
               ...(caller === undefined ? {} : { caller }),

@@ -404,6 +404,7 @@ async function admittedRecipe(
     provider: selected.execution,
     options: admission.options,
     allowed: bounds.ceiling === undefined ? recipe.allowed : clipAllowedActions(recipe.allowed, bounds.ceiling),
+    ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
   });
 }
 
@@ -471,6 +472,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
             provider: recipe.provider,
             options: recipe.options,
             allowed: recipe.allowed,
+            ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
             cwd: input.cwd,
             origin,
             ...(caller === undefined ? {} : { caller }),

@@ -25,6 +25,7 @@ export type ParsedAkumaCommand = Output &
         mode: "wait" | "detach";
         timeoutMs?: number;
         allowed?: AllowedActions;
+        bare?: boolean;
         schema?: string;
       }> &
         Readonly<{ prompt?: AkumaPromptSource }>)
@@ -44,7 +45,7 @@ export type ParsedAkumaCommand = Output &
       }> &
         Addressed)
     | Readonly<{ command: "history"; contract: string; full: boolean }>
-    | (Readonly<{ command: "fork"; at: string }> & Addressed)
+    | (Readonly<{ command: "fork"; at: string; bare?: boolean }> & Addressed)
   );
 
 export type InvokedAkumaCommand = Exclude<
@@ -88,16 +89,19 @@ const AKUMA_COMMAND_SPECS = {
       alias: "value",
       wait: "value",
       allowed: "repeat",
+      bare: "boolean",
       json: "boolean",
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--schema <file>] [--wait <duration>] [<prompt> | -]",
+      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
     purpose: "Call an Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
       "--schema and --wait require a prompt.",
+      "--bare omits Keiyaku's runtime instruction section for this birth and its later execution; personality, tools, permissions, and report remain unchanged.",
+      "Generic ACP needs --bare: it has no verified native runtime-instruction channel. Existing sessions without the section are not retrofitted; ordinary resume retains existing native instructions.",
       "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
@@ -181,11 +185,13 @@ const AKUMA_COMMAND_SPECS = {
   fork: {
     arity: 1,
     stdin: false,
-    flags: { at: "value", json: "boolean" },
-    usage: "fork <aku/...|@alias> --at <historyId> [--repo <path>]",
+    flags: { at: "value", bare: "boolean", json: "boolean" },
+    usage: "fork <aku/...|@alias> --at <historyId> [--bare] [--repo <path>]",
     purpose: "Create a new Akuma from an answered turn.",
-    details:
+    details: [
       "--at takes a retained answered turn id (turn/<n>); find its historyId in paged keiyaku history <aku/...|@alias> --json. Fork also requires a retained provider fork point.",
+      "A fork inherits bare; --bare additionally omits only the child's Keiyaku runtime instructions.",
+    ].join("\n"),
   },
   kill: {
     arity: "one-or-more",
@@ -361,7 +367,7 @@ function parseAddressed(
   }
   const akuma = rawSelectors[0]!;
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
-  return { command: action, akuma, at, output };
+  return { command: action, akuma, at, ...(flags.bare === true ? { bare: true } : {}), output };
 }
 
 function parsePrompted(
@@ -464,6 +470,7 @@ function parseCall(
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(allowed === undefined ? {} : { allowed }),
+    ...(flags.bare === true ? { bare: true } : {}),
     ...(schema === undefined ? {} : { schema }),
     ...(prompt === undefined ? {} : { prompt }),
     output,

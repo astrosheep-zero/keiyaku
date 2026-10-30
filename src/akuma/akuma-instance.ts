@@ -49,6 +49,7 @@ export type AkumaBirthInput = Readonly<{
   home?: string;
   settings?: Settings;
   allowed?: readonly AllowedAction[];
+  bare?: boolean;
   caller?: AkumaCaller;
   initiator?: string;
   host?: AkumaHostOptions;
@@ -104,6 +105,7 @@ export class Akuma {
         archetype,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
+        ...(input.bare === undefined ? {} : { bare: input.bare }),
         ...(input.caller === undefined ? {} : { caller: input.caller }),
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
       },

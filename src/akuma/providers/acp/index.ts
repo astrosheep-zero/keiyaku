@@ -53,6 +53,11 @@ export function createAcpProvider(execution: ProviderExecution, dependencies: Ac
   if (execution.executable === undefined) throw new TypeError("ACP provider execution requires executable");
   const config = decodeAcpConfig(execution.config);
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
+    if (input.runtimeInstructions !== undefined) {
+      throw new Error(
+        "ACP has no verified native runtime-instruction channel; call with bare to omit the Keiyaku section",
+      );
+    }
     const launch = {
       argv: argv(execution, config, input.options),
       ...(execution.env === undefined ? {} : { env: execution.env }),

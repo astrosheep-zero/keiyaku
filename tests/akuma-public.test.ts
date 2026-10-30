@@ -49,7 +49,7 @@ import {
   recordTell,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
 import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import type { OwnedProcess } from "../src/runtime/proc/run.js";
@@ -504,7 +504,7 @@ test("turn owner folds a rejected completion while the event stream remains open
   }
 });
 
-async function answeredSource(root: string, suffix: string) {
+async function answeredSource(root: string, suffix: string, bare?: boolean) {
   const world = await World.at(root);
   const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
@@ -515,6 +515,7 @@ async function answeredSource(root: string, suffix: string) {
         id: allocated.id,
         archetype: "claude",
         description: "Fork source",
+        ...(bare === undefined ? {} : { bare }),
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
         origin: { kind: "direct" },
@@ -1343,15 +1344,25 @@ test("SDK fork records its invoking caller independently of source lineage and e
   mutable.fork = () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "native-fork" } }));
   try {
     const caller = { kind: "akuma" as const, world, akuId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id };
-    const receipt = await Akumas.of(world).fork({ akuma: source.id, at: "turn/1", caller, initiator: "Invoker" });
+    const receipt = await Akumas.of(world).fork({ akuma: source.id, at: "turn/1", caller, initiator: "Invoker", bare: true });
     assert.equal(receipt.kind, "forked");
     if (receipt.kind !== "forked") return;
+    const child = pathsForAkuId(world, receipt.child);
+    assert.equal((await readHeart(child)).soul?.bare, true);
+    assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
     const status = await (await akumaAt(root)).of({ id: receipt.child }).status();
     assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
     const signals = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(signals.length, 2);
     assert.deepEqual(signals[1], { kind: "akuma.born", akumaId: receipt.child, bodySequence: 1,
       ...status.birth, initiator: "Invoker" });
+    const bareSource = await answeredSource(root, "f0a10004", true);
+    const inherited = await Akumas.of(world).fork({ akuma: bareSource.id, at: "turn/1", bare: false });
+    assert.equal(inherited.kind, "forked");
+    if (inherited.kind === "forked") {
+      assert.equal((await readHeart(pathsForAkuId(world, inherited.child))).soul?.bare, true,
+        "false cannot undo a source's frozen opt-out");
+    }
   } finally {
     mutable.fork = original;
   }

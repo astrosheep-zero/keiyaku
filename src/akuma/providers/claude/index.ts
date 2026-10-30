@@ -87,6 +87,9 @@ function claudeQueryOptions(
   execution: ClaudeExecution,
   abortController: AbortController,
 ): Options {
+  const instructions = [input.options.systemPrompt, input.runtimeInstructions]
+    .filter((part): part is string => part !== undefined && part.length > 0)
+    .join("\n\n");
   return {
     ...(execution.config ?? {}),
     cwd: input.cwd,
@@ -99,13 +102,13 @@ function claudeQueryOptions(
     settingSources: ["user", "project", "local"],
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.effort === undefined ? {} : { effort: input.options.effort as NonNullable<Options["effort"]> }),
-    ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0
+    ...(instructions.length === 0
       ? {}
       : {
           systemPrompt:
-            input.options.systemPromptMode === "replace"
-              ? input.options.systemPrompt
-              : { type: "preset", preset: "claude_code", append: input.options.systemPrompt },
+            input.options.systemPromptMode === "replace" && (input.options.systemPrompt?.length ?? 0) > 0
+              ? instructions
+              : { type: "preset", preset: "claude_code", append: instructions },
         }),
     ...(input.session.kind === "fresh" ? {} : { resume: claudeSessionId(input.session.coordinate) }),
     ...(input.schemaJson === undefined

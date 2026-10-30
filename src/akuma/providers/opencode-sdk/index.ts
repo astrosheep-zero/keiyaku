@@ -230,6 +230,13 @@ async function configureSession(
     // and fork. Updating the same entry announces an upstream instruction change.
     await session.instructions({ id, text: input.options.systemPrompt });
   }
+  if (input.runtimeInstructions === undefined) {
+    // Native forks copy current entries. Absence must remove the inherited
+    // runtime entry, not leave the source identity active in a bare child.
+    await session.removeInstruction({ id, key: "keiyaku.runtime" });
+  } else {
+    await session.instructions({ id, key: "keiyaku.runtime", text: input.runtimeInstructions });
+  }
 }
 async function openSession(runtime: OpencodeRuntime, input: Input): Promise<string> {
   const model =

@@ -22,6 +22,7 @@ import {
   type AgentEvent,
   type AttemptCustody,
   type ProviderAttempt,
+  type ProviderAdapter,
   type TurnResult,
   type DriveInput,
 } from "../src/akuma/provider.js";
@@ -1012,6 +1013,10 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
   assert.equal("_meta" in (records[1]!.params as object), false);
   assert.equal("rules" in (records[1]!.params as object), false);
   assert.equal("systemPromptOverride" in (records[1]!.params as object), false);
+  const unsupported = provider.start(freshInput("build", { runtimeInstructions: "<keiyaku>identity</keiyaku>" }));
+  await assert.rejects(unsupported.result, /ACP has no verified native runtime-instruction channel/u);
+  await unsupported.closed;
+  assert.deepEqual(acpLog(fake.log), records, "unsupported system injection does not become a user prompt");
 });
 
 test("ACP load retains the exact session ID without a fork or live tell capability", async (context) => {
@@ -1360,6 +1365,36 @@ test("Grok Build uses fixed launch arguments and admits broadcast interject on t
   await controlled.cleanupStarted;
   controlled.resolveCleanup();
   await drive.completion;
+});
+
+test("Grok runtime rules retain immutable context and personality replacements still load", async () => {
+  const section = "<keiyaku>current</keiyaku>";
+  const options = { systemPrompt: "Personality", systemPromptMode: "append" as const };
+  let spawned = 0;
+  const run = async (input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0] | Parameters<ProviderAdapter["start"]>[0]) => {
+    const controlled = controlledAcpProcess({ assistant: "done" });
+    const provider = createGrokBuildProvider(controlledGrokExecution, {
+      spawnProcess: () => { spawned += 1; return controlled.process; },
+    });
+    const attempt = input.session.kind === "fresh" ? provider.start(input as Parameters<ProviderAdapter["start"]>[0])
+      : provider.resume!(input as Parameters<NonNullable<ProviderAdapter["resume"]>>[0]);
+    const drive = await attempt.result;
+    await controlled.cleanupStarted;
+    controlled.resolveCleanup();
+    await drive.completion;
+    await attempt.closed;
+    return { drive, meta: (controlled.sessionNew ?? controlled.sessionLoad) as { _meta: Record<string, unknown> } };
+  };
+  const first = await run(freshInput("work", { options, runtimeInstructions: section }));
+  assert.deepEqual(first.meta._meta, { askUserQuestion: false, rules: `Personality\n\n${section}` });
+  const resumed = await run({ ...freshInput("continue", { options, runtimeInstructions: section }), session: {
+    kind: "resume", coordinate: { sessionId: "controlled-session" },
+  } });
+  assert.deepEqual(resumed.meta._meta, { askUserQuestion: false }, "load reuses rather than appends another section");
+  const replaced = await run({ ...freshInput("continue", { options: { ...options, systemPromptMode: "replace" }, runtimeInstructions: "new context" }),
+    session: { kind: "resume", coordinate: { sessionId: "controlled-session" } } });
+  assert.deepEqual(replaced.meta._meta, { askUserQuestion: false, systemPromptOverride: "Personality\n\nnew context" });
+  assert.equal(spawned, 3);
 });
 
 test("Grok Build returns turn-ended when completion wins before interject acknowledgement", async () => {
@@ -1949,6 +1984,7 @@ test("Pi leaves default model selection to its services and preserves prompt ove
     const provider = createPiProvider(undefined, async () => fake.sdk);
     const attempt = provider.start(freshInput("work", {
       options: { systemPrompt: "instructions", systemPromptMode: mode },
+      runtimeInstructions: "<keiyaku>current</keiyaku>",
     }));
     await (await attempt.result).completion;
     await attempt.closed;
@@ -1957,10 +1993,12 @@ test("Pi leaves default model selection to its services and preserves prompt ove
     assert.equal(fake.seen.servicesCreated, 1);
     if (mode === "append") {
       const append = fake.seen.loader?.appendSystemPromptOverride as (base: string[]) => string[];
-      assert.deepEqual(append(["base"]), ["base", "instructions"]);
+      assert.deepEqual(append(["base"]), ["base", "instructions", "<keiyaku>current</keiyaku>"]);
     } else {
       const replace = fake.seen.loader?.systemPromptOverride as () => string;
       assert.equal(replace(), "instructions");
+      const append = fake.seen.loader?.appendSystemPromptOverride as (base: string[]) => string[];
+      assert.deepEqual(append(["base"]), ["base", "<keiyaku>current</keiyaku>"]);
     }
   }
 });
@@ -2000,6 +2038,8 @@ test("Pi binds host extensions once before the first prompt on fresh and resumed
     assert.equal(fake.seen.binds, 1);
     assert.equal(fake.seen.prompt, "work\n\nalso check");
     assert.equal(fake.seen.opened, resumed ? "/sessions/pi.jsonl" : undefined);
+    const append = fake.seen.loader?.appendSystemPromptOverride as (base: string[]) => string[];
+    assert.deepEqual(append(["base"]), ["base"], "bare resume has no inherited runtime addendum");
     assert.equal(fake.seen.disposed, 1);
   }
 });
@@ -3073,6 +3113,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     launchTells: [],
     cwd: root,
     options,
+    runtimeInstructions: "<keiyaku>current</keiyaku>",
     requests: { dir: requestDirectory },
     session: { kind: "fresh" },
   }).result;
@@ -3097,6 +3138,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   assert.deepEqual(turn, {
     threadId: "thread-fresh",
     input: [{ type: "text", text: "build" }],
+    additionalContext: { keiyaku_execution: { kind: "application", value: "<keiyaku>current</keiyaku>" } },
     model: "gpt-test",
     effort: "high",
     approvalPolicy: "never",
@@ -3285,6 +3327,40 @@ test("Codex native fork receives an isolated child environment", async () => {
     }
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("Codex current developer context reaches start, fork resume, and ordinary resume without changing personality", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-runtime-context-");
+  const fake = fakeCodex(root);
+  const provider = createCodexAppServerProvider(fake.executable);
+  const input = freshInput("work", { cwd: root, options: { systemPrompt: "Personality", systemPromptMode: "append" } });
+  const finish = async (attempt: ReturnType<typeof provider.start>) => {
+    await (await attempt.result).completion;
+    await attempt.closed;
+  };
+  await finish(provider.start({ ...input, runtimeInstructions: "<keiyaku>source</keiyaku>" }));
+  const fork = provider.fork!({ session: { sessionId: "thread-fresh" }, at: "turn-1", cwd: root });
+  const child = await fork.result;
+  await fork.closed;
+  await finish(provider.resume!({ ...input, runtimeInstructions: "<keiyaku>child</keiyaku>",
+    session: { kind: "resume", coordinate: child.session } }));
+  await finish(provider.resume!({ ...input, runtimeInstructions: "<keiyaku>child</keiyaku>",
+    session: { kind: "resume", coordinate: child.session } }));
+  const clearInherited = "Any inherited Keiyaku execution context is inactive for this execution.";
+  await finish(provider.resume!({ ...input, runtimeInstructions: clearInherited,
+    session: { kind: "resume", coordinate: child.session } }));
+  await finish(provider.start(input));
+  const turns = fake.requests().filter((request) => request.method === "turn/start");
+  assert.deepEqual(turns.map((turn) => (turn.params as Record<string, unknown>).additionalContext), [
+    { keiyaku_execution: { kind: "application", value: "<keiyaku>source</keiyaku>" } },
+    { keiyaku_execution: { kind: "application", value: "<keiyaku>child</keiyaku>" } },
+    { keiyaku_execution: { kind: "application", value: "<keiyaku>child</keiyaku>" } },
+    { keiyaku_execution: { kind: "application", value: clearInherited } },
+    undefined,
+  ]);
+  const threads = fake.requests().filter((request) => request.method === "thread/start" || request.method === "thread/resume");
+  assert.ok(threads.every((thread) => (thread.params as Record<string, unknown>).developerInstructions === "Personality"));
+  assert.ok(turns.every((turn) => JSON.stringify((turn.params as Record<string, unknown>).input) === JSON.stringify([{ type: "text", text: "work" }])));
 });
 
 test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async (context) => {

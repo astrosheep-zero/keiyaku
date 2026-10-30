@@ -110,6 +110,25 @@ escape hatch.
 
 ## Native Continuity And Options
 
+Keiyaku execution instructions are generated at one shared execution boundary,
+separate from the frozen Archetype personality. They identify the actual Akuma
+and give concise progress-report guidance. New births receive this section by
+default; the birth opt-out omits only this section. Ordinary native resume may
+retain the immutable section without a hot-update capability. Already existing
+native sessions without the section are not retrofitted and never refuse solely
+for its absence. Optional Contract observation never becomes resume eligibility
+or a cached association authority.
+
+Adapters compose the section through verified native system or developer
+instruction channels, never a user-message substitute. A native fork supplies
+the child's current context rather than treating the source's historical
+identity as current. A bare fork deactivates inherited execution context without
+introducing identity or reporting guidance; a fresh bare execution adds nothing.
+Native supersession may leave historical sections in the
+transcript; history is not an additional active identity, and preserving it does
+not disable fork. Unsupported native capabilities remain explicit; no adapter
+silently discards requested context or invents a system channel.
+
 The OpenCode adapter uses the matching native client and checks native readiness,
 not a successful response from the server's web application. Its live event feed
 is volatile: disconnect or stream failure ends observation honestly without

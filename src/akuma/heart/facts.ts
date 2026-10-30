@@ -31,10 +31,11 @@ export type Soul = Readonly<{
   origin: AkumaOrigin;
   caller?: AkumaCaller;
   allowed: AllowedActions;
+  bare?: boolean;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "allowed">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "allowed" | "bare">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 

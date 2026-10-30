@@ -27,7 +27,7 @@ function diagnostic(error: unknown): string {
 async function initialize(server: LineRpcProcess): Promise<void> {
   await server.request("initialize", {
     clientInfo: { name: "keiyaku", title: "keiyaku", version: "4" },
-    capabilities: { experimentalApi: false, requestAttestation: false },
+    capabilities: { experimentalApi: true, requestAttestation: false },
   });
   server.notify("initialized");
 }
@@ -116,6 +116,9 @@ async function admitTurn(
       ...(input.options.model === undefined ? {} : { model: input.options.model }),
       ...(input.options.effort === undefined ? {} : { effort: input.options.effort }),
       approvalPolicy: "never",
+      ...(input.runtimeInstructions === undefined
+        ? {}
+        : { additionalContext: { keiyaku_execution: { kind: "application", value: input.runtimeInstructions } } }),
       ...(input.schemaJson === undefined ? {} : { outputSchema: JSON.parse(input.schemaJson) as unknown }),
     }),
   );

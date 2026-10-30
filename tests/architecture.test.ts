@@ -102,6 +102,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract-creation.ts", ["library/bind.ts", "prepareMarkdownBind"], true],
   ["library/invocation.ts", ["protocol/completion.ts", "completeCandidate"], false],
   ["library/invocation.ts", ["protocol/progress.ts", "ProtocolProgress", true], true],
+  ["akuma-body.ts", ["dispatch/index.ts", "readDispatch"], true],
+  ["akuma-body.ts", ["git/repository.ts", "repositoryAt"], true],
   ["akuma/akuma-owner.ts", ["dispatch/index.ts", "readDispatch"], false],
   ["akuma/akuma-wait.ts", ["alias/index.ts", "readAliases"], false],
   ["akuma/akuma-call.ts", ["library/akuma-creation.ts", "callAkumas"], false],

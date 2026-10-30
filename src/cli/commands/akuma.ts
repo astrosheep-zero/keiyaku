@@ -169,6 +169,7 @@ async function runCall(
     ...(input.contract === undefined ? {} : { contract: input.contract }),
     ...(command.alias === undefined ? {} : { alias: command.alias }),
     ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
+    ...(command.bare === undefined ? {} : { bare: command.bare }),
     ...(schema === undefined ? {} : { schema }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   };
@@ -341,6 +342,7 @@ async function runFork(
     ...(caller === undefined ? {} : { caller }),
     akuma: command.akuma,
     at: command.at,
+    ...(command.bare === undefined ? {} : { bare: command.bare }),
     ...(input.repo === undefined ? {} : { repo: input.repo }),
   });
   return emit(command.output, receipt, () => renderForkText(receipt), forkOutcome(receipt));
