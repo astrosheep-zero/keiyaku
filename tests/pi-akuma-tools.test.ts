@@ -58,9 +58,13 @@ async function fixtureWorld(t: TestContext) {
   const agent = join(world, "agent");
   mkdirSync(join(agent, "extensions"), { recursive: true });
   writeFileSync(join(agent, "extensions", "fixture.js"), fixture);
+  // Exercise the unfinished implementation explicitly, not the shipped hidden loadout.
+  const developmentExtension = join(agent, "native-tools.ts");
+  writeFileSync(developmentExtension,
+    `import { registerAkumaTools } from ${JSON.stringify(join(root, "build/plugins/pi/akuma-tools.ts"))};\nexport default pi => registerAkumaTools(pi, "direct");\n`);
   writeFileSync(
     join(agent, "settings.json"),
-    JSON.stringify({ extensions: [shippedExtension], compaction: { enabled: false }, retry: { enabled: false } }),
+    JSON.stringify({ extensions: [developmentExtension], compaction: { enabled: false }, retry: { enabled: false } }),
   );
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(
@@ -77,7 +81,8 @@ async function fixtureWorld(t: TestContext) {
   return { world, agent };
 }
 
-async function hostAt(t: TestContext, world: string, agent: string) {
+async function hostAt(t: TestContext, world: string, agent: string, development = true) {
+  const extensionPath = development ? join(agent, "native-tools.ts") : shippedExtension;
   const modelRuntime = await pi.ModelRuntime.create({
     credentials: {
       read: async () => undefined,
@@ -104,15 +109,15 @@ async function hostAt(t: TestContext, world: string, agent: string) {
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      additionalExtensionPaths: [shippedExtension, join(agent, "extensions", "fixture.js")],
+      additionalExtensionPaths: [extensionPath, join(agent, "extensions", "fixture.js")],
     },
   });
   const extensions = services.resourceLoader.getExtensions();
   assert.deepEqual(extensions.errors, []);
-  const shipped = extensions.extensions.find((extension) => extension.resolvedPath === shippedExtension);
-  assert.ok(shipped);
-  assert.ok(shipped.commands.has("keiyaku"));
-  assert.deepEqual([...shipped.tools.keys()].sort(), [...toolNames].sort());
+  const loaded = extensions.extensions.find((extension) => extension.resolvedPath === extensionPath);
+  assert.ok(loaded);
+  if (!development) assert.ok(loaded.commands.has("keiyaku"));
+  assert.deepEqual([...loaded.tools.keys()].sort(), [...toolNames].sort());
   const model = services.modelRuntime.getModel("native-fixture", "model");
   assert.ok(model);
   const { session } = await pi.createAgentSessionFromServices({
@@ -165,8 +170,18 @@ function events(world: string): { event: string; pid: number; session: string }[
     .map((line) => JSON.parse(line));
 }
 
+test("the shipped Pi entry keeps native tools hidden even when explicitly selected", async (t) => {
+  const { world, agent } = await fixtureWorld(t);
+  const host = await hostAt(t, world, agent, false);
+  const tools = host.session.getAllTools().filter((tool) => toolNames.includes(tool.name));
+  assert.equal(tools.length, toolNames.length);
+  assert.ok(tools.every((tool) => tool.exposure === "hidden"));
+  assert.ok(host.session.getActiveToolNames().every((name) => !toolNames.includes(name)));
+  await host.close();
+});
+
 test(
-  "shipped Pi tools use the public SDK, host wake/fork explicitly, preserve observation and permission boundaries",
+  "development Pi tools use the public SDK, host wake/fork explicitly, preserve observation and permission boundaries",
   { timeout: 90_000 },
   async (t) => {
     const { world, agent } = await fixtureWorld(t);

@@ -1,7 +1,11 @@
 # Keiyaku in Pi
 
 The existing Pi package entry `plugins/pi/keiyaku.ts` supplies `/keiyaku` (the
-status overlay) and ten native Akuma tools. It imports only the supported
+status overlay). The ten native Akuma tools are temporarily registered with
+Pi's `hidden` exposure while their design is unfinished: they are not declared
+to the model, discoverable, or callable, even if selected explicitly. The CLI
+and `/keiyaku` command remain available. The implementation is retained for
+development. It imports only the supported
 `@astrosheep/keiyaku` package root. Build the checkout before loading it locally;
 an installed npm package already carries its built SDK.
 
@@ -104,8 +108,9 @@ npm run build
 npm test -- tests/akuma-in-process.test.ts tests/pi-akuma-tools.test.ts tests/pi-extension.test.ts tests/package-consumers.test.ts
 ```
 
-The native-tool tests load the built package's actual extension with Pi's public
-loader and execute a deterministic offline model through real Pi tool calls,
+The native-tool tests verify that the built package's default extension keeps
+the tools hidden. An explicit development fixture registers the same implementation
+with direct exposure and executes a deterministic offline model through real Pi tool calls,
 SDK operations, Heart/leash, subprocess tools and detached launches. They do not
 replace the Body engine or depend on model credentials. These are not real-model
 quality or OS sandbox tests.

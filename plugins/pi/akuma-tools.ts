@@ -59,7 +59,7 @@ function caller(ctx: ExtensionContext): AkumaCaller {
 }
 
 /** Native adaptation only. Addressing, admission, observation and lifecycle stay with Keiyaku. */
-export function registerAkumaTools(pi: ExtensionAPI): void {
+export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direct" = "hidden"): void {
   pi.registerFlag("keiyaku-request-only", {
     type: "boolean",
     default: false,
@@ -110,6 +110,7 @@ export function registerAkumaTools(pi: ExtensionAPI): void {
     pi.registerTool({
       name,
       label: name,
+      exposure,
       description,
       parameters: { type: "object", properties, required, additionalProperties: false },
       outputSchema: { type: "object", additionalProperties: true },

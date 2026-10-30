@@ -416,6 +416,7 @@ type ExecResult = Readonly<{ stdout: string; stderr: string; code: number; kille
 
 function install(execute: (command: string, args: string[]) => Promise<ExecResult>) {
   const handlers = new Map<string, Handler>();
+  const tools: Array<{ name: string; exposure?: string }> = [];
   let command: CommandHandler | undefined;
   const pi = {
     on(event: string, handler: Handler): void {
@@ -425,7 +426,9 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
     getFlag(): boolean {
       return false;
     },
-    registerTool(): void {},
+    registerTool(tool: { name: string; exposure?: string }): void {
+      tools.push(tool);
+    },
     registerCommand(name: string, options: { handler: CommandHandler }): void {
       assert.equal(name, "keiyaku");
       command = options.handler;
@@ -437,15 +440,17 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
 
   keiyakuExtension(pi);
   assert.ok(command);
-  return { command, handlers };
+  return { command, handlers, tools };
 }
 
-test("Pi registers session-scoped native tools alongside the explicit Keiyaku command", () => {
-  const { handlers } = install(async () => {
+test("Pi keeps unfinished native tools hidden while preserving the explicit Keiyaku command", () => {
+  const { handlers, tools } = install(async () => {
     throw new Error("status must not run while loading");
   });
 
   assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown"]);
+  assert.equal(tools.length, 10);
+  assert.ok(tools.every((tool) => tool.exposure === "hidden"));
 });
 
 test("Pi command runs one text status and does not refresh when dismissed", async () => {
