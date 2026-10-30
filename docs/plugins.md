@@ -77,6 +77,10 @@ It reuses or reattaches that session's own standing seat, joins only an absent
 one, and never revives a finished participant or takes over a foreign seat.
 This is identity preparation, not evidence of
 successful admission; a later refusal may leave the participant standing.
+When Square reports a new automatic join, the shared notification identity
+addresses that participant with its actual Square path and name using ordinary
+wake-capable delivery. Reuse and reattachment of standing are silent. Notice
+failure is diagnostic only and neither reverses standing nor gates admission.
 Birth observation remains produced by the child's Body at the established birth
 boundary, but its Square record is authored by the shared notification identity,
 not by the initiator. The record visibly distinguishes the explicit initiator,
@@ -114,7 +118,8 @@ to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
 notice is never consumed. An explicitly attributed observer never acquires
 another execution's identity or wake route; a name alone cannot delegate
 acknowledgment authority.
-Outcome acknowledgment and wait deferral do not consume progress reports.
+Outcome acknowledgment and wait deferral do not consume progress reports or
+automatic join notices.
 Addressed outcomes use Square's wake-capable delivery boundary in
 the producing process; native host hooks remain recovery boundaries rather
 than the first delivery attempt. Such generated data has no implicit retention

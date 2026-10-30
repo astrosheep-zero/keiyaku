@@ -341,11 +341,10 @@ test("the shipped Square observer prepares the seat this session is then recogni
   assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stderr}`);
   const square = await openSquareFile(world, {});
   try {
-    const active = (await square.participants()).participants.filter(({ presence }) => presence === "active");
-    assert.deepEqual(
-      active.map(({ name }) => name),
-      [seat],
-      "preparation created exactly the selected participant",
+    assert.equal(
+      (await square.participants()).participants.find(({ name }) => name === seat)?.presence,
+      "active",
+      "the selected participant is standing",
     );
     assert.deepEqual(
       (await square.seatsOf(ownerFor(world.environment()))).map(({ name }) => name),

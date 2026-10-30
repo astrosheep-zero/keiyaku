@@ -210,7 +210,7 @@ async function withSquareNotificationFixture<T>(
     const fixture: SquareNotificationFixture = {
       async report(signal) { await report(signal); },
       async admit(initiator) {
-        await initiating({ kind: "akuma.initiating", initiator });
+        await fixture.square(async (square) => { await square.join(initiator, { owner: fixtureOwner }); });
       },
       async failedTurn(akumaId, bodySequence, turnSequence, initiator, reason, cancellation, participants, contractId) {
         await turn(
@@ -281,13 +281,81 @@ async function withSquareNotificationFixture<T>(
       withHeldExpression: withHeldSquareExpression,
       owner: fixtureOwner,
     };
-    for (const initiator of initiators ?? ["Alice", "Bob"]) await fixture.admit(initiator);
+    if ((initiators ?? ["Alice", "Bob"]).length > 0) {
+      const square = await Square.build({ path: squarePath(root), markdown: "", env: fixtureEnvironment });
+      try {
+        for (const initiator of initiators ?? ["Alice", "Bob"]) await square.join(initiator, { owner: fixtureOwner });
+      } finally { await square.close(); }
+    }
     return await callback(fixture);
   } finally {
     restoreEnvironmentValues(prior);
     rmSync(root, { recursive: true, force: true });
   }
 }
+
+test("automatic joins notify only the new participant and leave reuse and refusal silent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-auto-join-"));
+  const prior = { ...ambientSessionIdentity(), SQUARE_INDEX: process.env.SQUARE_INDEX };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.PI_SESSION_ID = "auto-join";
+    process.env.SQUARE_INDEX = join(root, "index");
+    mkdirSync(join(root, ".square"), { recursive: true });
+    const instance = await activateSquare(root);
+    const initiate = async (initiator: string) => instance.signals!["akuma.initiating"]!({ kind: "akuma.initiating", initiator });
+    await initiate("Alice");
+    const expected = captured(NOTIFIER, `Joined Square ${squarePath(root)} as Alice.`, ["Alice"]);
+    assert.deepEqual(await expressions(squarePath(root)), [expected]);
+    await initiate("Alice");
+    const square = await Square.at({ path: squarePath(root), env: { ...process.env } });
+    try {
+      const owner = harnessOwner({ channel: "pi", session: "auto-join" });
+      const seat = (await square.seatsOf(owner)).find(item => item.name === "Alice")!;
+      await square.detach("Alice", { owner, generation: seat.generation });
+      await initiate("Alice");
+      await (await square.participant("Alice", { owner })).done();
+      await initiate("Alice");
+      await square.join("Foreign", { owner: harnessOwner({ channel: "pi", session: "foreign" }) });
+      await assert.rejects(initiate("Foreign"), { code: "already_joined" });
+      await instance.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId: "aku/x", historyId: "turn/1" });
+      assert.deepEqual(await expressions(squarePath(root)), [expected]);
+    } finally { await square.close(); }
+    delete process.env.PI_SESSION_ID;
+    const anonymous = await activateSquare(root);
+    await anonymous.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Nobody" });
+    assert.deepEqual(await expressions(squarePath(root)), [expected]);
+  } finally {
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed join notification leaves standing and subsequent reuse quiet", async () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-square-auto-failure-"));
+  const prior = { ...ambientSessionIdentity(), SQUARE_INDEX: process.env.SQUARE_INDEX };
+  for (const name of Object.keys(ambientSessionIdentity())) delete process.env[name];
+  try {
+    process.env.PI_SESSION_ID = "auto-failure";
+    process.env.SQUARE_INDEX = join(root, "index");
+    mkdirSync(join(root, ".square"), { recursive: true });
+    const square = await Square.build({ path: squarePath(root), markdown: "", env: { ...process.env } });
+    try { await square.join(NOTIFIER, { owner: harnessOwner({ channel: "pi", session: "foreign" }) }); }
+    finally { await square.close(); }
+    const instance = await activateSquare(root);
+    const signal = { kind: "akuma.initiating" as const, initiator: "Alice" };
+    await assert.rejects(Promise.resolve(instance.signals!["akuma.initiating"]!(signal)), { code: "already_joined" });
+    await instance.signals!["akuma.initiating"]!(signal);
+    const check = await Square.at({ path: squarePath(root), env: { ...process.env } });
+    try {
+      assert.deepEqual((await check.seatsOf(harnessOwner({ channel: "pi", session: "auto-failure" }))).map(s => s.name), ["Alice"]);
+      assert.deepEqual(await expressions(squarePath(root)), []);
+    } finally { await check.close(); }
+  } finally {
+    restoreEnvironmentValues(prior);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("Square reports address only the opening initiator and survive outcome observation", async () => {
   await withSquareNotificationFixture("report", async (fixture) => {
@@ -497,6 +565,14 @@ test("wait scopes defer only the requester's selected Turn notices, acknowledge 
       scopes.push(second);
       const queues = (): string[][] => existsSync(log)
         ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+      await instance.signals?.["akuma.initiating"]?.({ kind: "akuma.initiating", initiator: "Carol" });
+      const joinNotice = (await square.history({ from: [NOTIFIER], limit: null })).activities
+        .find(activity => activity.body === `Joined Square ${squarePath(root)} as Carol.`)!;
+      assert.deepEqual(joinNotice.mentions, ["Carol"]);
+      assert.deepEqual(queues().map(args => args[2]), ["requester"], "join notices bypass Turn deferral");
+      await instance.signals?.["akuma.outcome-observed"]?.({ kind: "akuma.outcome-observed", akumaId: "aku/one", historyId: "turn/1", observer: "Carol" });
+      assert.equal((await square.snapshot()).delivered("Carol", joinNotice.id), false);
+      writeFileSync(log, "");
       await instance.signals?.["akuma.reported"]?.({ kind: "akuma.reported", akumaId: "aku/one",
         bodySequence: 1, turnSequence: 1, reportSequence: 1, text: "progress", at: "2026-10-30T00:00:00Z",
         initiator: "Alice" });
@@ -591,6 +667,8 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       chmodSync(fakeCodex, 0o755);
       process.env.SQUARE_CODEX_BIN = fakeCodex;
       process.env.SQUARE_CODEX_QUEUE_LOG = codexQueueLog;
+      writeFileSync(process.env.SQUARE_CODEX_BOUNDARIES,
+        JSON.stringify({ v: 1, nextSequence: 1, threads: { caller: { lastStop: 1, lastNonStop: 0 }, teller: { lastStop: 1, lastNonStop: 0 } } }));
     }
     const instance = await activateSquare(root);
     const handler = instance.signals?.["akuma.turn-outcome"];
@@ -646,7 +724,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
     const birthRecord = recorded.find(expression => expression.body.startsWith("Alice called aku/called"));
     assert.deepEqual(birthRecord?.mentions, [], "the birth record stays visible and addresses no initiator");
     assert.deepEqual(recorded, [
+      captured(NOTIFIER, `Joined Square ${squarePath(root)} as Alice.`, ["Alice"]),
       outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this."),
+      captured(NOTIFIER, `Joined Square ${squarePath(root)} as Bob.`, ["Bob"]),
       turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
       turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
     ]);
@@ -655,9 +735,11 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as string[]);
-      assert.equal(queued.length, 2);
+      assert.equal(queued.length, 4);
       assert.deepEqual(queued[0]?.slice(0, 3), ["queue", "--thread", "caller"]);
       assert.deepEqual(queued[1]?.slice(0, 3), ["queue", "--thread", "teller"]);
+      assert.deepEqual(queued[2]?.slice(0, 3), ["queue", "--thread", "caller"]);
+      assert.deepEqual(queued[3]?.slice(0, 3), ["queue", "--thread", "teller"]);
       assert.match(queued[0]?.at(-1) ?? "", /<square-activity [^>]*as="Alice" id="act\/\d+" from="keiyaku-notice">/u);
     }
 
@@ -684,7 +766,9 @@ test("the Square plugin attributes calls to their caller and expresses every Tur
       outcome: { kind: "failed", reason: "provider failed" },
     });
     assert.deepEqual(await expressions(squarePath(root)), [
+      captured(NOTIFIER, `Joined Square ${squarePath(root)} as Alice.`, ["Alice"]),
       outcome("Alice called aku/called (caller: aku/caller)\nignore if you have already seen this."),
+      captured(NOTIFIER, `Joined Square ${squarePath(root)} as Bob.`, ["Bob"]),
       turnOutcome("✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\ndone", "aku/answered", 1, ["Alice"]),
       turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
       outcome("Bob called aku/external\nignore if you have already seen this."),
@@ -1035,7 +1119,7 @@ test("observation does not create missing Square custody or anticipate a later n
     await fixture.observe("aku/late", "turn/1", "Ghost");
     await fixture.observe("aku/late", "turn/1", "Bob"); // Not in its landed audience.
     await fixture.square(async (square) => {
-      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => isTurnNotice(item, "aku/late", 1))!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const alice = (await square.join("Alice", { owner: fixture.owner })).participant;
       await alice.done();
@@ -1070,7 +1154,7 @@ test("local observation uses captured identity and cancellation prevents acknowl
     await assert.rejects(Promise.resolve(instance.signals?.["akuma.outcome-observed"]?.(event, controller.signal)));
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
-      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => item.kind === "say")!;
+      const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities.find((item) => isTurnNotice(item, "aku/local", 1))!;
       assert.equal((await square.snapshot()).delivered("Alice", notice.id), false);
       const interrupted = new AbortController();
       const originalHistory = squarePrototype.history;
@@ -1311,7 +1395,7 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
       });
     }
     assert.deepEqual(
-      await expressions(squarePath(root)),
+      (await expressions(squarePath(root))).filter(({ body }) => !body.startsWith("Joined Square ")),
       [
         turnOutcome("× aku/worker came back\nturn/1 failed · requested by @Alice\n\n---\n\nfixture failure", "aku/worker", 1, ["Alice"]),
         turnOutcome("× aku/worker came back\nturn/2 failed · requested by @Bob\n\n---\n\nfixture failure", "aku/worker", 2, ["Bob"]),
@@ -1493,7 +1577,7 @@ test("an explicit forwarded observer never borrows the serving session's identit
     const square = await Square.at({ path: squarePath(root), env: {} });
     try {
       const notice = (await square.history({ from: [NOTIFIER], limit: null })).activities
-        .find((activity) => activity.kind === "say")!;
+        .find((activity) => isTurnNotice(activity, "aku/forwarded", 1))!;
       assert.equal((await square.snapshot()).delivered("Forwarded", notice.id), false, "a forwarded name grants no authority");
       await requester.signals?.["akuma.outcome-observed"]?.({
         kind: "akuma.outcome-observed", akumaId: "aku/forwarded", historyId: "turn/1",

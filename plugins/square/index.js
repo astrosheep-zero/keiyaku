@@ -324,15 +324,21 @@ const plugin = {
                     if (identity === undefined)
                         return;
                     const square = await openSquare(path, environment, cancellation);
+                    let joinedName;
                     try {
                         cancellation?.throwIfAborted();
                         const retired = (await square.participants({}, control)).participants.some(({ name, presence }) => name === signal.initiator && presence === "done");
-                        if (!retired)
-                            await square.join(signal.initiator, identity, control);
+                        if (!retired) {
+                            const joined = await square.join(signal.initiator, identity, control);
+                            if (joined.kind === "joined")
+                                joinedName = joined.participant.name;
+                        }
                     }
                     finally {
                         await square.close();
                     }
+                    if (joinedName !== undefined)
+                        await expressAsNotifier(`Joined Square ${path} as ${joinedName}.`, [joinedName], cancellation);
                 },
                 async "akuma.born"(signal, cancellation) {
                     cancellation?.throwIfAborted();
