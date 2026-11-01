@@ -81,17 +81,19 @@ async function openSquare(path: string, environment: NodeJS.ProcessEnv, cancella
 }
 
 function turnOutcomeBody(signal: PluginSignalMap["akuma.turn-outcome"]): string {
-  const context = [
-    `turn/${signal.turnSequence}${signal.outcome.kind === "answered" ? "" : ` ${signal.outcome.kind}`}`,
-    signal.initiator === undefined ? undefined : `· requested by @${signal.initiator}`,
-    signal.contractId === undefined ? undefined : `· ${signal.contractId}`,
+  // Readable first: who and what happened, then the answer itself; ids trail as a footer.
+  const { kind } = signal.outcome;
+  const verdict = kind === "failed" ? "× failed" : kind === "canceled" ? "○ canceled" : "✓ done";
+  const result = kind === "failed" ? signal.outcome.reason : kind === "answered" ? signal.outcome.text : "";
+  const footer = [
+    `\`turn/${signal.turnSequence}\``,
+    signal.initiator === undefined ? undefined : `requested by @${signal.initiator}`,
+    signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
   ]
     .filter((value) => value !== undefined)
-    .join(" ");
-  const result = signal.outcome.kind === "failed" ? signal.outcome.reason
-    : signal.outcome.kind === "answered" ? signal.outcome.text : "";
-  const marker = signal.outcome.kind === "failed" ? "×" : signal.outcome.kind === "canceled" ? "○" : "✓";
-  return `${marker} ${signal.akumaId} came back\n${context}${signal.outcome.kind === "canceled" ? "" : `\n\n---\n\n${result}`}`;
+    .join(" · ");
+  const head = `\`${signal.akumaId}\` ${verdict}`;
+  return result.trim() === "" ? `${head}\n\n${footer}` : `${head}\n${result}\n\n${footer}`;
 }
 
 function turnOutcomeMetadata(signal: PluginSignalMap["akuma.turn-outcome"]): ActivityMetadata {
@@ -114,16 +116,16 @@ function bodyNotificationKey(signal: Pick<PluginSignalMap["akuma.body-ended"], "
 }
 
 function bodyEndExpression(signal: PluginSignalMap["akuma.body-ended"]): string {
-  const header = [
-    signal.akumaId,
-    `body/${signal.bodySequence}`,
-    signal.initiator === undefined ? undefined : `(@${signal.initiator})`,
-    signal.contractId,
+  const diagnostic = signal.diagnostic === undefined ? "" : `: ${signal.diagnostic}`;
+  const footer = [
+    `\`body/${signal.bodySequence}\``,
+    signal.initiator === undefined ? undefined : `requested by @${signal.initiator}`,
+    signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
+    DUPLICATE_HINT,
   ]
     .filter((value) => value !== undefined)
-    .join(" ");
-  const diagnostic = signal.diagnostic === undefined ? "" : `: ${signal.diagnostic}`;
-  return `${header}\n× interrupted: ${signal.end}${diagnostic}\n${DUPLICATE_HINT}`;
+    .join(" · ");
+  return `\`${signal.akumaId}\` × interrupted\n${signal.end}${diagnostic}\n\n${footer}`;
 }
 
 function serializeBodyNotification(
@@ -308,7 +310,7 @@ const plugin: KeiyakuPlugin = {
           cancellation?.throwIfAborted();
           if (signal.initiator === undefined) return;
           await sendNotice({
-            body: `▸ ${signal.akumaId} reported\nreport/${signal.reportSequence} · body/${signal.bodySequence} · turn/${signal.turnSequence}\n\n---\n\n${signal.text}`,
+            body: `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
             metadata: { keiyaku: {
               kind: signal.kind,
               akumaId: signal.akumaId,

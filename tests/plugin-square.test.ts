@@ -94,7 +94,7 @@ async function withHeldSquareExpression<T>(
   const { promise: released, resolve: release } = promiseBarrier<void>();
   squarePrototype.send = async function (...arguments_: Parameters<typeof originalSend>) {
     const { body } = arguments_[0];
-    if (!body.startsWith(`✓ ${akumaId} came back\n`) && !body.startsWith(`× ${akumaId} came back\n`))
+    if (!body.startsWith(`\`${akumaId}\` ✓ done\n`) && !body.startsWith(`\`${akumaId}\` × failed\n`))
       return originalSend.call(this, ...arguments_);
     if (!holdAfterSend) { markSent(); await released; }
     const result = await originalSend.call(this, ...arguments_);
@@ -330,7 +330,7 @@ test("Square reports address only the opening initiator and survive outcome obse
     const { initiator: _initiator, ...anonymous } = signal;
     await fixture.report(anonymous);
     assert.deepEqual(await fixture.expressions(), [captured(
-      NOTIFIER, "▸ aku/report reported\nreport/7 · body/2 · turn/3\n\n---\n\nProgress\n@Bob\n\nexact text", ["Alice"],
+      NOTIFIER, "`aku/report` ▸ update\nProgress\n@Bob\n\nexact text\n\n`report/7` · `body/2` · `turn/3`", ["Alice"],
       { keiyaku: { kind: "akuma.reported", akumaId: "aku/report", bodySequence: 2,
         turnSequence: 3, reportSequence: 7, at: signal.at } },
     )]);
@@ -660,8 +660,8 @@ test("persistent direct outcomes wake only their explicit recipients across prod
     assert.equal(existsSync(squarePath(root)), true);
     const recorded = await expressions(squarePath(root));
     assert.deepEqual(recorded, [
-      turnOutcome(`✓ aku/answered came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\n${fullAnswer}`, "aku/answered", 1, ["Alice"]),
-      turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Bob · kei/example\n\n---\n\nadjusted", "aku/answered", 2, ["Bob"]),
+      turnOutcome(`\`aku/answered\` ✓ done\n${fullAnswer}\n\n\`turn/1\` · requested by @Alice · \`kei/example\``, "aku/answered", 1, ["Alice"]),
+      turnOutcome("`aku/answered` ✓ done\nadjusted\n\n`turn/2` · requested by @Bob · `kei/example`", "aku/answered", 2, ["Bob"]),
     ]);
     if (process.platform !== "win32") {
       const queued = readFileSync(codexQueueLog, "utf8")
@@ -716,8 +716,8 @@ test("one shared notifier sends after its worker is done and needs no worker par
     // No participant ever stood for this Akuma.
     await fixture.answeredTurn("aku/absent", 2, 1, "Bob", "no worker at all");
     assert.deepEqual(await fixture.expressions(), [
-      turnOutcome("✓ aku/gone came back\nturn/1 · requested by @Alice\n\n---\n\nafter shutdown", "aku/gone", 1, ["Alice"]),
-      turnOutcome("✓ aku/absent came back\nturn/1 · requested by @Bob\n\n---\n\nno worker at all", "aku/absent", 1, ["Bob"]),
+      turnOutcome("`aku/gone` ✓ done\nafter shutdown\n\n`turn/1` · requested by @Alice", "aku/gone", 1, ["Alice"]),
+      turnOutcome("`aku/absent` ✓ done\nno worker at all\n\n`turn/1` · requested by @Bob", "aku/absent", 1, ["Bob"]),
     ]);
     const absentNotice = await outcomeNotice(fixture, "aku/absent", 1);
     // Observation needs the observer's standing, not a standing subject worker; it
@@ -746,7 +746,7 @@ test("direct notices need no sender seat and do not wake sender listeners or bod
       const bob = await square.participant("Bob", { owner: fixture.owner });
       assert.deepEqual((await bob.pending()).activities, []);
       const alice = await square.participant("Alice", { owner: fixture.owner });
-      assert.equal((await alice.pending()).activities[0]?.body?.endsWith("@Bob is content, not an audience"), true);
+      assert.equal((await alice.pending()).activities[0]?.body?.includes("\n@Bob is content, not an audience\n"), true);
     });
   });
 });
@@ -786,8 +786,8 @@ test("outcome observation catches exact notices only for the explicit observer",
     const { activities: notices } = await fixture.square((square) => square.history({ limit: null }));
     const noticeFor = (prefix: string, actor = NOTIFIER): Activity | undefined =>
       notices.find((item) => item.actor === actor && item.body?.startsWith(prefix));
-    const first = noticeFor("✓ aku/worker came back\nturn/1 · requested by @Alice");
-    const failed = noticeFor("× aku/worker came back\nturn/2 failed · requested by @Alice");
+    const first = noticeFor("`aku/worker` ✓ done\n");
+    const failed = noticeFor("`aku/worker` × failed\n");
     assert.ok(first);
     assert.ok(failed);
     // Explicit attribution wins even while the plugin's process belongs to someone else.
@@ -826,14 +826,14 @@ test("answer and failure notices preserve exact results and structured identity"
     await fixture.failedTurn("aku/forms", 1, 3, "Bob", "denied\nbecause", undefined, undefined, "kei/failure");
     assert.deepEqual(await fixture.expressions(), [
       turnOutcome(
-        "✓ aku/forms came back\nturn/1 · requested by @Alice · kei/example\n\n---\n\nfirst line\nsecond line",
+        "`aku/forms` ✓ done\nfirst line\nsecond line\n\n`turn/1` · requested by @Alice · `kei/example`",
         "aku/forms",
         1,
         ["Alice"],
       ),
-      turnOutcome("✓ aku/forms came back\nturn/2\n\n---\n\n", "aku/forms", 2, ["Alice"]),
+      turnOutcome("`aku/forms` ✓ done\n\n`turn/2`", "aku/forms", 2, ["Alice"]),
       turnOutcome(
-        "× aku/forms came back\nturn/3 failed · requested by @Bob · kei/failure\n\n---\n\ndenied\nbecause",
+        "`aku/forms` × failed\ndenied\nbecause\n\n`turn/3` · requested by @Bob · `kei/failure`",
         "aku/forms",
         3,
         ["Bob"],
@@ -1063,11 +1063,11 @@ test("the Square plugin reports abnormal Bodies without replacing Turn alerts", 
     await fixture.bodyEnd("aku/silent", 4, "exited");
     await fixture.bodyEnd("aku/silent", 5, "put-down");
     assert.deepEqual(await fixture.expressions(), [
-      turnOutcome("× aku/same came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed first", "aku/same", 1, ["Alice"]),
-      turnOutcome("✓ aku/answered came back\nturn/2 · requested by @Alice\n\n---\n\ndone", "aku/answered", 2, ["Alice"]),
-      outcome("aku/answered body/2 (@Alice)\n× interrupted: hung: provider custody remained live\nignore if you have already seen this.", ["Alice"]),
-      turnOutcome("× aku/different came back\nturn/3 failed · requested by @Alice\n\n---\n\nfailed for Alice", "aku/different", 3, ["Alice"]),
-      outcome("aku/different body/3 (@Bob)\n× interrupted: broke-off: different recipient\nignore if you have already seen this.", ["Bob"]),
+      turnOutcome("`aku/same` × failed\nfailed first\n\n`turn/1` · requested by @Alice", "aku/same", 1, ["Alice"]),
+      turnOutcome("`aku/answered` ✓ done\ndone\n\n`turn/2` · requested by @Alice", "aku/answered", 2, ["Alice"]),
+      outcome("`aku/answered` × interrupted\nhung: provider custody remained live\n\n`body/2` · requested by @Alice · ignore if you have already seen this.", ["Alice"]),
+      turnOutcome("`aku/different` × failed\nfailed for Alice\n\n`turn/3` · requested by @Alice", "aku/different", 3, ["Alice"]),
+      outcome("`aku/different` × interrupted\nbroke-off: different recipient\n\n`body/3` · requested by @Bob · ignore if you have already seen this.", ["Bob"]),
     ]);
   });
 });
@@ -1077,7 +1077,7 @@ test("Square canceled Turn notifies once, is exactly observed, and suppresses it
     await fixture.canceledTurn("aku/canceled", 1, 1, "Alice");
     await fixture.bodyEnd("aku/canceled", 1, "put-down", "Alice");
     assert.deepEqual(await fixture.expressions(), [
-      turnOutcome("○ aku/canceled came back\nturn/1 canceled · requested by @Alice", "aku/canceled", 1, ["Alice"]),
+      turnOutcome("`aku/canceled` ○ canceled\n\n`turn/1` · requested by @Alice", "aku/canceled", 1, ["Alice"]),
     ]);
     await fixture.observe("aku/canceled", "turn/1", "Alice");
     await fixture.square(async (square) => {
@@ -1096,16 +1096,16 @@ test("Square addresses all Turn participants and suppresses only already-notifie
     await fixture.bodyEnd("aku/silent-owner", 2, "hung", undefined, undefined, undefined, ["Bob"]);
     await fixture.answeredTurn("aku/no-audience", 3, 3, "Alice", "done", undefined, []);
     assert.deepEqual(await fixture.expressions(), [
-      turnOutcome("× aku/group came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed", "aku/group", 1, ["Alice", "Bob", "Carol"]),
-      outcome("aku/group body/1 (@Alice)\n× interrupted: broke-off: stopped\nignore if you have already seen this.", ["Dana"]),
-      turnOutcome("× aku/silent-owner came back\nturn/2 failed\n\n---\n\nfailed", "aku/silent-owner", 2, ["Bob"]),
+      turnOutcome("`aku/group` × failed\nfailed\n\n`turn/1` · requested by @Alice", "aku/group", 1, ["Alice", "Bob", "Carol"]),
+      outcome("`aku/group` × interrupted\nbroke-off: stopped\n\n`body/1` · requested by @Alice · ignore if you have already seen this.", ["Dana"]),
+      turnOutcome("`aku/silent-owner` × failed\nfailed\n\n`turn/2`", "aku/silent-owner", 2, ["Bob"]),
     ]);
   });
 });
 
 test("same-Body notifications serialize while distinct Bodies overlap", async () => {
   await withSquareNotificationFixture("serialize", async (fixture) => {
-    const failedExpression = turnOutcome("× aku/same came back\nturn/1 failed · requested by @Alice\n\n---\n\nfailed first", "aku/same", 1, ["Alice"]);
+    const failedExpression = turnOutcome("`aku/same` × failed\nfailed first\n\n`turn/1` · requested by @Alice", "aku/same", 1, ["Alice"]);
     await fixture.withHeldExpression("aku/same", async ({ sent, release }) => {
       const failed = fixture.failedTurn("aku/same", 1, 1, "Alice", "failed first");
       await sent;
@@ -1118,8 +1118,8 @@ test("same-Body notifications serialize while distinct Bodies overlap", async ()
     });
   });
   await withSquareNotificationFixture("overlap", async (fixture) => {
-    const liveExpression = turnOutcome("✓ aku/live-body came back\nturn/1 · requested by @Bob\n\n---\n\nlive", "aku/live-body", 1, ["Bob"]);
-    const parkedExpression = turnOutcome("× aku/parked-body came back\nturn/1 failed · requested by @Alice\n\n---\n\nparked failure", "aku/parked-body", 1, ["Alice"]);
+    const liveExpression = turnOutcome("`aku/live-body` ✓ done\nlive\n\n`turn/1` · requested by @Bob", "aku/live-body", 1, ["Bob"]);
+    const parkedExpression = turnOutcome("`aku/parked-body` × failed\nparked failure\n\n`turn/1` · requested by @Alice", "aku/parked-body", 1, ["Alice"]);
     await fixture.withHeldExpression("aku/parked-body", async ({ sent, release }) => {
       const parked = fixture.failedTurn("aku/parked-body", 1, 1, "Alice", "parked failure");
       await sent;
@@ -1142,7 +1142,7 @@ test("Square notification authority survives rejection and cancellation boundari
       await fixture.admit("Ghost");
       await fixture.bodyEnd("aku/rejected", 1, "broke-off", "Ghost", "route established late");
       assert.deepEqual(await fixture.expressions(), [
-        outcome("aku/rejected body/1 (@Ghost)\n× interrupted: broke-off: route established late\nignore if you have already seen this.", ["Ghost"]),
+        outcome("`aku/rejected` × interrupted\nbroke-off: route established late\n\n`body/1` · requested by @Ghost · ignore if you have already seen this.", ["Ghost"]),
       ]);
     },
     ["Alice"],
@@ -1158,7 +1158,7 @@ test("Square notification authority survives rejection and cancellation boundari
       release();
       await answered;
       await assert.rejects(queued);
-      assert.equal((await fixture.bodies()).some((body) => body.startsWith("aku/queued body/1")), false);
+      assert.equal((await fixture.bodies()).some((body) => body.startsWith("`aku/queued` × interrupted")), false);
     });
     await fixture.withHeldExpression("aku/late", async ({ sent, release }) => {
       const controller = new AbortController();
@@ -1171,11 +1171,11 @@ test("Square notification authority survives rejection and cancellation boundari
     await fixture.bodyEnd("aku/late", 1, "broke-off", "Alice", "after timeout");
     assert.deepEqual(
       (await fixture.expressions()).filter(
-        ({ body }) => body.startsWith("aku/late body/1 ") || body.startsWith("× aku/late came back\n"),
+        ({ body }) => body.startsWith("`aku/late` × interrupted\n") || body.startsWith("`aku/late` × failed\n"),
       ),
       [
-        turnOutcome("× aku/late came back\nturn/1 failed · requested by @Alice\n\n---\n\nlate failure", "aku/late", 1, ["Alice"]),
-        outcome("aku/late body/1 (@Alice)\n× interrupted: broke-off: after timeout\nignore if you have already seen this.", ["Alice"]),
+        turnOutcome("`aku/late` × failed\nlate failure\n\n`turn/1` · requested by @Alice", "aku/late", 1, ["Alice"]),
+        outcome("`aku/late` × interrupted\nbroke-off: after timeout\n\n`body/1` · requested by @Alice · ignore if you have already seen this.", ["Alice"]),
       ],
     );
   });
@@ -1217,8 +1217,8 @@ test("Turn mentions follow the signal initiator, never the Body environment", as
     assert.deepEqual(
       await expressions(squarePath(root)),
       [
-        turnOutcome("× aku/worker came back\nturn/1 failed · requested by @Alice\n\n---\n\nfixture failure", "aku/worker", 1, ["Alice"]),
-        turnOutcome("× aku/worker came back\nturn/2 failed · requested by @Bob\n\n---\n\nfixture failure", "aku/worker", 2, ["Bob"]),
+        turnOutcome("`aku/worker` × failed\nfixture failure\n\n`turn/1` · requested by @Alice", "aku/worker", 1, ["Alice"]),
+        turnOutcome("`aku/worker` × failed\nfixture failure\n\n`turn/2` · requested by @Bob", "aku/worker", 2, ["Bob"]),
       ],
     );
   } finally {
@@ -1281,7 +1281,7 @@ test("Pi caller registration and outcomes share artifact ownership across execut
     try {
       const joined = await square.join(initiator, { owner: callerOwner });
       const caught = await joined.participant.catch();
-      assert.ok(caught.activities.some((item) => item.body?.includes("\n\n---\n\ndone")));
+      assert.ok(caught.activities.some((item) => item.body?.includes("` ✓ done\ndone\n")));
     } finally {
       await square.close();
     }
