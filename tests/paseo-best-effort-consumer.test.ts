@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 import pino from "pino";
 import { PluginAgentClientRegistry } from "../node_modules/@getpaseo/server/dist/server/server/agent/plugin-provider.js";
 import { AgentManager } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-manager.js";
+import { AgentStorage } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-storage.js";
 import { createIdleRuntimeCleanup } from "../node_modules/@getpaseo/server/dist/server/server/agent/idle-runtime-cleanup/index.js";
 import { PluginHookHandlers } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
 import type { PluginLifecycle } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
@@ -156,8 +157,10 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
       void hooks.invoke("keiyaku-paseo", "event", name, event, paseo);
     },
   } as PluginLifecycle : undefined;
+  const storage = withResidency ? new AgentStorage(join(root, "agents"), logger) : undefined;
+  await storage?.initialize();
   manager = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } },
-    ...(pluginLifecycle ? { pluginLifecycle } : {}) });
+    ...(storage ? { registry: storage } : {}), ...(pluginLifecycle ? { pluginLifecycle } : {}) });
   const stateWaiters = new Map<string, Array<() => void>>();
   manager.subscribe(event => {
     if (event.type !== "agent_state") return;
@@ -312,10 +315,18 @@ test("installed AgentManager refresh keeps an idle mirror through actual GC and 
   const h = await harness(t, {}, [], true);
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
   assert.equal(h.getDirectoryOpens(), 1);
+  await h.drain();
   const session = h.manager.getAgent(h.agent.id)!.session;
+  const candidates = h.manager.getRuntimeCleanupCandidates();
+  assert.equal(candidates.length, 1, "a persisted mirror must actually enter the host's cleanup candidate set");
+  assert.equal(candidates[0]!.isEligible(), true, "baseline eligibility must not hide a missing provider veto");
+  const probesBefore = h.providerEvents.filter(event => event.type === "session.can_stop_runtime").length;
   const cleanup = createIdleRuntimeCleanup({ enabled: true, runtimes: () => h.manager.getRuntimeCleanupCandidates(),
     now: () => Date.now() + 2 * 60 * 60 * 1000, schedule: () => () => {}, logger });
   const result = await cleanup.sweep();
+  assert.equal(h.providerEvents.filter(event => event.type === "session.can_stop_runtime").length, probesBefore + 1,
+    "the real collector must reach the provider's safety reply");
+  assert.deepEqual(result.failures, []);
   assert.deepEqual(result.collected, []);
   assert.equal(h.manager.getAgent(h.agent.id)!.session, session, "the installed provider veto retains the idle runtime");
   await cleanup.close();
