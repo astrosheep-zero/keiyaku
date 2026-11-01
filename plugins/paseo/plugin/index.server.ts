@@ -4,14 +4,20 @@ import { createSdkTransport } from "./server/sdk.js";
 import { attach } from "./server/attach.js";
 import { attachRpc } from "./shared/attach-rpc.js";
 import { refreshRpc } from "./shared/refresh-rpc.js";
+import { refreshOrReopen } from "./server/reopen.js";
+import { createRegistrationHandoff, registerRegistrationHooks } from "./server/handoff.js";
 
 export default function contribute(server: PluginServerContext) {
   const transport = createSdkTransport();
-  const mirror = createProvider(transport);
+  const handoff = createRegistrationHandoff();
+  const mirror = createProvider(transport, handoff);
   server.registerProvider(mirror.provider);
-  server.handle(refreshRpc, (input) => mirror.refresh(input));
-  server.handle(attachRpc, (input, context) => attach(input, context, mirror.sync));
+  server.handle(refreshRpc, (input, context) => refreshOrReopen(context.paseo, input, mirror.refresh));
+  server.handle(attachRpc, (input, context) => attach(input, context));
+  const removeHooks = registerRegistrationHooks(server, handoff);
   return async () => {
+    removeHooks();
+    await handoff.close();
     try { await mirror.close(); } finally { await transport.close(); }
   };
 }

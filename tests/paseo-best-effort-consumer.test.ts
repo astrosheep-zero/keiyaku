@@ -6,9 +6,17 @@ import test, { type TestContext } from "node:test";
 import pino from "pino";
 import { PluginAgentClientRegistry } from "../node_modules/@getpaseo/server/dist/server/server/agent/plugin-provider.js";
 import { AgentManager } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-manager.js";
+import { createIdleRuntimeCleanup } from "../node_modules/@getpaseo/server/dist/server/server/agent/idle-runtime-cleanup/index.js";
+import { PluginHookHandlers } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
+import type { PluginLifecycle } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
 import { startAgentRun } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-prompt.js";
 import type { AgentStreamEvent } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-sdk-types.js";
+import type { PaseoAgent, PaseoAgentListResult, SubscriptionObserver } from "@getpaseo/client";
+import type { PluginHookContext } from "@getpaseo/plugin/server";
+import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
+import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
+import { createRegistrationHandoff, registerRegistrationHooks } from "../plugins/paseo/plugin/server/handoff.js";
 import { projectTurns } from "../src/akuma/projection.js";
 import { activityFact, turnEndFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
@@ -39,10 +47,11 @@ type MockTransport = Readonly<{
   tell?: Tell;
   stop?: Stop;
 }>;
-async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Row[] = []) {
+async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Row[] = [], withResidency = false) {
   const root = await mkdtemp(join(tmpdir(), "paseo-best-effort-consumer-"));
   let rows: Row[] = initialRows;
   const calls: BridgeCall[] = [];
+  const providerEvents: ProviderEvent[] = [];
   let waiting: ((frame: History) => void) | undefined;
   const queued: History[] = [];
   const read = async (world: string, akuId: string, signal: AbortSignal): Promise<History> => {
@@ -51,6 +60,7 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
   };
   // The mirror observes through its one stream; paging history beside it would
   // double the producers it trusts and is never a correct stand-in here.
+  const handoff = withResidency ? createRegistrationHandoff() : undefined;
   const bridge = createProvider({
     stream: (world, akuId, signal) => ({
       [Symbol.asyncIterator]: () => {
@@ -86,29 +96,105 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
     },
     status: async () => ({}),
     close: async () => {},
-  } satisfies AkumaTransport);
+  } satisfies AkumaTransport, handoff);
   let beforePrompt: (() => Promise<void>) | undefined;
   const registry = new PluginAgentClientRegistry(logger);
   registry.replace([{ ...bridge.provider, async connect(request) {
     const connection = await bridge.provider.connect(request);
-    return { ...connection, async send(input) {
-      if (input.type === "session.prompt") await beforePrompt?.();
-      await connection.send(input);
-    } };
+    return { ...connection,
+      onEvent(listener) { return connection.onEvent(event => { providerEvents.push(event); listener(event); }); },
+      async send(input) {
+        if (input.type === "session.prompt") await beforePrompt?.();
+        await connection.send(input);
+      } };
   } }]);
-  const manager = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } } });
+  let directoryOpens = 0;
+  let activeDirectoryListeners = 0;
+  let releaseDirectoryListener: (() => void) | undefined;
+  const hooks = withResidency ? new PluginHookHandlers(() => {}) : undefined;
+  const paseo = withResidency ? {
+    agents: {
+      async list(options: { filter?: unknown; page?: unknown; subscribe?: unknown; signal?: AbortSignal }) {
+        directoryOpens++;
+        assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
+        const current = { requestId: "directory", subscriptionId: "manager-directory", entries: [],
+          pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } } satisfies PaseoAgentListResult;
+        return { ...current, subscription: {
+          subscriptionId: "manager-directory",
+          ready: Promise.resolve({ ...current, subscriptionId: "manager-directory" }),
+          subscribe(observer: SubscriptionObserver<PaseoAgentListResult & { subscriptionId: string }>) {
+            const unsubscribe = manager.subscribe(event => {
+              if (event.type !== "agent_state") return;
+              const agent = { id: event.agent.id, provider: event.agent.provider, status: event.agent.lifecycle,
+                archivedAt: null } as PaseoAgent;
+              observer.update({ type: "agent_update", payload: { kind: "upsert", agent } } as SessionOutboundMessage);
+            }, { replayState: false });
+            activeDirectoryListeners++;
+            let active = true;
+            const releaseListener = () => {
+              if (!active) return;
+              active = false;
+              activeDirectoryListeners--;
+              unsubscribe();
+              if (releaseDirectoryListener === releaseListener) releaseDirectoryListener = undefined;
+            };
+            releaseDirectoryListener = releaseListener;
+            return releaseListener;
+          },
+          async release() { releaseDirectoryListener?.(); },
+        } };
+      },
+    },
+  } as unknown as PluginHookContext["paseo"] : undefined;
+  let manager!: AgentManager;
+  const removeHandoff = hooks && handoff ? registerRegistrationHooks(hooks, handoff) : undefined;
+  const pluginLifecycle = hooks && paseo ? {
+      before(name: Parameters<PluginLifecycle["before"]>[0], request: Parameters<PluginLifecycle["before"]>[1]) {
+      return hooks.invoke("keiyaku-paseo", "before", name, request, paseo) as ReturnType<PluginLifecycle["before"]>;
+    },
+    emit(name: Parameters<PluginLifecycle["emit"]>[0], event: Parameters<PluginLifecycle["emit"]>[1]) {
+      void hooks.invoke("keiyaku-paseo", "event", name, event, paseo);
+    },
+  } as PluginLifecycle : undefined;
+  manager = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } },
+    ...(pluginLifecycle ? { pluginLifecycle } : {}) });
+  const stateWaiters = new Map<string, Array<() => void>>();
+  manager.subscribe(event => {
+    if (event.type !== "agent_state") return;
+    for (const resolve of stateWaiters.get(event.agent.lifecycle) ?? []) resolve();
+  }, { replayState: false });
   const agent = await manager.createAgent({ provider: "keiyaku", cwd: root, providerOptions: { world: root, akuId: "aku/test/best-effort" } }, undefined, { workspaceId: undefined });
   const events: AgentStreamEvent[] = [];
   agent.session!.subscribe((event) => events.push(event));
   const drain = async () => { await tick(); await manager.flush(); };
+  let closed = false;
   const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
     await registry.shutdown();
+    await handoff?.close();
+    removeHandoff?.();
     await rm(root, { recursive: true, force: true });
   };
   t.after(close);
-  return { agent, bridge, manager, calls, events, root, drain,
+  return { agent, bridge, manager, calls, events, providerEvents, root, drain,
     setBeforePrompt(callback: () => Promise<void>) { beforePrompt = callback; },
     setRows(value: Row[]) { rows = value; },
+    waitForLifecycle(status: string) {
+      if (manager.getAgent(agent.id)?.lifecycle === status) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        let timer!: ReturnType<typeof setTimeout>;
+        const waiter = () => { clearTimeout(timer); resolve(); };
+        const waiters = stateWaiters.get(status) ?? [];
+        stateWaiters.set(status, [...waiters, waiter]);
+        timer = setTimeout(() => {
+          stateWaiters.set(status, (stateWaiters.get(status) ?? []).filter(item => item !== waiter));
+          reject(new Error(`agent did not reach ${status}`));
+        }, 3_000);
+      });
+    },
+    getDirectoryOpens() { return directoryOpens; },
+    getDirectoryListeners() { return activeDirectoryListeners; },
     /** Publish one change through the live observation, as the real producer does. */
     push(value: Row[]) { const frame = page(value); const deliver = waiting; waiting = undefined;
       if (deliver === undefined) queued.push(frame); else deliver(frame); },
@@ -201,6 +287,48 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   assert.equal(h.events.some((event) => event.type === "timeline" && event.item.type === "notification" && /delivery pending/u.test(event.item.message)), false);
   assert.equal(warnings.mock.callCount(), failed ? 1 : 0, "a failed wake retains its diagnostic without failing the recorded message");
   h.setRows([turn(2), answer(2, 3)]); await h.refresh();
+});
+
+test("installed AgentManager registration automatically recovers the missed open Turn through the real handoff hook", async t => {
+  const snapshot = [
+    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const },
+    turn(11), answer(11, 12, "old answer"), turn(13),
+  ];
+  const h = await harness(t, {}, snapshot, true);
+  await h.waitForLifecycle("running");
+  await h.drain();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/13");
+  const starts = h.providerEvents.filter(event => event.type === "session.turn" && event.turnId === "turn/13" && event.state === "started");
+  assert.equal(starts.length, 2, "open history and the one post-registration handoff name the same active Turn");
+  const timelineItems = h.providerEvents.filter(event => event.type === "timeline.item");
+  assert.equal(new Set(timelineItems.map(event => event.type === "timeline.item" ? event.item.id : "")).size, timelineItems.length,
+    "a fresh post-registration observation never duplicates a timeline identity");
+  assert.deepEqual(h.calls, [], "registration handoff does not tell or stop the Akuma");
+  assert.equal(await h.manager.getAgent(h.agent.id)!.session!.canStopRuntime?.(), false,
+    "the real PluginAgentSession refuses runtime collection while the mirror is open");
+});
+
+test("installed AgentManager refresh keeps an idle mirror through actual GC and later follows a new Turn", async t => {
+  const h = await harness(t, {}, [], true);
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  assert.equal(h.getDirectoryOpens(), 1);
+  const session = h.manager.getAgent(h.agent.id)!.session;
+  const cleanup = createIdleRuntimeCleanup({ enabled: true, runtimes: () => h.manager.getRuntimeCleanupCandidates(),
+    now: () => Date.now() + 2 * 60 * 60 * 1000, schedule: () => () => {}, logger });
+  const result = await cleanup.sweep();
+  assert.deepEqual(result.collected, []);
+  assert.equal(h.manager.getAgent(h.agent.id)!.session, session, "the installed provider veto retains the idle runtime");
+  await cleanup.close();
+  await h.manager.reloadAgentSession(h.agent.id);
+  await h.drain();
+  assert.equal(h.getDirectoryOpens(), 2, "refresh arms a new registration observation before session open");
+  assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  h.push([turn(2)]);
+  await h.waitForLifecycle("running");
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
+  assert.deepEqual(h.calls, [], "idle cleanup, refresh and later external execution never interrupt the Akuma");
+  await h.close();
+  assert.equal(h.getDirectoryListeners(), 0, "the owned manager subscription is released on shutdown");
 });
 
 test("post-create sync restores the installed consumer's running Turn without replay or execution", async (t) => {

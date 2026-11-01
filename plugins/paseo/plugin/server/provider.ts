@@ -8,14 +8,19 @@ import { createMirror } from "./mirror.js";
 import { modelConfig } from "./model.js";
 import type { StopAttempt } from "./stop.js";
 
+type RegistrationHandoff = Readonly<{
+  providerReady(agentId: string | undefined, session: Readonly<{ observe(reannounce?: boolean): Promise<void> }>): void;
+  providerClosed(agentId: string | undefined, session: Readonly<{ observe(reannounce?: boolean): Promise<void> }>): Promise<void> | void;
+}>;
+
 const identity = z.object({ world: z.string().min(1), akuId: z.string().regex(/^aku\//u) });
-export function createProvider(transport: AkumaTransport) {
-  const sessions = new Set<{ world: string; akuId: string; observe(reannounce?: boolean): Promise<void>; stop(): Promise<void> }>();
+export function createProvider(transport: AkumaTransport, handoff?: RegistrationHandoff) {
+  const sessions = new Set<{ agentId: string | undefined; world: string; akuId: string; observe(reannounce?: boolean): Promise<void>; stop(): Promise<void> }>();
   const provider: ProviderRegistration = {
     id: "keiyaku", label: "Keiyaku", description: "Akuma runtime mirror",
     async connect(request): Promise<ProviderConnection> {
       if (!request.versions.includes(1)) throw new Error("Provider protocol version 1 is required");
-      const capabilities = negotiateProviderCapabilities(request.capabilities, ["session.persistence", "prompt.message", "prompt.steer"]);
+      const capabilities = negotiateProviderCapabilities(request.capabilities, ["session.persistence", "prompt.message", "prompt.steer", "session.can_stop_runtime"]);
       const listeners = new Set<(event: ProviderEvent) => void>();
       const local = new Map<string, { stop(): Promise<void>; stopExecution(requestId: string): Promise<void>; prompt(prompt: ProviderPrompt): Promise<void> }>();
       let closed = false;
@@ -36,6 +41,7 @@ export function createProvider(transport: AkumaTransport) {
             const world = await realpath(target.world);
             const mirror = createMirror(input.sessionId, emit);
             const cancellation = new AbortController();
+            const agentId = input.config.env.PASEO_AGENT_ID;
             // The opening window seeds retained state instead of announcing it.
             const skipRetained = input.history === "skip";
             let opening = true;
@@ -127,7 +133,7 @@ export function createProvider(transport: AkumaTransport) {
               return running;
             }
             const session = {
-              world, akuId: target.akuId,
+              agentId, world, akuId: target.akuId,
               observe,
               async prompt(prompt: ProviderPrompt) {
                 const respond = (result: Extract<ProviderEvent, { type: "session.prompt_result" }>["result"]) => emit({
@@ -180,6 +186,7 @@ export function createProvider(transport: AkumaTransport) {
                 releaseObservation();
                 sessions.delete(session);
                 local.delete(input.sessionId);
+                await handoff?.providerClosed(agentId, session);
                 await Promise.allSettled([...submissions]);
                 await stopping;
                 await running;
@@ -228,7 +235,13 @@ export function createProvider(transport: AkumaTransport) {
             // Ready names the first observed window, or the explicit report that
             // none could be read. It never waits for the observation to end.
             await session.observe();
-            if (!cancellation.signal.aborted) emit({ type: "session.ready", requestId: input.requestId, sessionId: input.sessionId });
+            if (!cancellation.signal.aborted) {
+              handoff?.providerReady(agentId, session);
+              emit({ type: "session.ready", requestId: input.requestId, sessionId: input.sessionId });
+            }
+          } else if (input.type === "session.can_stop_runtime") {
+            emit({ type: "session.can_stop_runtime", requestId: input.requestId, sessionId: input.sessionId,
+              canStop: !local.has(input.sessionId) });
           } else if (input.type === "session.interrupt" || input.type === "session.close") {
             const session = local.get(input.sessionId);
             if (input.type === "session.close") {

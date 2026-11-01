@@ -181,11 +181,12 @@ class NativeFixture implements NativeClient {
     );
   }
 
-  async sendMessage(agentId: string, text: string, options?: SendOptions): Promise<void> {
+  async sendMessage(agentId: string, text: string, options?: SendOptions): Promise<{ deliveryStatus?: "queued" }> {
     this.calls.push("send");
     this.sendInput = { agentId, text, options };
     this.sent.resolve();
     if (this.echo) this.admit();
+    return {};
   }
 
   admit(): void {
@@ -1331,7 +1332,7 @@ function actualSocketProvider(url: string, connectTimeoutMs = 10_000, credential
         const send = client.sendMessage.bind(client);
         client.sendMessage = async (...args) => {
           prompts += 1;
-          await send(...args);
+          return await send(...args);
         };
         return client;
       },
@@ -1371,7 +1372,7 @@ test(
     peer.destroy();
     await closing;
     await attempt.closed;
-    assert.equal(real.connectSettled(), false, "raw pending connect is inert, not live custody");
+    assert.equal(real.connectSettled(), true, "client.close rejects and settles a pending connect");
     assert.equal(real.prompts(), 0);
     // The fixture's one-shot open observer has fired; every socket listener retires.
     assert.deepEqual(socketListeners(observed.sockets[0]!), { open: 0, close: 0, error: 0, message: 0 });
@@ -1391,7 +1392,7 @@ test(
     await attempt.abort();
     await rejected;
     await attempt.closed;
-    assert.equal(real.connectSettled(), false);
+    assert.equal(real.connectSettled(), true, "client.close rejects and settles a pending connect");
     assert.equal(real.prompts(), 0);
     assert.equal(endpoint.bytes(), 0);
     // Native/adapter observers and the test's never-fired open observer are gone,
@@ -1438,6 +1439,6 @@ test(
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(observed.sockets.length, 0);
     assert.equal(real.prompts(), 0);
-    assert.equal(real.connectSettled(), false);
+    assert.equal(real.connectSettled(), true, "closing the client settles auth-pending connect without opening a socket");
   },
 );

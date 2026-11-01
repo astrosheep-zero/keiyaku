@@ -569,6 +569,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
   const copied = join(await mkdtemp(join(tmpdir(), "paseo-plugin-copy-")), "plugin");
   t.after(() => rm(copied, { recursive: true, force: true }));
   await cp(PLUGIN_DIRECTORY, copied, { recursive: true });
+  await symlink(resolve("node_modules"), join(copied, "node_modules"), "dir");
   await appendFile(join(copied, "index.server.ts"), "\nexport { createSdkTransport } from \"./server/sdk.js\";\n");
   const bundles = await compilePlugin({ client: null, server: join(copied, "index.server.ts") });
   assert.ok(bundles.serverBundle, "the plugin server entry compiles under Paseo's own compiler");
@@ -579,6 +580,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
     "the new transport module survives Paseo's bundling, including its non-literal SDK import");
 
   const registrations: string[] = [];
+  const hooks: string[] = [];
   const handlers: number[] = [];
   const providers: ProviderRegistration[] = [];
   let cleanup: (() => Promise<void>) | undefined;
@@ -589,8 +591,11 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
     handle() { handlers.push(1); },
     registerSettings() { throw new Error("the bridge registers no settings"); },
     registerUsageSource() { throw new Error("the bridge registers no usage source"); },
+    before(name: string) { hooks.push(`before:${name}`); return () => {}; },
+    on(name: string) { hooks.push(`on:${name}`); return () => {}; },
   })) as (() => Promise<void>) | undefined;
   assert.deepEqual(registrations, ["keiyaku"]);
+  assert.deepEqual(hooks, ["before:agent.session_open", "on:agent.archived", "on:agent.closed"]);
   assert.equal(handlers.length, 2, "the compiled entry keeps its two RPC handlers");
   assert.equal(typeof cleanup, "function");
   assert.equal(providers.length, 1);

@@ -37,6 +37,7 @@ test("new alias/no-alias mirrors and mutable aliases preserve the daemon creatio
     const renames: string[] = [];
     const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
     const client = {
+      getLastServerInfoMessage() { return { serverId: "test-server" }; },
       async fetchAgent() { return { agent: { id: "parent", cwd: h.world, archivedAt: null }, project: null }; },
       async fetchAgents() { return { entries: child ? [{ agent: child, project: null }] : [], pageInfo }; },
       async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
@@ -50,7 +51,7 @@ test("new alias/no-alias mirrors and mutable aliases preserve the daemon creatio
         assert.equal(id, child!.id); child!.title = update.name!; renames.push(update.name!);
       },
       async invokePluginRpc(_plugin: string, method: string, input: unknown) {
-        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }, async () => {}) : { woken: 0 };
+        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }) : { woken: 0 };
       },
       async close() {},
     };

@@ -48,6 +48,19 @@ Plugin-owned paths are outside Keiyaku management custody unless an owner later
 adopts them. They are not Heart facts, Git facts, Settlement facts, Contract
 worktree material, or reset targets merely because a plugin uses them.
 
+An optional mirror may need to retain a host runtime even when the host labels
+its local session idle, because the mirrored execution can continue or begin
+independently. A missed registration boundary may be repaired only from a fresh
+observation of the exact existing execution after the host has registered the
+session; this restores presentation, never execution. Closing or archiving the
+host session, or deactivating the plugin, releases only the observer's own
+subscription and does not stop the underlying execution. Recovery requires a
+complete directory view and a fresh match of persistent identity and world; an
+incomplete view or stale, archived, or changed mapping does nothing. Host archive
+and read-only recovery are not one atomic operation, so a concurrent archive
+race cannot be ruled out by a plugin; recovery must preserve archive state and
+must never submit input or invoke execution controls.
+
 The Square observer uses Square's artifact-owned participant custody, shared
 with native harness integrations. A Square resource itself carries no identity:
 each operation supplies the integration execution's own opaque owner, derived

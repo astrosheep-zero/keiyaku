@@ -105,7 +105,7 @@ async function harness(t: TestContext, mock: MockTransport = {}) {
     close: async () => {},
   };
   const bridge = createProvider(transport);
-  const connection = await bridge.provider.connect({ versions: [1], capabilities: ["session.persistence", "prompt.message", "prompt.steer", "session.archive"] });
+  const connection = await bridge.provider.connect({ versions: [1], capabilities: ["session.persistence", "prompt.message", "prompt.steer", "session.can_stop_runtime", "session.archive"] });
   const events: ProviderEvent[] = [];
   connection.onEvent((event) => events.push(event));
   const config: ProviderSessionConfig = { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true,
@@ -163,7 +163,7 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   });
   await h.open();
   assert.equal(reads, 1);
-  assert.deepEqual(h.connection.capabilities, ["session.persistence", "prompt.message", "prompt.steer"]);
+  assert.deepEqual(h.connection.capabilities, ["session.persistence", "prompt.message", "prompt.steer", "session.can_stop_runtime"]);
   assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"]]);
   t.mock.timers.tick(60_000); await tick();
   assert.equal(reads, 1, "an open Turn is observed by its stream, never by a timer");
@@ -191,6 +191,17 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   assert.deepEqual(items(h.events).map((e) => e.item.id), ["keiyaku:tell/tell/1", "keiyaku:turn/1"], "resume replays in sequence order");
   assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]],
     "retained short turns publish their real start and terminal on replay");
+});
+
+test("every open mirror vetoes runtime collection while a missing local session may stop", async (t) => {
+  const h = await harness(t, { window: async () => [turn(1)] });
+  await h.open();
+  await h.connection.send({ type: "session.can_stop_runtime", requestId: "safety-open", sessionId: "session" });
+  assert.deepEqual(h.events.at(-1), { type: "session.can_stop_runtime", requestId: "safety-open", sessionId: "session", canStop: false });
+  await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
+  await h.connection.send({ type: "session.can_stop_runtime", requestId: "safety-missing", sessionId: "missing" });
+  assert.deepEqual(h.events.at(-1), { type: "session.can_stop_runtime", requestId: "safety-missing", sessionId: "missing", canStop: true });
+  assert.deepEqual(h.calls, [], "runtime safety and explicit close never kill the Akuma");
 });
 
 test("skip seeds retained history once, then publishes new activity and leaves replay unchanged", async (t) => {
@@ -562,6 +573,7 @@ test("native born attach, SDK creation and identity retries share the registered
     async fetchAgent({ agentId }: { agentId: string }) {
       return agentId === "parent" ? { agent: parent, project: null } : null;
     },
+    getLastServerInfoMessage() { return { serverId: "test-server" }; },
     async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
       wire.push(options);
       assert.ok(options.idempotencyKey);
@@ -579,12 +591,12 @@ test("native born attach, SDK creation and identity retries share the registered
     handle(contract, handler) { handlers.set(contract.name, (input) => handler(contract.input.parse(input), { paseo })); },
     registerSettings() { throw new Error("unused"); },
     registerUsageSource() { throw new Error("unused"); },
-    on() { throw new Error("unused"); }, before,
+    on() { return () => {}; }, before,
   });
   t.after(async () => { await cleanup(); });
   assert.equal(providerId, "keiyaku");
   assert.deepEqual([...handlers.keys()], ["refresh", "attach"]);
-  assert.equal(before.mock.callCount(), 0, "native identity needs no session_open injection");
+  assert.equal(before.mock.callCount(), 1, "the registration hook arms residency for provider session opens");
   const forwarder = createForwarder(async () => ({
     async invokePluginRpc(_plugin, method, input) { return await handlers.get(method)!(input); },
     fetchAgents: (async () => ({ requestId: "list", entries: [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } })) as unknown as DaemonClient["fetchAgents"],
@@ -601,7 +613,7 @@ test("native born attach, SDK creation and identity retries share the registered
   assert.equal(created.size, 1);
   assert.deepEqual(wire[0], { config: { provider: "keiyaku", model: "mirror", cwd: root, title: akuId,
       providerOptions: { world, akuId } },
-    callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:${akuId}` });
+    callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:${akuId}`, labels: {} });
   assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
   assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");
   assert.equal(wire[1]?.idempotencyKey, wire[0]?.idempotencyKey);

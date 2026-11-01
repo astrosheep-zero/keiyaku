@@ -15,7 +15,7 @@ const parent = (id: string, provider: string, sessionId: string) => ({
 async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | null) {
   const world = await mkdtemp(join(tmpdir(), "native-parent-"));
   t.after(() => rm(world, { recursive: true, force: true }));
-  const listed: unknown[] = [], fetched: string[] = [], created: unknown[] = [], synced: unknown[] = [];
+  const listed: unknown[] = [], fetched: string[] = [], created: unknown[] = [];
   const paseo = createPaseoApi({
     async fetchAgents(options: { filter: unknown; page: { limit: number; cursor?: string }; scope?: string }) {
       listed.push(options);
@@ -32,16 +32,14 @@ async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | nu
       fetched.push(agentId);
       return refreshed ? { agent: refreshed, project: null } : null;
     },
+    getLastServerInfoMessage() { return { serverId: "test-server" }; },
     async createAgent(options: unknown) { created.push(options); return { id: "child", cwd: world }; },
   } as unknown as DaemonClient);
   const create = t.mock.method(paseo.agents, "create");
   t.after(() => paseo.dispose());
   const run = (integration: string, id = "native-session") => attach({ world, akuId: "aku/test/1234abcd",
-    caller: { kind: "external", integration, id } }, { paseo }, async input => {
-      assert.equal(created.length, synced.length + 1, "synchronize only after successful SDK creation");
-      synced.push(input);
-    });
-  return { world, run, listed, fetched, created, create, synced, paseo };
+    caller: { kind: "external", integration, id } }, { paseo });
+  return { world, run, listed, fetched, created, create, paseo };
 }
 
 test("native parents match exact persistence provider/sessionId across every directory page, then refresh", async t => {
@@ -58,9 +56,8 @@ test("native parents match exact persistence provider/sessionId across every dir
     assert.deepEqual(h.created, [{
       config: { provider: "keiyaku", model: "mirror", cwd: "/parent/cwd", title: "aku/test/1234abcd",
         providerOptions: { world, akuId: "aku/test/1234abcd" } },
-      callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:aku/test/1234abcd`,
+      callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:aku/test/1234abcd`, labels: {},
     }]);
-    assert.deepEqual(h.synced, [{ world, akuId: "aku/test/1234abcd" }]);
     assert.equal(h.create.mock.calls[0]?.arguments[0]?.title, "aku/test/1234abcd",
       "the public SDK call carries the full Akuma identity as its title");
   });
@@ -84,27 +81,21 @@ test("missing, duplicate (including archived), archived and stale parent mapping
     const warning = t.mock.method(console, "warn", () => {});
     assert.deepEqual(await h.run("pi"), { attached: false });
     assert.equal(h.created.length, 0);
-    assert.deepEqual(h.synced, []);
     assert.equal(h.fetched.length, scenario.refreshes);
     assert.equal(warning.mock.callCount(), 1);
     assert.match(String(warning.mock.calls[0]?.arguments[0]), scenario.reason);
   });
 });
 
-test("attachment synchronizes only successful creation and keeps success if synchronization fails", async t => {
+test("attachment no longer synchronizes outside the registration handoff", async t => {
   const h = await harness(t, [], parent("parent", "pi", "native-session"));
   const input = { world: h.world, akuId: "aku/test/1234abcd",
     caller: { kind: "external" as const, integration: "paseo", id: "parent" } };
-  const warning = t.mock.method(console, "warn", () => {});
-  let syncs = 0;
-  const sync = async () => { syncs++; throw new Error("read unavailable"); };
-  assert.deepEqual(await attach(input, { paseo: h.paseo }, sync), { attached: true });
+  assert.deepEqual(await attach(input, { paseo: h.paseo }), { attached: true });
   assert.equal(h.created.length, 1);
-  assert.equal(syncs, 1);
-  assert.match(String(warning.mock.calls[0]?.arguments[0]), /attached, but synchronization failed: read unavailable/u);
   t.mock.method(h.paseo.agents, "create", async () => { throw new Error("creation failed"); });
-  await assert.rejects(attach(input, { paseo: h.paseo }, sync), /creation failed/u);
-  assert.equal(syncs, 1, "a failed create never synchronizes");
+  await assert.rejects(attach(input, { paseo: h.paseo }), /creation failed/u);
+  assert.equal(h.created.length, 1);
 });
 
 test("legacy Paseo IDs retain direct lookup without the native directory; archive still refuses", async t => {

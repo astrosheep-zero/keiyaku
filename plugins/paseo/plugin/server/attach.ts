@@ -7,8 +7,7 @@ function skip(reason: string) {
   console.warn(`Keiyaku mirror not attached: ${reason}`);
   return { attached: false };
 }
-export async function attach(input: z.output<typeof attachRpc.input>, { paseo }: PluginHandlerContext,
-  sync: (input: { world: string; akuId: string }) => Promise<void>) {
+export async function attach(input: z.output<typeof attachRpc.input>, { paseo }: PluginHandlerContext) {
   const caller = input.caller;
   if (caller?.kind !== "external") return skip("caller is not an external host");
   const native = ["codex", "pi", "claude"].includes(caller.integration);
@@ -44,9 +43,5 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
     config: { provider: "keiyaku/mirror", options: { world, akuId: input.akuId } },
     idempotencyKey: `keiyaku:${world}:${input.akuId}`,
   });
-  // Creation returns only after the host has registered and subscribed to the session.
-  // Opening's ready event is too early to restore running presentation there.
-  try { await sync({ world, akuId: input.akuId }); }
-  catch (error) { console.warn(`Keiyaku mirror attached, but synchronization failed: ${error instanceof Error ? error.message : String(error)}`); }
   return { attached: true };
 }

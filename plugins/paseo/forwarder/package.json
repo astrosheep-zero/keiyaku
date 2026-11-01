@@ -7,10 +7,10 @@
   "scripts": { "build": "tsc -p tsconfig.json", "prepack": "npm run build" },
   "peerDependencies": { "@astrosheep/keiyaku": "^4.6.8" },
   "dependencies": {
-    "@getpaseo/client": "0.11.2",
-    "@getpaseo/plugin": "0.11.2",
-    "@getpaseo/protocol": "0.11.2",
-    "@getpaseo/server": "0.11.2",
+    "@getpaseo/client": "0.14.0",
+    "@getpaseo/plugin": "0.14.0",
+    "@getpaseo/protocol": "0.14.0",
+    "@getpaseo/server": "0.14.0",
     "ws": "^8.22.0"
   }
 }

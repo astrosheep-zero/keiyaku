@@ -67,9 +67,9 @@ ID. Titles are bridge-owned presentation, including previously customized titles
 A rename neither creates a child nor reattaches, resumes, or unarchives it.
 Directory enumeration completes before renames, so title changes cannot reorder
 the bridge's own in-flight pagination. Existing mirrors, including archived
-entries, can be backfilled without replaying birth or creation. The installed
-Paseo agent filter accepts `includeArchived`, not `includeBackground`; enumeration
-uses the supported filter without an active-only scope.
+entries, can be backfilled without replaying birth or creation. The Paseo
+directory supports both `includeArchived` and `includeBackground`; title backfill
+intentionally includes archived entries but keeps its existing background scope.
 
 The flagship must run this one-shot backfill when deploying the title fix:
 
@@ -98,16 +98,39 @@ refresh hints and the provider's timeline refresh do not update titles.
 Completed creation replay does not reattach a detached child or revive an
 archived child. Unknown, unsupported, and nested-Akuma callers create no automatic
 mirror. Attachment is best effort, with no polling, creation backfill, or retry
-queue; a missed birth can remain unattached. After
-successful SDK creation, attachment synchronizes matching open mirror sessions
-once: it reads fresh history, publishes normal changes, and reannounces only a
-still-open Turn. This compensates for Paseo registering its manager subscription
-after the opening events. It never replays timeline items or submits execution.
-A failed read retains its notice without reannouncing cached running state or
-undoing creation. Repeated attachment may reannounce the same Turn; it does not
-start another worker. Automatic resume or reload without attachment is outside
-this mitigation, and later host races remain possible. Lookup
-and creation are not an atomic transaction. Manual creation remains available.
+queue; a missed birth can remain unattached. Registration recovery belongs to the
+provider-session lifecycle, not attachment.
+
+Before a `keiyaku` provider session opens, the plugin establishes and awaits a
+Paseo-owned agent-directory subscription. It includes archived and background
+entries, but ignores its initial snapshot and any updates until that exact host
+agent's provider observation is ready. After the manager registers the agent and
+publishes its idle state, a fresh Keiyaku observation updates normal history and
+reannounces only a Turn that is still open. This covers create, resume, refresh,
+and import; it does not wait for future registration in the hook, replay cached
+running state after an unreadable read, duplicate timeline history, or submit
+execution. The one-shot subscription is released after handoff and on close,
+archive, plugin unload, failed setup, timeout, or a later open replacing it.
+The provider advertises `session.can_stop_runtime` and answers false for every
+open mirror, including idle sessions; an absent local provider session may answer
+true. Host close and archive release observation only and never kill the Akuma.
+
+When a refresh signal has no matching local session, the plugin completes a
+public directory traversal including archived and background agents, then
+matches only the versioned provider persistence data's canonical World and
+AkuId. It does not infer identity from title or opaque session ID. Each candidate
+is refreshed and rechecked for the same provider identity and non-archived state
+before `timeline.refetch({ limit: 0 })` asks Paseo to load the existing agent for
+read-only history. The response's error and fresh agent identity are checked as
+well. No agent is created, unarchived, sent input, interrupted, or resumed via an
+execution operation. Concurrent recovery of one exact agent is coalesced, and
+`woken` counts only matching open or successfully recovered mirrors. Paseo does
+not make archive checking and this history read transactional: a concurrent
+archive can race between the final pre-read check and the host read. Paseo's
+history load preserves archive state and performs no execution, but the bridge
+cannot promise that the host will not briefly load an archived record in that
+race. Incomplete pagination or a missing, archived, or changed mapping is not
+reopened.
 
 Create a Paseo agent with `config.provider: "keiyaku/mirror"`, a working directory,
 and `config.options` (translated by the client to opaque `providerOptions`, not
@@ -123,7 +146,10 @@ model settings):
 }
 ```
 
-The provider observes through the public SDK's one pull-backed stream in a
+The Paseo plugin requires host version `>=0.14.0`, which supplies provider
+runtime-safety negotiation and the owned public directory subscription used for
+registration handoff and background mirror discovery. The provider observes
+through the public SDK's one pull-backed stream in a
 dedicated identity-clean worker: every frame is a complete latest bounded
 window carrying the producer's own coverage metadata, and the next frame is
 pulled only after the previous one settles, so slow consumption bounds what the
