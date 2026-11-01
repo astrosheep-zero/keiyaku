@@ -80,7 +80,7 @@ function turnOutcomeBody(signal) {
         .filter((value) => value !== undefined)
         .join(" · ");
     const head = `\`${signal.akumaId}\` ${verdict}`;
-    return result.trim() === "" ? `${head}\n\n${footer}` : `${head}\n${result}\n\n${footer}`;
+    return result.trim() === "" ? `${head}\n\n---\n\n${footer}` : `${head}\n${result}\n\n---\n\n${footer}`;
 }
 function turnOutcomeMetadata(signal) {
     return {
@@ -104,7 +104,7 @@ function bodyEndExpression(signal) {
     ]
         .filter((value) => value !== undefined)
         .join(" · ");
-    return `\`${signal.akumaId}\` × interrupted\n${signal.end}${diagnostic}\n\n${footer}`;
+    return `\`${signal.akumaId}\` × interrupted\n${signal.end}${diagnostic}\n\n---\n\n${footer}`;
 }
 function serializeBodyNotification(notifications, signal, operation) {
     const key = bodyNotificationKey(signal);
@@ -286,7 +286,7 @@ const plugin = {
                     if (signal.initiator === undefined)
                         return;
                     await sendNotice({
-                        body: `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
+                        body: `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
                         metadata: { keiyaku: {
                                 kind: signal.kind,
                                 akumaId: signal.akumaId,
