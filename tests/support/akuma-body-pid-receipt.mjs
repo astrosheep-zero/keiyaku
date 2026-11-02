@@ -11,7 +11,11 @@ async function waitForStartupBarrier(readyPath) {
 
 const receiptPath = process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT;
 const isAkumaBody = process.argv.some((arg) => /(^|[\\/])akuma-body\.(m?[jt]s)$/u.test(arg));
-if (isAkumaBody && typeof process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER === "string") {
+if (
+  isAkumaBody &&
+  (typeof process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER === "string" ||
+    typeof process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER === "string")
+) {
   register(new URL("./akuma-body-empty-publication-loader.mjs", import.meta.url));
 }
 if (typeof receiptPath === "string" && receiptPath.length > 0 && isAkumaBody) {

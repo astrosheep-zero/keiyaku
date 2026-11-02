@@ -55,7 +55,10 @@ import { akumasWithExecution } from "../src/library/akumas.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
+  installAkumaBodyIdleFinishBarrier,
   installAkumaBodyPidReceipt,
+  readPidReceipt,
+  waitForProcessExit,
 } from "./support/process.js";
 import type { WorldRoot } from "../src/world.js";
 import { AkumaComposition as Akuma, AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
@@ -585,6 +588,72 @@ test("call without a host preserves log-only diagnostics", async (t) => {
       fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed,
     });
     restoreBodyPidReceipt();
+  }
+});
+
+test("a Tell admitted while an empty Body is deciding to put down is still driven", async (t) => {
+  const { raw, world, configured } = await directCallFixture();
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const barrier = join(raw.path, "idle-finish-barrier");
+  mkdirSync(barrier);
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreIdleBarrier = installAkumaBodyIdleFinishBarrier(barrier);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let child: PublicAkuma | undefined;
+  let tellRecorded = false;
+  let operationFailed = true;
+  try {
+    child = await PublicAkuma.birth("worker", { root: world, cwd: world, ...configured.placement });
+    await waitForCondition("Body idle-finish barrier", () => existsSync(join(barrier, "idle-ready")), { budgetMs: 5_000 });
+    await waitForCondition("Body periodic observation barrier", () => existsSync(join(barrier, "observation-ready")), { budgetMs: 5_000 });
+    const paths = pathsForAkuId(world, child.id);
+    const admitted = await recordTell(paths, {
+      kind: "tell", id: "late-tell", body: "answer", recordedAt: new Date().toISOString(),
+    });
+    assert.equal(admitted.kind, "recorded");
+    tellRecorded = true;
+    writeFileSync(join(barrier, "release"), "release\\n");
+    await waitForCondition("late Tell answer", async () => {
+      const tell = await readTell(paths, "late-tell");
+      if (tell?.binding === undefined) return false;
+      const turn = await readTurn(paths, tell.binding.turnSequence);
+      return turn?.end?.outcome.kind === "answered";
+    }, { budgetMs: 5_000 });
+    const tell = await readTell(paths, "late-tell");
+    const turn = tell?.binding === undefined ? null : await readTurn(paths, tell.binding.turnSequence);
+    assert.equal(turn?.end?.outcome.kind, "answered");
+    if (turn?.end?.outcome.kind === "answered") assert.equal(turn.end.outcome.answer, '{"ok":true}');
+    writeFileSync(join(barrier, "observation-release"), "release\\n");
+    operationFailed = false;
+  } finally {
+    try {
+      if (operationFailed && child !== undefined && tellRecorded) {
+        const tell = await readTell(pathsForAkuId(world, child.id), "late-tell");
+        if (tell?.state === "pending" && tell.binding === undefined && tell.deliveries.length === 0) {
+          for (const pid of readPidReceipt(bodyPidReceipt)) {
+            try {
+              process.kill(pid, "SIGTERM");
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+            }
+            await waitForProcessExit(pid, 5_000);
+          }
+        }
+      }
+    } finally {
+      writeFileSync(join(barrier, "release"), "release\\n");
+      writeFileSync(join(barrier, "observation-release"), "release\\n");
+      restoreIdleBarrier();
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+      await cleanupSpawnCapableFixtureForTest(t, {
+        fixturePath: raw.path,
+        pidReceiptPath: bodyPidReceipt,
+        timeoutMs: 15_000,
+        operationFailed,
+        expectRetainedEvidence: operationFailed,
+      });
+    }
   }
 });
 

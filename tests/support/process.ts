@@ -155,6 +155,19 @@ export function installAkumaBodyEmptyPublicationBarrier(barrierPath: string): ()
   };
 }
 
+export function installAkumaBodyIdleFinishBarrier(barrierPath: string): () => void {
+  const previousBarrier = process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER;
+  const previousNodeOptions = process.env.NODE_OPTIONS;
+  process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER = barrierPath;
+  process.env.NODE_OPTIONS = appendNodeOptionsImport(akumaBodyPidReceiptImport(), previousNodeOptions);
+  return () => {
+    if (previousBarrier === undefined) delete process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER;
+    else process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER = previousBarrier;
+    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = previousNodeOptions;
+  };
+}
+
 export function readPidReceipt(path: string): number[] {
   if (!existsSync(path)) return [];
   const seen = new Set<number>();

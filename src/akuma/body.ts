@@ -483,6 +483,7 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
         await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now, turnOutcome);
         return;
       }
+      await supervisor.refresh();
       continue;
     }
     const schema = launchTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson ?? launch.initialSchemaJson;
