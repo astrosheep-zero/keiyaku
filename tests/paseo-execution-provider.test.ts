@@ -1242,8 +1242,9 @@ async function socketEndpoint(context: TestContext, handshake: boolean) {
     if (handshake) {
       const key = request.headers["sec-websocket-key"]!;
       const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+      const protocol = request.headers["sec-websocket-protocol"];
       peer.write(
-        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+        `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${protocol === undefined ? "" : `Sec-WebSocket-Protocol: ${protocol.split(",")[0]!.trim()}\r\n`}\r\n`,
       );
     }
     accepted.resolve(peer);
@@ -1363,6 +1364,10 @@ test(
     const rejected = assert.rejects(attempt.result, /provider attempt retired/u);
     const peer = await endpoint.accepted;
     await observed.opened;
+    assert.equal(observed.sockets.length, 1);
+    assert.equal(observed.sockets[0]!.url, endpoint.url);
+    assert.equal(observed.sockets[0]!.readyState, WebSocket.OPEN);
+    assert.equal(peer.destroyed, false);
     const closing = attempt.abort();
     await rejected;
     await real.logicalClosed;

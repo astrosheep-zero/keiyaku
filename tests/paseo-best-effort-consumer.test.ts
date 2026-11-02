@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -170,17 +171,21 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
   const events: AgentStreamEvent[] = [];
   agent.session!.subscribe((event) => events.push(event));
   const drain = async () => { await tick(); await manager.flush(); };
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    await registry.shutdown();
-    await handoff?.close();
-    removeHandoff?.();
-    await rm(root, { recursive: true, force: true });
+  let closing: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    return closing ??= (async () => {
+      manager.prepareForShutdown();
+      await manager.closeAgent(agent.id);
+      await handoff?.close();
+      removeHandoff?.();
+      await registry.shutdown();
+      await manager.flushForShutdown();
+      await storage?.flush();
+      await rm(root, { recursive: true, force: true });
+    })();
   };
   t.after(close);
-  return { agent, bridge, manager, calls, events, providerEvents, root, drain,
+  return { agent, bridge, manager, storage, calls, events, providerEvents, root, drain,
     setBeforePrompt(callback: () => Promise<void>) { beforePrompt = callback; },
     setRows(value: Row[]) { rows = value; },
     waitForLifecycle(status: string) {
@@ -334,11 +339,37 @@ test("installed AgentManager refresh keeps an idle mirror through actual GC and 
   await h.drain();
   assert.equal(h.getDirectoryOpens(), 2, "refresh arms a new registration observation before session open");
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
+  const storage = h.storage!;
+  const applySnapshot = storage.applySnapshot.bind(storage);
+  let entered!: () => void;
+  let release!: () => void;
+  let snapshotFinished = false;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  t.mock.method(storage, "applySnapshot", async (...args: Parameters<typeof storage.applySnapshot>) => {
+    entered();
+    await gate;
+    const result = await applySnapshot(...args);
+    snapshotFinished = true;
+    return result;
+  });
   h.push([turn(2)]);
   await h.waitForLifecycle("running");
+  await started;
   assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
   assert.deepEqual(h.calls, [], "idle cleanup, refresh and later external execution never interrupt the Akuma");
-  await h.close();
+  let closed = false;
+  const closing = h.close().then(() => { closed = true; });
+  try {
+    await tick();
+    assert.equal(closed, false, "shutdown waits for the owned persistence");
+    assert.equal(existsSync(h.root), true, "the fixture remains until its writer retires");
+  } finally {
+    release();
+  }
+  await closing;
+  assert.equal(snapshotFinished, true, "owned persistence finishes before fixture removal");
+  assert.equal(existsSync(h.root), false);
   assert.equal(h.getDirectoryListeners(), 0, "the owned manager subscription is released on shutdown");
 });
 
