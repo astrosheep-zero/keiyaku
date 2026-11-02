@@ -45,13 +45,16 @@ Create and inspect Debts:
 
 ```bash
 keiyaku debt add "<title>"
-keiyaku debt add "<title>" --priority 1 --needs <debt-id>
-keiyaku debt show <debt-id>
+keiyaku debt add "<title>" --priority 1 --needs <debt/...>
+keiyaku debt show <debt/...>
 keiyaku debt ls
 keiyaku debt ready
 keiyaku debt blocked
-keiyaku debt tree <debt-id>
+keiyaku debt tree <debt/...>
 keiyaku debt doctor
+keiyaku debt query --where 'priority <= 1 and ready' --world
+keiyaku debt context                  # read the default namespace
+keiyaku debt context <namespace>      # set it; / resets to root
 ```
 
 Use complete Debt IDs for targeted commands. `ls`, `ready`, and `blocked` use
@@ -60,8 +63,8 @@ the current namespace; use `--world` to inspect the complete Debt world.
 Close work:
 
 ```bash
-keiyaku debt done <debt-id>...
-keiyaku debt drop <debt-id>... --note "<reason>"
+keiyaku debt done <debt/...>...
+keiyaku debt drop <debt/...>... --note "<reason>"
 ```
 
 Use `done` when the Debt is complete. Use `drop` when it is no longer owed.
@@ -71,9 +74,11 @@ Both terminal states release dependent Debts. Unresolved `needs` appear in
 Update a Debt without changing its lifecycle:
 
 ```bash
-keiyaku debt update <debt-id> --title "<title>"
-keiyaku debt update <debt-id> --body "<body>"
-keiyaku debt update <debt-id> --needs <debt-id>
+keiyaku debt update <debt/...> --title "<title>"
+keiyaku debt update <debt/...> --body "<body>"
+keiyaku debt update <debt/...> --needs <debt/...>
+keiyaku debt update <debt/...> --parent <debt/...> --relates <debt/...>
+keiyaku debt update <debt/...> --drop-needs <debt/...>
 ```
 
 ## 4. After Creating A Debt

@@ -10,39 +10,27 @@ description: >-
 
 ## Model
 
-Keiyaku is three independent pillars, not a bundle: **Debt** records unresolved
-work and dependencies, **Contract** makes acceptance standing and auditable,
-**Akuma** invokes capability. Use any one alone; combine them only when the
-work calls for it. Behind every Contract in flight there is one holder of its
-fulfillment loop — whoever turns intent into commissions and returns into
-decisions. The flagship holds it by default, and may hand a whole Contract's
-loop to one Aku in a single commission; the harness serves both styles
-equally. See `keiyaku-workflow` for the loop, `keiyaku-bind` for authoring,
-`keiyaku-akuma` for invocation.
+Keiyaku has three independent pillars: **Debt** records unresolved work,
+**Contract** makes acceptance auditable, **Akuma** runs delegates. Use any one
+alone. Each Contract in flight has one holder who runs its loop: you by
+default, or one Aku you hand the whole loop to.
+
+- Shaping and binding a Contract: `keiyaku-bind`
+- Holding a Contract to acceptance: `keiyaku-workflow`
+- Calling and steering Akumas: `keiyaku-akuma`
+- Recording unresolved work: `keiyaku-debt`
+- Watching many lanes at once: `keiyaku-babysit`
 
 ## Quick Start
 
 ```bash
 keiyaku -C <repo> debt add "title"
-keiyaku -C <repo> bind [--debt <debt-id>] -
+keiyaku -C <repo> bind [--debt <debt/...>] -
 keiyaku -C <repo> status
 keiyaku -C <repo> deliver [<contract>|@<contract>]
 keiyaku -C <repo> review [<contract>|@<contract>] --satisfied --summary "<evidence>"
 ```
 
-`-C` selects the invocation cwd and therefore the World. `--repo <path>` only
-selects the Contract repository; it never retargets that World. `call
---workdir <path>` selects execution cwd (relative to the effective invocation
-cwd). Without it, the call uses the invocation cwd; `--contract` associates a
-Contract without selecting an execution directory.
-
-An Akuma caller can find its own delegation tree with `keiyaku ls --mine` (or an
-explicit `--caller`); see `keiyaku-akuma` for the roster and its text labels.
-
-`deliver` and `review` may take time after their leading admission.
-`deliver --dry-run` only observes the prospective candidate, standing evidence,
-and target followability; it never runs Verification or hooks or admits work.
-Their witnessed progress is ephemeral stderr output; stdout remains one final
-text or JSON result. Ctrl-C asks the owned operation to stop and waits for its
-truthful final receipt, so it is not evidence that an already admitted action
-was rolled back.
+`-C <path>` sets the invocation directory and with it the World. `--repo <path>`
+only picks the Contract repository. `call --workdir <path>` only picks where the
+Akuma runs.

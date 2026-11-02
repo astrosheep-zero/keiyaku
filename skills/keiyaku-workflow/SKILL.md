@@ -1,44 +1,21 @@
 ---
 name: keiyaku-workflow
 description: >-
-  Must read before binding a `kei` (Contract) or when acting as its holder.
-  Use when deciding when to bind a kei, how to shape and hold it, how to
-  delegate its work, and how to accept, amend, or end it.
+  Read when holding a `kei`: its roles, lifecycle, handing roles to Akumas,
+  and deciding to accept, amend, or abandon.
 ---
 
 # Keiyaku Workflow
 
 The holder runs one Contract's fulfillment loop from preparation to completion.
 
-## 1. Prepare Before Binding
+## 1. Before Binding
 
-Before `bind`, settle the information that makes the `kei` truthful:
+Shape and author the `kei` with `keiyaku-bind`. Do not bind while design or
+acceptance is open; only private implementation details may stay with the
+Deliverer.
 
-- objective and intended outcome;
-- design and approach;
-- affected Region;
-- acceptance conditions;
-- verification and required evidence;
-- prerequisites;
-- holder.
-
-If the design, approach, or acceptance conditions are still open, do not bind.
-Resolve them with their owner first. Private implementation details may remain
-for the Deliverer; the public meaning and acceptance boundary may not.
-
-Bind independent `kei`s in parallel. Do not split one acceptance boundary just
-to create parallel work.
-
-## 2. Split the Work
-
-- Separate `kei`s have independently acceptable outcomes.
-- An Arc is a chapter of one `kei`; it is not separately accepted.
-- A Debt records confirmed unresolved work and its dependencies.
-
-Use `after` only when one `kei` requires another to be accepted first. Ordinary
-overlap is not a dependency.
-
-## 3. Roles
+## 2. Roles
 
 A `kei` has three roles. They are responsibilities, not people, and one agent
 may fill more than one of them, with one exception below.
@@ -59,7 +36,7 @@ reviews, so keeping the Reviewer apart from the Deliverer is the holder's duty.
 Any role may be filled directly or handed to an Akuma. Hand one over when other
 hands help the work, not to make review count.
 
-## 4. Lifecycle
+## 3. Lifecycle
 
 Each act changes a different part of the world:
 
@@ -71,11 +48,10 @@ Each act changes a different part of the world:
   lane's claim can move the target beneath it. Check target movement before
   delivery preview; when it matters, merge the target branch (main when selected)
   in the worktree and resolve conflicts there before previewing again.
-- **Delivery preview:** Use `deliver --dry-run` to observe the candidate, existing
-  Verification evidence and target followability without tendering or claiming.
-  It never runs Verification or hooks, admits testimony, or reconciles. Missing
-  or stale evidence means Verification is still required; an existing failure
-  remains unsatisfied. Preparation is not a promise of successful delivery.
+- **Delivery preview:** `deliver --dry-run` shows the candidate, existing
+  Verification evidence, and target followability without submitting work or
+  running Verification or hooks. With the `verified` gate, missing or stale
+  evidence still needs Verification; preview never promises acceptance.
 - **Deliver:** Captures a tender and integration against the observed target;
   journal gains a delivered candidate. Ready prerequisites and gates trigger
   placement and claim in this invocation; otherwise the candidate waits.
@@ -92,7 +68,7 @@ Placement judges declared gates, not the producer's identity. Review does not
 replace Verification; delivery preview never requests placement. Read the final receipt
 for stops and reconciliation lag after an admitted act.
 
-## 5. Handing A Role To An Akuma
+## 4. Handing A Role To An Akuma
 
 This is the one commissioning map. `call --help` owns the exact action
 vocabulary and default set. The flagship acting directly needs no grant.
@@ -115,7 +91,7 @@ worktree, and expected result. Never ask the Akuma that delivered a candidate
 to review it. Use `keiyaku-akuma` for invocation and observation, and command
 help for exact syntax.
 
-## 6. Decide What Happens Next
+## 5. Decide What Happens Next
 
 The holder checks candidate, verification, review, prerequisites, and gates.
 

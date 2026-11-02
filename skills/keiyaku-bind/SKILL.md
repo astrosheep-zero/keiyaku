@@ -24,20 +24,9 @@ Settle these facts first:
 - the affected Region;
 - the one holder responsible for the `kei`.
 
-The Design section is a detailed design document. It may contain subsections
-such as:
-
-- Architecture: components, module boundaries, ownership, and connections;
-- Interfaces And Behavior: public surfaces, inputs, outputs, success, and
-  refusal behavior;
-- Data And Persistence: data shape, identity, lifecycle facts, and persistence;
-- Approach And Flow: implementation approach, dependencies, ordering,
-  concurrency, and failure handling;
-- Pseudocode: algorithms and control flow.
-
-Record every design decision the implementation must follow. Add other Design
-subsections when needed. Do not bind while the architecture, design, approach,
-or acceptance conditions are open.
+The Design section is a detailed design document. Use the subsections in the
+template below as needed, add others when useful, and record every decision the
+implementation must follow. Do not bind while design or acceptance is open.
 
 ### Contract Shape: Mandatory Acceptance Boundary Check
 
