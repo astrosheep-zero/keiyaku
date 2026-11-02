@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku-plugin-paseo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "files": ["index.js", "index.d.ts", "backfill-titles.mjs"],
   "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
