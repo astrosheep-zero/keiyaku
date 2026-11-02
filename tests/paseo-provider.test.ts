@@ -159,7 +159,7 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
   await h.connection.send({ type: "catalog", requestId: "catalog" });
   assert.deepEqual(h.events.find((e) => e.type === "catalog")?.catalog, {
-    models: [{ id: "mirror", label: "Akuma mirror" }], defaultModel: "mirror", modes: [],
+    models: [], modes: [],
   });
   await h.open();
   assert.equal(reads, 1);
@@ -928,6 +928,9 @@ test("session close releases the live observation and discards its in-flight rea
 test("an open session reports the observed Akuma model, admits no missing one, and degrades to a notice without failing", async (t) => {
   const h = await harness(t, { window: async () => [turn(2)],
     status: async () => ({ provider: "pi", model: "kimi-coding/k3-256k" }) });
+  await h.connection.send({ type: "catalog", requestId: "catalog" });
+  assert.deepEqual(h.events.find((event) => event.type === "catalog")?.catalog,
+    { models: [], modes: [] }, "the provider catalog offers no global placeholder or default");
   await h.open();
   assert.deepEqual(h.events.filter((event) => event.type === "session.config").map((event) => event.config), [{
     model: "kimi-coding/k3-256k",
@@ -950,7 +953,7 @@ test("an open session reports the observed Akuma model, admits no missing one, a
     "an unavailable model never changes observed execution");
 
   // A provider the runtime never admitted a model for offers none: the mirror
-  // never borrows its own placeholder or a provider default.
+  // never borrows a provider default or invents a session selection.
   const unspecified = await harness(t, { window: async () => [turn(2)], status: async () => ({ provider: "pi" }) });
   await unspecified.open();
   assert.deepEqual(unspecified.events.filter((event) => event.type === "session.config").map((event) => event.config),

@@ -1,11 +1,10 @@
 import { realpath } from "node:fs/promises";
-import { z } from "zod";
 import { negotiateProviderCapabilities, type ProviderConnection, type ProviderEvent, type ProviderPrompt, type ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import type { History } from "./keiyaku.js";
 import type { AkumaTransport } from "./transport.js";
 import { messageText, tellPresentation } from "./message.js";
 import { createMirror } from "./mirror.js";
-import { modelConfig } from "./model.js";
+import { modelConfig, mirrorTarget } from "./model.js";
 import type { StopAttempt } from "./stop.js";
 
 type RegistrationHandoff = Readonly<{
@@ -13,7 +12,6 @@ type RegistrationHandoff = Readonly<{
   providerClosed(agentId: string | undefined, session: Readonly<{ observe(reannounce?: boolean): Promise<void> }>): Promise<void> | void;
 }>;
 
-const identity = z.object({ world: z.string().min(1), akuId: z.string().regex(/^aku\//u) });
 export function createProvider(transport: AkumaTransport, handoff?: RegistrationHandoff) {
   const sessions = new Set<{ agentId: string | undefined; world: string; akuId: string; observe(reannounce?: boolean): Promise<void>; stop(): Promise<void> }>();
   const provider: ProviderRegistration = {
@@ -32,13 +30,13 @@ export function createProvider(transport: AkumaTransport, handoff?: Registration
           if (closed) throw new Error("Provider connection is closed");
           if (input.type === "catalog") {
             emit({ type: "catalog", requestId: input.requestId, catalog: {
-              models: [{ id: "mirror", label: "Akuma mirror" }], defaultModel: "mirror", modes: [],
+              models: [], modes: [],
             } });
           } else if (input.type === "session.open") {
             if (local.has(input.sessionId)) throw new Error("Session already open");
             if (input.persistence && input.persistence.version !== 1) throw new Error("Unsupported persistence version");
-            const target = identity.parse(input.persistence?.data ?? input.config.providerOptions);
-            const world = await realpath(target.world);
+            const target = await mirrorTarget(input.persistence?.data ?? input.config.providerOptions);
+            const world = target.world;
             const mirror = createMirror(input.sessionId, emit);
             const cancellation = new AbortController();
             const agentId = input.config.env.PASEO_AGENT_ID;

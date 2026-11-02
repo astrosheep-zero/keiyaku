@@ -173,11 +173,15 @@ its declared public entry once. Inherited harness, Square and Keiyaku caller
 identities are stripped, not replaced; the host environment is never mutated.
 The same World and Akuma identity reopen on refresh/resume.
 
-Opening also reads public status and publishes the admitted model through
-Paseo's session configuration, with its provider in the model label. This is
-read-only display, not model switching. An unspecified model stays unknown;
-a failed status read reports a notice without blocking history. The global
-catalog remains the mirror attachment entry, not a catalogue of native models.
+At native agent creation, the plugin reads the exact Akuma status from
+`providerOptions`, keeps the native provider as `keiyaku`, and persists a known
+model as `config.model`. It removes the `mirror` placeholder when status is
+unknown or unavailable and leaves that diagnostic-only condition without
+blocking creation. The provider catalog stays `{ "models": [], "modes": [] }`;
+this create-time correction is for new or recreated mirrors. Existing persisted
+`mirror` sessions are outside the guarantee. The opened session still publishes
+its current status through session configuration for runtime observation, with
+no live model-change refresh.
 
 Progress reports appear as informational notifications with stable report
 identity; they do not start or finish a Turn or constitute its answer.

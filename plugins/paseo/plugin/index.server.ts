@@ -5,6 +5,7 @@ import { attach } from "./server/attach.js";
 import { attachRpc } from "./shared/attach-rpc.js";
 import { refreshRpc } from "./shared/refresh-rpc.js";
 import { refreshOrReopen } from "./server/reopen.js";
+import { registerModelCorrection } from "./server/model.js";
 import { createRegistrationHandoff, registerRegistrationHooks } from "./server/handoff.js";
 
 export default function contribute(server: PluginServerContext) {
@@ -14,9 +15,11 @@ export default function contribute(server: PluginServerContext) {
   server.registerProvider(mirror.provider);
   server.handle(refreshRpc, (input, context) => refreshOrReopen(context.paseo, input, mirror.refresh));
   server.handle(attachRpc, (input, context) => attach(input, context));
+  const removeModelCorrection = registerModelCorrection(server, transport.status);
   const removeHooks = registerRegistrationHooks(server, handoff);
   return async () => {
     removeHooks();
+    removeModelCorrection();
     await handoff.close();
     try { await mirror.close(); } finally { await transport.close(); }
   };

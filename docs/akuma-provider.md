@@ -195,6 +195,13 @@ supersedes an obsolete one instead of retaining both, so neither narration
 overflow nor a full protected backlog leaves the Soul on a model the attempt is
 no longer running. An unnamed observation clears the confirmation it replaces.
 
+The optional Paseo mirror has no shared model catalog or inferred default. A
+new or recreated mirror persists the exact model observed at creation time for
+ordinary presentation. If that observation is missing or unreadable, the mirror
+remains unknown and never borrows another model. Old persisted placeholders are
+not retroactively repaired, and later observation makes no promise of live
+model-change refresh.
+
 A generic native tool invocation may contribute one bounded compact preview of
 the structured arguments it actually supplied. That preview is narration, not
 execution authority: it never carries tool output, results, deltas, or a raw
