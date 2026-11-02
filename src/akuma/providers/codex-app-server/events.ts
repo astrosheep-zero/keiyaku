@@ -98,7 +98,7 @@ export const CODEX_NOTIFICATION_DISPOSITIONS = {
   "thread/unarchived": "drop",
   "turn/completed": "terminal",
   "turn/diff/updated": "drop",
-  "turn/moderationMetadata": "note",
+  "turn/moderationMetadata": "drop",
   "turn/plan/updated": "plan",
   "turn/started": "drop",
   warning: "note",
@@ -330,8 +330,6 @@ function notificationAction(method: string, params: Readonly<Record<string, unkn
       return "Goal updated";
     case "thread/realtime/error":
       return `Realtime warning: ${message ?? "unknown error"}`;
-    case "turn/moderationMetadata":
-      return "Moderation updated";
     case "warning":
       return `Warning: ${message ?? "unknown warning"}`;
     case "windows/worldWritableWarning":

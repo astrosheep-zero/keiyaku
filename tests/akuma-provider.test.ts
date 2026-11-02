@@ -2665,6 +2665,7 @@ function fakeCodex(
       "      send({method:'item/started',params:{item:{id:'command-1',type:'commandExecution',command:'npm test'}}});",
       "      send({method:'item/commandExecution/outputDelta',params:{delta:'secret output'}});",
       "      send({method:'item/completed',params:{item:{id:'command-1',type:'commandExecution',command:'npm test',status:'completed',exitCode:0,aggregatedOutput:'secret output'}}});",
+      "      send({method:'turn/moderationMetadata',params:{threadId:message.params.threadId,turnId:'turn-1'}});",
       "      send({method:'turn/plan/updated',params:{explanation:'Verify the adapter',plan:[{step:'test'}]}});",
       "      send({method:'error',params:{error:{message:'temporary outage',additionalDetails:null},willRetry:true}});",
       "      send({method:'item/completed',params:{item:{id:'answer-1',type:'agentMessage',text:'first answer'}}});",
