@@ -1,4 +1,4 @@
-import { cliExitCode, type CliOutcome } from "../streams.js";
+import type { CliOutcome } from "../streams.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcessInput, ProcessOutcome } from "../../runtime/proc/run.js";
@@ -65,7 +65,7 @@ export function parseInstallCommand(argv: readonly string[]): ParsedInstallComma
 }
 
 export function renderInstallHelp(): string {
-  return `${INSTALL_ROOT_PURPOSE}\n\n${usageLine(INSTALL_USAGE)}\n\n--all continues past failures; any failure exits ${cliExitCode("failed")}.`;
+  return `${INSTALL_ROOT_PURPOSE}\n\n${usageLine(INSTALL_USAGE)}\n\n--all continues past failures and fails if any harness failed.`;
 }
 
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000;

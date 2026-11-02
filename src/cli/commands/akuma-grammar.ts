@@ -78,9 +78,9 @@ const AKUMA_COMMAND_SPECS = {
     stdin: true,
     flags: { json: "boolean" },
     usage: "report (<text> | -) [--json]",
-    purpose: "Record progress in the invoking Akuma's Heart without ending work.",
+    purpose: "Report progress to your caller and keep working.",
     details:
-      "Give one nonblank text argument, or - to read stdin. Requires explicit Akuma, World, Body and Turn execution declarations; no recipient or parent forwarding. Recorded means persisted, not received.",
+      "Give <text> as one argument, or - to read stdin. Works only from inside a running Akuma. It does not end your turn or replace your final answer.",
   },
   call: {
     arity: 1,
@@ -143,7 +143,7 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Tell an Akuma something without waiting for its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt durably admits the new Tell while asking the current Body to yield; admission remains even if completion cannot be proven.",
+      "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
       "Use ask to block for the answer or supply a schema.",
     ].join("\n"),
   },
@@ -155,7 +155,7 @@ const AKUMA_COMMAND_SPECS = {
     purpose: "Ask an Akuma and block until it answers.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt durably admits the new Tell while asking the current Body to yield; admission remains even if completion cannot be proven.",
+      "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
       SCHEMA_DETAILS,
       "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
       "Completed activity streams on stderr and the final answer is written to stdout once.",

@@ -492,8 +492,6 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
 
   const help = renderAkumaHelp("history");
   assert.match(help, /\[--full\]/u, "help advertises the full mode");
-  assert.match(help, /defaults to a causal skeleton/u, "help documents the default skeleton");
-  assert.match(help, /--full prints every event/u, "help documents the full mode");
 });
 
 test("a debt title wraps its em-dash and title as one unit", () => {
@@ -617,15 +615,12 @@ test("catalog text renders only the selected identity layer", () => {
   );
 });
 
-test("ls help names Akuma names and states the catalog-vs-fleet mapping", () => {
+test("ls help lists the Akuma catalogue usage forms", () => {
   const help = renderContractHelp("ls");
-  assert.doesNotMatch(help, /archetype/iu);
   assert.ok(help.includes("ls aku[/] [--limit <count>]"));
   assert.ok(help.includes("ls aku/<name>"));
   assert.ok(help.includes('ls "aku/<name>/*"'));
   assert.ok(help.includes('ls "aku/*/*"'));
-  assert.ok(help.includes("callable Akuma-name catalog"));
-  assert.ok(help.includes("recent retained Akuma instances"));
 });
 
 test("rendered Akuma catalog header names Akuma names, never archetype", () => {

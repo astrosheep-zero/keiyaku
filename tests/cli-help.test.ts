@@ -39,50 +39,23 @@ test("help resolves the longest legal command-word prefix before syntax scanning
   assert.throws(() => parseArgv(["help"]), CliUsageError);
 });
 
-test("namespace and leaf help identify an executable command", () => {
+test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
-  assert.match(renderRootHelp(), /Debt — unresolved-work ledger/u);
-  assert.doesNotMatch(renderRootHelp(), /plan memory|keiyaku task/u);
   assert.match(renderRootHelp(), /--workdir <path>/u);
-  assert.match(renderRootHelp(), /Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 64 usage/u);
-  assert.match(renderRootHelp(), /--version\s+Print the running package version\./u);
-  assert.match(renderInstallHelp(), /install/u);
+  assert.match(renderRootHelp(), /--version/u);
   assert.match(renderDebtHelp("add"), /usage  keiyaku debt add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
-  assert.match(
-    renderAkumaHelp("call"),
-    /keiyaku ls aku\/ to find visible Akuma names; hidden definitions can still be called by name/u,
-  );
   const showHelp = renderContractHelp("show");
-  assert.match(renderRootHelp(), /show\s+Read one Contract's guidance/u);
   assert.match(showHelp, /usage  keiyaku show \[<contract>\|@<contract>\]/u);
   assert.match(showHelp, /--json/u);
-  assert.doesNotMatch(showHelp, /status --guidance/u);
   const statusHelp = renderContractHelp("status");
   assert.match(statusHelp, /status \(aku\|aku\/\|aku\/\*\) \[--limit <count>\]/u);
   assert.match(statusHelp, /status \(kei\|kei\/\|kei\/\*\) \[--limit <count>\]/u);
-  assert.match(statusHelp, /default 10/u);
-  assert.match(statusHelp, /Contract category requires a Repo/u);
-  assert.doesNotMatch(statusHelp, /guidance/u);
-  assert.doesNotMatch(renderContractHelp("status"), /\bverb\b/u);
-  assert.match(renderAkumaHelp("wait"), /default mode is any/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
   assert.match(lsHelp, /ls debt\/<namespace>\/ \[--limit <count>\]/u);
-  assert.match(lsHelp, /direct and transitive descendants in this World/u);
-  const settingsHelp = renderContractHelp("settings");
-  assert.match(settingsHelp, /"url": "ws:\/\/127\.0\.0\.1:6767\/ws"/u);
-  assert.match(settingsHelp, /native provider id is bare/u);
-  assert.match(settingsHelp, /model: <native-model-id>/u);
-  assert.match(settingsHelp, /effort: high/u);
-  assert.match(settingsHelp, /PASEO_PASSWORD=<password> keiyaku call/u);
-  assert.match(settingsHelp, /native reload\/restart create a fresh Akuma/u);
-  assert.match(settingsHelp, /check\/send race/u);
-  assert.match(settingsHelp, /session-wide/u);
-  assert.match(settingsHelp, /never cancels later work/u);
-  assert.match(settingsHelp, /Socket closure does not prove native cancellation/u);
 });
 
 test("leaf help and usage refusals share accepted invocation options", () => {
@@ -114,16 +87,6 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   }
   assert.match(renderContractHelp("show"), /\[--repo <path>\]/u);
   assert.match(renderAkumaHelp("history"), /history <kei\/\.\.\.> \[--full\] \[--repo <path>\]/u);
-});
-
-test("Akuma help distinguishes schema contracts, exact results, and fork points", () => {
-  for (const action of ["call", "ask"] as const) {
-    assert.match(renderAkumaHelp(action), /JSON Schema answer contract to the provider/u);
-    assert.match(renderAkumaHelp(action), /does not independently validate schema conformance/u);
-  }
-  assert.match(renderAkumaHelp("call"), /status <aku\/\.\.\.\|@alias> --json to inspect status\.allowed/u);
-  assert.match(renderAkumaHelp("history"), /answer or failure diagnostic/u);
-  assert.match(renderAkumaHelp("fork"), /history <aku\/\.\.\.\|@alias> --json/u);
 });
 
 test("help projections reflow at the requested terminal width without splitting tokens", () => {

@@ -131,7 +131,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
       case "install":
         return renderInstallHelp();
       case "whoami":
-        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only; an Akuma's current initiator and birth parent are distinct. Absent, invalid, and unavailable facts remain explicit.`;
+        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only. For an Akuma, who started its current turn is shown apart from who called it. Missing or unreadable facts stay explicit.`;
       case "akuma":
         return renderAkumaHelp(coordinate.action);
     }

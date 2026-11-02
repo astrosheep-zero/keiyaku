@@ -206,6 +206,43 @@ A failing hook retains the worktree
 and reports lag; it never abandons the Contract. `keiyaku settings --help`
 lists every recognized namespace.
 
+### Paseo provider
+
+Configure a local, already-running Paseo server in settings.json:
+
+```json
+{
+  "providers": {
+    "paseo": {
+      "kind": "paseo",
+      "config": { "url": "ws://127.0.0.1:6767/ws", "provider": "claude" }
+    }
+  }
+}
+```
+
+The native provider id is bare (`claude`, `codex`, `pi`), not provider/model.
+Select it in an Akuma definition such as .keiyaku/akumas/paseo-worker.md:
+
+```markdown
+---
+provider: paseo
+model: <native-model-id>
+effort: high
+---
+```
+
+Model and effort must be offered by that native provider; effort is its native
+thinking option id. Call with
+`PASEO_PASSWORD=<password> keiyaku call paseo-worker "<prompt>"`.
+
+- After a Paseo native reload or restart, call a fresh Akuma instead of resuming.
+- `kill` and `--interrupt` control current execution session-wide and may affect
+  concurrent human work. Normal completion only disconnects the client; it does
+  not cancel later work or close the native runtime.
+- Busy agents refuse new work, but steering can still race concurrent input.
+- A dropped connection does not prove cancellation succeeded.
+
 ## Install
 
 ```bash

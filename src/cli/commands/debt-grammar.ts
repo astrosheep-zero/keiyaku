@@ -71,8 +71,8 @@ const DEBT_COMMAND_SPECS: Readonly<Record<DebtAction, DebtCommandSpec>> = {
     usage: `debt add <TITLE> [--namespace <ns>] [--priority 0..3]
   [--state open|done|drop]
   [--note <text>] [--actor <actor>]
-  [--needs <DebtId>]... [--parent <DebtId>]
-  [--supersedes <DebtId>]... [--relates <DebtId>]...
+  [--needs <debt/...>]... [--parent <debt/...>]
+  [--supersedes <debt/...>]... [--relates <debt/...>]...
   [--body <text>]
 debt add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create a Debt from flags or a Debt document on stdin.",
@@ -82,13 +82,13 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
   show: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: COMMON,
-    usage: "debt show <DebtId>...",
+    usage: "debt show <debt/...>...",
     purpose: "Read one or more Debts and their relationships.",
   },
   ls: {
     arity: [0, 1],
     flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
-    usage: "debt ls [<namespace-selector>] [--closed | --all] [--world] [--limit <n>]",
+    usage: "debt ls [<namespace-selector>] [--closed | --all] [--world] [--limit <count>]",
     purpose: "List Debts in the selected namespace.",
     details: [
       "With no selector, lists the current directory Debt context.",
@@ -98,14 +98,14 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
   ready: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "debt ready [--world] [--parent <DebtId>] [--limit <n>]",
+    usage: "debt ready [--world] [--parent <debt/...>] [--limit <count>]",
     purpose: "List open Debts whose every dependency is complete or dropped.",
     details: "--world lists every namespace in the current Debt world.",
   },
   blocked: {
     arity: [0, 0],
     flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "debt blocked [--world] [--parent <DebtId>] [--limit <n>]",
+    usage: "debt blocked [--world] [--parent <debt/...>] [--limit <count>]",
     purpose: "List Debts with unmet dependencies.",
     details: "--world lists every namespace in the current Debt world.",
   },
@@ -121,7 +121,7 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
       limit: "value",
     },
     usage: `debt query [--where <expression>] [--closed | --all] [--world]
-  [--sort priority|created|updated|id] [--limit <n>]`,
+  [--sort priority|created|updated|id] [--limit <count>]`,
     purpose: "Filter and sort Debts with a boolean expression.",
     details: [
       "fields: state priority title id parent under needs blocks ready blocked created updated",
@@ -137,7 +137,7 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
   tree: {
     arity: [1, 1],
     flags: COMMON,
-    usage: "debt tree <DebtId>",
+    usage: "debt tree <debt/...>",
     purpose: "Show a Debt and its parent/child breakdown.",
   },
   doctor: {
@@ -164,12 +164,12 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
       relates: "repeat",
       "drop-relates": "repeat",
     },
-    usage: `debt update <DebtId> [--title <text>] [--body <text>|- | --append <text>]
+    usage: `debt update <debt/...> [--title <text>] [--body <text>|- | --append <text>]
   [--note <text>]
-  [--priority 0..3] [--needs <DebtId>]... [--drop-needs <DebtId>]...
-  [--parent <DebtId> | --no-parent]
-  [--supersedes <DebtId>]... [--drop-supersedes <DebtId>]...
-  [--relates <DebtId>]... [--drop-relates <DebtId>]...`,
+  [--priority 0..3] [--needs <debt/...>]... [--drop-needs <debt/...>]...
+  [--parent <debt/...> | --no-parent]
+  [--supersedes <debt/...>]... [--drop-supersedes <debt/...>]...
+  [--relates <debt/...>]... [--drop-relates <debt/...>]...`,
     purpose: "Change a Debt's fields and relationships.",
     details: [
       "--body replaces the body; --append adds text after it, separated by a newline when needed.",
@@ -179,13 +179,13 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
   done: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
-    usage: "debt done <DebtId>... [--note <text>]",
+    usage: "debt done <debt/...>... [--note <text>]",
     purpose: "Mark one or more Debts done.",
   },
   drop: {
     arity: [1, Number.POSITIVE_INFINITY],
     flags: { ...COMMON, note: "value" },
-    usage: "debt drop <DebtId>... [--note <text>]",
+    usage: "debt drop <debt/...>... [--note <text>]",
     purpose: "Mark one or more Debts as no longer needed.",
   },
   context: {
