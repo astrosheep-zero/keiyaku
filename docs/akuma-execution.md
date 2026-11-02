@@ -191,6 +191,8 @@ and is witnessed only after settlement, the asleep Body receipts already
 stopped, and only an already witnessed Body receipts already killed. Hung,
 untidy, held, or changed custody returns the existing unavailable evidence and
 never authorizes external signaling. Stop and interrupt remain distinct controls.
+Cancellation before kill admission starts neither control nor successor recovery;
+after admission it stops observation without retracting the admitted control.
 For an externally hosted persistent runtime, kill and interrupt control current
 native execution while preserving the runtime for later resume. Ordinary Turn
 completion only disconnects the adapter's owned client. Neither client retirement

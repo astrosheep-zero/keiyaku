@@ -171,6 +171,99 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
   }
 });
 
+test("cancelled kill admission does not start successor recovery", async (context) => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  const blocker = new DatabaseSync(paths.heart);
+  try {
+    await leash.birth(paths, value.soul);
+    await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    blocker.exec("BEGIN IMMEDIATE");
+    const controller = new AbortController();
+    const reason = new Error("cancel admission");
+    const exec = DatabaseSync.prototype.exec;
+    let contended = false;
+    const injected = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+      try {
+        return exec.call(this, sql);
+      } catch (error) {
+        if (sql === "BEGIN IMMEDIATE") {
+          contended = true;
+          controller.abort(reason);
+        }
+        throw error;
+      }
+    });
+    let recoveries = 0;
+    try {
+      await assert.rejects(
+        killAkumaWithRecovery(
+          paths,
+          async () => {
+            recoveries++;
+          },
+          controller.signal,
+        ),
+        (error) => error === reason,
+      );
+      assert.equal(contended, true);
+      assert.equal(recoveries, 0);
+    } finally {
+      injected.mock.restore();
+    }
+    blocker.exec("ROLLBACK");
+    assert.equal((await readHeart(paths)).stop, null);
+  } finally {
+    blocker.close();
+    leash.release();
+    value.close();
+  }
+});
+
+test("cancellation after kill admission still starts successor recovery", async (context) => {
+  const value = await fixture();
+  const paths = value.allocated.paths;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    const controller = new AbortController();
+    const reason = new Error("cancel after admission");
+    const exec = DatabaseSync.prototype.exec;
+    let committed = false;
+    const injected = context.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+      const result = exec.call(this, sql);
+      if (sql === "COMMIT") {
+        committed = true;
+        controller.abort(reason);
+      }
+      return result;
+    });
+    let recoveries = 0;
+    try {
+      await assert.rejects(
+        killAkumaWithRecovery(
+          paths,
+          async () => {
+            recoveries++;
+          },
+          controller.signal,
+        ),
+        (error) => error === reason,
+      );
+      assert.equal(committed, true);
+      assert.equal(recoveries, 1);
+    } finally {
+      injected.mock.restore();
+    }
+    assert.notEqual((await readHeart(paths)).stop, null);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
+
 test("a commit failure rolls back the Heart mutation without replaying it", async (context) => {
   const value = await fixture();
   const paths = value.allocated.paths;

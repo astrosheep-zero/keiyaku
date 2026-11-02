@@ -117,8 +117,10 @@ export async function settleAkumaKill(
   paths: AkumaPaths,
   signal?: AbortSignal,
   retainLeash = false,
+  admitted?: () => void,
 ): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
   const request = await requestStop(paths, new Date().toISOString(), signal);
+  admitted?.();
   if (request.kind !== "requested") {
     // A witnessed Body was already settled: the kill witness Heart recorded is
     // the kill evidence, not a stop outcome.
@@ -160,10 +162,15 @@ export async function killAkumaWithRecovery(
   recover?: (paths: AkumaPaths) => Promise<void>,
   signal?: AbortSignal,
 ): Promise<KillEvidence> {
+  let admitted = false;
   try {
-    return (await settleAkumaKill(paths, signal)).evidence;
+    return (
+      await settleAkumaKill(paths, signal, false, () => {
+        admitted = true;
+      })
+    ).evidence;
   } finally {
-    if (recover !== undefined) void recover(paths).catch(() => undefined);
+    if (admitted && recover !== undefined) void recover(paths).catch(() => undefined);
   }
 }
 
