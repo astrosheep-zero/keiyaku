@@ -1,50 +1,15 @@
 import { realpath } from "node:fs/promises";
 import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
-import { z } from "zod";
+import { listMirrorCandidates, matchesCanonicalMirror } from "./mirror-identity.js";
 
-const PAGE_SIZE = 200;
-const mirrorPersistence = z.object({ version: z.literal(1),
-  data: z.object({ world: z.string(), akuId: z.string() }) });
 const reopenInFlight = new Map<string, Promise<boolean>>();
-
-function metadataMatches(agent: PaseoAgent, akuId: string): boolean {
-  if (agent.provider !== "keiyaku" || agent.archivedAt || agent.persistence?.provider !== "keiyaku") return false;
-  const parsed = mirrorPersistence.safeParse(agent.persistence.metadata?.pluginProviderPersistence);
-  return parsed.success && parsed.data.data.world.length > 0 && parsed.data.data.akuId === akuId;
-}
-
-async function matchesCanonicalIdentity(agent: PaseoAgent, world: string, akuId: string): Promise<boolean> {
-  if (!metadataMatches(agent, akuId)) return false;
-  const parsed = mirrorPersistence.parse(agent.persistence!.metadata!.pluginProviderPersistence);
-  try {
-    return await realpath(parsed.data.world) === world && parsed.data.akuId === akuId;
-  } catch {
-    return false;
-  }
-}
-
-async function listCandidates(paseo: PaseoApi, world: string, akuId: string): Promise<PaseoAgent[]> {
-  const candidates: PaseoAgent[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-  for (;;) {
-    const page = await paseo.agents.list({ filter: { includeArchived: true, includeBackground: true },
-      page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) } });
-    for (const { agent } of page.entries) if (await matchesCanonicalIdentity(agent, world, akuId)) candidates.push(agent);
-    if (!page.pageInfo.hasMore) return candidates;
-    const next = page.pageInfo.nextCursor;
-    if (!next || next === cursor || seenCursors.has(next)) throw new Error("incomplete Paseo agent directory pagination");
-    seenCursors.add(next);
-    cursor = next;
-  }
-}
 
 async function reopenOne(paseo: PaseoApi, candidate: PaseoAgent, world: string, akuId: string): Promise<boolean> {
   const current = await paseo.agents.ref(candidate.id).refresh();
-  if (!current || !(await matchesCanonicalIdentity(current.agent, world, akuId))) return false;
+  if (!current || !(await matchesCanonicalMirror(current.agent, world, akuId))) return false;
   const handle: PaseoAgentHandle = paseo.agents.ref(current.agent);
   const timeline = await handle.timeline.refetch({ limit: 0 });
-  if (timeline.error || !timeline.agent || !(await matchesCanonicalIdentity(timeline.agent, world, akuId))) return false;
+  if (timeline.error || !timeline.agent || !(await matchesCanonicalMirror(timeline.agent, world, akuId))) return false;
   return true;
 }
 
@@ -56,7 +21,7 @@ export async function refreshOrReopen(paseo: PaseoApi, input: { world: string; a
 
   let candidates: PaseoAgent[];
   try {
-    candidates = await listCandidates(paseo, world, input.akuId);
+    candidates = await listMirrorCandidates(paseo, world, input.akuId);
   } catch (error) {
     console.warn(`Keiyaku mirror refresh skipped: ${error instanceof Error ? error.message : String(error)}`);
     return { woken: 0 };

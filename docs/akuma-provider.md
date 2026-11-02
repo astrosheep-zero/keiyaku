@@ -78,6 +78,16 @@ reporting from that old environment is unavailable until a native per-turn
 context mechanism is supported. A stable request entry, latest Heart read, or
 model-visible instruction is never a substitute for exact execution custody.
 
+A born Akuma may name another Akuma as its direct caller. The optional Paseo
+observer attaches that child beneath the parent's exact existing mirror only
+when persisted provider identity proves the caller's canonical World and AkuId
+and a fresh read confirms the same unarchived mirror. Titles, ancestry, cwd,
+native sessions, and aliases do not establish parent identity. Missing,
+ambiguous, archived, stale, or unreadable evidence leaves the child unattached
+with a best-effort diagnostic and never changes Akuma birth. This observation
+adds no identity registry, backfill, polling, retry queue, or execution, and
+external-parent attachment remains unchanged.
+
 The Paseo bridge uses the installed Keiyaku library in its plugin process and
 requires the current public observation surface; it does not emulate missing
 capabilities. A successfully loaded library remains in that process for its

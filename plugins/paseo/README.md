@@ -34,6 +34,16 @@ is installed. A complete Akuma parent declaration wins. Multiple nonempty native
 host IDs refuse as ambiguous instead of guessing. With no native ID, the existing
 `KEIYAKU_EXTERNAL_CALLER` fallback remains supported.
 
+A born Akuma caller is matched only against Paseo's complete public agent
+directory, including archived and background entries. The bridge compares the
+persisted Keiyaku provider identity and canonical
+caller World/AkuId, then refreshes the sole match and checks identity and
+unarchived state again before creating the child beneath it. Archived, missing,
+ambiguous, changed, or unreadable parent evidence logs non-attachment and does
+not affect birth. Canonical path aliases still match; titles, cwd, ancestry,
+native provider sessions, and aliases never identify a parent. External and
+legacy Paseo callers keep their existing selection behavior.
+
 A born signal carries that frozen caller to Paseo. The bridge enumerates public
 agent snapshots with the supported `includeArchived` filter, never an active-only
 scope, matching only
@@ -96,10 +106,10 @@ backfill, or another successful attachment, to reflect changed aliases. Ordinary
 refresh hints and the provider's timeline refresh do not update titles.
 
 Completed creation replay does not reattach a detached child or revive an
-archived child. Unknown, unsupported, and nested-Akuma callers create no automatic
-mirror. Attachment is best effort, with no polling, creation backfill, or retry
-queue; a missed birth can remain unattached. Registration recovery belongs to the
-provider-session lifecycle, not attachment.
+archived child. Unknown and unsupported callers create no automatic mirror. A
+missed birth can remain unattached; there is no creation backfill, polling, or
+retry queue. Registration recovery belongs to the provider-session lifecycle,
+not attachment.
 
 Before a `keiyaku` provider session opens, the plugin establishes and awaits a
 Paseo-owned agent-directory subscription. It includes archived and background

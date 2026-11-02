@@ -1,7 +1,9 @@
 import { realpath } from "node:fs/promises";
+import type { PaseoAgent } from "@getpaseo/client";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { z } from "zod";
 import type { attachRpc } from "../shared/attach-rpc.js";
+import { listMirrorCandidates, matchesCanonicalMirror } from "./mirror-identity.js";
 
 function skip(reason: string) {
   console.warn(`Keiyaku mirror not attached: ${reason}`);
@@ -9,6 +11,7 @@ function skip(reason: string) {
 }
 export async function attach(input: z.output<typeof attachRpc.input>, { paseo }: PluginHandlerContext) {
   const caller = input.caller;
+  if (caller?.kind === "akuma") return attachToAkuma(input, caller, paseo);
   if (caller?.kind !== "external") return skip("caller is not an external host");
   const native = ["codex", "pi", "claude"].includes(caller.integration);
   let parentId = caller.id;
@@ -42,6 +45,45 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
   await paseo.agents.create({ parent: parentId, cwd: parent.agent.cwd, title: input.akuId,
     config: { provider: "keiyaku/mirror", options: { world, akuId: input.akuId } },
     idempotencyKey: `keiyaku:${world}:${input.akuId}`,
+  });
+  return { attached: true };
+}
+
+async function attachToAkuma(input: z.output<typeof attachRpc.input>,
+  caller: Extract<NonNullable<z.output<typeof attachRpc.input>["caller"]>, { kind: "akuma" }>,
+  paseo: PluginHandlerContext["paseo"]): Promise<{ attached: boolean }> {
+  let parentWorld: string;
+  let childWorld: string;
+  try {
+    [parentWorld, childWorld] = await Promise.all([realpath(caller.world), realpath(input.world)]);
+  } catch {
+    return skip("Akuma parent or child World is unavailable");
+  }
+  let candidates: PaseoAgent[];
+  try {
+    candidates = await listMirrorCandidates(paseo, parentWorld, caller.akuId, true);
+  } catch (error) {
+    return skip(error instanceof Error ? error.message : String(error));
+  }
+  if (candidates.length !== 1) return skip(candidates.length
+    ? `ambiguous Akuma parent ${caller.akuId}: multiple mirrors`
+    : `no mirror for Akuma parent ${caller.akuId}`);
+  const candidate = candidates[0]!;
+  let current: { agent: PaseoAgent } | null;
+  try {
+    current = await paseo.agents.ref(candidate.id).refresh();
+  } catch (error) {
+    return skip(`Akuma parent mirror ${candidate.id} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!current) return skip(`Akuma parent mirror ${candidate.id} does not exist`);
+  if (current.agent.archivedAt) return skip(`Akuma parent mirror ${candidate.id} is archived`);
+  if (!(await matchesCanonicalMirror(current.agent, parentWorld, caller.akuId))) {
+    return skip(`Akuma parent mirror ${candidate.id} changed identity`);
+  }
+  const parentId = current.agent.id;
+  await paseo.agents.create({ parent: parentId, cwd: current.agent.cwd, title: input.akuId,
+    config: { provider: "keiyaku/mirror", options: { world: childWorld, akuId: input.akuId } },
+    idempotencyKey: `keiyaku:${childWorld}:${input.akuId}`,
   });
   return { attached: true };
 }
