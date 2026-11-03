@@ -6,7 +6,7 @@ import {
   placementStopSchema,
   entryUlidSchema,
 } from "./operations.js";
-import type { ActorId, ContractId, EntryUlid } from "../core/facts/types.js";
+import { targetName, type ActorId, type ContractId, type EntryUlid } from "../core/facts/types.js";
 import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -198,7 +198,7 @@ async function completedResult(
   // read must never erase an already-claimed candidate.
   cursor.completion = {
     integration,
-    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
   };
   input.progress.recordCompletion(state.id, cursor.completion);
   const declaration = input.deriveDocument(state).verification;
@@ -213,7 +213,7 @@ async function completedResult(
     predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
   const completion: CandidateCompletion = {
     integration,
-    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target }),
+    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
     ...(scope === undefined
       ? {}
       : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
@@ -326,7 +326,7 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
       return stoppedResult(cursor, {
         failure: "target-moved",
         contractId: cursor.checkpoint.state.id,
-        target,
+        target: targetName(target),
         integratedAt: cursor.checkpoint.state.currentIntegration!.snapshot,
         observed: placement.observed,
         attempts: cycles,
@@ -370,7 +370,7 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
         const target = admitted.state.coordinates.target;
         cursor.completion = {
           integration: integration.snapshot,
-          ...(target === undefined ? {} : { target, predecessor: integration.predecessor }),
+          ...(target === undefined ? {} : { target: targetName(target), predecessor: integration.predecessor }),
         };
         input.progress.recordCompletion(contractId, cursor.completion);
       }

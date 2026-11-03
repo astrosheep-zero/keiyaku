@@ -35,10 +35,17 @@ const CONTRACT_ID_CODE_POINTS = 32;
 const CONTRACT_ID_ATTEMPTS = 4;
 
 /** A fork with no target copies its source; `null` clears it and a string overrides it. */
-function forkTargetSelection(target: string | null | undefined, sourceTarget: string | undefined): BindTargetSelection {
+function forkTargetSelection(
+  target: string | null | undefined,
+  sourceTarget: import("../core/facts/types.js").ContractTarget | undefined,
+): BindTargetSelection {
   if (target === null) return { kind: "targetless" };
   if (target !== undefined) return { kind: "explicit", target };
-  return sourceTarget === undefined ? { kind: "targetless" } : { kind: "explicit", target: sourceTarget };
+  return sourceTarget === undefined
+    ? { kind: "targetless" }
+    : typeof sourceTarget === "string"
+      ? { kind: "explicit", target: sourceTarget }
+      : { kind: "contract", contractId: sourceTarget.contractId, inherited: sourceTarget };
 }
 
 function drawContractSuffix(): string {

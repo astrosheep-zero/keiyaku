@@ -26,6 +26,7 @@ export const capabilityPolicy = {
         { source: "git/reconcile.ts", symbols: ["z"] },
         { source: "git/scratch.ts", symbols: ["z"] },
         { source: "git/target-placement.ts", symbols: ["z"] },
+        { source: "git/target.ts", symbols: ["z"] },
         { source: "git/tender.ts", symbols: ["z"] },
         { source: "git/terminal-seal.ts", symbols: ["z"] },
         { source: "git/workspace.ts", symbols: ["z"] },

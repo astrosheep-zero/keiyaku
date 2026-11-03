@@ -11,6 +11,7 @@ import {
 } from "../git/private-state-seat.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { GIT_REF, readRefs, type GitRefAssertion } from "../git/repository.js";
+import { targetRef } from "../git/target.js";
 import type { GitRepository } from "../git/process.js";
 import type { AttemptContext } from "../core/decide.js";
 import { foldJournal } from "../core/facts/fold.js";
@@ -145,14 +146,18 @@ async function publicationPremiseMoved(
   offer: Offer,
   assertions: readonly GitRefAssertion[],
 ): Promise<boolean> {
-  const refs = await readRefs(repository, [
+  const crossWorktree =
+    (offer.target !== undefined && typeof offer.target.target !== "string") ||
+    assertions.some((assertion) => assertion.ref.startsWith("worktrees/"));
+  const stable = crossWorktree ? { ...repository, effectiveCwd: repository.primaryWorktree } : repository;
+  const refs = await readRefs(stable, [
     GIT_REF,
     ...assertions.map((assertion) => assertion.ref),
-    ...(offer.target === undefined ? [] : [offer.target.target]),
+    ...(offer.target === undefined ? [] : [targetRef(offer.target.target)]),
   ]);
   if (refs.get(GIT_REF) !== observation.admission.snapshot.commit) return true;
   for (const assertion of assertions) if (refs.get(assertion.ref) !== assertion.oid) return true;
-  return offer.target !== undefined && refs.get(offer.target.target) !== offer.target.expectedOid;
+  return offer.target !== undefined && refs.get(targetRef(offer.target.target)) !== offer.target.expectedOid;
 }
 
 /** Admit one decided offer without making another legal decision. */

@@ -1,3 +1,4 @@
+import { targetName } from "../../core/facts/types.js";
 import type {
   AbandonOutcome,
   AmendOutcome,
@@ -64,7 +65,8 @@ function attestationVerdict(facts: readonly Fact[]): "satisfied" | "unsatisfied"
 }
 
 function bindTarget(facts: readonly Fact[]): string | null {
-  return facts.findLast((fact) => fact.kind === "bind")?.data.coordinates.target ?? null;
+  const target = facts.findLast((fact) => fact.kind === "bind")?.data.coordinates.target;
+  return target === undefined ? null : targetName(target);
 }
 
 function arcChapter(facts: readonly Fact[]): Readonly<{ seq: number; title: string }> {
@@ -101,7 +103,10 @@ function checkoutBehindRows(path: string, target: string, columns: number): read
 }
 
 function lagRows(
-  lag: Extract<ReconciliationLag, { kind: "worktree-hook-failed" | "contract-file-failed" | "reconcile-failed" }>,
+  lag: Extract<
+    ReconciliationLag,
+    { kind: "worktree-hook-failed" | "contract-file-failed" | "reconcile-failed" | "target-workspace-retained" }
+  >,
   columns: number,
 ): readonly string[] {
   const lines: string[] = [];
@@ -128,6 +133,14 @@ function lagRows(
       columns,
     );
     receiptPayload(lines, "reason", lag.diagnostic);
+  } else if (lag.kind === "target-workspace-retained") {
+    receiptRow(
+      lines,
+      "!",
+      "target workspace unavailable",
+      [{ text: lag.contractId, opaque: true }, { text: lag.reason.replaceAll("-", " ") }],
+      columns,
+    );
   } else {
     receiptRow(lines, "!", "lag", [{ text: `reconcile-failed ${lag.stage}`, opaque: true }], columns);
     receiptPayload(lines, "reason", lag.diagnostic);

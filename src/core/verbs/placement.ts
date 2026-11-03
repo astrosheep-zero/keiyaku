@@ -1,6 +1,11 @@
 import { gateReports, type GateReport } from "../facts/gate.js";
-import { activeContract, contractState } from "../facts/observation.js";
-import { journalEntry, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
+import {
+  activeContract,
+  contractState,
+  targetContractRefusal,
+  type TargetContractRefusal,
+} from "../facts/observation.js";
+import { journalEntry, targetName, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
@@ -15,6 +20,7 @@ type UnmetPrerequisite = Readonly<{
 }>;
 
 export type PlacementRefusal =
+  | TargetContractRefusal
   | Readonly<{
       kind: "contract-missing" | "delivery-missing" | "terminal";
       contractId: ContractId;
@@ -57,6 +63,8 @@ export function decidePlacement({
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
+  const targetRefusal = targetContractRefusal(observation, id, current.coordinates.target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   const delivery = current.delivery;
   const integration = current.currentIntegration;
   if (!delivery || !integration) {
@@ -77,7 +85,7 @@ export function decidePlacement({
         kind: "gates-unsatisfied",
         contractId: id,
         unmet: unmetGates,
-        ...(current.coordinates.target === undefined ? {} : { target: current.coordinates.target }),
+        ...(current.coordinates.target === undefined ? {} : { target: targetName(current.coordinates.target) }),
       },
     };
   }

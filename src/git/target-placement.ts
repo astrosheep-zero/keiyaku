@@ -7,7 +7,20 @@ import {
   acquireSqliteTransactionLock,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
-import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
+import {
+  targetName,
+  type ContractId,
+  type ContractState,
+  type ContractTarget,
+  type SnapshotId,
+} from "../core/facts/types.js";
+import {
+  resolveContractTarget,
+  targetRef,
+  targetRepository,
+  targetWorkspaceRefusalSchema,
+  type TargetWorkspaceRefusal,
+} from "./target.js";
 import type { RefOperation } from "../core/facts/offer.js";
 import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
@@ -25,7 +38,7 @@ export const checkoutNotFollowableRefusalSchema = z
   })
   .strict();
 type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
-export type TargetPlacementRefusal = CheckoutNotFollowableRefusal;
+export type TargetPlacementRefusal = CheckoutNotFollowableRefusal | TargetWorkspaceRefusal;
 export const targetCheckoutEffectSchema = z
   .object({
     kind: z.literal("target-checkout"),
@@ -44,9 +57,16 @@ export const targetCheckoutLagSchema = z
   })
   .strict();
 type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
+export const targetWorkspaceLagSchema = z
+  .object({
+    kind: z.literal("target-workspace-retained"),
+    contractId: contractIdSchema,
+    reason: targetWorkspaceRefusalSchema.shape.reason,
+  })
+  .strict();
 type TargetPlacementPhysicalResult = Readonly<{
   effects: readonly TargetCheckoutEffect[];
-  lag: readonly TargetCheckoutLag[];
+  lag: readonly (TargetCheckoutLag | z.infer<typeof targetWorkspaceLagSchema>)[];
 }>;
 
 type FollowArm = Readonly<{ kind: "ordinary"; path: string }>;
@@ -60,8 +80,8 @@ type TargetPlacementPreparation =
   | Readonly<{ kind: "prepared"; placement: PreparedTargetPlacement }>
   | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
 
-export async function observeTargetHead(repository: GitRepository, target: string): Promise<SnapshotId | null> {
-  const value = await readRef(repository, target);
+export async function observeTargetHead(repository: GitRepository, target: ContractTarget): Promise<SnapshotId | null> {
+  const value = await readRef(targetRepository(repository, target), targetRef(target));
   return value === null ? null : mintSnapshotId(value);
 }
 
@@ -102,7 +122,7 @@ function checkoutRefusal(
   reason: CheckoutNotFollowableRefusal["reason"],
   paths: readonly string[],
 ): CheckoutNotFollowableRefusal {
-  return { kind: "checkout-not-followable", contractId, target: target.target, path, reason, paths };
+  return { kind: "checkout-not-followable", contractId, target: targetName(target.target), path, reason, paths };
 }
 
 type CheckoutObservation = Readonly<{
@@ -313,7 +333,7 @@ export async function acquireTargetPlacementFence(
   });
 }
 
-type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: string }>;
+type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: ContractTarget }>;
 
 type TargetPlacementObservationInput = Readonly<{
   contractId: ContractId;
@@ -345,9 +365,17 @@ export async function observeTargetPlacement(
   changes ??= await prepareTargetPlacementChanges(repository, target);
   if (changes.predecessor !== target.expectedOid || changes.candidate !== target.newOid)
     throw new Error("target changes do not match the observed movement");
-  const worktrees = (await registeredWorktrees(repository))
-    .filter((worktree) => worktree.branch === target.target)
-    .sort((left, right) => left.path.localeCompare(right.path));
+  const destination = target.target;
+  let worktrees: readonly Readonly<{ path: string }>[];
+  if (typeof destination === "string") {
+    worktrees = (await registeredWorktrees(repository))
+      .filter((worktree) => worktree.branch === destination)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  } else {
+    const resolved = await resolveContractTarget(repository, destination.contractId, destination);
+    if (resolved.kind === "refused") return resolved;
+    worktrees = [{ path: resolved.path }];
+  }
   const arms: FollowArm[] = [];
   const checkouts: TargetCheckoutObservation[] = [];
   for (const worktree of worktrees) {
@@ -376,7 +404,12 @@ export const previewTargetAnswerSchema = z.union([
       observed: snapshotIdSchema.nullable(),
     })
     .strict(),
-  z.object({ kind: z.literal("refused"), refusal: checkoutNotFollowableRefusalSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("refused"),
+      refusal: z.union([checkoutNotFollowableRefusalSchema, targetWorkspaceRefusalSchema]),
+    })
+    .strict(),
   z.object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
 ]);
 type PreviewTargetAnswer = z.infer<typeof previewTargetAnswerSchema>;
@@ -385,13 +418,14 @@ export async function adjudicatePreviewTarget(
   repository: GitRepository,
   input: TargetPlacementObservationInput,
 ): Promise<PreviewTargetAnswer> {
-  const ref = input.coordinates.target;
+  const destination = input.coordinates.target;
+  const ref = targetName(destination);
   const expected = input.predecessor;
   try {
-    const head = await observeTargetHead(repository, ref);
+    const head = await observeTargetHead(repository, destination);
     if (head !== expected) return { kind: "moved", ref, expected, observed: head };
     const follow = await observeTargetPlacement(repository, input);
-    const observed = await observeTargetHead(repository, ref);
+    const observed = await observeTargetHead(repository, destination);
     if (observed !== expected) return { kind: "moved", ref, expected, observed };
     return follow.kind === "refused"
       ? { kind: "refused", refusal: follow.refusal }
@@ -441,13 +475,18 @@ export async function followTargetPlacement(
       beforeLag = lag.length;
     try {
       await executeGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
-      effects.push({ kind: "target-checkout", path: arm.path, target: prepared.target.target, action: "followed" });
+      effects.push({
+        kind: "target-checkout",
+        path: arm.path,
+        target: targetName(prepared.target.target),
+        action: "followed",
+      });
     } catch (error) {
       if (!(error instanceof GitPlumbingError)) throw error;
       lag.push({
         kind: "target-checkout-retained",
         path: arm.path,
-        target: prepared.target.target,
+        target: targetName(prepared.target.target),
         diagnostic: diagnostic(error),
       });
     }
@@ -571,7 +610,18 @@ export async function recoverTargetPlacement(
   const delivery = state.delivery;
   if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
   const integration = state.currentIntegration;
-  if (integration === null || (await readRef(repository, target)) !== integration.snapshot)
+  if (integration === null) return { effects: [], lag: [] };
+  const resolved =
+    typeof target === "string" ? undefined : await resolveContractTarget(repository, target.contractId, target);
+  if (resolved?.kind === "refused") {
+    return {
+      effects: [],
+      lag: [
+        { kind: "target-workspace-retained", contractId: resolved.refusal.contractId, reason: resolved.refusal.reason },
+      ],
+    };
+  }
+  if ((await readRef(targetRepository(repository, target), targetRef(target))) !== integration.snapshot)
     return { effects: [], lag: [] };
 
   const movement: RefOperation = {
@@ -582,9 +632,15 @@ export async function recoverTargetPlacement(
   const changes = await prepareTargetPlacementChanges(repository, movement);
   const candidateTree = await commitTree(repository, integration.snapshot);
   const predecessorTree = await commitTree(repository, integration.predecessor);
-  const worktrees = (await registeredWorktrees(repository))
-    .filter((worktree) => worktree.branch === target)
-    .sort((left, right) => left.path.localeCompare(right.path));
+  let worktrees: readonly Readonly<{ path: string }>[];
+  if (typeof target === "string") {
+    worktrees = (await registeredWorktrees(repository))
+      .filter((worktree) => worktree.branch === target)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  } else {
+    if (resolved === undefined || resolved.kind !== "resolved") throw new Error("missing resolved target workspace");
+    worktrees = [{ path: resolved.path }];
+  }
   const effects: TargetCheckoutEffect[] = [];
   const lag: TargetCheckoutLag[] = [];
   for (const worktree of worktrees) {
@@ -603,16 +659,16 @@ export async function recoverTargetPlacement(
         candidateTree,
       });
       if (recovery.kind === "retained") {
-        lag.push(recoveryLag(worktree.path, target, recovery.diagnostic));
+        lag.push(recoveryLag(worktree.path, targetName(target), recovery.diagnostic));
         onPhysical?.({ effects: [], lag: lag.slice(beforeLag) });
         continue;
       }
       if (recovery.kind === "recovered") {
-        effects.push({ kind: "target-checkout", path: worktree.path, target, action: "recovered" });
+        effects.push({ kind: "target-checkout", path: worktree.path, target: targetName(target), action: "recovered" });
       }
     } catch (error) {
       if (!(error instanceof GitPlumbingError)) throw error;
-      lag.push(recoveryLag(worktree.path, target, diagnostic(error)));
+      lag.push(recoveryLag(worktree.path, targetName(target), diagnostic(error)));
     }
     onPhysical?.({ effects: effects.slice(beforeEffects), lag: lag.slice(beforeLag) });
   }

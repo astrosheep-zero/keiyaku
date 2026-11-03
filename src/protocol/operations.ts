@@ -15,12 +15,13 @@ import { gate } from "../core/facts/types.js";
 import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
-import { currentBranch, observeContractAt } from "../git/observe.js";
+import { observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
-import { repositoryAt } from "../git/repository.js";
+import { currentBranch, repositoryAt } from "../git/repository.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
+import { targetWorkspaceRefusalSchema } from "../git/target.js";
 import {
   dirtyWorkspaceRefusalSchema,
   unmergedPathsRefusalSchema,
@@ -89,7 +90,17 @@ export const activeContractRefusalSchema = z
   .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })
   .strict();
 export const bindRefusalSchema = z
-  .object({ kind: z.enum(["contract-exists", "invalid-after", "unknown-prerequisite"]), contractId: contractIdSchema })
+  .object({
+    kind: z.enum([
+      "contract-exists",
+      "invalid-after",
+      "unknown-prerequisite",
+      "target-contract-missing",
+      "target-contract-terminal",
+      "target-contract-self",
+    ]),
+    contractId: contractIdSchema,
+  })
   .strict();
 export const amendRefusalSchema = z
   .object({
@@ -98,7 +109,17 @@ export const amendRefusalSchema = z
   })
   .strict();
 export const deliverRefusalSchema = z
-  .object({ kind: z.enum(["contract-missing", "terminal", "document-moved"]), contractId: contractIdSchema })
+  .object({
+    kind: z.enum([
+      "contract-missing",
+      "terminal",
+      "document-moved",
+      "target-contract-missing",
+      "target-contract-terminal",
+      "target-contract-self",
+    ]),
+    contractId: contractIdSchema,
+  })
   .strict();
 export const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.optional() })
@@ -130,6 +151,13 @@ export const gateReportSchema = z
   })
   .strict();
 export const placementRefusalSchema = z.union([
+  z
+    .object({
+      kind: z.enum(["target-contract-missing", "target-contract-terminal", "target-contract-self"]),
+      contractId: contractIdSchema,
+    })
+    .strict(),
+  targetWorkspaceRefusalSchema,
   z
     .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]), contractId: contractIdSchema })
     .strict(),
@@ -170,6 +198,7 @@ const targetMissingRefusalSchema = z
   .object({ kind: z.literal("target-missing"), contractId: contractIdSchema })
   .strict();
 export const deliveryPreparationRefusalSchema = z.union([
+  targetWorkspaceRefusalSchema,
   targetMissingRefusalSchema,
   worktreeMissingRefusalSchema,
   dirtyWorkspaceRefusalSchema,

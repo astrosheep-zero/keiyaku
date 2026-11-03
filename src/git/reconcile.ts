@@ -1,6 +1,6 @@
 import { snapshotIdSchema, mintedSnapshotInputSchema } from "./identity.js";
 import { z } from "zod";
-import { targetCheckoutEffectSchema, targetCheckoutLagSchema } from "./target-placement.js";
+import { targetCheckoutEffectSchema, targetCheckoutLagSchema, targetWorkspaceLagSchema } from "./target-placement.js";
 import { worktreeHookLagSchema } from "./hooks.js";
 import { unsealedBytesSchema } from "./terminal-seal.js";
 import { access, mkdir } from "node:fs/promises";
@@ -18,9 +18,11 @@ import {
   registeredWorktreePaths,
 } from "./repository.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
-import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
+import { targetName, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
+import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContractAt } from "./observe.js";
+import { GitPrivateStateSeatContentionError, withPrivateStatePublicationSeat } from "./private-state-seat.js";
 import type { GitDecodeChannel } from "./read-observation.js";
 import { acquireTargetPlacementFence, recoverTargetPlacement } from "./target-placement.js";
 import { runCreateHooks, type WorktreeHooks } from "./hooks.js";
@@ -121,6 +123,7 @@ export const gitReconcileLagSchema = z.union([
     .strict(),
   unsealedBytesSchema,
   targetCheckoutLagSchema,
+  targetWorkspaceLagSchema,
   worktreeHookLagSchema,
   reconcileFailureSchema,
 ]);
@@ -205,6 +208,7 @@ function failed(
   if (
     !(
       error instanceof WorktreeCustodyError ||
+      error instanceof GitPrivateStateSeatContentionError ||
       error instanceof GitPlumbingError ||
       error instanceof SqliteTransactionLockError ||
       (error instanceof Error &&
@@ -278,7 +282,7 @@ async function reconcileTargetCheckouts(
   }
   let held: HeldSqliteTransactionLock;
   try {
-    held = await acquireTargetPlacementFence(repository, state.coordinates.target);
+    held = await acquireTargetPlacementFence(repository, targetName(state.coordinates.target));
   } catch (error) {
     return failed("effect", error);
   }
@@ -307,7 +311,7 @@ async function reconcileTargetCheckouts(
 }
 
 async function reconcileActiveManagedWorktree(
-  { repository, hooks, retryHooks, place }: ReconcileEffectsInput,
+  { repository, channel, hooks, retryHooks, place }: ReconcileEffectsInput,
   state: ContractState,
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
@@ -319,7 +323,23 @@ async function reconcileActiveManagedWorktree(
   }
   const path = worktreePath(repository, place);
   const desired = state.delivery?.data.tenderSnapshot ?? state.coordinates.start;
-  acc.recordEffect(await updateRef(repository, deliveryRefFor(state.id), desired));
+  const pins = await withPrivateStatePublicationSeat(repository, async () => {
+    const current = (await observeContractAt(repository, channel, state.id)).state;
+    if (current?.head !== state.head) return undefined;
+    acc.recordEffect(await updateRef(repository, deliveryRefFor(state.id), desired));
+    acc.recordEffect(
+      state.delivery
+        ? await updateRef(
+            repository,
+            candidatePinRefFor(state.id),
+            state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
+          )
+        : await removeRef(repository, candidatePinRefFor(state.id)),
+    );
+    return true;
+  });
+  if (pins.value === undefined)
+    throw new WorktreeCustodyError(`Contract moved during workspace reconciliation: ${state.id}`);
   const projection = await worktree(repository, topology, path, desired);
   acc.recordEffect(projection);
   const handoff = await retireConflictHandoff(repository, {
@@ -340,15 +360,6 @@ async function reconcileActiveManagedWorktree(
     hookRuns.push(...hookRun.runs.map((name) => ({ phase: "create" as const, name })));
     if (hookRun.lag !== null) acc.recordLag(hookRun.lag);
   }
-  acc.recordEffect(
-    await (state.delivery
-      ? await updateRef(
-          repository,
-          candidatePinRefFor(state.id),
-          state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
-        )
-      : await removeRef(repository, candidatePinRefFor(state.id))),
-  );
   return complete(effects, lag, hookRuns);
 }
 
@@ -395,9 +406,6 @@ async function reconcileWithTopology(
   try {
     await removeCollectableScratch(repository, topology, acc, state?.terminal ? state.id : undefined);
     if (!state) return complete(effects, lag);
-    const targetCheckouts = await reconcileTargetCheckouts(repository, state, input.onPhysical);
-    acc.recordEffect(...targetCheckouts.effects);
-    acc.recordLag(...targetCheckouts.lag);
     if (state.terminal) {
       if (await terminalHandoffRetained(input, state, topology, acc)) return complete(effects, lag, hookRuns);
       return await reconcileTerminalManagedWorktree(input, state, topology, acc, {
@@ -428,6 +436,47 @@ function releaseFailure(
   }
 }
 
+type ReconcileCursor = {
+  before: ContractState | null;
+  outgoing?: ReconcileResult;
+  observation?: GitReconcileObservation | undefined;
+};
+
+async function reconcileFreshEffects(input: ReconcileInput, cursor: ReconcileCursor): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const before = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
+    cursor.before = before;
+    const recovered =
+      before === null ? complete() : await reconcileTargetCheckouts(input.repository, before, input.onPhysical);
+    const outgoing = {
+      effects: [...(cursor.outgoing?.effects ?? []), ...recovered.effects],
+      lag: [...(cursor.outgoing?.lag ?? []), ...recovered.lag],
+    };
+    cursor.outgoing = outgoing;
+    const incoming = await acquireTargetPlacementFence(input.repository, input.contractId);
+    try {
+      const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
+      if (state?.head !== before?.head) continue;
+      const topology = await acquireWorktreeTopology(input.repository);
+      const place = appointmentFor(await readPlaceRegister(input.repository), input.contractId)?.place;
+      const { place: _previousPlace, ...base } = input;
+      const result = await reconcileWithTopology(
+        { ...base, ...(place === undefined ? {} : { place }) },
+        state,
+        topology,
+      );
+      cursor.observation = {
+        state,
+        result: { ...result, effects: [...outgoing.effects, ...result.effects], lag: [...outgoing.lag, ...result.lag] },
+      };
+    } finally {
+      incoming.close();
+    }
+    return;
+  }
+  throw new WorktreeCustodyError(`Contract moved during reconciliation: ${input.contractId}`);
+}
+
 export async function reconcile(input: ReconcileInput): Promise<GitReconcileObservation> {
   let held: HeldSqliteTransactionLock;
   try {
@@ -439,32 +488,31 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
     return { state: null, result: failed("observation", error) };
   }
 
-  let observation: GitReconcileObservation | undefined;
+  const cursor: ReconcileCursor = { before: null };
   let exceptional: { error: unknown } | undefined;
   try {
-    const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
-    const topology = await acquireWorktreeTopology(input.repository);
-    observation = {
-      state,
-      result: await reconcileWithTopology(input, state, topology),
-    };
-    input.onPhysical?.(observation.result);
+    await reconcileFreshEffects(input, cursor);
+    input.onPhysical?.(cursor.observation!.result);
   } catch (error) {
     try {
-      observation = { state: null, result: failed("observation", error) };
+      const prior = cursor.observation?.result ?? cursor.outgoing;
+      cursor.observation = {
+        state: cursor.observation?.state ?? cursor.before,
+        result: failed(cursor.outgoing === undefined ? "observation" : "effect", error, prior?.effects, prior?.lag),
+      };
     } catch (unexpected) {
       exceptional = { error: unexpected };
     }
   }
 
   try {
-    observation = releaseFailure(held, observation);
+    cursor.observation = releaseFailure(held, cursor.observation);
   } catch (error) {
     exceptional ??= { error };
   }
   if (exceptional !== undefined) throw exceptional.error;
-  if (observation === undefined) throw new Error("reconcile produced no observation");
-  return observation;
+  if (cursor.observation === undefined) throw new Error("reconcile produced no observation");
+  return cursor.observation;
 }
 
 /** Reconcile one retained dependent worktree under its normal per-Contract lock. */
@@ -482,28 +530,36 @@ export async function reconcileDependentWorktree(
   }
   let result: ReconcileResult;
   try {
-    const follow = await followDependentManagedWorktree(repository, path, target);
-    if (follow.kind === "followed") {
-      result = {
-        effects: [{ kind: "worktree", path, action: "followed", before: follow.before, after: follow.after }],
-        lag: [],
-      };
-    } else if (follow.kind === "unchanged") {
-      result = { effects: [], lag: [] };
-    } else {
-      result = {
-        effects: [{ kind: "worktree", path, action: "unchanged" }],
-        lag: [
-          {
-            kind: "worktree-follow-retained",
-            path,
-            tender: target,
-            head: follow.head,
-            reason: follow.reason,
-            ...(follow.paths.length === 0 ? {} : { paths: follow.paths }),
-          },
-        ],
-      };
+    const incoming = await acquireTargetPlacementFence(repository, contractId);
+    try {
+      const appointed = appointmentFor(await readPlaceRegister(repository), contractId);
+      if (appointed === undefined || worktreePath(repository, appointed.place) !== path)
+        throw new WorktreeCustodyError(`dependent Contract workspace appointment changed: ${contractId}`);
+      const follow = await followDependentManagedWorktree(repository, path, target);
+      if (follow.kind === "followed") {
+        result = {
+          effects: [{ kind: "worktree", path, action: "followed", before: follow.before, after: follow.after }],
+          lag: [],
+        };
+      } else if (follow.kind === "unchanged") {
+        result = { effects: [], lag: [] };
+      } else {
+        result = {
+          effects: [{ kind: "worktree", path, action: "unchanged" }],
+          lag: [
+            {
+              kind: "worktree-follow-retained",
+              path,
+              tender: target,
+              head: follow.head,
+              reason: follow.reason,
+              ...(follow.paths.length === 0 ? {} : { paths: follow.paths }),
+            },
+          ],
+        };
+      }
+    } finally {
+      incoming.close();
     }
   } catch (error) {
     result = failed("effect", error, [{ kind: "worktree", path, action: "unchanged" }]);

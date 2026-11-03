@@ -1,6 +1,15 @@
 import type { ProtocolProgress } from "./progress.js";
-import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, ReintegratedData, SnapshotId } from "../core/facts/types.js";
+import { contractState, targetContractRefusal } from "../core/facts/observation.js";
+import {
+  targetName,
+  type ActorId,
+  type ContractId,
+  type ContractState,
+  type ContractTarget,
+  type ReintegratedData,
+  type SnapshotId,
+} from "../core/facts/types.js";
+import { resolveContractTarget, targetRef, type TargetWorkspaceRefusal } from "../git/target.js";
 import { decideReintegrate, type ReintegrateInput, type ReintegrateRefusal } from "../core/verbs/reintegrate.js";
 import {
   materializeReintegrationSnapshot,
@@ -26,7 +35,7 @@ import {
 import { runUnderTargetPlacementFence, type PlacementExecutionFailure } from "./placement.js";
 
 type TargetMissing = Readonly<{ kind: "target-missing"; contractId: ContractId }>;
-type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal;
+type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal | TargetWorkspaceRefusal;
 export type ReintegrationResult =
   | (AcceptedAdmission & Readonly<{ value: ReintegratedData }>)
   | Readonly<{ kind: "refused"; refusal: ReintegrationRefusal }>
@@ -37,7 +46,7 @@ type ReintegrationInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   contractId: ContractId;
-  target: string;
+  target: ContractTarget;
   actor?: ActorId;
   progress?: ProtocolProgress;
 }>;
@@ -102,7 +111,7 @@ async function planReintegrationArtifacts(
   return {
     kind: "prepared",
     data: { predecessor: planned.data.predecessor, snapshot },
-    assertion: { ref: input.target, oid: planned.data.predecessor },
+    assertion: { ref: targetRef(input.target), oid: planned.data.predecessor },
   };
 }
 
@@ -143,6 +152,17 @@ async function runReintegration(
         const observation = await observeContractsForAdmissionAt(input.repository, input.channel, [input.contractId]);
         const assembled = assembleReintegrationAttempt(input, observation, external);
         if (assembled.kind === "stale") return assembled;
+        const state = contractState(observation.decision, input.contractId);
+        if (state !== null) {
+          const refusal = targetContractRefusal(observation.decision, state.id, state.coordinates.target);
+          if (refusal !== undefined) return { kind: "refused", refusal };
+        }
+        if (typeof input.target !== "string") {
+          const resolved = await resolveContractTarget(input.repository, input.target.contractId, input.target);
+          if (resolved.kind === "refused") return resolved;
+          if (assembled.kind === "prepared" && resolved.head !== assembled.data.predecessor)
+            return STALE_PRIVATE_STATE_PREPARATION;
+        }
         const preparation: ReintegrateInput<ReintegrationRefusal>["preparation"] =
           assembled.kind === "unavailable" ? { kind: "refused", refusal: assembled.refusal } : assembled;
         const decision = decideReintegrate({
@@ -181,5 +201,9 @@ async function runReintegration(
 }
 
 export async function reintegrateOperation(input: ReintegrationInput): Promise<ReintegrationResult> {
-  return await runUnderTargetPlacementFence(input.repository, input.target, async () => await runReintegration(input));
+  return await runUnderTargetPlacementFence(
+    input.repository,
+    targetName(input.target),
+    async () => await runReintegration(input),
+  );
 }

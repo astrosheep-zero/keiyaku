@@ -21,6 +21,12 @@ v4 does not admit an unfulfillable forward dependency. Placement judges only the
 current direct prerequisites: every one must be accepted. A prerequisite that
 later abandons remains visible as an unsatisfied dependency, not an unknown one.
 
+A Contract-addressed destination must exist and remain active for new binding,
+preparation, reintegration, and placement. It is not a prerequisite or a parent
+lifecycle: landing changes the child's authority and the destination worktree,
+not the destination Contract's terms, candidate, testimony, or terminal state.
+Concurrent terminal admission and child landing are ordered by journal admission.
+
 Delivery captures a candidate and frozen placement policy. After that leading
 fact is admitted, a later delivery with the same worktree-content identity
 continues the non-terminal candidate and reuses its delivery data and recorded

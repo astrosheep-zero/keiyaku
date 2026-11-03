@@ -59,7 +59,13 @@ predecessor-to-candidate movement while the checkout state proves it can carry
 that movement. It never adopts an older ancestor, retries a pre-publication
 refusal, recaptures a candidate, or overwrites incompatible concurrent state.
 A successful recovery is an observed physical effect; incompatible state is
-retained unchanged.
+retained unchanged. For a Contract destination, recovery proves the same
+appointed incarnation and exact already-published movement even if the
+destination has since become terminal; it never creates an appointment or
+adopts a replacement. Workspace replacement, dependent following, and terminal
+cleanup share the incoming destination fence with placement and follow.
+Outgoing recovery finishes before incoming workspace custody begins, and
+cleanup observes its seal and topology afresh under that custody.
 
 Pending delivery keeps the required tender and integration custody. Terminal
 cleanup applies Git's sealed-byte and surviving-custodian law from

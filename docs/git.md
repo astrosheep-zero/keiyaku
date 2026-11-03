@@ -122,6 +122,13 @@ its carrier and field layout remain private Git mechanics. An unmatched record
 with no live operation is disposable custody, while a live operation without a
 matching receipt remains foreign.
 
+A Contract destination names the exact incarnation of its appointed linked
+worktree. Git proves its registration, reverse association, detached committed
+head, and stable physical identity rather than trusting a path or creating a
+marker. Replacement, an attached head, or an unsupported operation is not the
+admitted destination. Its logical identity is the Contract, not a branch or
+private Git path.
+
 Targeted placement is serialized per target and claims only when its persisted predecessor still matches. Uncommitted checkout state never vetoes a landed placement: the journal admits, the reference advances, and each registered target checkout follows when Git can carry the movement without touching uncommitted state. A checkout Git cannot carry stays behind, named on the terminal receipt and carried forward later by [git-reconciliation.md](git-reconciliation.md). Contact, not cleanliness, decides: uncommitted state the movement does not touch neither blocks nor lags, and automatic merging of uncommitted state never happens. The one collision Git reports by silently destroying an ignored worktree entry is refused before the journal admits rather than followed. `conflict` is integration-only. Target lag names the appointed worktree against the frozen target. ContractHead and journal blob custody identifiers remain private to ordinary text.
 
 ## Custody And Cleanup
@@ -130,8 +137,11 @@ Journal facts retain candidate identities, but are not reachability edges. Git
 keeps the tender and integration reachable while a managed worktree or pending
 placement needs them, and an accepted target may become a custodian. Refs are
 released only after an independent surviving custodian proves the required exact
-commit or tender bytes remain available. Equal content never substitutes for
-the integration identity. Cleanup never rewrites a target; a target rewrite or
+commit or tender bytes remain available. A disposable Contract worktree head
+is not a surviving custodian for a child's exact integration. A Contract
+landing preserves independent owned custody with the admission, and cleanup
+retains unsealed workspace bytes containing a claimed incoming Contract landing for that worktree incarnation.
+Equal content never substitutes for the integration identity. Cleanup never rewrites a target; a target rewrite or
 deletion that loses custody retains the owned ref for later observation.
 
 Workspace appointment is owned by [workspace.md](workspace.md). Git consumes an

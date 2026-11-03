@@ -1,5 +1,5 @@
 import { dependencyKeys, currentSubjectPredicate } from "../subject.js";
-import { type AttestationEntry, type ChangeId, type ContractState, type Gate } from "./types.js";
+import { targetName, type AttestationEntry, type ChangeId, type ContractState, type Gate } from "./types.js";
 
 export type GateStaleReason = Readonly<{
   kind: "candidate-content-changed";
@@ -23,7 +23,7 @@ function staleReason(state: ContractState, previous: AttestationEntry): GateStal
   if (previousChange === undefined || previousChange === currentChange) return undefined;
   return {
     kind: "candidate-content-changed",
-    ...(target === undefined ? {} : { target }),
+    ...(target === undefined ? {} : { target: targetName(target) }),
     previousChange,
     currentChange,
   };

@@ -135,6 +135,13 @@ function refusalFacts(
   if (refusal.kind === "checkout-not-followable") {
     return checkoutNotFollowableLines(refusal);
   }
+  if (refusal.kind === "target-workspace-unavailable") {
+    return [
+      `${indent}reason  target workspace unavailable`,
+      `${indent}contract  ${safeText(refusal.contractId)}`,
+      `${indent}detail  ${safeText(refusal.reason.replaceAll("-", " "))}`,
+    ];
+  }
   const lines = [`${indent}reason  ${refusalWords(refusal.kind)}`];
   if (identity !== undefined) lines.push(`${indent}contract  ${safeText(identity)}`);
   if ("diagnostic" in refusal && typeof refusal.diagnostic === "string")

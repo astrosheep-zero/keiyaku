@@ -14,6 +14,7 @@ import {
 } from "./tender.js";
 import { workspaceMergeStatePresent } from "./workspace.js";
 import { withGitDecodeChannel } from "./read-observation.js";
+import { resolveContractTarget, targetRef, targetRepository } from "./target.js";
 
 export { workspaceMergeStatePresent };
 
@@ -332,7 +333,9 @@ export async function planIntegration(
 ): Promise<
   Preparation<
     IntegrationPlan,
-    Readonly<{ kind: "target-missing"; contractId: ContractId }> | IntegrationPreparationRefusal
+    | Readonly<{ kind: "target-missing"; contractId: ContractId }>
+    | IntegrationPreparationRefusal
+    | import("./target.js").TargetWorkspaceRefusal
   >
 > {
   const target = input.coordinates.target;
@@ -345,7 +348,11 @@ export async function planIntegration(
       },
     };
   }
-  const observed = await readRef(repository, target);
+  if (typeof target !== "string") {
+    const resolved = await resolveContractTarget(repository, target.contractId, target);
+    if (resolved.kind === "refused") return resolved;
+  }
+  const observed = await readRef(targetRepository(repository, target), targetRef(target));
   if (observed === null) {
     return { kind: "refused", refusal: { kind: "target-missing", contractId: input.contractId } };
   }

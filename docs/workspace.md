@@ -34,6 +34,10 @@ registration, and guidance do not replace the register's appointment authority.
 
 Writers serialize a fresh read and durable replacement; corrupt or unavailable state is an appointment failure. Only active Contracts receive missing appointments; terminal ones retain an existing Place for cleanup.
 
+A Contract used as a destination must already have its appointed live Place;
+selection does not allocate, recreate, or substitute a workspace. Its
+incarnation is immutable for callers that bind to it.
+
 After admission, composition appoints before Git realizes the worktree and retries use that Place. Release waits for Git to prove the path absent; failures retain the appointment, so no reusable Place hides managed bytes. Bind returns the appointed path, and target lag identifies that worktree subject.
 
 ## Derived Files And Cleanup

@@ -79,7 +79,10 @@ not disguise later workspace bytes as a candidate. Successful placement is
 represented once as completion; callers do not rebuild it from facts or folded
 state. A completed placement also carries the movement it made — the reference it
 advanced and the head it advanced from — so a receipt states the target's
-movement instead of deriving it from journal facts or folded state. Reused
+movement instead of deriving it from journal facts or folded state. A
+Contract-addressed movement names the destination Contract, while typed state
+retains its immutable destination identity; it never presents that movement as
+a branch update. Reused
 Verification evidence is identified as reuse, not a cache or a new evidence
 source.
 

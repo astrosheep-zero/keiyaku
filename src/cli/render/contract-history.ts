@@ -1,3 +1,4 @@
+import { targetName } from "../../core/facts/types.js";
 import type { ContractHistory, ContractHistoryEvent, Fact } from "../../index.js";
 import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
 import { receiptPayload } from "./receipt.js";
@@ -41,7 +42,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
       const { coordinates, terms } = fact.data;
       return [
         `  start commit  ${shortGitId(coordinates.start)}`,
-        ...(coordinates.target === undefined ? [] : [`  target  ${coordinates.target}`]),
+        ...(coordinates.target === undefined ? [] : [`  target  ${targetName(coordinates.target)}`]),
         `  ${workspace === undefined ? "worktree" : `worktree  ${workspace.path}`}`,
         ...listFact("gates", terms.gates),
         ...listFact("after", terms.after),
@@ -133,7 +134,8 @@ function mark(verdict: "satisfied" | "unsatisfied"): string {
 }
 
 function bindLine(bind: Extract<Fact, { kind: "bind" }>, dispatch: ContractHistoryEvent | undefined): string {
-  const target = bind.data.coordinates.target?.replace(/^refs\/heads\//u, "") ?? "targetless";
+  const destination = bind.data.coordinates.target;
+  const target = destination === undefined ? "targetless" : targetName(destination).replace(/^refs\/heads\//u, "");
   const gates = bind.data.terms.gates.map(gateDisplayName);
   const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
   const caller = dispatch?.source === "dispatch" ? ` · ${dispatch.dispatch.akuId}` : "";

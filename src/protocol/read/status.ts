@@ -27,6 +27,7 @@ import {
   gate,
   type ContractId,
   type ContractState,
+  type ContractTarget,
   type DeliverData,
   type JournalEntry,
   type SnapshotId,
@@ -77,7 +78,7 @@ export type ContractRow = Readonly<{
   workspace: "worktree";
   worktreePath: string | null;
   workspaceObservation: ContractWorkspaceObservation;
-  target: string | null;
+  target: ContractTarget | null;
   targetLag: ContractTargetLag;
   delivery: DeliverData | null;
   abandonNote?: string;

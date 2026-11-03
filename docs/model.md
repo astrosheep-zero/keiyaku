@@ -7,7 +7,9 @@ state store. v4 accepts no compatibility or migration authority.
 ## Durable Authority
 
 A Contract begins with immutable coordinates and opaque terms. Amendments
-replace the effective terms but never the coordinates. The journal records the
+replace the effective terms but never the coordinates. A Contract-addressed
+destination fixes the addressed Contract and its worktree incarnation as part
+of those coordinates, rather than a local path or a mutable appointment. The journal records the
 closed Contract vocabulary needed to bind and amend terms, retain a delivery
 and any reintegration, admit producer testimony, name an arc, mark the delivery
 phase, and reach one terminal outcome. The canonical journal and its entry

@@ -1,4 +1,4 @@
-import type { ContractId, ContractState, DocumentKey } from "./types.js";
+import type { ContractId, ContractState, ContractTarget, DocumentKey } from "./types.js";
 
 /** The complete state projection consumed by one pure pact decision. */
 export type ContractsObservation = ReadonlyMap<ContractId, ContractState | null>;
@@ -34,6 +34,32 @@ export type ActiveContractRefusal = Readonly<{
   kind: "contract-missing" | "terminal";
   contractId: ContractId;
 }>;
+
+export type TargetContractRefusal = Readonly<{
+  kind: "target-contract-missing" | "target-contract-terminal" | "target-contract-self";
+  contractId: ContractId;
+}>;
+
+export function targetContractRefusal(
+  observation: ContractsObservation,
+  owner: ContractId,
+  target: ContractTarget | undefined,
+): TargetContractRefusal | undefined {
+  if (target === undefined || typeof target === "string") return undefined;
+  return targetContractIdRefusal(observation, owner, target.contractId);
+}
+
+export function targetContractIdRefusal(
+  observation: ContractsObservation,
+  owner: ContractId,
+  target: ContractId,
+): TargetContractRefusal | undefined {
+  if (owner === target) return { kind: "target-contract-self", contractId: owner };
+  const state = contractState(observation, target);
+  if (state === null) return { kind: "target-contract-missing", contractId: target };
+  if (state.terminal !== null) return { kind: "target-contract-terminal", contractId: target };
+  return undefined;
+}
 
 /** The single lifecycle guard shared by every operation on an existing contract. */
 export function activeContract(

@@ -97,6 +97,7 @@ export type {
   ContractHead,
   ContractId,
   ContractState,
+  ContractTarget,
   JournalEntry as Fact,
   FactKind,
   SnapshotId,

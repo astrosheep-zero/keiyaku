@@ -61,6 +61,7 @@ function classifyReconcileLag(kind: ReconcileCompletion["lag"][number]["kind"]):
     case "worktree-follow-retained":
       return { scope: "continuation", failure: false };
     case "target-checkout-retained":
+    case "target-workspace-retained":
       return { scope: "placement", failure: true };
     case "worktree-hook-failed":
     case "reconcile-failed":

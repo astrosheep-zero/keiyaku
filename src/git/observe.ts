@@ -1,7 +1,14 @@
 import { decodeJournal } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
-import { type ContractId, type ContractState, type JournalEntry, type SnapshotId } from "../core/facts/types.js";
+import {
+  type ContractId,
+  type ContractState,
+  type ContractTarget,
+  type JournalEntry,
+  type SnapshotId,
+} from "../core/facts/types.js";
+import { targetRef, targetRepository, resolveContractTarget } from "./target.js";
 import type { ContractsObservation } from "../core/facts/observation.js";
 import {
   contractJournalPath,
@@ -10,7 +17,7 @@ import {
   mintSnapshotId,
   type ContractJournalClass,
 } from "./identity.js";
-import { isKeiyakuOwnedRef, type GitSnapshot, type GitOid } from "./repository.js";
+import { currentBranch, isKeiyakuOwnedRef, readRef, type GitSnapshot, type GitOid } from "./repository.js";
 import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import {
   readBlobResults,
@@ -29,7 +36,14 @@ export async function observeDeliveryTargetAt(
 ): Promise<TargetObservation | null> {
   const target = state.coordinates.target;
   if (target === undefined) return null;
-  const value = await observation.resolveRef(target);
+  if (typeof target !== "string") {
+    const resolved = await resolveContractTarget(observation.repository, target.contractId, target);
+    if (resolved.kind === "refused") return { head: null, drift: true };
+  }
+  const value =
+    typeof target === "string"
+      ? await observation.resolveRef(target)
+      : await readRef(targetRepository(observation.repository, target), targetRef(target));
   const head = value === null ? null : mintSnapshotId(value);
   const integration = state.currentIntegration;
   if (integration === null) return { head, drift: false };
@@ -71,7 +85,7 @@ export type GitDecisionObservation = Readonly<{
 
 export type BindCoordinatesObservation = Readonly<{
   start: SnapshotId;
-  target?: string;
+  target?: ContractTarget;
   branch: string | null;
 }>;
 
@@ -82,6 +96,7 @@ type UnbornHeadObservation = Readonly<{
 
 export type BindTargetSelection =
   | Readonly<{ kind: "explicit"; target: string }>
+  | Readonly<{ kind: "contract"; contractId: ContractId; inherited?: Exclude<ContractTarget, string> }>
   | Readonly<{ kind: "current-branch" }>
   | Readonly<{ kind: "targetless" }>;
 
@@ -99,21 +114,6 @@ export async function normalizeTargetBranch(repository: GitRepository, input: st
     return checked === branch ? target : null;
   } catch (error) {
     if (error instanceof GitPlumbingError && error.status !== null) return null;
-    throw error;
-  }
-}
-
-/** Read one worktree's attached branch, or null for detached HEAD. */
-export async function currentBranch(repository: GitRepository, path?: string): Promise<string | null> {
-  try {
-    const ref = (
-      await executeGit(repository, [...(path === undefined ? [] : ["-C", path]), "symbolic-ref", "--quiet", "HEAD"])
-    )
-      .toString("utf8")
-      .trim();
-    return ref.startsWith("refs/heads/") ? ref : null;
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status === 1) return null;
     throw error;
   }
 }
@@ -157,6 +157,7 @@ export async function observeBindCoordinates(
   repository: GitRepository,
   selection: BindTargetSelection,
 ): Promise<BindCoordinatesObservation | UnbornHeadObservation | null> {
+  if (selection.kind === "contract") throw new Error("contract targets require physical resolution");
   if (selection.kind === "explicit") {
     const requestedTarget = selection.target;
     if (isKeiyakuOwnedRef(requestedTarget)) {
@@ -354,7 +355,7 @@ export async function observeContractsForAdmissionAt(
   ids: readonly ContractId[],
   selection: GitTreeSelection = {},
 ): Promise<GitDecisionObservation> {
-  return withGitTargetedReadObservation(
+  const observed = await withGitTargetedReadObservation(
     repository,
     channel,
     {
@@ -363,6 +364,11 @@ export async function observeContractsForAdmissionAt(
     },
     async (observation) => await observeContractsForAdmissionInObservationAt(observation, ids),
   );
+  const targets = ids.flatMap((id) => {
+    const target = observed.decision.get(id)?.coordinates.target;
+    return target !== undefined && typeof target !== "string" ? [target.contractId] : [];
+  });
+  return await extendContractsForAdmissionAt(channel, observed, targets);
 }
 
 /** Observe selected Contract journals and their current direct prerequisites in one Git epoch. */

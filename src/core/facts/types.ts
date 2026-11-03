@@ -96,9 +96,21 @@ export function gate(value: string): Gate {
   return value as Gate;
 }
 
+export type ContractTarget =
+  | string
+  | Readonly<{
+      kind: "contract";
+      contractId: ContractId;
+      worktree: Readonly<{ id: string; identity: string }>;
+    }>;
+
+export function targetName(target: ContractTarget): string {
+  return typeof target === "string" ? target : target.contractId;
+}
+
 export type ContractCoordinates = Readonly<{
   start: SnapshotId;
-  target?: string;
+  target?: ContractTarget;
   workspace: "worktree";
 }>;
 

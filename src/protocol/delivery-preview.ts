@@ -13,7 +13,7 @@ import { previewTargetAnswerSchema, adjudicatePreviewTarget } from "../git/targe
 import { verificationReuseSchema, currentVerifiedAttestation } from "./intent.js";
 import { deliveryDiffScopeSchema, readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
-import { activeContract, documentIsCurrent } from "../core/facts/observation.js";
+import { activeContract, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
 import { gateReports } from "../core/facts/gate.js";
 import { unmetPrerequisites } from "../core/verbs/placement.js";
 import type { ContractState, DeliverData } from "../core/facts/types.js";
@@ -166,6 +166,7 @@ type PreviewRefusal =
   | import("../core/verbs/deliver.js").DeliverRefusal
   | import("../verification/declaration.js").VerificationDeclarationRefusal;
 
+// eslint-disable-next-line complexity -- Preview retains its distinct lifecycle and physical observations.
 export async function previewDeliveryOperation(
   input: DeliveryPreviewOperationInput,
 ): Promise<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>> {
@@ -173,6 +174,8 @@ export async function previewDeliveryOperation(
   const observed = await observeGitForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = activeContract(observed.decision, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
+  const targetRefusal = targetContractRefusal(observed.decision, state.id, state.coordinates.target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   const derivation = input.deriveDocument(state);
   if (!documentIsCurrent(state, derivation.document)) {
     return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };

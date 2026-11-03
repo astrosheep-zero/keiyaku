@@ -6,6 +6,7 @@ import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { Keiyaku, Repo } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
+import { parseArgv, renderHelp } from "../src/cli/parse.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
 
@@ -26,7 +27,10 @@ async function cliBind(path: string, extra: readonly string[] = []) {
   });
 }
 
-async function boundTarget(path: string, contract: ContractId): Promise<string | undefined> {
+async function boundTarget(
+  path: string,
+  contract: ContractId,
+): Promise<import("../src/core/facts/types.js").ContractTarget | undefined> {
   const observed = await observeContract(await repositoryAt(path), contract);
   return observed.state?.coordinates.target;
 }
@@ -60,10 +64,7 @@ test("CLI and SDK share the one omitted-target default", async () => {
   );
   const sdkState = present(await fromSdk.value.keiyaku.state());
   assert.equal(sdkState.coordinates.target, "refs/heads/main");
-  assert.equal(
-    await boundTarget(raw.path, contractId(fromCli.value.contract)),
-    sdkState.coordinates.target,
-  );
+  assert.equal(await boundTarget(raw.path, contractId(fromCli.value.contract)), sdkState.coordinates.target);
 });
 
 test("CLI --no-target binds without a target on an attached HEAD", async () => {
@@ -117,6 +118,32 @@ test("CLI markdown bind keeps an explicit --target literal", async () => {
   assert.equal(missing.value.refusal?.kind, "target-missing");
 });
 
+test("CLI selects a complete Contract identity and preserves the kei-named branch escape", async () => {
+  const raw = repositoryWithMain();
+  const parent = await cliBind(raw.path);
+  assert.equal(parent.value.kind, "accepted");
+  assert.ok(parent.value.contract);
+  const child = await cliBind(raw.path, ["--target", parent.value.contract]);
+  assert.equal(child.value.kind, "accepted", JSON.stringify(child.value));
+  assert.ok(child.value.contract);
+  const target = await boundTarget(raw.path, contractId(child.value.contract));
+  assert.equal(typeof target, "object");
+  if (typeof target !== "object" || target === null) throw new Error("missing typed target");
+  assert.equal(target.contractId, parent.value.contract);
+  assert.match(child.stdout, /"kind"\s*:\s*"contract"/u);
+  const malformed = await cliBind(raw.path, ["--target", "kei/"]);
+  assert.equal(malformed.value.kind, "refused");
+  assert.equal(malformed.value.refusal?.kind, "invalid-target");
+  raw.run(["branch", "kei/example"]);
+  const branch = await cliBind(raw.path, ["--target", "refs/heads/kei/example"]);
+  assert.equal(branch.value.kind, "accepted", JSON.stringify(branch.value));
+  assert.ok(branch.value.contract);
+  assert.equal(await boundTarget(raw.path, contractId(branch.value.contract)), "refs/heads/kei/example");
+  const help = parseArgv(["bind", "--help"]);
+  assert.ok("help" in help);
+  assert.match(renderHelp(help.help), /active kei\/\.\.\./u);
+});
+
 test("an omitted target reads the explicit linked worktree coordinate, not the primary worktree", async () => {
   const raw = repositoryWithMain();
   const linked = join(raw.path, "linked-worktree");
@@ -126,9 +153,7 @@ test("an omitted target reads the explicit linked worktree coordinate, not the p
   assert.equal(repo.root, raw.path);
   assert.equal(repo.cwd, await realpath(linked));
 
-  const bound = accepted(
-    await Keiyaku.with().bind({ repo, markdown: document(), workspace: "worktree", gates: [] }),
-  );
+  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), workspace: "worktree", gates: [] }));
   assert.equal(present(await bound.value.keiyaku.state()).coordinates.target, "refs/heads/feature");
 
   const fromCli = await cliBind(linked);

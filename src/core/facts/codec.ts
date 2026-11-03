@@ -130,6 +130,23 @@ function validateTimestamp(value: unknown, path: string): string {
   return text;
 }
 
+function targetValue(value: unknown, path: string): NonNullable<ContractCoordinates["target"]> {
+  if (typeof value === "string") return stringValue(value, path);
+  const object = requireRecord(value, path);
+  requireKeys(object, ["kind", "contractId", "worktree"], path);
+  if (object.kind !== "contract") fail(`${path}.kind`, "unknown target kind");
+  const worktree = requireRecord(object.worktree, `${path}.worktree`);
+  requireKeys(worktree, ["id", "identity"], `${path}.worktree`);
+  return {
+    kind: "contract",
+    contractId: brandedValue(object.contractId, `${path}.contractId`, contractId),
+    worktree: {
+      id: stringValue(worktree.id, `${path}.worktree.id`),
+      identity: stringValue(worktree.identity, `${path}.worktree.identity`),
+    },
+  };
+}
+
 function validateCoordinates(value: unknown, path: string): ContractCoordinates {
   const object = requireRecord(value, path);
   requireKeys(object, ["start", "workspace"], path, ["target"]);
@@ -138,7 +155,7 @@ function validateCoordinates(value: unknown, path: string): ContractCoordinates 
   return {
     start: brandedValue(object.start, `${path}.start`, snapshotId),
     workspace,
-    ...(object.target === undefined ? {} : { target: stringValue(object.target, `${path}.target`) }),
+    ...(object.target === undefined ? {} : { target: targetValue(object.target, `${path}.target`) }),
   };
 }
 

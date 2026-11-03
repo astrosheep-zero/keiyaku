@@ -46,8 +46,9 @@ Each act changes a different part of the world:
   `reconcile` retries workspace realization.
 - **Work:** Changes and commits belong in the appointed worktree. Another
   lane's claim can move the target beneath it. Check target movement before
-  delivery preview; when it matters, merge the target branch (main when selected)
-  in the worktree and resolve conflicts there before previewing again.
+  delivery preview; when needed, merge the selected target's committed head in
+  the worktree and resolve conflicts there before previewing again. A Contract
+  target is its appointed detached worktree, not its ordinary branch.
 - **Delivery preview:** `deliver --dry-run` shows the candidate, existing
   Verification evidence, and target followability without submitting work or
   running Verification or hooks. With the `verified` gate, missing or stale

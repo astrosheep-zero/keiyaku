@@ -1,3 +1,5 @@
+import { targetName } from "../../core/facts/types.js";
+import { resolveContractTarget } from "../../git/target.js";
 import type { GitRepository } from "../../git/process.js";
 import { registeredWorktrees } from "../../git/repository.js";
 import { observeTargetCheckoutShape } from "../../git/target-placement.js";
@@ -14,16 +16,23 @@ export async function observeCurrentPhysicalIssue(
   const delivery = row.delivery;
   if (row.phase !== "claimed" || target === null || delivery === null) return undefined;
   if (row.targetObservation?.head !== delivery.integration.snapshot) return undefined;
-  const worktrees = (await registeredWorktrees(repository))
-    .filter((worktree) => worktree.branch === target)
-    .sort((left, right) => left.path.localeCompare(right.path));
+  let worktrees: readonly Readonly<{ path: string }>[];
+  if (typeof target === "string") {
+    worktrees = (await registeredWorktrees(repository))
+      .filter((worktree) => worktree.branch === target)
+      .sort((left, right) => left.path.localeCompare(right.path));
+  } else {
+    const resolved = await resolveContractTarget(repository, target.contractId, target);
+    if (resolved.kind === "refused") return { kind: "target-checkout-retained", target: targetName(target) };
+    worktrees = [{ path: resolved.path }];
+  }
   for (const worktree of worktrees) {
     const shape = await observeTargetCheckoutShape(repository, {
       path: worktree.path,
       predecessor: delivery.integration.predecessor,
       candidate: delivery.integration.snapshot,
     });
-    if (shape === "retained") return { kind: "target-checkout-retained", target };
+    if (shape === "retained") return { kind: "target-checkout-retained", target: targetName(target) };
   }
   return undefined;
 }

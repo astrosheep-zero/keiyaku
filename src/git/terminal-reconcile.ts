@@ -1,8 +1,10 @@
 import { lstat } from "node:fs/promises";
-import { isKeiyakuOwnedRef, readRef, writeCommit, type GitOid } from "./repository.js";
-import { gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
+import { CANDIDATE_PIN_REF_NAMESPACE, isKeiyakuOwnedRef, readRef, writeCommit, type GitOid } from "./repository.js";
+import { contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
-import type { GitDecodeChannel } from "./read-observation.js";
+import { withGitReadObservation, type GitDecodeChannel } from "./read-observation.js";
+import { observeContractWorld } from "./observe.js";
+import { resolveContractTarget } from "./target.js";
 import { runDestroyHooks, type WorktreeHooks } from "./hooks.js";
 import {
   terminalSealExpectations as decodeTerminalSealExpectations,
@@ -37,6 +39,7 @@ type TerminalReconcileInput = Readonly<{
 type EphemeralRecovery = Readonly<{ snapshot: SnapshotId; workspace: TerminalWorkspace }>;
 type TerminalWorktreeCleanup = Readonly<{
   repository: GitRepository;
+  channel: GitDecodeChannel;
   topology: WorktreeTopology;
   path: string;
   state: ContractState;
@@ -172,6 +175,33 @@ async function snapshotCustodian(
   return null;
 }
 
+async function hasIncomingLanding(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  state: ContractState,
+  head: SnapshotId,
+): Promise<boolean> {
+  const world = await withGitReadObservation(repository, channel, async (read) => await observeContractWorld(read));
+  for (const { state: child } of world.contracts.values()) {
+    const target = child?.coordinates.target;
+    const integration = child?.currentIntegration?.snapshot;
+    if (
+      child?.terminal?.kind !== "claimed" ||
+      typeof target !== "object" ||
+      target.contractId !== state.id ||
+      !integration
+    )
+      continue;
+    const pin = `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(child.id)}`;
+    if ((await readRef(repository, pin)) !== integration || !(await commitIsAncestor(repository, integration, head)))
+      continue;
+    const resolved = await resolveContractTarget(repository, state.id, target);
+    if (resolved.kind === "resolved" || ["attached", "operation", "uncommitted"].includes(resolved.refusal.reason))
+      return true;
+  }
+  return false;
+}
+
 function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
 }
@@ -199,8 +229,23 @@ async function terminalSealExpectations(
   return decodeTerminalSealExpectations(state, objects);
 }
 
+async function mustRetainUnsealed(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  state: ContractState,
+  canRecover: boolean,
+  workspace: TerminalWorkspace,
+): Promise<boolean> {
+  return (
+    !canRecover ||
+    workspace.submodules.length > 0 ||
+    (await hasIncomingLanding(repository, channel, state, workspace.head))
+  );
+}
+
 async function removeSealedTerminalWorktree({
   repository,
+  channel,
   topology,
   path,
   state,
@@ -239,7 +284,7 @@ async function removeSealedTerminalWorktree({
     const beforeWorkspace = before.workspace;
     const beforeHooks = before.unsealed;
     if (beforeHooks !== null) {
-      if (!canRecover || beforeWorkspace.submodules.length > 0) {
+      if (await mustRetainUnsealed(repository, channel, state, canRecover, beforeWorkspace)) {
         return retainTerminalWorktree(path, beforeHooks, acc);
       }
       recovery = await recordRecovery(beforeWorkspace);
@@ -251,7 +296,7 @@ async function removeSealedTerminalWorktree({
     const afterWorkspace = after.workspace;
     const afterHooks = after.unsealed;
     if (afterHooks !== null) {
-      if (!canRecover || afterWorkspace.submodules.length > 0) {
+      if (await mustRetainUnsealed(repository, channel, state, canRecover, afterWorkspace)) {
         return retainTerminalWorktree(path, afterHooks, acc);
       }
     }
@@ -281,7 +326,7 @@ async function targetCustodyForClaimedIntegration(
   state: ContractState,
   integration: SnapshotId,
 ): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
-  if (state.terminal?.kind !== "claimed" || state.coordinates.target === undefined) return null;
+  if (state.terminal?.kind !== "claimed" || typeof state.coordinates.target !== "string") return null;
   const target = await readRef(repository, state.coordinates.target);
   if (target === null) return null;
   const oid = mintSnapshotId(target);
@@ -376,6 +421,7 @@ export async function reconcileTerminalManagedWorktree(
   }
   const retained = await removeSealedTerminalWorktree({
     repository: primary,
+    channel,
     topology,
     path,
     state,

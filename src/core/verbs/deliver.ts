@@ -1,5 +1,10 @@
 import type { DecideInput, OfferDecision, StampedPreparation } from "../decide.js";
-import { activeContract, documentIsCurrent } from "../facts/observation.js";
+import {
+  activeContract,
+  documentIsCurrent,
+  targetContractRefusal,
+  type TargetContractRefusal,
+} from "../facts/observation.js";
 import { journalEntry, type ActorId, type ContractId, type DeliverData } from "../facts/types.js";
 
 export type DeliverInput<Failure = never> = Readonly<{
@@ -9,10 +14,12 @@ export type DeliverInput<Failure = never> = Readonly<{
   preparation: StampedPreparation<DeliverData, Failure>;
 }>;
 
-export type DeliverRefusal = Readonly<{
-  kind: "contract-missing" | "terminal" | "document-moved";
-  contractId: ContractId;
-}>;
+export type DeliverRefusal =
+  | Readonly<{
+      kind: "contract-missing" | "terminal" | "document-moved";
+      contractId: ContractId;
+    }>
+  | TargetContractRefusal;
 
 export function decideDeliver<Failure>({
   input,
@@ -21,6 +28,8 @@ export function decideDeliver<Failure>({
 }: DecideInput<DeliverInput<Failure>>): OfferDecision<DeliverRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
+  const targetRefusal = targetContractRefusal(observation, state.id, state.coordinates.target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   if (input.preparation.kind === "unavailable") {
     throw new Error("existing contract requires a stamped delivery preparation");
   }

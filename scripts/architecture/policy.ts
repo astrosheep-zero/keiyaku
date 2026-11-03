@@ -174,6 +174,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [any("git/**"), any("runtime/proc/**"), any("settings.ts")],
     },
     {
+      source: "git/target.ts",
+      allow: [any("coordination/**"), any("core/**"), any("git/**"), any("workspace-place.ts")],
+      deny: [any("git/observe.ts")],
+    },
+    {
       source: "git/**",
       allow: [
         any("contract-worktree.ts"),
@@ -239,13 +244,37 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("workspace-place.ts"),
       ],
     },
+    {
+      source: "protocol/bind.ts",
+      allow: protocolOwner.allow,
+      deny: [
+        ...protocolOwner.deny.filter((rule) => rule !== targetPlacementRuntime),
+        runtime("git/target-placement.ts", [
+          "prepareTargetPlacement",
+          "followTargetPlacement",
+          "recoverTargetPlacement",
+        ]),
+      ],
+    },
     { source: "protocol/review.ts", ...leadingAdmissionOwner },
-    { source: "protocol/deliver.ts", ...leadingAdmissionOwner },
+    {
+      source: "protocol/deliver.ts",
+      allow: leadingAdmissionOwner.allow,
+      deny: [
+        ...leadingAdmissionOwner.deny.filter((rule) => rule !== targetPlacementRuntime),
+        runtime("git/target-placement.ts", [
+          "prepareTargetPlacement",
+          "followTargetPlacement",
+          "recoverTargetPlacement",
+        ]),
+      ],
+    },
     {
       source: "protocol/operations.ts",
       allow: [
         ...protocolOwner.allow.filter((rule) => rule.target !== "git/**"),
         any("git/integration.ts"),
+        any("git/target.ts"),
         runtime("git/identity.ts", ["contractIdSchema", "snapshotIdSchema", "changeIdSchema"]),
         any("git/tender.ts"),
         any("git/observe.ts"),
@@ -697,6 +726,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "cli/**",
       allow: [
+        runtime("core/facts/types.ts", ["targetName"]),
         any("akuma/**"),
         any("cli/**"),
         types("protocol/execution-observation.ts"),

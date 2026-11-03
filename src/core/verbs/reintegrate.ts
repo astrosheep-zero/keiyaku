@@ -1,5 +1,5 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
-import { activeContract } from "../facts/observation.js";
+import { activeContract, targetContractRefusal, type TargetContractRefusal } from "../facts/observation.js";
 import { journalEntry, type ActorId, type ContractId, type ReintegratedData } from "../facts/types.js";
 
 export type ReintegrateInput<Failure = never> = Readonly<{
@@ -9,10 +9,12 @@ export type ReintegrateInput<Failure = never> = Readonly<{
   preparation: Preparation<ReintegratedData, Failure>;
 }>;
 
-export type ReintegrateRefusal = Readonly<{
-  kind: "contract-missing" | "delivery-missing" | "terminal";
-  contractId: ContractId;
-}>;
+export type ReintegrateRefusal =
+  | Readonly<{
+      kind: "contract-missing" | "delivery-missing" | "terminal";
+      contractId: ContractId;
+    }>
+  | TargetContractRefusal;
 
 export function decideReintegrate<Failure>({
   input,
@@ -21,6 +23,8 @@ export function decideReintegrate<Failure>({
 }: DecideInput<ReintegrateInput<Failure>>): OfferDecision<ReintegrateRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
+  const targetRefusal = targetContractRefusal(observation, state.id, state.coordinates.target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   if (state.delivery === null) {
     return { kind: "refused", refusal: { kind: "delivery-missing", contractId: input.contractId } };
   }

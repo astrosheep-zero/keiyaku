@@ -37,7 +37,10 @@ import {
   type WorktreeWitness,
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
-import { contractState } from "../core/facts/observation.js";
+import { contractState, targetContractRefusal } from "../core/facts/observation.js";
+import { targetName } from "../core/facts/types.js";
+import { resolveContractTarget } from "../git/target.js";
+import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import type {
   ActorId,
   ChangeId,
@@ -603,6 +606,26 @@ function continuationDeliveryDecision(
   };
 }
 
+async function validateDeliveryTarget(
+  input: DeliverOperationInput,
+  observation: GitDecisionObservation,
+  assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
+): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined> {
+  const target = assembled.state?.coordinates.target;
+  const targetRefusal = targetContractRefusal(observation.decision, input.contractId, target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
+  if (target === undefined || typeof target === "string") return undefined;
+  const resolved = await resolveContractTarget(input.scope, target.contractId, target);
+  if (resolved.kind === "refused") return resolved;
+  if (
+    assembled.continuation !== true &&
+    assembled.preparation?.kind === "prepared" &&
+    resolved.head !== assembled.preparation.data.integration.predecessor
+  )
+    return STALE_PRIVATE_STATE_PREPARATION;
+  return undefined;
+}
+
 async function decideAndAdmitDelivery(
   input: DeliverOperationInput,
   attempt: AttemptContext,
@@ -610,6 +633,8 @@ async function decideAndAdmitDelivery(
   observation: GitDecisionObservation,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
 ): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
+  const targetCheck = await validateDeliveryTarget(input, observation, assembled);
+  if (targetCheck !== undefined) return targetCheck;
   const current = currentCandidateDeliveryDecision(input, observation, assembled);
   if (current !== undefined) return current;
   if (assembled.continuation === true) return continuationDeliveryDecision(input, observation, assembled);
@@ -649,7 +674,7 @@ async function decideAndAdmitDelivery(
               kind: "candidate-content-changed" as const,
               ...(assembled.state?.coordinates.target === undefined
                 ? {}
-                : { target: assembled.state.coordinates.target }),
+                : { target: targetName(assembled.state.coordinates.target) }),
               previousChange,
               currentChange,
             },
@@ -807,12 +832,19 @@ async function finishDeliverRefusal(
 export async function admitDeliveryOperation(
   input: DeliverOperationInput,
 ): Promise<LeadingOutcome<DeliverValue, DeliverOperationRefusal> | IntegrationConflictMaterialized> {
-  const result = await runBoundedAttempts<
-    Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }>,
-    DeliverOperationRefusal
-  >(mintAttempts({ entryCount: 1 }), (attempt) => deliverAttempt(input, attempt));
-  if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
-  if (result.kind !== "accepted") return { kind: "retry", reason: result };
-  input.progress?.recordResidue(input.contractId, result);
-  return result;
+  const incoming = input.materializeConflict
+    ? await acquireTargetPlacementFence(input.scope, input.contractId)
+    : undefined;
+  try {
+    const result = await runBoundedAttempts<
+      Extract<AttemptDecision<DeliverValue, DeliverOperationRefusal>, { kind: "accepted" }>,
+      DeliverOperationRefusal
+    >(mintAttempts({ entryCount: 1 }), (attempt) => deliverAttempt(input, attempt));
+    if (result.kind === "refused") return await finishDeliverRefusal(input, result.refusal);
+    if (result.kind !== "accepted") return { kind: "retry", reason: result };
+    input.progress?.recordResidue(input.contractId, result);
+    return result;
+  } finally {
+    incoming?.close();
+  }
 }

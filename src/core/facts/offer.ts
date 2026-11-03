@@ -1,4 +1,4 @@
-import type { ContractId, JournalEntry, SnapshotId } from "./types.js";
+import type { ContractId, ContractTarget, JournalEntry, SnapshotId } from "./types.js";
 
 export type ContractJournalAppend = Readonly<{
   readonly contractId: ContractId;
@@ -7,7 +7,7 @@ export type ContractJournalAppend = Readonly<{
 
 /** A target operation is optional because claim can be journal-only. */
 export type RefOperation = Readonly<{
-  readonly target: string;
+  readonly target: ContractTarget;
   readonly newOid: SnapshotId;
   readonly expectedOid: SnapshotId;
 }>;

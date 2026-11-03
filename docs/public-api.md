@@ -69,17 +69,21 @@ not receive a decoded document, direct journal writer, Git handle, placement
 operation, or verification runner.
 
 A bind target carries exactly three caller intents, and this chapter is their
-sole owner. An explicit target is a caller-selected existing branch: it is
-canonicalized at the boundary, never created by Keiyaku, and cannot name
-Keiyaku-owned storage. An omitted target takes the current attached branch of
+sole owner. An explicit target is either a caller-selected existing branch or an active
+Contract's appointed managed worktree. A branch is canonicalized at the
+boundary, never created by Keiyaku, and cannot name Keiyaku-owned storage. A
+Contract destination identifies its exact appointed worktree incarnation and
+starts new Markdown work at its committed head, without capturing local edits. An omitted target takes the current attached branch of
 the Repo worktree coordinate the caller explicitly supplied; a committed HEAD
 attached to no branch is targetless, and a HEAD that does not exist yet is
 refused as such rather than reported as a missing target. A deliberately absent
 target is targetless. The default branch is resolved within bind coordinate
 observation, never pre-read by an adapter or taken from an ambient process
 directory. Forking differs only
-in what omission means: an omitted target copies the source target, a
-deliberately absent target clears it, and an explicit target overrides it.
+in what omission means: an omitted target copies the source target including
+its physical incarnation, a deliberately absent target clears it, and an
+explicit target overrides it. Forking retains the source start even when the
+destination changes.
 Gates remain opaque public words; the package does not infer a custom gate's meaning or manufacture its producer.
 
 A Contract wait observes the addressed journals themselves, without requiring an

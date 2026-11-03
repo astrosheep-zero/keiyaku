@@ -49,8 +49,9 @@ target checkout this command's own follow could not carry as one `checkout
 behind` lag row with its path and target, one row per retained arm, and leaves
 retention that predates the command to the typed result.
 
-A completed placement reads like Git movement, identically for a review and a
-deliver: the title states the verdict or delivery and the Contract, one row
+A completed placement names a Contract destination by its complete identity,
+not by its private Git reference or another branch. A completed placement reads
+like Git movement, identically for a review and a deliver: the title states the verdict or delivery and the Contract, one row
 states the reference movement, satisfied Verification adds one fact row naming
 the integrated object, and the final lifecycle state is one explicit row. The
 completed lifecycle state reads `accepted`; its recorded fact kind is not

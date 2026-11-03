@@ -153,6 +153,21 @@ export function commonGitDirectory(repository: GitRepository): string {
   return repository.commonDirectory;
 }
 
+/** Read one worktree's attached branch, or null for detached HEAD. */
+export async function currentBranch(repository: GitRepository, path?: string): Promise<string | null> {
+  try {
+    const ref = (
+      await executeGit(repository, [...(path === undefined ? [] : ["-C", path]), "symbolic-ref", "--quiet", "HEAD"])
+    )
+      .toString("utf8")
+      .trim();
+    return ref.startsWith("refs/heads/") ? ref : null;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return null;
+    throw error;
+  }
+}
+
 export async function worktreeGitDirectory(repository: GitRepository, worktree: string): Promise<string> {
   const scoped = { ...repository, effectiveCwd: worktree };
   return await absoluteGitPath(scoped, ["--git-dir"], "worktree Git directory");
@@ -163,7 +178,11 @@ async function worktreeRoot(repository: GitRepository): Promise<string> {
 }
 
 function assertRef(ref: string): void {
-  if (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes("..")) {
+  const linkedWorktreeHead = /^worktrees\/(?!\.)(?![^/]*\.lock\/)(?![^/]*\.\.)[^/\s\0~^:?*\[\\]+\/HEAD$/u.test(ref);
+  if (
+    !linkedWorktreeHead &&
+    (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes(".."))
+  ) {
     throw new Error(`invalid Git ref: ${ref}`);
   }
 }
@@ -474,6 +493,10 @@ export async function writeStateCommit(input: WriteCommitInput): Promise<GitOid>
 function refAssertionLine(assertion: GitRefAssertion): string {
   assertAssertionRef(assertion.ref);
   gitObjectId(assertion.oid, `expected oid for ${assertion.ref}`);
+  if (assertion.ref.startsWith("worktrees/")) {
+    // Git accepts a cross-worktree HEAD as an update but not as a verify command.
+    return `option no-deref\nupdate ${assertion.ref} ${assertion.oid} ${assertion.oid}`;
+  }
   return `${assertion.ref === "HEAD" ? "" : "option no-deref\n"}verify ${assertion.ref} ${assertion.oid}`;
 }
 
@@ -483,7 +506,9 @@ function refUpdateLine(
 ): string {
   assertRef(update.ref);
   if (index > 0 && update.ref === GIT_REF) throw new Error(`duplicate ref update: ${update.ref}`);
-  if (index > 0 && update.expectedOid === null) throw new Error("target ref updates require non-null OIDs");
+  if (index === 1 && update.expectedOid === null) throw new Error("target ref updates require non-null OIDs");
+  if (index === 2 && !update.ref.startsWith(`${CANDIDATE_PIN_REF_NAMESPACE}/`))
+    throw new Error("third atomic update must be a candidate pin");
   gitObjectId(update.newOid, `new oid for ${update.ref}`);
   if (update.expectedOid !== null) gitObjectId(update.expectedOid, `expected oid for ${update.ref}`);
   return `option no-deref\nupdate ${update.ref} ${update.newOid} ${update.expectedOid ?? "0".repeat(update.newOid.length)}`;
@@ -493,12 +518,12 @@ export async function updateRefsAtomically(
   repository: GitRepository,
   updates: readonly (
     | { readonly ref: typeof GIT_REF; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
-    | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid }
+    | { readonly ref: string; readonly newOid: GitOid; readonly expectedOid: GitOid | null }
   )[],
   assertions: readonly GitRefAssertion[] = [],
 ): Promise<RefPublication> {
   if (updates.length === 0) throw new Error("an atomic ref transaction needs a Git update");
-  if (updates.length > 2) throw new Error("an atomic ref transaction accepts at most one target ref update");
+  if (updates.length > 3) throw new Error("an atomic ref transaction accepts at most one target and candidate pin");
   const git = updates[0];
   if (git === undefined || git.ref !== GIT_REF) {
     throw new Error(`the first atomic update must be the Git ref: ${GIT_REF}`);

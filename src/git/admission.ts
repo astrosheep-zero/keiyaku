@@ -5,12 +5,14 @@ import { foldJournal } from "../core/facts/fold.js";
 import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
 import type { GitAdmissionSnapshot } from "./observe.js";
 import {
+  CANDIDATE_PIN_REF_NAMESPACE,
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
   GIT_REF,
   type GitRefAssertion,
   type RefPublication,
   type TreeChange,
+  readRef,
   updateGitTreeFromFrozenDirectories,
   updateRefsAtomically,
   writeBlob,
@@ -21,11 +23,13 @@ import { type ContractHead, type ContractId } from "../core/facts/types.js";
 import {
   contractJournalPath,
   contractJournalPaths,
+  contractPhysicalName,
   gitObjectIdForSnapshot,
   mintContractHead,
   mintSnapshotId,
 } from "./identity.js";
 import { validPath } from "./tree.js";
+import { targetRef } from "./target.js";
 
 type Accepted = Readonly<{
   kind: "accepted";
@@ -146,12 +150,14 @@ async function buildOffer(
   return { changes, heads };
 }
 
+// eslint-disable-next-line max-params -- Publication keeps its seat-bound inputs explicit.
 async function publishOffer(
   repository: GitRepository,
   admission: GitAdmissionSnapshot,
   target: RefOperation | null,
   changes: ReadonlyMap<string, TreeChange>,
   assertions: readonly GitRefAssertion[],
+  owner: ContractId,
 ): Promise<RefPublication> {
   const { snapshot } = admission;
   const gitTree = await updateGitTreeFromFrozenDirectories(
@@ -167,19 +173,31 @@ async function publishOffer(
       parent: snapshot.commit,
     }),
   );
+  const pin =
+    target !== null && typeof target.target !== "string"
+      ? `${CANDIDATE_PIN_REF_NAMESPACE}/${contractPhysicalName(owner)}`
+      : undefined;
+  const previousPin = pin === undefined ? null : await readRef(repository, pin);
+  const crossWorktree =
+    (target !== null && typeof target.target !== "string") ||
+    assertions.some((assertion) => assertion.ref.startsWith("worktrees/"));
+  const stable = crossWorktree ? { ...repository, effectiveCwd: repository.primaryWorktree } : repository;
   return await updateRefsAtomically(
-    repository,
+    stable,
     [
       { ref: GIT_REF, newOid: gitObjectIdForSnapshot(gitCommit), expectedOid: snapshot.commit },
       ...(target === null
         ? []
         : [
             {
-              ref: target.target,
+              ref: targetRef(target.target),
               newOid: gitObjectIdForSnapshot(target.newOid),
               expectedOid: gitObjectIdForSnapshot(target.expectedOid),
             },
           ]),
+      ...(pin === undefined || target === null
+        ? []
+        : [{ ref: pin, newOid: gitObjectIdForSnapshot(target.newOid), expectedOid: previousPin }]),
     ],
     assertions,
   );
@@ -200,7 +218,14 @@ export async function admit(
   const target = offer.target ?? null;
 
   const attempt = await buildOffer(repository, admission, appends, companions);
-  const publication = await publishOffer(repository, admission, target, attempt.changes, assertions);
+  const publication = await publishOffer(
+    repository,
+    admission,
+    target,
+    attempt.changes,
+    assertions,
+    appends[0]!.contractId,
+  );
   if (publication.kind === "published") {
     return {
       kind: "accepted",

@@ -113,6 +113,15 @@ function lagRow(lines: string[], lag: ReconcileLag, columns: number, contract: s
       );
       receiptRow(lines, " ", "reason", [{ text: lag.diagnostic, opaque: true }], columns);
       break;
+    case "target-workspace-retained":
+      receiptRow(
+        lines,
+        "!",
+        "target workspace unavailable",
+        [{ text: lag.contractId, opaque: true }, { text: `· ${lag.reason.replaceAll("-", " ")}` }],
+        columns,
+      );
+      break;
     case "contract-file-failed":
       receiptRow(
         lines,

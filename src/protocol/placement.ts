@@ -3,7 +3,13 @@ import type { ProtocolProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import type { ActorId, ContractId, SnapshotId } from "../core/facts/types.js";
+import {
+  targetName,
+  type ActorId,
+  type ContractId,
+  type ContractTarget,
+  type SnapshotId,
+} from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContractsForAdmissionAt, observeGitForAdmissionAt } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -57,7 +63,7 @@ export async function observeIntegrationTargetMovement(
   return {
     kind: "target-moved",
     contractId: state.id,
-    target,
+    target: targetName(target),
     expected: integration.predecessor,
     observed,
     observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, integration.snapshot),
@@ -74,7 +80,7 @@ type PlacementProtocolInput = Readonly<{ contractId: ContractId; actor?: ActorId
 type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
-  target: string | undefined;
+  target: ContractTarget | undefined;
   placement: PlacementProtocolInput;
   onDeliveryMissing?: () => Promise<PlacementProtocolResult<ExtraRefusal> | undefined>;
   progress?: ProtocolProgress;
@@ -141,7 +147,7 @@ async function runFencedPlacement(
           return {
             kind: "target-moved" as const,
             contractId: input.contractId,
-            target: target.target,
+            target: targetName(target.target),
             expected: target.expectedOid,
             observed,
             observedTreeEqualsCandidate: await observedTreeEqualsCandidate(repository, observed, target.newOid),
@@ -263,7 +269,7 @@ export async function admitPlacement<ExtraRefusal = never>(
   if (target === undefined) return await runProtocol(protocol);
   return await runUnderTargetPlacementFence(
     repository,
-    target,
+    targetName(target),
     async () => {
       const result = await runFencedPlacement(repository, input, protocol);
       if (onDeliveryMissing === undefined || !isDeliveryMissing(result)) return result;
