@@ -596,7 +596,7 @@ test("native born attach, SDK creation and identity retries share the registered
   t.after(async () => { await cleanup(); });
   assert.equal(providerId, "keiyaku");
   assert.deepEqual([...handlers.keys()], ["refresh", "attach"]);
-  assert.equal(before.mock.callCount(), 1, "the registration hook arms residency for provider session opens");
+  assert.deepEqual(before.mock.calls.map((call) => call.arguments[0]), ["agent.create", "agent.session_open"]);
   const forwarder = createForwarder(async () => ({
     async invokePluginRpc(_plugin, method, input) { return await handlers.get(method)!(input); },
     fetchAgents: (async () => ({ requestId: "list", entries: [], pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } })) as unknown as DaemonClient["fetchAgents"],

@@ -595,7 +595,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
     on(name: string) { hooks.push(`on:${name}`); return () => {}; },
   })) as (() => Promise<void>) | undefined;
   assert.deepEqual(registrations, ["keiyaku"]);
-  assert.deepEqual(hooks, ["before:agent.session_open", "on:agent.archived", "on:agent.closed"]);
+  assert.deepEqual(hooks, ["before:agent.create", "before:agent.session_open", "on:agent.archived", "on:agent.closed"]);
   assert.equal(handlers.length, 2, "the compiled entry keeps its two RPC handlers");
   assert.equal(typeof cleanup, "function");
   assert.equal(providers.length, 1);
