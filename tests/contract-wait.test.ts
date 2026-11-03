@@ -11,7 +11,7 @@ import { parseArgv } from "../src/cli/parse.js";
 import { bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { withContractWaitBarrier } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
-import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
+import { accepted, document, managedCandidate, present, repositoryWithMain } from "./support/library-verbs.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 
 async function fixture() {
@@ -68,10 +68,60 @@ test("Contract waits witness their own journal changes and preserve plural progr
   assert.equal(missing.kind, "missing");
   assert.equal(missing.contracts[1]?.present, false);
   accepted(await second.handle.abandon());
-  const terminal = await second.handle.wait({ timeoutMs: 300 });
-  assert.equal(terminal.kind, "deadline");
+  const terminal = await second.handle.wait({ timeoutMs: 0 });
+  assert.equal(terminal.kind, "terminal");
   assert.equal(terminal.contracts[0]?.terminal, "abandoned");
   assert.equal(terminal.contracts[0]?.changed, false);
+});
+
+test("terminal baselines satisfy any and all without inventing changes", async () => {
+  const { repository, repo, first, second } = await fixture();
+  const claimed = await managedCandidate(repository);
+  accepted(await claimed.contract.deliver());
+  assert.equal(present(await claimed.contract.state()).terminal?.kind, "claimed");
+  accepted(await second.handle.abandon());
+  for (const [handle, terminal] of [[claimed.contract, "claimed"], [second.handle, "abandoned"]] as const) {
+    const result = await handle.wait({ timeoutMs: 0 });
+    assert.equal(result.kind, "terminal");
+    assert.equal(result.contracts[0]?.terminal, terminal);
+    assert.equal(result.contracts[0]?.changed, false);
+    assert.equal(result.contracts[0]?.baseline, result.contracts[0]?.head);
+  }
+  const all = await Keiyaku.with().wait({ repo, contracts: [claimed.id, second.id], completion: "all", timeoutMs: 0 });
+  assert.equal(all.kind, "terminal");
+  assert.deepEqual(all.contracts.map((item) => item.terminal), ["claimed", "abandoned"]);
+  const any = await Keiyaku.with().wait({ repo, contracts: [first.id, second.id], timeoutMs: 0 });
+  assert.equal(any.kind, "terminal");
+  assert.deepEqual(any.contracts.map((item) => item.changed), [false, false]);
+  const missing = await Keiyaku.with().wait({ repo, contracts: [second.id, "kei/not-present"], timeoutMs: 0 });
+  assert.equal(missing.kind, "missing");
+  const partial = await Keiyaku.with().wait({ repo, contracts: [second.id, first.id], completion: "all", timeoutMs: 0 });
+  assert.equal(partial.kind, "deadline");
+  assert.equal(partial.contracts[0]?.terminal, "abandoned");
+  await withContractWaitBarrier(repository.path, async (barrier) => {
+    const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
+    const immediate = await Keiyaku.with().select({ repo: observingRepo, id: claimed.id }).wait();
+    assert.equal(immediate.kind, "terminal");
+    barrier.reset();
+    const pending = Keiyaku.with().wait({ repo: observingRepo, contracts: [second.id, first.id], completion: "all", timeoutMs: 10_000 });
+    await barrier.reads();
+    await amend(first.handle, "Active member changes after baseline.");
+    const changed = await pending;
+    assert.equal(changed.kind, "changed");
+    assert.deepEqual(changed.contracts.map((item) => item.changed), [false, true]);
+    assert.equal(changed.contracts[0]?.baseline, changed.contracts[0]?.head);
+  });
+  for (const [id, label] of [[claimed.id, "accepted"], [second.id, "abandoned"]] as const) {
+    const text = await runCli(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
+    assert.equal(text.exit, 0);
+    assert.match(text.stdout, new RegExp(`terminal: .*\\(${label}\\)`, "u"));
+    assert.doesNotMatch(text.stdout, /changed/u);
+    const json = await cliJson<{ kind: string; contracts: { terminal: string; changed: boolean }[] }>(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
+    assert.equal(json.exit, 0);
+    assert.equal(json.value.kind, "terminal");
+    assert.equal(json.value.contracts[0]?.terminal, label === "accepted" ? "claimed" : label);
+    assert.equal(json.value.contracts[0]?.changed, false);
+  }
 });
 
 test("other journals, Dispatch, worker completion, worktree edits and target movement do not wake a Contract", async () => {

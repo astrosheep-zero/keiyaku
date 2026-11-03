@@ -125,10 +125,10 @@ const AKUMA_COMMAND_SPECS = {
     stdin: false,
     flags: { any: "boolean", all: "boolean", timeout: "value", json: "boolean" },
     usage: `wait ${SET_SELECTORS} [--any | --all] [--timeout <duration>] [--repo <path>]`,
-    purpose: "Wait for Contract journal changes or Akumas to finish work.",
+    purpose: "Wait for Contract changes or terminal state, or Akumas to finish work.",
     details: [
-      "Select Contracts or Akumas, never both in one wait. Contract IDs wait for their next journal change, not associated Akumas.",
-      "The default mode is any; --all waits for every selected member. Each Contract starts from its current journal head, even if terminal.",
+      "Select Contracts or Akumas, never both in one wait. Contract IDs wait for their next journal change or terminal state, not associated Akumas.",
+      "The default mode is any; --all waits for every selected member. Each Contract starts from its current journal head; already accepted or abandoned Contracts complete immediately.",
       SET_DETAILS,
       "An already completed Akuma counts immediately; a deadline only bounds observation.",
       "With --json stdout carries the native result document.",

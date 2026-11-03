@@ -84,8 +84,9 @@ Gates remain opaque public words; the package does not infer a custom gate's mea
 
 A Contract wait observes the addressed journals themselves, without requiring an
 Akuma World or Dispatch. It captures each selected journal's head at entry and
-reports a later witnessed change for any or all selected Contracts; a terminal
-baseline is not a new change. Missing authority is explicit, including after
+returns when any or all selected Contracts have a later witnessed change or are
+observed terminal. An already-terminal baseline satisfies the wait but is not a
+new change. Missing authority is explicit, including after
 baseline, and a deadline preserves witnessed progress without changing its
 subjects. Cancellation retires the wait's owned observation. Each invocation
 starts anew; no cursor, acknowledgement, or replay is persisted. The handle

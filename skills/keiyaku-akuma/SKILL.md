@@ -79,10 +79,11 @@ ends the wait, not the workers. An already finished Akuma counts immediately.
 Unlike `ask`, this observes existing work, not a newly submitted instruction.
 
 `keiyaku wait kei/...` instead waits for the named Contract's next journal
-change, even without a dispatched Akuma. Each invocation starts at the current
-head; a terminal Contract does not count as a new change by itself. Use
-`--all` to wait for every selected Contract, and do not mix Contract and Akuma
-selectors in one wait. `kill kei/...` still selects the associated Akumas.
+change or terminal state, even without a dispatched Akuma. Each invocation
+starts at the current head; an already accepted or abandoned Contract counts
+immediately, without being reported as changed. Use `--all` to wait for every
+selected Contract, and do not mix Contract and Akuma selectors in one wait.
+`kill kei/...` still selects the associated Akumas.
 
 ## Inspect and retrieve results
 

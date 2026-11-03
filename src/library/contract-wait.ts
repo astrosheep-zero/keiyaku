@@ -26,7 +26,7 @@ const memberSchema = z
   .strict();
 export const contractWaitResultSchema = z
   .object({
-    kind: z.enum(["changed", "deadline", "missing"]),
+    kind: z.enum(["changed", "terminal", "deadline", "missing"]),
     completion: z.enum(["any", "all"]),
     contracts: z.array(memberSchema).min(1).readonly(),
   })
@@ -87,6 +87,15 @@ function validateContractWaitValues(values: Record<string, unknown>, scope: Repo
   };
 }
 
+function readiness(members: ContractWaitMember[], completion: "any" | "all"): ContractWaitResult["kind"] | undefined {
+  if (members.some((member) => member.present === false)) return "missing";
+  const satisfied = (member: ContractWaitMember): boolean =>
+    member.present === true && (member.changed || member.terminal !== null);
+  if (completion === "any" ? members.some(satisfied) : members.every(satisfied))
+    return members.some((member) => member.changed) ? "changed" : "terminal";
+  return undefined;
+}
+
 export async function waitContractLocal(input: ValidatedWait): Promise<ContractWaitResult> {
   const { ids, completion, timeoutMs, signal } = input;
   signal?.throwIfAborted();
@@ -136,7 +145,8 @@ export async function waitContractLocal(input: ValidatedWait): Promise<ContractW
         terminal: state?.terminal?.kind ?? null,
       };
     });
-    if (members.some((member) => member.present === false)) return result("missing");
+    const initialResult = readiness(members, completion);
+    if (initialResult !== undefined) return result(initialResult);
     if (performance.now() >= deadline) return result("deadline");
     for (;;) {
       const states = await read();
@@ -152,9 +162,8 @@ export async function waitContractLocal(input: ValidatedWait): Promise<ContractW
           changed: member.changed || (state !== null && head !== member.baseline),
         };
       });
-      if (members.some((member) => member.present === false)) return result("missing");
-      if (completion === "any" ? members.some((member) => member.changed) : members.every((member) => member.changed))
-        return result("changed");
+      const observedResult = readiness(members, completion);
+      if (observedResult !== undefined) return result(observedResult);
       const remaining = deadline - performance.now();
       if (remaining <= 0) return result("deadline");
       await delay(Math.min(remaining, 100), undefined, { signal: readSignal });

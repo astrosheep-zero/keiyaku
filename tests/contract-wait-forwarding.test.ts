@@ -43,6 +43,13 @@ test("parent-served Contract waits retain native journal evidence, mode, timeout
       await barrier.reads();
       controller.abort();
       await assert.rejects(cancelled);
+      accepted(await second.value.keiyaku.abandon());
+      const terminal = await forwarded.select({ repo, id: second.contract }).wait({ timeoutMs: 0 });
+      const directTerminal = await second.value.keiyaku.wait({ timeoutMs: 0 });
+      assert.deepEqual(terminal, directTerminal);
+      assert.equal(terminal.kind, "terminal");
+      assert.equal(terminal.contracts[0]?.terminal, "abandoned");
+      assert.equal(terminal.contracts[0]?.changed, false);
     } finally {
       await pump.close();
     }
