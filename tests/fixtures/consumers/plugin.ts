@@ -3,8 +3,9 @@ import type {
   PluginContext as RootContext,
   PluginHooks as RootHooks,
   PluginSignal as RootSignal,
+  PluginWaitDeferralInput as RootWaitInput,
 } from "@astrosheep/keiyaku";
-import type { KeiyakuPlugin, PluginContext, PluginHooks, PluginSignal } from "@astrosheep/keiyaku/plugin";
+import type { KeiyakuPlugin, PluginContext, PluginHooks, PluginSignal, PluginWaitDeferralInput } from "@astrosheep/keiyaku/plugin";
 import squarePlugin from "@astrosheep/keiyaku-plugin-square";
 const rootPlugin = null as unknown as RootPlugin;
 const plugin: KeiyakuPlugin = rootPlugin;
@@ -22,6 +23,7 @@ const hooks: PluginHooks = {
   },
   "akuma.turn-outcome": (turn) => {
     turn.turnSequence.toFixed();
+    turn.tellIds?.forEach(id => id.toUpperCase());
     if (turn.outcome.kind === "answered") turn.outcome.text.toUpperCase();
     else if (turn.outcome.kind === "failed") turn.outcome.reason.toUpperCase();
     else {
@@ -33,6 +35,23 @@ const hooks: PluginHooks = {
   },
 };
 const rootHooks = hooks as RootHooks;
+const callWait: RootWaitInput = { akumaIds: [], initialTellId: "first-tell-uuid" };
+const waitInput: PluginWaitDeferralInput = callWait;
+waitInput.initialTellId?.toUpperCase();
+const observingPlugin: RootPlugin = {
+  manifest: { id: "consumer", apiVersion: 1 },
+  activate() {
+    return {
+      signals: hooks,
+      waitDeferral(input) {
+        input.initialTellId?.toUpperCase();
+        input.akumaIds.forEach(id => id.toUpperCase());
+        return { close() {} };
+      },
+    };
+  },
+};
+void observingPlugin;
 const installedPlugin: RootPlugin = squarePlugin;
 void plugin;
 void context;

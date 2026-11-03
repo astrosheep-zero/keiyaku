@@ -1,7 +1,7 @@
 import { pluginRuntime, reportPluginDiagnostic } from "./runtime.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
-import type { PluginSignal } from "./public.js";
+import type { PluginSignal, PluginWaitDeferralInput } from "./public.js";
 
 /** The local library observation default; CLI and Body supply their own sinks. */
 export function stderrPluginDiagnostic(message: string): void {
@@ -34,7 +34,7 @@ export async function emitPluginSignal(emission: PluginSignalEmission, signal: P
 
 export async function withAkumaWaitDeferrals<T>(
   emission: PluginSignalEmission,
-  akumaIds: readonly string[],
+  input: PluginWaitDeferralInput,
   signal: AbortSignal | undefined,
   action: () => Promise<T>,
 ): Promise<T> {
@@ -51,7 +51,7 @@ export async function withAkumaWaitDeferrals<T>(
     reportPluginDiagnostic(emission.reportDiagnostic, "runtime", "wait deferral", error);
     return await action();
   }
-  return await runtime.withWaitDeferrals(akumaIds, signal, action, emission.reportDiagnostic);
+  return await runtime.withWaitDeferrals(input, signal, action, emission.reportDiagnostic);
 }
 
 /** One public observer operation, never shared with incidental owner reads. */

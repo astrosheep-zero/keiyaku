@@ -114,9 +114,9 @@ execution's established voices but never grants another execution's authority.
 A notice is recognized by its shared sender and structured outcome identity;
 the sender label and subject Akuma need no standing.
 The operation never computes a substitute identity, joins a participant, or
-creates a route merely to acknowledge; missing standing, notice, or availability
-to that observer stays silence, and another Akuma's, Turn's, birth's, or Body's
-notice is never consumed. An explicitly attributed observer never acquires
+creates a route merely to acknowledge; missing standing or availability to that
+observer stays silence, and another Akuma's, Turn's, birth's, or Body's notice is
+never consumed. An explicitly attributed observer never acquires
 another execution's identity or wake route; a name alone cannot delegate
 acknowledgment authority.
 Outcome acknowledgment and wait deferral do not consume progress reports.
@@ -159,23 +159,38 @@ not replay or inherit earlier diagnostics. A destination that throws or rejects
 asynchronously cannot change product results or hold execution custody.
 Diagnostics create no persistence, retry, or cross-process callback channel.
 
-A selected plugin may also expose an invocation-local resource for a wait. The
-requesting edge freezes its selected Akuma identities, acquires each plugin's
-optional resource before local or forwarded observation, and retains it through
-acknowledgment of only the exact outcomes in the final returned statuses. It
-closes those resources afterward, including on failure or cancellation.
-Acquisition, cleanup, and any late acquisition remain bounded and
-diagnostic-only; they do not change the wait result. The plugin resource owns
-renewal and releases only its own custody. Serving Bodies do not acquire
-requester resources, and Keiyaku adds no shared lease registry or cross-process
-capability. Square's optional wait resource defers selected Turn-outcome notices
-only for the requesting execution's own attached standing seat. It neither establishes
-standing nor borrows a serving execution's identity. Other recipients and notice
-kinds remain unaffected; independent waits retain independent custody. Exact
-observation may acknowledge an existing notice while deferral is held, but never
-records an intent for a notice not yet present. Closing releases only that
-invocation's deferrals, and expiry bounds abandoned custody. An observing
-execution with no attached seat leaves ordinary delivery unchanged.
+A selected plugin may own an invocation-local observation resource. The
+requesting edge freezes selected Akuma identities, acquires before local
+admission or forwarding, and retains custody through exact observation, bounded
+acknowledgment, and answer decoding. Wait and idle acknowledge only final-status
+outcomes; ask and bounded call acknowledge only their exact admitted input's
+outcome. A new bounded call may correlate through its existing first Tell when
+acquisition precedes child identity. That correlation only defers delivery: multiple
+inputs bound to one Turn still name one outcome, and correlation never
+authorizes acknowledgment. Detached and prompt-free calls own no answer resource.
+
+Resources close on completion, failure, or cancellation. Acquisition, cleanup,
+and late acquisition remain bounded and diagnostic-only, preserving native
+results and admission. Plugins own renewal and release only their invocation's
+custody. Serving Bodies acquire no requester resources; core adds no registry,
+watcher, or cross-process capability. Square defers matching Turn notices in the
+producer's World for only the observing execution's attached standing seat.
+Other recipients and notice kinds remain unaffected; scopes own independent
+leases. Release or expiry permits unconsumed notices at the next ordinary
+posting opportunity. Without an attached seat, delivery stays unchanged.
+
+Square serializes source insertion, exact consumption, deferral, and export
+ownership under World custody. Consumption or a matching lease established
+before export ownership prevents that recipient's export. The exporter calls
+the delivery ledger outside the World transaction. Observation waits for neither
+notification nor export or ledger custody. A later acknowledgment persists
+consumption but promises no recall of an already-owned export.
+
+Deferral and acknowledgment use only the producer's World. Captured ownership,
+join generation, and locally known lifecycle fence custody. Takeover, local
+leave, or known detach or deletion invalidates old handles. Ledger-only lifecycle
+changes become known on ordinary privileged reconciliation; sandboxed observers
+neither probe that ledger nor claim synchronous host-liveness knowledge.
 
 ## Signals And Boundaries
 
@@ -215,75 +230,67 @@ recipient. Delivery remains one bounded diagnostic-only attempt: no rollback,
 replay queue, receipt guarantee, or change to completion and outcome observation.
 Report custody belongs to Akuma, not to an observer plugin.
 
-A started Akuma Turn emits `akuma.turn-started` once its start fact and Tell
-bindings are durable and before provider work begins. The signal identifies the
-Akuma and Turn sequence and carries the Turn's optional initiator, so a
-consumer can align it with the outcome that later names the same Turn. A Turn
-that later fails still has a start; a Turn whose start never commits emits
-nothing. Because this occurs on the Body's critical path, a producer waits one
-bounded delivery exactly as it does for that Turn's outcome, so consumers stay
-fast.
+A started Turn emits `akuma.turn-started` after its start and Tell bindings are
+durable, before provider work. It carries Akuma/Turn identity and optional
+initiator, correlating with the later outcome even if that Turn fails. Without a
+committed start it emits nothing. The Body awaits one bounded delivery on this
+critical path.
 
-Every committed terminal Akuma Turn emits `akuma.turn-outcome` after its outcome
-is durable, including Turns driven by later Tells. The signal identifies the
-Akuma and Turn sequence and carries the committed answered, failed, or canceled
-outcome and the Turn's optional owner and participant audience; cancellation is its own
-terminal meaning, with neither answer text nor failure reason. It does not expose
-provider or continuation custody. Plugins cannot participate in providers, generic lifecycle verbs, operation inputs, or Settlement. In
-particular, plugin delivery does not make birth reversible, add a pre-Body
-listener, or create rollback or cross-process continuation behavior.
+Every committed terminal Turn emits `akuma.turn-outcome` after durability,
+including later-Tell Turns. It carries Akuma/Turn identity, the answered, failed,
+or canceled outcome, and optional owner and audience. Cancellation carries no
+answer or failure reason. Signals expose no provider or continuation custody;
+plugins neither participate in providers, lifecycle verbs, inputs, or Settlement,
+nor make birth reversible, add pre-Body listeners, or create rollback or
+cross-process continuations.
 
-Public Akuma observation emits `akuma.outcome-observed` when it establishes a
-specific retained committed outcome identity, whether answered, failed, or
-canceled. This means knowing that result exists, not consuming its body, acknowledging it, or
-judging the Akuma idle. Status, wait and idle, history, stream, ask, and bounded call
-answer observation participate; roster and board reads, incidental internal
-reads, and lifecycle production do not. A running Akuma may have an observed
-past outcome. Missing or pruned evidence, unknown completion, and a deadline
-alone establish no identity; answer decoding failure does not undo an outcome
-already observed.
+Public Akuma observation emits `akuma.outcome-observed` when it establishes an
+exact retained answered, failed, or canceled outcome. Knowing it exists neither
+consumes its body nor judges idle. Status, wait and idle, history, stream, ask,
+and bounded call participate; roster, board, incidental reads, and lifecycle
+production do not. Running execution may have an observed past outcome. Missing
+or pruned evidence and deadlines invent no identity; decoding failure never
+undoes an established observation.
 
-Each observer operation owns its delivery and suppresses repeated observations
-of the same Akuma and outcome within that operation only. Status and wait
-observe the outcomes their selected view establishes, never historical outcomes
-read incidentally while building that view. History observes its
-returned page or chosen result; stream observes the retained outcomes in its
-emitted window; input-bound answer observation observes only
-the exact admission's committed outcome. A wait delivers for its final status
-observations without consuming answer text; completion-only
-probes remain completion-only. Outcomes established together receive concurrent
-bounded delivery attempts; the operation awaits them without a detached queue
-or a timeout interval multiplied by the number of results. Forwarded wait and
-ask observe once in their requesting process,
-after a concrete live result establishes the exact outcome identity. The serving
-executor supplies semantic evidence but does not deliver that plugin signal.
-Wait uses the returned status frontier; ask carries the exact semantic identity
-alongside its private live result. No later read reconstructs an earlier
-observation, and expired transport or durable service evidence never replays one.
-Answer-schema decoding follows observation, so an invalid answer remains an
-observed committed outcome. Bounded call answer observation belongs to the
-submitting process, after call admission. These are ephemeral observations, not
-Keiyaku acknowledgment facts or cross-operation delivery receipts. The observing
-integration uses its own actual local ownership; semantic observer attribution
-grants no permission and changes no public operation result.
+Each operation owns delivery and deduplicates the same Akuma/outcome only within
+that operation. Status and wait observe their selected views, never incidental
+history. History observes its returned page or chosen result; stream observes
+its emitted window; input-bound observation uses only its exact admission's
+outcome. Wait delivers final-status observations without reading answer text;
+completion probes establish no observation. Results established together receive
+concurrent bounded attempts, awaited without a detached queue or multiplied
+timeout.
 
-Square may acknowledge only already-existing outcome notices corresponding to
-the observed Akuma and exact retained outcome, for that observer alone. A
-successful Turn notice carries the exact committed answer, while failed-Turn and
-abnormal-Body notices keep their human-readable markers. Turn identity comes
-only from structured metadata, independent of presentation prose. The receiver
-queries its pending notices without consuming them, then acknowledges only the
-exact returned identities. It neither scans the archive
-nor interprets historical prose. Matching pages are drained until no pending
-notice remains; acknowledgment never extends beyond the exact queried IDs.
-Explicit observer attribution takes precedence over the observing execution's
-own seat selection and never borrows the producing session's ownership or route.
-Square owns the
-acknowledgment; core owns only the semantic observation. Missing Square,
-observer, standing participant, corresponding notice, or availability to that
-participant is silence, not permission to create, join, take over, consume other
-notices, or remember an intent. A notice arriving later remains unseen until
-another ordinary observation; no retry, queue, or mapping authority is created.
+Forwarded wait and ask observe once in the requester after a concrete live
+result establishes identity. Serving executors supply semantic evidence without
+emitting the requester's signal: wait uses its returned status frontier and ask
+carries exact identity beside its private live result. Later reads, expired
+transport, and durable service evidence never reconstruct or replay observation.
+Decoding follows observation, including invalid answers; bounded call observes
+in the submitting process after admission. These ephemeral observations are
+neither Keiyaku acknowledgment facts nor cross-operation receipts. The observing
+integration uses its own local ownership; attribution grants no permission and
+changes no public result.
+
+Square acknowledges the observed Akuma and exact retained Turn outcome for that
+observer alone, including when its notice has not yet been inserted. It consumes
+matching current notices and durably remembers exact consumption in the
+producer's World, so a later matching notice retains its body and other
+recipients while that recipient remains consumed. No notification identity or
+arrival is needed. Consumption has no expiry; optional cleanup requires producer
+proof that this exact source cannot be inserted or exported again. Elapsed time,
+missing notice, Heart compaction, and absent ledger receipts are not that proof.
+This changes neither admissibility of old unconsumed outcomes nor ordinary
+activity acknowledgment, which consumes only existing selected activities.
+
+A successful Turn notice carries the exact committed answer; failed-Turn and
+abnormal-Body notices keep their readable markers. Structured Turn identity is
+independent of prose and of optional input correlation. Explicit observer
+attribution takes precedence over the observing execution's own seat selection
+and grants no ownership or route. Missing Square, observer, standing, or
+availability stays silence, without creating or taking over a participant,
+consuming another result, or installing a retry queue. Core supplies only the
+semantic observation; Square owns notice custody and exact consumption.
 
 Every Body that reaches a durable terminal state emits `akuma.body-ended` after
 that Body fact is durable. The signal identifies the Akuma and Body sequence

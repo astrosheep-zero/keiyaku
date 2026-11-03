@@ -62,20 +62,22 @@ test("focused and sweep runners isolate Square ledgers through descendant exit a
       const path = require('node:path');
       const assert = require('node:assert/strict');
       require('node:test')('isolated ledger', () => {
-        const root = process.env.SQUARE_HOST_LEDGER_ROOT;
+        const ledger = process.env.SQUARE_DELIVERY;
+        const root = path.dirname(ledger);
         assert.notEqual(root, ${JSON.stringify(ambient)});
+        assert.equal(ledger, path.join(root, 'delivery.sqlite'));
         assert.ok(fs.existsSync(root));
         fs.writeFileSync(${JSON.stringify(record)}, root);
         const child = require('node:child_process').spawnSync(process.execPath, ['-e',
-          "require('node:fs').writeFileSync(require('node:path').join(process.env.SQUARE_HOST_LEDGER_ROOT, 'descendant'), 'owned')"]);
+          "require('node:fs').writeFileSync(process.env.SQUARE_DELIVERY, 'owned')"]);
         assert.equal(child.status, 0);
-        assert.equal(fs.readFileSync(path.join(root, 'descendant'), 'utf8'), 'owned');
+        assert.equal(fs.readFileSync(ledger, 'utf8'), 'owned');
         ${sweep ? "assert.fail('chosen failure');" : ""}
       });
     `);
     const result = spawnSync(process.execPath, [resolve(root, "scripts/run-tests.mjs"), "--compiled",
       ...(sweep ? ["--test-concurrency=1"] : ["tests/ledger.test.ts"])], {
-      cwd: directory, encoding: "utf8", env: { ...process.env, SQUARE_HOST_LEDGER_ROOT: ambient },
+      cwd: directory, encoding: "utf8", env: { ...process.env, SQUARE_DELIVERY: join(ambient, "delivery.sqlite") },
     });
     assert.equal(result.status, sweep ? 1 : 0, result.stdout + result.stderr);
     const observed = readFileSync(record, "utf8");

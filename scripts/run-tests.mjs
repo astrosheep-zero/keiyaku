@@ -120,7 +120,7 @@ if (compiled && runtimeFiles.some((file) => !existsSync(file))) {
 const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
 const ledgerRoot = mkdtempSync(join(tmpdir(), "keiyaku-test-square-ledger-"));
 /** @type {NodeJS.ProcessEnv} */
-const environment = { ...process.env, SQUARE_HOST_LEDGER_ROOT: ledgerRoot };
+const environment = { ...process.env, SQUARE_DELIVERY: join(ledgerRoot, "delivery.sqlite") };
 delete environment.AKUMA_REQUESTS;
 delete environment.AKUMA_REQUESTS_ENTRY;
 // This is a new runner, including when invoked by a test of the runner itself.

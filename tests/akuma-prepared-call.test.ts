@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { driveAkumaBody, tellWakeRuntime } from "../src/akuma/body.js";
+import type { BodyLauncher } from "../src/akuma/body-launch.js";
+import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
+import { BodyRequestPump } from "../src/akuma/request-serve.js";
+import { bodyRequestExecution, localExecutionContext } from "../src/akuma/requests.js";
+import { Schema } from "../src/akuma/schema.js";
+import { akumasWithLauncher } from "../src/library/akumas.js";
+import { settings } from "../src/settings.js";
+import { bornDirectAkuma, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { answering } from "./support/akuma-tell.js";
+import { Square, DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
-import { HeldAkumaLeash, projectTell, readSoul, type Soul, type TellFact } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, type AkuId } from "../src/akuma/identity.js";
+import { HeldAkumaLeash, projectTell, readSoul, readTell, type Soul, type TellFact } from "../src/akuma/heart/index.js";
+import { akumaRunRoot, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import type { CallInitialTellAdmission, TellResult } from "../src/akuma/call-initial-tell.js";
 import {
   executePreparedCall,
@@ -12,7 +26,7 @@ import {
   type PreparedCallSpawn,
 } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
-import { temporaryDirectory } from "./support/process.js";
+import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
 const AT = "2026-08-09T00:00:00.000Z";
 
@@ -86,6 +100,134 @@ async function childRuns(root: string): Promise<readonly string[]> {
   } catch {
     return [];
   }
+}
+
+for (const route of ["local", "forwarded"] as const) {
+  test(`${route} bounded call protects its exact first Tell before admission can finish`, { timeout: 15_000 }, async (t) => {
+    const world = await World.at(temporaryDirectory(t, "keiyaku-call-scope-"));
+    const variables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID",
+      "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION", "SQUARE_PARTICIPANT_NAME", "SQUARE_DELIVERY", "SQUARE_INDEX"];
+    const prior = Object.fromEntries(variables.map(key => [key, process.env[key]]));
+    variables.forEach(key => { delete process.env[key]; });
+    process.env.PI_SESSION_ID = "bounded-call";
+    process.env.SQUARE_PARTICIPANT_NAME = "Requester";
+    process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
+    process.env.SQUARE_INDEX = join(world, "square-index");
+    t.after(() => restoreEnvironmentValues(prior));
+    mkdirSync(join(world, ".square"), { recursive: true });
+    const square = await Square.build({ path: join(world, ".square", "KEIYAKU.square"), markdown: "" });
+    const owner = harnessOwner({ channel: "pi", session: "bounded-call" });
+    await square.join("Requester", { owner });
+    const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
+    t.after(async () => { await square.close(); await ledger.close(); });
+    const cards = async () => {
+      const session = await ledger.session(owner);
+      assert.ok(session);
+      return await ledger.pending(owner, { generation: session.generation });
+    };
+    const output = join(world, "call-trace.jsonl");
+    const trace = (): unknown[][] => readFileSync(output, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+    mkdirSync(join(world, "plugins"), { recursive: true });
+    writeFileSync(join(world, "plugins", "call.mjs"), `
+      import { appendFileSync } from "node:fs";
+      import squarePlugin from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};
+      export default { manifest: { ...squarePlugin.manifest, id: "call" }, async activate(context) {
+        const actual = await squarePlugin.activate(context);
+        const record = value => appendFileSync(${JSON.stringify(output)}, JSON.stringify(value) + "\\n");
+        return {
+          async waitDeferral(input, signal) {
+            const resource = await actual.waitDeferral(input, signal);
+            record(["acquire", input]);
+            return { async close(signal) { await resource?.close(signal); record(["close"]); } };
+          },
+          signals: {
+            "akuma.turn-outcome": async signal => {
+              await actual.signals["akuma.turn-outcome"](signal);
+              record(["produced", signal.akumaId, signal.turnSequence, signal.tellIds]);
+            },
+            "akuma.outcome-observed": async signal => {
+              await actual.signals["akuma.outcome-observed"](signal);
+              record(["observe", signal.akumaId, signal.historyId]);
+            }
+          }
+        };
+      } };
+    `);
+    mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+    writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: fixture\n---\nWork.\n");
+    writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+      providers: { fixture: { kind: "claude-agent-sdk" } },
+      plugins: {
+        square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+        call: { package: "./plugins/call.mjs" },
+      },
+    }));
+    const selected = await settings({ root: world, home: join(world, "empty-home") });
+    let bounded = true;
+    const spawn: BodyLauncher = async launch => {
+      if (bounded) {
+        const first = trace()[0];
+        assert.equal(first?.[0], "acquire", "scope exists even before child birth");
+        assert.deepEqual((first?.[1] as { akumaIds: string[] }).akumaIds, []);
+        assert.equal(trace().some(row => row[0] === "close"), false);
+      }
+      // Complete provider work before returning launch/admission to expose the fast-first-Tell gap.
+      await driveAkumaBody(launch, answering('{"ok":true}'), {
+        spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => AT,
+      });
+      return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };
+    };
+    let pump: BodyRequestPump | undefined;
+    if (route === "forwarded") {
+      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0def0006", createdAt: AT });
+      t.after(() => parent.leash.release());
+      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
+      pump = await BodyRequestPump.open({
+        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        now: () => AT, signal: t.signal,
+        commands: akumaCallRequestCommands({
+          world, paths: parent.paths, parent: parent.soul, spawn,
+          admitInitialTell: async ({ id, initialTell, signal }) => {
+            if (bounded) assert.deepEqual(trace(), [["acquire", { akumaIds: [], initialTellId: initialTell.tellId }]]);
+            return await new AkumaOwner(id, world).admitInitialTell(initialTell, {
+              signal, runtime: tellWakeRuntime(spawn),
+            });
+          },
+        }),
+      });
+    }
+    try {
+      const api = akumasWithLauncher(world,
+        pump === undefined ? localExecutionContext() : bodyRequestExecution({ directory: pump.directory }), spawn);
+      const schema = Schema.json({ type: "object" }, value => {
+        assert.deepEqual(trace().slice(-1)[0]?.slice(0, 1), ["observe"], "ACK attempt precedes decode and close");
+        return value;
+      });
+      const result = await api.call({ archetype: "worker", body: "work", mode: "wait", settings: selected, schema, initiator: "Requester", signal: t.signal,
+        observe: { admitted: async () => {
+          assert.equal(trace().some(row => row[0] === "produced"), true, "the first Tell finished before call admission returned");
+          assert.deepEqual(await cards(), [], "UUID lease protected the producer before the requester knew its child ID");
+        } },
+      });
+      assert.equal(result.observation.kind, "observed");
+      if (result.observation.kind === "observed") assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
+      const input = trace()[0]?.[1] as { akumaIds: string[]; initialTellId: string };
+      assert.match(input.initialTellId, /^[0-9a-f-]{36}$/u);
+      const tell = await readTell(pathsForAkuId(world, result.akuma), input.initialTellId);
+      assert.ok(tell?.binding);
+      assert.deepEqual(trace(), [
+        ["acquire", input], ["produced", result.akuma, tell.binding.turnSequence, [input.initialTellId]],
+        ["observe", result.akuma, `turn/${tell.binding.turnSequence}`], ["close"],
+      ]);
+      assert.deepEqual(await cards(), [], "exact observation consumed the held notice before releasing the UUID lease");
+      bounded = false;
+      writeFileSync(output, "");
+      await api.call({ archetype: "worker", settings: selected, signal: t.signal });
+      await api.call({ archetype: "worker", body: "detached", settings: selected, signal: t.signal });
+      assert.equal(trace().some(row => row[0] === "acquire" || row[0] === "close" || row[0] === "observe"), false,
+        "prompt-free and detached calls acquire no answer scope");
+    } finally { await pump?.close(); }
+  });
 }
 
 const rejectedTell = async (input: PreparedCallInitialTellAdmission): Promise<CallInitialTellAdmission> => {

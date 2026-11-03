@@ -29,11 +29,11 @@ export function recordCallInitialTell(world: WorldRoot, now: () => string = () =
 }
 
 export function isolateSquareFixtureLedger(root: string): () => void {
-  const previous = process.env.SQUARE_HOST_LEDGER_ROOT;
-  process.env.SQUARE_HOST_LEDGER_ROOT = join(root, "square-ledger");
+  const previous = process.env.SQUARE_DELIVERY;
+  process.env.SQUARE_DELIVERY = join(root, "square-ledger", "delivery.sqlite");
   return () => {
-    if (previous === undefined) delete process.env.SQUARE_HOST_LEDGER_ROOT;
-    else process.env.SQUARE_HOST_LEDGER_ROOT = previous;
+    if (previous === undefined) delete process.env.SQUARE_DELIVERY;
+    else process.env.SQUARE_DELIVERY = previous;
   };
 }
 

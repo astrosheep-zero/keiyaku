@@ -124,21 +124,28 @@ class AkumaHandle {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     const schema = options.schema === undefined ? undefined : schemaFromStandard(options.schema);
-    const result = await executeAskAkuma({
-      spawn: this.spawn,
-      path: this.root,
-      id: this.id,
-      outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }),
-      body: text,
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(schema === undefined ? {} : { schemaJson: schemaJsonText(schema) }),
-      ...(options.interrupt === true ? { interrupt: true } : {}),
-      ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
-      ...(signal === undefined ? {} : { signal }),
-    });
-    return (
-      schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }
-    ) as AkumaAskResult<string | T>;
+    return await withAkumaWaitDeferrals(
+      { world: this.root, reportDiagnostic: this.reportDiagnostic },
+      { akumaIds: [this.id] },
+      signal,
+      async () => {
+        const result = await executeAskAkuma({
+          spawn: this.spawn,
+          path: this.root,
+          id: this.id,
+          outcomeObserved: outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }),
+          body: text,
+          ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+          ...(schema === undefined ? {} : { schemaJson: schemaJsonText(schema) }),
+          ...(options.interrupt === true ? { interrupt: true } : {}),
+          ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
+          ...(signal === undefined ? {} : { signal }),
+        });
+        return (
+          schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }
+        ) as AkumaAskResult<string | T>;
+      },
+    );
   }
 
   async report(text: string, options: AkumaReportOptions): Promise<AkumaReportResult> {
@@ -195,7 +202,7 @@ class AkumaHandle {
     const signal = signalOption(options.signal);
     return await withAkumaWaitDeferrals(
       { world: this.root, reportDiagnostic: this.reportDiagnostic },
-      [this.id],
+      { akumaIds: [this.id] },
       signal,
       async () => {
         const waited = await this.owner(true).waitReceipt(defaultWaitComplete, {

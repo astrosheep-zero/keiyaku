@@ -55,7 +55,7 @@ async function attachedSeat(
   declared: string | undefined,
 ): Promise<Participant | undefined> {
   if (declared === undefined) return await selectOwnSeat(square, owner, undefined, { optional: true });
-  const attached = (await square.seatsOf(owner)).filter(({ attachment }) => attachment === "attached");
+  const attached = await square.seatsOf(owner);
   return attached.some(({ name }) => name === declared) ? await square.participant(declared, { owner }) : undefined;
 }
 
@@ -102,6 +102,7 @@ function turnOutcomeMetadata(signal: PluginSignalMap["akuma.turn-outcome"]): Act
       kind: TURN_OUTCOME_KIND,
       akumaId: signal.akumaId,
       historyId: `turn/${signal.turnSequence}`,
+      ...(signal.tellIds === undefined ? {} : { tellIds: Object.fromEntries(signal.tellIds.map(id => [id, true])) }),
     },
   };
 }
@@ -168,7 +169,7 @@ const plugin: KeiyakuPlugin = {
       const control = cancellation === undefined ? {} : { signal: cancellation };
       const square = await openSquare(path, environment, cancellation);
       try {
-        await square.send({ from: NOTIFIER, to: participants, ...notice, truncate: false }, control);
+        await square.send({ from: NOTIFIER, to: participants, ...notice }, control);
         return true;
       } finally {
         await square.close();
@@ -176,7 +177,13 @@ const plugin: KeiyakuPlugin = {
     };
     const waitDeferral: NonNullable<PluginInstance["waitDeferral"]> = async (input, cancellation) => {
       cancellation?.throwIfAborted();
-      if (input.akumaIds.length === 0) return undefined;
+      const selectors: MetadataMatch["fields"] = [
+        ...input.akumaIds.map(akumaId => ({ path: [NOTICE_METADATA_KEY, "akumaId"], equals: akumaId })),
+        ...(input.initialTellId === undefined ? [] : [
+          { path: [NOTICE_METADATA_KEY, "tellIds", input.initialTellId], equals: true },
+        ]),
+      ];
+      if (selectors.length === 0) return undefined;
       const identity = squareIdentity(environment);
       if (identity === undefined) return undefined;
       let square: Square;
@@ -238,14 +245,14 @@ const plugin: KeiyakuPlugin = {
           return undefined;
         }
         const leases = await Promise.allSettled(
-          input.akumaIds.map(async (akumaId) => {
+          selectors.map(async (selector) => {
             cancellation?.throwIfAborted();
             const lease = await seat!.deferDelivery(
               {
                 match: {
                   fields: [
-                    { path: ["keiyaku", "kind"], equals: "akuma.turn-outcome" },
-                    { path: ["keiyaku", "akumaId"], equals: akumaId },
+                    { path: [NOTICE_METADATA_KEY, "kind"], equals: TURN_OUTCOME_KIND },
+                    selector,
                   ],
                 },
                 durationMs: WAIT_DEFERRAL_TTL_MS,
@@ -343,12 +350,7 @@ const plugin: KeiyakuPlugin = {
               { path: [NOTICE_METADATA_KEY, "akumaId"], equals: signal.akumaId },
               { path: [NOTICE_METADATA_KEY, "historyId"], equals: signal.historyId },
             ] };
-            for (;;) {
-              const page = await observer.pending({ from: [NOTIFIER], match }, control);
-              if (page.activities.length === 0) break;
-              cancellation?.throwIfAborted();
-              await observer.ack(page.activities.map(({ id }) => id), control);
-            }
+            await observer.ack({ from: NOTIFIER, match, future: "exact" }, control);
           } finally {
             await square.close();
           }

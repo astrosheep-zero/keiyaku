@@ -44,11 +44,13 @@ function seatWorld(t: TestContext): SeatWorld {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
     SQUARE_INDEX: process.env.SQUARE_INDEX,
+    SQUARE_DELIVERY: process.env.SQUARE_DELIVERY,
   };
   for (const name of SESSION_VARIABLES) delete process.env[name];
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   process.env.SQUARE_INDEX = join(root, "index.ndjsonl");
+  process.env.SQUARE_DELIVERY = join(root, "delivery.sqlite");
   t.after(() => restoreEnvironmentValues(prior));
   return {
     root,
@@ -108,8 +110,7 @@ async function withJoined<T>(
 async function recognize(world: SeatWorld, session: NodeJS.ProcessEnv): Promise<string | undefined> {
   const square = await openSquareFile(world, session);
   try {
-    const seats = (await square.seatsOf(ownerFor(world.environment(session))))
-      .filter(({ attachment }) => attachment === "attached");
+    const seats = await square.seatsOf(ownerFor(world.environment(session)));
     return seats.length === 1 ? seats[0]!.name : undefined;
   } finally {
     await square.close();
@@ -175,6 +176,14 @@ test("an explicit Square name is authoritative and an unusable one selects nothi
     undefined,
     "Square owns the name grammar; an unusable explicit name selects nothing",
   );
+  const blockedParent = join(world.root, "not-a-directory");
+  writeFileSync(blockedParent, "file");
+  const ledger = join(blockedParent, "delivery.sqlite");
+  assert.equal(await squareSeat({
+    path: world.world,
+    environment: world.environment({ SQUARE_PARTICIPANT_NAME: "Custom", SQUARE_DELIVERY: ledger }),
+  }), "Custom");
+  assert.equal(existsSync(ledger), false, "name validation does not join or create host custody");
 });
 
 test("an established legacy participant is reused and a prepared seat becomes recognizable", async (t) => {
@@ -218,7 +227,7 @@ test("a finished seat is not proposed again or implicitly rejoined", async (t) =
   try {
     const owner = ownerFor(world.environment(session));
     assert.deepEqual(await square.seatsOf(owner), [], "standing stays Square's decision");
-    assert.equal(await square.reattach(seat!, { owner }), null, "a finished seat is never restored");
+    await assert.rejects(square.participant(seat!, { owner }), "a finished seat has no participant handle");
     assert.equal(
       (await square.participants()).participants.find(({ name }) => name === seat)?.presence,
       "done",
@@ -226,6 +235,27 @@ test("a finished seat is not proposed again or implicitly rejoined", async (t) =
   } finally {
     await square.close();
   }
+});
+
+test("fallback discovery reads the World without host ledger access", async (t) => {
+  const world = seatWorld(t);
+  const finished = { PI_SESSION_ID: "finished-local" };
+  const seat = await squareSeat({ path: world.world, environment: world.environment(finished) });
+  assert.ok(seat);
+  await withJoined(world, finished, seat, async (participant) => await participant.done());
+  const prior = { PI_SESSION_ID: "prior-local" };
+  const priorName = `pi-${createHash("sha256").update(prior.PI_SESSION_ID).digest("hex").slice(0, 12)}`;
+  await withJoined(world, prior, priorName, async (participant) => await participant.done());
+
+  const blockedParent = join(world.root, "blocked-ledger-parent");
+  writeFileSync(blockedParent, "file");
+  const ledger = join(blockedParent, "delivery.sqlite");
+  const localEnvironment = (session: NodeJS.ProcessEnv) => world.environment({ ...session, SQUARE_DELIVERY: ledger });
+  const fresh = await squareSeat({ path: world.world, environment: localEnvironment({ PI_SESSION_ID: "fresh-local" }) });
+  assert.match(fresh ?? "", /^keiyaku-assigned-[0-9a-f]{12}$/u);
+  assert.equal(await squareSeat({ path: world.world, environment: localEnvironment(finished) }), undefined);
+  assert.equal(await squareSeat({ path: world.world, environment: localEnvironment(prior) }), undefined);
+  assert.equal(existsSync(ledger), false);
 });
 
 test("recognition ambiguity is artifact-owned even when the discovery index is absent", async (t) => {

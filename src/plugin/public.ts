@@ -60,6 +60,7 @@ export type PluginSignalMap = Readonly<{
     turnSequence: number;
     initiator?: string;
     participants?: readonly string[];
+    tellIds?: readonly string[];
     outcome: PluginOutcome;
     contractId?: string;
   }>;
@@ -96,7 +97,10 @@ export type KeiyakuPlugin = Readonly<{
   activate(context: PluginContext, cancellation?: AbortSignal): Promise<PluginInstance> | PluginInstance;
 }>;
 
-export type PluginWaitDeferralInput = Readonly<{ akumaIds: readonly string[] }>;
+export type PluginWaitDeferralInput = Readonly<{
+  akumaIds: readonly string[];
+  initialTellId?: string;
+}>;
 
 export type PluginWaitDeferral = Readonly<{
   close(cancellation?: AbortSignal): Promise<void> | void;

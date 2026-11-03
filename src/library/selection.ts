@@ -90,7 +90,7 @@ export function selectionSeam(
     wait: async (addressed, mode) =>
       await withAkumaWaitDeferrals(
         { world: addressed.path, reportDiagnostic },
-        addressed.orderedIds,
+        { akumaIds: addressed.orderedIds },
         mode.signal,
         async () => {
           const result = await routed.wait(addressed, mode);
@@ -98,6 +98,13 @@ export function selectionSeam(
           await Promise.all(result.observations.map(({ status }) => observeStatusOutcome(status, observer)));
           return result;
         },
+      ),
+    ask: async (addressed, input, signal) =>
+      await withAkumaWaitDeferrals(
+        { world: addressed.path, reportDiagnostic },
+        { akumaIds: [addressed.id] },
+        signal,
+        async () => await routed.ask(addressed, input, signal),
       ),
   };
 }

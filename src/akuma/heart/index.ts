@@ -71,6 +71,7 @@ import {
   tellFact,
   tellIdsForFence,
   turnParticipants,
+  turnTellIds,
 } from "./tells.js";
 import {
   activityFactSlice,
@@ -718,6 +719,10 @@ export async function readTurn(paths: AkumaPaths, sequence: number): Promise<Tur
 
 export async function readTurnParticipants(paths: AkumaPaths, sequence: number): Promise<readonly string[]> {
   return await withReadOnlyHeart(paths, (heart) => turnParticipants(heart, sequence));
+}
+
+export async function readTurnTellIds(paths: AkumaPaths, sequence: number): Promise<readonly string[]> {
+  return await withReadOnlyHeart(paths, (heart) => turnTellIds(heart, sequence));
 }
 
 export async function readLatestTurnForBody(paths: AkumaPaths, bodySequence: number): Promise<TurnFact | null> {

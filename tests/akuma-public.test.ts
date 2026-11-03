@@ -85,7 +85,7 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
   const turnStarted = join(root, "turn-outcome-started");
   const turnRelease = join(root, "turn-outcome-release");
   const turnSettled = join(root, "turn-outcome-settled");
-  const ledger = join(root, "square-ledger");
+  const ledger = join(root, "square-ledger", "delivery.sqlite");
   mkdirSync(plugins, { recursive: true });
   writeFileSync(
     join(plugins, "square-wrapper.mjs"),
@@ -103,11 +103,11 @@ function configureDeferredBodyEndPlugin(root: string): DeferredBodyEnd {
       "export default {",
       '  manifest: { id: "square", apiVersion: 1, writablePaths: [{ name: "square", path: ".square" }] },',
       "  async activate(context) {",
-      "    const previous = process.env.SQUARE_HOST_LEDGER_ROOT;",
-      "    process.env.SQUARE_HOST_LEDGER_ROOT = context.config.ledger;",
+      "    const previous = process.env.SQUARE_DELIVERY;",
+      "    process.env.SQUARE_DELIVERY = context.config.ledger;",
       "    let actual;",
       "    try { actual = await square.activate(context); } finally {",
-      "      if (previous === undefined) delete process.env.SQUARE_HOST_LEDGER_ROOT; else process.env.SQUARE_HOST_LEDGER_ROOT = previous;",
+      "      if (previous === undefined) delete process.env.SQUARE_DELIVERY; else process.env.SQUARE_DELIVERY = previous;",
       "    }",
       '    const handler = actual.signals?.["akuma.turn-outcome"];',
       '    if (handler === undefined) throw new Error("Square plugin has no turn-outcome handler");',

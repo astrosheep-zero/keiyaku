@@ -14,7 +14,7 @@ import { World } from "../src/world.js";
 import { restoreEnvironmentValues } from "./support/process.js";
 import { runCli } from "./support/cli-fixtures.js";
 
-test("wait-scoped plugin resources surround one route and close after its final observation", async () => {
+test("frozen call correlation and independent resources surround observation", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -24,9 +24,10 @@ test("wait-scoped plugin resources surround one route and close after its final 
       [
         'import { appendFileSync } from "node:fs";',
         'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
-        "  return { waitDeferral(input) {",
-        '    appendFileSync(context.config.trace, `acquire:${input.akumaIds.join(",")}:${Object.isFrozen(input.akumaIds)}\\n`);',
-        "    return { close(cleanup) { appendFileSync(context.config.trace, `close:${cleanup.aborted}\\n`); } };",
+        '  let next = 0; return { waitDeferral(input) {',
+        '    const id = ++next;',
+        '    appendFileSync(context.config.trace, `acquire:${id}:${input.akumaIds.join(",")}:${input.initialTellId}:${Object.isFrozen(input)}:${Object.isFrozen(input.akumaIds)}\\n`);',
+        '    return { close(cleanup) { appendFileSync(context.config.trace, `close:${id}:${cleanup.aborted}\\n`); } };',
         "  } };",
         "} };",
       ].join("\n"),
@@ -37,10 +38,20 @@ test("wait-scoped plugin resources surround one route and close after its final 
     });
     const world = await World.at(value.root);
     const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
-    await runtime.withWaitDeferrals(["aku/one", "aku/two"], undefined, async () => {
-      appendFileSync(output, "route-and-final-observation\n");
+    const selected = { akumaIds: [] as string[], initialTellId: "first-tell" };
+    const pending = runtime.withWaitDeferrals(selected, undefined, async () => {
+      await runtime.withWaitDeferrals({ akumaIds: ["aku/one", "aku/two"] }, undefined, async () => {
+        appendFileSync(output, "route-and-final-observation\n");
+      });
+      appendFileSync(output, "outer-still-active\n");
     });
-    assert.deepEqual(trace(output), ["acquire:aku/one,aku/two:true", "route-and-final-observation", "close:false"]);
+    selected.akumaIds.push("aku/changed");
+    selected.initialTellId = "changed-tell";
+    await pending;
+    assert.deepEqual(trace(output), [
+      "acquire:1::first-tell:true:true", "acquire:2:aku/one,aku/two:undefined:true:true",
+      "route-and-final-observation", "close:2:false", "outer-still-active", "close:1:false",
+    ]);
   } finally {
     value.close();
   }
@@ -66,7 +77,7 @@ test("timed-out acquisition closes a scope that arrives later", async (context) 
     const world = await World.at(value.root);
     const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
     const advance = deadlineClock(context);
-    const pending = runtime.withWaitDeferrals(["aku/one"], undefined, async () => {
+    const pending = runtime.withWaitDeferrals({ akumaIds: [], initialTellId: "first-tell" }, undefined, async () => {
       appendFileSync(output, "route\n");
     });
     await eventually(() => trace(output).includes("started"));
@@ -107,12 +118,12 @@ test("pre-aborted wait acquires nothing; rejected cleanup preserves both result 
     const aborted = new AbortController();
     aborted.abort();
     await assert.rejects(
-      runtime.withWaitDeferrals(["aku/one"], aborted.signal, async () => assert.fail("route must not run")),
+      runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, aborted.signal, async () => assert.fail("route must not run")),
     );
     const result = {};
-    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => result), result);
+    assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => result), result);
     await assert.rejects(
-      runtime.withWaitDeferrals(["aku/one"], undefined, async () => {
+      runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => {
         throw new Error("wait failed");
       }),
       /wait failed/u,
@@ -156,7 +167,7 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
       reportDiagnostic: message => diagnostics.push(message) });
     const caller = new AbortController();
     const reason = new Error("caller cancelled");
-    const pending = runtime.withWaitDeferrals(["aku/one"], caller.signal, async () => assert.fail("must not start"));
+    const pending = runtime.withWaitDeferrals({ akumaIds: [], initialTellId: "first-tell" }, caller.signal, async () => assert.fail("must not start"));
     const rejected = assert.rejects(pending, error => error === reason);
     await eventually(() => trace(output).includes("gamma:started"));
     caller.abort(reason);
@@ -167,7 +178,7 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
     diagnostics.length = 0;
     writeFileSync(output, "");
     const advance = deadlineClock(context);
-    const timed = runtime.withWaitDeferrals(["aku/timeout"], undefined, async () => "result");
+    const timed = runtime.withWaitDeferrals({ akumaIds: ["aku/timeout"] }, undefined, async () => "result");
     await eventually(() => trace(output).includes("gamma:started"));
     advance(5000);
     assert.equal(await timed, "result");
@@ -188,7 +199,7 @@ test("caller abort outranks concurrent runtime acquisition failure", async () =>
     } };
     await assert.rejects(withAkumaWaitDeferrals({
       world: await World.at(value.root), settings: failing, reportDiagnostic: () => assert.fail("abort is not a plugin failure"),
-    }, ["aku/one"], caller.signal, async () => assert.fail("aborted operation must not run")), error => error === reason);
+    }, { akumaIds: ["aku/one"] }, caller.signal, async () => assert.fail("aborted operation must not run")), error => error === reason);
   } finally { value.close(); }
 });
 
@@ -199,7 +210,7 @@ test("wait with no selected plugins preserves its result", async () => {
     const runtime = await pluginRuntime({ world: await World.at(value.root),
       settings: await settings({ root: value.root, home: value.home }) });
     const result = {};
-    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => result), result);
+    assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => result), result);
   } finally { value.close(); }
 });
 
@@ -230,7 +241,7 @@ test("wait cleanup has a fresh bound and cannot replace the original error", asy
     const caller = new AbortController();
     const primary = new Error("original operation failed");
     let settled = false;
-    const pending = runtime.withWaitDeferrals(["aku/one"], caller.signal, async () => { throw primary; });
+    const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, caller.signal, async () => { throw primary; });
     const rejected = assert.rejects(pending, error => error === primary).then(() => { settled = true; });
     await eventually(() => trace(output).length === 1);
     caller.abort(new Error("caller cancelled after operation"));
@@ -257,7 +268,7 @@ test("malformed wait resources diagnose without changing the route result", asyn
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({ world: await World.at(value.root),
       settings: await settings({ root: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
-    assert.equal(await runtime.withWaitDeferrals(["aku/one"], undefined, async () => "result"), "result");
+    assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => "result"), "result");
     assert.equal(diagnostics.length, 1);
     assert.match(diagnostics[0]!, /wait deferral validation: resource close must be a function/u);
   } finally { value.close(); }

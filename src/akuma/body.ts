@@ -25,6 +25,7 @@ import {
   readTell,
   readTurn,
   readTurnParticipants,
+  readTurnTellIds,
   readNonterminalRequests,
   resolvePendingTellDisposition,
   type PendingTellDisposition,
@@ -372,6 +373,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
         if (turn?.end === undefined) throw new Error(`Committed Turn ${turnSequence} outcome is missing from Heart`);
         const outcome = turn.end.outcome;
         const participants = await readTurnParticipants(launch.paths, turnSequence);
+        const tellIds = await readTurnTellIds(launch.paths, turnSequence);
         await emitPluginSignal(
           { world, reportDiagnostic },
           {
@@ -379,6 +381,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
             akumaId: soul.id,
             bodySequence: turn.bodySequence,
             turnSequence,
+            tellIds,
             ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
             ...(participants.length === 0 ? {} : { participants }),
             outcome:

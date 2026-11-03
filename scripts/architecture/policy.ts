@@ -389,7 +389,15 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "library/contract/**", ...contractOwner },
     {
       source: "library/akuma-creation.ts",
-      allow: [...libraryOwner.allow, any("plugin/akuma-signals.ts", ["emitPluginSignal", "outcomePluginObserver"])],
+      allow: [
+        ...libraryOwner.allow,
+        any("plugin/akuma-signals.ts", [
+          "emitPluginSignal",
+          "outcomePluginObserver",
+          "stderrPluginDiagnostic",
+          "withAkumaWaitDeferrals",
+        ]),
+      ],
       deny: [...libraryOwner.deny, any("akuma/detached-body.ts")],
     },
     {

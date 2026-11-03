@@ -6,21 +6,22 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Square, harnessOwner } from "@astrosheep/square";
+import { Square, DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
-import test, { after } from "node:test";
+import test, { after, type TestContext } from "node:test";
 import { Akuma, Akumas, Schema, World, type WorldRoot } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
-import { beginTurn, endTurn, finishBodyIfIdle, readTell } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
 import { BodyRequestPump } from "../src/akuma/request-serve.js";
 import { bodyRequestExecution } from "../src/akuma/requests.js";
 import { selectionRequestCommands } from "../src/akuma/selection-request.js";
 import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
 import { akumasWithExecution } from "../src/library/akumas.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
-import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
-import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
+import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
 type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; historyId: string; observer?: string }>;
@@ -68,6 +69,91 @@ function recordingPlugin(world: WorldRoot, fail = false) {
     reset: () => writeFileSync(output, ""),
   };
 }
+
+test("Body outcome correlates exact Turn bindings through many steers, no bindings, and cancellation", { timeout: 15_000 }, async (t) => {
+  const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-tell-ids-"), "0b500017");
+  const output = join(source.world, "outcomes.jsonl");
+  mkdirSync(join(source.world, "plugins"), { recursive: true });
+  writeFileSync(join(source.world, "plugins", "outcomes.mjs"), `
+    import { appendFileSync } from "node:fs";
+    export default { manifest: { id: "outcomes", apiVersion: 1 }, activate(context) {
+      return { signals: { "akuma.turn-outcome": signal => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n") } };
+    } };
+  `);
+  writeFileSync(join(source.world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+  }));
+  let started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  let received!: () => void;
+  const bothReceived = new Promise<void>((resolve) => { received = resolve; });
+  const steers: string[] = [];
+  const adapter = fixtureAdapter(async () => ({
+    events: { async *[Symbol.asyncIterator]() {
+      yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
+      started();
+      await released;
+    } },
+    completion: released.then(() => ({ kind: "answered" as const, answer: "done", historyId: "answer" })),
+    async tell(input) {
+      steers.push(input.id);
+      if (steers.length === 2) received();
+      return { kind: "accepted" as const, fence: input.id };
+    },
+    resource: { abort: async () => { release(); } },
+  }));
+  const runtime = { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => AT };
+  const body = driveAkumaBody({ paths: source.allocated.paths, initialBody: "work" }, adapter, runtime);
+  try {
+    await ready;
+    await recordTell(source.allocated.paths, { kind: "tell", id: "live-one", body: "one", recordedAt: AT });
+    await recordTell(source.allocated.paths, { kind: "tell", id: "live-two", body: "two", recordedAt: AT });
+    await bothReceived;
+  } finally {
+    release();
+    await body;
+  }
+  const empty = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-empty-ids-"), "0b500018");
+  mkdirSync(join(empty.world, "plugins"), { recursive: true });
+  writeFileSync(join(empty.world, "plugins", "outcomes.mjs"), readFileSync(join(source.world, "plugins", "outcomes.mjs")));
+  writeFileSync(join(empty.world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+  }));
+  await driveAkumaBody({ paths: empty.allocated.paths, initialBody: "no tells" }, answering("second"), runtime);
+  const canceled = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-canceled-ids-"), "0b500021");
+  mkdirSync(join(canceled.world, "plugins"), { recursive: true });
+  writeFileSync(join(canceled.world, "plugins", "outcomes.mjs"), readFileSync(join(source.world, "plugins", "outcomes.mjs")));
+  writeFileSync(join(canceled.world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+  }));
+  const canceledStarted = deferred<void>();
+  const bound = deferred<void>();
+  const closed = deferred<void>();
+  const canceledBody = driveAkumaBody({ paths: canceled.allocated.paths, initialBody: "cancel me" }, fixtureAdapter(async () => ({
+    events: { async *[Symbol.asyncIterator]() { canceledStarted.resolve(); await closed.promise; } },
+    completion: new Promise<never>(() => {}),
+    async tell(input) { bound.resolve(); return { kind: "accepted" as const, fence: input.id }; },
+    resource: { closed: closed.promise, abort: async () => { closed.resolve(); } },
+  })), runtime);
+  try {
+    await canceledStarted.promise;
+    await recordTell(canceled.allocated.paths, { kind: "tell", id: "canceled-tell", body: "steer", recordedAt: AT });
+    await bound.promise;
+    assert.equal(await Akuma.select(canceled.world, canceled.allocated.id).kill({ signal: t.signal }), "killed");
+  } finally { closed.resolve(); await canceledBody; }
+  const outcomes = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(outcomes.length, 3);
+  assert.deepEqual(outcomes[0].tellIds, ["live-one", "live-two"]);
+  assert.deepEqual(outcomes[1].tellIds, []);
+  assert.equal(outcomes[0].akumaId, source.allocated.id);
+  assert.equal(outcomes[1].akumaId, empty.allocated.id);
+  assert.deepEqual(outcomes[2].tellIds, ["canceled-tell"]);
+  assert.deepEqual(outcomes[2].outcome, { kind: "canceled" });
+  assert.equal((await readTell(source.allocated.paths, "live-one"))?.binding?.turnSequence, outcomes[0].turnSequence);
+  assert.equal((await readTell(source.allocated.paths, "live-two"))?.binding?.turnSequence, outcomes[0].turnSequence);
+});
 
 test("public hosts capture independent immutable sinks for native and plural observations", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-host-diagnostics-"));
@@ -314,59 +400,145 @@ test("forwarded wait and ask have exactly one requesting observer", { timeout: 1
   }
 });
 
-test("forwarded wait acknowledges a real Square notice using the requester's local ownership", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-forwarded-"));
-  const identityVariables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID", "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION"];
-  const prior = { ...Object.fromEntries(identityVariables.map((key) => [key, process.env[key]])),
-    SQUARE_PARTICIPANT_NAME: process.env.SQUARE_PARTICIPANT_NAME, SQUARE_INDEX: process.env.SQUARE_INDEX };
-  for (const key of identityVariables) delete process.env[key];
+async function squareObserver(t: TestContext, world: WorldRoot) {
+  const variables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID",
+    "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION", "SQUARE_PARTICIPANT_NAME", "SQUARE_INDEX", "SQUARE_DELIVERY"];
+  const prior = Object.fromEntries(variables.map(key => [key, process.env[key]]));
+  variables.forEach(key => { delete process.env[key]; });
   process.env.SQUARE_PARTICIPANT_NAME = "Requester";
   process.env.PI_SESSION_ID = "requester-session";
   process.env.SQUARE_INDEX = join(world, "index.ndjsonl");
+  process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
   t.after(() => restoreEnvironmentValues(prior));
-  const target = await bornBody(world, "0b500009", AT);
-  t.after(() => target.holder.release());
-  const turn = await outcome(target, "known answer");
-  await finish(target);
-  const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500010", createdAt: AT });
-  t.after(() => parent.leash.release());
-  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
   const path = join(world, ".square", "KEIYAKU.square");
   mkdirSync(join(world, ".square"), { recursive: true });
   const square = await Square.build({ path, markdown: "" });
-  t.after(() => square.close());
-  await square.join("Requester", { owner: harnessOwner({ channel: "pi", session: "requester-session" }) });
-  const serving = await Square.at({ path });
-  try {
-    await serving.join("ServingSession", { owner: harnessOwner({ channel: "pi", session: "serving-session" }) });
-  } finally { await serving.close(); }
-  const observer = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
-  await observer.signals?.["akuma.turn-outcome"]?.({
-    kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
-    turnSequence: turn.sequence, participants: ["Requester", "ServingSession"], outcome: { kind: "answered", text: "known answer" },
-  });
-  const requester = await square.participant("Requester", { owner: harnessOwner({ channel: "pi", session: "requester-session" }) });
-  const servingRecipient = await square.participant("ServingSession", { owner: harnessOwner({ channel: "pi", session: "serving-session" }) });
-  const notice = (await requester.pending()).activities[0]!;
-  assert.ok(notice);
+  const owner = harnessOwner({ channel: "pi", session: "requester-session" });
+  const other = harnessOwner({ channel: "pi", session: "other-session" });
+  await square.join("Requester", { owner });
+  await square.join("Other", { owner: other });
+  const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
+  t.after(async () => { await square.close(); await ledger.close(); });
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(join(world, "plugins", "square.mjs"),
     `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { package: "./plugins/square.mjs" } } }));
-  const diagnostics: string[] = [];
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
-    commands: selectionRequestCommands(selectionRequestPort(world, noBodyLaunch)),
+  const plugin = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
+  return {
+    square, plugin,
+    async cards(recipient = owner) {
+      const session = await ledger.session(recipient);
+      assert.ok(session);
+      return await ledger.pending(recipient, { generation: session.generation });
+    },
+    other,
+  };
+}
+
+for (const route of ["wait", "forwarded-wait", "idle"] as const) {
+  test(`${route} consumes the exact outcome before a real Square notice is inserted`, async (t) => {
+    const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-wait-"));
+    const target = await bornBody(world, "0b500009", AT);
+    t.after(() => target.holder.release());
+    const turn = await outcome(target, "known answer");
+    await finish(target);
+    const observed = await squareObserver(t, world);
+    let pump: BodyRequestPump | undefined;
+    if (route === "forwarded-wait") {
+      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500010", createdAt: AT });
+      t.after(() => parent.leash.release());
+      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
+      pump = await BodyRequestPump.open({
+        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
+        commands: selectionRequestCommands(selectionRequestPort(world, noBodyLaunch)),
+      });
+    }
+    try {
+      const api = pump === undefined ? Akumas.of(world) : akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
+      const result = route === "idle"
+        ? await Akuma.select(world, target.allocated.id).idle({ timeoutMs: 0 })
+        : await api.wait({ akuma: [target.allocated.id], timeoutMs: 0, signal: t.signal });
+      assert.equal(result.reason, "completed");
+      const signal = {
+        kind: "akuma.turn-outcome" as const, akumaId: target.allocated.id, bodySequence: target.body.sequence,
+        turnSequence: turn.sequence, participants: ["Requester", "Other"], outcome: { kind: "answered" as const, text: "known answer" },
+      };
+      await observed.plugin.signals?.["akuma.turn-outcome"]?.(signal);
+      assert.deepEqual(await observed.cards(), []);
+      assert.equal((await observed.cards(observed.other)).length, 1, "other recipient still posts");
+      await observed.plugin.signals?.["akuma.turn-outcome"]?.({ ...signal, turnSequence: turn.sequence + 1 });
+      assert.equal((await observed.cards()).length, 1, "another Turn remains deliverable");
+    } finally { await pump?.close(); }
   });
-  try {
-    const waited = await akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }))
-      .wait({ akuma: [target.allocated.id], timeoutMs: 5_000, signal: t.signal });
-    assert.equal(waited.reason, "completed");
-    assert.deepEqual((await requester.pending()).activities, []);
-    assert.deepEqual((await servingRecipient.pending()).activities.map(({ id }) => id), [notice.id]);
-    assert.deepEqual(diagnostics, []);
-  } finally { await pump.close(); }
+}
+
+test("a deadline without an established outcome releases deferral without consuming a later notice", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-deadline-"));
+  const target = await bornBody(world, "0b500022", AT);
+  t.after(() => target.holder.release());
+  const observed = await squareObserver(t, world);
+  const result = await Akuma.select(world, target.allocated.id).idle({ timeoutMs: 0, signal: t.signal });
+  assert.equal(result.reason, "deadline");
+  const turn = await outcome(target, "after deadline");
+  await finish(target);
+  await observed.plugin.signals?.["akuma.turn-outcome"]?.({
+    kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
+    turnSequence: turn.sequence, participants: ["Requester"], outcome: { kind: "answered", text: "after deadline" },
+  });
+  assert.equal((await observed.cards()).length, 1);
 });
+
+for (const route of ["ask", "forwarded-ask", "standalone-ask"] as const) {
+  test(`${route} observes and decodes before its delayed real notice is inserted`, { timeout: 15_000 }, async (t) => {
+    const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-square-ask-"), "0b500019");
+    const observed = await squareObserver(t, source.world);
+    const bodies: Promise<unknown>[] = [];
+    const spawn = fixtureLauncher(bodies, new Map([
+      [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
+    ]));
+    const prototype = Object.getPrototypeOf(observed.square) as Square;
+    const send = prototype.send;
+    let entered!: () => void;
+    const sending = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>(resolve => { release = resolve; });
+    t.mock.method(prototype, "send", async function(this: Square, ...args: Parameters<typeof send>) {
+      const identity = args[0].metadata?.keiyaku;
+      if (identity !== null && typeof identity === "object" && "akumaId" in identity && identity.akumaId === source.allocated.id) {
+        entered(); await released;
+      }
+      return await send.apply(this, args);
+    });
+    let pump: BodyRequestPump | undefined;
+    if (route === "forwarded-ask") {
+      const parent = await bornDirectAkuma({ root: source.world, archetype: "parent", draw: "0b500020", createdAt: AT });
+      t.after(() => parent.leash.release());
+      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
+      pump = await BodyRequestPump.open({
+        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
+        commands: selectionRequestCommands(selectionRequestPort(source.world, spawn)),
+      });
+    }
+    try {
+      const schema = Schema.json({ type: "object" }, () => { throw new Error("decoder refused"); });
+      const result = route === "standalone-ask"
+        ? await akumaWithLauncher(source.world, source.allocated.id, spawn).ask("work", { schema, initiator: "Requester", signal: t.signal })
+        : await (pump === undefined
+          ? akumasWithLauncher(source.world, localExecutionContext(), spawn)
+          : akumasWithExecution(source.world, bodyRequestExecution({ directory: pump.directory })))
+          .ask({ akuma: source.allocated.id, body: "work", schema, initiator: "Requester", signal: t.signal });
+      assert.equal(result.observation.reason, "invalid-output");
+      await sending;
+      release();
+      await settleFixtureBodies(bodies);
+      assert.deepEqual(await observed.cards(), [], "exact early ACK survives schema decoding failure and scope release");
+    } finally {
+      release();
+      await settleFixtureBodies(bodies);
+      await pump?.close();
+    }
+  });
+}
 
 test("ask retains the observed outcome through schema and plugin failure using its host sink", { timeout: 15_000 }, async (t) => {
   const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-ask-"), "0b500008");

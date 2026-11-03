@@ -24,7 +24,7 @@ import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
 import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { activitySlice, appendActivity, beginTurn, breakBody, endTurn, HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
+import { activitySlice, appendActivity, beginTurn, breakBody, endTurn, HeldAkumaLeash, initializeHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
@@ -212,6 +212,74 @@ test("facade ask refuses path selection and invalid timeout before addressing", 
     /Akumas\.ask input has unknown field: extra/u,
   );
 });
+
+for (const route of ["local", "forwarded"] as const) {
+  test(`${route} ask holds its requester resource before admission through exact observation and decoding`, { timeout: 15_000 }, async (t) => {
+    const world = await World.at(fixtureRoot(t, "keiyaku-ask-scope-"));
+    const source = await bornWorld(world, "0def0004");
+    const output = join(world, "ask-trace.jsonl");
+    const trace = (): unknown[][] => readFileSync(output, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    mkdirSync(join(world, "plugins"), { recursive: true });
+    writeFileSync(join(world, "plugins", "ask.mjs"), `
+      import { appendFileSync } from "node:fs";
+      export default { manifest: { id: "ask", apiVersion: 1 }, activate() {
+        const record = value => appendFileSync(${JSON.stringify(output)}, JSON.stringify(value) + "\\n");
+        return {
+          waitDeferral(input) { record(["acquire", input]); return { close() { record(["close"]); } }; },
+          signals: { "akuma.outcome-observed": signal => record(["observe", signal.akumaId, signal.historyId]) }
+        };
+      } };
+    `);
+    writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      ask: { package: "./plugins/ask.mjs" },
+    } }));
+    const acquired = [["acquire", { akumaIds: [source.allocated.id] }]];
+    const bodies: Promise<unknown>[] = [];
+    const launch = fixtureLauncher(bodies, new Map([
+      [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: WAIT_AT }],
+    ]));
+    const spawn: typeof launch = async input => {
+      assert.deepEqual(trace(), acquired, "the resource precedes Tell admission and launch");
+      return await launch(input);
+    };
+    let pump: BodyRequestPump | undefined;
+    if (route === "forwarded") {
+      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0def0005", createdAt: WAIT_AT });
+      t.after(() => parent.leash.release());
+      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAIT_AT });
+      const port = selectionRequestPort(world, spawn);
+      pump = await BodyRequestPump.open({
+        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        now: () => WAIT_AT, signal: t.signal,
+        commands: selectionRequestCommands({ ...port, ask: async request => {
+          assert.deepEqual(trace(), acquired, "acquire precedes forwarding and the server acquires nothing");
+          return await port.ask!(request);
+        } }),
+      });
+    }
+    try {
+      const api = pump === undefined
+        ? akumasWithLauncher(world, localExecutionContext(), spawn)
+        : akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
+      const schema = Schema.json({ type: "object" }, () => {
+        const rows = trace();
+        assert.deepEqual(rows.slice(0, 1), acquired);
+        assert.equal(rows.length, 2, "exact observation runs while the resource is held");
+        assert.deepEqual(rows[1]?.slice(0, 2), ["observe", source.allocated.id]);
+        throw new Error("invalid answer");
+      });
+      const result = await api.ask({ akuma: source.allocated.id, body: "work", schema, signal: t.signal });
+      assert.equal(result.observation.reason, "invalid-output");
+      const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
+      assert.ok(tell?.binding);
+      assert.deepEqual(trace(), [...acquired, ["observe", source.allocated.id, `turn/${tell.binding.turnSequence}`], ["close"]]);
+    } finally {
+      await settleFixtureBodies(bodies);
+      await pump?.close();
+    }
+  });
+}
 
 for (const route of ["local", "forwarded", "idle"] as const) {
   test(`${route} wait owns one scope through only its final outcome observation`, { timeout: 15_000 }, async (t) => {

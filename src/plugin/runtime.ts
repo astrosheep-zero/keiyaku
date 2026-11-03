@@ -42,7 +42,7 @@ type RegisteredHandler = Readonly<{
 export type PluginRuntime = Readonly<{
   emit(signal: PluginSignal, reportDiagnostic?: PluginDiagnostic): Promise<void>;
   withWaitDeferrals<T>(
-    akumaIds: readonly string[],
+    input: PluginWaitDeferralInput,
     signal: AbortSignal | undefined,
     action: () => Promise<T>,
     reportDiagnostic?: PluginDiagnostic,
@@ -565,13 +565,16 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
       }
     },
     async withWaitDeferrals<T>(
-      akumaIds: readonly string[],
+      selected: PluginWaitDeferralInput,
       signal: AbortSignal | undefined,
       action: () => Promise<T>,
       reportDiagnostic: PluginDiagnostic | undefined = report,
     ): Promise<T> {
       signal?.throwIfAborted();
-      const input = Object.freeze({ akumaIds: Object.freeze([...akumaIds]) });
+      const input = Object.freeze({
+        akumaIds: Object.freeze([...selected.akumaIds]),
+        ...(selected.initialTellId === undefined ? {} : { initialTellId: selected.initialTellId }),
+      });
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
       const scopes = await Promise.all(
         activations.map((plugin) => acquireWaitDeferral(plugin, input, signal, deadline, reportDiagnostic)),

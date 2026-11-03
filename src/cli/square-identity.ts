@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { Square, SquareError, harnessOwner, localUserOwner, type Owner } from "@astrosheep/square";
+import { Square, SquareError, harnessOwner, requireJoinName, type Owner } from "@astrosheep/square";
 import type { WorldRoot } from "../world.js";
 
 /**
@@ -67,9 +67,9 @@ function priorSeatNames(environment: NodeJS.ProcessEnv): readonly string[] {
   });
 }
 
-async function usableName(name: string): Promise<boolean> {
+function usableName(name: string): boolean {
   try {
-    await Square.inMemory({ markdown: "" }).join(name, { owner: localUserOwner() });
+    requireJoinName(name);
     return true;
   } catch {
     return false;
@@ -96,11 +96,11 @@ async function standingAt(
       : { kind: "indeterminate" };
   }
   try {
-    const standing = (await square.seatsOf(owner)).filter(({ attachment }) => attachment === "attached");
+    const standing = await square.seatsOf(owner);
     if (standing.length === 1) return { kind: "standing", name: standing[0]!.name };
     if (standing.length > 1) return { kind: "indeterminate" };
     const known = new Set(priorSeatNames(environment));
-    const participants = (await square.participants({}, { signal })).participants;
+    const participants = (await square.participants({ local: true }, { signal })).participants;
     if (participants.some(({ name, presence }) => known.has(name) && presence !== "never-joined"))
       return { kind: "indeterminate" };
     return { kind: "absent" };
@@ -143,7 +143,7 @@ function whenAborted(signal: AbortSignal): Promise<undefined> {
 
 export async function squareSeat(input: SquareSeatInput, control: SquareSeatControl = {}): Promise<string | undefined> {
   const name = declared(input.environment, "SQUARE_PARTICIPANT_NAME");
-  if (name !== undefined) return (await usableName(name)) ? name : undefined;
+  if (name !== undefined) return usableName(name) ? name : undefined;
   const owner = squareOwner(input.environment);
   const candidate = seatCandidate(input.environment);
   if (owner === undefined) return undefined;
