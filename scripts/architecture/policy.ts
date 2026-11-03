@@ -659,6 +659,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("library/contract-composition.ts"),
         types("library/contract-outcomes.ts"),
         types("library/contract-types.ts"),
+        types("library/contract-wait.ts"),
         types("library/continuation.ts"),
         types("library/reconcile.ts"),
         types("library/refusal.ts"),

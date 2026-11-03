@@ -1220,7 +1220,7 @@ test("named Address resolves a retained Alias outside Kanshi roster rows", async
   );
 });
 
-test("cross-World Contract selector wait and kill refuse before operating", async (t) => {
+test("Contract wait refuses selectors while cross-World Contract kill refuses before operating", async (t) => {
   const rawA = fixtureRepository(t);
   const rawB = fixtureRepository(t);
   for (const repository of [rawA, rawB]) {
@@ -1246,12 +1246,7 @@ test("cross-World Contract selector wait and kill refuse before operating", asyn
     repo: repoB,
     timeoutMs: 0,
   });
-  await assert.rejects(wait, (error: unknown) => {
-    assert.ok(error instanceof AkumaWorldScopeError);
-    assert.deepEqual(error.refusal, { kind: "akuma-not-in-world", ids: [born.id], world: worldB });
-    assert.doesNotMatch(error.message, /is not born/u);
-    return true;
-  });
+  await assert.rejects(wait, /Akumas\.wait does not accept Contract selectors/u);
   await assert.rejects(
     Akumas.of(worldB).kill({
     akuma: ["kei/foreign"], repo: repoB }),

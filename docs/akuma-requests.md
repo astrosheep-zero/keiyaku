@@ -6,7 +6,9 @@ Verb owners alone define their payloads, results, and service evidence.
 Delivery preview retains the Contract request owner's one-hop transport as an
 unkeyed observation. Its descriptor is preview-only, preserves the native live
 result and failure evidence, and cannot invoke mutable delivery. Service evidence
-records observation, not candidate admission or placement.
+records observation, not candidate admission or placement. Contract wait is likewise
+an unkeyed, cancellable, parent-served observation of the same native owner;
+its live result is not durable replay evidence and it never falls back to local Git.
 
 ## Transport And Authority
 

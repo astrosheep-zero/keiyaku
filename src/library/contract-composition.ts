@@ -27,6 +27,8 @@ import type {
   LocalContractComposition,
 } from "./contract-types.js";
 import { requireInput } from "./input.js";
+import { validateContractWait, type ContractWaitInput, type ContractWaitResult } from "./contract-wait.js";
+import { waitContractRouted } from "./contract-wait-request.js";
 import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
 import { readContractValue } from "./outcome.js";
 import {
@@ -50,6 +52,7 @@ export type KeiyakuLibrary = Readonly<{
   resolve(input: ContractResolveInput): Promise<ContractResolution>;
   list(input: ContractListInput): Promise<ContractList>;
   observe(input: ContractObservationInput): Promise<ContractObservation>;
+  wait(input: ContractWaitInput): Promise<ContractWaitResult>;
   reconcile: KeiyakuLibraryReconcile;
 }>;
 
@@ -71,6 +74,7 @@ export function composeContractLibrary(
     resolve: resolveContract,
     list: (operation: ContractListInput) => listKeiyaku(operation),
     observe: (operation: ContractObservationInput) => observeKeiyaku(operation),
+    wait: async (operation: ContractWaitInput) => await waitContractRouted(validateContractWait(operation), execution),
     reconcile: reconcileOperation(composition),
   });
 }

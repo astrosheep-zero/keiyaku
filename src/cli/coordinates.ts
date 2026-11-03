@@ -77,6 +77,24 @@ export const cliCoordinateDiscovery = {
   },
   async resolve(input: CliCoordinateInput): Promise<CliCoordinates> {
     const cwd = await resolveInvocationCwd(input);
+    if (input.command.command === "wait" && input.command.akuma.every((selector) => selector.startsWith("kei/"))) {
+      const selectedRepo = await discoverRepoAt(
+        input.repo === undefined ? cwd : resolve(cwd, input.repo),
+        input.gitPath,
+      );
+      const repo = repoFor("required", selectedRepo)!;
+      return {
+        cwd,
+        cwdSource: input.cwd === undefined ? "process" : "input",
+        repo,
+        world: null,
+        candidateWorld: null,
+        debtContext: { directory: cwd, boundary: cwd, writeRoot: cwd, managed: false },
+        establishWorld: async () => {
+          throw new Error("Contract wait has no World");
+        },
+      };
+    }
     const invocationRepo = await discoverRepoAt(cwd, input.gitPath);
     const selectedRepo =
       input.repo === undefined ? invocationRepo : await discoverRepoAt(resolve(cwd, input.repo), input.gitPath);

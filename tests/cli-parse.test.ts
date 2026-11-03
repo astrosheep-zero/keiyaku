@@ -440,15 +440,13 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("wait and kill select Contracts and Akuma globs with conditional repo coordinates", () => {
+test("wait separates Contract and Akuma selectors while kill retains mixed selection", () => {
+  assert.throws(() => parseArgv(["wait", "kei/example", "aku/work*/12*"]), /cannot mix Contract and Akuma/u);
   for (const action of ["wait", "kill"] as const) {
-    const parsed = parseArgv([action, "kei/example", "aku/work*/12*", "--repo", "/repo", "--json"]);
+    const selectors = action === "wait" ? ["kei/example"] : ["kei/example", "aku/work*/12*"];
+    const parsed = parseArgv([action, ...selectors, "--repo", "/repo", "--json"]);
     assert.ok("command" in parsed);
-    assert.deepEqual(parsed.command, {
-      command: action,
-      akuma: ["kei/example", "aku/work*/12*"],
-      output: "json",
-    });
+    assert.deepEqual(parsed.command, { command: action, akuma: selectors, output: "json" });
     assert.doesNotThrow(() => assertExplicitRepoUse(parsed.command, parsed.repo));
     const akumaOnly = parseArgv([action, "aku/*/*", "--repo", "/repo"]);
     assert.ok("command" in akumaOnly);

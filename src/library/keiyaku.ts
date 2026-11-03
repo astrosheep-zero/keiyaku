@@ -38,6 +38,8 @@ import type {
   ReviewInput,
 } from "./contract-types.js";
 import { deliveryForContract, type Delivery } from "./delivery.js";
+import { validateContractWaitHandle, type ContractWaitOptions, type ContractWaitResult } from "./contract-wait.js";
+import { waitContractRouted } from "./contract-wait-request.js";
 
 const KEIYAKU_HANDLE = Symbol("Keiyaku handle");
 
@@ -52,6 +54,7 @@ export class Keiyaku {
   private readonly id: ContractId;
   private readonly scope: RepositoryScope;
   private readonly operations: ContractExecution;
+  private readonly execution: ExecutionContext;
 
   constructor(
     token: typeof KEIYAKU_HANDLE,
@@ -63,6 +66,7 @@ export class Keiyaku {
     if (token !== KEIYAKU_HANDLE) throw new TypeError("Keiyaku handles are created by Keiyaku.with");
     this.id = id;
     this.scope = scope;
+    this.execution = execution;
     this.operations = new ContractExecution({ id, scope, execution, composition });
     // Process-local custody never serializes: identity-only JSON projection.
     Object.defineProperties(this, {
@@ -87,6 +91,10 @@ export class Keiyaku {
         stateOperation({ scope: this.scope, channel, contractId: this.id }),
       ),
     );
+  }
+
+  async wait(input?: ContractWaitOptions): Promise<ContractWaitResult> {
+    return await waitContractRouted(validateContractWaitHandle(this.scope, this.id, input), this.execution);
   }
 
   async history(): Promise<ContractHistory | null> {

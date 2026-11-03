@@ -12,6 +12,8 @@ import { executionChannel } from "../../akuma/requests.js";
 import { settings, type Settings } from "../../settings.js";
 import { AkumaWorldScopeError, type CallInput, type Keiyaku as KeiyakuContract, type Repo } from "../../index.js";
 import { akumasWithExecution } from "../../library/akumas.js";
+import { composeContractLibrary } from "../../library/contract-composition.js";
+import { createKeiyakuHandle } from "../../library/keiyaku.js";
 import { World, type WorldRoot } from "../../world.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { contractFromInput } from "../selectors.js";
@@ -27,6 +29,7 @@ import {
 } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import { callObservationStream } from "../render/akuma-activity.js";
+import { contractWaitText } from "../render/contract-wait.js";
 import {
   askRawAnswer,
   callRawAnswer,
@@ -432,6 +435,22 @@ export async function runAkumaCommand(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   try {
+    if (command.command === "wait") {
+      const contracts = command.akuma.filter((selector) => selector.startsWith("kei/"));
+      if (contracts.length > 0) {
+        if (coordinates.repo === undefined) throw new CliUsageError("Contract wait requires a repository");
+        const result = await composeContractLibrary(runtime.execution, createKeiyakuHandle).wait({
+          repo: coordinates.repo,
+          contracts,
+          ...(command.completion === undefined ? {} : { completion: command.completion }),
+          ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
+          ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
+        });
+        if (command.output === "json") writeJson(result);
+        else writeStdout(contractWaitText(result));
+        return result.kind === "missing" ? "refused" : "accepted";
+      }
+    }
     const input = await akumaInput(command, coordinates, workdir, runtime);
     switch (command.command) {
       case "call":

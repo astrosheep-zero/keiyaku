@@ -160,6 +160,8 @@ fabricates completion. A wait reports its requested mode separately from its
 completed-or-deadline return reason. Wait returns final status observations and
 does not expose a live activity stream or viewer callbacks. It uses the same
 status projection and association composition as ordinary status observation.
+Akuma wait refuses Contract selectors: Contract journal change observation belongs
+to the Contract product. Kill retains Contract-to-Dispatch selection.
 Tell and kill return their primary evidence; ask returns its input-bound observation.
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves

@@ -50,7 +50,7 @@ second repository coordinate. A handle offers state and guidance reads, history,
 amendment, delivery and its read-only preview, review, abandonment, and arc. `Keiyaku.with()`
 synchronously captures one already-loaded immutable Settings value and the
 Contract-local actor, then exposes the Contract collection operations bind,
-select, resolve, list, and observe, and the one public repair entry that reconciles
+select, resolve, list, observe, and wait, and the one public repair entry that reconciles
 either a world or one addressed Contract from an explicit Git-world
 coordinate. Construction performs no I/O and validates no product namespace.
 Public construction is always local; only the CLI and a detached Body supply
@@ -81,6 +81,15 @@ directory. Forking differs only
 in what omission means: an omitted target copies the source target, a
 deliberately absent target clears it, and an explicit target overrides it.
 Gates remain opaque public words; the package does not infer a custom gate's meaning or manufacture its producer.
+
+A Contract wait observes the addressed journals themselves, without requiring an
+Akuma World or Dispatch. It captures each selected journal's head at entry and
+reports a later witnessed change for any or all selected Contracts; a terminal
+baseline is not a new change. Missing authority is explicit, including after
+baseline, and a deadline preserves witnessed progress without changing its
+subjects. Cancellation retires the wait's owned observation. Each invocation
+starts anew; no cursor, acknowledgement, or replay is persisted. The handle
+and collection use the same owner and the same direct-parent route.
 
 Contract boards and observations are frozen read-time views of the journal and
 Git state. They show the adjudicated phase, current gate and dependency state,

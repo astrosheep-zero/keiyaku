@@ -56,7 +56,14 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     `
 import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
   ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
-  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal } from "@astrosheep/keiyaku";
+  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal, Repo, Keiyaku,
+  ContractWaitInput, ContractWaitResult } from "@astrosheep/keiyaku";
+declare const repo: Repo;
+declare const handle: Keiyaku;
+const waitInput: ContractWaitInput = { repo, contracts: ["kei/consumer"], timeoutMs: 0 };
+const waitResult: Promise<ContractWaitResult> = handle.wait({ timeoutMs: 0 });
+const collectionWait: Promise<ContractWaitResult> = (await import("@astrosheep/keiyaku")).Keiyaku.with().wait(waitInput);
+void [waitResult, collectionWait];
 declare const fact: Fact;
 declare const error: KeiyakuError;
 declare const row: ContractRow;
@@ -99,6 +106,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
     { cwd: directory, encoding: "utf8" },
   );
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+  execFileSync("git", ["init", "--quiet", directory]);
   const loaded = spawnSync(
     process.execPath,
     [
@@ -108,7 +116,9 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Delivery, Keiyaku, Debts, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Delivery, Keiyaku, Repo, Debts, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
+        'const repo = await Repo.at({ path: process.cwd() });',
+        'assert.equal((await Keiyaku.with().wait({ repo, contracts: ["kei/missing"], timeoutMs: 0 })).kind, "missing");',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
         "assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);",
         'assert.equal(typeof Keiyaku.prototype.previewDelivery, "function");',

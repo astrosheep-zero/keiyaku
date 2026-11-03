@@ -6,6 +6,7 @@ import { selectionRequestPort } from "./akuma/selection-owner-port.js";
 import { selectionRequestCommands } from "./akuma/selection-request.js";
 import { composeContractLibrary } from "./library/contract-composition.js";
 import { contractRequestCommands, type ContractRequestPort } from "./library/contract-operations.js";
+import { contractWaitRequestCommand } from "./library/contract-wait-request.js";
 import { createKeiyakuHandle } from "./library/keiyaku.js";
 import { Repo } from "./library/repo.js";
 import { settings } from "./settings.js";
@@ -158,6 +159,23 @@ export async function externalRequestCommandsFor(
     commands: composeRequestCommands(
       selectionRequestCommands(selectionRequestPort(world, spawn, servingBody)),
       contractRequestCommands(contractUpstream(processConfiguration)),
+      {
+        "contract.wait": contractWaitRequestCommand(async (request, signal) => {
+          const repo = await Repo.at({
+            path: request.repoRoot,
+            ...(processConfiguration.gitPath === undefined ? {} : { gitPath: processConfiguration.gitPath }),
+          });
+          if (repo.root !== request.repoRoot)
+            throw new TypeError("forwarded Contract repoRoot must equal the canonical primary worktree");
+          return await composeContractLibrary(localExecutionContext(), createKeiyakuHandle).wait({
+            repo,
+            contracts: request.contracts,
+            completion: request.completion,
+            ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+            signal,
+          });
+        }),
+      },
       debtMutationRequestCommands(debtMutationRequestPort()),
     ),
   };

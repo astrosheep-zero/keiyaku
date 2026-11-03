@@ -31,7 +31,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   const contracts = composeContractLibrary(bodyRequestExecution({ directory: join(root, "contract-requests") }), createKeiyakuHandle, {
     actor: "contract-actor",
   });
-  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select"]);
+  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select", "wait"]);
   assert.equal("call" in contracts, false);
   assert.equal("nuke" in contracts, false);
   assert.equal("debts" in contracts, false);
@@ -47,7 +47,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   );
   await assert.rejects(
     Akumas.of(world).wait({ akuma: ["kei/needs-explicit-repo"] }),
-    /Contract Akuma selector requires repo/u,
+    /Akumas\.wait does not accept Contract selectors/u,
   );
 });
 
