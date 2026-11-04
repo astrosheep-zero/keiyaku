@@ -16,6 +16,16 @@ keiyaku install pi
 pi --extension ./plugins/pi/keiyaku.ts
 ```
 
+## Native status
+
+Interactive Pi sessions show a compact status entry with the current World's
+running Akuma, active Contracts, and open Debts across all namespaces. A zero
+is an observed empty count; `-` means absent and `?` means unknown or failed.
+The entry refreshes after each completed read (five seconds later) and when the
+agent settles. It starts with the session and is removed on shutdown or reload;
+non-terminal modes do not run the sampler. The `/keiyaku` overlay and native
+tools are unchanged.
+
 ## Native tools
 
 All tools return the SDK result in `details`, `structuredContent`, and JSON

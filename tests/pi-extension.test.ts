@@ -444,7 +444,7 @@ test("Pi keeps unfinished native tools hidden while preserving the explicit Keiy
     throw new Error("status must not run while loading");
   });
 
-  assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown"]);
+  assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown", "agent_settled"]);
   assert.equal(tools.length, 10);
   assert.ok(tools.every((tool) => tool.exposure === "hidden"));
 });

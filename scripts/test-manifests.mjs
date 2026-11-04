@@ -48,6 +48,7 @@ export const LOCAL_TEST_FILES = [
   "tests/paseo-sdk-transport.test.ts",
   "tests/paseo-title.test.ts",
   "tests/pi-extension.test.ts",
+  "tests/pi-status.test.ts",
   "tests/product-boundaries.test.ts",
   "tests/region.test.ts",
   "tests/settings.test.ts",

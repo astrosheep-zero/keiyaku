@@ -1,4 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { kanshiCounts, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
 import { registerAkumaTools } from "./akuma-tools.ts";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
@@ -37,8 +38,79 @@ function overlay(lines: readonly string[], theme: Theme, done: () => void) {
   };
 }
 
-export default function keiyakuExtension(pi: ExtensionAPI): void {
+type StatusReaders = { repo: typeof Repo.at; world: typeof World.resolve; counts: typeof kanshiCounts };
+
+export default function keiyakuExtension(
+  pi: ExtensionAPI,
+  readers: StatusReaders = { repo: Repo.at, world: World.resolve, counts: kanshiCounts },
+): void {
   registerAkumaTools(pi);
+  let close: (() => void) | undefined;
+  let refresh: (() => void) | undefined;
+  pi.on("session_start", (_event, ctx) => {
+    close?.();
+    close = undefined;
+    refresh = undefined;
+    if (ctx.mode !== "tui") return;
+    const cwd = ctx.cwd;
+    const ui = ctx.ui;
+    let live = true;
+    let reading = false;
+    let pending = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unknown = "aku ? · kei ? · debt ?";
+    const show = (text: string | undefined): void => ui.setStatus("keiyaku", text);
+    const value = (section: { kind: "present"; value: number } | { kind: "absent" | "failed" }): string =>
+      section.kind === "present" ? String(section.value) : section.kind === "absent" ? "-" : "?";
+    const sample = async (): Promise<string> => {
+      let repo: Repo | undefined;
+      try {
+        repo = await readers.repo({ path: cwd });
+      } catch (error) {
+        if (!(error instanceof NoGitWorldError)) throw error;
+      }
+      const world = await readers.world(repo === undefined ? { cwd } : { cwd, repositoryRoot: repo.root });
+      const report = await readers.counts({ world: world.root, ...(repo === undefined ? {} : { repo }) });
+      return `aku ${value(report.akuma)} · kei ${value(report.contracts)} · debt ${value(report.debts)}`;
+    };
+    const request = (): void => {
+      if (!live) return;
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      if (reading) {
+        pending = true;
+        return;
+      }
+      reading = true;
+      void sample().catch(() => unknown).then((text) => {
+        if (!live) return;
+        show(text);
+        reading = false;
+        if (pending) {
+          pending = false;
+          request();
+        } else {
+          timer = setTimeout(request, 5_000);
+          timer.unref();
+        }
+      });
+    };
+    close = () => {
+      if (!live) return;
+      live = false;
+      if (timer !== undefined) clearTimeout(timer);
+      show(undefined);
+    };
+    refresh = request;
+    show(unknown);
+    request();
+  });
+  pi.on("agent_settled", () => { refresh?.(); });
+  pi.on("session_shutdown", () => {
+    close?.();
+    close = undefined;
+    refresh = undefined;
+  });
   pi.registerCommand("keiyaku", {
     description: "Open the Kanshi world status",
     handler: async (_args, ctx) => {
