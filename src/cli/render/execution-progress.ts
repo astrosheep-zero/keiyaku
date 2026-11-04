@@ -160,8 +160,6 @@ export function executionProgressLines(event: ExecutionObservation, context: Tex
       if (event.observation.kind === "output") return outputLines(event.observation, context);
       return event.observation.state === "started" ? [] : [phaseFinishLine(event.observation)];
     }
-    case "progress-dropped":
-      return [`progress dropped ${event.count} event${event.count === 1 ? "" : "s"}`];
   }
 }
 

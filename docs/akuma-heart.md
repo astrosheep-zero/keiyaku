@@ -1,7 +1,7 @@
 # Akuma Heart
 
 Heart is the sole durable Akuma authority. It owns Soul, Body, Turn, session,
-activity, Tell, request, control, kill, hung, and seal facts; schemas, custody,
+activity, Tell, control, kill, hung, and seal facts; schemas, custody,
 transactions, and public projections. Private database layout and row mechanics
 are not law.
 
@@ -140,7 +140,7 @@ life projection without deleting history.
 
 Hung evidence records failure of a Body's owned provider custody to retire. It
 permanently gates same-identity succession and never clears, changes sessions,
-pending tells, requests, or history. Elapsed time, a held leash alone, provider
+pending tells or history. Elapsed time, a held leash alone, provider
 events, or observer inference cannot manufacture it.
 
 Kill admission classifies the latest Body in one transaction. A Body already
@@ -170,14 +170,9 @@ running Body remains in that Body's active attempt; it does not settle the
 Tell for later recovery.
 Provider submission can be at least once: lacking durable witness leaves a Tell
 pending for a later Body, while a terminal witness settles it without rollback.
-Kill never settles or discards a Tell. Request facts are the sole durable Body
-Request authority and service reference; their lifecycle is owned by
-[akuma-requests.md](akuma-requests.md).
-
-Heart validates generic request lifecycle and requester authenticity, but does
-not interpret payload, service schema, or operation semantics. Provider adapters
-own live processes and never write Heart. Body is the only mover and tell-fact
-writer after Heart admission.
+Kill never settles or discards a Tell. Provider adapters own live processes and
+never write Heart. Body is the only mover and tell-fact writer after Heart
+admission. Product operations retain their native local owner and admission.
 No observer store, capability registry, duplicate tell pipeline, or
 cross-database atomicity exists.
 

@@ -27,7 +27,6 @@ export const observationSchema = z.discriminatedUnion("kind", [
       state: z.enum(["started", "finished"]),
     })
     .strict(),
-  z.object({ kind: z.literal("progress-dropped"), count: z.number().int().positive() }).strict(),
 ]);
 
 export type ExecutionObservation = z.infer<typeof observationSchema>;

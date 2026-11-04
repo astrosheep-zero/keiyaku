@@ -103,7 +103,7 @@ authority.
 | Role | Commission | Return |
 | --- | --- | --- |
 | Holder | Commission the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
-| Deliverer | `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The verify results when commissioned, and the delivery receipt. |
+| Deliverer | Commission the objective, including explicit Verification when needed: `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | Requested verify results and delivery receipt. |
 | Reviewer | `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> -` | The verdict receipt. |
 
 Commission with a clear objective, current Arc when one exists, appointed

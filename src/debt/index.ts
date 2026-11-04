@@ -1,12 +1,6 @@
 import type { WorldRoot } from "../world.js";
 import type { NamespaceContextSource, ResolvedNamespaceContext } from "./context.js";
-import { executionChannel, localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
-import {
-  requestForwardedDebt,
-  type DebtLifecycleVerb,
-  type DebtMutationRequest,
-  type DebtMutationResultForRequest,
-} from "./mutation.js";
+import type { DebtLifecycleVerb } from "./operation-types.js";
 export type { WorldRoot } from "../world.js";
 import {
   buildTree,
@@ -108,123 +102,14 @@ export type {
   DebtQuerySort,
   DebtRelationPredicateField,
 };
-export type { LibraryExecution } from "../akuma/requests.js";
 export { DebtAuthorityCorruptionError, DEBT_RELATION_PREDICATE_FIELDS };
 export { observeRecentDebtStatus, type RecentDebtStatusRow } from "./catalog.js";
 export { boundedListLimit as debtRowViewLimit } from "../bounded-list.js";
-
-/**
- * The one captured execution route per Debts handle. Local execution calls the
- * Debt operations directly; a forwarded handle sends the same operation through
- * the one body-request channel. The channel is read once at construction, never
- * re-derived per operation.
- */
-type DebtRoute = Readonly<{ kind: "local" }> | Readonly<{ kind: "forwarded"; directory: string }>;
-
-function debtRoute(execution: ExecutionContext): DebtRoute {
-  const channel = executionChannel(execution);
-  return channel.kind === "body-request" ? { kind: "forwarded", directory: channel.directory } : { kind: "local" };
-}
-
-function forwardDebt<Request extends DebtMutationRequest>(
-  directory: string,
-  world: WorldRoot,
-  request: Request,
-  signal?: AbortSignal,
-): Promise<DebtMutationResultForRequest<Request>> {
-  return requestForwardedDebt({
-    directory,
-    world,
-    request,
-    ...(signal === undefined ? {} : { signal }),
-  });
-}
-
-type LifecycleAction = "debt.done" | "debt.drop";
-type SingleLifecycleRequest = Extract<DebtMutationRequest, { action: LifecycleAction; id: DebtId }>;
-type BatchLifecycleRequest = Extract<DebtMutationRequest, { action: LifecycleAction; ids: readonly DebtId[] }>;
-
-/** The single lifecycle request shapes, keyed once by verb instead of switched per handle. */
-const SINGLE_LIFECYCLE: Readonly<
-  Record<DebtLifecycleVerb, (id: DebtId, note: string | undefined) => SingleLifecycleRequest>
-> = {
-  done: (id, note) => ({ action: "debt.done", id, ...(note === undefined ? {} : { note }) }),
-  drop: (id, note) => ({ action: "debt.drop", id, ...(note === undefined ? {} : { note }) }),
-};
-
-/** The batch lifecycle request shapes for the same verbs. */
-const BATCH_LIFECYCLE: Readonly<
-  Record<DebtLifecycleVerb, (ids: readonly DebtId[], note: string | undefined) => BatchLifecycleRequest>
-> = {
-  done: (ids, note) => ({ action: "debt.done", ids, ...(note === undefined ? {} : { note }) }),
-  drop: (ids, note) => ({ action: "debt.drop", ids, ...(note === undefined ? {} : { note }) }),
-};
-
-/**
- * The one bound operation table for a captured route. Each entry either calls the
- * local Debt operations directly or sends the same validated values as the one
- * forwarded request shape. Validation stays in the handle methods.
- */
-type DebtOperations = Readonly<{
-  add(values: AddDebtInput): Promise<DebtMutationResult>;
-  addDocument(values: AddDebtDocumentInput): Promise<DebtMutationResult>;
-  update(id: DebtId, values: UpdateDebtInput): Promise<DebtUpdateResult>;
-  lifecycle(
-    id: DebtId,
-    verb: DebtLifecycleVerb,
-    note: string | undefined,
-    signal?: AbortSignal,
-  ): Promise<DebtMutationResult>;
-  batch(
-    verb: DebtLifecycleVerb,
-    ids: readonly DebtId[],
-    note: string | undefined,
-    signal?: AbortSignal,
-  ): Promise<DebtBatchResult>;
-}>;
-
-function debtOperations(world: WorldRoot, route: DebtRoute): DebtOperations {
-  if (route.kind === "forwarded") {
-    const { directory } = route;
-    return {
-      add: (values) => {
-        const { actor: _actor, signal, namespace: selected, ...request } = values;
-        return forwardDebt(
-          directory,
-          world,
-          { action: "debt.add", input: { ...request, namespace: selected ?? [] } },
-          signal,
-        );
-      },
-      addDocument: (values) =>
-        forwardDebt(
-          directory,
-          world,
-          { action: "debt.addDocument", input: { markdown: values.markdown, namespace: values.namespace ?? [] } },
-          values.signal,
-        ),
-      update: (id, values) => {
-        const { signal, ...request } = values;
-        return forwardDebt(directory, world, { action: "debt.update", id, input: request }, signal);
-      },
-      lifecycle: (id, verb, note, signal) => forwardDebt(directory, world, SINGLE_LIFECYCLE[verb](id, note), signal),
-      batch: (verb, ids, note, signal) => forwardDebt(directory, world, BATCH_LIFECYCLE[verb](ids, note), signal),
-    };
-  }
-  return {
-    add: (values) => addDebt(world, values),
-    addDocument: (values) => addDebtDocument(world, values),
-    update: (id, values) => updateDebt(world, id, values),
-    lifecycle: (id, verb, note, signal) => lifecycleDebt(world, id, verb, signal, note),
-    batch: (verb, ids, note, signal) => batchDebts(world, verb, ids, signal, note),
-  };
-}
 
 class DebtHandle {
   constructor(
     readonly id: DebtId,
     private readonly world: WorldRoot,
-    private readonly operations: DebtOperations,
   ) {}
   async read(): Promise<DebtDetail | null> {
     const facts = await readDebtDetail(this.world, this.id);
@@ -239,13 +124,13 @@ class DebtHandle {
       : { kind: "accepted", value: node };
   }
   update(input: UpdateDebtInput): Promise<DebtUpdateResult> {
-    return this.operations.update(this.id, updateInput(input));
+    return updateDebt(this.world, this.id, updateInput(input));
   }
   private lifecycle(verb: DebtLifecycleVerb, input: unknown): Promise<DebtMutationResult> {
     const value = record(input ?? {}, `${verb} input`);
     closed(value, ["note", "signal"], `${verb} input`);
     const note = text(value.note, "note");
-    return this.operations.lifecycle(this.id, verb, note, signal(value.signal));
+    return lifecycleDebt(this.world, this.id, verb, signal(value.signal), note);
   }
   done(input?: { note?: string; signal?: AbortSignal }): Promise<DebtMutationResult> {
     return this.lifecycle("done", input);
@@ -258,21 +143,16 @@ export type Debt = DebtHandle;
 
 class DebtsHandle {
   readonly root: WorldRoot;
-  private readonly operations: DebtOperations;
-  constructor(
-    private readonly world: WorldRoot,
-    execution: ExecutionContext,
-  ) {
+  constructor(private readonly world: WorldRoot) {
     this.root = world;
-    this.operations = debtOperations(world, debtRoute(execution));
   }
   debt(input: Readonly<{ id: string }>): Debt {
     const v = record(input, "debt input");
     closed(v, ["id"], "debt input");
-    return new DebtHandle(id(v.id), this.world, this.operations);
+    return new DebtHandle(id(v.id), this.world);
   }
   add(input: AddDebtInput): Promise<DebtMutationResult> {
-    return this.operations.add(addInput(input));
+    return addDebt(this.world, addInput(input));
   }
   addDocument(input: AddDebtDocumentInput): Promise<DebtMutationResult> {
     const v = record(input, "addDocument input");
@@ -282,7 +162,7 @@ class DebtsHandle {
     const ns = namespace(v.namespace),
       createdBy = actor(v.actor),
       abort = signal(v.signal);
-    return this.operations.addDocument({
+    return addDebtDocument(this.world, {
       markdown,
       ...(ns === undefined ? {} : { namespace: ns }),
       ...(createdBy === undefined ? {} : { actor: createdBy }),
@@ -400,22 +280,14 @@ class DebtsHandle {
     if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one DebtId");
     const note = text(v.note, "note");
 
-    return this.operations.batch(verb, ids, note, signal(v.signal));
+    return batchDebts(this.world, verb, ids, signal(v.signal), note);
   }
 }
 export type Debts = DebtsHandle;
 
-/**
- * The one Debts composition. Public `of` fixes local execution; CLI and Body pass their captured
- * internal channel through `debtsWithExecution` instead of a second constructor.
- */
-export function debtsWithExecution(world: WorldRoot, execution: ExecutionContext): Debts {
-  if (typeof world !== "string") throw new TypeError("Debts.of world must be a WorldRoot");
-  return new DebtsHandle(world, execution);
-}
-
 export const Debts = Object.freeze({
   of(world: WorldRoot): Debts {
-    return debtsWithExecution(world, localExecutionContext());
+    if (typeof world !== "string") throw new TypeError("Debts.of world must be a WorldRoot");
+    return new DebtsHandle(world);
   },
 });

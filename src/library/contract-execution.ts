@@ -1,6 +1,4 @@
 /** @architectureCompositionRoot */
-import { AkumaBodyRequestError } from "../akuma/request-rendezvous.js";
-import { executionChannel, type ExecutionContext } from "../akuma/requests.js";
 import { prepareAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
@@ -32,7 +30,6 @@ import { admitReviewOperation } from "../protocol/review.js";
 import { verifyOperation } from "../protocol/verify.js";
 import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
 import { continueDeliveredDependents } from "./continuation.js";
-import { requestForwardedContractLive, type ContractRequest } from "./contract-operations.js";
 import type {
   AbandonOutcome,
   AmendOutcome,
@@ -70,7 +67,6 @@ import {
 import { InvocationAccumulator } from "./invocation.js";
 import {
   KeiyakuError,
-  errorCategory,
   project,
   validated,
   type ContractVerb,
@@ -90,7 +86,6 @@ export class ContractExecution {
     private readonly seat: Readonly<{
       id: ContractId;
       scope: RepositoryScope;
-      execution: ExecutionContext;
       composition: LocalContractCompositionCapture;
     }>,
   ) {}
@@ -99,9 +94,6 @@ export class ContractExecution {
   }
   private get scope() {
     return this.seat.scope;
-  }
-  private get execution() {
-    return this.seat.execution;
   }
   private get composition() {
     return this.seat.composition;
@@ -185,24 +177,6 @@ export class ContractExecution {
   async deliver(input?: DeliverInput, options?: MutationObservation): Promise<DeliverOutcome> {
     const values = validated(() => normalizeDeliverInput(input));
     const observer = validated(() => observationOptions(options));
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request")
-      return await forwardedContractOutcome<"deliver", Delivery & DeliveryValue>({
-        revive: (value) => deliveryForContract(this.scope, value),
-        directory: channel.directory,
-        action: "contract.deliver",
-        ...(observer === undefined ? {} : { observe: observer }),
-        ...(values.signal === undefined ? {} : { signal: values.signal }),
-        request: {
-          action: "contract.deliver",
-          repoRoot: this.scope.primaryWorktree,
-          contractId: this.id,
-          ...(values.message === undefined ? {} : { message: values.message }),
-          includeDirty: values.includeDirty,
-          materializeConflict: values.materializeConflict,
-          overwrite: values.overwrite,
-        },
-      });
     const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
     return await this.local(
       "deliver",
@@ -265,21 +239,6 @@ export class ContractExecution {
     const includeDirty = validated(() => optionalBoolean(values?.includeDirty, "includeDirty") ?? false);
     const signal = validated(() => optionalSignal(values?.signal));
     const observer = validated(() => observationOptions(options));
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request")
-      return await forwardedContractOutcome<"verify", Verify>({
-        directory: channel.directory,
-        action: "contract.verify",
-        request: {
-          action: "contract.verify",
-          repoRoot: this.scope.primaryWorktree,
-          contractId: this.id,
-          includeDirty,
-          ...(index === undefined ? {} : { index }),
-        },
-        ...(signal === undefined ? {} : { signal }),
-        ...(observer === undefined ? {} : { observe: observer }),
-      });
     const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
     return await this.local(
       "verify",
@@ -343,22 +302,6 @@ export class ContractExecution {
     const summary = validated(() => optionalNonblank(values.summary, "review summary"));
     const signal = validated(() => optionalSignal(values.signal));
     const observer = validated(() => observationOptions(options));
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request")
-      return await forwardedContractOutcome<"review", Review>({
-        directory: channel.directory,
-        action: "contract.review",
-        ...(observer === undefined ? {} : { observe: observer }),
-        ...(signal === undefined ? {} : { signal }),
-        request: {
-          action: "contract.review",
-          repoRoot: this.scope.primaryWorktree,
-          contractId: this.id,
-          verdict,
-          ...(summary === undefined ? {} : { summary }),
-          ...actor,
-        },
-      });
     const hooks = derivedHooks(this.composition);
     return await this.local(
       "review",
@@ -501,21 +444,6 @@ export class ContractExecution {
     const showDiff = validated(() => optionalBoolean(values?.showDiff, "showDiff") ?? false);
     const signal = validated(() => optionalSignal(values?.signal));
     const observer = validated(() => observationOptions(options));
-    const channel = executionChannel(this.execution);
-    if (channel.kind === "body-request")
-      return await forwardedContractOutcome<"deliver-preview", DeliveryPreviewReport>({
-        directory: channel.directory,
-        action: "contract.preview-delivery",
-        ...(observer === undefined ? {} : { observe: observer }),
-        ...(signal === undefined ? {} : { signal }),
-        request: {
-          action: "contract.preview-delivery",
-          repoRoot: this.scope.primaryWorktree,
-          contractId: this.id,
-          includeDirty,
-          showDiff,
-        },
-      });
     const requireBranchesToBeUpToDate = derivedFreshness(this.composition);
     return await this.local(
       "deliver-preview",
@@ -717,42 +645,6 @@ function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: C
   if (delivery !== undefined && delivery !== null)
     return { ...delivery.data, leading: { kind: "already-admitted", fact: delivery.entry } };
   throw new Error("confirmed delivery requires its own receipt");
-}
-
-async function forwardedContractOutcome<Operation extends "deliver" | "verify" | "review" | "deliver-preview", Value>(
-  input: Readonly<{
-    directory: string;
-    action: ContractRequest["action"];
-    revive?: (value: Value) => Value;
-    request: ContractRequest;
-    signal?: AbortSignal;
-    observe?: ExecutionObserver;
-  }>,
-): Promise<ProjectedOutcome<Operation, Value, OperationRefusals[Operation]>> {
-  try {
-    const result = (await requestForwardedContractLive({
-      directory: input.directory,
-      action: input.action,
-      request: input.request,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.observe === undefined ? {} : { observe: input.observe }),
-    })) as ProjectedOutcome<Operation, Value, OperationRefusals[Operation]>;
-    return result.kind === "accepted" && input.revive !== undefined
-      ? { ...result, value: input.revive(result.value) }
-      : result;
-  } catch (error) {
-    if (error instanceof KeiyakuError) throw error;
-    if (input.signal?.aborted === true && error === input.signal.reason) throw invocationFailure(error, input.signal);
-    throw new KeiyakuError(
-      error instanceof AkumaBodyRequestError && (error.outcome === "unknown" || error.outcome === "unproven")
-        ? "unknown-outcome"
-        : errorCategory(error),
-      errorMessage(error),
-      {
-        cause: error,
-      },
-    );
-  }
 }
 
 function invocationFailure(error: unknown, signal?: AbortSignal): unknown {

@@ -22,8 +22,7 @@ import { contractHead } from "../src/core/facts/types.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
 import { withGitShim, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
-import { outcomeSchema, encodeFailureWire, decodeFailureWire } from "../src/library/outcome.js";
-import { deliveryPreviewReportSchema } from "../src/protocol/delivery-preview.js";
+import { projectFailure } from "../src/library/outcome.js";
 
 function verificationBody(script: string | null = "exit 1"): string {
   return contractMarkdown("Audit", {
@@ -388,56 +387,47 @@ test("cancelling the target dry-run preserves native abort and partial preview i
   const barrier = join(repository.path, ".git", "target-probe-started");
   const before = custodySnapshot(repository, worktree);
   const history = await bound.value.keiyaku.history();
-  await withGitShim(
-    [
-      'if [ "$3" = "read-tree" ] && [ "$4" = "--dry-run" ]; then',
-      '  : > "$KEIYAKU_TEST_BARRIER"',
-      "  exec sleep 30",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_TEST_BARRIER: barrier },
-    async (gitPath) => {
-      const controller = new AbortController();
-      const reason = new Error("stop preview in target probe");
-      const native = Keiyaku.with().select({
-        repo: await Repo.at({ path: repository.path, gitPath }),
-        id: bound.contract,
-      });
-      const pending = native.previewDelivery({ signal: controller.signal });
-      // Attach the rejection consumer before waiting on the in-flight process barrier.
-      const rejection = assert.rejects(pending, (error: unknown) => {
-        assert.ok(error instanceof KeiyakuError);
-        assert.equal(error.category, "aborted");
-        assert.equal(error.cause, reason);
-        assert.equal(error.outcome?.operation, "deliver-preview");
-        assert.ok(error.outcome?.operation === "deliver-preview");
-        assert.equal(error.outcome.value?.candidate?.kind, "ready");
-        assert.deepEqual(error.outcome.value?.verification, { kind: "undeclared" });
-        assert.equal(error.outcome.value?.target, undefined, "interrupted target observation is not a failed answer");
-        assert.deepEqual(error.outcome.facts, []);
-        assert.ok(
-          error.outcome.effects.every(
-            (effect) => effect.kind === "cleanup" && effect.issue.kind === "decode-channel-retirement",
-          ),
-          "only native decode-channel retirement diagnostics may accompany cancellation",
-        );
-        const forwarded = decodeFailureWire(encodeFailureWire(error));
-        assert.ok(forwarded);
-        assert.equal(forwarded.category, "aborted");
-        assert.deepEqual(forwarded.outcome, error.outcome);
-        return true;
-      });
-      try {
-        await waitForFixtureFile(barrier);
-        controller.abort(reason);
-        await rejection;
-      } finally {
-        if (!controller.signal.aborted) controller.abort(reason);
-        await pending.catch(() => undefined);
-      }
-    },
-  );
+  await withGitShim([
+    'if [ "$3" = "read-tree" ] && [ "$4" = "--dry-run" ]; then',
+    '  : > "$KEIYAKU_TEST_BARRIER"',
+    '  exec sleep 30',
+    'fi',
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n"), { KEIYAKU_TEST_BARRIER: barrier }, async (gitPath) => {
+    const controller = new AbortController();
+    const reason = new Error("stop preview in target probe");
+    const native = Keiyaku.with().select({ repo: await Repo.at({ path: repository.path, gitPath }), id: bound.contract });
+    const pending = native.previewDelivery({ signal: controller.signal });
+    // Attach the rejection consumer before waiting on the in-flight process barrier.
+    const rejection = assert.rejects(pending, (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "aborted");
+      assert.equal(error.cause, reason);
+      assert.equal(error.outcome?.operation, "deliver-preview");
+      assert.ok(error.outcome?.operation === "deliver-preview");
+      assert.equal(error.outcome.value?.candidate?.kind, "ready");
+      assert.deepEqual(error.outcome.value?.verification, { kind: "undeclared" });
+      assert.equal(error.outcome.value?.target, undefined, "interrupted target observation is not a failed answer");
+      assert.deepEqual(error.outcome.facts, []);
+      assert.ok(error.outcome.effects.every((effect) =>
+        effect.kind === "cleanup" && effect.issue.kind === "decode-channel-retirement",
+      ), "only native decode-channel retirement diagnostics may accompany cancellation");
+      const json = JSON.parse(JSON.stringify(projectFailure(error)));
+      assert.equal(json.category, "aborted");
+      assert.equal(json.causeClass, "Error");
+      assert.equal(json.causeDiagnostic, reason.message);
+      assert.deepEqual(json.outcome, error.outcome);
+      return true;
+    });
+    try {
+      await waitForFixtureFile(barrier);
+      controller.abort(reason);
+      await rejection;
+    } finally {
+      if (!controller.signal.aborted) controller.abort(reason);
+      await pending.catch(() => undefined);
+    }
+  });
   assert.deepEqual(await bound.value.keiyaku.history(), history);
   assert.deepEqual(custodySnapshot(repository, worktree), before);
 });
@@ -488,12 +478,7 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   assert.match(text, /target  placeable/u);
   assert.ok(text.includes(`checkout cannot follow  ${repository.path}`));
   assert.ok(displayed.includes("notuptodate"), `preview must render the checkout diagnostic; got:\n${text}`);
-  const schema = outcomeSchema("deliver-preview", deliveryPreviewReportSchema);
-  assert.deepEqual(
-    schema.parse(JSON.parse(JSON.stringify(preview))),
-    preview,
-    "live forwarding retains checkout diagnostics",
-  );
+
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.deepEqual(await bound.value.keiyaku.history(), history);
   assert.deepEqual(preview.facts, []);

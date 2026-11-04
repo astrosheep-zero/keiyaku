@@ -1,11 +1,11 @@
-import { z } from "zod";
-import type { ContractState, SnapshotId } from "../core/facts/types.js";
+import type { z } from "zod";
+import type { AttestationData, ContractState, EntryUlid, SnapshotId } from "../core/facts/types.js";
 import { activeContract, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
 import { VERIFIED, verificationRequirement, type VerificationDefinition } from "../verification/declaration.js";
 import { prepareDelivery, deliveryIntegrationSnapshots } from "./deliver.js";
 import { verifyRequirement } from "./intent.js";
-import type { DocumentDerivation, MutationOperationInput } from "./operations.js";
+import type { DocumentDerivation, MutationOperationInput, VerificationStop } from "./operations.js";
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
 import { executionStop, type ContractCheckpoint } from "./progress.js";
 import {
@@ -14,38 +14,32 @@ import {
   deliveryPreparationRefusalSchema,
   verificationDeclarationRefusalSchema,
 } from "./operations.js";
-import { completionEvidenceSchema } from "./completion.js";
-import { entryUlidSchema, snapshotIdSchema, verdictSchema, verificationStopSchema } from "./operations.js";
+import type { CompletionEvidence } from "./completion.js";
 
-const coordinateSchema = z.object({
-  index: z.number().int().positive(),
-  requirement: z.string().min(1),
-  snapshot: snapshotIdSchema,
-  retainedPath: z.string().min(1).optional(),
-});
-const admissionSchema = z.union([
-  z.object({ kind: z.enum(["admitted", "reused"]), entry: entryUlidSchema }).strict(),
-  z.object({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
-]);
-export const verificationCheckSchema = z.union([
-  coordinateSchema
-    .extend({
-      kind: z.literal("terminal"),
-      verdict: verdictSchema,
-      summary: z.string().optional(),
-      admission: admissionSchema,
-    })
-    .strict(),
-  coordinateSchema.extend({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
-]);
-export type VerificationCheck = z.infer<typeof verificationCheckSchema>;
-export const verifyValueSchema = completionEvidenceSchema
-  .extend({
-    snapshot: snapshotIdSchema,
-    checks: z.array(verificationCheckSchema).readonly(),
-  })
-  .strict();
-export type VerifyValue = z.infer<typeof verifyValueSchema>;
+type VerificationCoordinate = Readonly<{
+  index: number;
+  requirement: string;
+  snapshot: SnapshotId;
+  retainedPath?: string;
+}>;
+type VerificationAdmission =
+  | Readonly<{ kind: "admitted" | "reused"; entry: EntryUlid }>
+  | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
+export type VerificationCheck = VerificationCoordinate &
+  (
+    | Readonly<{
+        kind: "terminal";
+        verdict: AttestationData["verdict"];
+        summary?: string;
+        admission: VerificationAdmission;
+      }>
+    | Readonly<{ kind: "stopped"; stop: VerificationStop }>
+  );
+export type VerifyValue = CompletionEvidence &
+  Readonly<{
+    snapshot: SnapshotId;
+    checks: readonly VerificationCheck[];
+  }>;
 
 type VerifyRefusal =
   | z.infer<typeof verifyRefusalSchema>
@@ -119,7 +113,7 @@ async function prepareVerification(
 }
 
 function checkReport(
-  coordinate: z.infer<typeof coordinateSchema>,
+  coordinate: VerificationCoordinate,
   checked: ReturnType<typeof unpackVerificationOutcome>,
 ): VerificationCheck {
   if (checked.counts === undefined) {

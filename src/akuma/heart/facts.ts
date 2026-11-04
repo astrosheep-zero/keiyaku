@@ -15,7 +15,7 @@ export class HeartAuthorityCorruptionError extends Error {
 const originText = z.string().refine((value) => value.trim().length > 0);
 export const akumaOriginSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("direct") }),
-  z.object({ kind: z.literal("request"), parent: akumaIdSchema, requestId: originText }),
+
   z.object({ kind: z.literal("fork"), parent: akumaIdSchema, at: originText }),
 ]);
 export type AkumaOrigin = z.infer<typeof akumaOriginSchema>;
@@ -32,8 +32,6 @@ export type Soul = Readonly<{
   bare?: boolean;
   createdAt: string;
 }>;
-
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "bare">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 
@@ -189,28 +187,6 @@ export type TellReceiptInput = Readonly<{
     | Readonly<{ evidence: "exact"; tellId: string }>
     | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
   );
-
-export type RequestInput = Readonly<{
-  id: string;
-  action: string;
-  payloadJson: string;
-}>;
-
-type AdmittedRequest = RequestInput &
-  Readonly<{
-    requester: AkuId;
-    admittedAt: string;
-  }>;
-
-export type RequestFact =
-  | (AdmittedRequest & Readonly<{ state: "admitted" }>)
-  | (AdmittedRequest & Readonly<{ state: "reserved"; child: AkuId }>)
-  | (AdmittedRequest & Readonly<{ state: "begun" }>)
-  | (AdmittedRequest & Readonly<{ state: "served"; child: AkuId }>)
-  | (AdmittedRequest & Readonly<{ state: "served"; serviceJson: string }>)
-  | (AdmittedRequest & Readonly<{ state: "refused"; diagnostic: string }>)
-  | (AdmittedRequest & Readonly<{ state: "unproven"; evidence: string }>)
-  | (AdmittedRequest & Readonly<{ state: "voided"; evidence: string }>);
 
 export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;

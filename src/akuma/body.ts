@@ -2,7 +2,6 @@ import { projectAkumaBirth } from "./caller.js";
 import { appendFile } from "node:fs/promises";
 import { abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
-import type { InitialTellAdmissionRequest } from "./call-request.js";
 import { driveTurn, type DrivenTurn } from "./turn-drive.js";
 import {
   HeldAkumaLeash,
@@ -26,29 +25,21 @@ import {
   readTurn,
   readTurnParticipants,
   readTurnTellIds,
-  readNonterminalRequests,
   resolvePendingTellDisposition,
   type PendingTellDisposition,
   type BodyEnd,
   type Soul,
   type TurnOutcome,
 } from "./heart/index.js";
-import { pathsForAkuId, worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
+import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
 import { recordAkumaLineage } from "./lineage-cache.js";
-import {
-  admitCallInitialTell,
-  type CallInitialTellAdmission,
-  type TellResult,
-  type TellWake,
-} from "./call-initial-tell.js";
+import type { TellResult, TellWake } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import type { ExecutionAssociationReader } from "./execution-instructions.js";
 import { resolveProviderExecution } from "./providers/index.js";
-import { clearBodyRequestTransport, settleBodyRequests } from "./request-serve.js";
-import type { ErasedRequestCommand } from "./request-wire.js";
 import {
   observeBodyLaunch,
   launchEndWake,
@@ -68,11 +59,9 @@ export type TellWakeRuntime = Readonly<{
 export type BodyRuntime = Readonly<{
   now(): string;
   spawn: BodyLauncher;
-  requestSpawn: BodyLauncher;
   signal?: AbortSignal;
   forceSignal?: AbortSignal;
   world: WorldRoot;
-  externalCommands: Readonly<Record<string, ErasedRequestCommand>>;
   executionAssociation?: ExecutionAssociationReader;
 }>;
 
@@ -252,17 +241,12 @@ async function prepareBodyExecution(
   const { soul } = birth;
   if (launch.handoffFromBodySequence === undefined && !(await prepareBodyStart(launch.paths, leash))) return null;
   if (launch.seed === undefined && launch.initialBody === undefined) {
-    const [heart, requests] = await Promise.all([readHeart(launch.paths), readNonterminalRequests(launch.paths)]);
-    if (heart.pending.length === 0 && requests.length === 0) return null;
+    if ((await readHeart(launch.paths)).pending.length === 0) return null;
   }
   runtime.signal?.throwIfAborted();
   const selected = adapter ?? (await resolveProviderExecution(soul.provider)).adapter;
   runtime.signal?.throwIfAborted();
   return { ...birth, adapter: selected };
-}
-
-async function runPreparedBody(input: BodyExecution): Promise<BodyTurnEnd> {
-  return (await recoverBodyRequests(input)) ? await runBodyTurns(input) : undefined;
 }
 
 async function preserveBodyFailure(
@@ -293,21 +277,6 @@ async function prepareBodyStart(paths: AkumaPaths, leash: HeldAkumaLeash): Promi
     await leash.clearStop(paths);
   }
   return true;
-}
-
-async function recoverBodyRequests(input: BodyExecution): Promise<boolean> {
-  const { launch, soul, bodySequence, supervisor, runtime } = input;
-  try {
-    const result = await settleBodyRequests(launch.paths, soul, runtime.now, supervisor.signal);
-    await clearBodyRequestTransport(launch.paths);
-    if (result === "settled") return true;
-    await breakBody(launch.paths, { sequence: bodySequence, end: "broke-off", at: runtime.now() });
-  } catch (error) {
-    if (!supervisor.signal.aborted) throw error;
-    await clearBodyRequestTransport(launch.paths);
-    await putDownIfControlled(launch.paths, supervisor, bodySequence, runtime.now, input.turnOutcome);
-  }
-  return false;
 }
 
 type TurnStartedEmitter = Readonly<{
@@ -434,35 +403,6 @@ function bodyEndEmitter(
 
 type BodyTurnEnd = PendingTellDisposition | undefined;
 
-async function admitInitialCallTell(
-  runtime: BodyRuntime,
-  input: InitialTellAdmissionRequest,
-): Promise<CallInitialTellAdmission> {
-  const paths = pathsForAkuId(runtime.world, input.id);
-  return await admitCallInitialTell({
-    world: runtime.world,
-    id: input.id,
-    initialTell: input.initialTell,
-    signal: input.signal,
-    now: runtime.now,
-    wake: async (tell) =>
-      await wakeRecordedTell(
-        paths,
-        tell.id,
-        {
-          spawn: async (tellPaths) =>
-            await runtime.requestSpawn({
-              paths: tellPaths,
-              refuseIfHeld: true,
-              ...(input.contractId === undefined ? {} : { completion: { contractId: input.contractId } }),
-            }),
-          schedule: abortableDelay,
-        },
-        input.signal,
-      ),
-  });
-}
-
 async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
   const { launch, soul, adapter, bodySequence, supervisor, runtime, turnStarted, turnOutcome } = input;
   let initial = launch.initialBody;
@@ -496,15 +436,12 @@ async function runBodyTurns(input: BodyExecution): Promise<BodyTurnEnd> {
       adapter,
       bodySequence,
       supervisor,
-      runtimeSpawn: runtime.requestSpawn,
-      admitInitialTell: async (admission) => await admitInitialCallTell(runtime, admission),
       body: initial ?? "",
       ...(initial === undefined ? {} : { call: initial }),
       ...(launch.initiator === undefined ? {} : { initiator: launch.initiator }),
       launchTells,
       ...(schema === undefined ? {} : { schemaJson: schema }),
       world: runtime.world,
-      externalCommands: runtime.externalCommands,
       ...(runtime.executionAssociation === undefined ? {} : { executionAssociation: runtime.executionAssociation }),
       now: runtime.now,
       turnStarted,
@@ -634,11 +571,11 @@ async function finishBody(
 export async function driveAkumaBody(
   launch: BodyLaunch,
   adapter: ProviderAdapter | undefined,
-  runtimeInput: Pick<BodyRuntime, "spawn" | "requestSpawn"> & Partial<Omit<BodyRuntime, "spawn" | "requestSpawn">>,
+  runtimeInput: Pick<BodyRuntime, "spawn"> & Partial<Omit<BodyRuntime, "spawn">>,
 ): Promise<"held" | "hung" | void> {
   runtimeInput.signal?.throwIfAborted();
   const world = runtimeInput.world ?? (await World.at(worldRootForAkumaPaths(launch.paths)));
-  const runtime: BodyRuntime = { now: () => new Date().toISOString(), externalCommands: {}, ...runtimeInput, world };
+  const runtime: BodyRuntime = { now: () => new Date().toISOString(), ...runtimeInput, world };
   const acquired = await takeLeash(launch.paths, launch.refuseIfHeld, runtime.signal);
   if (acquired === "held") return "held";
   if (acquired === "absent") return;
@@ -668,7 +605,7 @@ export async function driveAkumaBody(
     bodySequence = body.sequence;
     supervisor = await BodySupervisor.open(launch.paths, body.sequence, leash, runtime.signal, runtime.forceSignal);
     if (prepared.created) await emitBodyBirth(launch, prepared.soul, world, body.sequence);
-    pendingTellDisposition = await runPreparedBody({
+    pendingTellDisposition = await runBodyTurns({
       launch,
       soul: prepared.soul,
       adapter: prepared.adapter,

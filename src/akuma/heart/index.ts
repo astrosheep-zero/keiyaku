@@ -103,19 +103,6 @@ export {
   isHeartAbsent,
   probeLeash,
 } from "./storage.js";
-export {
-  admitRequest,
-  beginRequest,
-  isRequestInputConflict,
-  readNonterminalRequests,
-  readRequest,
-  refuseRequest,
-  reserveRequest,
-  serveRequest,
-  serveUpstreamRequest,
-  unproveRequest,
-  voidRequest,
-} from "./request-authority.js";
 
 export { AkumaBusyError, BodyControlledError, life, lifeAt, projectTell } from "./facts.js";
 export { drainPendingTells } from "./tells.js";
@@ -128,7 +115,6 @@ export type {
   PauseFact,
   HeartSnapshot,
   KillEvidence,
-  RequestFact,
   SessionFact,
   Soul,
   TellFact,

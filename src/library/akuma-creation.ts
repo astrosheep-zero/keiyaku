@@ -10,7 +10,6 @@ import type { AkumaStatus } from "../akuma/akuma.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
-import type { ExecutionContext } from "../akuma/requests.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
@@ -88,7 +87,7 @@ export type CallResult = Readonly<{
   akuma: AkuId;
   execution: Readonly<{
     cwd: string;
-    source: "input" | "caller" | "process" | "world";
+    source: "input" | "process" | "world";
   }>;
   dispatch: DispatchStage;
   alias: AliasStage;
@@ -379,11 +378,10 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
   };
 }
 
-function callConfiguration(input: ParsedCallInput, execution: ExecutionContext) {
+function callConfiguration(input: ParsedCallInput) {
   return {
     ...(input.home === undefined ? {} : { home: input.home }),
     ...(input.settings === undefined ? {} : { settings: input.settings }),
-    execution,
   };
 }
 
@@ -521,7 +519,6 @@ function asError(failure: unknown): Error {
 
 export async function callAkumas(
   input: CallInput & Readonly<{ path: WorldRoot }>,
-  execution: ExecutionContext,
   spawn: BodyLauncher,
   reportDiagnostic?: (message: string) => void,
 ): Promise<CallResult> {
@@ -531,7 +528,7 @@ export async function callAkumas(
     const seat = parsed.seat;
     const admitted = await admitAkumaCall(
       parsed.path,
-      callConfiguration(parsed, execution),
+      callConfiguration(parsed),
       {
         ...callAdmissionInput(parsed, selectedExecution),
         ...(seat === undefined ? {} : { contractId: seat.id }),

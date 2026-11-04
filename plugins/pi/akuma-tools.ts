@@ -60,16 +60,11 @@ function caller(ctx: ExtensionContext): AkumaCaller {
 
 /** Native adaptation only. Addressing, admission, observation and lifecycle stay with Keiyaku. */
 export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direct" = "hidden"): void {
-  pi.registerFlag("keiyaku-request-only", {
-    type: "boolean",
-    default: false,
-    description: "Disable local native Akuma tools in provider-owned Pi sessions; use the request-aware CLI",
-  });
-  type Session = { id: string; host?: AkumaHostScope; closed: boolean };
+  type Session = { id: string; host: AkumaHostScope; closed: boolean };
   let current: Session | undefined;
   const create = (ctx: ExtensionContext): Session => ({
     id: ctx.sessionManager.getSessionId(),
-    ...(pi.getFlag("keiyaku-request-only") === true ? {} : { host: AkumaHost.inProcess() }),
+    host: AkumaHost.inProcess(),
     closed: false,
   });
   function session(ctx: ExtensionContext): Session {
@@ -77,10 +72,6 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     if (current.id !== ctx.sessionManager.getSessionId())
       throw new Error("Keiyaku Pi session has changed; wait for session_start");
     if (current.closed) throw new Error("Keiyaku Pi session is shutting down");
-    if (current.host === undefined)
-      throw new Error(
-        "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI.",
-      );
     return current;
   }
   pi.on("session_start", (_event, ctx) => {
@@ -92,7 +83,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     const owned = current;
     if (owned === undefined || owned.id !== ctx.sessionManager.getSessionId()) return;
     owned.closed = true;
-    await owned.host?.close();
+    await owned.host.close();
   });
   function register<Input>(
     name: string,
@@ -115,12 +106,6 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
       parameters: { type: "object", properties, required, additionalProperties: false },
       outputSchema: { type: "object", additionalProperties: true },
       async execute(_id, raw, signal, _update, ctx) {
-        // SDK flag injection happens after the factory. Read here, before World
-        // establishment, including when invoked as another tool's nested call.
-        if (pi.getFlag("keiyaku-request-only") === true)
-          throw new Error(
-            "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI.",
-          );
         const owned = session(ctx);
         signal?.throwIfAborted();
         const world = await (await World.resolve(ctx.cwd)).establish();

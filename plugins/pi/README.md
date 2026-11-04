@@ -49,8 +49,9 @@ unless the caller opts out.
 `writableDirectories` grants native tools access to additional existing canonical
 absolute directories at birth (currently Codex only). It preserves the native
 sandbox mode, network policy, and existing writable roots. Other providers
-refuse nonempty grants. Nothing automatically exposes the repository or Home. Forks
-inherit the frozen native recipe; there is no live elevation option.
+refuse nonempty grants. These explicit filesystem grants do not automatically
+expose the repository or Home. Forks inherit the frozen native recipe; there is
+no live elevation option.
 
 ```json
 {"akuma":"worker","body":"Inspect the parser without changing files."}
@@ -75,7 +76,7 @@ ends observation, not admitted work. Optional `schema` supplies a provider JSON
 answer contract; the result is JSON-decoded, not locally validated against
 arbitrary JSON Schema. Schema input to busy work retains the SDK refusal.
 
-## Lifetime and permissions
+## Lifetime
 
 The extension owns one `AkumaHost.inProcess()` scope per Pi session. Orderly
 `session_shutdown` closes only that scope's exact in-process launches, including
@@ -83,13 +84,9 @@ setup and automatic succession. It never kills by AkuId, so an older session
 cannot stop a foreign host's later wake of the same identity. Detached work
 survives. Reload and session replacement follow Pi's shutdown/start lifecycle.
 
-The Pi provider supplies the public SDK extension flag
-`keiyaku-request-only: true` to its own sessions. The extension reads that flag
-at native tool execution, before World establishment or SDK operations, and
-refuses local tools there (including nested tool calls). Those child Akumas use
-the existing CLI in their tool environment, with authenticated direct-parent
-routing. There is no ambient identity guess. If the optional extension is
-absent, Pi collects an unknown-option diagnostic without failing provider startup.
+Native tools use the same local SDK composition in external and provider-owned
+Pi sessions. Each session owns its own in-process host scope and caller identity.
+CLI operations in native tool children likewise run their ordinary local owners.
 
 In-process hosting is shared lifetime, not a sandbox: arbitrary extensions can
 block or terminate the runtime. A noncooperative tool/provider can remain

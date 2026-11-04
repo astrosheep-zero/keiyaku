@@ -42,7 +42,6 @@ export async function runReleasePlan(run) {
 const SWEEP_COST_MS = Object.freeze({
   "tests/actor.test.ts": 200,
   "tests/akuma-api.test.ts": 4700,
-  "tests/akuma-body-requests.test.ts": 8600,
   "tests/akuma-body.test.ts": 7600,
   "tests/akuma-heart-admission.test.ts": 900,
   "tests/akuma-heart.test.ts": 4200,
@@ -51,7 +50,6 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/akuma-physical.test.ts": 400,
   "tests/akuma-provider.test.ts": 6700,
   "tests/akuma-public.test.ts": 8900,
-  "tests/akuma-requests.test.ts": 7100,
   "tests/akuma-schema.test.ts": 1300,
   "tests/amend-body.test.ts": 300,
   "tests/arc.test.ts": 2900,
@@ -79,7 +77,6 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/contract-document.test.ts": 300,
   "tests/contract-execution-observation.test.ts": 300,
   "tests/contract-fork.test.ts": 4900,
-  "tests/contract-forwarding-result.test.ts": 1000,
   "tests/contract-guidance.test.ts": 200,
   "tests/dependency-currentness.test.ts": 200,
   "tests/dispatch-alias.test.ts": 3600,

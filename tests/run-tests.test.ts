@@ -19,12 +19,10 @@ const { TEST_MANIFESTS } = (await import(
 
 const root = process.cwd();
 
-test("test runner removes ambient Akuma requests and preserves unrelated environment", () => {
+test("test runner preserves the inherited environment", () => {
   for (const sentinel of ["sentinel bytes", "wrong sentinel"]) {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
-      AKUMA_REQUESTS: resolve(root, ".keiyaku", "ambient-requests"),
-      AKUMA_REQUESTS_ENTRY: resolve(root, ".keiyaku", "ambient-request-entry.json"),
       KEIYAKU_TEST_SENTINEL: sentinel,
     };
     // A deliberately nested runner must not inherit Node's recursion guard.
@@ -40,7 +38,7 @@ test("test runner removes ambient Akuma requests and preserves unrelated environ
       { cwd: root, encoding: "utf8", env },
     );
     assert.equal(result.status, sentinel === "sentinel bytes" ? 0 : 1, result.stderr || result.stdout);
-    assert.match(result.stdout + result.stderr, /repository test environment is isolated from Akuma request forwarding/u);
+    assert.match(result.stdout + result.stderr, /repository test environment preserves inherited values/u);
     assert.match(result.stdout + result.stderr, /# tests 1/u);
   }
 });

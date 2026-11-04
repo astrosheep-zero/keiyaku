@@ -75,7 +75,7 @@ export function fixtureLauncher(
     const fixture = fixtures.get(launch.paths.directory);
     if (fixture === undefined) throw new Error(`missing fixture adapter for ${launch.paths.directory}`);
     // This test host queues behind short observation custody instead of refusing a busy seat.
-    const body = driveAkumaBody({ ...launch, refuseIfHeld: false }, fixture.adapter, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => fixture.now });
+    const body = driveAkumaBody({ ...launch, refuseIfHeld: false }, fixture.adapter, { spawn: noBodyLaunch, now: () => fixture.now });
     bodies.push(body);
     return {
       completed: body.then(

@@ -92,7 +92,6 @@ async function nativeWorld(t: TestContext, path = temporaryDirectory(t, "keiyaku
     PI_SESSION_ID: "outer-session",
     KEIYAKU_ACTOR_ID: "aku/outer/12345678",
     KEIYAKU_ACTOR_WORLD: world,
-    AKUMA_REQUESTS: join(world, "outer-requests"),
     KEIYAKU_EXTERNAL_CALLER: "outer:caller",
   };
   const previous = Object.fromEntries(Object.keys(environment).map((key) => [key, process.env[key]]));
@@ -107,7 +106,7 @@ async function nativeWorld(t: TestContext, path = temporaryDirectory(t, "keiyaku
 }
 
 function holdingCommand(world: string, name: string): string {
-  const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(join(world, `${name}.ready`))}, 'ready'); const timer = setInterval(() => { if (fs.existsSync(${JSON.stringify(join(world, `${name}.release`))})) { clearInterval(timer); console.log(JSON.stringify({ actor: process.env.KEIYAKU_ACTOR_ID, world: process.env.KEIYAKU_ACTOR_WORLD, requests: process.env.AKUMA_REQUESTS, native: process.env.PI_SESSION_ID, external: process.env.KEIYAKU_EXTERNAL_CALLER })); } }, 20);`;
+  const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(join(world, `${name}.ready`))}, 'ready'); const timer = setInterval(() => { if (fs.existsSync(${JSON.stringify(join(world, `${name}.release`))})) { clearInterval(timer); console.log(JSON.stringify({ actor: process.env.KEIYAKU_ACTOR_ID, world: process.env.KEIYAKU_ACTOR_WORLD, native: process.env.PI_SESSION_ID, external: process.env.KEIYAKU_EXTERNAL_CALLER })); } }, 20);`;
   return [process.execPath, "-e", script].map(quote).join(" ");
 }
 
@@ -162,7 +161,6 @@ test(
       const identity = JSON.parse(outcome.answer);
       assert.equal(identity.actor, second.akuma);
       assert.equal(identity.world, world);
-      assert.ok(identity.requests.startsWith(pathsForAkuId(world, second.akuma).requests));
       assert.notEqual(identity.native, "outer-session");
       assert.equal(identity.external, undefined);
       const selectedAnswer = await secondHandle.ask(prompt("printf selected-answer"), {
@@ -255,7 +253,7 @@ console.log(JSON.stringify({
 });
 
 test(
-  "an in-process Body serves child, selection, Debt, and Contract requests without inheriting hosting",
+  "an in-process Body runs local child, selection, Debt, and Contract operations without inheriting hosting",
   { timeout: 60_000 },
   async (t) => {
     const repository = repositoryWithMain();
@@ -275,14 +273,14 @@ test(
       cwd: world,
       host: { hosting: "in-process" },
     });
-    const script = join(world, "requests.mjs");
+    const script = join(world, "operations.mjs");
     writeFileSync(
       script,
       `import { execFileSync } from "node:child_process";
 const cli = ${JSON.stringify(cli)}, world = ${JSON.stringify(world)};
 const run = (...args) => JSON.parse(execFileSync(process.execPath, ["--import", ${JSON.stringify(import.meta.resolve("tsx"))}, cli, "-C", world, ...args, "--json"], { encoding: "utf8" }));
 const who = run("whoami");
-const debt = run("debt", "add", "Body request service");
+const debt = run("debt", "add", "Local Body operation");
 const review = run("review", ${JSON.stringify(id)}, "--unsatisfied", "--summary", "fixture");
 const child = run("call", "worker", ${JSON.stringify(prompt("printf child-answer"))});
 const waited = run("wait", child.akuma, "--timeout", "20s");
@@ -301,6 +299,7 @@ console.log(JSON.stringify({ who, debt, review, child, waited }));
     assert.equal(result.child.observation.kind, "detached");
     assert.equal(result.waited.reason, "completed");
     const child = await readHeart(pathsForAkuId(world, result.child.akuma));
+    assert.equal(child.soul?.origin.kind, "direct");
     assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akuId: parent.id });
     assert.equal(present(await contract.state()).attestations.at(-1)?.actor, parent.id);
     const events = nativeEvents(world).filter((event) => event.event === "session_start");
@@ -373,7 +372,7 @@ test("launch cancellation before preparation cannot create a late Body, and publ
         async () => {
           entered.resolve();
           await preparation.promise;
-          return { world, externalCommands: {}, spawn: noBodyLaunch, requestSpawn: noBodyLaunch };
+          return { world, spawn: noBodyLaunch };
         },
       );
     },
@@ -418,7 +417,7 @@ test("owned in-process cancellation retires only its own prepared Body", async (
   const spawn: BodyLauncher = async (launch) =>
     await launchInProcessBody(
       launch,
-      async () => ({ world, externalCommands: {}, spawn, requestSpawn: noBodyLaunch }),
+      async () => ({ world, spawn }),
       adapter,
     );
   for (const [index, child] of [first, second].entries())

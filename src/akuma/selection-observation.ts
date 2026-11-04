@@ -1,77 +1,38 @@
-import { z } from "zod";
-import { EMPTY_CREATED_DEBT_OBSERVATION, createdDebtObservationSchema } from "../debt/created-observation.js";
-import { akumaStatusSchema, type AkumaStatus } from "./akuma.js";
-import { tellResultSchema } from "./call-initial-tell.js";
-import { NO_DISPATCH_ASSOCIATION, dispatchAssociationSchema } from "./dispatch-association.js";
+import type { CreatedDebtObservation } from "../debt/created-observation.js";
+import type { AkumaStatus } from "./akuma.js";
+import type { TellResult } from "./call-initial-tell.js";
+import type { DispatchAssociation } from "./dispatch-association.js";
 import type { KillEvidence } from "./heart/index.js";
-import { akumaIdSchema } from "./identity.js";
+import type { AkuId } from "./identity.js";
 
-const killEvidenceSchema = z.enum([
-  "killed",
-  "already-killed",
-  "already-stopped",
-  "hung",
-  "untidy",
-  "unavailable",
-]) satisfies z.ZodType<KillEvidence>;
-const akumaObservationSchema = z
-  .object({
-    status: akumaStatusSchema,
-    contract: dispatchAssociationSchema,
-    createdDebts: createdDebtObservationSchema,
-  })
-  .strict();
-const akumaUnobservedSchema = z.object({ id: akumaIdSchema, diagnostic: z.string() }).strict();
-const akumaKillResultItemSchema = z.object({ id: akumaIdSchema, evidence: killEvidenceSchema }).strict();
-const akumaWaitResultSchema = z
-  .object({
-    mode: z.enum(["any", "all"]),
-    reason: z.enum(["completed", "deadline"]),
-    observations: z.array(akumaObservationSchema).readonly(),
-    unobserved: z.array(akumaUnobservedSchema).readonly(),
-  })
-  .strict();
-const akumaKillResultSchema = z.object({ results: z.array(akumaKillResultItemSchema).readonly() }).strict();
-const akumaTellResultSchema = z.object({ akuma: akumaIdSchema, tell: tellResultSchema }).strict();
-const askObservationSchema = z.union([
-  z.object({ reason: z.literal("answered"), answer: z.unknown() }).strict(),
-  z.object({ reason: z.literal("failed"), diagnostic: z.string() }).strict(),
-  z.object({ reason: z.literal("invalid-output"), diagnostic: z.string(), answer: z.string() }).strict(),
-  z.object({ reason: z.literal("unanswered") }).strict(),
-  z.object({ reason: z.literal("deadline") }).strict(),
-]);
-const akumaAskResultSchema = z
-  .object({
-    akuma: akumaIdSchema,
-    tell: tellResultSchema,
-    observation: askObservationSchema,
-    completedAt: z.string().datetime({ offset: true }).nullable().optional(),
-  })
-  .strict();
-
-export type AkumaObservation = z.infer<typeof akumaObservationSchema>;
+export type AkumaObservation = Readonly<{
+  status: AkumaStatus;
+  contract: DispatchAssociation;
+  createdDebts: CreatedDebtObservation;
+}>;
 export type AkumaObservationStage =
   | (Readonly<{ kind: "observed" }> & AkumaObservation)
   | Readonly<{ kind: "unobserved"; diagnostic: string }>;
-export type AkumaUnobserved = z.infer<typeof akumaUnobservedSchema>;
-export type AkumaWaitResult = z.infer<typeof akumaWaitResultSchema>;
-export type AkumaKillResult = z.infer<typeof akumaKillResultSchema>;
-export type AkumaTellResult = z.infer<typeof akumaTellResultSchema>;
+export type AkumaUnobserved = Readonly<{ id: AkuId; diagnostic: string }>;
+export type AkumaWaitResult = Readonly<{
+  mode: "any" | "all";
+  reason: "completed" | "deadline";
+  observations: readonly AkumaObservation[];
+  unobserved: readonly AkumaUnobserved[];
+}>;
+export type AkumaKillResult = Readonly<{
+  results: readonly Readonly<{ id: AkuId; evidence: KillEvidence }>[];
+}>;
+export type AkumaTellResult = Readonly<{ akuma: AkuId; tell: TellResult }>;
 export type AkumaAskObservation<T = unknown> =
-  | Exclude<z.infer<typeof askObservationSchema>, { reason: "answered" }>
-  | Readonly<{ reason: "answered"; answer: T }>;
-export type AkumaAskResult<T = unknown> = Omit<z.infer<typeof akumaAskResultSchema>, "observation"> &
-  Readonly<{ observation: AkumaAskObservation<T> }>;
-
-/** Compose one native status into the canonical observation its crossing transports. */
-export function akumaObservationOf(status: AkumaStatus): AkumaObservation {
-  return { status, contract: NO_DISPATCH_ASSOCIATION, createdDebts: EMPTY_CREATED_DEBT_OBSERVATION };
-}
-
-export const selectionResultSchemas = {
-  wait: akumaWaitResultSchema,
-  tell: akumaTellResultSchema,
-  ask: akumaAskResultSchema,
-  kill: akumaKillResultSchema,
-  killEvidence: killEvidenceSchema,
-};
+  | Readonly<{ reason: "answered"; answer: T }>
+  | Readonly<{ reason: "failed"; diagnostic: string }>
+  | Readonly<{ reason: "invalid-output"; diagnostic: string; answer: string }>
+  | Readonly<{ reason: "unanswered" }>
+  | Readonly<{ reason: "deadline" }>;
+export type AkumaAskResult<T = unknown> = Readonly<{
+  akuma: AkuId;
+  tell: TellResult;
+  observation: AkumaAskObservation<T>;
+  completedAt?: string | null;
+}>;

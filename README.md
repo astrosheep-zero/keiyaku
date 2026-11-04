@@ -220,8 +220,9 @@ attests every current requirement. `reviewed` and custom gates each have one
 requirement; `verified` derives its requirements from distinct current
 declarations. There is no separate aggregate gate attestation.
 
-Only explicit verify executes checks. Forwarded verify returns the same typed
-result as local execution under the serving parent's Git and process custody.
+Verification runs only through explicit `verify`; delivery and review consume
+existing evidence. Each check runs locally with the invoking process's Git and
+process custody.
 
 Worktree hooks run commands when a Contract's managed worktree is created or
 destroyed — dependency installs are the usual suspect:

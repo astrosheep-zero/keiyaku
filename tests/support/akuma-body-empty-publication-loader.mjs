@@ -1,4 +1,4 @@
-const marker = "pendingTellDisposition = await runPreparedBody({";
+const marker = "pendingTellDisposition = await runBodyTurns({";
 const idleMarker = "const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });";
 const observationMarker = "await this.refresh();";
 const injected = `

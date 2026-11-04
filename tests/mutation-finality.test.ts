@@ -195,14 +195,16 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.ok(first.kind === "failed");
   assert.equal(first.error.cause, native);
   assert.equal(first.error.category, "internal");
-  Object.defineProperty(first.error, "requestOutcome", { value: "unproven", enumerable: false });
+  assert.equal(first.error.message, native.message);
   progress.recordChannelRetirement(id, new Error("retirement failed"));
   const final = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
   assert.ok(final.error instanceof KeiyakuError);
   assert.equal(final.error.cause, native);
   assert.equal(final.error.category, "internal");
-  assert.equal(Object.getOwnPropertyDescriptor(final.error, "requestOutcome")?.value, "unproven");
+  assert.equal(final.error.message, native.message);
+  assert.ok(final.error.outcome?.operation === "deliver-preview");
+  assert.deepEqual(final.error.outcome.facts, []);
   assert.equal(final.error.outcome?.effects.length, 1);
   assert.deepEqual(first.error.outcome?.effects, []);
   assert.deepEqual(final.error.outcome?.value, { verification });

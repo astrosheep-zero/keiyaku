@@ -165,7 +165,6 @@ function freshInput(): DriveInput & { session: { kind: "fresh" } } {
     cwd: "/tmp",
     options: {},
     signal: new AbortController().signal,
-    requests: { dir: "/tmp/akuma-test-requests" },
     session: { kind: "fresh" },
   };
 }

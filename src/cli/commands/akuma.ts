@@ -7,15 +7,17 @@ import { squareSeat } from "../square-identity.js";
 import { emitPluginSignal } from "../../plugin/akuma-signals.js";
 import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
-import type { ExecutionContext } from "../../akuma/requests.js";
-import { executionChannel } from "../../akuma/requests.js";
 import { settings, type Settings } from "../../settings.js";
-import { AkumaWorldScopeError, type CallInput, type Keiyaku as KeiyakuContract, type Repo } from "../../index.js";
-import { akumasWithExecution } from "../../library/akumas.js";
-import { composeContractLibrary } from "../../library/contract-composition.js";
-import { createKeiyakuHandle } from "../../library/keiyaku.js";
-import { World, type WorldRoot } from "../../world.js";
+import {
+  Akumas,
+  AkumaWorldScopeError,
+  type CallInput,
+  type Keiyaku as KeiyakuContract,
+  type Repo,
+} from "../../index.js";
+import { Keiyaku } from "../../index.js";
 import type { CliCoordinates } from "../coordinates.js";
+import { World, type WorldRoot } from "../../world.js";
 import { contractFromInput } from "../selectors.js";
 import { ActivityDriver } from "../activity.js";
 import {
@@ -51,7 +53,6 @@ import {
   renderForkText,
   renderKillText,
   tellOutcome,
-  waitedTellProgress,
 } from "../render/akuma.js";
 export { isParsedAkumaCommand, renderAkumaHelp } from "./akuma-grammar.js";
 
@@ -76,14 +77,13 @@ type InvokeInput = Readonly<{
   repo?: Repo;
   environment: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
-  execution: ExecutionContext;
   signal?: AbortSignal;
 }>;
 
 type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
 
 function akumas(input: InvokeInput) {
-  return akumasWithExecution(input.path, input.execution, { reportDiagnostic: writeStderr });
+  return Akumas.of(input.path, { reportDiagnostic: writeStderr });
 }
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
@@ -155,10 +155,7 @@ async function runCall(
 ): Promise<CliOutcome> {
   const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-  const declaredCaller =
-    executionChannel(input.execution).kind === "body-request"
-      ? undefined
-      : await akumaCallerFromEnvironment(input.environment);
+  const declaredCaller = await akumaCallerFromEnvironment(input.environment);
   // Establish the selected World before preparing the submitting Square route.
   await World.at(input.path);
   const caller = akumas(input);
@@ -267,11 +264,7 @@ async function runAsk(
   const body = await promptBody("ask", command, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const alias = inputAlias(command.akuma);
-  const channel = executionChannel(input.execution);
-  const progress =
-    command.output === "text" && channel.kind === "local"
-      ? askProgressStream(undefined, alias, resultContext())
-      : undefined;
+  const progress = command.output === "text" ? askProgressStream(undefined, alias, resultContext()) : undefined;
   const driver = new ActivityDriver(process.stderr);
   try {
     const result = await akumas(input).ask({
@@ -297,8 +290,6 @@ async function runAsk(
           }),
     });
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
-    else if (command.output === "text" && channel.kind === "body-request")
-      writeStderr(waitedTellProgress(result, alias, resultContext()));
     if (command.output === "json") writeJson(result);
     else emitAnswer(askRawAnswer(result, schema !== undefined) ?? "", true);
     return askOutcome(result);
@@ -403,14 +394,13 @@ async function akumaInput(
             return canonicalBirthCwd(resolve(coordinates.cwd, path));
           }),
         );
-  const execution = runtime.execution;
   const home = command.command === "call" ? runtime.home : undefined;
   const configuration = command.command === "call" ? await settingsAt(path, home) : undefined;
   if (command.command === "call" && command.contract !== undefined && coordinates.repo === undefined)
     throw new Error("call with Contract requires a resolved Repo");
   const contract =
     command.command === "call" && command.contract !== undefined
-      ? contractFromInput(coordinates.repo!, command.contract, execution).contract
+      ? contractFromInput(coordinates.repo!, command.contract).contract
       : undefined;
   return {
     path,
@@ -422,7 +412,6 @@ async function akumaInput(
     ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
     environment: runtime.environment,
     readStdin: runtime.readStdin,
-    execution,
     ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
   };
 }
@@ -438,7 +427,7 @@ export async function runAkumaCommand(
       const contracts = command.akuma.filter((selector) => selector.startsWith("kei/"));
       if (contracts.length > 0) {
         if (coordinates.repo === undefined) throw new CliUsageError("Contract wait requires a repository");
-        const result = await composeContractLibrary(runtime.execution, createKeiyakuHandle).wait({
+        const result = await Keiyaku.with().wait({
           repo: coordinates.repo,
           contracts,
           ...(command.completion === undefined ? {} : { completion: command.completion }),

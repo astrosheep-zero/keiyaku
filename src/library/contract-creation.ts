@@ -1,5 +1,4 @@
 /** @architectureCompositionRoot */
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { decodeCanonicalContractDocument } from "../body/render.js";
 import { regionWarnings } from "../body/region.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
@@ -75,13 +74,12 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
 export async function bindKeiyaku(
   input: BindInput,
   createHandle: typeof createKeiyakuHandle,
-  execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<BindOutcome> {
   const prepared = bindInput(input, composition);
   const hooks = derivedHooks(composition);
   const { forkOf, scope, document, target, actor } = prepared;
-  const handle = (id: ContractId) => createHandle(id, scope, execution, composition);
+  const handle = (id: ContractId) => createHandle(id, scope, composition);
   const accumulator = new InvocationAccumulator();
   const projection = await (async (): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> => {
     let completed: OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]> | undefined;

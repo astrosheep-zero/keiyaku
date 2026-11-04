@@ -121,8 +121,6 @@ const loader = compiled ? ["--enable-source-maps"] : ["--import", "tsx"];
 const ledgerRoot = mkdtempSync(join(tmpdir(), "keiyaku-test-square-ledger-"));
 /** @type {NodeJS.ProcessEnv} */
 const environment = { ...process.env, SQUARE_DELIVERY: join(ledgerRoot, "delivery.sqlite") };
-delete environment.AKUMA_REQUESTS;
-delete environment.AKUMA_REQUESTS_ENTRY;
 // This is a new runner, including when invoked by a test of the runner itself.
 delete environment.NODE_TEST_CONTEXT;
 const started = performance.now();

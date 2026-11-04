@@ -7,7 +7,6 @@ import { KeiyakuError, AuthorityCorruptionError, Repo, Keiyaku } from "../src/in
 import { createKeiyakuHandle } from "../src/library/keiyaku.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { scopeForRepo } from "../src/library/repo.js";
-import { localExecutionContext } from "../src/akuma/requests.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { executionStop } from "../src/protocol/progress.js";
 import { actorId, contractId } from "../src/core/facts/types.js";
@@ -43,7 +42,7 @@ test("native delivery propagates lower programming and corruption failures after
         armed = true;
       },
     };
-    const native = createKeiyakuHandle(id, scope, localExecutionContext(), captureLocalContractComposition());
+    const native = createKeiyakuHandle(id, scope, captureLocalContractComposition());
     await assert.rejects(native.deliver(), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, original instanceof AuthorityCorruptionError ? "authority-corruption" : "internal");
@@ -83,7 +82,7 @@ test("native delivery never treats an aborted signal as proof that an independen
       return actorId("test");
     },
   };
-  const native = createKeiyakuHandle(present(await bound.state()).id, scope, localExecutionContext(), composition);
+  const native = createKeiyakuHandle(present(await bound.state()).id, scope, composition);
   await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
@@ -158,7 +157,7 @@ test("native delivery keeps claim and movement when the optional scope observati
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(id, scope, localExecutionContext(), captureLocalContractComposition());
+  const native = createKeiyakuHandle(id, scope, captureLocalContractComposition());
   await assert.rejects(
     native.deliver(
       {},
@@ -217,7 +216,7 @@ test("native review retains an earlier claimed sibling when a later continuation
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(primaryId, scope, localExecutionContext(), captureLocalContractComposition());
+  const native = createKeiyakuHandle(primaryId, scope, captureLocalContractComposition());
   await assert.rejects(
     native.review(
       { verdict: "satisfied" },
@@ -340,7 +339,7 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
         armed = true;
     },
   };
-  const native = createKeiyakuHandle(bound.contract, scope, localExecutionContext(), captureLocalContractComposition());
+  const native = createKeiyakuHandle(bound.contract, scope, captureLocalContractComposition());
   await assert.rejects(native.deliver(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.cause, original);
@@ -451,7 +450,7 @@ test("native preview preserves partial observation on unexpected target-lag fail
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(bound.contract, scope, localExecutionContext(), captureLocalContractComposition());
+  const native = createKeiyakuHandle(bound.contract, scope, captureLocalContractComposition());
   const witnessedHead = present(await bound.value.keiyaku.state()).head;
   await assert.rejects(native.previewDelivery(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
@@ -521,7 +520,6 @@ test("native delivery retains an earlier completed checkout follow when a later 
     const native = createKeiyakuHandle(
       bound.contract,
       scope,
-      localExecutionContext(),
       captureLocalContractComposition(),
     );
     await assert.rejects(native.deliver(), (error: unknown) => {

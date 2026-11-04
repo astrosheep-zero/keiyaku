@@ -10,10 +10,9 @@ import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.j
 import { bornWorld } from "./support/akuma-tell.js";
 import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { localExecutionContext } from "../src/akuma/requests.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, BodyLauncher } from "../src/akuma/body-launch.js";
-import { requestForwardedAkumaCall } from "../src/akuma/call-request.js";
+import { Schema } from "../src/akuma/schema.js";
 import { fixtureAdapter, fixtureAttempt } from "./support/akuma-tell.js";
 import type { DriveInput, ProviderAdapter } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
@@ -37,16 +36,21 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: `session-${text}` } };
           if (text === "parent") {
-            const child = await requestForwardedAkumaCall({
-              directory: input.requests!.dir, id: "00000000-0000-4000-8000-000000000001", world, archetype: "worker",
-              recipe: { provider: { name: "claude", kind: "claude-agent-sdk" }, options: {} },
-              initialTell: { tellId: "nested-tell", body: "child", schemaJson: '{"type":"object"}' },
+            const child = await akumasWithLauncher(world, spawn).call({
+              archetype: "worker",
+              body: "child",
+              schema: Schema.json({ type: "object" }, (value) => value),
+              caller: {
+                kind: "akuma",
+                world,
+                akuId: input.execution!.akumaId as NonNullable<BodyLaunch["seed"]>["id"],
+              },
+              signal: context.signal,
             });
-            assert.equal(child.kind, "live");
-            if (child.kind !== "live") throw new Error("nested call lost its live receipt");
-            nestedId = child.id;
-            assert.equal(child.tell?.admission.tellId, "nested-tell");
-            assert.equal(child.tellFailure, undefined);
+            nestedId = child.akuma;
+            assert.equal(child.observation.kind, "detached");
+            if (child.observation.kind !== "detached") throw new Error("nested call lost its Tell receipt");
+            assert.equal(child.observation.tell.row.text, "child");
             answer.resolve("parent answer");
           } else {
             assert.equal(input.schemaJson, '{"type":"object"}');
@@ -55,22 +59,31 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
         },
       },
       completion: answer.promise.then((value) => ({ kind: "answered" as const, answer: value })),
-      resource: { abort: async () => { answer.resolve("canceled"); } },
+      resource: {
+        abort: async () => {
+          answer.resolve("canceled");
+        },
+      },
     };
   });
   const spawn: BodyLauncher = async (launch) => {
     launches.push(launch);
-    const body = driveAkumaBody(launch, adapter, { spawn, requestSpawn: spawn, world });
+    const body = driveAkumaBody(launch, adapter, { spawn, world });
     bodies.push(body);
     return {
       completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
-      async cancel() { throw new Error("confirmed launches must not be canceled"); },
+      async cancel() {
+        throw new Error("confirmed launches must not be canceled");
+      },
       release() {},
     };
   };
   try {
-    const result = await akumasWithLauncher(world, localExecutionContext(), spawn).call({
-      archetype: "worker", body: "parent", mode: "wait", signal: context.signal,
+    const result = await akumasWithLauncher(world, spawn).call({
+      archetype: "worker",
+      body: "parent",
+      mode: "wait",
+      signal: context.signal,
     });
     assert.equal(result.observation.kind, "observed");
     if (result.observation.kind === "observed")
@@ -78,12 +91,16 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
     await Promise.all(bodies);
     assert.deepEqual(submissions, ["parent", "child"], "births submit no provider prompt");
     assert.equal(launches.length, 4);
-    assert.deepEqual(launches.map((launch) => launch.seed?.origin.kind ?? "wake"), ["direct", "wake", "request", "wake"]);
+    assert.deepEqual(
+      launches.map((launch) => launch.seed?.origin.kind ?? "wake"),
+      ["direct", "wake", "direct", "wake"],
+    );
     assert.equal(launches[0]!.paths.directory, launches[1]!.paths.directory);
     assert.equal(launches[2]!.paths.directory, launches[3]!.paths.directory);
     assert.notEqual(launches[0]!.paths.directory, launches[2]!.paths.directory);
     assert.equal(launches[2]!.seed?.id, nestedId);
     const child = await readHeart(launches[2]!.paths);
+    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akuId: launches[0]!.seed!.id });
     assert.equal(child.latestBody?.end, "exited");
     assert.equal(child.pending.length, 0);
   } finally {
@@ -101,30 +118,44 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
   const launches: BodyLaunch[] = [];
   const bodies: Promise<unknown>[] = [];
   const inputs: string[] = [];
-  const drive = (input: DriveInput) => fixtureAttempt(input, async () => {
-    const text = input.launchTells[0]!.text;
-    inputs.push(text);
-    const finished = text === "first" ? retired.promise : Promise.resolve();
-    return {
-      events: { async *[Symbol.asyncIterator]() {
-        yield { type: "session" as const, coordinate: { sessionId: "succession-session" } };
-        if (text === "first") started.resolve();
-        await finished;
-      } },
-      completion: finished.then(() => ({ kind: "answered" as const, answer: text })),
-      resource: { abort: async () => { retired.resolve(); } },
-    };
-  });
-  const adapter: ProviderAdapter = { admitOptions: (options) => ({ kind: "admitted", options }), start: drive, resume: drive };
+  const drive = (input: DriveInput) =>
+    fixtureAttempt(input, async () => {
+      const text = input.launchTells[0]!.text;
+      inputs.push(text);
+      const finished = text === "first" ? retired.promise : Promise.resolve();
+      return {
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "succession-session" } };
+            if (text === "first") started.resolve();
+            await finished;
+          },
+        },
+        completion: finished.then(() => ({ kind: "answered" as const, answer: text })),
+        resource: {
+          abort: async () => {
+            retired.resolve();
+          },
+        },
+      };
+    });
+  const adapter: ProviderAdapter = {
+    admitOptions: (options) => ({ kind: "admitted", options }),
+    start: drive,
+    resume: drive,
+  };
   const spawn: BodyLauncher = async (launch) => {
     launches.push(launch);
-    const body = driveAkumaBody(launch, adapter, { spawn, requestSpawn: spawn, world });
+    const body = driveAkumaBody(launch, adapter, { spawn, world });
     bodies.push(body);
-    return { completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
-      async cancel() {}, release() {} };
+    return {
+      completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
+      async cancel() {},
+      release() {},
+    };
   };
   try {
-    const api = akumasWithLauncher(world, localExecutionContext(), spawn);
+    const api = akumasWithLauncher(world, spawn);
     const result = await api.call({ archetype: "worker", body: "first", signal: context.signal });
     await started.promise;
     const next = await api.ask({ akuma: result.akuma, body: "second", signal: context.signal });

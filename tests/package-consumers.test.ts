@@ -124,7 +124,6 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'assert.equal(typeof Keiyaku.prototype.previewDelivery, "function");',
         'assert.equal("audit" in Keiyaku.prototype, false);',
         'assert.equal(typeof Keiyaku.with, "function");',
-        'assert.throws(() => Keiyaku.with({ execution: { channel: { kind: "body-request", directory: "/tmp/keiyaku-p6-carrier-witness" } } }), /unknown field: execution/u);',
         "assert.equal(Keiyaku.call, Function.prototype.call);",
         "assert.equal(Keiyaku.bind, Function.prototype.bind);",
         'assert.equal("fork" in Keiyaku, false);',
@@ -161,7 +160,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
         "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
-        'for (const name of ["bodyRequestExecution", "gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle", "akumasWithExecution", "debtsWithExecution"]) {',
+        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle"]) {',
         "  assert.equal(name in root, false, name);",
         "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

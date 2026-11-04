@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 // Pinned vendor CLI entry: the public SDK does not expose cancellation or selectors.
 import { DaemonClient, type DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
@@ -23,7 +22,7 @@ import {
 } from "../../provider.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
-import { AKUMA_REQUESTS_ENTRY_ENV, akumaExecutionEnvironment } from "../execution-environment.js";
+import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { PaseoTurn, paseoRuntimeModel } from "./events.js";
 import { providerLifecycle } from "../lifecycle.js";
 
@@ -258,9 +257,6 @@ class PaseoDrive {
     const systemPrompt = [input.options.systemPrompt, input.runtimeInstructions]
       .filter((part) => part !== undefined && part.length > 0)
       .join("\n\n");
-    const entry = input.requests.entry;
-    if (entry === undefined || !isAbsolute(entry) || resolve(entry) !== entry)
-      throw new Error("Paseo requires the Body's stable request entry");
     input.signal.throwIfAborted();
     await setup(input.signal, () => this.client.connect());
     const agent =
@@ -270,10 +266,7 @@ class PaseoDrive {
               provider: config.provider,
               cwd: input.cwd,
               ...(systemPrompt === "" ? {} : { systemPrompt }),
-              env: {
-                ...akumaExecutionEnvironment(process.env, this.environment, undefined, [], input.execution),
-                [AKUMA_REQUESTS_ENTRY_ENV]: entry,
-              },
+              env: akumaExecutionEnvironment(process.env, this.environment, [], input.execution),
               autoArchive: false,
             }),
           )

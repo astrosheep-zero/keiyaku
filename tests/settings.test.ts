@@ -872,6 +872,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
     const selected = Keiyaku.with({ settings: brokenFreshness }).select({ repo, id: missing });
     await assert.rejects(selected.previewDelivery(), invalidInputFromSettings);
     await assert.rejects(selected.deliver(), invalidInputFromSettings);
+    await assert.rejects(selected.verify(), invalidInputFromSettings);
     // Review consumes neither namespace and reaches its own admission instead.
     assert.equal((await selected.review({ verdict: "satisfied" })).kind, "refused");
 

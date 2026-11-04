@@ -8,30 +8,25 @@ World-bound product.
 
 ## Composition
 
-`Akumas.of(world)` captures one World at construction and is always local. A
-detached Body's direct-parent route is private composition, never a public
-input; public inputs do not select a route, forwarding never recurses, and
-composition creates no cached resolution, parallel writer, or background
-integration queue. Callers do not repeat World on operations. Repo stays an
+`Akumas.of(world)` captures one World at construction. Composition creates no
+cached resolution, parallel writer, or background integration queue. Callers do not repeat World on operations. Repo stays an
 explicit separate coordinate for Contract selector and Dispatch association;
 neither coordinate is inferred from the other. Every filesystem, Alias,
 Dispatch, Debt, and Heart observation is awaited before its public Promise
 settles. Contract-local actor, hook, and branch-freshness configuration does
 not enter this composition.
 
-Construction captures a host choice independently of request routing and
-observation. Detached hosting remains the default; an explicit in-process choice
+Construction captures a host choice independently of observation. Detached hosting remains the default; an explicit in-process choice
 runs locally admitted Bodies in the calling Node runtime. Changing the caller's
 options afterward changes nothing, and selection never relocates an already
-running Body. Host choice is not persisted, forwarded, or inherited by newly
-requested children. Shared-host lifetime and cancellation belong to
+running Body. Host choice is not persisted or inherited by forked children. Shared-host lifetime and cancellation belong to
 [akuma-execution.md](akuma-execution.md).
 
 Construction may also capture an immutable host diagnostic observer. This
-capability is independent of execution routing: it sees only plugin diagnostics
-produced in that host, never remote Body logs, and cannot change public results.
+capability sees only plugin diagnostics produced in that host, never remote Body
+logs, and cannot change public results.
 The callback itself is captured, not a mutable caller options object; it enters
-neither operation inputs, persisted facts, nor forwarded requests. Independent
+neither operation inputs nor persisted facts. Independent
 compositions retain independent destinations. Plugin diagnostic defaults,
 producer ownership, and failure isolation belong to [plugins.md](plugins.md).
 
@@ -42,9 +37,8 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability. The submitting process writes its call wiring after
-call admission — including any exact first Tell — and before it observes the
-call outcome, and the same wiring serves a local call and a live forwarded call.
+provider fork capability. The submitting process writes its call wiring after call admission — including
+any exact first Tell — and before it observes the call outcome.
 Submitting-process identity preparation stays optional observation that never gates
 birth, Tell, or Dispatch; Dispatch and Alias remain independent cross-product
 authority, not child identity, and each keeps its own integration result.
@@ -84,23 +78,17 @@ or facade integration stage. Their absence or failure neither alters birth nor
 creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics. Public selection observations explicitly
 participate in identified-outcome observation, while association reads and
-roster expansion do not. Forwarded wait and ask leave plugin delivery with the
-requesting observer after it receives concrete live outcome evidence, using that
-integration's actual local ownership. The server supplies semantic identities
-without emitting the signal. Wait uses its returned status outcomes; ask carries
-private live observation evidence that never changes the public result. Delivery
-precedes caller-side answer decoding, and neither expired transport nor durable
-service evidence reconstructs or replays it. Bounded call answer observation
-stays with the submitting observer. Composition never rereads later state to
-infer the identity of an earlier observed answer.
+roster expansion do not. Wait and ask deliver identified outcome observation
+in the observing process from the concrete result they return. Wait uses its
+returned status outcomes; ask uses private live observation evidence that never
+changes the public result. Delivery precedes answer decoding. Bounded call
+answer observation stays with the submitting observer. Composition never
+rereads later state to infer the identity of an earlier observed answer.
 
 A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
-Akuma execution owns that admission and wake for both local and forwarded calls;
-Library composes surrounding Dispatch and Alias facts. A forwarded child receipt
-proves birth only. If its exact initial Tell receipt is absent, the call keeps
-the child identity and reports partial failure without replaying admission or
-requesting a separate Tell authority. A schema belongs to that same input and
-its answer contract; it creates no second call workflow or route and does not
+Akuma execution owns that admission and wake. Library composes surrounding
+Dispatch and Alias facts. A schema belongs to that same input and
+its answer contract; it creates no alternate call path and does not
 alter the existing busy refusal for schema Tells to a running Akuma.
 
 After a successful call or fork has made its new Akuma durable, and outside that

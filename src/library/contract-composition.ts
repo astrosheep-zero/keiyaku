@@ -1,5 +1,4 @@
 /** @architectureCompositionRoot */
-import { localExecutionContext, type ExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import {
@@ -27,8 +26,12 @@ import type {
   LocalContractComposition,
 } from "./contract-types.js";
 import { requireInput } from "./input.js";
-import { validateContractWait, type ContractWaitInput, type ContractWaitResult } from "./contract-wait.js";
-import { waitContractRouted } from "./contract-wait-request.js";
+import {
+  validateContractWait,
+  waitContractLocal,
+  type ContractWaitInput,
+  type ContractWaitResult,
+} from "./contract-wait.js";
 import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
 import { readContractValue } from "./outcome.js";
 import {
@@ -56,25 +59,19 @@ export type KeiyakuLibrary = Readonly<{
   reconcile: KeiyakuLibraryReconcile;
 }>;
 
-/**
- * The one private Contract composition constructor. `Keiyaku.with` fixes local execution; CLI and
- * Body pass their captured internal channel explicitly here instead of a second constructor. The
- * carrier is a positional argument, never a field of the public construction input, so no runtime
- * value reaching the public surface can select a private channel.
- */
+/** Captures immutable Contract settings for native owner operations. */
 export function composeContractLibrary(
-  execution: LibraryExecution,
   createHandle: typeof createKeiyakuHandle,
   input?: LocalContractComposition,
 ): KeiyakuLibrary {
   const composition = captureLocalContractComposition(input);
   return Object.freeze({
-    bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, execution, composition),
-    select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, execution, composition),
+    bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, composition),
+    select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, composition),
     resolve: resolveContract,
     list: (operation: ContractListInput) => listKeiyaku(operation),
     observe: (operation: ContractObservationInput) => observeKeiyaku(operation),
-    wait: async (operation: ContractWaitInput) => await waitContractRouted(validateContractWait(operation), execution),
+    wait: async (operation: ContractWaitInput) => await waitContractLocal(validateContractWait(operation)),
     reconcile: reconcileOperation(composition),
   });
 }
@@ -82,13 +79,12 @@ export function composeContractLibrary(
 function selectKeiyaku(
   input: KeiyakuSelectInput,
   createHandle: typeof createKeiyakuHandle,
-  execution: ExecutionContext = localExecutionContext(),
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Keiyaku {
   const values = requireInput(input, "Keiyaku.with().select input");
   const scope = scopeForRepo(values.repo);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  return createHandle(contractId(values.id), scope, execution, composition);
+  return createHandle(contractId(values.id), scope, composition);
 }
 
 /**

@@ -1,20 +1,13 @@
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { identitySegments } from "../identity/coordinates.js";
 import { Keiyaku, type ContractId, type Repo } from "../index.js";
-import { composeContractLibrary } from "../library/contract-composition.js";
-import { createKeiyakuHandle } from "../library/keiyaku.js";
 import { CliUsageError } from "./parse.js";
 
 type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
 
-export function contractFromInput(
-  repo: Repo,
-  value: string,
-  execution: ExecutionContext = localExecutionContext(),
-): SelectedContract {
+export function contractFromInput(repo: Repo, value: string): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: composeContractLibrary(execution, createKeiyakuHandle).select({ repo, id }) };
+    return { id, contract: Keiyaku.with().select({ repo, id }) };
   } catch (error) {
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }

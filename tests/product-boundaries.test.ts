@@ -4,33 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Akumas, Keiyaku, World } from "../src/index.js";
-import { bodyRequestExecution } from "../src/akuma/requests.js";
-import { composeContractLibrary } from "../src/library/contract-composition.js";
 
 test("Contract and Akumas capture only their own composition inputs", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-product-boundaries-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const world = await World.at(root);
   assert.throws(() => Keiyaku.with(null as never), TypeError);
-  // Public construction is local at runtime too: no value reaching the public surface selects a
-  // private carrier, and the execution field is refused rather than honored.
-  assert.throws(
-    () =>
-      Keiyaku.with({
-        execution: { channel: { kind: "body-request", directory: join(root, "contract-requests") } },
-      } as never),
-    /unknown field: execution/u,
-  );
-  assert.throws(
-    () => Keiyaku.with({ execution: { channel: { kind: "local" } } } as never),
-    /unknown field: execution/u,
-  );
   assert.throws(() => Akumas.of(null as never), TypeError);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
-  const contracts = composeContractLibrary(bodyRequestExecution({ directory: join(root, "contract-requests") }), createKeiyakuHandle, {
-    actor: "contract-actor",
-  });
+  const contracts = Keiyaku.with({ actor: "contract-actor" });
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select", "wait"]);
   assert.equal("call" in contracts, false);
   assert.equal("nuke" in contracts, false);
@@ -50,5 +33,3 @@ test("Contract and Akumas capture only their own composition inputs", async (con
     /Akumas\.wait does not accept Contract selectors/u,
   );
 });
-
-import { createKeiyakuHandle } from "../src/library/keiyaku.js";

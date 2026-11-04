@@ -2,28 +2,23 @@ import assert from "node:assert/strict";
 import { readdir } from "node:fs/promises";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { driveAkumaBody, tellWakeRuntime } from "../src/akuma/body.js";
-import type { BodyLauncher } from "../src/akuma/body-launch.js";
-import { akumaCallRequestCommands } from "../src/akuma/call-request.js";
-import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { bodyRequestExecution, localExecutionContext } from "../src/akuma/requests.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
+import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
 import { Schema } from "../src/akuma/schema.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { settings } from "../src/settings.js";
-import { bornDirectAkuma, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering } from "./support/akuma-tell.js";
 import { Square, DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
-import { HeldAkumaLeash, projectTell, readSoul, readTell, type Soul, type TellFact } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
-import type { CallInitialTellAdmission, TellResult } from "../src/akuma/call-initial-tell.js";
-import {
-  executePreparedCall,
-  type PreparedCallInitialTellAdmission,
-  type PreparedCallRecipe,
-  type PreparedCallSpawn,
-} from "../src/akuma/publication.js";
+import { HeldAkumaLeash, projectTell, readSoul, readTell, type TellFact } from "../src/akuma/heart/index.js";
+import { akumaRunRoot, pathsForAkuId } from "../src/akuma/identity.js";
+import type {
+  CallInitialTellAdmission,
+  InitialTellAdmissionInput,
+  TellResult,
+} from "../src/akuma/call-initial-tell.js";
+import { executePreparedCall, type PreparedCallRecipe } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
@@ -38,7 +33,7 @@ function rawRecipe(overrides: Partial<PreparedCallRecipe> = {}): PreparedCallRec
 }
 
 /** Birth one already-allocated child through its own leash, the way a real spawn body would. */
-async function birth(launch: PreparedCallSpawn, createdAt = AT): Promise<void> {
+async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<void> {
   const leash = await HeldAkumaLeash.try(launch.paths);
   if (leash === null) throw new Error("expected a free child leash");
   try {
@@ -78,18 +73,6 @@ function admittedTell(tellId: string): CallInitialTellAdmission {
   };
 }
 
-function parentSoul(): Soul {
-  return {
-    id: "aku/parent/1234abcd" as AkuId,
-    archetype: "parent",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {},
-    cwd: "/tmp",
-    origin: { kind: "direct" },
-    createdAt: AT,
-  };
-}
-
 /** The child run directory entries, or an empty list when no child was ever allocated. */
 async function childRuns(root: string): Promise<readonly string[]> {
   try {
@@ -99,33 +82,53 @@ async function childRuns(root: string): Promise<readonly string[]> {
   }
 }
 
-for (const route of ["local", "forwarded"] as const) {
-  test(`${route} bounded call protects its exact first Tell before admission can finish`, { timeout: 15_000 }, async (t) => {
-    const world = await World.at(temporaryDirectory(t, "keiyaku-call-scope-"));
-    const variables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID",
-      "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION", "SQUARE_PARTICIPANT_NAME", "SQUARE_DELIVERY", "SQUARE_INDEX"];
-    const prior = Object.fromEntries(variables.map(key => [key, process.env[key]]));
-    variables.forEach(key => { delete process.env[key]; });
-    process.env.PI_SESSION_ID = "bounded-call";
-    process.env.SQUARE_PARTICIPANT_NAME = "Requester";
-    process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
-    process.env.SQUARE_INDEX = join(world, "square-index");
-    t.after(() => restoreEnvironmentValues(prior));
-    mkdirSync(join(world, ".square"), { recursive: true });
-    const square = await Square.build({ path: join(world, ".square", "KEIYAKU.square"), markdown: "" });
-    const owner = harnessOwner({ channel: "pi", session: "bounded-call" });
-    await square.join("Requester", { owner });
-    const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
-    t.after(async () => { await square.close(); await ledger.close(); });
-    const cards = async () => {
-      const session = await ledger.session(owner);
-      assert.ok(session);
-      return await ledger.pending(owner, { generation: session.generation });
-    };
-    const output = join(world, "call-trace.jsonl");
-    const trace = (): unknown[][] => readFileSync(output, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-    mkdirSync(join(world, "plugins"), { recursive: true });
-    writeFileSync(join(world, "plugins", "call.mjs"), `
+test("bounded call protects its exact first Tell before admission can finish", { timeout: 15_000 }, async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-call-scope-"));
+  const variables = [
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "OPENCODE_SESSION_ID",
+    "PI_SESSION_ID",
+    "PASEO_AGENT_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "SQUARE_PARTICIPANT_NAME",
+    "SQUARE_DELIVERY",
+    "SQUARE_INDEX",
+  ];
+  const prior = Object.fromEntries(variables.map((key) => [key, process.env[key]]));
+  variables.forEach((key) => {
+    delete process.env[key];
+  });
+  process.env.PI_SESSION_ID = "bounded-call";
+  process.env.SQUARE_PARTICIPANT_NAME = "Requester";
+  process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
+  process.env.SQUARE_INDEX = join(world, "square-index");
+  t.after(() => restoreEnvironmentValues(prior));
+  mkdirSync(join(world, ".square"), { recursive: true });
+  const square = await Square.build({ path: join(world, ".square", "KEIYAKU.square"), markdown: "" });
+  const owner = harnessOwner({ channel: "pi", session: "bounded-call" });
+  await square.join("Requester", { owner });
+  const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
+  t.after(async () => {
+    await square.close();
+    await ledger.close();
+  });
+  const cards = async () => {
+    const session = await ledger.session(owner);
+    assert.ok(session);
+    return await ledger.pending(owner, { generation: session.generation });
+  };
+  const output = join(world, "call-trace.jsonl");
+  const trace = (): unknown[][] =>
+    readFileSync(output, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  mkdirSync(join(world, "plugins"), { recursive: true });
+  writeFileSync(
+    join(world, "plugins", "call.mjs"),
+    `
       import { appendFileSync } from "node:fs";
       import squarePlugin from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};
       export default { manifest: { ...squarePlugin.manifest, id: "call" }, async activate(context) {
@@ -149,85 +152,89 @@ for (const route of ["local", "forwarded"] as const) {
           }
         };
       } };
-    `);
-    mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
-    writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: fixture\n---\nWork.\n");
-    writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    `,
+  );
+  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: fixture\n---\nWork.\n");
+  writeFileSync(
+    join(world, ".keiyaku", "settings.json"),
+    JSON.stringify({
       providers: { fixture: { kind: "claude-agent-sdk" } },
       plugins: {
         square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
         call: { package: "./plugins/call.mjs" },
       },
-    }));
-    const selected = await settings({ root: world, home: join(world, "empty-home") });
-    let bounded = true;
-    const spawn: BodyLauncher = async launch => {
-      if (bounded) {
-        const first = trace()[0];
-        assert.equal(first?.[0], "acquire", "scope exists even before child birth");
-        assert.deepEqual((first?.[1] as { akumaIds: string[] }).akumaIds, []);
-        assert.equal(trace().some(row => row[0] === "close"), false);
-      }
-      // Complete provider work before returning launch/admission to expose the fast-first-Tell gap.
-      await driveAkumaBody(launch, answering('{"ok":true}'), {
-        spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => AT,
-      });
-      return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };
-    };
-    let pump: BodyRequestPump | undefined;
-    if (route === "forwarded") {
-      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0def0006", createdAt: AT });
-      t.after(() => parent.leash.release());
-      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-      pump = await BodyRequestPump.open({
-        paths: parent.paths, bodySequence: body.sequence,
-        now: () => AT, signal: t.signal,
-        commands: akumaCallRequestCommands({
-          world, paths: parent.paths, parent: parent.soul, spawn,
-          admitInitialTell: async ({ id, initialTell, signal }) => {
-            if (bounded) assert.deepEqual(trace(), [["acquire", { akumaIds: [], initialTellId: initialTell.tellId }]]);
-            return await new AkumaOwner(id, world).admitInitialTell(initialTell, {
-              signal, runtime: tellWakeRuntime(spawn),
-            });
-          },
-        }),
-      });
+    }),
+  );
+  const selected = await settings({ root: world, home: join(world, "empty-home") });
+  let bounded = true;
+  const spawn: BodyLauncher = async (launch) => {
+    if (bounded) {
+      const first = trace()[0];
+      assert.equal(first?.[0], "acquire", "scope exists even before child birth");
+      assert.deepEqual((first?.[1] as { akumaIds: string[] }).akumaIds, []);
+      assert.equal(
+        trace().some((row) => row[0] === "close"),
+        false,
+      );
     }
-    try {
-      const api = akumasWithLauncher(world,
-        pump === undefined ? localExecutionContext() : bodyRequestExecution({ directory: pump.directory }), spawn);
-      const schema = Schema.json({ type: "object" }, value => {
-        assert.deepEqual(trace().slice(-1)[0]?.slice(0, 1), ["observe"], "ACK attempt precedes decode and close");
-        return value;
-      });
-      const result = await api.call({ archetype: "worker", body: "work", mode: "wait", settings: selected, schema, initiator: "Requester", signal: t.signal,
-        observe: { admitted: async () => {
-          assert.equal(trace().some(row => row[0] === "produced"), true, "the first Tell finished before call admission returned");
-          assert.deepEqual(await cards(), [], "UUID lease protected the producer before the requester knew its child ID");
-        } },
-      });
-      assert.equal(result.observation.kind, "observed");
-      if (result.observation.kind === "observed") assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
-      const input = trace()[0]?.[1] as { akumaIds: string[]; initialTellId: string };
-      assert.match(input.initialTellId, /^[0-9a-f-]{36}$/u);
-      const tell = await readTell(pathsForAkuId(world, result.akuma), input.initialTellId);
-      assert.ok(tell?.binding);
-      assert.deepEqual(trace(), [
-        ["acquire", input], ["produced", result.akuma, tell.binding.turnSequence, [input.initialTellId]],
-        ["observe", result.akuma, `turn/${tell.binding.turnSequence}`], ["close"],
-      ]);
-      assert.deepEqual(await cards(), [], "exact observation consumed the held notice before releasing the UUID lease");
-      bounded = false;
-      writeFileSync(output, "");
-      await api.call({ archetype: "worker", settings: selected, signal: t.signal });
-      await api.call({ archetype: "worker", body: "detached", settings: selected, signal: t.signal });
-      assert.equal(trace().some(row => row[0] === "acquire" || row[0] === "close" || row[0] === "observe"), false,
-        "prompt-free and detached calls acquire no answer scope");
-    } finally { await pump?.close(); }
+    // Complete provider work before returning launch/admission to expose the fast-first-Tell gap.
+    await driveAkumaBody(launch, answering('{"ok":true}'), {
+      spawn: noBodyLaunch,
+      now: () => AT,
+    });
+    return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };
+  };
+  const api = akumasWithLauncher(world, spawn);
+  const schema = Schema.json({ type: "object" }, (value) => {
+    assert.deepEqual(trace().slice(-1)[0]?.slice(0, 1), ["observe"], "ACK attempt precedes decode and close");
+    return value;
   });
-}
+  const result = await api.call({
+    archetype: "worker",
+    body: "work",
+    mode: "wait",
+    settings: selected,
+    schema,
+    initiator: "Requester",
+    signal: t.signal,
+    observe: {
+      admitted: async () => {
+        assert.equal(
+          trace().some((row) => row[0] === "produced"),
+          true,
+          "the first Tell finished before call admission returned",
+        );
+        assert.deepEqual(await cards(), [], "UUID lease protected the producer before the requester knew its child ID");
+      },
+    },
+  });
+  assert.equal(result.observation.kind, "observed");
+  if (result.observation.kind === "observed")
+    assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
+  const input = trace()[0]?.[1] as { akumaIds: string[]; initialTellId: string };
+  assert.match(input.initialTellId, /^[0-9a-f-]{36}$/u);
+  const tell = await readTell(pathsForAkuId(world, result.akuma), input.initialTellId);
+  assert.ok(tell?.binding);
+  assert.deepEqual(trace(), [
+    ["acquire", input],
+    ["produced", result.akuma, tell.binding.turnSequence, [input.initialTellId]],
+    ["observe", result.akuma, `turn/${tell.binding.turnSequence}`],
+    ["close"],
+  ]);
+  assert.deepEqual(await cards(), [], "exact observation consumed the held notice before releasing the UUID lease");
+  bounded = false;
+  writeFileSync(output, "");
+  await api.call({ archetype: "worker", settings: selected, signal: t.signal });
+  await api.call({ archetype: "worker", body: "detached", settings: selected, signal: t.signal });
+  assert.equal(
+    trace().some((row) => row[0] === "acquire" || row[0] === "close" || row[0] === "observe"),
+    false,
+    "prompt-free and detached calls acquire no answer scope",
+  );
+});
 
-const rejectedTell = async (input: PreparedCallInitialTellAdmission): Promise<CallInitialTellAdmission> => {
+const rejectedTell = async (input: InitialTellAdmissionInput): Promise<CallInitialTellAdmission> => {
   throw new Error(`unexpected initial Tell ${input.initialTell.tellId}`);
 };
 
@@ -237,13 +244,10 @@ test("the prepared executor admits local provider options itself and refuses uns
     executePreparedCall({
       archetype: "worker",
       cwd: root,
-      custody: {
-        kind: "local",
-        world: root,
-        recipe: rawRecipe({ options: { network: "enabled" } }),
-        spawn: async (launch) => await birth(launch),
-        admitInitialTell: rejectedTell,
-      },
+      world: root,
+      recipe: rawRecipe({ options: { network: "enabled" } }),
+      spawn: async (launch) => await birth(launch),
+      admitInitialTell: rejectedTell,
     }),
     /Claude provider does not support the network option/u,
   );
@@ -256,13 +260,10 @@ test("local custody carries a raw recipe the executor admits once and births wit
   const result = await executePreparedCall({
     archetype: "worker",
     cwd: root,
-    custody: {
-      kind: "local",
-      world: root,
-      recipe,
-      spawn: async (launch) => await birth(launch),
-      admitInitialTell: rejectedTell,
-    },
+    world: root,
+    recipe,
+    spawn: async (launch) => await birth(launch),
+    admitInitialTell: rejectedTell,
   });
   assert.equal(result.failure, undefined);
   const soul = await readSoul(result.child.paths);
@@ -273,92 +274,19 @@ test("local custody carries a raw recipe the executor admits once and births wit
   assert.deepEqual(soul?.origin, { kind: "direct" });
 });
 
-test("request custody resolves, reserves before spawn, and stamps caller and request origin", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-request-"));
-  const order: string[] = [];
-  const parent = parentSoul();
-  const result = await executePreparedCall({
-    archetype: "worker",
-    cwd: root,
-    custody: {
-      kind: "request",
-      world: root,
-      coordinate: root,
-      recipe: rawRecipe(),
-      parent,
-      requestId: "request-1",
-      admissionOpen: () => true,
-      reserve: async (child) => {
-        order.push(`reserve:${child}`);
-      },
-      refuse: async (diagnostic) => {
-        order.push(`refuse:${diagnostic}`);
-      },
-      spawn: async (launch) => {
-        order.push("spawn");
-        await birth(launch);
-      },
-      admitInitialTell: rejectedTell,
-    },
-  });
-  assert.deepEqual(order, [`reserve:${result.child.id}`, "spawn"]);
-  const soul = await readSoul(result.child.paths);
-  assert.deepEqual(soul?.caller, { kind: "akuma", world: root, akuId: parent.id });
-  assert.deepEqual(soul?.origin, { kind: "request", parent: parent.id, requestId: "request-1" });
-  assert.equal(result.failure, undefined);
-});
-
-test("request custody refuses a mismatched world before any reservation or birth", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-world-"));
-  const other = await World.at(temporaryDirectory(context, "keiyaku-prepared-other-"));
-  let refused: string | undefined;
-  let spawned = false;
-  await assert.rejects(
-    executePreparedCall({
-      archetype: "worker",
-      cwd: root,
-      custody: {
-        kind: "request",
-        world: root,
-        coordinate: other,
-        recipe: rawRecipe(),
-        parent: parentSoul(),
-        requestId: "request-mismatch",
-        admissionOpen: () => true,
-        reserve: async () => {},
-        refuse: async (diagnostic) => {
-          refused = diagnostic;
-        },
-        spawn: async (launch) => {
-          spawned = true;
-          await birth(launch);
-        },
-        admitInitialTell: rejectedTell,
-      },
-    }),
-    /does not match/u,
-  );
-  assert.match(refused ?? "", /does not match/u);
-  assert.equal(spawned, false);
-  assert.deepEqual(await childRuns(root), []);
-});
-
 test("a durably born child survives a later launch failure and returns the native failure", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-born-"));
   const failure = new Error("post-birth launch failure");
   const result = await executePreparedCall({
     archetype: "worker",
     cwd: root,
-    custody: {
-      kind: "local",
-      world: root,
-      recipe: rawRecipe(),
-      spawn: async (launch) => {
-        await birth(launch);
-        throw failure;
-      },
-      admitInitialTell: rejectedTell,
+    world: root,
+    recipe: rawRecipe(),
+    spawn: async (launch) => {
+      await birth(launch);
+      throw failure;
     },
+    admitInitialTell: rejectedTell,
   });
   assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
   assert.equal(result.failure, failure);
@@ -373,16 +301,13 @@ test("an abort after confirmed birth keeps the child and its native reason", asy
     archetype: "worker",
     cwd: root,
     signal: controller.signal,
-    custody: {
-      kind: "local",
-      world: root,
-      recipe: rawRecipe(),
-      spawn: async (launch) => {
-        await birth(launch);
-        controller.abort(reason);
-      },
-      admitInitialTell: rejectedTell,
+    world: root,
+    recipe: rawRecipe(),
+    spawn: async (launch) => {
+      await birth(launch);
+      controller.abort(reason);
     },
+    admitInitialTell: rejectedTell,
   });
   assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
   assert.equal(result.failure, reason);
@@ -396,15 +321,12 @@ test("the exact admitted initial Tell is preserved and a missing admission never
     archetype: "worker",
     cwd: root,
     initialTell: { tellId, body: "begin" },
-    custody: {
-      kind: "local",
-      world: root,
-      recipe: rawRecipe(),
-      spawn: async (launch) => await birth(launch),
-      admitInitialTell: async (input) => {
-        seen.push(input.initialTell.tellId);
-        return admittedTell(input.initialTell.tellId);
-      },
+    world: root,
+    recipe: rawRecipe(),
+    spawn: async (launch) => await birth(launch),
+    admitInitialTell: async (input) => {
+      seen.push(input.initialTell.tellId);
+      return admittedTell(input.initialTell.tellId);
     },
   });
   assert.deepEqual(seen, [tellId]);
@@ -415,13 +337,10 @@ test("the exact admitted initial Tell is preserved and a missing admission never
     archetype: "worker",
     cwd: missingRoot,
     initialTell: { tellId, body: "begin" },
-    custody: {
-      kind: "local",
-      world: missingRoot,
-      recipe: rawRecipe(),
-      spawn: async (launch) => await birth(launch),
-      admitInitialTell: async () => ({ kind: "not-born" }),
-    },
+    world: missingRoot,
+    recipe: rawRecipe(),
+    spawn: async (launch) => await birth(launch),
+    admitInitialTell: async () => ({ kind: "not-born" }),
   });
   assert.equal(missing.tell, undefined);
   assert.match(String(missing.failure), /was not born for its initial Tell/u);
@@ -434,25 +353,22 @@ test("a failed initial Tell wake keeps the born child and the native failure", a
     archetype: "worker",
     cwd: root,
     initialTell: { tellId: "2f1c4b6a-0000-4000-8000-000000000002", body: "begin" },
-    custody: {
-      kind: "local",
-      world: root,
-      recipe: rawRecipe(),
-      spawn: async (launch) => await birth(launch),
-      admitInitialTell: async (input) => ({
-        kind: "admitted",
-        tell: {
-          kind: "tell",
-          sequence: 1,
-          id: input.initialTell.tellId,
-          body: "",
-          recordedAt: AT,
-          state: "pending",
-          deliveries: [],
-        },
-        wake: Promise.reject(failure),
-      }),
-    },
+    world: root,
+    recipe: rawRecipe(),
+    spawn: async (launch) => await birth(launch),
+    admitInitialTell: async (input) => ({
+      kind: "admitted",
+      tell: {
+        kind: "tell",
+        sequence: 1,
+        id: input.initialTell.tellId,
+        body: "",
+        recordedAt: AT,
+        state: "pending",
+        deliveries: [],
+      },
+      wake: Promise.reject(failure),
+    }),
   });
   assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
   assert.equal(result.failure, failure);

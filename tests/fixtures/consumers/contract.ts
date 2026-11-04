@@ -142,15 +142,3 @@ selected.abandon("manual");
 selected.startDelivery();
 // @ts-expect-error retired result sidecars are not public
 reviewed.cleanup;
-const bindRetry: BindResult = {
-  kind: "retry",
-  operation: "bind",
-  // @ts-expect-error forwarding-specific retries do not belong to local bind
-  reason: { kind: "owner-reason-unavailable", diagnostic: "gone" },
-  facts: [],
-  effects: [],
-  pending: [],
-};
-void bindRetry;
-// @ts-expect-error the retired execution helper is not a public root name
-type RemovedExecutionHelper = import("@astrosheep/keiyaku").bodyRequestExecution;

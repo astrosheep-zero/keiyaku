@@ -1,12 +1,9 @@
-import { z } from "zod";
 import type { WorldRoot } from "../world.js";
 import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkuId, type AkuId } from "./identity.js";
-import { tellRowSchema } from "./projection.js";
+import type { TellRow } from "./heart/facts.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
-
-const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 
 export type CallInitialTell = Readonly<{
   tellId: string;
@@ -15,53 +12,36 @@ export type CallInitialTell = Readonly<{
   initiator?: string;
 }>;
 
-const runLogReferenceSchema = z
-  .object({ path: z.string(), from: z.number().int().nonnegative(), to: z.number().int().nonnegative() })
-  .strict();
-const failedTellWakeSchema = z
-  .object({
-    kind: z.literal("failed"),
-    diagnostic: z.string(),
-    child: z
-      .object({ code: z.number().int().nullable(), signal: z.string().nullable(), log: runLogReferenceSchema })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .transform(({ child, ...wake }) => (child === undefined ? wake : { ...wake, child }));
-const interruptReceiptSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("completed"),
-      bodySequence: z.number().int().positive(),
-      putDown: z.enum(["was-idle", "self-aborted"]),
-    })
-    .strict(),
-  z.object({ kind: z.literal("pending"), bodySequence: z.number().int().positive() }).strict(),
-  z
-    .object({
-      kind: z.literal("unavailable"),
-      bodySequence: z.number().int().positive(),
-      evidence: z.enum(["hung", "untidy"]),
-    })
-    .strict(),
-]);
-const tellWakeSchema = z.union([
-  z.object({ kind: z.literal("told") }).strict(),
-  z.object({ kind: z.literal("held") }).strict(),
-  z.object({ kind: z.literal("pursuing"), bodySequence: z.number().int().nonnegative() }).strict(),
-  failedTellWakeSchema,
-]);
-export const tellResultSchema = z
-  .object({
-    admission: z.object({ fact: z.literal("recorded"), tellId: nonblankTextSchema }).strict(),
-    row: tellRowSchema,
-    wake: tellWakeSchema,
-    interruption: interruptReceiptSchema.optional(),
-  })
-  .strict();
-export type TellWake = z.infer<typeof tellWakeSchema>;
-export type TellResult = z.infer<typeof tellResultSchema>;
+export type InitialTellAdmissionInput = Readonly<{
+  id: AkuId;
+  initialTell: CallInitialTell;
+  contractId?: string;
+  signal?: AbortSignal;
+}>;
+
+export type TellWake =
+  | Readonly<{ kind: "told" }>
+  | Readonly<{ kind: "held" }>
+  | Readonly<{ kind: "pursuing"; bodySequence: number }>
+  | Readonly<{
+      kind: "failed";
+      diagnostic: string;
+      child?: Readonly<{
+        code: number | null;
+        signal: string | null;
+        log: Readonly<{ path: string; from: number; to: number }>;
+      }>;
+    }>;
+
+export type TellResult = Readonly<{
+  admission: Readonly<{ fact: "recorded"; tellId: string }>;
+  row: TellRow;
+  wake: TellWake;
+  interruption?:
+    | Readonly<{ kind: "completed"; bodySequence: number; putDown: "was-idle" | "self-aborted" }>
+    | Readonly<{ kind: "pending"; bodySequence: number }>
+    | Readonly<{ kind: "unavailable"; bodySequence: number; evidence: "hung" | "untidy" }>;
+}>;
 
 export type CallInitialTellAdmission =
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>

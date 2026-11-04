@@ -1,4 +1,3 @@
-import { executionChannel, type ExecutionContext, type LibraryExecution } from "../../akuma/requests.js";
 import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
 import type {
   ActorId,
@@ -19,9 +18,8 @@ import type {
 import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
 import { kanshi, selectRegion } from "../../kanshi/index.js";
 import { observeNamedAddress, resolveNamedAddress, type NamedAddressAuthority } from "../../library/address.js";
-import { composeContractLibrary, observeKeiyaku } from "../../library/contract-composition.js";
+import { observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
-import { createKeiyakuHandle } from "../../library/keiyaku.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
 import type { Repo } from "../../library/repo.js";
 import { SettingsError, settings } from "../../settings.js";
@@ -73,7 +71,6 @@ type ContractMutationInput = Readonly<{
   coordinates: CliCoordinates;
   runtime: CliRuntime;
   configuration?: Settings;
-  execution: ExecutionContext;
 }>;
 
 function requiredRepo(coordinates: CliCoordinates): Repo {
@@ -86,23 +83,6 @@ async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<S
     ...(root === undefined ? {} : { root }),
     ...(home === undefined ? {} : { home }),
   });
-}
-
-/**
- * The process edge loads one Settings value and hands it to the private composition.
- * A forwarded preview/deliver/review is served by its parent, which loads its own.
- */
-async function contractSettings(
-  command: ParsedContractCommand,
-  execution: ExecutionContext,
-  world: WorldRoot | null,
-  home?: string,
-): Promise<Settings | undefined> {
-  const forwarded =
-    executionChannel(execution).kind === "body-request" &&
-    (command.command === "deliver" || command.command === "verify" || command.command === "review");
-  if (forwarded) return undefined;
-  return await settingsAt(world ?? undefined, home);
 }
 
 function draftWarning(error: unknown): Readonly<{ warning: string }> {
@@ -383,12 +363,11 @@ async function runAbandon(
 }
 
 async function runContractMutation(command: ContractMutation, input: ContractMutationInput): Promise<CliOutcome> {
-  const { execution, configuration, runtime } = input;
-  const actor =
-    executionChannel(execution).kind === "local" && ["deliver", "verify", "review"].includes(command.command)
-      ? actorFromEdge(undefined, runtime.environment)
-      : undefined;
-  const library = composeContractLibrary(execution, createKeiyakuHandle, {
+  const { configuration, runtime } = input;
+  const actor = ["deliver", "verify", "review"].includes(command.command)
+    ? actorFromEdge(undefined, runtime.environment)
+    : undefined;
+  const library = Keiyaku.with({
     ...(configuration === undefined ? {} : { settings: configuration }),
     ...(actor === undefined ? {} : { actor }),
   });
@@ -718,14 +697,11 @@ export async function runContractHistoryCommand(
 async function runReconcile(
   command: Extract<ParsedContractCommand, { command: "reconcile" }>,
   coordinates: CliCoordinates,
-  execution: LibraryExecution,
   home: string | undefined,
 ): Promise<CliOutcome> {
   const repo = requiredRepo(coordinates);
-  const configuration = await contractSettings(command, execution, coordinates.world, home);
-  const library = composeContractLibrary(execution, createKeiyakuHandle, {
-    ...(configuration === undefined ? {} : { settings: configuration }),
-  });
+  const configuration = await settingsAt(coordinates.world ?? undefined, home);
+  const library = Keiyaku.with({ settings: configuration });
   let report: ReconcileCompletion | RepoReconcileReport;
   if (command.contract === undefined) {
     report = await library.reconcile({ repo, retryHooks: command.retryHooks });
@@ -749,7 +725,6 @@ export async function runContractCommand(
   coordinates: CliCoordinates,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const execution = runtime.execution;
   const home = runtime.home;
   switch (command.command) {
     case "settings":
@@ -765,13 +740,12 @@ export async function runContractCommand(
     case "region":
       return await runRegion(command, coordinates);
     case "reconcile":
-      return await runReconcile(command, coordinates, execution, home);
+      return await runReconcile(command, coordinates, home);
     default: {
-      const configuration = await contractSettings(command, execution, coordinates.world, home);
+      const configuration = await settingsAt(coordinates.world ?? undefined, home);
       return await runContractMutation(command, {
         coordinates,
         runtime,
-        execution,
         ...(configuration === undefined ? {} : { configuration }),
       });
     }

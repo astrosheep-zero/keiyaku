@@ -1,8 +1,42 @@
 import { setMaxListeners } from "node:events";
-import type { BodyLauncher, BodyLaunchEnd, LiveBodyLaunch } from "./akuma/body-launch.js";
+import type { BodyLaunch, BodyLauncher, BodyLaunchEnd, LiveBodyLaunch } from "./akuma/body-launch.js";
 import { spawnAkumaBody } from "./akuma/detached-body.js";
 import { launchInProcessBody } from "./akuma/in-process-body.js";
-import { bodyProcessConfiguration, externalRequestCommandsFor } from "./body-requests.js";
+import { worldRootForAkumaPaths } from "./akuma/identity.js";
+import { readSoul } from "./akuma/heart/index.js";
+import type { ExecutionAssociationReader } from "./akuma/execution-instructions.js";
+import { readDispatch } from "./dispatch/index.js";
+import { NoGitWorldError, repositoryAt } from "./git/repository.js";
+import { World } from "./world.js";
+
+export async function bodyExecutionContext(launch: BodyLaunch): Promise<
+  Readonly<{
+    world: Awaited<ReturnType<typeof World.prove>>;
+    executionAssociation: ExecutionAssociationReader;
+  }>
+> {
+  const world = await World.prove(worldRootForAkumaPaths(launch.paths));
+  const akuma = launch.seed?.id ?? (await readSoul(launch.paths))?.id;
+  return {
+    world,
+    executionAssociation: async () => {
+      if (akuma !== undefined) {
+        try {
+          const dispatch = await readDispatch(await repositoryAt(world), akuma);
+          if (dispatch !== null) return { contractId: dispatch.contractId };
+        } catch (error) {
+          if (!(error instanceof NoGitWorldError)) {
+            console.error(
+              `Keiyaku execution association unavailable for ${akuma}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
+      const contractId = launch.completion?.contractId;
+      return contractId === undefined ? undefined : { contractId };
+    },
+  };
+}
 
 export type AkumaHostOptions = Readonly<{
   /** Detached by default. In-process Bodies share this Node runtime's lifetime. */
@@ -21,12 +55,7 @@ function inProcessLauncher(
       launch,
       async (signal) => {
         signal.throwIfAborted();
-        const { world, commands, executionAssociation } = await externalRequestCommandsFor(
-          launch,
-          bodyProcessConfiguration(),
-          spawnAkumaBody,
-        );
-        return { world, externalCommands: commands, executionAssociation, spawn, requestSpawn: spawnAkumaBody };
+        return { ...(await bodyExecutionContext(launch)), spawn };
       },
       undefined,
       scopeSignal,
@@ -90,7 +119,7 @@ export const AkumaHost = Object.freeze({
   },
 });
 
-/** Capture host capabilities once, independently of observation and request routing. */
+/** Capture the invoking composition's host capabilities. */
 export function captureAkumaHost(host?: AkumaHostOptions): Readonly<{
   spawn: BodyLauncher;
   reportDiagnostic?: (message: string) => void;

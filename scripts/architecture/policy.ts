@@ -16,8 +16,6 @@ const protocolOperations = [
 
 const contractOwner = {
   allow: [
-    any("akuma/requests.ts"),
-    any("akuma/request-*.ts"),
     any("body/**"),
     any("contract-guidance.ts"),
     any("contract-worktree.ts"),
@@ -117,32 +115,26 @@ const outcomeOwner = {
     any("core/facts/**"),
     any("contract-worktree.ts"),
     any("git/reconcile.ts"),
-    runtime("git/identity.ts", ["contractHeadSchema"]),
-    runtime("git/workspace.ts", ["worktreeWorkspaceSchema"]),
     types("git/private-state-seat.ts"),
     types("world.ts"),
     any("library/continuation.ts"),
     any("library/reconcile.ts"),
     any("library/refusal.ts"),
+    types("library/contract-outcomes.ts"),
     types("library/keiyaku.ts"),
     types("library/invocation.ts"),
     types("library/delivery.ts"),
-    runtime("library/delivery.ts", ["deliveryValueSchema"]),
     types("library/region.ts"),
-    runtime("library/region.ts", ["regionOverlapSchema"]),
     any("protocol/execution-observation.ts"),
     any("protocol/progress.ts"),
     types("protocol/outcome.ts"),
     types("protocol/verify.ts"),
-    runtime("protocol/verify.ts", ["verifyValueSchema"]),
     types("protocol/completion.ts"),
-    runtime("protocol/completion.ts", ["completionEvidenceSchema"]),
     types("protocol/operations.ts"),
-    runtime("protocol/operations.ts", ["contractIdSchema", "gateSchema", "deliverDataSchema"]),
+    runtime("protocol/operations.ts", ["contractIdSchema"]),
     types("protocol/deliver.ts"),
-    runtime("protocol/deliver.ts", ["materializedConflictSchema"]),
-    any("protocol/delivery-preview.ts", ["DeliveryPreviewReport", "deliveryPreviewReportSchema"]),
-    any("protocol/review.ts", ["reviewAdmissionValueSchema"]),
+    types("protocol/delivery-preview.ts"),
+    types("protocol/review.ts"),
     types("settlement/settle.ts"),
     runtime("settlement/settle.ts", ["settlementActionSchema", "settlementLagSchema"]),
   ],
@@ -304,35 +296,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "protocol/**", ...protocolOwner },
     {
-      source: "library/contract-operations.ts",
-      allow: [
-        any("akuma/requests.ts"),
-        any("akuma/request-*.ts"),
-        any("core/facts/types.ts"),
-        any("library/**"),
-        types("protocol/delivery-preview.ts"),
-        runtime("protocol/delivery-preview.ts", ["deliveryPreviewReportSchema"]),
-        types("protocol/deliver.ts"),
-        runtime("protocol/deliver.ts", ["materializedConflictSchema"]),
-        runtime("protocol/operations.ts", [
-          "contractIdSchema",
-          "entryUlidSchema",
-          "snapshotIdSchema",
-          "verificationStopSchema",
-        ]),
-        any("protocol/execution-observation.ts"),
-        types("protocol/review.ts"),
-      ],
-      deny: [
-        any("library/akuma-creation.ts"),
-        any("library/bind.ts"),
-        any("protocol/attempt.ts"),
-        any("protocol/delivery-preview.ts", ["previewDeliveryOperation"]),
-        any("protocol/placement.ts"),
-        any("protocol/run.ts"),
-      ],
-    },
-    {
       source: "library/continuation.ts",
       allow: [...libraryOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],
       deny: libraryOwner.deny,
@@ -391,7 +354,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "library/keiyaku.ts",
       allow: [
-        any("akuma/requests.ts"),
         any("contract-guidance.ts"),
         any("core/facts/types.ts"),
         any("dispatch/index.ts"),
@@ -430,7 +392,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/delivery.ts",
-      allow: [...libraryOwner.allow, runtime("protocol/completion.ts", ["completionEvidenceSchema"])],
+      allow: [...libraryOwner.allow, types("protocol/completion.ts")],
       deny: libraryOwner.deny,
     },
     {
@@ -450,8 +412,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "debt/**",
       allow: [
-        any("akuma/requests.ts"),
-        any("akuma/request-*.ts"),
         any("coordination/**"),
         boundedList,
         any("core/facts/types.ts"),
@@ -553,13 +513,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
       deny: [any("library/**"), any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
-    ...["akuma/body-launch.ts", "akuma/publication.ts", "akuma/call-request.ts", "akuma/turn-drive.ts"].map(
-      (source) => ({
-        source,
-        allow: [any("akuma/**"), any("identity/**"), any("world.ts")],
-        deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
-      }),
-    ),
+    ...["akuma/body-launch.ts", "akuma/publication.ts", "akuma/turn-drive.ts"].map((source) => ({
+      source,
+      allow: [any("akuma/**"), any("identity/**"), any("world.ts")],
+      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
+    })),
     {
       source: "akuma/in-process-body.ts",
       allow: [any("akuma/body.ts"), any("akuma/body-launch.ts"), any("akuma/abort.ts"), types("akuma/provider.ts")],
@@ -625,11 +583,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
       ],
     },
-    {
-      source: "akuma/selection-owner-port.ts",
-      allow: [any("akuma/**"), types("world.ts"), any("plugin/akuma-signals.ts", ["outcomePluginObserver"])],
-      deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
-    },
     { source: "akuma/read-pool.ts", allow: [] },
     {
       source: "akuma/**",
@@ -677,23 +630,16 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "identity/**", allow: [any("identity/**")] },
     { source: "coordination/**", allow: [] },
     { source: "plugin/**", allow: [any("plugin/**"), any("settings.ts"), types("world.ts")] },
-    { source: "body-host.ts", allow: [any("akuma/**"), any("body-requests.ts")] },
     {
-      source: "body-requests.ts",
+      source: "body-host.ts",
       allow: [
         any("akuma/**"),
         any("dispatch/index.ts", ["readDispatch"]),
         any("git/repository.ts", ["NoGitWorldError", "repositoryAt"]),
-        any("library/**"),
-        any("settings.ts"),
-        any("debt/**"),
         any("world.ts"),
       ],
     },
-    {
-      source: "akuma-body.ts",
-      allow: [any("body-requests.ts"), any("akuma/**")],
-    },
+    { source: "akuma-body.ts", allow: [any("body-host.ts"), any("akuma/**")] },
     {
       source: "index.ts",
       allow: [

@@ -8,7 +8,7 @@ import { initializeHeart, readHeart, recordTell } from "../src/akuma/heart/index
 import { allocateAkumaDirectory, parseAkuId } from "../src/akuma/identity.js";
 import { AgentEventChannel, createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { World } from "../src/world.js";
-import { externalRequestCommandsFor } from "../src/body-requests.js";
+import { bodyExecutionContext } from "../src/body-host.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -44,12 +44,12 @@ test("Body regenerates one runtime section on start and wake, separate from froz
   };
   const seen: DriveInput[] = [];
   const adapter = recordingProvider(seen);
-  const runtime = { world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+  const runtime = { world, spawn: noBodyLaunch,
     executionAssociation: async () => ({ contractId: "kei/work-1234" }) };
   await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "first" }, adapter, runtime);
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, {
-    world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    world, spawn: noBodyLaunch,
     executionAssociation: async () => ({ contractId: "kei/work-1234" }),
   });
   assert.equal(seen.length, 2);
@@ -75,7 +75,7 @@ test("Body composition observes later Dispatch without treating launch metadata 
     options: {}, cwd: world, origin: { kind: "direct" as const },
   };
   const launch = { paths: allocated.paths, seed, completion: { contractId: "kei/launch-intent" } };
-  const composition = await externalRequestCommandsFor(launch, {}, noBodyLaunch);
+  const composition = await bodyExecutionContext(launch);
   assert.deepEqual(await composition.executionAssociation(), { contractId: "kei/launch-intent" });
   const admitted = await publishDispatch({ repository: await repositoryAt(world), akuId: allocated.id,
     contractId: contractId("kei/persisted-owner") });
@@ -83,9 +83,9 @@ test("Body composition observes later Dispatch without treating launch metadata 
   assert.deepEqual(await composition.executionAssociation(), { contractId: "kei/persisted-owner" },
     "a later read resolves actual Dispatch rather than freezing launch intent");
   await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "work" }, recordingProvider([]), {
-    world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    world, spawn: noBodyLaunch,
   });
-  const recovered = await externalRequestCommandsFor({ paths: allocated.paths }, {}, noBodyLaunch);
+  const recovered = await bodyExecutionContext({ paths: allocated.paths });
   assert.deepEqual(await recovered.executionAssociation(), { contractId: "kei/persisted-owner" });
   assert.equal("contractId" in (await readHeart(allocated.paths)).soul!, false);
 });
@@ -104,16 +104,16 @@ test("bare is frozen in Soul and omits only runtime instructions through wake", 
   };
   const adapter = recordingProvider(seen);
   await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "first" }, adapter, {
-    world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    world, spawn: noBodyLaunch,
   });
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, {
-    world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    world, spawn: noBodyLaunch,
     executionAssociation: async () => { throw new Error("bare has no need for optional association"); },
   });
   assert.equal(seen.length, 2);
   assert.ok(seen.every((input) => input.runtimeInstructions === undefined));
-  assert.ok(seen.every((input) => input.options.systemPrompt === "Still myself" && input.requests.dir.length > 0));
+  assert.ok(seen.every((input) => input.options.systemPrompt === "Still myself"));
   const soul = (await readHeart(allocated.paths)).soul!;
   assert.equal(soul.bare, true);
   assert.equal(keiyakuExecutionInstructions(soul), undefined);
@@ -133,7 +133,7 @@ test("a prefeature Soul resumes without retrofitting instructions or requiring o
   await initializeHeart(allocated.paths);
   const seen: DriveInput[] = [];
   const adapter = recordingProvider(seen);
-  const runtime = { world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+  const runtime = { world, spawn: noBodyLaunch,
     executionAssociation: async () => { throw new Error("legacy execution does not need association"); } };
   await driveAkumaBody({ paths: allocated.paths, seed: {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },

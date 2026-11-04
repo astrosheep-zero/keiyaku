@@ -1,8 +1,7 @@
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { executionForEnvironment, localExecutionContext, type LibraryExecution } from "../akuma/requests.js";
 import { AkumaArchetypeError, type ActorId } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
-import { encodeFailureWire, KeiyakuError } from "../library/outcome.js";
+import { projectFailure, KeiyakuError } from "../library/outcome.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
 import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
@@ -32,7 +31,6 @@ type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: ()
 /** Everything one invocation's leaves need at the process edge; Product JSON never sees this. */
 export type CliRuntime = Readonly<{
   environment: NodeJS.ProcessEnv;
-  execution: LibraryExecution;
   home?: string;
   readStdin: () => Promise<string>;
   signal: AbortSignal;
@@ -178,7 +176,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
   if (error instanceof BindDraftError) return writeBindDraftFailure(error, command);
   if (error instanceof KeiyakuError) {
     const diagnostic = error.message;
-    if (command.output === "json") writeJson(encodeFailureWire(error));
+    if (command.output === "json") writeJson(projectFailure(error));
     else if (error.outcome !== undefined) {
       writeStdout(
         executionFailureLines(error.outcome, error.category, diagnostic, displayContext().columns).join("\n"),
@@ -213,7 +211,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
       "refused",
     );
   }
-  if (command.output === "json") writeJson(encodeFailureWire(error));
+  if (command.output === "json") writeJson(projectFailure(error));
   else {
     const diagnostic = error instanceof Error ? error.message : String(error);
     writeStderr(
@@ -254,9 +252,6 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   try {
     const runtime: CliRuntime = {
       environment,
-      execution: ["whoami", "report"].includes(command.command)
-        ? localExecutionContext()
-        : await executionForEnvironment(environment, cancellation.signal),
       ...(home === undefined ? {} : { home }),
       readStdin: memoized(input.readStdin ?? processStdin),
       signal: cancellation.signal,

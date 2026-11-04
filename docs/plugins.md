@@ -81,7 +81,7 @@ migrating, or taking over a participant. Selection is read-only and never
 rejoins, renames, or migrates a finished participant.
 
 A generic integration initiator supplied by the caller outranks the Square
-integration's own selection and is forwarded unchanged; Square-specific seat
+integration's own selection and is passed unchanged; Square-specific seat
 selection belongs to the integration adapter rather than the generic caller
 decoder or the Akuma domain. Before a submitting
 process sends an attributed Akuma input, the optional initiation observation
@@ -145,12 +145,12 @@ diagnostic and is never replayed.
 
 A library host may capture diagnostics through an immutable Akuma composition
 capability. It observes only diagnostics produced in that host process, never
-remote Body logs, and is neither transport routing nor a public result stage.
+remote Body logs, and cannot change public results.
 Independent handles may select independent destinations. Local public
 observations default to line-oriented stderr; call observations keep their
 existing Akuma log and additionally notify an explicitly selected host.
-CLI output remains owned by its process edge, and serving Body observations
-retain their own log custody and authenticated observer attribution.
+CLI output remains owned by its process edge, and Body observations retain
+their own log custody.
 
 Activation remains process-local and is selected once per World. Activation
 diagnostics belong to the producer that initiated activation; delivery
@@ -160,9 +160,9 @@ asynchronously cannot change product results or hold execution custody.
 Diagnostics create no persistence, retry, or cross-process callback channel.
 
 A selected plugin may own an invocation-local observation resource. The
-requesting edge freezes selected Akuma identities, acquires before local
-admission or forwarding, and retains custody through exact observation, bounded
-acknowledgment, and answer decoding. Wait and idle acknowledge only final-status
+invocation freezes selected Akuma identities, acquires before local admission,
+and retains custody through exact observation, bounded acknowledgment, and
+answer decoding. Wait and idle acknowledge only final-status
 outcomes; ask and bounded call acknowledge only their exact admitted input's
 outcome. A new bounded call may correlate through its existing first Tell when
 acquisition precedes child identity. That correlation only defers delivery: multiple
@@ -172,8 +172,7 @@ authorizes acknowledgment. Detached and prompt-free calls own no answer resource
 Resources close on completion, failure, or cancellation. Acquisition, cleanup,
 and late acquisition remain bounded and diagnostic-only, preserving native
 results and admission. Plugins own renewal and release only their invocation's
-custody. Serving Bodies acquire no requester resources; core adds no registry,
-watcher, or cross-process capability. Square defers matching Turn notices in the
+custody. Core adds no registry, watcher, or cross-process capability. Square defers matching Turn notices in the
 producer's World for only the observing execution's attached standing seat.
 Other recipients and notice kinds remain unaffected; scopes own independent
 leases. Release or expiry permits unconsumed notices at the next ordinary
@@ -205,16 +204,14 @@ compensating action, or generic event bus for plugins.
 
 The input-submitting edge may emit `akuma.initiating` before submitting a Call
 or Tell. It identifies only the initiator, carries no operation contents, and
-makes no admission claim. Forwarded submissions prepare that identity before
-crossing the request channel, not in the serving parent's session. This bounded
-observation is optional and cannot gate input admission.
+makes no admission claim. This bounded observation is optional and cannot gate
+input admission.
 
 Normal Akuma birth attempts `akuma.born` after Soul is durable and its first
 Body has been recorded, before supervisor or Turn work. It carries frozen
 origin and caller attribution, the recorded Body identity, and any submitting
 initiator and Contract association already known to that launch. Absent caller
-projects unknown. Direct calls, requested calls, and forks share this Body-owned
-producer; wake and succession never replay it. Sealed unborn coordinates emit
+projects unknown. Calls and forks share this Body-owned producer; wake and succession never replay it. Sealed unborn coordinates emit
 nothing. Loss or failed preparation after Soul durability but before this point
 may leave zero notification. Delivery is best effort, not exactly once or proof
 of provider startup, and cannot roll back birth. This deliberately replaces
@@ -261,16 +258,14 @@ completion probes establish no observation. Results established together receive
 concurrent bounded attempts, awaited without a detached queue or multiplied
 timeout.
 
-Forwarded wait and ask observe once in the requester after a concrete live
-result establishes identity. Serving executors supply semantic evidence without
-emitting the requester's signal: wait uses its returned status frontier and ask
-carries exact identity beside its private live result. Later reads, expired
-transport, and durable service evidence never reconstruct or replay observation.
-Decoding follows observation, including invalid answers; bounded call observes
-in the submitting process after admission. These ephemeral observations are
-neither Keiyaku acknowledgment facts nor cross-operation receipts. The observing
-integration uses its own local ownership; attribution grants no permission and
-changes no public result.
+Wait and ask observe once in the process returning the concrete result that
+establishes identity: wait uses its returned status frontier and ask carries
+exact identity beside its private live result. Later reads never reconstruct or
+replay observation. Decoding follows observation, including invalid answers;
+bounded call observes in the submitting process after admission. These
+ephemeral observations are neither Keiyaku acknowledgment facts nor
+cross-operation receipts. The observing integration uses its own local
+ownership; attribution grants no permission and changes no public result.
 
 Square acknowledges the observed Akuma and exact retained Turn outcome for that
 observer alone, including when its notice has not yet been inserted. It consumes

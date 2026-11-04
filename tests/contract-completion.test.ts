@@ -44,7 +44,6 @@ async function fixture() {
 // These tests exercise the real admission boundary, not a synthetic accepted object.
 import { createKeiyakuHandle } from "../src/library/keiyaku.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
-import { localExecutionContext } from "../src/akuma/requests.js";
 import { KeiyakuError } from "../src/library/outcome.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
 import { withGitShim } from "./support/git.js";
@@ -95,12 +94,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const committed = deferred(),
       controller = new AbortController();
     try {
-      const native = createKeiyakuHandle(
-        state.id,
-        { ...scope, onPrivateStateSeatClose: committed.resolve },
-        localExecutionContext(),
-        captureLocalContractComposition(),
-      );
+      const native = createKeiyakuHandle(state.id, { ...scope, onPrivateStateSeatClose: committed.resolve }, captureLocalContractComposition());
       const pending = native.review({ verdict: "satisfied", signal: controller.signal });
       await committed.promise;
       controller.abort(new Error("cancel review after its receipt"));
@@ -180,7 +174,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     );
     const refreshed = present(await contract.state());
     assert.notEqual(refreshed.currentIntegration?.snapshot, delivered.value.integration.snapshot);
-    assert.equal(reviewed.value.gates?.find((report) => report.gate === "verified")?.current.kind, "missing");
+    assert.equal(reviewed.value.gates?.find((report) => report.gate === "verified")?.requirements[0]?.current.kind, "missing");
     const repeated = accepted(await contract.deliver());
     assert.deepEqual(repeated.facts, []);
     assert.deepEqual(repeated.value.leading, { kind: "already-admitted", fact: delivered.value.leading.fact });
@@ -355,21 +349,10 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const scope = await cachedRepositoryAt(repository.path),
       original = new TypeError("injected trailing bug");
     let armed = false;
-    const native = createKeiyakuHandle(
-      state.id,
-      {
-        ...scope,
-        onPrivateStateSeatClose: () => {
-          armed = true;
-        },
-        get gitPath(): string {
-          if (armed) throw original;
-          return scope.gitPath;
-        },
-      },
-      localExecutionContext(),
-      captureLocalContractComposition(),
-    );
+    const native = createKeiyakuHandle(state.id, { ...scope,
+      onPrivateStateSeatClose: () => { armed = true; },
+      get gitPath(): string { if (armed) throw original; return scope.gitPath; },
+    }, captureLocalContractComposition());
     let caught: unknown;
     try {
       await native.review({ verdict: "unsatisfied" });
@@ -445,12 +428,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       ].join("\n"),
       { CONFIRMED_MARKER: marker },
       async (gitPath) => {
-        const native = createKeiyakuHandle(
-          state.id,
-          await cachedRepositoryAt(repository.path, gitPath),
-          localExecutionContext(),
-          captureLocalContractComposition(),
-        );
+        const native = createKeiyakuHandle(state.id, await cachedRepositoryAt(repository.path, gitPath), captureLocalContractComposition());
         const pending = native.review({ verdict: "satisfied", signal: controller.signal });
         try {
           await waitForFile(marker);

@@ -7,12 +7,12 @@ specifications.
 
 ## Structural Boundary
 
-Unknown caller and transported operation values are structurally validated
-once at their Library or Body transport boundary. Nested evidence retains its
-native structural owner within the operation answer and its invocation envelope;
-schema validation proves structure only and never decides
-legality, finality, pending work, or recovery. A local owner value is not
-re-decoded merely because it is later projected or forwarded.
+Unknown caller values are structurally validated once at their Library
+boundary. Nested evidence retains its native structural owner within the
+operation answer and its invocation envelope;
+schema validation proves structure only and never decides legality, finality,
+pending work, or recovery. A local owner value is not re-decoded merely because
+it is later projected.
 
 ## Leading Outcome
 
@@ -20,8 +20,7 @@ Library alone projects protocol work into public answers. A successful mutation
 reports every fact admitted by that invocation, the addressed Contract's
 resulting head, its operation value, and any post-admission lags. The answer is
 invocation-scoped, not Contract state, a durable receipt, an effects log, or a
-result retained on a handle. Local and forwarded execution return this same
-answer without a transport-specific receipt. An accepted delivery also carries
+result retained on a handle. An accepted delivery also carries
 its witnessed leading provenance: whether this invocation admitted the
 candidate or continues a candidate already admitted before this attempt. Fresh
 provenance comes only from the confirmed admission of this invocation; continued
@@ -29,9 +28,8 @@ provenance comes only from the historical entry observed in custody during this
 attempt, and that historical entry never appears among the invocation's newly
 admitted facts. A replacement reports the candidate-content-change explanation
 with its previous and current content identities, witnessed in the admission
-attempt rather than recovered from later Contract state. Forwarded execution
-preserves that provenance as returned and never rereads later authority to
-recover it; a missing or disagreeing provenance
+attempt rather than recovered from later Contract state. A missing or
+disagreeing provenance
 is an integrity failure, not a reason to infer from newer state. Text names the
 candidate and integration result, patch-id as `content identity (not commit)`,
 keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
@@ -47,8 +45,9 @@ from raw coordinates.
 Physical effects, required stops, settlement, and retained residue have one
 invocation-wide carrier. Candidate conclusions stay in the operation value.
 Pending work is judged once by the final projection from those conclusions and
-owner classifications, not by a second caller finality judgment or an independently
-transported summary. Optional resource residue stays observable without becoming
+owner classifications, not by a second caller finality judgment or a separately
+reconstructed summary. Optional resource residue stays observable without
+becoming
 mandatory replay or undoing admission. Recovery evidence is transient Git custody,
 not a new Contract fact or retention promise.
 
@@ -117,20 +116,16 @@ claim or already-applied placement.
 A materialized handoff returns the captured handoff base, the target head and
 conflict paths, plus the recovery projection. The continuation is explicitly
 `deliver --include-dirty` with staging `not-required`: callers resolve the
-appointed worktree by editing its final bytes, while the parent Body retains
-Git custody and private-index capture preserves the real index, including
-`UU`. Materialization admits no delivery fact. Review results likewise expose
+appointed worktree by editing its final bytes, while Git custody and
+private-index capture preserve the real index, including `UU`. Materialization
+admits no delivery fact. Review results likewise expose
 captured `unmergedPaths` as evidence without turning them into a blanket
 refusal. A stale gate may explain that candidate content changed during
 reintegration; target movement alone is not that reason.
 
 A materialized handoff is itself a complete no-fact delivery outcome. Its
-forwarded descriptor is durable service evidence sufficient to return that same
-outcome on replay, without rematerializing it or inventing a delivery fact.
-Heart may retain that opaque descriptor but cannot turn it into Git custody or
-cleanup authority. Recorded delivery continues to retain its journal-fact
-evidence, and request service remains incomplete when no required evidence
-exists.
+recovery evidence does not create Git custody or cleanup authority. Recorded
+delivery continues to retain its journal-fact evidence.
 
 Unmet prerequisites and gates retain the lifecycle decision's ordered,
 adjudicated explanation. Consumers render that result and never recompute
@@ -186,7 +181,7 @@ cleanup authority or reconciliation input.
 Ephemeral execution observations are separate from this final result boundary.
 They can expose a confirmed leading fact before later work settles, but neither
 missing observation nor a reported gap changes admission, cancellation,
-Verification stop, cleanup residue, or forwarded recovery. A stopped process's
+Verification stop or cleanup residue. A stopped process's
 captured output remains part of its typed stop rather than an implied terminal
 verdict.
 
@@ -201,20 +196,3 @@ not repeat it as another source of truth.
 Every confirmed conclusion and completed owner effect is retained before later
 work can fail. The final exceptional envelope includes later retirement residue
 even when an earlier exceptional envelope was already attached to the cause.
-
-## Forwarded evidence availability
-
-A live returned refusal or retry is owner testimony of no committed product
-effect, separate from Heart's service disposition. Its precise reason and
-invocation-local observations exist only in live transport. When those bytes
-are gone, a voided request proves no committed product effect but cannot establish its
-original owner reason or physical residue. Forwarding exposes that unavailability
-with raw diagnostic evidence and never parses prose to reconstruct typed facts.
-A retry permits a fresh request identity only; old identities never re-execute.
-
-An exceptional live owner answer retains its original category, native cause,
-and invocation envelope even when Heart records the service as unproven.
-Disposition and error category are independent. Without that decoded owner proof,
-unproven service or post-publication channel loss remains unknown outcome. An
-exact served reference proves the leading operation identity, not its missing
-trailing observations; expiration does not authorize reconstruction or replay.

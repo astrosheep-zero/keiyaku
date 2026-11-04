@@ -45,7 +45,7 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
   const cli = fileURLToPath(new URL(`../src/cli/index.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
   const adapter = fixtureAdapter(async input => {
     assert.ok(input.execution, "Body must freeze its exact admitted context before provider work");
-    const environment = akumaExecutionEnvironment(process.env, {}, input.requests.dir, [], input.execution);
+    const environment = akumaExecutionEnvironment(process.env, {}, [], input.execution);
     const child = await promisify(execFile)(process.execPath, [
       ...(import.meta.url.endsWith(".ts") ? ["--import", import.meta.resolve("tsx")] : []),
       cli, "report", "milestone from actual child", "--json",
@@ -60,7 +60,7 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
     };
   });
   await driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
-    world, spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    world, spawn: noBodyLaunch,
   });
   const akuma = Akuma.select(world, allocated.id);
   assert.equal((await akuma.status()).life, "asleep");
@@ -224,10 +224,10 @@ test("retained report corruption fails observation instead of becoming a partial
   } finally { value.holder.release(); }
 });
 
-test("CLI report adapts explicit immutable execution, takes stdin, and never resolves parent transport", async (context) => {
+test("CLI report adapts explicit immutable execution and takes stdin", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-report-cli-");
   const value = await reportFixture(root, "feed0005");
-  const environment = akumaExecutionEnvironment({}, {}, "/missing-parent-channel", [], {
+  const environment = akumaExecutionEnvironment({}, {}, [], {
     akumaId: value.allocated.id, world: value.world, ...value.execution,
   });
   try {

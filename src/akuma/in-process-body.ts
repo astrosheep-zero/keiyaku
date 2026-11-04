@@ -6,9 +6,7 @@ import type { BodyLaunch, LiveBodyLaunch } from "./body-launch.js";
 /** One owned Body in this Node runtime; preparation starts only after custody is returned. */
 export async function launchInProcessBody(
   launch: BodyLaunch,
-  prepare: (
-    signal: AbortSignal,
-  ) => Promise<Pick<BodyRuntime, "world" | "externalCommands" | "spawn" | "requestSpawn" | "executionAssociation">>,
+  prepare: (signal: AbortSignal) => Promise<Pick<BodyRuntime, "world" | "spawn" | "executionAssociation">>,
   adapter?: ProviderAdapter,
   scopeSignal?: AbortSignal,
 ): Promise<LiveBodyLaunch> {

@@ -1,5 +1,4 @@
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
-import { deferred as promiseBarrier, removeTempDirectory, restoreEnvironmentValues } from "./support/process.js";
+import { removeTempDirectory, restoreEnvironmentValues } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -8,14 +7,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { driveAkumaBody } from "../src/akuma/body.js";
-import { akumaCallRequestCommands, type AkumaCallRequestChildLaunch } from "../src/akuma/call-request.js";
-import { admitCallInitialTell } from "../src/akuma/call-initial-tell.js";
-import { HeldAkumaLeash, initializeHeart, projectTell, readTell, type Soul } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
-import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { composeRequestCommands } from "../src/akuma/request-wire.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { Akumas, type AkumaKillResult } from "../src/index.js";
 import { World, type WorldRoot } from "../src/world.js";
@@ -151,8 +142,6 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
     )}\n`,
   );
   const env: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_HOME: home };
-  // A local observing call must be made here, never forwarded to an enclosing Body.
-  delete env.AKUMA_REQUESTS;
   return { root, world, env };
 }
 
@@ -435,144 +424,3 @@ function runPackagedCli(
     child.stdin.end(input.stdin ?? "");
   });
 }
-
-test("packaged Akuma call, wait, and history cross the request boundary", async () => {
-  assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
-  const root = (await World.resolve(mkdtempSync(join(tmpdir(), "keiyaku-packaged-akuma-")))).candidate!;
-  const world = await World.prove(root);
-  mkdirSync(join(root, ".keiyaku"), { recursive: true });
-  writeFileSync(
-    join(root, ".keiyaku", "settings.json"),
-    JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
-  );
-  const home = join(root, ".home");
-  mkdirSync(join(home, "akumas"), { recursive: true });
-  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-
-  const parent = await allocateAkumaDirectory({ worldRoot: root, archetype: "parent", draw: () => "1234abcd" });
-  await initializeHeart(parent.paths);
-  const soul: Soul = {
-    id: parent.id,
-    archetype: "parent",
-    provider: { name: "codex-app-server", kind: "codex-app-server" },
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    createdAt: "2026-08-15T00:00:00.000Z",
-  };
-  const leash = (await HeldAkumaLeash.try(parent.paths))!;
-  await leash.birth(parent.paths, soul);
-  const provider: ProviderAdapter = {
-    admitOptions(options) {
-      return { kind: "admitted", options };
-    },
-    start() {
-      return createProviderAttempt(undefined, async () => {
-        const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
-        return {
-          admission: { fence: "packaged-akuma" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              yield { type: "session" as const, coordinate: { sessionId: "packaged-session" } };
-              finishEvents();
-            },
-          },
-          completion: eventsFinished.then(() => ({
-            kind: "answered" as const,
-            answer: "finished",
-            historyId: "packaged-history",
-          })),
-          resource: {
-            abort: async () => {
-              finishEvents();
-            },
-            forceDispose: async () => {
-              finishEvents();
-            },
-          },
-        };
-      });
-    },
-  };
-  const spawnChild = async (launch: AkumaCallRequestChildLaunch): Promise<void> => {
-    await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-15T00:00:02.000Z" });
-  };
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths,
-    bodySequence: 1,
-    now: () => "2026-08-15T00:00:01.000Z",
-    signal: new AbortController().signal,
-    commands: composeRequestCommands(
-      akumaCallRequestCommands({
-        world,
-        paths: parent.paths,
-        parent: soul,
-        spawn: spawnChild,
-        admitInitialTell: async ({ id, initialTell, signal }) => {
-          if (initialTell.body === "admission-failure")
-            return { kind: "birth-failed", diagnostic: "fixture initial Tell admission failed" };
-          const admission = await admitCallInitialTell({
-            world,
-            id,
-            initialTell,
-            signal,
-            now: () => "2026-08-15T00:00:03.000Z",
-            wake: async (tell) => {
-              const paths = pathsForAkuId(world, id);
-              await driveAkumaBody({ paths, refuseIfHeld: true }, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-                now: () => "2026-08-15T00:00:04.000Z",
-              });
-              const delivered = await readTell(paths, tell.id);
-              if (delivered === null) throw new Error(`initial Tell ${tell.id} disappeared`);
-              return {
-                admission: { tellId: tell.id, fact: "recorded" },
-                row: projectTell(delivered),
-                wake: { kind: "told" },
-              };
-            },
-          });
-          return admission;
-        },
-      }),
-    ),
-  });
-  const env = { ...process.env, KEIYAKU_HOME: home, AKUMA_REQUESTS: pump.directory };
-  const localEnv = { ...process.env, KEIYAKU_HOME: home };
-  try {
-    const call = await runPackagedCli(["-C", root, "call", "worker", "--json", "answer"], { cwd: root, env });
-    assert.equal(call.code, 0, `${call.stdout}\n${call.stderr}`);
-    const child = (JSON.parse(call.stdout) as { akuma: string }).akuma;
-    assert.match(child, /^aku\/worker\//u);
-
-    const wait = await runPackagedCli(["-C", root, "wait", child, "--timeout", "0ms"], { cwd: root, env: localEnv });
-    assert.equal(wait.code, 0, wait.stderr);
-    assert.notEqual(wait.stdout, "", "snapshot wait returns the selected status");
-    assert.equal(wait.stderr, "", "snapshot wait writes no live progress");
-    assert.match(wait.stdout, /aku\/worker\/[0-9a-f]{8}/u, "snapshot wait names the child");
-
-    const history = await runPackagedCli(["-C", root, "history", child, "--last", "--json"], {
-      cwd: root,
-      env: localEnv,
-    });
-    assert.equal(history.code, 0, history.stderr);
-    assert.equal(JSON.parse(history.stdout).answer, "finished");
-
-    const failed = await runPackagedCli(["-C", root, "call", "worker", "--wait", "10s", "admission-failure"], {
-      cwd: root,
-      env,
-    });
-    assert.equal(failed.code, 3, failed.stderr);
-    assert.equal(failed.stdout, "", "a pre-admission failure keeps stdout byte-pure");
-    assert.equal(
-      failed.stderr.match(/^aku\/worker\/[0-9a-f]{8}$/gmu)?.length,
-      1,
-      "failure opens the known child identity once",
-    );
-    assert.match(failed.stderr, /! .*fixture initial Tell admission failed/u);
-    assert.doesNotMatch(failed.stderr, /● tell/u, "a birth reference does not claim Tell admission");
-  } finally {
-    await pump.close();
-    leash.release();
-    await removeTempDirectory(root);
-  }
-});

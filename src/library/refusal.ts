@@ -39,10 +39,7 @@ export const keiyakuRefusalSchema = z.union([
   nukeConfirmationRequiredRefusalSchema,
 ]);
 export type KeiyakuRefusal = z.infer<typeof keiyakuRefusalSchema>;
-const forwardingRetrySchema = z
-  .object({ kind: z.literal("owner-reason-unavailable"), diagnostic: z.string() })
-  .strict();
-export const keiyakuRetryReasonSchema = z.union([protocolTerminalSchema, forwardingRetrySchema]);
+export const keiyakuRetryReasonSchema = protocolTerminalSchema;
 export type KeiyakuRetryReason = z.infer<typeof keiyakuRetryReasonSchema>;
 export const operationRetrySchemas = {
   bind: protocolTerminalSchema,

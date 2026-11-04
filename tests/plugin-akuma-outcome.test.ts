@@ -1,6 +1,5 @@
 import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { localExecutionContext } from "../src/akuma/requests.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -14,12 +13,7 @@ import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { bodyRequestExecution } from "../src/akuma/requests.js";
-import { selectionRequestCommands } from "../src/akuma/selection-request.js";
-import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
-import { akumasWithExecution } from "../src/library/akumas.js";
-import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { bornBody } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 
@@ -47,7 +41,9 @@ after(() => {
 function recordingPlugin(world: WorldRoot, fail = false) {
   const output = join(world, "observations.jsonl");
   mkdirSync(join(world, "plugins"), { recursive: true });
-  writeFileSync(join(world, "plugins", "record.mjs"), `
+  writeFileSync(
+    join(world, "plugins", "record.mjs"),
+    `
     import { appendFileSync } from "node:fs";
     export default {
       manifest: { id: "record", apiVersion: 1 },
@@ -58,102 +54,168 @@ function recordingPlugin(world: WorldRoot, fail = false) {
         }
       } }; }
     };
-  `);
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
-    plugins: { record: { package: "./plugins/record.mjs", config: { output } } },
-  }));
+  `,
+  );
+  writeFileSync(
+    join(world, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      plugins: { record: { package: "./plugins/record.mjs", config: { output } } },
+    }),
+  );
   return {
-    signals: (): Signal[] => existsSync(output)
-      ? readFileSync(output, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Signal)
-      : [],
+    signals: (): Signal[] =>
+      existsSync(output)
+        ? readFileSync(output, "utf8")
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as Signal)
+        : [],
     reset: () => writeFileSync(output, ""),
   };
 }
 
-test("Body outcome correlates exact Turn bindings through many steers, no bindings, and cancellation", { timeout: 15_000 }, async (t) => {
-  const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-tell-ids-"), "0b500017");
-  const output = join(source.world, "outcomes.jsonl");
-  mkdirSync(join(source.world, "plugins"), { recursive: true });
-  writeFileSync(join(source.world, "plugins", "outcomes.mjs"), `
+test(
+  "Body outcome correlates exact Turn bindings through many steers, no bindings, and cancellation",
+  { timeout: 15_000 },
+  async (t) => {
+    const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-tell-ids-"), "0b500017");
+    const output = join(source.world, "outcomes.jsonl");
+    mkdirSync(join(source.world, "plugins"), { recursive: true });
+    writeFileSync(
+      join(source.world, "plugins", "outcomes.mjs"),
+      `
     import { appendFileSync } from "node:fs";
     export default { manifest: { id: "outcomes", apiVersion: 1 }, activate(context) {
       return { signals: { "akuma.turn-outcome": signal => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n") } };
     } };
-  `);
-  writeFileSync(join(source.world, ".keiyaku", "settings.json"), JSON.stringify({
-    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
-  }));
-  let started!: () => void;
-  const ready = new Promise<void>((resolve) => { started = resolve; });
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => { release = resolve; });
-  let received!: () => void;
-  const bothReceived = new Promise<void>((resolve) => { received = resolve; });
-  const steers: string[] = [];
-  const adapter = fixtureAdapter(async () => ({
-    events: { async *[Symbol.asyncIterator]() {
-      yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
-      started();
-      await released;
-    } },
-    completion: released.then(() => ({ kind: "answered" as const, answer: "done", historyId: "answer" })),
-    async tell(input) {
-      steers.push(input.id);
-      if (steers.length === 2) received();
-      return { kind: "accepted" as const, fence: input.id };
-    },
-    resource: { abort: async () => { release(); } },
-  }));
-  const runtime = { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => AT };
-  const body = driveAkumaBody({ paths: source.allocated.paths, initialBody: "work" }, adapter, runtime);
-  try {
-    await ready;
-    await recordTell(source.allocated.paths, { kind: "tell", id: "live-one", body: "one", recordedAt: AT });
-    await recordTell(source.allocated.paths, { kind: "tell", id: "live-two", body: "two", recordedAt: AT });
-    await bothReceived;
-  } finally {
-    release();
-    await body;
-  }
-  const empty = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-empty-ids-"), "0b500018");
-  mkdirSync(join(empty.world, "plugins"), { recursive: true });
-  writeFileSync(join(empty.world, "plugins", "outcomes.mjs"), readFileSync(join(source.world, "plugins", "outcomes.mjs")));
-  writeFileSync(join(empty.world, ".keiyaku", "settings.json"), JSON.stringify({
-    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
-  }));
-  await driveAkumaBody({ paths: empty.allocated.paths, initialBody: "no tells" }, answering("second"), runtime);
-  const canceled = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-canceled-ids-"), "0b500021");
-  mkdirSync(join(canceled.world, "plugins"), { recursive: true });
-  writeFileSync(join(canceled.world, "plugins", "outcomes.mjs"), readFileSync(join(source.world, "plugins", "outcomes.mjs")));
-  writeFileSync(join(canceled.world, ".keiyaku", "settings.json"), JSON.stringify({
-    plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
-  }));
-  const canceledStarted = deferred<void>();
-  const bound = deferred<void>();
-  const closed = deferred<void>();
-  const canceledBody = driveAkumaBody({ paths: canceled.allocated.paths, initialBody: "cancel me" }, fixtureAdapter(async () => ({
-    events: { async *[Symbol.asyncIterator]() { canceledStarted.resolve(); await closed.promise; } },
-    completion: new Promise<never>(() => {}),
-    async tell(input) { bound.resolve(); return { kind: "accepted" as const, fence: input.id }; },
-    resource: { closed: closed.promise, abort: async () => { closed.resolve(); } },
-  })), runtime);
-  try {
-    await canceledStarted.promise;
-    await recordTell(canceled.allocated.paths, { kind: "tell", id: "canceled-tell", body: "steer", recordedAt: AT });
-    await bound.promise;
-    assert.equal(await Akuma.select(canceled.world, canceled.allocated.id).kill({ signal: t.signal }), "killed");
-  } finally { closed.resolve(); await canceledBody; }
-  const outcomes = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(outcomes.length, 3);
-  assert.deepEqual(outcomes[0].tellIds, ["live-one", "live-two"]);
-  assert.deepEqual(outcomes[1].tellIds, []);
-  assert.equal(outcomes[0].akumaId, source.allocated.id);
-  assert.equal(outcomes[1].akumaId, empty.allocated.id);
-  assert.deepEqual(outcomes[2].tellIds, ["canceled-tell"]);
-  assert.deepEqual(outcomes[2].outcome, { kind: "canceled" });
-  assert.equal((await readTell(source.allocated.paths, "live-one"))?.binding?.turnSequence, outcomes[0].turnSequence);
-  assert.equal((await readTell(source.allocated.paths, "live-two"))?.binding?.turnSequence, outcomes[0].turnSequence);
-});
+  `,
+    );
+    writeFileSync(
+      join(source.world, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+      }),
+    );
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let received!: () => void;
+    const bothReceived = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+    const steers: string[] = [];
+    const adapter = fixtureAdapter(async () => ({
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
+          started();
+          await released;
+        },
+      },
+      completion: released.then(() => ({ kind: "answered" as const, answer: "done", historyId: "answer" })),
+      async tell(input) {
+        steers.push(input.id);
+        if (steers.length === 2) received();
+        return { kind: "accepted" as const, fence: input.id };
+      },
+      resource: {
+        abort: async () => {
+          release();
+        },
+      },
+    }));
+    const runtime = { spawn: noBodyLaunch, now: () => AT };
+    const body = driveAkumaBody({ paths: source.allocated.paths, initialBody: "work" }, adapter, runtime);
+    try {
+      await ready;
+      await recordTell(source.allocated.paths, { kind: "tell", id: "live-one", body: "one", recordedAt: AT });
+      await recordTell(source.allocated.paths, { kind: "tell", id: "live-two", body: "two", recordedAt: AT });
+      await bothReceived;
+    } finally {
+      release();
+      await body;
+    }
+    const empty = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-empty-ids-"), "0b500018");
+    mkdirSync(join(empty.world, "plugins"), { recursive: true });
+    writeFileSync(
+      join(empty.world, "plugins", "outcomes.mjs"),
+      readFileSync(join(source.world, "plugins", "outcomes.mjs")),
+    );
+    writeFileSync(
+      join(empty.world, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+      }),
+    );
+    await driveAkumaBody({ paths: empty.allocated.paths, initialBody: "no tells" }, answering("second"), runtime);
+    const canceled = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-canceled-ids-"), "0b500021");
+    mkdirSync(join(canceled.world, "plugins"), { recursive: true });
+    writeFileSync(
+      join(canceled.world, "plugins", "outcomes.mjs"),
+      readFileSync(join(source.world, "plugins", "outcomes.mjs")),
+    );
+    writeFileSync(
+      join(canceled.world, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        plugins: { outcomes: { package: "./plugins/outcomes.mjs", config: { output } } },
+      }),
+    );
+    const canceledStarted = deferred<void>();
+    const bound = deferred<void>();
+    const closed = deferred<void>();
+    const canceledBody = driveAkumaBody(
+      { paths: canceled.allocated.paths, initialBody: "cancel me" },
+      fixtureAdapter(async () => ({
+        events: {
+          async *[Symbol.asyncIterator]() {
+            canceledStarted.resolve();
+            await closed.promise;
+          },
+        },
+        completion: new Promise<never>(() => {}),
+        async tell(input) {
+          bound.resolve();
+          return { kind: "accepted" as const, fence: input.id };
+        },
+        resource: {
+          closed: closed.promise,
+          abort: async () => {
+            closed.resolve();
+          },
+        },
+      })),
+      runtime,
+    );
+    try {
+      await canceledStarted.promise;
+      await recordTell(canceled.allocated.paths, { kind: "tell", id: "canceled-tell", body: "steer", recordedAt: AT });
+      await bound.promise;
+      assert.equal(await Akuma.select(canceled.world, canceled.allocated.id).kill({ signal: t.signal }), "killed");
+    } finally {
+      closed.resolve();
+      await canceledBody;
+    }
+    const outcomes = readFileSync(output, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(outcomes.length, 3);
+    assert.deepEqual(outcomes[0].tellIds, ["live-one", "live-two"]);
+    assert.deepEqual(outcomes[1].tellIds, []);
+    assert.equal(outcomes[0].akumaId, source.allocated.id);
+    assert.equal(outcomes[1].akumaId, empty.allocated.id);
+    assert.deepEqual(outcomes[2].tellIds, ["canceled-tell"]);
+    assert.deepEqual(outcomes[2].outcome, { kind: "canceled" });
+    assert.equal((await readTell(source.allocated.paths, "live-one"))?.binding?.turnSequence, outcomes[0].turnSequence);
+    assert.equal((await readTell(source.allocated.paths, "live-two"))?.binding?.turnSequence, outcomes[0].turnSequence);
+  },
+);
 
 test("public hosts capture independent immutable sinks for native and plural observations", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-host-diagnostics-"));
@@ -163,10 +225,16 @@ test("public hosts capture independent immutable sinks for native and plural obs
   await finish(value);
   const first: string[] = [];
   const second: string[] = [];
-  const host = { reportDiagnostic: (message: string) => { first.push(message); } };
+  const host = {
+    reportDiagnostic: (message: string) => {
+      first.push(message);
+    },
+  };
   const plural = Akumas.of(world, host);
   const native = Akuma.select(world, value.allocated.id, host);
-  host.reportDiagnostic = (message) => { second.push(message); };
+  host.reportDiagnostic = (message) => {
+    second.push(message);
+  };
   const peer = Akumas.of(world, host);
 
   assert.equal((await plural.status({ akuma: value.allocated.id })).status.life, "asleep");
@@ -181,8 +249,11 @@ test("public hosts capture independent immutable sinks for native and plural obs
   assert.equal(first.length, 6);
   assert.equal(second.length, 1);
   assert.ok([...first, ...second].every((message) => message.includes("observer deliberately failed")));
-  assert.deepEqual(recorded.signals(), Array.from({ length: 7 }, () => signal(value.allocated.id, turn.sequence)),
-    "changing destinations never duplicates semantic emission");
+  assert.deepEqual(
+    recorded.signals(),
+    Array.from({ length: 7 }, () => signal(value.allocated.id, turn.sequence)),
+    "changing destinations never duplicates semantic emission",
+  );
 });
 
 test("host callback throws and async rejections cannot alter observation results", async (t) => {
@@ -192,16 +263,20 @@ test("host callback throws and async rejections cannot alter observation results
   await outcome(value, "unchanged answer");
   await finish(value);
   let thrown = 0;
-  const native = Akuma.select(world, value.allocated.id, { reportDiagnostic: () => {
-    thrown += 1;
-    throw new Error("broken host callback");
-  } });
+  const native = Akuma.select(world, value.allocated.id, {
+    reportDiagnostic: () => {
+      thrown += 1;
+      throw new Error("broken host callback");
+    },
+  });
   assert.equal((await native.status()).life, "asleep");
   let rejected = 0;
-  const plural = Akumas.of(world, { reportDiagnostic: async () => {
-    rejected += 1;
-    throw new Error("rejected host callback");
-  } });
+  const plural = Akumas.of(world, {
+    reportDiagnostic: async () => {
+      rejected += 1;
+      throw new Error("rejected host callback");
+    },
+  });
   const result = await plural.history({ akuma: value.allocated.id, last: true });
   assert.equal(result.kind, "last");
   assert.ok(result.kind === "last");
@@ -218,7 +293,9 @@ test("local observations without a host keep the line-oriented stderr default", 
   await outcome(value, "answer");
   await finish(value);
   const diagnostics: string[] = [];
-  t.mock.method(console, "error", (message: string) => { diagnostics.push(message); });
+  t.mock.method(console, "error", (message: string) => {
+    diagnostics.push(message);
+  });
   await Akumas.of(world).status({ akuma: value.allocated.id });
   await Akuma.select(world, value.allocated.id).history();
   assert.equal(diagnostics.length, 2);
@@ -228,17 +305,28 @@ test("local observations without a host keep the line-oriented stderr default", 
 test("activation diagnostics belong to the initiating host and are never replayed", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-host-activation-"));
   recordingPlugin(world);
-  writeFileSync(join(world, "plugins", "record.mjs"), `export default {
+  writeFileSync(
+    join(world, "plugins", "record.mjs"),
+    `export default {
     manifest: { id: "record", apiVersion: 1 },
     activate() { throw new Error("activation failed"); }
-  };`);
+  };`,
+  );
   const value = await bornBody(world, "0b500014", AT);
   await outcome(value, "answer");
   await finish(value);
   const first: string[] = [];
   const later: string[] = [];
-  await Akumas.of(world, { reportDiagnostic: (message) => { first.push(message); } }).status({ akuma: value.allocated.id });
-  await Akuma.select(world, value.allocated.id, { reportDiagnostic: (message) => { later.push(message); } }).status();
+  await Akumas.of(world, {
+    reportDiagnostic: (message) => {
+      first.push(message);
+    },
+  }).status({ akuma: value.allocated.id });
+  await Akuma.select(world, value.allocated.id, {
+    reportDiagnostic: (message) => {
+      later.push(message);
+    },
+  }).status();
   assert.deepEqual(first, ["plugin record activation: activation failed"]);
   assert.deepEqual(later, []);
 });
@@ -262,8 +350,10 @@ async function outcome(value: Awaited<ReturnType<typeof bornBody>>, answer?: str
   await endTurn(value.allocated.paths, {
     turnSequence: turn.sequence,
     completedAt: AT,
-    outcome: answer === undefined ? { kind: "failed", diagnostic: "provider failed" }
-      : { kind: "answered", answer, session: { sessionId: "fixture-session" } },
+    outcome:
+      answer === undefined
+        ? { kind: "failed", diagnostic: "provider failed" }
+        : { kind: "answered", answer, session: { sessionId: "fixture-session" } },
   });
   return turn;
 }
@@ -300,8 +390,11 @@ test("public status observes committed identity, not idle or incidental internal
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)]);
   recorded.reset();
   await api.status({ akuma: value.allocated.id });
-  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)],
-    "a distinct operation may observe the same result again");
+  assert.deepEqual(
+    recorded.signals(),
+    [signal(value.allocated.id, failed.sequence)],
+    "a distinct operation may observe the same result again",
+  );
   recorded.reset();
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
@@ -319,17 +412,27 @@ test("history page, exact and last use the identity of the actual retained resul
   const api = Akumas.of(world);
   const last = await api.history({ akuma: value.allocated.id, last: true });
   assert.equal(last.kind, "last");
-  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence)], "last must not guess the newer failed Turn");
+  assert.deepEqual(
+    recorded.signals(),
+    [signal(value.allocated.id, answered.sequence)],
+    "last must not guess the newer failed Turn",
+  );
   recorded.reset();
   const exact = await api.history({ akuma: value.allocated.id, id: `turn/${failed.sequence}` });
   assert.equal(exact.kind, "exact");
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)]);
   recorded.reset();
   await api.history({ akuma: value.allocated.id });
-  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence), signal(value.allocated.id, failed.sequence)]);
+  assert.deepEqual(recorded.signals(), [
+    signal(value.allocated.id, answered.sequence),
+    signal(value.allocated.id, failed.sequence),
+  ]);
   recorded.reset();
   await Akuma.select(world, value.allocated.id).history();
-  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence), signal(value.allocated.id, failed.sequence)]);
+  assert.deepEqual(recorded.signals(), [
+    signal(value.allocated.id, answered.sequence),
+    signal(value.allocated.id, failed.sequence),
+  ]);
 });
 
 test("all-wait observes final snapshot outcomes once per operation", { timeout: 10_000 }, async (t) => {
@@ -337,11 +440,17 @@ test("all-wait observes final snapshot outcomes once per operation", { timeout: 
   const recorded = recordingPlugin(world);
   const first = await bornBody(world, "0b500004", AT);
   const peer = await bornBody(world, "0b500005", AT);
-  t.after(() => { first.holder.release(); peer.holder.release(); });
+  t.after(() => {
+    first.holder.release();
+    peer.holder.release();
+  });
   const turn = await outcome(first, "already committed");
   await finish(first);
   const result = await Akumas.of(world).wait({
-    akuma: [first.allocated.id, peer.allocated.id], completion: "all", timeoutMs: 0, signal: t.signal,
+    akuma: [first.allocated.id, peer.allocated.id],
+    completion: "all",
+    timeoutMs: 0,
+    signal: t.signal,
   });
   assert.equal(result.reason, "deadline");
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
@@ -350,61 +459,22 @@ test("all-wait observes final snapshot outcomes once per operation", { timeout: 
   assert.deepEqual(recorded.signals(), [signal(first.allocated.id, turn.sequence)]);
 });
 
-test("forwarded wait and ask have exactly one requesting observer", { timeout: 15_000 }, async (t) => {
-  const root = temporaryDirectory(t, "keiyaku-outcome-forwarded-");
-  const source = await bornWorld(root, "0b500006");
-  const world = source.world;
-  const recorded = recordingPlugin(world, true);
-  const priorParticipant = process.env.SQUARE_PARTICIPANT_NAME;
-  process.env.SQUARE_PARTICIPANT_NAME = "UnrelatedServingSession";
-  t.after(() => {
-    if (priorParticipant === undefined) delete process.env.SQUARE_PARTICIPANT_NAME;
-    else process.env.SQUARE_PARTICIPANT_NAME = priorParticipant;
-  });
-  const diagnostics: string[] = [];
-  const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500007", createdAt: AT });
-  t.after(() => parent.leash.release());
-  const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-  const bodies: Promise<unknown>[] = [];
-  const spawn = fixtureLauncher(bodies, new Map([
-    [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-  ]));
-  const pump = await BodyRequestPump.open({
-    paths: parent.paths, bodySequence: body.sequence, now: () => AT,
-    commands: selectionRequestCommands(selectionRequestPort(world, spawn)), signal: t.signal,
-  });
-  try {
-    const submittingDiagnostics: string[] = [];
-    const api = akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }), {
-      reportDiagnostic: (message) => { submittingDiagnostics.push(message); },
-    });
-    const schema = Schema.json({ type: "object" }, () => {
-      assert.equal(recorded.signals().length, 1, "observation precedes caller answer decoding");
-      throw new Error("caller decode refused");
-    });
-    const asked = await api.ask({ akuma: source.allocated.id, body: "work", schema, signal: t.signal });
-    assert.equal(asked.observation.reason, "invalid-output");
-    assert.equal("historyIds" in asked, false, "the transport envelope never becomes public");
-    const tell = await readTell(source.allocated.paths, asked.tell.admission.tellId);
-    assert.ok(tell?.binding);
-    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
-    recorded.reset();
-    const waited = await api.wait({ akuma: [source.allocated.id], timeoutMs: 5_000 });
-    assert.equal(waited.reason, "completed");
-    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
-    assert.deepEqual(diagnostics, [], "the serving executor captures identity without plugin emission");
-    assert.equal(submittingDiagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
-  } finally {
-    await settleFixtureBodies(bodies);
-    await pump.close();
-  }
-});
-
 async function squareObserver(t: TestContext, world: WorldRoot) {
-  const variables = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID",
-    "PASEO_AGENT_ID", "CLAUDE_CODE_CHILD_SESSION", "SQUARE_PARTICIPANT_NAME", "SQUARE_INDEX", "SQUARE_DELIVERY"];
-  const prior = Object.fromEntries(variables.map(key => [key, process.env[key]]));
-  variables.forEach(key => { delete process.env[key]; });
+  const variables = [
+    "CLAUDE_CODE_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "OPENCODE_SESSION_ID",
+    "PI_SESSION_ID",
+    "PASEO_AGENT_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "SQUARE_PARTICIPANT_NAME",
+    "SQUARE_INDEX",
+    "SQUARE_DELIVERY",
+  ];
+  const prior = Object.fromEntries(variables.map((key) => [key, process.env[key]]));
+  variables.forEach((key) => {
+    delete process.env[key];
+  });
   process.env.SQUARE_PARTICIPANT_NAME = "Requester";
   process.env.PI_SESSION_ID = "requester-session";
   process.env.SQUARE_INDEX = join(world, "index.ndjsonl");
@@ -418,14 +488,23 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   await square.join("Requester", { owner });
   await square.join("Other", { owner: other });
   const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
-  t.after(async () => { await square.close(); await ledger.close(); });
+  t.after(async () => {
+    await square.close();
+    await ledger.close();
+  });
   mkdirSync(join(world, "plugins"), { recursive: true });
-  writeFileSync(join(world, "plugins", "square.mjs"),
-    `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`);
-  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { package: "./plugins/square.mjs" } } }));
+  writeFileSync(
+    join(world, "plugins", "square.mjs"),
+    `export { default } from ${JSON.stringify(new URL("../plugins/square/index.js", import.meta.url).href)};`,
+  );
+  writeFileSync(
+    join(world, ".keiyaku", "settings.json"),
+    JSON.stringify({ plugins: { square: { package: "./plugins/square.mjs" } } }),
+  );
   const plugin = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
   return {
-    square, plugin,
+    square,
+    plugin,
     async cards(recipient = owner) {
       const session = await ledger.session(recipient);
       assert.ok(session);
@@ -435,7 +514,7 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   };
 }
 
-for (const route of ["wait", "forwarded-wait", "idle"] as const) {
+for (const route of ["wait", "idle"] as const) {
   test(`${route} consumes the exact outcome before a real Square notice is inserted`, async (t) => {
     const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-wait-"));
     const target = await bornBody(world, "0b500009", AT);
@@ -443,32 +522,25 @@ for (const route of ["wait", "forwarded-wait", "idle"] as const) {
     const turn = await outcome(target, "known answer");
     await finish(target);
     const observed = await squareObserver(t, world);
-    let pump: BodyRequestPump | undefined;
-    if (route === "forwarded-wait") {
-      const parent = await bornDirectAkuma({ root: world, archetype: "parent", draw: "0b500010", createdAt: AT });
-      t.after(() => parent.leash.release());
-      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-      pump = await BodyRequestPump.open({
-        paths: parent.paths, bodySequence: body.sequence, now: () => AT, signal: t.signal,
-        commands: selectionRequestCommands(selectionRequestPort(world, noBodyLaunch)),
-      });
-    }
-    try {
-      const api = pump === undefined ? Akumas.of(world) : akumasWithExecution(world, bodyRequestExecution({ directory: pump.directory }));
-      const result = route === "idle"
+    const api = Akumas.of(world);
+    const result =
+      route === "idle"
         ? await Akuma.select(world, target.allocated.id).idle({ timeoutMs: 0 })
         : await api.wait({ akuma: [target.allocated.id], timeoutMs: 0, signal: t.signal });
-      assert.equal(result.reason, "completed");
-      const signal = {
-        kind: "akuma.turn-outcome" as const, akumaId: target.allocated.id, bodySequence: target.body.sequence,
-        turnSequence: turn.sequence, participants: ["Requester", "Other"], outcome: { kind: "answered" as const, text: "known answer" },
-      };
-      await observed.plugin.signals?.["akuma.turn-outcome"]?.(signal);
-      assert.deepEqual(await observed.cards(), []);
-      assert.equal((await observed.cards(observed.other)).length, 1, "other recipient still posts");
-      await observed.plugin.signals?.["akuma.turn-outcome"]?.({ ...signal, turnSequence: turn.sequence + 1 });
-      assert.equal((await observed.cards()).length, 1, "another Turn remains deliverable");
-    } finally { await pump?.close(); }
+    assert.equal(result.reason, "completed");
+    const signal = {
+      kind: "akuma.turn-outcome" as const,
+      akumaId: target.allocated.id,
+      bodySequence: target.body.sequence,
+      turnSequence: turn.sequence,
+      participants: ["Requester", "Other"],
+      outcome: { kind: "answered" as const, text: "known answer" },
+    };
+    await observed.plugin.signals?.["akuma.turn-outcome"]?.(signal);
+    assert.deepEqual(await observed.cards(), []);
+    assert.equal((await observed.cards(observed.other)).length, 1, "other recipient still posts");
+    await observed.plugin.signals?.["akuma.turn-outcome"]?.({ ...signal, turnSequence: turn.sequence + 1 });
+    assert.equal((await observed.cards()).length, 1, "another Turn remains deliverable");
   });
 }
 
@@ -482,93 +554,124 @@ test("a deadline without an established outcome releases deferral without consum
   const turn = await outcome(target, "after deadline");
   await finish(target);
   await observed.plugin.signals?.["akuma.turn-outcome"]?.({
-    kind: "akuma.turn-outcome", akumaId: target.allocated.id, bodySequence: target.body.sequence,
-    turnSequence: turn.sequence, participants: ["Requester"], outcome: { kind: "answered", text: "after deadline" },
+    kind: "akuma.turn-outcome",
+    akumaId: target.allocated.id,
+    bodySequence: target.body.sequence,
+    turnSequence: turn.sequence,
+    participants: ["Requester"],
+    outcome: { kind: "answered", text: "after deadline" },
   });
   assert.equal((await observed.cards()).length, 1);
 });
 
-for (const route of ["ask", "forwarded-ask", "standalone-ask"] as const) {
+for (const route of ["ask", "standalone-ask"] as const) {
   test(`${route} observes and decodes before its delayed real notice is inserted`, { timeout: 15_000 }, async (t) => {
     const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-square-ask-"), "0b500019");
     const observed = await squareObserver(t, source.world);
     const bodies: Promise<unknown>[] = [];
-    const spawn = fixtureLauncher(bodies, new Map([
-      [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-    ]));
+    const spawn = fixtureLauncher(
+      bodies,
+      new Map([[source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }]]),
+    );
     const prototype = Object.getPrototypeOf(observed.square) as Square;
     const send = prototype.send;
     let entered!: () => void;
-    const sending = new Promise<void>(resolve => { entered = resolve; });
+    const sending = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
     let release!: () => void;
-    const released = new Promise<void>(resolve => { release = resolve; });
-    t.mock.method(prototype, "send", async function(this: Square, ...args: Parameters<typeof send>) {
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    t.mock.method(prototype, "send", async function (this: Square, ...args: Parameters<typeof send>) {
       const identity = args[0].metadata?.keiyaku;
-      if (identity !== null && typeof identity === "object" && "akumaId" in identity && identity.akumaId === source.allocated.id) {
-        entered(); await released;
+      if (
+        identity !== null &&
+        typeof identity === "object" &&
+        "akumaId" in identity &&
+        identity.akumaId === source.allocated.id
+      ) {
+        entered();
+        await released;
       }
       return await send.apply(this, args);
     });
-    let pump: BodyRequestPump | undefined;
-    if (route === "forwarded-ask") {
-      const parent = await bornDirectAkuma({ root: source.world, archetype: "parent", draw: "0b500020", createdAt: AT });
-      t.after(() => parent.leash.release());
-      const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
-      pump = await BodyRequestPump.open({
-        paths: parent.paths, bodySequence: body.sequence, now: () => AT, signal: t.signal,
-        commands: selectionRequestCommands(selectionRequestPort(source.world, spawn)),
-      });
-    }
     try {
-      const schema = Schema.json({ type: "object" }, () => { throw new Error("decoder refused"); });
-      const result = route === "standalone-ask"
-        ? await akumaWithLauncher(source.world, source.allocated.id, spawn).ask("work", { schema, initiator: "Requester", signal: t.signal })
-        : await (pump === undefined
-          ? akumasWithLauncher(source.world, localExecutionContext(), spawn)
-          : akumasWithExecution(source.world, bodyRequestExecution({ directory: pump.directory })))
-          .ask({ akuma: source.allocated.id, body: "work", schema, initiator: "Requester", signal: t.signal });
+      const schema = Schema.json({ type: "object" }, () => {
+        throw new Error("decoder refused");
+      });
+      const result =
+        route === "standalone-ask"
+          ? await akumaWithLauncher(source.world, source.allocated.id, spawn).ask("work", {
+              schema,
+              initiator: "Requester",
+              signal: t.signal,
+            })
+          : await akumasWithLauncher(source.world, spawn).ask({
+              akuma: source.allocated.id,
+              body: "work",
+              schema,
+              initiator: "Requester",
+              signal: t.signal,
+            });
       assert.equal(result.observation.reason, "invalid-output");
       await sending;
       release();
       await settleFixtureBodies(bodies);
-      assert.deepEqual(await observed.cards(), [], "exact early ACK survives schema decoding failure and scope release");
+      assert.deepEqual(
+        await observed.cards(),
+        [],
+        "exact early ACK survives schema decoding failure and scope release",
+      );
     } finally {
       release();
       await settleFixtureBodies(bodies);
-      await pump?.close();
     }
   });
 }
 
-test("ask retains the observed outcome through schema and plugin failure using its host sink", { timeout: 15_000 }, async (t) => {
-  const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-ask-"), "0b500008");
-  const peer = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-plural-ask-"), "0b500016");
-  const recorded = recordingPlugin(source.world, true);
-  const peerRecorded = recordingPlugin(peer.world, true);
-  const diagnostics: string[] = [];
-  const bodies: Promise<unknown>[] = [];
-  const spawn = fixtureLauncher(bodies, new Map([
-    [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-    [peer.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
-  ]));
-  try {
-    const schema = Schema.json({ type: "object" }, () => { throw new Error("decode refused"); });
-    const result = await akumaWithLauncher(source.world, source.allocated.id, spawn, {
-      reportDiagnostic: (message) => { diagnostics.push(message); },
-    }).ask("work", { schema, signal: t.signal });
-    assert.equal(result.observation.reason, "invalid-output");
-    const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
-    assert.ok(tell?.binding);
-    assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
-    const pluralResult = await akumasWithLauncher(peer.world, localExecutionContext(), spawn, {
-      reportDiagnostic: (message) => { diagnostics.push(message); },
-    }).ask({ akuma: peer.allocated.id, body: "work", schema, signal: t.signal });
-    assert.equal(pluralResult.observation.reason, "invalid-output");
-    const peerTell = await readTell(peer.allocated.paths, pluralResult.tell.admission.tellId);
-    assert.ok(peerTell?.binding);
-    assert.deepEqual(peerRecorded.signals(), [signal(peer.allocated.id, peerTell.binding.turnSequence)]);
-    assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
-  } finally {
-    await settleFixtureBodies(bodies);
-  }
-});
+test(
+  "ask retains the observed outcome through schema and plugin failure using its host sink",
+  { timeout: 15_000 },
+  async (t) => {
+    const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-ask-"), "0b500008");
+    const peer = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-plural-ask-"), "0b500016");
+    const recorded = recordingPlugin(source.world, true);
+    const peerRecorded = recordingPlugin(peer.world, true);
+    const diagnostics: string[] = [];
+    const bodies: Promise<unknown>[] = [];
+    const spawn = fixtureLauncher(
+      bodies,
+      new Map([
+        [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
+        [peer.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
+      ]),
+    );
+    try {
+      const schema = Schema.json({ type: "object" }, () => {
+        throw new Error("decode refused");
+      });
+      const result = await akumaWithLauncher(source.world, source.allocated.id, spawn, {
+        reportDiagnostic: (message) => {
+          diagnostics.push(message);
+        },
+      }).ask("work", { schema, signal: t.signal });
+      assert.equal(result.observation.reason, "invalid-output");
+      const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
+      assert.ok(tell?.binding);
+      assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
+      const pluralResult = await akumasWithLauncher(peer.world, spawn, {
+        reportDiagnostic: (message) => {
+          diagnostics.push(message);
+        },
+      }).ask({ akuma: peer.allocated.id, body: "work", schema, signal: t.signal });
+      assert.equal(pluralResult.observation.reason, "invalid-output");
+      const peerTell = await readTell(peer.allocated.paths, pluralResult.tell.admission.tellId);
+      assert.ok(peerTell?.binding);
+      assert.deepEqual(peerRecorded.signals(), [signal(peer.allocated.id, peerTell.binding.turnSequence)]);
+      assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);
+    } finally {
+      await settleFixtureBodies(bodies);
+    }
+  },
+);

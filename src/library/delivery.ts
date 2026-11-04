@@ -1,24 +1,18 @@
-import { z } from "zod";
-import type { SnapshotId } from "../core/facts/types.js";
-import { completionEvidenceSchema } from "../protocol/completion.js";
-import { deliverLeadingSchema } from "../protocol/deliver.js";
-import {
-  candidateContentChangeSchema,
-  deliverDataSchema,
-  deliveryDiffOperation,
-  type RepositoryScope,
-} from "../protocol/operations.js";
-import { continuationReportSchema } from "./continuation.js";
+import type { z } from "zod";
+import type { DeliverData, SnapshotId } from "../core/facts/types.js";
+import type { CompletionEvidence } from "../protocol/completion.js";
+import type { deliverLeadingSchema } from "../protocol/deliver.js";
+import type { candidateContentChangeSchema } from "../protocol/operations.js";
+import { deliveryDiffOperation, type RepositoryScope } from "../protocol/operations.js";
+import type { ContinuationReport } from "./continuation.js";
 
-export const deliveryValueSchema = completionEvidenceSchema
-  .extend({
-    ...deliverDataSchema.shape,
-    leading: deliverLeadingSchema,
-    contentChange: candidateContentChangeSchema.optional(),
-    continuation: continuationReportSchema.optional(),
-  })
-  .strict();
-export type DeliveryValue = z.infer<typeof deliveryValueSchema>;
+export type DeliveryValue = DeliverData &
+  CompletionEvidence &
+  Readonly<{
+    leading: z.infer<typeof deliverLeadingSchema>;
+    contentChange?: z.infer<typeof candidateContentChangeSchema> | undefined;
+    continuation?: ContinuationReport | undefined;
+  }>;
 
 class DeliveryHandle {
   declare readonly leading?: DeliveryValue["leading"];

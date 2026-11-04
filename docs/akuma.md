@@ -45,22 +45,17 @@ births.
 
 Publication ends process custody by writing a durable verdict — Soul proves birth, a Seal under the leash proves failure — or by leaving the unborn child to leash judgment when the leash is unavailable; proven exit is welcome evidence but never a custody precondition, and a termination or exit error by itself changes nothing durable.
 
-A direct call and a requested call served by its parent share one lower birth
-authority. The initiating caller's admitted provider recipe, execution directory,
-and first Tell are retained as caller intent: the serving parent admits provider
-input itself but never reloads Settings or an Archetype, and never reinterprets
-that intent. Provider input is admitted once before any child exists, so a refused
-recipe leaves no child; a requested child is reserved before it is published.
-Confirmed birth is never replaced by a later stage's failure: a spawn or
-first-Tell failure after Soul carries the born child together with its native
-failure, and caller cancellation never discards a confirmed child or an exact
-admitted Tell. Only a birth that never proved Soul is a failed birth.
+Provider input is admitted once before any child exists, so a refused recipe
+leaves no child. Confirmed birth is never replaced by a later stage's failure: a
+spawn or first-Tell failure after Soul carries the born child together with its
+native failure, and caller cancellation never discards a confirmed child or an
+exact admitted Tell. Only a birth that never proved Soul is a failed birth.
 
 Caller-selected additional writable directories are explicit birth-time filesystem
-roots. Admission requires
-existing canonical directories before allocating a child and deduplicates them.
-Only a provider with a verified native mapping accepts nonempty roots. The
-admitted native recipe retains the roots across forwarding, wake, and fork;
+roots. Admission requires existing canonical directories before allocating a
+child and deduplicates them. Only a provider with a verified native mapping
+accepts nonempty roots. The admitted native recipe retains the roots across wake
+and fork;
 source definitions and shared Settings never change. No directory is granted
 automatically, and adding roots never selects a broader sandbox mode or network
 policy.
@@ -72,7 +67,7 @@ no clean end is untidy, not permission to signal a described process. `hung`
 requires the latest Body's durable proof that its owned provider custody could
 not retire; it permanently refuses same-identity succession even after physical
 leash release. A later body may supersede untidy history but never hung history.
-Stopping a Body preserves Soul, sessions, history, pending tells, and requests.
+Stopping a Body preserves Soul, sessions, history, and pending tells.
 
 ## Inactive Retention
 
@@ -153,8 +148,7 @@ hidden by a second store or automatic defense.
 
 A disposable World-local lineage record may cache each born Akuma's frozen
 caller edge beside Heart custody, so a caller-scoped roster need not open every
-Heart to learn known edges. It stores no identity, lifecycle, or permission
-fact of its own, is reconstructible from Hearts alone, and is never a second
+Heart to learn known edges. It stores no identity or lifecycle fact of its own, is reconstructible from Hearts alone, and is never a second
 authority: an offered edge only proposes a candidate, and every returned
 member's caller chain is rechecked against its born Souls before that member is
 accepted. Any disagreement discards the record for an answer built from direct
@@ -171,10 +165,9 @@ complete deletion retains custody for retry.
 
 ## Dependency Direction
 
-One lower Akuma owner implements creation, admission, observation, and
-lifecycle. The standalone identity handle, plural selection, and the Body
-Request service are thin faces over those same algorithms rather than parallel
-orchestrators. That owner reads only Heart, leash, provider, Archetype,
+One Akuma owner implements creation, admission, observation, and lifecycle. The
+standalone identity handle and plural selection are faces over those same
+algorithms rather than parallel orchestrators. That owner reads only Heart, leash, provider, Archetype,
 Settings, and filesystem state; optional Alias, Dispatch, Debt, and Contract
 associations are composed after its values by the World composition that owns
 them, so a standalone operation still works when those optional authorities are
@@ -183,9 +176,7 @@ activity order, and observed extent, and the upper composition attaches Alias
 context without counting or reopening the board.
 
 The public surface composes identity, Archetype, Heart, Body, provider,
-Requests, publication, and Settings. Body drives providers and writes typed
-Heart facts. Request service composes Heart, identity, provider recipe, and
-publication. Provider adapters depend on the provider-neutral boundary, never
+publication, and Settings. Body drives providers and writes typed Heart facts. Provider adapters depend on the provider-neutral boundary, never
 on public or lifecycle projections. Kanshi consumes public values only.
 Inactive retirement follows the same split: the Akuma owner reads Heart, leash,
 and filesystem state and removes recognized custody, while the World

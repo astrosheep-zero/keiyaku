@@ -117,20 +117,19 @@ type LoadOpencodeInput = Readonly<{
   loader?: OpencodeSdkLoader;
   onRuntime?: (runtime: OpencodeRuntime) => void;
   executionCoordinate?: import("../execution-environment.js").ExecutionCoordinate;
-  requests?: string;
 }>;
 export async function loadOpencode(input: LoadOpencodeInput): Promise<OpencodeRuntime> {
   const { loader } = input;
   return loader === undefined ? loadNativeOpencode(input) : loadInjectedOpencode(input, loader);
 }
 async function loadInjectedOpencode(input: LoadOpencodeInput, loader: OpencodeSdkLoader): Promise<OpencodeRuntime> {
-  const { execution, cwd, signal, onRuntime, requests } = input;
+  const { execution, cwd, signal, onRuntime } = input;
   const loaded = await abortable(
     loader(
       cwd,
       {
         ...execution,
-        env: akumaExecutionEnvironment(process.env, execution.env, requests, [], input.executionCoordinate),
+        env: akumaExecutionEnvironment(process.env, execution.env, [], input.executionCoordinate),
       },
       signal,
     ),
@@ -155,7 +154,7 @@ async function loadInjectedOpencode(input: LoadOpencodeInput, loader: OpencodeSd
   }
 }
 async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRuntime> {
-  const { execution, cwd, signal, onRuntime, requests } = input;
+  const { execution, cwd, signal, onRuntime } = input;
   const port = await availablePort();
   signal.throwIfAborted();
   const password =
@@ -174,7 +173,6 @@ async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRun
         OPENCODE_PASSWORD: password,
         OPENCODE_SERVER_PASSWORD: password,
       },
-      requests,
       [],
       input.executionCoordinate,
     ),

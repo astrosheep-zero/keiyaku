@@ -9,9 +9,7 @@ function callerText(caller: AkumaCaller | Readonly<{ kind: "unknown" }>): string
 }
 
 function originText(origin: Exclude<AkumaOrigin, { kind: "direct" }>): string {
-  return origin.kind === "request"
-    ? `request · ${origin.parent} · ${origin.requestId}`
-    : `fork · ${origin.parent} · ${origin.at}`;
+  return `fork · ${origin.parent} · ${origin.at}`;
 }
 
 function selfHead(facts: WhoamiFacts, dispatch: ContractId | undefined, workdir: string | null | undefined): string[] {
@@ -56,7 +54,6 @@ export function renderWhoami(facts: WhoamiFacts): string {
   lines.push(row("world", facts.world ?? "none"));
   const context = contextText(facts.contract);
   if (context !== dispatch) lines.push(row("context", context));
-  lines.push(row("requests", facts.requests));
   if (self.kind === "akuma" && facts.profile?.kind === "unavailable")
     lines.push(row("profile", `unavailable · ${facts.profile.reason}`));
   if (profile !== undefined) {

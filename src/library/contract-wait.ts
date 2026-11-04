@@ -1,10 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { z } from "zod";
-import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
-import { contractHeadSchema } from "../git/identity.js";
+import { contractId, type ContractHead, type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import { contractIdSchema, type RepositoryScope } from "../protocol/operations.js";
+import type { RepositoryScope } from "../protocol/operations.js";
 import { optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -12,27 +10,20 @@ import { scopeForRepo, type Repo } from "./repo.js";
 export type ContractWaitOptions = Readonly<{ completion?: "any" | "all"; timeoutMs?: number; signal?: AbortSignal }>;
 export type ContractWaitInput = ContractWaitOptions & Readonly<{ repo: Repo; contracts: readonly string[] }>;
 
-// This is the native wait observation, shared unchanged across the transport boundary.
 // An unknown presence means the deadline interrupted the initial observation.
-const memberSchema = z
-  .object({
-    contract: contractIdSchema,
-    baseline: contractHeadSchema.nullable(),
-    head: contractHeadSchema.nullable(),
-    changed: z.boolean(),
-    present: z.boolean().nullable(),
-    terminal: z.enum(["claimed", "abandoned"]).nullable(),
-  })
-  .strict();
-export const contractWaitResultSchema = z
-  .object({
-    kind: z.enum(["changed", "terminal", "deadline", "missing"]),
-    completion: z.enum(["any", "all"]),
-    contracts: z.array(memberSchema).min(1).readonly(),
-  })
-  .strict();
-export type ContractWaitMember = z.infer<typeof memberSchema>;
-export type ContractWaitResult = z.infer<typeof contractWaitResultSchema>;
+export type ContractWaitMember = Readonly<{
+  contract: ContractId;
+  baseline: ContractHead | null;
+  head: ContractHead | null;
+  changed: boolean;
+  present: boolean | null;
+  terminal: "claimed" | "abandoned" | null;
+}>;
+export type ContractWaitResult = Readonly<{
+  kind: "changed" | "terminal" | "deadline" | "missing";
+  completion: "any" | "all";
+  contracts: readonly ContractWaitMember[];
+}>;
 
 export type ValidatedWait = Readonly<{
   scope: RepositoryScope;

@@ -238,7 +238,7 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
       },
       initialBody: "work",
     };
-    const body = driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
+    const body = driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     // Iterator return, not elapsed time or prompt submission, proves this exact phase.
     await waitForCondition("whole closure entered unproven iterator return", () => returning, { budgetMs: 5_000 });
     if (control === "stop") {

@@ -215,8 +215,8 @@ pairwise comparisons, experiment queues, or adaptive sampling instead.
   primitive limits concurrency; use a caller-owned pool for larger workloads.
 - An AskResult distinguishes provider failure and schema invalid-output from
   an answered value. Handle its observation arm before using the answer;
-  admission or transport errors can still reject. Busy admission is a separate
-  refusal. Another Tell is new work, not a retry without side effects.
+  admission failures or unexpected execution errors can still reject. Busy
+  admission is a separate refusal. Another Tell is new work, not a retry without side effects.
 - Serialize schema Tells to the same identity and let its Body settle with
   `idle()` before submitting the next one, including after a prompt-free call.
   An answer can become visible before Body settlement. Separate Akuma can run

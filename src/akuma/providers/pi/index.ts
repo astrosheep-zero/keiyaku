@@ -80,29 +80,20 @@ function piCreateOptions(
         : (() => {
             throw new Error("Pi resume requires sessionFile");
           })();
-  const customTools =
-    input.requests === undefined
-      ? undefined
-      : [
-          sdk.createBashToolDefinition(input.cwd, {
-            spawnHook: (context) => ({
-              ...context,
-              env: akumaExecutionEnvironment(
-                context.env,
-                {},
-                input.requests.dir,
-                ["PI_SESSION_ID", "PI_SESSION_FILE"],
-                input.execution,
-              ),
-            }),
-          }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
-        ];
+  const customTools = [
+    sdk.createBashToolDefinition(input.cwd, {
+      spawnHook: (context) => ({
+        ...context,
+        env: akumaExecutionEnvironment(context.env, {}, ["PI_SESSION_ID", "PI_SESSION_FILE"], input.execution),
+      }),
+    }) as NonNullable<CreateAgentSessionOptions["customTools"]>[number],
+  ];
   return {
     services,
     sessionManager,
     ...(model === undefined ? {} : { model }),
     ...(input.options.effort === undefined ? {} : { thinkingLevel: input.options.effort as PiThinkingLevel }),
-    ...(customTools === undefined ? {} : { customTools }),
+    customTools,
   };
 }
 
@@ -134,10 +125,6 @@ async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: 
     cwd: input.cwd,
     agentDir: sdk.getAgentDir(),
     modelRuntimeSignal: input.signal,
-    // A positive restriction is applied after resource loading, before startup.
-    // If the optional shipped extension is absent Pi collects an unknown-option
-    // diagnostic; it is not a setup failure and must not disable other resources.
-    extensionFlagValues: new Map([["keiyaku-request-only", true]]),
     resourceLoaderOptions: {
       ...(personality === undefined || input.options.systemPromptMode === "append"
         ? {}

@@ -15,7 +15,6 @@ import { spawnAkumaBody } from "../src/akuma/detached-body.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import {
   HeldAkumaLeash,
-  admitRequest,
   activitySlice,
   appendActivity,
   AkumaBusyError,
@@ -37,7 +36,6 @@ import {
   readForkPoint,
   readLatestTurnForBody,
   readTell,
-  readRequest,
   readTurnParticipants,
   recordCurrentModel,
   recordSession,
@@ -718,12 +716,6 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
     assert.equal(pending.kind, "recorded");
-    const request = await admitRequest(value.allocated.paths, {
-      id: "00000000-0000-4000-8000-000000000010",
-      action: "akuma.call",
-      payloadJson: JSON.stringify({ body: "child work" }),
-      admittedAt: "2026-08-08T00:00:02.000Z",
-    });
     assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
       kind: "requested",
       body: firstBody,
@@ -744,7 +736,6 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       snapshot.pending.map((tell) => tell.id),
       ["tell-pending"],
     );
-    assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     assert.equal(
       life({
         leash: "free",
@@ -782,7 +773,6 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       },
     ]);
     assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
-    assert.equal((await readRequest(value.allocated.paths, request.id))?.state, "admitted");
     successor.release();
   } finally {
     value.close();
@@ -921,31 +911,6 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
     assert.equal((await readHeart(value.allocated.paths)).latestKill?.bodySequence, body.sequence);
     assert.equal(recoveries, 1);
     await recoveryDone;
-  } finally {
-    value.close();
-  }
-});
-
-test("unknown Body Request state is authority corruption", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    await admitRequest(value.allocated.paths, {
-      id: "00000000-0000-4000-8000-000000000004",
-      action: "akuma.call",
-      payloadJson: "{}",
-      admittedAt: "2026-08-08T00:00:01.000Z",
-    });
-    leash.release();
-    const heart = new DatabaseSync(value.allocated.paths.heart);
-    heart.exec("PRAGMA ignore_check_constraints = ON");
-    heart.prepare("UPDATE requests SET state = 'unknown' WHERE id = ?").run("00000000-0000-4000-8000-000000000004");
-    heart.close();
-    await assert.rejects(
-      readRequest(value.allocated.paths, "00000000-0000-4000-8000-000000000004"),
-      /unknown request state: unknown/u,
-    );
   } finally {
     value.close();
   }
@@ -1534,7 +1499,6 @@ test("a model update preserves unrelated raw Soul members instead of re-encoding
       origin: { kind: "direct" },
       createdAt: value.soul.createdAt,
       legacyMember: [1, 2],
-      allowed: ["task.unknown"],
     };
     const database = new DatabaseSync(value.allocated.paths.heart);
     try {
@@ -1766,9 +1730,9 @@ function codecSoul(): Soul {
     options: { model: "claude-sonnet-4-5", effort: "high", network: "disabled", systemPrompt: "Work." },
     cwd: "/tmp/work",
     origin: {
-      kind: "request",
+      kind: "fork",
       parent: "aku/parent/1234abcd" as Soul["id"],
-      requestId: "00000000-0000-4000-8000-000000000001",
+      at: "turn/1",
     },
     createdAt: "2026-08-15T00:00:00.000Z",
   };
@@ -1787,8 +1751,6 @@ test("soul codec hard-fails invalid known members", () => {
     { name: "unknown provider kind", change: (soul) => ({ ...soul, provider: { ...soul.provider, kind: "grok" } }) },
     { name: "blank provider name", change: (soul) => ({ ...soul, provider: { ...soul.provider, name: " " } }) },
     { name: "provider env non-string value", change: (soul) => ({ ...soul, provider: { ...soul.provider, env: { HOME: 9 } } }) },
-    { name: "request origin missing parent", change: (soul) => ({ ...soul, origin: { kind: "request", requestId: "00000000-0000-4000-8000-000000000001" } }) },
-    { name: "request origin parent has non-hex suffix", change: (soul) => ({ ...soul, origin: { kind: "request", parent: "aku/parent/nothex", requestId: "00000000-0000-4000-8000-000000000001" } }) },
     { name: "fork origin parent has extra segment", change: (soul) => ({ ...soul, origin: { kind: "fork", parent: "aku/parent/1234abcd/extra", at: "history" } }) },
     { name: "unknown origin kind", change: (soul) => ({ ...soul, origin: { kind: "rebirth" } }) },
     { name: "id is not an Akuma coordinate", change: (soul) => ({ ...soul, id: "garbage" }) },

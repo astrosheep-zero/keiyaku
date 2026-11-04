@@ -67,13 +67,13 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
-| report | Record the invoking Akuma's explicit progress on its exact declared current execution; no recipient selection, parent forwarding, or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
-| whoami | Observe the invoking process's own identity, request context, and contextual Contract; for an Akuma, also observe its current Turn initiator and birth profile. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
+| report | Record the invoking Akuma's explicit progress on its exact declared current execution; no recipient selection or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
+| whoami | Observe the invoking process's own identity and contextual Contract; for an Akuma, also observe its current Turn initiator and birth profile. | Report absence, invalid declarations, and unavailable observations explicitly without refusing the remaining facts. |
 | install | Ask the integration owner to install bundled harness support. | Render its native receipt; no product authority is created by rendering it. |
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
 | wait | Route Contract journal change waits and Akuma completion waits to their respective owners; refuse mixed families before observation. | Return the selected owner's native observation. |
-| call, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, requests, answers, and recovery. |
+| call, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
 inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
@@ -81,15 +81,6 @@ its literal option grammar onto those intents and inspects no Git state itself.
 The edge resolves the invocation worktree coordinate once and hands that same
 resolved coordinate to the operation, so the Contract owner reads it rather
 than any ambient directory.
-
-In a declared direct-parent request channel, the CLI forwards only the
-caller-selected operation and the information needed to execute it locally.
-A stable request entry is resolved asynchronously once inside the invocation's
-failure and cancellation boundary before operations begin; its actual channel
-is then pinned for the invocation under [akuma-requests.md](akuma-requests.md).
-The parent reconstructs local custody and returns the ordinary public result;
-forwarding does not create another delivery, review, verify, preview, or Debt
-workflow.
 
 Delivery's dry-run form calls the dedicated native preview operation, never the
 mutating delivery path. Unused or mutation-only options are refused before any
@@ -112,8 +103,7 @@ rules, and parser recovery are executable interface detail, not CLI law.
 
 `whoami` is a read-only edge composition: it acquires process declarations once,
 uses the existing identity and contextual selection authorities, and never
-establishes a World, reads Square, emits a plugin signal, or forwards the
-observation. An Akuma's current initiator comes only from the open Turn of its
+establishes a World, reads Square, or emits a plugin signal. An Akuma's current initiator comes only from the open Turn of its
 open current Body; an ended Body or Turn contributes no initiator. This is
 independent of its birth caller and of the identity used for future submissions.
 Its Dispatch association is independent of the contextual Contract. Independent
@@ -155,17 +145,16 @@ Schema acquisition failures are usage or input failures, while ordinary call,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
 Call, fork, tell, and ask select the submitting process's Square participant name at
-the invocation edge and pass it as optional input attribution, including through a
-direct-parent request. An explicit Square participant name is authoritative, an
+the invocation edge and pass it as optional input attribution,  An explicit Square participant name is authoritative, an
 established participant already owned by this session is reused unchanged, and a
 session with no identity in the World's local Square derives one stable name from
 its own provider session coordinate. An ambiguous or missing session coordinate,
 an ambiguous existing binding, or an unavailable registry selects nothing.
 Missing or unusable Square identity leaves attribution absent and never refuses
 the operation. A generic integration initiator supplied by the caller outranks
-that selection and is forwarded unchanged. The Body does not rediscover the caller
+that selection and is passed unchanged. The Body does not rediscover the caller
 from its own environment. Call establishes the already selected World before
-preparing the submitting participant's route; a later failed first call may
+preparing the submitting participant's identity; a later failed first call may
 therefore leave that World marker.
 
 Direct call and fork derive optional declared caller attribution at this edge:
@@ -176,6 +165,4 @@ native host session supplies external attribution. Conflicting native host
 identities refuse rather than select an arbitrary parent. Only when no native
 host identity is declared does the edge use the explicit external-integration
 fallback. These declarations remain attribution, not authentication or authority;
-the SDK does not infer them from its environment. Request-custody call skips
-ambient caller parsing entirely because serving custody supplies the actual
-parent, including for older running Bodies without a World declaration.
+the SDK does not infer them from its environment.

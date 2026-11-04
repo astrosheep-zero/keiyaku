@@ -64,19 +64,19 @@ a later human turn.
 The Paseo integration supports successive Bodies against a retained live native
 runtime, not upstream native reload or restart. Such reload discards the creation
 environment; an unchanged agent or native session identity is not proof that the
-request entry remains injected. After native reload the caller must create a
-fresh Akuma. If that unsupported reload removes the routing declaration from the
-native environment, this integration cannot promise routing isolation. It adds
+provider session identity remains valid. After native reload the caller must
+create a fresh Akuma. This integration does not promise session continuity across
+unsupported native reload. It adds
 no registry, daemon, plugin, inferred retention proof, or automatic repair.
 
 The native execution's reporting context is frozen for its admitted Body and
-Turn, separate from its routing context. A retained native environment that
+Turn. A retained native environment that
 cannot refresh that exact context keeps its execution and resume capabilities,
 but report admission refuses its obsolete coordinates. In particular, a later
 Paseo drive currently retains the creation drive's report context; progress
 reporting from that old environment is unavailable until a native per-turn
-context mechanism is supported. A stable request entry, latest Heart read, or
-model-visible instruction is never a substitute for exact execution custody.
+context mechanism is supported. A latest Heart read or model-visible instruction
+is never a substitute for exact execution custody.
 
 A born Akuma may name another Akuma as its direct caller. The optional Paseo
 observer attaches that child beneath the parent's exact existing mirror only
@@ -261,15 +261,11 @@ resumed native session. Missing choices and unconfirmed selections fail that
 attempt rather than silently running with the agent's default.
 
 Each drive receives the Body's exact execution actor and World independently of
-the host process environment, along with the one Body Request channel and its
-optional stable entry as provider transport setup. Adapters supply those explicit
-coordinates to their tool children without mutating process-global identity or
-working directory. A shared host's outer attribution cannot identify a Body's
-work. Native services and extension runtimes remain attempt-scoped; arbitrary
-extensions that consult or mutate globals are not isolated by in-process hosting. Persistent native environments may retain the
-stable entry under [akuma-requests.md](akuma-requests.md); other providers retain
-the direct channel. This does not alter Library routing or permit recursive
-service. New provider
+the host process environment. Adapters supply those explicit coordinates to
+their tool children without mutating process-global identity or working
+directory. A shared host's outer attribution cannot identify a Body's work.
+Native services and extension runtimes remain attempt-scoped; arbitrary
+extensions that consult or mutate globals are not isolated by in-process hosting. New provider
 behavior must fit an existing provider-neutral capability or receive a new owner
 ruling; there is no dialect passthrough, generic extension bag, or second
 provider protocol.

@@ -48,11 +48,11 @@ test("non-Akuma self is explicit and leaves a fresh directory untouched", async 
   const bare = await cliJson<WhoamiFacts>(["-C", root, "whoami"], { environment: {} });
   assert.equal(bare.exit, 0, bare.stderr);
   assert.deepEqual(bare.value, {
-    world: null, self: { kind: "none" }, initiator: null, requests: "local", contract: { kind: "none" },
+    world: null, self: { kind: "none" }, initiator: null, contract: { kind: "none" },
   });
   const text = await runCli(["whoami"], { cwd: root, environment: {} });
   assert.equal(text.exit, 0, text.stderr);
-  assert.equal(text.stdout, "none (not an akuma)\n  world       none\n  context     none\n  requests    local\n");
+  assert.equal(text.stdout, "none (not an akuma)\n  world       none\n  context     none\n");
 
   const external = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
     environment: { PI_SESSION_ID: "fresh-seat", SQUARE_INDEX: join(root, "square-index") },
@@ -63,7 +63,7 @@ test("non-Akuma self is explicit and leaves a fresh directory untouched", async 
   assert.equal(external.value.profile, undefined);
   assert.equal("caller" in external.value, false);
   const externalText = await runCli(["-C", root, "whoami"], { environment: { PI_SESSION_ID: "fresh-seat" } });
-  assert.equal(externalText.stdout, "pi:fresh-seat (not an akuma)\n  world       none\n  context     none\n  requests    local\n");
+  assert.equal(externalText.stdout, "pi:fresh-seat (not an akuma)\n  world       none\n  context     none\n");
   assert.deepEqual(readdirSync(root), before);
   assert.equal(existsSync(join(root, ".keiyaku")), false);
   assert.equal(existsSync(join(root, ".square")), false);
@@ -96,20 +96,19 @@ test("whoami never reads an existing Square seat or publishes an index", async (
   assert.equal(existsSync(join(root, "uncreated")), false, "whoami did not publish a Square discovery index");
 });
 
-test("self and request declarations do not adopt outgoing attribution", async (t) => {
+test("self declarations do not adopt outgoing attribution", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-whoami-env-");
   const declared = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
-    environment: { CODEX_THREAD_ID: "session", KEIYAKU_INITIATOR: "  Integration  ", SQUARE_PARTICIPANT_NAME: "Other", AKUMA_REQUESTS: "/missing/route" },
+    environment: { CODEX_THREAD_ID: "session", KEIYAKU_INITIATOR: "  Integration  ", SQUARE_PARTICIPANT_NAME: "Other" },
   });
   assert.equal(declared.exit, 0, declared.stderr);
   assert.deepEqual(declared.value.self, { kind: "external", integration: "codex", id: "session" });
   assert.equal(declared.value.initiator, null);
-  assert.equal(declared.value.requests, "parent");
   const text = await runCli(["-C", root, "whoami"], {
-    environment: { KEIYAKU_EXTERNAL_CALLER: "slack:channel:thread", AKUMA_REQUESTS_ENTRY: "/missing/entry" },
+    environment: { KEIYAKU_EXTERNAL_CALLER: "slack:channel:thread" },
   });
   assert.equal(text.exit, 0, text.stderr);
-  assert.equal(text.stdout, "slack:channel:thread (not an akuma)\n  world       none\n  context     none\n  requests    parent\n");
+  assert.equal(text.stdout, "slack:channel:thread (not an akuma)\n  world       none\n  context     none\n");
 
   for (const [environment, message] of [
     [{ KEIYAKU_ACTOR_ID: "aku/worker/1234abcd" }, /both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD/u],
@@ -124,7 +123,7 @@ test("self and request declarations do not adopt outgoing attribution", async (t
     if (result.value.self.kind === "invalid") assert.match(result.value.self.reason, message);
     const readable = await runCli(["-C", root, "whoami"], { environment });
     assert.equal(readable.exit, 0, readable.stderr);
-    assert.match(readable.stdout, /^invalid · .+ \(not an akuma\)\n  world       none\n  context     none\n  requests    local\n$/u);
+    assert.match(readable.stdout, /^invalid · .+ \(not an akuma\)\n  world       none\n  context     none\n$/u);
     assert.match(readable.stdout, message);
   }
 });
@@ -155,7 +154,6 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const environment = {
     KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world,
     KEIYAKU_INITIATOR: "LaterOutgoing", SQUARE_PARTICIPANT_NAME: "OtherSeat",
-    AKUMA_REQUESTS_ENTRY: "/missing/channel",
   };
   const body = await leash.recordBody(allocated.paths, { leashTakenAt: AT });
   const beforeTurn = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
@@ -194,7 +192,6 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
     "  initiator   CurrentSeat",
     "  parent      fixture:parent",
     `  world       ${world}`,
-    "  requests    parent",
     "  runtime     claude · fixture-model",
     "",
   ].join("\n"));
@@ -210,7 +207,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
     contract: { kind: "unavailable", reason: "missing\nstate" },
     profile: {
       ...result.value.profile, workdir: null, provider: null, model: null,
-      birth: { ...result.value.profile.birth, origin: { kind: "request", parent: allocated.id, requestId: "request\nid" } },
+      birth: { ...result.value.profile.birth, origin: { kind: "fork", parent: allocated.id, at: "turn/1" } },
     },
   }), [
     `${allocated.id} (@backup · @worker) · ${bound.contract}`,
@@ -218,9 +215,8 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
     "  parent      fixture:parent",
     `  world       ${world}`,
     "  context     unavailable · missing state",
-    "  requests    parent",
     "  runtime     unknown · unknown",
-    `  origin      request · ${allocated.id} · request id`,
+    `  origin      fork · ${allocated.id} · turn/1`,
   ].join("\n"));
 
   const elsewhere = temporaryDirectory(t, "keiyaku-whoami-other-world-");
@@ -274,7 +270,6 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
     "  parent      unknown",
     `  world       ${world}`,
     `  context     ${bound.contract}`,
-    "  requests    parent",
     "  runtime     claude · unknown",
     `  origin      fork · ${allocated.id} · turn/1`,
     "",

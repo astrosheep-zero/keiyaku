@@ -166,12 +166,8 @@ type AddressedAkuma = Readonly<{
   id: AkuId;
 }>;
 
-/**
- * Resolves one selector to a complete identity without proving it born. The
- * caller is a forwarding boundary: the parent Selection answers for the target, so
- * this process must not read its own Heart files to decide.
- */
-export async function resolveAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
+/** Resolve one selector and prove its birth through the native addressability owner. */
+export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
   const values = requireInput(input, "Akuma address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
@@ -181,17 +177,8 @@ export async function resolveAkuma(input: UncheckedAkumaAddressInput): Promise<A
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
   const id = await directId(path, nonblank(values.akuma, "akuma"));
+  await requireBornAkuma(path, id);
   return { path, id };
-}
-
-/**
- * Resolves one selector against this World, where a local caller is answered
- * for the target's birth by the one addressability normalization.
- */
-export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
-  const addressed = await resolveAkuma(input);
-  await requireBornAkuma(addressed.path, addressed.id);
-  return addressed;
 }
 
 type ParsedSetSelector =
@@ -310,18 +297,6 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
   const sources = { rosterIds, aliases, dispatches };
   for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
   return { path, orderedIds: [...selected], ids: canonicalAkumaOrder(selected), contractMembers, explicit };
-}
-
-/**
- * Resolves a selector set to complete identities without proving any born. The
- * caller is a forwarding boundary, the parent Selection owns the answer, and no
- * member's Heart is read here.
- */
-export async function resolveAkumaSet(
-  input: UncheckedAkumaAddressInput,
-): Promise<Readonly<{ path: WorldRoot; ids: readonly AkuId[]; orderedIds: readonly AkuId[] }>> {
-  const resolved = await readAkumaSet(input);
-  return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds };
 }
 
 export async function addressAkumaSet(

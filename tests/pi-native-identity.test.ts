@@ -5,14 +5,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CreateAgentSessionOptions, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import { squareSeat } from "../src/cli/square-identity.js";
 import type { WorldRoot } from "../src/world.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 const PI_SESSION_VARIABLE = "PI_SESSION_ID";
 
-type NativeRequestTool = NonNullable<CreateAgentSessionOptions["customTools"]>[number];
+type NativeBashTool = NonNullable<CreateAgentSessionOptions["customTools"]>[number];
 
 function packageProvenance(specifier: string): string {
   const entry = fileURLToPath(import.meta.resolve(specifier));
@@ -60,23 +58,23 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
 }
 
 /**
- * Boot one fake Pi session wired to Keiyaku's real request-channel tool. The
- * attempt is always retired, so a setup or assertion failure inside `body`
+ * Boot one fake Pi session wired to Keiyaku's real identity-scoped Bash tool.
+ * The attempt is always retired, so a setup or assertion failure inside `body`
  * cannot leak a live session or its child processes.
  */
-async function withNativeRequestTool<T>(
-  input: Readonly<{ root: string; requests: string }>,
-  body: (tool: NativeRequestTool) => Promise<T>,
+async function withNativeBashTool<T>(
+  root: string,
+  body: (tool: NativeBashTool) => Promise<T>,
 ): Promise<T> {
   const fake = await nativePiSdk();
   const provider = createPiProvider({ name: "pi", kind: "pi" }, async () => fake.sdk);
   const attempt = provider.start({
     body: "work",
     launchTells: [],
-    cwd: input.root,
+    cwd: root,
     options: {},
     signal: new AbortController().signal,
-    requests: { dir: input.requests },
+    execution: { akumaId: "aku/pi/1234abcd", world: root, bodySequence: 7, turnSequence: 19 },
     session: { kind: "fresh" },
   });
   try {
@@ -100,22 +98,21 @@ function nativeSessionContext(sessionId: string, sessionFile = `/sessions/${sess
 }
 
 
-test("the Pi request channel preserves the native session identity instead of an ancestor value", async (t) => {
+test("Pi Bash preserves native session identity and the current execution coordinates", async (t) => {
   t.diagnostic(`Pi runtime: ${packageProvenance("@earendil-works/pi-coding-agent")}`);
   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-native-identity-"));
-  const requests = join(root, "requests");
   const previousSession = process.env[PI_SESSION_VARIABLE];
   process.env[PI_SESSION_VARIABLE] = "ancestor-session";
   try {
-    await withNativeRequestTool({ root, requests }, async (tool) => {
+    await withNativeBashTool(root, async (tool) => {
       const result = await tool.execute(
         "native-identity",
-        { command: `printf '%s' "$PI_SESSION_ID|$${AKUMA_REQUESTS_ENV}"` },
+        { command: `printf '%s' "$PI_SESSION_ID|$PI_SESSION_FILE|$KEIYAKU_ACTOR_ID|$KEIYAKU_ACTOR_WORLD|$KEIYAKU_BODY_SEQUENCE|$KEIYAKU_TURN_SEQUENCE"` },
         new AbortController().signal,
         undefined,
         nativeSessionContext("native-child-session", "/sessions/native.jsonl"),
       );
-      assert.deepEqual(result.content, [{ type: "text", text: `native-child-session|${requests}` }]);
+      assert.deepEqual(result.content, [{ type: "text", text: `native-child-session|/sessions/native.jsonl|aku/pi/1234abcd|${root}|7|19` }]);
       assert.equal(process.env[PI_SESSION_VARIABLE], "ancestor-session");
     });
   } finally {
@@ -126,6 +123,7 @@ test("the Pi request channel preserves the native session identity instead of an
 });
 
 test("parent and child native Pi environments resolve distinct Square initiators", async (t) => {
+  const { squareSeat } = await import("../src/cli/square-identity.js");
   t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
   const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-square-")) as WorldRoot;
   t.after(() => rmSync(root, { recursive: true, force: true }));

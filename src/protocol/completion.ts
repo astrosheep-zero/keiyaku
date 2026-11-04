@@ -1,8 +1,6 @@
-import { z } from "zod";
-import { snapshotIdSchema, placementStopSchema, gateReportSchema } from "./operations.js";
-import { targetName, type ActorId, type ContractId } from "../core/facts/types.js";
-import { gateReports } from "../core/facts/gate.js";
-import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.js";
+import { targetName, type ActorId, type ContractId, type SnapshotId } from "../core/facts/types.js";
+import { gateReports, type GateReport } from "../core/facts/gate.js";
+import { readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { admitPlacement, observeTargetPlacement, observeIntegrationTargetMovement } from "./placement.js";
@@ -22,26 +20,17 @@ import { placementStop, timestamp } from "./operations.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-const candidateCompletionSchema = z
-  .object({
-    integration: snapshotIdSchema,
-    predecessor: snapshotIdSchema.optional(),
-    target: z
-      .string()
-      .refine((value) => value.trim() !== "")
-      .optional(),
-    scope: deliveryDiffScopeSchema.omit({ paths: true }).optional(),
-  })
-  .strict();
-export type CandidateCompletion = z.infer<typeof candidateCompletionSchema>;
-export const completionEvidenceSchema = z
-  .object({
-    completion: candidateCompletionSchema.optional(),
-    gates: z.array(gateReportSchema).readonly().optional(),
-    placement: placementStopSchema.optional(),
-  })
-  .strict();
-export type CompletionEvidence = z.infer<typeof completionEvidenceSchema>;
+export type CandidateCompletion = Readonly<{
+  integration: SnapshotId;
+  predecessor?: SnapshotId;
+  target?: string;
+  scope?: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
+}>;
+export type CompletionEvidence = Readonly<{
+  completion?: CandidateCompletion;
+  gates?: readonly GateReport[];
+  placement?: PlacementStop;
+}>;
 export type CompletionInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;

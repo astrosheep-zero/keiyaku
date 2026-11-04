@@ -1,5 +1,4 @@
 /** @architectureCompositionRoot */
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { renderContractGuidance } from "../contract-guidance.js";
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import { readDispatchesAt } from "../dispatch/index.js";
@@ -40,8 +39,12 @@ import type {
   VerifyInput,
 } from "./contract-types.js";
 import { deliveryForContract, type Delivery } from "./delivery.js";
-import { validateContractWaitHandle, type ContractWaitOptions, type ContractWaitResult } from "./contract-wait.js";
-import { waitContractRouted } from "./contract-wait-request.js";
+import {
+  validateContractWaitHandle,
+  waitContractLocal,
+  type ContractWaitOptions,
+  type ContractWaitResult,
+} from "./contract-wait.js";
 
 const KEIYAKU_HANDLE = Symbol("Keiyaku handle");
 
@@ -50,31 +53,27 @@ const KEIYAKU_SEATS = new WeakMap<object, HandleSeat>();
 
 export class Keiyaku {
   static with(input?: LocalContractComposition): KeiyakuLibrary {
-    return composeContractLibrary(localExecutionContext(), createKeiyakuHandle, input);
+    return composeContractLibrary(createKeiyakuHandle, input);
   }
 
   private readonly id: ContractId;
   private readonly scope: RepositoryScope;
   private readonly operations: ContractExecution;
-  private readonly execution: ExecutionContext;
 
   constructor(
     token: typeof KEIYAKU_HANDLE,
     id: ContractId,
     scope: RepositoryScope,
-    execution: ExecutionContext = localExecutionContext(),
     composition: LocalContractCompositionCapture,
   ) {
     if (token !== KEIYAKU_HANDLE) throw new TypeError("Keiyaku handles are created by Keiyaku.with");
     this.id = id;
     this.scope = scope;
-    this.execution = execution;
-    this.operations = new ContractExecution({ id, scope, execution, composition });
+    this.operations = new ContractExecution({ id, scope, composition });
     // Process-local custody never serializes: identity-only JSON projection.
     Object.defineProperties(this, {
       id: { value: id, enumerable: false },
       scope: { value: scope, enumerable: false },
-      execution: { value: execution, enumerable: false },
       operations: { value: this.operations, enumerable: false },
       composition: { value: composition, enumerable: false },
     });
@@ -96,7 +95,7 @@ export class Keiyaku {
   }
 
   async wait(input?: ContractWaitOptions): Promise<ContractWaitResult> {
-    return await waitContractRouted(validateContractWaitHandle(this.scope, this.id, input), this.execution);
+    return await waitContractLocal(validateContractWaitHandle(this.scope, this.id, input));
   }
 
   async history(): Promise<ContractHistory | null> {
@@ -193,10 +192,9 @@ export class Keiyaku {
 export function createKeiyakuHandle(
   id: ContractId,
   scope: RepositoryScope,
-  execution: ExecutionContext,
   composition: LocalContractCompositionCapture,
 ): Keiyaku {
-  return new Keiyaku(KEIYAKU_HANDLE, id, scope, execution, composition);
+  return new Keiyaku(KEIYAKU_HANDLE, id, scope, composition);
 }
 
 /** Internal package composition capability; not exported from the package root. */

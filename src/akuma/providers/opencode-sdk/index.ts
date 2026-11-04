@@ -278,7 +278,6 @@ async function openResources(
       runtimeOwner = ownRuntime(custody, ready);
     },
     ...(input.execution === undefined ? {} : { executionCoordinate: input.execution }),
-    ...(input.requests === undefined ? {} : { requests: input.requests.dir }),
   });
   const stream = ownEventStream({
     directory: input.cwd,

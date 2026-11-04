@@ -37,7 +37,7 @@ into the appointed workspace without treating the projection as delivery. Its
 public result names the handoff base and the recovery projection: callers
 continue with `deliver --include-dirty`, and staging is `not-required`.
 Resolution operates on final worktree bytes through private-index capture while
-the real index and its `UU` state remain under parent Body custody. Dirty
+the real index and its `UU` state remain under the invoking local owner's custody. Dirty
 workspace bytes require explicit delivery authorization; with that
 authorization, conflict materialization preserves the captured bytes as the
 handoff base before projecting the judged conflict. Review records observed

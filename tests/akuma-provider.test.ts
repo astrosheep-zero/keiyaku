@@ -2,7 +2,7 @@ import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
@@ -10,7 +10,6 @@ import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import {
-  AKUMA_REQUESTS_ENV,
   AGENT_EVENT_QUEUE_LIMIT,
   createProviderAttempt,
   boundedToolInput,
@@ -57,7 +56,6 @@ import { waitForCondition, waitForFixtureFile } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
   signal: new AbortController().signal,
-  requests: { dir: "/tmp/akuma-test-requests" },
 } as const;
 
 /** Fresh carrier objects; non-default recipe and admission inputs remain at each call site. */
@@ -884,7 +882,7 @@ const app = acp.agent({ name: "fake-acp" })
     return { configOptions: configOptions() };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
-    log({ kind: "prompt", params, argv: process.argv.slice(2), requests: process.env.AKUMA_REQUESTS });
+    log({ kind: "prompt", params, argv: process.argv.slice(2) });
     if (process.env.ACP_TEST_MODE === "prompt-error") throw new acp.RequestError(-32603, "Internal error", "native detail");
     if (process.env.ACP_TEST_MODE === "cancel") return await new Promise(() => {});
     if (process.env.ACP_TEST_MODE === "reverse") {
@@ -965,7 +963,6 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       launchTells: [{ id: "tell-1", text: "then test" }],
       cwd: root,
       options: { model: "grok-4", effort: "high", systemPrompt: "Be precise." },
-      requests: { dir: join(root, "requests") },
     }),
   ).result;
   const events = await collectEvents(drive.events);
@@ -1010,7 +1007,6 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     "Be precise.",
     "stdio",
   ]);
-  assert.equal(records[2]!.requests, join(root, "requests"));
   assert.equal("_meta" in (records[1]!.params as object), false);
   assert.equal("rules" in (records[1]!.params as object), false);
   assert.equal("systemPromptOverride" in (records[1]!.params as object), false);
@@ -1654,7 +1650,7 @@ test("OpenCode v2 adapter admits and completes from native execution evidence", 
   const provider = createOpencodeProvider({ loader: fake.loader });
   assert.equal(provider.admitOptions({ network: "enabled" }).kind, "refused");
   const drive = await provider.start(
-    freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }], requests: { dir: "/tmp/requests" } }),
+    freshInput("build", { launchTells: [{ id: "tell-1", text: "also check" }] }),
   ).result;
   assert.equal(drive.admission.fence, fake.prompts[0]!.body.id);
   const observed = await collectEvents(drive.events);
@@ -1669,7 +1665,6 @@ test("OpenCode v2 adapter admits and completes from native execution evidence", 
   assert.deepEqual(completedTool.call, { kind: "run", command: "npm test" });
   assert.deepEqual(completedTool.result, { status: "ok", output: "ok" }, "the completed state's output survives");
   assert.equal(fake.closed(), 1);
-  assert.equal(fake.executions[0]!.env?.[AKUMA_REQUESTS_ENV], "/tmp/requests");
 });
 
 test("OpenCode v2 composes headless permission rules below caller actions", () => {
@@ -1898,7 +1893,6 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     freshInput("work", {
       launchTells: [{ id: "tell-1", text: "also" }],
       cwd: tmpdir(),
-      requests: { dir: "/work/requests" },
       execution: { akumaId: "aku/pi/1234abcd", world: "/work", bodySequence: 7, turnSequence: 19 },
     }),
   );
@@ -1928,10 +1922,9 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
   assert.ok(bash.options?.spawnHook);
   const context = {
     cwd: tmpdir(),
-    command: "echo native request",
+    command: "echo native identity",
     env: Object.freeze({
       SAFE: "keep",
-      AKUMA_REQUESTS: "ancestor-requests",
       PI_SESSION_ID: "native-session",
       PI_SESSION_FILE: "native-session-file",
       CODEX_THREAD_ID: "ancestor-codex",
@@ -1943,7 +1936,6 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     ...context,
     env: {
       SAFE: "keep",
-      AKUMA_REQUESTS: "/work/requests",
       KEIYAKU_ACTOR_ID: "aku/pi/1234abcd",
       KEIYAKU_ACTOR_WORLD: "/work",
       KEIYAKU_BODY_SEQUENCE: "7",
@@ -2531,7 +2523,7 @@ test("Pi adapter resumes and forks only exact sessionFile coordinates", async ()
   );
 });
 
-test("Pi installs the request-scoped Bash tool without changing the default toolset", async () => {
+test("Pi installs the identity-scoped Bash tool without changing the default toolset", async () => {
   const fake = fakePiSdk({
     events: [{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } }],
   });
@@ -2539,7 +2531,6 @@ test("Pi installs the request-scoped Bash tool without changing the default tool
   const drive = await provider.start(
     freshInput("inspect", {
       cwd: "/work",
-      requests: { dir: "/work/requests" },
     }),
   ).result;
   await collectEvents(drive.events);
@@ -2596,7 +2587,6 @@ function fakeCodex(
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
-  requestEnvironment(): Readonly<{ requests: string; literal: string; actor: string }>;
   environment(): NodeJS.ProcessEnv;
   /** Creating this file releases the fixture's model reroute. */
   rerouteRelease: string;
@@ -2714,14 +2704,6 @@ function fakeCodex(
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
         throw error;
       }
-    },
-    requestEnvironment: () => {
-      const value = JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv;
-      return {
-        requests: value.AKUMA_REQUESTS ?? "",
-        literal: value.SETTINGS_LITERAL ?? "",
-        actor: value.KEIYAKU_ACTOR_ID ?? "",
-      };
     },
     environment: () => JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv,
     rerouteRelease,
@@ -3117,8 +3099,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   };
   assert.deepEqual(provider.admitOptions(options), { kind: "admitted", options });
 
-  const requestDirectory = join(root, "body-requests");
-  mkdirSync(requestDirectory);
   const drive = await provider.start({
     ...DRIVE_DEFAULTS,
     body: "build",
@@ -3126,7 +3106,6 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     cwd: root,
     options,
     runtimeInstructions: "<keiyaku>current</keiyaku>",
-    requests: { dir: requestDirectory },
     session: { kind: "fresh" },
   }).result;
   const events = await collectEvents(drive.events);
@@ -3155,7 +3134,8 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
     effort: "high",
     approvalPolicy: "never",
   });
-  assert.deepEqual(fake.requestEnvironment(), { requests: requestDirectory, literal: "from-settings", actor: "" });
+  assert.equal(fake.environment().SETTINGS_LITERAL, "from-settings");
+  assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "");
 });
 
 test("native adapters report only the runtime model their own payloads name", { timeout: 30_000 }, async (context) => {
@@ -3310,8 +3290,6 @@ test("Codex native fork receives an isolated child environment", async () => {
     PI_SESSION_FILE: "/parent/pi.jsonl",
     PASEO_AGENT_ID: "parent-paseo",
     SQUARE_PARTICIPANT_NAME: "Parent",
-    AKUMA_REQUESTS: "/parent/requests",
-    AKUMA_REQUESTS_ENTRY: "/parent/request-entry.json",
   } as const;
   const parentKeys = Object.keys(parentHarness) as Array<keyof typeof parentHarness>;
   const root = mkdtempSync(join(tmpdir(), "keiyaku-codex-fork-environment-"));

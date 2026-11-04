@@ -332,7 +332,7 @@ function traced(trace: string): readonly string[] {
     : [];
 }
 
-test("call, tell, ask, and fork prepare one seat before forwarding", async (t) => {
+test("call, tell, ask, and fork prepare one seat before admission", async (t) => {
   const world = seatWorld(t);
   const trace = join(world.root, "trace.txt");
   writeTracePlugin(world.root, trace);

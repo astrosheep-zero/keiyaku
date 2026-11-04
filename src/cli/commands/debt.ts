@@ -3,7 +3,6 @@ import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import type { ParsedDebtCommand } from "./debt-grammar.js";
 import {
   Debts,
-  debtsWithExecution,
   debtRowViewLimit,
   type DebtDetail,
   type DebtId,
@@ -421,7 +420,7 @@ async function runContext(command: ParsedDebtCommand, context: DebtContext): Pro
   return emit(command.output, result, () => renderDebtContext(result, displayContext()), debtOutcome(result));
 }
 
-// eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, forwarding, and local execution.
+// eslint-disable-next-line complexity -- this is the single CLI edge ordering world, context, and local execution.
 export async function runDebtCommand(
   command: ParsedDebtCommand,
   coordinates: CliCoordinates,
@@ -439,7 +438,7 @@ export async function runDebtCommand(
   const world = coordinates.world ?? (establishesWorld(command) ? await coordinates.establishWorld() : null);
   if (world === null) return missingWorld(command);
   if (command.action === "context") return await runContext(command, coordinates.debtContext);
-  const debts = debtsWithExecution(world, runtime.execution);
+  const debts = Debts.of(world);
   const consumesDefaultNamespace =
     (command.action === "add" && explicitNamespace === undefined) ||
     (((command.action === "ls" && explicitListNamespace(command) === undefined) ||

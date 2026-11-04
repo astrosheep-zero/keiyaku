@@ -181,7 +181,7 @@ test("the shipped Pi entry keeps native tools hidden even when explicitly select
 });
 
 test(
-  "development Pi tools use the public SDK, host wake/fork explicitly, and preserve observation and native boundaries",
+  "development Pi tools use local SDK owners, host wake/fork explicitly, and preserve observation boundaries",
   { timeout: 90_000 },
   async (t) => {
     const { world, agent } = await fixtureWorld(t);
@@ -205,12 +205,10 @@ test(
     const ambient = {
       KEIYAKU_ACTOR_ID: process.env.KEIYAKU_ACTOR_ID,
       KEIYAKU_ACTOR_WORLD: process.env.KEIYAKU_ACTOR_WORLD,
-      AKUMA_REQUESTS: process.env.AKUMA_REQUESTS,
     };
     Object.assign(process.env, {
       KEIYAKU_ACTOR_ID: "aku/not-the-caller/12345678",
       KEIYAKU_ACTOR_WORLD: world,
-      AKUMA_REQUESTS: join(world, "unrelated-host-route"),
     });
     t.after(() => {
       for (const [key, value] of Object.entries(ambient)) {
@@ -295,18 +293,23 @@ test(
       "ordinary native wake/fork must stay in the selected in-process host",
     );
 
-    // The extension is actually discovered in the provider-owned child. Local
-    // tools still refuse there; the existing CLI admits the nested call.
+    // The provider-owned Pi session invokes the real local SDK through a nested
+    // native tool, and its bash child invokes the same local owners through CLI.
     const nested = await native("akuma_ask", {
       akuma: id,
       body: JSON.stringify({
         tool: "nested-fixture",
-        args: { name: "akuma_call", args: { akuma: "worker", body: "must not be born" } },
+        args: { name: "akuma_call", args: { akuma: "worker", body: "nested child", wait: true, timeoutMs: 20_000 } },
       }),
       timeoutMs: 20_000,
     });
-    assert.match(nested.observation.answer, /request-aware keiyaku CLI/u);
-    const nestedCall = await native("akuma_ask", {
+    const nestedBirth = JSON.parse(nested.observation.answer);
+    assert.equal(nestedBirth.kind, "called");
+    assert.equal(nestedBirth.observation.observation.answer, "ack:nested child");
+    assert.deepEqual((await api.status({ akuma: nestedBirth.akuma })).status.birth.caller, {
+      kind: "external", integration: "pi", id: events(world).find(event => event.event === "session_start" && event.session !== host.session.sessionId)?.session,
+    });
+    const local = await native("akuma_ask", {
       akuma: id,
       body: command(
         [
@@ -318,21 +321,23 @@ test(
           world,
           "call",
           "worker",
-          command("printf nested-child"),
+          "local child",
+          "--wait",
+          "20s",
           "--json",
         ]
           .map(quote)
-          .join(" ") + " 2>&1",
+          .join(" ") + ` 2>${quote(join(world, "local-cli.log"))}`,
       ),
-      timeoutMs: 20_000,
+      timeoutMs: 30_000,
     });
-    const child = JSON.parse(nestedCall.observation.answer.trim().split("\n").at(-1)!);
-    assert.equal(child.kind, "called");
-    assert.deepEqual((await api.status({ akuma: child.akuma })).status.birth.caller, {
-      kind: "akuma", world, akuId: id,
+    const localBirth = JSON.parse(local.observation.answer);
+    assert.equal(localBirth.kind, "called");
+    assert.equal(localBirth.observation.observation.answer, "ack:local child");
+    assert.deepEqual((await api.status({ akuma: localBirth.akuma })).status.birth.caller, {
+      kind: "akuma", akuId: id, world,
     });
-    assert.equal((await api.wait({ akuma: [child.akuma], timeoutMs: 20_000 })).reason, "completed");
-    assert.equal((await api.list()).rows.length, 4, "only the CLI request births a nested child");
+    assert.equal((await api.list()).rows.length, 5);
 
     // Tool schema validation is real Pi validation, before any owner mutation.
     await host.invoke("akuma_call", { akuma: "worker", body: "x", detach: "yes" }, true);

@@ -3,7 +3,6 @@ import { debtDocument } from "./support/debt.js";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
-  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -16,11 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { DebtAuthorityCorruptionError, Debts, type DebtId, type DebtTreeNode } from "../src/debt/index.js";
-import {
-  debtMutationRequestCommand,
-  type DebtMutationBodyRequest,
-  type DebtMutationRequestPort,
-} from "../src/debt/mutation.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseDebtDocument, serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
 import { parseDebtId } from "../src/debt/identity.js";
@@ -32,12 +26,6 @@ import { debtAuthorityFile } from "./support/debt.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { runCli, cliJson } from "./support/cli-fixtures.js";
 import { parseDebtQueryExpression } from "../src/cli/commands/debt-query.js";
-
-type Assert<Condition extends true> = Condition;
-
-export type DebtBodyWorldRequiresCanonicalMint = Assert<
-  [DebtMutationBodyRequest["world"]] extends [WorldRoot] ? false : true
->;
 
 async function world(): Promise<{ root: WorldRoot; debts: ReturnType<typeof Debts.of> }> {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-debts-"));
@@ -380,35 +368,6 @@ test("batch missing refusal retries when the Debt is created before its lock", a
 
   const result = await pending;
   assert.deepEqual(result.items[0]?.outcome, { kind: "retry", reason: "concurrent-modification" });
-});
-
-test("Debt mutation mints raw World once while Debts consumes its branded capability", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-debts-forged-world-"));
-  mkdirSync(join(root, ".keiyaku"));
-  const canonical = await World.at(root);
-  await assert.rejects(
-    debtMutationRequestCommand("debt.add", {
-      ...UNUSED_DEBT_ABILITIES,
-      add: async () => Promise.reject(new Error("raw World must not reach the Debt executor")),
-    }).execute(
-      {
-        world: `${canonical}/.` as WorldRoot,
-        request: { action: "debt.add", input: { title: "must not write", namespace: [] } },
-      },
-      {
-        id: "00000000-0000-4000-8000-000000000001",
-        admittedAt: "2026-08-18T00:00:00.000Z",
-        requester: "aku/parent/00000001",
-        signal: new AbortController().signal,
-        admissionOpen: () => true,
-      },
-    ),
-    /canonical physical directory/u,
-  );
-  assert.equal(existsSync(join(canonical, ".keiyaku", "debts")), false);
-  const debts = Debts.of(canonical);
-  assert.equal(debts.root, canonical);
-  assert.equal((await debts.add({ title: "branded capability" })).kind, "accepted");
 });
 
 test("appendBody supplies one missing LF boundary without duplicating caller delimiters", async () => {
@@ -1047,58 +1006,6 @@ test("targeted reads ignore unrelated malformed and symlink authorities", async 
 
   const shown = await debts.debt({ id }).read();
   assert.equal(shown?.debt.id, id);
-});
-
-const UNUSED_DEBT_ABILITIES: DebtMutationRequestPort = {
-  add: async () => {
-    throw new Error("unexpected Debt ability");
-  },
-  addDocument: async () => {
-    throw new Error("unexpected Debt ability");
-  },
-  update: async () => {
-    throw new Error("unexpected Debt ability");
-  },
-  lifecycle: async () => {
-    throw new Error("unexpected Debt ability");
-  },
-  batch: async () => {
-    throw new Error("unexpected Debt ability");
-  },
-};
-
-test("forced-local Debt descriptor preserves owner validation and authenticated creation actor", async () => {
-  const { root, debts } = await world();
-  const served = await debtMutationRequestCommand("debt.add", {
-    ...UNUSED_DEBT_ABILITIES,
-    add: async ({ world: proven, options }) => await Debts.of(proven).add(options),
-  }).execute(
-    {
-      world: debts.root,
-      request: { action: "debt.add", input: { title: "Forwarded", body: "exact\nbody", namespace: [] } },
-    },
-    {
-      id: "00000000-0000-4000-8000-000000000001",
-      admittedAt: "2026-08-18T00:00:00.000Z",
-      requester: "aku/parent/00000001",
-      signal: new AbortController().signal,
-      admissionOpen: () => true,
-    },
-  );
-  if (served.kind !== "served") assert.fail("expected a served Debt mutation");
-  const result = served.result;
-  assert.equal("kind" in result && result.kind, "accepted");
-  if (!("kind" in result) || result.kind !== "accepted" || !("value" in result) || "debt" in result.value)
-    assert.fail("expected accepted debt mutation result");
-  assert.equal(result.value.createdBy, "aku/parent/00000001");
-  assert.equal(
-    (
-      await Debts.of(await World.at(root))
-        .debt({ id: result.value.id })
-        .read()
-    )?.debt.body,
-    "exact\nbody",
-  );
 });
 
 test("debt show keeps the native addressed read and null with or without an established World", async (context) => {

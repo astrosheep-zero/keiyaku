@@ -1,5 +1,3 @@
-import { z } from "zod";
-import { workspaceDirtyDeltaSchema } from "../git/tender.js";
 import { worktreeChangeId } from "../git/integration.js";
 import { captureTender, dirtyTenderDelta, dirtyTenderRefusal, type TenderCapture } from "../git/tender.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
@@ -41,12 +39,14 @@ type ReviewOperationInput = MutationOperationInput &
     verdict: AttestationData["verdict"];
     summary?: string;
   }>;
-const reviewWorkspaceEvidenceSchema = workspaceDirtyDeltaSchema
-  .extend({ unmergedPaths: z.array(z.string().refine((value) => value.trim() !== "")).readonly() })
-  .strict();
-type ReviewWorkspaceEvidence = z.infer<typeof reviewWorkspaceEvidenceSchema>;
-export const reviewAdmissionValueSchema = z.object({ workspace: reviewWorkspaceEvidenceSchema.optional() }).strict();
-type ReviewAdmissionValue = z.infer<typeof reviewAdmissionValueSchema>;
+type ReviewWorkspaceDelta = NonNullable<Awaited<ReturnType<typeof dirtyTenderDelta>>>;
+type ReviewWorkspaceEvidence = Readonly<
+  Omit<ReviewWorkspaceDelta, "shortStat"> & {
+    shortStat: Readonly<ReviewWorkspaceDelta["shortStat"]>;
+    unmergedPaths: readonly string[];
+  }
+>;
+export type ReviewAdmissionValue = Readonly<{ workspace?: ReviewWorkspaceEvidence }>;
 
 type PreparedReview = Readonly<{
   workspace?: ReviewWorkspaceEvidence;

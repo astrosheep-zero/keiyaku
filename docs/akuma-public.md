@@ -6,14 +6,13 @@ declarations, help, and executable specifications.
 
 The public caller path is `Akuma.birth`, synchronous `Akuma.select`, then `Akuma.tell` or `Akuma.ask`. Birth submits no prompt; selection performs no read. A selected Akuma exposes its identity, status, admission-only Tell, and input-bound AskResult with optional schema decoding, along with the lifecycle-only idle, history, and kill observations.
 `Akumas` owns World selection, Alias and Contract selector resolution, Dispatch
-and DebtHolder association, and plural request routing around this product;
+and DebtHolder association, and plural selection around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
 independent of Repo and selector composition.
 
 A selected Akuma may record an explicit progress report against caller-supplied
 exact current Body and Turn custody. The operation never infers execution from
-ambient state, forwards to a parent, or substitutes newer execution for a stale
-caller. Its result means recorded, not received; optional notification failure
+ambient state or substitutes newer execution for a stale caller. Its result means recorded, not received; optional notification failure
 cannot undo the fact. Reports appear as distinct rows in the same public history
 and stream, under their existing sequence and retention meaning. They are not
 answers, and neither completion observation nor final-answer selection changes.
@@ -141,9 +140,8 @@ observation.
 
 Native selection or birth captures its launch hosting for the resulting handle.
 Detached execution is the default; an explicit in-process choice runs future
-locally launched Bodies in that calling Node runtime. This selects neither a
-request route nor an observation bound, never persists in Soul, and never
-relocates existing execution. Shared-host lifetime and cancellation belong to
+locally launched Bodies in that calling Node runtime. This does not select an observation bound, persist in Soul, or relocate existing
+execution. Shared-host lifetime and cancellation belong to
 [akuma-execution.md](akuma-execution.md).
 
 Native selection or birth may capture an immutable host diagnostic observer
@@ -158,7 +156,7 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, call, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy, routing, and recovery semantics.
+A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment or a caller
 deadline. Running execution keeps observation open. Normally sleeping execution
 completes only without pending Tell, preserving ordinary successor handoff.

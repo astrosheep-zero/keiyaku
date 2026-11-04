@@ -1,5 +1,4 @@
 import type { CliOutcome } from "../streams.js";
-import { AKUMA_REQUESTS_ENTRY_ENV, AKUMA_REQUESTS_ENV } from "../../akuma/providers/execution-environment.js";
 import { AkumaOwner } from "../../akuma/akuma-owner.js";
 import { readHeart, readLatestTurnForBody } from "../../akuma/heart/index.js";
 import { parseAkuId, pathsForAkuId } from "../../akuma/identity.js";
@@ -37,7 +36,6 @@ export type WhoamiFacts = Readonly<{
   self: Self;
   initiator: string | null;
   initiatorUnavailable?: string;
-  requests: "local" | "parent";
   contract: Contract;
   profile?: Profile;
 }>;
@@ -156,10 +154,6 @@ export async function runWhoami(
     self,
     initiator: turn?.initiator ?? null,
     ...(turn?.unavailable === undefined ? {} : { initiatorUnavailable: turn.unavailable }),
-    requests:
-      environment[AKUMA_REQUESTS_ENV] !== undefined || environment[AKUMA_REQUESTS_ENTRY_ENV] !== undefined
-        ? "parent"
-        : "local",
     contract,
     ...(self.kind === "akuma"
       ? { profile: await callerProfile(self, coordinates, environment, turn?.bornAt ?? null) }

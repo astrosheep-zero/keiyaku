@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { join } from "node:path";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
@@ -126,7 +125,6 @@ test("Pi's native service bootstrap registers virtual models before selection an
     launchTells: [],
     cwd: root,
     options: { model: "dot-router/dots-dot" },
-    requests: { dir: join(root, "requests") },
     session: { kind: "fresh" },
     signal: new AbortController().signal,
   });

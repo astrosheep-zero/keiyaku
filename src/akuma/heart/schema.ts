@@ -227,32 +227,6 @@ export const HEART_SCHEMA = `
   CREATE INDEX IF NOT EXISTS tell_bindings_by_turn ON tell_bindings(turn_sequence);
   CREATE INDEX IF NOT EXISTS tell_deliveries_by_turn ON tell_deliveries(turn_sequence);
   CREATE INDEX IF NOT EXISTS tell_disposition_members_by_tell ON tell_disposition_members(tell_id);
-  CREATE TABLE IF NOT EXISTS requests (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    id TEXT NOT NULL UNIQUE,
-    requester TEXT NOT NULL,
-    action TEXT NOT NULL,
-    payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
-    admitted_at TEXT NOT NULL,
-    state TEXT NOT NULL CHECK (state IN ('admitted', 'reserved', 'begun', 'served', 'refused', 'voided', 'unproven')),
-    child TEXT,
-    service_json TEXT CHECK (service_json IS NULL OR json_valid(service_json)),
-    diagnostic TEXT,
-    evidence TEXT,
-    CHECK (
-      (state = 'admitted' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'reserved' AND child IS NOT NULL AND service_json IS NULL
-        AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'begun' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'served'
-        AND ((child IS NOT NULL AND service_json IS NULL)
-          OR (child IS NULL AND service_json IS NOT NULL))
-        AND diagnostic IS NULL AND evidence IS NULL)
-      OR (state = 'refused' AND child IS NULL AND service_json IS NULL AND diagnostic IS NOT NULL AND evidence IS NULL)
-      OR (state = 'voided' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)
-      OR (state = 'unproven' AND child IS NULL AND service_json IS NULL AND diagnostic IS NULL AND evidence IS NOT NULL)
-    )
-  ) STRICT;
   CREATE TABLE IF NOT EXISTS control (
     kind TEXT PRIMARY KEY CHECK (kind IN ('stop', 'pause')),
     value_json TEXT NOT NULL CHECK (json_valid(value_json)),

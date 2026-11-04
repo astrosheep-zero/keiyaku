@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { InvocationAccumulator } from "../src/library/invocation.js";
 import {
   bind,
   commitCandidate,
@@ -13,18 +12,6 @@ import {
 import { Keiyaku, Repo } from "../src/index.js";
 import { deferred } from "./support/process.js";
 import type { ExecutionObservation } from "../src/index.js";
-
-test("callback observations preserve order and transported gaps without subscription state", () => {
-  const observed: ExecutionObservation[] = [];
-  const progress = new InvocationAccumulator((event) => {
-    observed.push(event);
-  });
-  for (const count of [1, 300, 2]) progress.observe({ kind: "progress-dropped", count });
-  assert.deepEqual(
-    observed,
-    [1, 300, 2].map((count) => ({ kind: "progress-dropped", count })),
-  );
-});
 
 test("synchronous and asynchronous observer failures cannot change delivery admission or completion", async () => {
   for (const observer of [

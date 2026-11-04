@@ -22,7 +22,7 @@ import { deferred, settlementProbe, temporaryDirectory, expectBodySettles } from
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { World } from "../src/world.js";
-import { allocatedHeart, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { allocatedHeart } from "./support/akuma-fixtures.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -31,11 +31,9 @@ import {
   readLatestTurnForBody,
   readTell,
   readOpenPendingTellDisposition,
+  recordReport,
+  activitySlice,
 } from "../src/akuma/heart/index.js";
-import { executionForEnvironment, AkumaBodyRequestError } from "../src/akuma/requests.js";
-import { eraseRequestCommand } from "../src/akuma/request-wire.js";
-import { Debts, debtsWithExecution } from "../src/debt/index.js";
-import { debtMutationRequestCommand, type DebtMutationRequestPort } from "../src/debt/mutation.js";
 
 type NativeClient = ReturnType<NonNullable<PaseoDependencies["createClient"]>>;
 type TimelineHandler = Parameters<DaemonClient["subscribeAgentTimeline"]>[1];
@@ -243,7 +241,6 @@ function drive(signal = new AbortController().signal): DriveInput {
     cwd: "/tmp/paseo-work",
     options: {},
     signal,
-    requests: { dir: "/tmp/disposable/1", entry: "/tmp/parent/request-entry.json" },
   };
 }
 
@@ -254,8 +251,6 @@ function provider(fake: NativeFixture, configurations: DaemonClientConfig[] = []
       kind: "paseo",
       env: {
         PASEO_AGENT_ID: "parent",
-        AKUMA_REQUESTS: "/parent/requests",
-        AKUMA_REQUESTS_ENTRY: "/parent/entry",
         PASEO_PASSWORD: "local-password",
         API_TOKEN: "native-token",
       },
@@ -340,7 +335,7 @@ test("Paseo reports the runtime model its own confirmation names and stays unkno
   );
 });
 
-test("Paseo start and resume retain native id, pin stable entry, and complete only admitted turn", async () => {
+test("Paseo start and resume retain native id and complete only the admitted turn", async () => {
   const fake = new NativeFixture();
   fake.echo = false;
   const readiness = deferred<void>();
@@ -383,8 +378,6 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
   assert.equal(fake.createInput!.initialPrompt, undefined);
   assert.equal(fake.createInput!.autoArchive, false);
   assert.equal(fake.createInput!.systemPrompt, "Work precisely.\n\n<keiyaku>own identity</keiyaku>");
-  assert.equal(fake.createInput!.env!.AKUMA_REQUESTS_ENTRY, drive().requests.entry);
-  assert.equal(fake.createInput!.env!.AKUMA_REQUESTS, undefined);
   assert.equal(fake.createInput!.env!.PASEO_AGENT_ID, undefined);
   assert.equal(fake.createInput!.env!.API_TOKEN, "native-token");
   assert.equal(configs[0]!.password, "local-password");
@@ -427,7 +420,6 @@ test("Paseo start and resume retain native id, pin stable entry, and complete on
     ...drive(),
     options: { model: "native-model", effort: "high" },
     schemaJson: '{"type":"object","properties":{"ok":{"type":"boolean"}}}',
-    requests: { dir: "/tmp/disposable/2", entry: drive().requests.entry! },
     runtimeInstructions: "<keiyaku>own identity</keiyaku>",
     session: { kind: "resume", coordinate: { sessionId: "native-agent" } },
   });
@@ -817,7 +809,7 @@ test("Paseo observation invalidation fails honestly and control failure survives
 });
 
 test(
-  "retained native creation env serves real request succession through ordinary wake and pending-Tell handoff",
+  "retained Paseo execution resumes through wake and pending-Tell handoff while old report context stays frozen",
   { timeout: 15_000 },
   async (context) => {
     const root = await World.at(temporaryDirectory(context, "keiyaku-paseo-retained-"));
@@ -848,21 +840,6 @@ test(
         },
       },
     );
-    const serviced: number[] = [];
-    const unused = async (): Promise<never> => {
-      throw new Error("unexpected Debt action");
-    };
-    const port: DebtMutationRequestPort = {
-      add: async ({ world, options }) => {
-        serviced.push((await readHeart(allocated.paths)).latestBody!.sequence);
-        return await Debts.of(world).add(options);
-      },
-      addDocument: unused,
-      update: unused,
-      lifecycle: unused,
-      batch: unused,
-    };
-    const externalCommands = { "debt.add": eraseRequestCommand(debtMutationRequestCommand("debt.add", port)) };
     const owned = (body: Promise<unknown>): LiveBodyLaunch => ({
       completed: body.then(
         () => ({ diagnostic: "fixture Body completed" }),
@@ -874,9 +851,7 @@ test(
     const startBody = (launch: BodyLaunch): Promise<unknown> => {
       const body = driveAkumaBody(launch, adapter, {
         world: root,
-        externalCommands,
         spawn: async (next) => owned(startBody(next)),
-        requestSpawn: noBodyLaunch,
       });
       bodies.push(body);
       return body;
@@ -898,17 +873,21 @@ test(
       });
       const first = await launched[0]!.promise;
       const retained = first.createInput!.env!;
-      assert.equal(retained.AKUMA_REQUESTS, undefined);
+      assert.equal(retained.KEIYAKU_ACTOR_ID, allocated.id);
+      assert.equal(retained.KEIYAKU_ACTOR_WORLD, root);
       assert.equal(retained.KEIYAKU_EXTERNAL_CALLER, undefined);
-      const old = debtsWithExecution(root, await executionForEnvironment(retained));
-      assert.equal((await old.add({ title: "First Body service" })).kind, "accepted");
+      const reportExecution = {
+        bodySequence: Number(retained.KEIYAKU_BODY_SEQUENCE),
+        turnSequence: Number(retained.KEIYAKU_TURN_SEQUENCE),
+        at: new Date().toISOString(),
+      };
+      assert.equal((await recordReport(allocated.paths, { ...reportExecution, text: "First Body progress" })).kind, "recorded");
       assistant(first, "first answer");
       complete(first);
       await expectBodySettles(firstBody, "first Paseo Body did not complete");
       assert.equal((await readLatestTurnForBody(allocated.paths, 1))?.end?.outcome.kind, "answered");
       assert.equal(first.calls.includes("cancel"), false);
       assert.equal(first.closed, true);
-      await assert.rejects(executionForEnvironment(retained), /no current request channel/u);
 
       // Ordinary Tell wake resumes the exact retained native id with its original
       // creation environment; no replacement agent is created or environment rewritten.
@@ -917,13 +896,9 @@ test(
       await receipt;
       assert.equal(second.createInput, undefined);
       assert.equal(second.sendInput!.agentId, first.agent.id);
-      const fresh = debtsWithExecution(root, await executionForEnvironment(retained));
-      assert.equal((await fresh.add({ title: "Successor Body service" })).kind, "accepted");
-      await assert.rejects(
-        old.add({ title: "Must not execute locally or replay" }),
-        (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "unknown",
-      );
-      assert.deepEqual(serviced, [1, 2]);
+      assert.deepEqual(await recordReport(allocated.paths, { ...reportExecution, text: "Old creation context" }), {
+        kind: "refused", reason: "not-current-execution",
+      });
 
       // A live session without native tell takes the existing Heart-owned handoff,
       // not a provider emulation. Native cancel is explicit control for that work.
@@ -934,8 +909,6 @@ test(
       assert.equal(third.sendInput!.agentId, first.agent.id);
       assert.equal(third.createInput, undefined);
       assert.match(third.sendInput!.text, /pending continuation/u);
-      const thirdContext = debtsWithExecution(root, await executionForEnvironment(retained));
-      assert.equal((await thirdContext.add({ title: "Handoff Body service" })).kind, "accepted");
       assistant(third, "successor answer");
       complete(third);
       await expectBodySettles(Promise.all(bodies), "retained Paseo successor did not settle");
@@ -944,15 +917,7 @@ test(
       assert.equal((await readTell(allocated.paths, "pending-handoff"))?.state, "told");
       assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
       assert.equal(clients.filter((client) => client.createInput !== undefined).length, 1);
-      assert.deepEqual(serviced, [1, 2, 3]);
-      const board = await Debts.of(root).list({ selection: "all", scope: "world" });
-      assert.equal(board.kind, "accepted");
-      if (board.kind === "accepted")
-        assert.deepEqual(board.value.rows.map((row) => row.title).sort(), [
-          "First Body service",
-          "Handoff Body service",
-          "Successor Body service",
-        ]);
+      assert.equal((await activitySlice(allocated.paths)).rows.filter((row) => row.kind === "report").length, 1);
       assert.ok(clients.every((client) => client.closed));
     } finally {
       cleaning = true;
@@ -1177,8 +1142,6 @@ test(
     if (creation.type === "agent.create.request") {
       assert.equal(creation.initialPrompt, undefined);
       assert.equal(creation.autoArchive, false);
-      assert.equal(creation.env?.AKUMA_REQUESTS, undefined);
-      assert.equal(creation.env?.AKUMA_REQUESTS_ENTRY, drive().requests.entry);
     }
     wire.event({
       type: "timeline",

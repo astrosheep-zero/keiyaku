@@ -1,14 +1,18 @@
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
-import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths, type AkuId } from "./identity.js";
+import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths } from "./identity.js";
 import { abortableDelay } from "./abort.js";
-import type { BodyLaunchEnd, LiveBodyLaunch } from "./body-launch.js";
-import type { RequestRecipe } from "./heart/facts.js";
-import type { CallInitialTell, CallInitialTellAdmission, TellResult } from "./call-initial-tell.js";
+import type { BodyLaunchEnd, ChildBodyLaunch, LiveBodyLaunch } from "./body-launch.js";
+import type {
+  CallInitialTell,
+  CallInitialTellAdmission,
+  InitialTellAdmissionInput,
+  TellResult,
+} from "./call-initial-tell.js";
 import { resolveProviderExecution, withWritableDirectories } from "./providers/index.js";
 import { writableDirectoriesOption } from "./call-input.js";
-import { World, type WorldRoot } from "../world.js";
+import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 100;
 const CUSTODY_HANDOFF_MS = 1_000;
@@ -291,12 +295,8 @@ export async function publishAkuma(input: BirthInput & Omit<LaunchInput, "alloca
   return await launchAkuma({ ...input, allocated });
 }
 
-/**
- * The one prepared-call recipe shape, owned by the Heart Soul projection. Both
- * custody kinds carry the same raw recipe: the decoded provider execution plus
- * the options the one prepared-call executor admits exactly once.
- */
-export type PreparedCallRecipe = RequestRecipe;
+/** The caller's prepared recipe; provider admission happens before allocation. */
+export type PreparedCallRecipe = Pick<Soul, "description" | "provider" | "options" | "bare">;
 
 /**
  * The one owner-typed admission failure the prepared executor raises before any
@@ -314,42 +314,6 @@ export class PreparedCallAdmissionError extends Error {
   }
 }
 
-export type PreparedCallSpawn = Readonly<{ paths: AkumaPaths; seed: Omit<Soul, "createdAt"> }>;
-
-export type PreparedCallInitialTellAdmission = Readonly<{
-  id: AkuId;
-  initialTell: CallInitialTell;
-  signal?: AbortSignal;
-}>;
-
-type PreparedCallPorts = Readonly<{
-  /** Spawn one already-allocated child; publication already owns the allocated directory. */
-  spawn(launch: PreparedCallSpawn): Promise<LiveBodyLaunch | void>;
-  /** Admit the optional initial Tell against the just-confirmed child. */
-  admitInitialTell(input: PreparedCallInitialTellAdmission): Promise<CallInitialTellAdmission>;
-}>;
-
-/**
- * The one discriminated custody the prepared executor serves. Local custody
- * carries the initiating process's own proved World and local spawn/initial-Tell
- * ports. Request custody carries the authenticated direct parent, the serving
- * request identity and the reservation edge. Both kinds carry the same raw recipe.
- */
-type PreparedCallCustody =
-  | (PreparedCallPorts & Readonly<{ kind: "local"; world: WorldRoot; recipe: PreparedCallRecipe }>)
-  | (PreparedCallPorts &
-      Readonly<{
-        kind: "request";
-        world: WorldRoot;
-        coordinate: string;
-        recipe: PreparedCallRecipe;
-        parent: Soul;
-        requestId: string;
-        admissionOpen(): boolean;
-        reserve(child: AkuId): Promise<void>;
-        refuse(diagnostic: string): Promise<void>;
-      }>);
-
 type PreparedCallResult = Readonly<{
   child: AllocatedAkuma;
   /** The exact initial TellResult, present only when its admission completed. */
@@ -365,21 +329,18 @@ type PreparedCallInput = Readonly<{
   caller?: AkumaCaller;
   initialTell?: CallInitialTell;
   signal?: AbortSignal;
-  custody: PreparedCallCustody;
+  world: WorldRoot;
+  recipe: PreparedCallRecipe;
+  /** Spawn one already-allocated child; publication already owns the allocated directory. */
+  spawn(launch: ChildBodyLaunch): Promise<LiveBodyLaunch | void>;
+  /** Admit the optional initial Tell against the just-confirmed child. */
+  admitInitialTell(input: InitialTellAdmissionInput): Promise<CallInitialTellAdmission>;
 }>;
 
-export function callDiagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * The one provider-owner admission shared by both custody kinds: resolve the
- * decoded execution to its adapter and admit the raw options once.
- */
+/** Admit the provider recipe once before allocating any child. */
 async function admittedRecipe(
   recipe: PreparedCallRecipe,
   input: Pick<PreparedCallInput, "cwd" | "writableDirectories" | "signal">,
-  bounds: Readonly<{ refuse?: (diagnostic: string) => Promise<void> }> = {},
 ): Promise<PreparedCallRecipe> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
@@ -392,7 +353,6 @@ async function admittedRecipe(
   }
   const admission = selected.adapter.admitOptions(recipe.options);
   if (admission.kind === "refused") {
-    if (bounds.refuse !== undefined) await bounds.refuse(admission.diagnostic);
     throw new PreparedCallAdmissionError("options", admission.diagnostic);
   }
   return Object.freeze({
@@ -409,42 +369,12 @@ async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
   return soul !== null && soul.id === allocated.id;
 }
 
-/**
- * The one lower birth owner for a prepared call. It alone orders World
- * proof/consumption, request-custody provider resolution and options admission,
- * child allocation, the launch admission gate and reservation,
- * spawn/publication, and optional initial-Tell admission. It never loads
- * Settings or an Archetype and never imports Library, and it never replaces a
- * durably born child with a thrown error.
- */
+/** Publish a prepared call without replacing a confirmed child with a later failure. */
 export async function executePreparedCall(input: PreparedCallInput): Promise<PreparedCallResult> {
-  const { custody } = input;
-  const caller =
-    custody.kind === "request"
-      ? { kind: "akuma" as const, world: custody.world, akuId: custody.parent.id }
-      : decodeAkumaCaller(input.caller);
-  let world: WorldRoot;
-  if (custody.kind === "local") {
-    world = custody.world;
-  } else {
-    const requestWorld = await World.prove(custody.coordinate);
-    if (requestWorld !== custody.world) {
-      const diagnostic = `request world ${requestWorld} does not match ${custody.world}`;
-      await custody.refuse(diagnostic);
-      throw new Error(diagnostic);
-    }
-    world = custody.world;
-  }
-  const recipe =
-    custody.kind === "request"
-      ? await admittedRecipe(custody.recipe, input, { refuse: custody.refuse })
-      : await admittedRecipe(custody.recipe, input);
-  const origin: Soul["origin"] =
-    custody.kind === "request"
-      ? { kind: "request", parent: custody.parent.id, requestId: custody.requestId }
-      : { kind: "direct" };
+  const caller = decodeAkumaCaller(input.caller);
+  const recipe = await admittedRecipe(input.recipe, input);
   const allocated = await birthAkuma({
-    worldPath: world,
+    worldPath: input.world,
     archetype: input.archetype,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
@@ -454,11 +384,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
       allocated,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       launch: async (ready) => {
-        if (custody.kind === "request") {
-          if (!custody.admissionOpen()) throw new Error("body closed request admission");
-          await custody.reserve(ready.id);
-        }
-        return await custody.spawn({
+        return await input.spawn({
           paths: ready.paths,
           seed: {
             id: ready.id,
@@ -468,7 +394,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
             options: recipe.options,
             ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
             cwd: input.cwd,
-            origin,
+            origin: { kind: "direct" },
             ...(caller === undefined ? {} : { caller }),
           },
         });
@@ -481,7 +407,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
   if (input.initialTell === undefined) return { child };
   let told: TellResult | undefined;
   try {
-    const admitted = await custody.admitInitialTell({
+    const admitted = await input.admitInitialTell({
       id: child.id,
       initialTell: input.initialTell,
       ...(input.signal === undefined ? {} : { signal: input.signal }),

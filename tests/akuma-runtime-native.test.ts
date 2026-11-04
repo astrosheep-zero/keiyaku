@@ -46,7 +46,7 @@ test("Claude native system options replace runtime identity across start, fork r
     const personality = Object.freeze({ systemPrompt: "Keep the personality.", systemPromptMode: mode });
     const input: DriveInput & { session: { kind: "fresh" } } = {
       body: "work", launchTells: [], cwd: "/tmp", options: personality,
-      signal: new AbortController().signal, requests: { dir: "/tmp/requests" },
+      signal: new AbortController().signal,
       session: { kind: "fresh" }, runtimeInstructions: SOURCE,
     };
     await finish(fake.provider.start(input));
@@ -72,7 +72,7 @@ test("Claude runtime-only bare fork supersedes inherited context without replaci
   const fake = claudeFixture();
   const input: DriveInput & { session: { kind: "fresh" } } = {
     body: "work", launchTells: [], cwd: "/tmp", options: {},
-    signal: new AbortController().signal, requests: { dir: "/tmp/requests" },
+    signal: new AbortController().signal,
     session: { kind: "fresh" }, runtimeInstructions: SOURCE,
   };
   await finish(fake.provider.start(input));

@@ -5,8 +5,6 @@ import type { ProviderOptions } from "./provider-recipe.js";
 /* eslint-disable max-lines-per-function -- Provider custody is the single owner boundary for its public protocol. */
 export type { ResumeCoordinate } from "./coordinate.js";
 
-export { AKUMA_REQUESTS_ENV, AKUMA_REQUESTS_ENTRY_ENV } from "./providers/execution-environment.js";
-
 const AGENT_EVENT_TEXT_LIMIT = 16_384;
 const AGENT_THOUGHT_TEXT_LIMIT = 4_000;
 const OBSERVED_TEXT_TRUNCATION_MARKER = "\n…[truncated]";
@@ -583,7 +581,6 @@ export type DriveInput = Readonly<{
   runtimeInstructions?: string;
   signal: AbortSignal;
   execution?: ExecutionCoordinate;
-  requests: Readonly<{ dir: string; entry?: string }>;
   schemaJson?: string;
 }>;
 

@@ -9,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -29,8 +28,6 @@ import { contractMarkdown } from "./support/markdown.js";
  * test runner also owns.
  */
 function runCliJson(cwd: string, argv: readonly string[]) {
-  const environment = { ...process.env };
-  delete environment[AKUMA_REQUESTS_ENV];
   const result = spawnSync(
     process.execPath,
     [
@@ -43,7 +40,7 @@ function runCliJson(cwd: string, argv: readonly string[]) {
       ...argv,
       "--json",
     ],
-    { encoding: "utf8", env: environment },
+    { encoding: "utf8", env: process.env },
   );
   assert.equal(result.error, undefined, result.error?.message);
   return result;

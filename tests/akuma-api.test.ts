@@ -11,8 +11,21 @@ import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, tellWakeRuntime, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
-  appendActivity, beginTurn, bindTellsToTurn, breakBody, cancelBodyTurns, decidePendingTellDisposition, endTurn, finishBodyIfIdle,
-  HeldAkumaLeash, readHeart, readTell, readTurn, recordTell, recordTellDeliveries, recordTellReceipt,
+  appendActivity,
+  beginTurn,
+  bindTellsToTurn,
+  breakBody,
+  cancelBodyTurns,
+  decidePendingTellDisposition,
+  endTurn,
+  finishBodyIfIdle,
+  HeldAkumaLeash,
+  readHeart,
+  readTell,
+  readTurn,
+  recordTell,
+  recordTellDeliveries,
+  recordTellReceipt,
   resolvePendingTellDisposition,
 } from "../src/akuma/heart/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -29,8 +42,6 @@ import {
   waitForCondition,
   waitForPidReceiptExit,
 } from "./support/process.js";
-import { cliJson } from "./support/cli-fixtures.js";
-import type { AkumaAskResult } from "../src/akuma/selection-observation.js";
 import { schemaJsonText } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 import { debtAuthorityFile } from "./support/debt.js";
@@ -173,9 +184,6 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
 import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import type { BodyLauncher } from "../src/akuma/body-launch.js";
-import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { selectionRequestPort } from "../src/akuma/selection-owner-port.js";
-import { selectionRequestCommands } from "../src/akuma/selection-request.js";
 
 const WAITED_TELL_NOW = "2026-08-10T00:00:01.000Z";
 type WaitedTellWorld = Awaited<ReturnType<typeof bornWorld>> & { spawn: BodyLauncher };
@@ -262,7 +270,10 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     const tellId = "waited-cancel-tell";
     const pending = waitTell(canceled, { body: "finish later", tellId, timeoutMs: 5_000, signal: controller.signal });
     await started.promise;
-    await waitForCondition("the admitted Tell to bind its Turn", async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined);
+    await waitForCondition(
+      "the admitted Tell to bind its Turn",
+      async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined,
+    );
     controller.abort(reason);
     await assert.rejects(pending, (error: unknown) => error === reason);
     const admitted = await readTell(canceled.allocated.paths, tellId);
@@ -272,53 +283,28 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     await settle();
     const settled = await readTell(canceled.allocated.paths, tellId);
     assert.equal(settled?.state, "told");
-    const turn = settled?.binding === undefined ? null : await readTurn(canceled.allocated.paths, settled.binding.turnSequence);
+    const turn =
+      settled?.binding === undefined ? null : await readTurn(canceled.allocated.paths, settled.binding.turnSequence);
     assert.equal(turn?.end?.outcome.kind, "answered");
   });
 });
 
-test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell keeps provider errors distinct", async (context) => {
-  await withWaitedTellFixture(async ({ root, born }) => {
-    const schemaPath = join(root, "answer.schema.json");
-    writeFileSync(schemaPath, JSON.stringify({
-      type: "object",
-      properties: { ok: { type: "boolean" } },
-      required: ["ok"],
-      additionalProperties: false,
-    }));
-    const answered = await born("a1000013", answering('{"ok":true}'));
-    const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "a1000abc", createdAt: WAITED_TELL_NOW });
-    const parentBody = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAITED_TELL_NOW });
-    const pump = await BodyRequestPump.open({
-      paths: parent.paths, bodySequence: parentBody.sequence,
-      now: () => WAITED_TELL_NOW, signal: context.signal,
-      commands: selectionRequestCommands(selectionRequestPort(answered.world, answered.spawn)),
-    });
-    try {
-    const argv = (akuma: string) =>
-      ["-C", answered.world, "ask", akuma, "--schema", schemaPath, "--wait", "5s", "structured"] as const;
-    const result = await cliJson<AkumaAskResult>(argv(answered.allocated.id), {
-      environment: { AKUMA_REQUESTS: pump.directory },
-      readStdin: async () => "",
-    });
-    assert.deepEqual(result.value.observation, { reason: "answered", answer: { ok: true } });
-
-    const invalid = await born("a1000014", answering("not-json"));
-    const invalidResult = await cliJson<AkumaAskResult>(
-      ["-C", invalid.world, "ask", invalid.allocated.id, "--schema", schemaPath, "--wait", "5s", "structured"],
-      { environment: { AKUMA_REQUESTS: pump.directory }, readStdin: async () => "" },
-    );
-    assert.equal(invalidResult.value.observation.reason, "invalid-output");
-    assert.equal(invalidResult.exit, 3, "invalid schema output fails like an invalid call answer");
-    } finally {
-      await pump.close();
-      parent.leash.release();
-    }
-
+test("bounded interrupt Tell keeps provider errors distinct", async (context) => {
+  await withWaitedTellFixture(async ({ born }) => {
     const interrupt = await born("a1000012", answering("unused"));
-    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({ kind: "unavailable" as const, evidence: "hung" as const }));
+    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({
+      kind: "unavailable" as const,
+      evidence: "hung" as const,
+    }));
     await assert.rejects(
-      executeAskAkuma({ spawn: noBodyLaunch, path: interrupt.world, id: interrupt.allocated.id, body: "interrupt", timeoutMs: 0, interrupt: true }),
+      executeAskAkuma({
+        spawn: noBodyLaunch,
+        path: interrupt.world,
+        id: interrupt.allocated.id,
+        body: "interrupt",
+        timeoutMs: 0,
+        interrupt: true,
+      }),
       (error) => error instanceof AkumaProviderError && error.message === "Tell interrupt unavailable: hung",
     );
   });
@@ -361,8 +347,18 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
       const nextBody = await successor.recordBody(paths, { leashTakenAt: at });
       const next = await beginTurn(paths, { bodySequence: nextBody.sequence, startedAt: at });
       await bindTellsToTurn(paths, { turnSequence: next.sequence, tellIds: ["exact"], boundAt: at });
-      const result = await executeAskAkuma({ spawn: noBodyLaunch, path: value.world, id: value.allocated.id, body: "original", tellId: "exact", recordedAt: at,
-        timeoutMs: 0, outcomeObserved: async (_id, identities) => { observed.push([...identities]); } });
+      const result = await executeAskAkuma({
+        spawn: noBodyLaunch,
+        path: value.world,
+        id: value.allocated.id,
+        body: "original",
+        tellId: "exact",
+        recordedAt: at,
+        timeoutMs: 0,
+        outcomeObserved: async (_id, identities) => {
+          observed.push([...identities]);
+        },
+      });
       assert.deepEqual(result.observation, { reason: "unanswered" });
       assert.deepEqual(observed, [[`turn/${turn.sequence}`]]);
       assert.equal((await readTurn(paths, next.sequence))?.end, undefined);
@@ -373,9 +369,15 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
         const first = await stream.next();
         assert.equal(first.done, false);
         if (!first.done) assert.equal(first.value.rows.find((row) => row.kind === "outcome")?.outcome.kind, "canceled");
-      } finally { await stream.return?.(); }
-    } finally { successor.release(); }
-  } finally { holder.release(); }
+      } finally {
+        await stream.return?.();
+      }
+    } finally {
+      successor.release();
+    }
+  } finally {
+    holder.release();
+  }
 });
 
 test("terminal Tell delivery reports answered and explicit unanswered results", async () => {
@@ -391,18 +393,26 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
     if (observed.outcome?.kind === "answered") assert.equal(observed.outcome.answer, "edge answer");
 
     {
-      const envelope = await waitTell({ ...terminal, spawn: async (launch) => dormantTellRuntime.spawn(launch.paths) }, {
-        body: "edge",
-        tellId: recorded.admission.tellId,
-        recordedAt,
-        timeoutMs: 0,
-      });
+      const envelope = await waitTell(
+        { ...terminal, spawn: async (launch) => dormantTellRuntime.spawn(launch.paths) },
+        {
+          body: "edge",
+          tellId: recorded.admission.tellId,
+          recordedAt,
+          timeoutMs: 0,
+        },
+      );
       assert.deepEqual(envelope.observation, { reason: "answered", answer: "edge answer" });
 
       const unanswered = await born("a1000017", answering("unused"));
       const tellId = "terminal-without-turn";
       await recordTell(unanswered.allocated.paths, { kind: "tell", id: tellId, body: "gone", recordedAt });
-      await recordTellReceipt(unanswered.allocated.paths, { kind: "custody", evidence: "exact", tellId, receivedAt: recordedAt });
+      await recordTellReceipt(unanswered.allocated.paths, {
+        kind: "custody",
+        evidence: "exact",
+        tellId,
+        receivedAt: recordedAt,
+      });
       const result = await waitTell(unanswered, { body: "gone", tellId, recordedAt, timeoutMs: 0 });
       assert.equal(result.tell.row.state, "told");
       assert.deepEqual(result.observation, { reason: "unanswered" });
@@ -454,7 +464,10 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
       resource: { abort: async () => {} },
     }));
     const failed = await born("a1000005", failing);
-    assert.deepEqual((await failed.akuma.ask("structured", { schema })).observation, { reason: "failed", diagnostic: "provider broke" });
+    assert.deepEqual((await failed.akuma.ask("structured", { schema })).observation, {
+      reason: "failed",
+      diagnostic: "provider broke",
+    });
   });
 });
 
@@ -467,8 +480,10 @@ test("tell refuses schema before admission; ask checks options before addressing
   const controller = new AbortController();
   const reason = new Error("cancel before admission");
   controller.abort(reason);
-  await assert.rejects(akuma.ask("structured", { schema, interrupt: true, signal: controller.signal }),
-    (error: unknown) => error === reason);
+  await assert.rejects(
+    akuma.ask("structured", { schema, interrupt: true, signal: controller.signal }),
+    (error: unknown) => error === reason,
+  );
 });
 
 test("plain Tell preserves its admission while caller cancellation releases the wake wait", async () => {
@@ -504,7 +519,13 @@ test("plain Tell preserves its admission while caller cancellation releases the 
     },
   };
   try {
-    const pending = new AkumaOwner(allocated.id, await World.at(root)).tell("remain admitted", undefined, undefined, runtime, { signal: controller.signal });
+    const pending = new AkumaOwner(allocated.id, await World.at(root)).tell(
+      "remain admitted",
+      undefined,
+      undefined,
+      runtime,
+      { signal: controller.signal },
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.ok(polls > 0, "wake polling must have started before cancellation");
     controller.abort(reason);
@@ -572,12 +593,18 @@ test("idle after kill names the killed life", async () => {
       body: "start",
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
-    body = driveAkumaBody({ paths: allocated.paths }, hanging, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-10T00:00:02.000Z" });
+    body = driveAkumaBody({ paths: allocated.paths }, hanging, {
+      spawn: noBodyLaunch,
+      now: () => "2026-08-10T00:00:02.000Z",
+    });
     await waitForSeedBinding(allocated.paths, body);
     assert.equal(await akuma.kill(), "killed");
     await body;
     body = undefined;
-    await waitForCondition("the killed life to become observable", async () => (await akuma.status()).life === "killed");
+    await waitForCondition(
+      "the killed life to become observable",
+      async () => (await akuma.status()).life === "killed",
+    );
     const killed = await akuma.idle();
     assert.equal(killed.reason, "completed");
     assert.equal(killed.status.life, "killed");
@@ -602,9 +629,15 @@ test("idle returns untidy execution while preserving a pending tell", async (con
   assert.equal(timed.reason, "completed");
   assert.equal(timed.status.life, "untidy");
   assert.equal(timed.status.id, allocated.id);
-  assert.ok(timed.status.timeline.entries.some((entry) =>
-    entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "queued" && entry.row.state === "pending",
-  ));
+  assert.ok(
+    timed.status.timeline.entries.some(
+      (entry) =>
+        entry.kind === "row" &&
+        entry.row.kind === "tell" &&
+        entry.row.tellId === "queued" &&
+        entry.row.state === "pending",
+    ),
+  );
 });
 
 const LIVE_WAIT_AT = "2026-10-01T00:00:00.000Z";

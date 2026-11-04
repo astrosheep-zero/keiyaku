@@ -3,7 +3,6 @@ import { AkumaOwner } from "../../src/akuma/akuma-owner.js";
 import { readAkumaCompleteRoster, readAkumaRoster } from "../../src/akuma/akuma.js";
 import type { AkumaCallInput } from "../../src/akuma/akuma-call.js";
 import { Akumas } from "../../src/index.js";
-import { akumasWithExecution } from "../../src/library/akumas.js";
 import type { AkumaConfiguration } from "../../src/akuma/akuma-call.js";
 import type { AkumaCompleteList, AkumaList, AkumaListInput } from "../../src/akuma/akuma.js";
 import { listArchetypes } from "../../src/akuma/archetype.js";
@@ -63,12 +62,9 @@ export class AkumaComposition {
   }
 
   async call(input: AkumaCallInput): Promise<AkumaOwner> {
-    const execution = this.configuration.execution;
-    const caller = execution === undefined ? Akumas.of(this.root) : akumasWithExecution(this.root, execution);
-    const cwd = input.cwd ?? (execution?.channel.kind === "body-request" ? undefined : process.cwd());
-    const result = await caller.call({
+    const result = await Akumas.of(this.root).call({
       ...input,
-      ...(cwd === undefined ? {} : { cwd }),
+      cwd: input.cwd ?? process.cwd(),
       ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
       ...(this.configuration.settings === undefined ? {} : { settings: this.configuration.settings }),
       mode: "detach",

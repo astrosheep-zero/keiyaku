@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { abortable, abortableDelay } from "./abort.js";
 import type { TellWake } from "./call-initial-tell.js";
+import type { Soul } from "./heart/index.js";
+import type { AkumaPaths } from "./identity.js";
 import { decodeSoulSeed } from "./heart/soul.js";
 import { sessionAdmissionSchema } from "./heart/rows.js";
 import { akumaPathsSchema } from "./identity.js";
@@ -29,11 +31,18 @@ export const bodyLaunchSchema = z
   .strict();
 export type BodyLaunch = z.infer<typeof bodyLaunchSchema>;
 
+export type ChildBodyLaunch = Readonly<{
+  paths: AkumaPaths;
+  seed: Omit<Soul, "createdAt">;
+  birthInitiator?: string;
+  completion?: Readonly<{ contractId?: string }>;
+}>;
+
 /** Live launch evidence only; Heart and leash alone judge birth and settlement. */
 export type BodyLaunchEnd = Readonly<{
   diagnostic: string;
   held?: boolean;
-  child?: Extract<TellWake, { child: unknown }>["child"];
+  child?: Extract<TellWake, { kind: "failed" }>["child"];
 }>;
 export type LiveBodyLaunch = Readonly<{
   /** Launch completion evidence, never a product outcome or closure proof. */

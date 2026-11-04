@@ -191,7 +191,6 @@ test("non-TTY progress emits sparse boundaries, bounded output, and no key-value
     yield phase("started", { phase: "setup", name: "npm ci" });
     yield output("x".repeat(5_000));
     yield phase("finished", { phase: "setup", name: "npm ci", outcome: "ok", elapsedMs: 42_000 });
-    yield { kind: "progress-dropped", count: 2 };
   }
 
   const progress = await writeExecutionProgress(stream);
@@ -201,7 +200,6 @@ test("non-TTY progress emits sparse boundaries, bounded output, and no key-value
   assert.match(stream.text, /stdout\n  x/u);
   assert.match(stream.text, /\[live output truncated\]/u);
   assert.match(stream.text, /✓ setup · check 1\/1 · npm ci · snapshot snapshot · check-one · 42s\n/u);
-  assert.match(stream.text, /progress dropped 2 events\n$/u);
   assert.doesNotMatch(stream.text, /●/u);
   assert.doesNotMatch(stream.text, /(?:cwd|hook|declaration|elapsed)=/u);
 });

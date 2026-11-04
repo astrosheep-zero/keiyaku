@@ -142,7 +142,6 @@ test("Pi native extensions finish session start and discover resources before fr
       launchTells: [{ id: "tell-1", text: "also check" }],
       cwd: root,
       options: {},
-      requests: { dir: join(root, "requests") },
       signal: new AbortController().signal,
     };
     assert.ok(!resumed || sessionFile);
@@ -252,7 +251,6 @@ test("Pi retires native extension contexts and subscriptions when cancellation i
       launchTells: [],
       cwd: root,
       options: {},
-      requests: { dir: join(root, "requests") },
       signal: controller.signal,
       session: { kind: "fresh" },
     });
@@ -315,7 +313,6 @@ test("Pi closure reports extension shutdown failure but still disposes native st
     launchTells: [],
     cwd: root,
     options: {},
-    requests: { dir: join(root, "requests") },
     signal: new AbortController().signal,
     session: { kind: "fresh" },
   });
@@ -339,7 +336,6 @@ test("Pi reports extension load failures to stderr and Akuma activity", async (t
     launchTells: [],
     cwd: root,
     options: {},
-    requests: { dir: join(root, "requests") },
     signal: new AbortController().signal,
     session: { kind: "fresh" },
   });

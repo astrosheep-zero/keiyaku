@@ -13,12 +13,8 @@ composition, or storage mechanism is reachable from either entry.
 
 Library validates caller values, composes concrete owner capabilities, and
 presents public handles and results. It owns neither durable authority nor a
-transport-specific result model. Local and one-hop forwarded invocation return
-the same public value; forwarding cannot recurse or establish an ambient route.
-Operation inputs do not carry routing, and construction captures one immutable
-execution channel. Private process composition may asynchronously discover that
-channel through the stable entry owned by [akuma-requests.md](akuma-requests.md);
-public construction stays local, synchronous, and free of filesystem observation.
+separate result model. Public construction stays synchronous and free of
+filesystem observation.
 
 Each crossing value has one structural declaration at its coherent domain owner.
 Library composes those declarations at caller and process boundaries; trusted
@@ -54,8 +50,8 @@ Contract-local actor, then exposes the Contract collection operations bind,
 select, resolve, list, observe, and wait, and the one public repair entry that reconciles
 either a world or one addressed Contract from an explicit Git-world
 coordinate. Construction performs no I/O and validates no product namespace.
-Public construction is always local; only the CLI and a detached Body supply
-their captured internal channel through private composition. Neither the Git-world coordinate
+Public construction is synchronous. The CLI and Akuma execution invoke the same
+native owner operations with ordinary caller inputs. Neither the Git-world coordinate
 nor a Contract handle exposes a second repair door. The composition's actor,
 worktree hooks, and branch-freshness policy stay within Contract operations and
 never configure Akumas; hooks and freshness are read from the captured Settings
@@ -95,7 +91,7 @@ new change. Missing authority is explicit, including after
 baseline, and a deadline preserves witnessed progress without changing its
 subjects. Cancellation retires the wait's owned observation. Each invocation
 starts anew; no cursor, acknowledgement, or replay is persisted. The handle
-and collection use the same owner and the same direct-parent route.
+and collection use the same native owner.
 
 Contract boards and observations are frozen read-time views of the journal and
 Git state. They show the adjudicated phase, current gate and dependency state,
@@ -137,14 +133,14 @@ candidate, delivery, review, or reintegration. Preparation conflict is typed
 non-admission, not conflict handoff. It always executes the selected work,
 admits each terminal check independently, then requests ordinary completion
 using current generic requirement evidence. Only an already-delivered Contract
-can place. Local and direct-parent execution return the same public result;
-mutable Verification has its own permission, independent of review and delivery.
+can place. Verification records each selected check independently of review and
+delivery; generic completion judges the current evidence for every requirement.
 
 Delivery preview observes a prospective candidate through a dedicated native handle
 operation, separate from delivery admission. CLI and other adapters consume that
 same typed result. It never runs Verification, reconciles, settles, or continues
-dependents. It preserves Git-less direct-parent forwarding without granting a
-mutable action. The observation is not a reservation: delivery observes again.
+dependents. It executes through the same local owner.
+The observation is not a reservation: delivery observes again.
 
 `Delivery` exposes the captured candidate identity and a presentation diff.
 The diff may be unavailable when Git can no longer supply the recorded bytes;
@@ -152,16 +148,14 @@ that absence is not a lifecycle error and the diff is never persisted, gated, or
 cached as authority.
 
 Native Contract and delivery abilities keep process custody private while their
-JSON projection retains public result data. Forwarded delivery revives its local
-diff ability from owner evidence, never from serialized callbacks or transport
-state.
+JSON projection retains public result data.
 
 Delivery, review, verify, and delivery preview each expose one promised answer
 and an optional observation callback. Execution never depends on observation; a callback cannot
 hold custody, cancel execution, or change finality, even when it throws or
 rejects asynchronously. Caller cancellation alone requests a stop. Observations
-name confirmed admission and witnessed trailing work, including transport gaps,
-without becoming a scheduler, durable timeline, or second result model.
+name confirmed admission and witnessed trailing work without becoming a
+scheduler, durable timeline, or second result model.
 
 Legitimately absent Contract reads return absence. A missing requested entry in
 a supposedly complete observation remains a broken observation, and corrupt
@@ -199,8 +193,8 @@ accepts the explicit World confirmation and adds no reset authority to a
 product handle.
 
 The standalone Akuma product owns one Akuma's identity, execution, and public
-handle. `Akumas.of(world)` captures a World and execution channel for selector,
-selection, creation, and fork operations; callers do not repeat that World on each
+handle. `Akumas.of(world)` captures a World for selector, selection, creation, and fork
+operations; callers do not repeat that World on each
 operation. It retains an explicit Repo only for Contract selection or Dispatch
 association and never infers Repo from World or World from Repo. Archetype
 definitions remain an archetype-owner listing, reachable through the root as
@@ -221,8 +215,7 @@ is owned by [lifecycle.md](lifecycle.md).
 ## Cancellation And Confirmed Effects
 
 Review, delivery, verify, and delivery preview carry caller cancellation through
-their local or parent-served execution. A signal is a request to stop further
-work, not proof
+execution. A signal is a request to stop further work, not proof
 that publication did not occur. Once a leading act has been accepted, cancellation
 preserves its receipt and identifies the unfinished stage. An unknown Git
 publication is still adjudicated under independent, bounded read custody before

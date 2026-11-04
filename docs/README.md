@@ -27,7 +27,6 @@ surface. Read every owner named for the surface being changed.
 | [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, and placement. |
 | [akuma-heart.md](akuma-heart.md) | Akuma durable life evidence, custody, activity retention, and observation. |
 | [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
-| [akuma-requests.md](akuma-requests.md) | Body Request admission, forwarding, serving, and recovery protocol. |
 | [akuma-provider.md](akuma-provider.md) | Provider boundary, shared event meaning, and adaptation responsibility. |
 | [akuma-public.md](akuma-public.md) | Separate Akuma product handles, status, wait, history, and roster values. |
 | [settings.md](settings.md) | Shared Settings resource: coordinates, scope, shadowing, failure isolation, provenance, and observation. |

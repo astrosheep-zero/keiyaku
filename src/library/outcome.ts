@@ -1,35 +1,27 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractFileEffectSchema } from "../contract-worktree.js";
-import { validateEntry } from "../core/facts/codec.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import type { ContractHead, ContractId } from "../core/facts/types.js";
-import { contractHeadSchema } from "../git/identity.js";
+import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types.js";
 import { reconcileEffectSchema } from "../git/reconcile.js";
-import { worktreeWorkspaceSchema } from "../git/workspace.js";
-import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
-import { completionEvidenceSchema } from "../protocol/completion.js";
-import { verifyValueSchema } from "../protocol/verify.js";
+import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import type { CompletionEvidence } from "../protocol/completion.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import { materializedConflictSchema } from "../protocol/deliver.js";
-import { contractIdSchema, deliverDataSchema, gateSchema } from "../protocol/operations.js";
+import { contractIdSchema } from "../protocol/operations.js";
 import { executionCleanupSchema, executionStageSchema, type ExecutionStage } from "../protocol/progress.js";
-import { reviewAdmissionValueSchema } from "../protocol/review.js";
+import type { ReviewAdmissionValue } from "../protocol/review.js";
 import { settlementActionSchema, settlementLagSchema } from "../settlement/settle.js";
 import type { WorldRoot } from "../world.js";
-import { continuationReportSchema, type ContinuationReport } from "./continuation.js";
-import { deliveryValueSchema } from "./delivery.js";
+import type { ContinuationReport } from "./continuation.js";
+import type { AmendValue, BindValue } from "./contract-outcomes.js";
+import type { DeliveryValue } from "./delivery.js";
+import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import type { InvocationSnapshot } from "./invocation.js";
 import { reconcileLagScope, reconciliationLagSchema } from "./reconcile.js";
 import {
   nukeConfirmationRefusalSchema,
   nukeConfirmationRequiredRefusalSchema,
-  operationRefusalSchemas,
-  operationRetrySchemas,
-  type OperationRefusals,
   type OperationRetries,
 } from "./refusal.js";
-import { regionOverlapSchema } from "./region.js";
 
 /** Contract operation tags, including preview, sharing the invocation envelope with World reset. */
 export type ContractVerb = "bind" | "amend" | "deliver" | "verify" | "review" | "deliver-preview" | "arc" | "abandon";
@@ -116,18 +108,40 @@ export type PendingSurface = z.infer<typeof pendingSurfaceSchema>;
 // The public envelope
 // ---------------------------------------------------------------------------
 
-type EnvelopeFields = Omit<z.infer<typeof envelopeFieldsSchema>, "contract"> & {
-  readonly contract?: ContractId;
-};
-type AcceptedOutcome<Operation extends ContractVerb, Value> = Omit<
-  z.infer<ReturnType<typeof acceptedOutcomeSchema<Operation, Value>>>,
-  "value"
-> & { readonly value: Value };
-type RefusedOutcome<Operation extends ContractVerb, Refusal> = z.infer<
-  ReturnType<typeof refusedOutcomeSchema<Operation, Refusal>>
->;
-type RetryOutcome<Operation extends ContractVerb> = z.infer<ReturnType<typeof retryOutcomeSchema<Operation>>>;
-export type HandoffOutcome = z.infer<typeof handoffOutcomeSchema>;
+type EnvelopeFields = Readonly<{
+  operation: ContractVerb;
+  contract?: ContractId;
+  facts: readonly JournalEntry[];
+  effects: readonly z.infer<typeof contractEffectSchema>[];
+  pending: readonly PendingSurface[];
+}>;
+type AcceptedOutcome<Operation extends ContractVerb, Value> = EnvelopeFields &
+  Readonly<{
+    operation: Operation;
+    kind: "accepted";
+    contract: ContractId;
+    head: ContractHead;
+    value: Value;
+  }>;
+type RefusedOutcome<Operation extends ContractVerb, Refusal> = EnvelopeFields &
+  Readonly<{
+    operation: Operation;
+    kind: "refused";
+    refusal: Refusal;
+  }>;
+type RetryOutcome<Operation extends ContractVerb> = EnvelopeFields &
+  Readonly<{
+    operation: Operation;
+    kind: "retry";
+    reason: OperationRetries[Operation];
+  }>;
+export type HandoffOutcome = EnvelopeFields &
+  Readonly<{
+    operation: "deliver";
+    kind: "handoff";
+    contract: ContractId;
+    value: IntegrationConflictMaterialized;
+  }>;
 export type OperationOutcome<Operation extends ContractVerb, Value, Refusal> =
   | AcceptedOutcome<Operation, Value>
   | RefusedOutcome<Operation, Refusal>
@@ -135,12 +149,21 @@ export type OperationOutcome<Operation extends ContractVerb, Value, Refusal> =
 export type ProjectedOutcome<Operation extends ContractVerb, Value, Refusal> =
   | OperationOutcome<Operation, Value, Refusal>
   | (Operation extends "deliver" ? HandoffOutcome : never);
-export type ResetCounts = z.infer<typeof resetCountsSchema>;
+export type ResetCounts = Readonly<{ refs: number; worktrees: number; debts: number }>;
 export type ResetRefusal =
   | z.infer<typeof nukeConfirmationRefusalSchema>
   | z.infer<typeof nukeConfirmationRequiredRefusalSchema>;
-type WithWorld<Value> = Value extends { world: string } ? Omit<Value, "world"> & { readonly world: WorldRoot } : never;
-export type ResetOutcome = WithWorld<z.infer<typeof resetOutcomeSchema>>;
+type ResetEnvelope = Readonly<{
+  operation: "nuke";
+  world: WorldRoot;
+  effects: readonly ResetEffect[];
+  pending: readonly PendingSurface[];
+}>;
+export type ResetOutcome = ResetEnvelope &
+  (
+    | Readonly<{ kind: "accepted"; value: { removed: ResetCounts } }>
+    | Readonly<{ kind: "refused"; refusal: ResetRefusal }>
+  );
 
 type ResetProjection = Readonly<{ world: WorldRoot }> &
   (
@@ -149,8 +172,27 @@ type ResetProjection = Readonly<{ world: WorldRoot }> &
     | Readonly<{ kind: "failed"; error: unknown }>
   );
 
-type PartialContractEnvelope = z.infer<typeof partialContractEnvelopeSchema>;
-export type PartialOutcomeEnvelope = z.infer<typeof partialOutcomeEnvelopeSchema>;
+type PartialValues = {
+  bind: Partial<BindValue>;
+  amend: Partial<AmendValue>;
+  deliver: Partial<DeliveryValue>;
+  verify: Partial<Verify>;
+  review: Review;
+  "deliver-preview": Partial<DeliveryPreviewReport>;
+  arc: Record<string, never>;
+  abandon: Record<string, never>;
+};
+type PartialContractEnvelope = {
+  [Operation in ContractVerb]: EnvelopeFields &
+    Readonly<{
+      operation: Operation;
+      head?: ContractHead;
+      value?: PartialValues[Operation];
+    }>;
+}[ContractVerb];
+export type PartialOutcomeEnvelope =
+  | PartialContractEnvelope
+  | (ResetEnvelope & Readonly<{ value?: { removed: ResetCounts } }>);
 
 function surface(surface: PendingAction, required: boolean): PendingSurface {
   return { surface, required };
@@ -200,7 +242,7 @@ function effectPending(effects: readonly InvocationEffect[]): readonly PendingSu
 
 /**
  * Pending is computed here and nowhere else, from the operation's conclusions and the invocation's
- * effects. It is never taken from a transported summary.
+ * effects.
  */
 function projectPending(
   operation: OutcomeOperation,
@@ -350,12 +392,7 @@ export function project<Value, Refusal>(
 // Exceptional failure
 // ---------------------------------------------------------------------------
 
-export type KeiyakuErrorCategory =
-  | "invalid-input"
-  | "authority-corruption"
-  | "unknown-outcome"
-  | "aborted"
-  | "internal";
+export type KeiyakuErrorCategory = "invalid-input" | "authority-corruption" | "aborted" | "internal";
 
 type KeiyakuErrorOptions = Readonly<{ cause?: unknown; outcome?: PartialOutcomeEnvelope }>;
 
@@ -408,252 +445,35 @@ function errorDiagnostic(error: unknown): string {
 /** Attach this invocation's partial envelope without changing the error's own identity or category. */
 export function withOutcomeReceipt(error: unknown, outcome: PartialOutcomeEnvelope): KeiyakuError {
   if (error instanceof KeiyakuError) {
-    const current = new KeiyakuError(error.category, error.message, { cause: error.cause, outcome });
-    for (const key of ["requestId", "action", "requestOutcome"]) {
-      const descriptor = Object.getOwnPropertyDescriptor(error, key);
-      if (descriptor !== undefined) Object.defineProperty(current, key, { ...descriptor, enumerable: false });
-    }
-    return current;
+    return new KeiyakuError(error.category, error.message, { cause: error.cause, outcome });
   }
   return new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error, outcome });
 }
 
-// Public value composition: owned nested declarations, no local re-decoding.
-export const verifySchema = verifyValueSchema.extend({ continuation: continuationReportSchema.optional() }).strict();
-export type Verify = z.infer<typeof verifySchema>;
-export const reviewSchema = completionEvidenceSchema
-  .extend({
-    ...reviewAdmissionValueSchema.shape,
-    continuation: continuationReportSchema.optional(),
-  })
-  .strict();
-export type Review = z.infer<typeof reviewSchema>;
-const bindEvidenceSchema = z
-  .object({
-    keiyaku: z.object({ contract: contractIdSchema }).strict().optional(),
-    workspace: worktreeWorkspaceSchema.optional(),
-    warnings: z.array(z.string()).readonly().optional(),
-    overlaps: z.array(regionOverlapSchema).readonly().optional(),
-    overlapFailure: z.string().optional(),
-  })
-  .strict()
-  .refine((value) => value.overlaps === undefined || value.overlapFailure === undefined);
-const amendEvidenceSchema = z
-  .object({
-    documentDiff: z.string().optional(),
-    changes: z
-      .object({
-        gates: z.array(gateSchema).readonly().optional(),
-        after: z.array(contractIdSchema).readonly().optional(),
-      })
-      .strict()
-      .optional(),
-    overlaps: z.array(regionOverlapSchema).readonly().optional(),
-    overlapFailure: z.string().optional(),
-  })
-  .strict()
-  .refine((value) => value.overlaps === undefined || value.overlapFailure === undefined);
-const partialDeliverySchema = deliveryValueSchema.partial().superRefine((value, context) => {
-  const fields = deliverDataSchema.omit({ note: true }).keyof().options;
-  const present = fields.filter((field) => value[field] !== undefined);
-  if (present.length !== 0 && present.length !== fields.length)
-    context.addIssue({ code: "custom", message: "delivery identity must be complete when present" });
-});
-const partialValueSchemas = {
-  bind: bindEvidenceSchema,
-  amend: amendEvidenceSchema,
-  deliver: partialDeliverySchema,
-  verify: verifySchema.partial(),
-  review: reviewSchema,
-  "deliver-preview": deliveryPreviewReportSchema.partial(),
-  arc: z.object({}).strict(),
-  abandon: z.object({}).strict(),
-} as const;
-const journalEntrySchema = z.unknown().transform((value, context) => {
-  try {
-    return validateEntry(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid journal fact" });
-    return z.NEVER;
-  }
-});
-const envelopeFieldsSchema = z
-  .object({
-    operation: z.enum(["bind", "amend", "deliver", "verify", "review", "deliver-preview", "arc", "abandon"]),
-    contract: contractIdSchema.optional(),
-    facts: z.array(journalEntrySchema).readonly(),
-    effects: z.array(contractEffectSchema).readonly(),
-    pending: z.array(pendingSurfaceSchema).readonly(),
-  })
-  .strict();
-function definedContract<Value extends { contract?: ContractId | undefined }>(
-  value: Value,
-): Omit<Value, "contract"> & { readonly contract?: ContractId } {
-  const { contract, ...fields } = value;
-  return { ...fields, ...(contract === undefined ? {} : { contract }) };
-}
-function acceptedOutcomeSchema<Operation extends ContractVerb, Value>(operation: Operation, value: z.ZodType<Value>) {
-  return envelopeFieldsSchema
-    .extend({
-      operation: z.literal(operation),
-      kind: z.literal("accepted"),
-      contract: contractIdSchema,
-      head: contractHeadSchema,
-      value,
-    })
-    .strict();
-}
-function refusedOutcomeSchema<Operation extends ContractVerb, Refusal>(
-  operation: Operation,
-  refusal: z.ZodType<Refusal>,
-) {
-  return envelopeFieldsSchema
-    .extend({ operation: z.literal(operation), kind: z.literal("refused"), refusal })
-    .strict()
-    .transform(definedContract);
-}
-function retryOutcomeSchema<Operation extends ContractVerb>(operation: Operation) {
-  return envelopeFieldsSchema
-    .extend({
-      operation: z.literal(operation),
-      kind: z.literal("retry"),
-      reason: operationRetrySchemas[operation] as z.ZodType<OperationRetries[Operation]>,
-    })
-    .strict()
-    .transform(definedContract);
-}
-const handoffOutcomeSchema = envelopeFieldsSchema
-  .extend({
-    operation: z.literal("deliver"),
-    kind: z.literal("handoff"),
-    contract: contractIdSchema,
-    value: materializedConflictSchema,
-  })
-  .strict();
-/** Complete and exceptional modes use the same envelope and nested owner declarations. */
-export function outcomeSchema<Operation extends ContractVerb, Value>(
-  operation: Operation,
-  value: z.ZodType<Value>,
-  handoff?: Operation extends "deliver" ? z.ZodType<IntegrationConflictMaterialized> : never,
-) {
-  const accepted = acceptedOutcomeSchema(operation, value);
-  const refused = refusedOutcomeSchema(
-    operation,
-    operationRefusalSchemas[operation] as unknown as z.ZodType<OperationRefusals[Operation]>,
-  );
-  const retry = retryOutcomeSchema(operation);
-  const ordinary = z.union([accepted, refused, retry]);
-  return (
-    handoff === undefined ? ordinary : z.union([ordinary, handoffOutcomeSchema.extend({ value: handoff }).strict()])
-  ) as z.ZodType<ProjectedOutcome<Operation, Value, OperationRefusals[Operation]>>;
-}
-function partialContractSchema<Operation extends ContractVerb, Value>(operation: Operation, value: z.ZodType<Value>) {
-  return envelopeFieldsSchema
-    .extend({ operation: z.literal(operation), head: contractHeadSchema.optional(), value: value.optional() })
-    .strict();
-}
-const resetCountsSchema = z
-  .object({
-    refs: z.number().int().nonnegative(),
-    worktrees: z.number().int().nonnegative(),
-    debts: z.number().int().nonnegative(),
-  })
-  .strict();
-const resetValueSchema = z.object({ removed: resetCountsSchema }).strict();
-const resetBaseSchema = z
-  .object({
-    operation: z.literal("nuke"),
-    world: z.string().min(1),
-    effects: z.array(resetEffectSchema).readonly(),
-    pending: z.array(pendingSurfaceSchema).readonly(),
-  })
-  .strict();
-const resetOutcomeSchema = z.union([
-  resetBaseSchema.extend({ kind: z.literal("accepted"), value: resetValueSchema }).strict(),
-  resetBaseSchema
-    .extend({
-      kind: z.literal("refused"),
-      refusal: z.union([nukeConfirmationRefusalSchema, nukeConfirmationRequiredRefusalSchema]),
-    })
-    .strict(),
-]);
-const partialContractEnvelopeSchema = z.union([
-  partialContractSchema("bind", partialValueSchemas.bind),
-  partialContractSchema("amend", partialValueSchemas.amend),
-  partialContractSchema("deliver", partialValueSchemas.deliver),
-  partialContractSchema("verify", partialValueSchemas.verify),
-  partialContractSchema("review", partialValueSchemas.review),
-  partialContractSchema("deliver-preview", partialValueSchemas["deliver-preview"]),
-  partialContractSchema("arc", partialValueSchemas.arc),
-  partialContractSchema("abandon", partialValueSchemas.abandon),
-]);
-const partialOutcomeEnvelopeSchema = z.union([
-  partialContractEnvelopeSchema,
-  resetBaseSchema.extend({ value: resetValueSchema.optional() }).strict(),
-]);
+export type Verify = import("../protocol/verify.js").VerifyValue &
+  Readonly<{ continuation?: ContinuationReport | undefined }>;
 
-// ---------------------------------------------------------------------------
-// Wire failure: category, diagnostic, and the same-envelope receipt
-// ---------------------------------------------------------------------------
+export type Review = CompletionEvidence &
+  ReviewAdmissionValue &
+  Readonly<{ continuation?: ContinuationReport | undefined }>;
 
-const errorCategorySchema = z.enum(["invalid-input", "authority-corruption", "unknown-outcome", "aborted", "internal"]);
-const failureWireSchema = z
-  .object({
-    kind: z.literal("failed"),
-    category: errorCategorySchema,
-    diagnostic: z.string(),
-    causeClass: z.string().optional(),
-    causeDiagnostic: z.string().optional(),
-    outcome: partialOutcomeEnvelopeSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (value) => (value.causeClass === undefined) === (value.causeDiagnostic === undefined),
-    "native cause requires class and diagnostic",
-  );
-type FailureWire = z.infer<typeof failureWireSchema>;
+/** Native diagnostic projection for JSON callers; process custody stays on the original error. */
+export type FailureProjection = Readonly<{
+  kind: "failed";
+  category: KeiyakuErrorCategory;
+  diagnostic: string;
+  causeClass?: string;
+  causeDiagnostic?: string;
+  outcome?: PartialOutcomeEnvelope;
+}>;
 
-const NATIVE_CAUSES = {
-  Error,
-  TypeError,
-  RangeError,
-  ReferenceError,
-  SyntaxError,
-  URIError,
-  EvalError,
-  AuthorityCorruptionError,
-};
-
-function causeWire(cause: unknown): Pick<FailureWire, "causeClass" | "causeDiagnostic"> {
-  return cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {};
-}
-
-export function encodeFailureWire(error: unknown): FailureWire {
-  return error instanceof KeiyakuError
-    ? {
-        kind: "failed",
-        category: error.category,
-        diagnostic: error.message,
-        ...causeWire(error.cause),
-        ...(error.outcome === undefined ? {} : { outcome: error.outcome }),
-      }
-    : { kind: "failed", category: errorCategory(error), diagnostic: errorDiagnostic(error), ...causeWire(error) };
-}
-
-export function decodeFailureWire(value: unknown): KeiyakuError | null {
-  const parsed = failureWireSchema.safeParse(value);
-  if (!parsed.success) return null;
-  const wire = parsed.data;
-  let cause: Error | undefined;
-  if (wire.causeClass !== undefined && wire.causeDiagnostic !== undefined) {
-    const constructor = Object.hasOwn(NATIVE_CAUSES, wire.causeClass)
-      ? NATIVE_CAUSES[wire.causeClass as keyof typeof NATIVE_CAUSES]
-      : Error;
-    cause = new constructor(wire.causeDiagnostic);
-    cause.name = wire.causeClass;
-  }
-  return new KeiyakuError(wire.category, wire.diagnostic, {
-    ...(cause === undefined ? {} : { cause }),
-    ...(wire.outcome === undefined ? {} : { outcome: wire.outcome }),
-  });
+export function projectFailure(error: unknown): FailureProjection {
+  const cause = error instanceof KeiyakuError ? error.cause : error;
+  return {
+    kind: "failed",
+    category: error instanceof KeiyakuError ? error.category : errorCategory(error),
+    diagnostic: errorDiagnostic(error),
+    ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
+    ...(error instanceof KeiyakuError && error.outcome !== undefined ? { outcome: error.outcome } : {}),
+  };
 }

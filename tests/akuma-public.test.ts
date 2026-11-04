@@ -1,7 +1,5 @@
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
-import { selectionRequestProtocol } from "../src/akuma/selection-request.js";
-import { decodeAgentEvent } from "../src/akuma/heart/activity-schema.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import {
@@ -39,7 +37,6 @@ import { driveAkumaBody, tellWakeRuntime } from "../src/akuma/body.js";
 import { spawnAkumaBody } from "../src/akuma/detached-body.js";
 import type { BodyLaunch, BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { localExecutionContext } from "../src/akuma/requests.js";
 import {
   activitySlice,
   appendActivity,
@@ -281,7 +278,12 @@ test("overlapping file tools order each Turn and reported changes by completion"
   const file = (path: string): ToolCall => ({
     kind: "fileChange",
     changes: [
-      { op: "update", path, diffstat: { added: 1, removed: 0 }, patch: [`@@ -1 +1 @@`, `-${path}`, `+${path}`].join("\n") },
+      {
+        op: "update",
+        path,
+        diffstat: { added: 1, removed: 0 },
+        patch: [`@@ -1 +1 @@`, `-${path}`, `+${path}`].join("\n"),
+      },
     ],
   });
   const event = (sequence: number, phase: "started" | "completed", id: string, path: string) =>
@@ -319,7 +321,10 @@ test("overlapping file tools order each Turn and reported changes by completion"
   );
   const view = selectSnapshot(ledger, { aperture: "monitoring" }).snapshot;
   assert.deepEqual(activitySnapshotSchema.parse(view), view, "public snapshot schema preserves tool identity");
-  assert.deepEqual(ledger.rows.filter((row) => row.kind === "tool").map((row) => row.toolId), ["b", "a"]);
+  assert.deepEqual(
+    ledger.rows.filter((row) => row.kind === "tool").map((row) => row.toolId),
+    ["b", "a"],
+  );
   assert.deepEqual(
     view.reportedChanges,
     [
@@ -358,7 +363,8 @@ test("overlapping file tools order each Turn and reported changes by completion"
   assert.equal(completed.durationMs, undefined);
   assert.equal(completed.toolId, "a", "a completion without retained start keeps the producer identity");
   const closed = projectTurns([
-    ...facts, event(7, "started", "unwitnessed", "src/open.ts"),
+    ...facts,
+    event(7, "started", "unwitnessed", "src/open.ts"),
     turnEndFact(8, 1, at(8), { kind: "failed", diagnostic: "stopped" }),
   ]);
   const unsettled = closed.rows.find((row) => row.kind === "tool" && row.state === "unsettled");
@@ -490,7 +496,8 @@ test("turn owner folds a rejected completion while the event stream remains open
     const world = await World.at(root);
     const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
-    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
+    driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
+      spawn: noBodyLaunch,
       now: () => "2026-08-24T00:00:00.000Z",
     });
     void driving.catch(() => undefined);
@@ -528,9 +535,7 @@ async function answeredSource(root: string, suffix: string, bare?: boolean) {
       initialBody: "work",
     },
     provider,
-    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-      now: () => "2026-08-08T00:00:00.000Z",
-    },
+    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
   return allocated;
 }
@@ -1218,18 +1223,35 @@ test("outcome folding carries the exact omitted final said identity through publ
     activityFact(3, 1, at, { type: "assistant", text: "same answer" }),
   ];
   assert.equal(projectTurns(facts).rows.filter((row) => row.kind === "said").length, 2);
-  const ledger = projectTurns([...facts, turnEndFact(4, 1, at, {
-    kind: "answered", answer: "same answer", session: { sessionId: "session" },
-  })]);
-  assert.deepEqual(ledger.rows.map((row) => [row.kind, row.sequence]), [["turn", 1], ["said", 2], ["outcome", 4]]);
+  const ledger = projectTurns([
+    ...facts,
+    turnEndFact(4, 1, at, {
+      kind: "answered",
+      answer: "same answer",
+      session: { sessionId: "session" },
+    }),
+  ]);
+  assert.deepEqual(
+    ledger.rows.map((row) => [row.kind, row.sequence]),
+    [
+      ["turn", 1],
+      ["said", 2],
+      ["outcome", 4],
+    ],
+  );
   const outcome = ledger.latestOutcome?.outcome;
   assert.ok(outcome?.kind === "answered");
   assert.equal(outcome.foldedSaidSequence, 3, "only the producer's final narration is the linked duplicate");
   const view = selectSnapshot(ledger, { aperture: "monitoring" }).snapshot;
   assert.deepEqual(activitySnapshotSchema.parse(view), view, "public schema preserves answered fold identity");
-  const unequal = projectTurns([...facts, turnEndFact(4, 1, at, {
-    kind: "answered", answer: "different answer", session: { sessionId: "session" },
-  })]);
+  const unequal = projectTurns([
+    ...facts,
+    turnEndFact(4, 1, at, {
+      kind: "answered",
+      answer: "different answer",
+      session: { sessionId: "session" },
+    }),
+  ]);
   assert.equal(unequal.rows.filter((row) => row.kind === "said").length, 2, "unequal narration is retained");
   const unequalOutcome = unequal.latestOutcome?.outcome;
   assert.ok(unequalOutcome?.kind === "answered");
@@ -1256,7 +1278,11 @@ test("outcome folding preserves a truncated final voice equal to the answer", ()
     ["turn", "said", "outcome"],
   );
   assert.ok(ledger.latestOutcome?.outcome.kind === "answered");
-  assert.equal(ledger.latestOutcome.outcome.foldedSaidSequence, undefined, "unfolded narration has no replacement identity");
+  assert.equal(
+    ledger.latestOutcome.outcome.foldedSaidSequence,
+    undefined,
+    "unfolded narration has no replacement identity",
+  );
 });
 
 test("wait timeout returns the same running status carrier", async (context) => {
@@ -1309,9 +1335,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       initialBody: "work",
     },
     noPointProvider,
-    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-      now: () => "2026-08-08T00:00:00.000Z",
-    },
+    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
 
   const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -1323,7 +1347,10 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   });
   const exact = await handle.history({ id: "turn/1" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history", at: "missing-point" });
+  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), {
+    kind: "unknown-history",
+    at: "missing-point",
+  });
 });
 
 test("SDK fork records its invoking caller independently of source lineage and emits born", async (t) => {
@@ -1331,22 +1358,40 @@ test("SDK fork records its invoking caller independently of source lineage and e
   const world = await World.at(root);
   mkdirSync(join(root, "plugins"));
   const output = join(root, "births.jsonl");
-  writeFileSync(join(root, "plugins", "birth.mjs"), `
+  writeFileSync(
+    join(root, "plugins", "birth.mjs"),
+    `
     import { appendFileSync } from "node:fs";
     export default { manifest: { id: "birth", apiVersion: 1 }, activate(context) {
       return { signals: { "akuma.born": (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n") } };
     } };
-  `);
-  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
-    birth: { package: "./plugins/birth.mjs", config: { output } },
-  } }));
+  `,
+  );
+  writeFileSync(
+    join(root, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      plugins: {
+        birth: { package: "./plugins/birth.mjs", config: { output } },
+      },
+    }),
+  );
   const source = await answeredSource(root, "f0a10001");
   const mutable = claudeProvider as MutableProvider;
   const original = mutable.fork;
   mutable.fork = () => createProviderAttempt(undefined, async () => ({ session: { sessionId: "native-fork" } }));
   try {
-    const caller = { kind: "akuma" as const, world, akuId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id };
-    const receipt = await Akumas.of(world).fork({ akuma: source.id, at: "turn/1", caller, initiator: "Invoker", bare: true });
+    const caller = {
+      kind: "akuma" as const,
+      world,
+      akuId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id,
+    };
+    const receipt = await Akumas.of(world).fork({
+      akuma: source.id,
+      at: "turn/1",
+      caller,
+      initiator: "Invoker",
+      bare: true,
+    });
     assert.equal(receipt.kind, "forked");
     if (receipt.kind !== "forked") return;
     const child = pathsForAkuId(world, receipt.child);
@@ -1354,27 +1399,40 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
     const status = await (await akumaAt(root)).of({ id: receipt.child }).status();
     assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
-    const signals = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const signals = readFileSync(output, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     assert.equal(signals.length, 2);
-    assert.deepEqual(signals[1], { kind: "akuma.born", akumaId: receipt.child, bodySequence: 1,
-      ...status.birth, initiator: "Invoker" });
+    assert.deepEqual(signals[1], {
+      kind: "akuma.born",
+      akumaId: receipt.child,
+      bodySequence: 1,
+      ...status.birth,
+      initiator: "Invoker",
+    });
     const bareSource = await answeredSource(root, "f0a10004", true);
     const inherited = await Akumas.of(world).fork({ akuma: bareSource.id, at: "turn/1", bare: false });
     assert.equal(inherited.kind, "forked");
     if (inherited.kind === "forked") {
-      assert.equal((await readHeart(pathsForAkuId(world, inherited.child))).soul?.bare, true,
-        "false cannot undo a source's frozen opt-out");
+      assert.equal(
+        (await readHeart(pathsForAkuId(world, inherited.child))).soul?.bare,
+        true,
+        "false cannot undo a source's frozen opt-out",
+      );
     }
     const launches: BodyLaunch[] = [];
     const bodies: Promise<unknown>[] = [];
     const spawn: BodyLauncher = async (launch) => {
       launches.push(launch);
-      const body = driveAkumaBody(launch, provider, { spawn, requestSpawn: spawn, world });
+      const body = driveAkumaBody(launch, provider, { spawn, world });
       bodies.push(body);
       return { completed: body.then(() => ({ diagnostic: "fork launch completed" })), async cancel() {}, release() {} };
     };
-    const second = await akumasWithLauncher(world, localExecutionContext(), spawn).fork({
-      akuma: source.id, at: "turn/1", caller,
+    const second = await akumasWithLauncher(world, spawn).fork({
+      akuma: source.id,
+      at: "turn/1",
+      caller,
     });
     await Promise.all(bodies);
     assert.equal(second.kind, "forked");
@@ -1396,7 +1454,10 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     const handle = (await akumaAt(root)).of({ id: source.id });
 
     delete mutable.fork;
-    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "provider-cannot-fork", provider: "claude" });
+    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), {
+      kind: "provider-cannot-fork",
+      provider: "claude",
+    });
 
     let nativeCalls = 0;
     mutable.fork = () =>
@@ -1406,7 +1467,10 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
       });
     assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "unknown-history", at: "missing" });
     assert.equal(nativeCalls, 0);
-    assert.deepEqual(await handle.fork({ at: "turn/1" }, spawnAkumaBody), { kind: "fork-failed", diagnostic: "native refused" });
+    assert.deepEqual(await handle.fork({ at: "turn/1" }, spawnAkumaBody), {
+      kind: "fork-failed",
+      diagnostic: "native refused",
+    });
 
     mutable.fork = () =>
       createProviderAttempt(undefined, async () => {
@@ -1469,9 +1533,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
     },
     initialBody: "work",
   };
-  await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-    now: () => "2026-08-08T00:00:00.000Z",
-  });
+  await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = world.of({ id: allocated.id });
   const listed = (await world.list()).rows[0]!;
@@ -1590,8 +1652,16 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
     [akumaCaller(sibling.id), akumaCaller(grandchild.id), akumaCaller(direct.id), rootCaller, rootCaller],
     "every born row keeps its frozen caller edge",
   );
-  assert.equal(listed.rows.some((row) => row.id === unrelated.id), false, "a different caller is not descended");
-  assert.equal(listed.rows.some((row) => row.id === forked.id), false, "fork origin alone is not a caller edge");
+  assert.equal(
+    listed.rows.some((row) => row.id === unrelated.id),
+    false,
+    "a different caller is not descended",
+  );
+  assert.equal(
+    listed.rows.some((row) => row.id === forked.id),
+    false,
+    "fork origin alone is not a caller edge",
+  );
 
   assert.deepEqual(
     (await world.list({ caller: rootCaller, archetype: "intern" })).rows.map((row) => row.id),
@@ -1647,7 +1717,7 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
       initialBody: "work",
     },
     provider,
-    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
+    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   await waitForFile(cache);
@@ -1744,7 +1814,10 @@ test("a lineage cache row for a vanished directory never resurrects an identity"
     caller: rootCaller,
   });
   await recordAkumaLineage(proved, { id: "aku/ghost/deadbeef" as never, caller: rootCaller });
-  assert.deepEqual((await world.list({ caller: rootCaller })).rows.map((row) => row.id), [direct.id]);
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    [direct.id],
+  );
   assert.deepEqual(
     (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
     [direct.id],
@@ -1839,9 +1912,7 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
       initialBody: "first",
     },
     provider,
-    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-      now: () => "2026-08-08T00:00:00.000Z",
-    },
+    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
   rmSync(seat, { recursive: true, force: true });
 
@@ -1854,7 +1925,10 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   const admitted = await readHeart(allocated.paths);
   assert.equal(admitted.pause?.bodySequence, admitted.latestBody?.sequence);
   assert.equal(admitted.pause?.frontierTellId, admission.tell.id);
-  assert.deepEqual(admitted.pending.map((tell) => tell.id), [admission.tell.id]);
+  assert.deepEqual(
+    admitted.pending.map((tell) => tell.id),
+    [admission.tell.id],
+  );
   held.release();
   const receipt = await owner.completeInterruptAdmission(admission, {
     async spawn() {
@@ -1868,7 +1942,10 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   assert.equal(receipt.interruption?.kind, "completed");
   assert.equal(receipt.wake.kind, "held");
   assert.equal((await readHeart(allocated.paths)).pause, null);
-  assert.deepEqual((await readHeart(allocated.paths)).pending.map((tell) => tell.id), [receipt.admission.tellId]);
+  assert.deepEqual(
+    (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
+    [receipt.admission.tellId],
+  );
 });
 
 test("interrupt completion refuses unexplained successor custody", async (context) => {
@@ -1900,7 +1977,10 @@ test("interrupt completion refuses unexplained successor custody", async (contex
     });
     const heart = await readHeart(allocated.paths);
     assert.equal(heart.pause?.frontierTellId, admission.tell.id);
-    assert.deepEqual(heart.pending.map((tell) => tell.id), [admission.tell.id]);
+    assert.deepEqual(
+      heart.pending.map((tell) => tell.id),
+      [admission.tell.id],
+    );
   } finally {
     holder.release();
     successorLeash?.release();
@@ -1977,18 +2057,20 @@ test("interrupt cancellation after admission stops waiting but keeps Tell and fr
     releaseHolder = value.holder.release.bind(value.holder);
     const controller = new AbortController();
     const reason = new Error("caller stopped waiting");
-    const { promise: admitted, resolve: witnessAdmission } = promiseBarrier<Awaited<ReturnType<AkumaOwner["admitInterrupt"]>>>();
+    const { promise: admitted, resolve: witnessAdmission } =
+      promiseBarrier<Awaited<ReturnType<AkumaOwner["admitInterrupt"]>>>();
     const original = AkumaOwner.prototype.admitInterrupt;
-    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async function (
-      this: AkumaOwner,
-      body: string,
-      options?: Parameters<AkumaOwner["admitInterrupt"]>[1],
-    ) {
-      const result = await original.call(this, body, options);
-      witnessAdmission(result);
-      return result;
-    });
-    const operation = value.handle.interrupt("cancelled", { runtime: tellWakeRuntime(noBodyLaunch),
+    context.mock.method(
+      AkumaOwner.prototype,
+      "admitInterrupt",
+      async function (this: AkumaOwner, body: string, options?: Parameters<AkumaOwner["admitInterrupt"]>[1]) {
+        const result = await original.call(this, body, options);
+        witnessAdmission(result);
+        return result;
+      },
+    );
+    const operation = value.handle.interrupt("cancelled", {
+      runtime: tellWakeRuntime(noBodyLaunch),
       tellId: "cancelled-interrupt",
       signal: controller.signal,
     });
@@ -1998,7 +2080,10 @@ test("interrupt cancellation after admission stops waiting but keeps Tell and fr
     await assert.rejects(operation, (error: unknown) => error === reason);
     const heart = await readHeart(value.allocated.paths);
     assert.equal(heart.pause?.frontierTellId, "cancelled-interrupt");
-    assert.deepEqual(heart.pending.map((tell) => tell.id), ["cancelled-interrupt"]);
+    assert.deepEqual(
+      heart.pending.map((tell) => tell.id),
+      ["cancelled-interrupt"],
+    );
   } finally {
     releaseHolder?.();
     rmSync(root, { recursive: true, force: true });
@@ -2009,7 +2094,9 @@ test("interrupt preserves an admitted Tell when predecessor custody is untidy", 
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-unstoppable-");
   const { allocated, holder } = await bornBody(root, "1d1e0003", "2026-08-08T00:00:00.000Z");
   holder.release();
-  const receipt = await (await akumaAt(root)).of({ id: allocated.id }).interrupt("never recorded", { runtime: tellWakeRuntime(noBodyLaunch), tellId: "untidy-interrupt" });
+  const receipt = await (await akumaAt(root))
+    .of({ id: allocated.id })
+    .interrupt("never recorded", { runtime: tellWakeRuntime(noBodyLaunch), tellId: "untidy-interrupt" });
   assert.equal("kind" in receipt, false);
   if ("kind" in receipt) throw new Error("untidy interruption was not admitted");
   assert.equal(receipt.admission.tellId, "untidy-interrupt");
@@ -2021,7 +2108,10 @@ test("interrupt preserves an admitted Tell when predecessor custody is untidy", 
   assert.notEqual(receipt.wake.kind, "failed");
   const heart = await readHeart(allocated.paths);
   assert.equal(heart.pause?.frontierTellId, "untidy-interrupt");
-  assert.deepEqual(heart.pending.map((tell) => tell.id), ["untidy-interrupt"]);
+  assert.deepEqual(
+    heart.pending.map((tell) => tell.id),
+    ["untidy-interrupt"],
+  );
 });
 
 test("interrupt reports hung when the Body does not release its held leash", async (context) => {
@@ -2187,7 +2277,10 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   });
 
   const world = await akumaAt(root);
-  await assert.rejects(world.of({ id: heartCut.id }).status(), (error: unknown) => !(error instanceof AkumaNotBornError));
+  await assert.rejects(
+    world.of({ id: heartCut.id }).status(),
+    (error: unknown) => !(error instanceof AkumaNotBornError),
+  );
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
   assert.equal(existsSync(noise), true);
 
@@ -2240,9 +2333,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     },
     initialBody: "keep working",
   };
-  const body = driveAkumaBody(launch, running, { spawn: noBodyLaunch, requestSpawn: noBodyLaunch,
-    now: () => "2026-08-08T00:00:00.000Z",
-  });
+  const body = driveAkumaBody(launch, running, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
   await started;
 
   const handle = (await akumaAt(root)).of({ id: allocated.id });
@@ -2253,21 +2344,4 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   assert.equal(aborted, true);
   assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
   assert.equal((await handle.status()).life, "killed");
-});
-
-
-test("Selection wire retains strict derived tool views without tightening neutral narration", () => {
-  const at = "2026-08-08T00:00:00.000Z";
-  const row = { kind: "tool", sequence: 2, turnSequence: 1, at, name: "run", call: { kind: "run", command: "x" }, state: { status: "ok" } };
-  const timeline = { kind: "idle", entries: [{ kind: "row", row }], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 };
-  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", timeline }, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }], unobserved: [] };
-  const protocol = selectionRequestProtocol("akuma.wait");
-  assert.doesNotThrow(() => protocol.decodeResult(value));
-  const withRow = (changed: unknown) => ({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, entries: [{ kind: "row", row: changed }] } } }] });
-  assert.throws(() => protocol.decodeResult(withRow({ ...row, call: { ...row.call, foreign: true } })));
-  assert.throws(() => protocol.decodeResult(withRow({ ...row, state: { ...row.state, foreign: true } })));
-  assert.throws(() => protocol.decodeResult({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, reportedChanges: [{ sequence: 2, at, op: "update", path: "x", diffstat: { added: 1, removed: 0, foreign: true } }] } } }] }));
-  assert.doesNotThrow(() => protocol.decodeResult(withRow({ ...row, call: { kind: "read", path: "x", offset: 0 } })));
-  assert.deepEqual(decodeAgentEvent({ type: "tool", phase: "completed", id: "tool", name: "run", call: { ...row.call, foreign: true }, result: { ...row.state, foreign: true } }), { type: "tool", phase: "completed", id: "tool", name: "run", call: row.call, result: row.state });
-  assert.throws(() => decodeAgentEvent({ type: "tool", phase: "started", id: "read", name: "read", call: { kind: "read", path: "x", offset: 0 } }));
 });

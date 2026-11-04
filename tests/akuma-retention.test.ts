@@ -55,7 +55,7 @@ async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<All
       initialBody: "old work",
     },
     answering("done"),
-    { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => at },
+    { spawn: noBodyLaunch, now: () => at },
   );
   ageAkuma(allocated, at);
   return allocated;

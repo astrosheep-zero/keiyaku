@@ -3,25 +3,18 @@ import { fileURLToPath } from "node:url";
 import { driveAkumaBody } from "./akuma/body.js";
 import { bodyLaunchSchema } from "./akuma/body-launch.js";
 import { LEASH_HELD_EXIT, spawnAkumaBody } from "./akuma/detached-body.js";
-import { externalRequestCommandsFor, bodyProcessConfiguration } from "./body-requests.js";
+import { bodyExecutionContext } from "./body-host.js";
 
 async function runBodyEntrypoint(): Promise<void> {
   const encoded = process.argv[2];
   if (encoded === undefined) throw new TypeError("Akuma body launch payload is missing");
   const launch = bodyLaunchSchema.parse(JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")));
   const spawn = spawnAkumaBody;
-  const { world, commands, executionAssociation } = await externalRequestCommandsFor(
-    launch,
-    bodyProcessConfiguration(),
-    spawn,
-  );
+  const context = await bodyExecutionContext(launch);
   if (
     (await driveAkumaBody(launch, undefined, {
-      world,
-      externalCommands: commands,
-      executionAssociation,
+      ...context,
       spawn,
-      requestSpawn: spawn,
     })) === "held"
   )
     process.exitCode = LEASH_HELD_EXIT;

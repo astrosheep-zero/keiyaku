@@ -9,7 +9,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv, renderHelp } from "../src/cli/parse.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { parseAkuId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -20,10 +19,6 @@ import { contractId } from "../src/core/facts/types.js";
 import type { WorldRoot } from "../src/world.js";
 
 function runCli(cwd: string, argv: readonly string[], input?: string) {
-  // A caller inside an Akuma Body carries AKUMA_REQUESTS and would forward the
-  // operation to its parent; this suite asserts the local addressing result.
-  const environment = { ...process.env };
-  delete environment[AKUMA_REQUESTS_ENV];
   return spawnSync(
     process.execPath,
     [
@@ -35,7 +30,7 @@ function runCli(cwd: string, argv: readonly string[], input?: string) {
       cwd,
       ...argv,
     ],
-    { encoding: "utf8", env: environment, ...(input === undefined ? {} : { input }) },
+    { encoding: "utf8", env: process.env, ...(input === undefined ? {} : { input }) },
   );
 }
 

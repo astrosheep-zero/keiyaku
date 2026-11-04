@@ -3,7 +3,6 @@ import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akum
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
 import { readAkumaRoster } from "../akuma/akuma.js";
 import type { TellResult, TellWake } from "../akuma/body.js";
-import { localExecutionContext, type ExecutionContext } from "../akuma/requests.js";
 import { captureAkumaHost } from "../body-host.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
@@ -17,13 +16,12 @@ import type { CallInput, CallResult, CallWaitHead, DispatchStage, ForkInput, For
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
 import { requireInput } from "./input.js";
 import {
-  askAkumaOn,
+  askAkuma,
   historyAkuma,
-  killAkumaOn,
-  selectionSeam,
+  killAkuma,
   statusAkuma,
-  tellAkumaOn,
-  waitAkumaOn,
+  tellAkuma,
+  waitAkuma,
   type AkumaAskInput,
   type AkumaAskResult,
   type AkumaHistoryInput,
@@ -36,7 +34,6 @@ import {
   type AkumaTellResult,
   type AkumaWaitInput,
   type AkumaWaitResult,
-  type SelectionSeam,
 } from "./selection.js";
 
 export { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
@@ -70,19 +67,14 @@ export type Akumas = AkumasHandle;
 
 class AkumasHandle {
   #world: WorldRoot;
-  #execution: ExecutionContext;
   #spawn: BodyLauncher;
-  #selection: SelectionSeam;
   #reportDiagnostic: AkumaHostOptions["reportDiagnostic"];
   #maintenance: Promise<void> | undefined;
 
-  constructor(world: WorldRoot, execution: ExecutionContext, spawn: BodyLauncher, host?: AkumaHostOptions) {
+  constructor(world: WorldRoot, spawn: BodyLauncher, host?: AkumaHostOptions) {
     this.#world = world;
-    this.#execution = execution;
     this.#spawn = spawn;
-    // One typed route seam captured at construction: no operation re-derives it.
     this.#reportDiagnostic = captureAkumaHostDiagnostic(host);
-    this.#selection = selectionSeam(execution, spawn, this.#reportDiagnostic);
     Object.freeze(this);
   }
 
@@ -94,12 +86,7 @@ class AkumasHandle {
   }
 
   call(input: CallInput): Promise<CallResult> {
-    const pending = callAkumas(
-      this.withWorld(input, "Akumas.call input"),
-      this.#execution,
-      this.#spawn,
-      this.#reportDiagnostic,
-    );
+    const pending = callAkumas(this.withWorld(input, "Akumas.call input"), this.#spawn, this.#reportDiagnostic);
     return pending.then(async (result) => {
       await this.maintain(this.#world);
       return result;
@@ -119,19 +106,19 @@ class AkumasHandle {
   }
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
-    return tellAkumaOn(this.#selection, this.withWorld(input, "Akumas.tell input"));
+    return tellAkuma(this.withWorld(input, "Akumas.tell input"), this.#spawn);
   }
 
   ask<T = string>(input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
-    return askAkumaOn(this.#selection, this.withWorld(input, "Akumas.ask input"));
+    return askAkuma(this.withWorld(input, "Akumas.ask input"), this.#spawn, this.#reportDiagnostic);
   }
 
   wait(input: AkumaWaitInput): Promise<AkumaWaitResult> {
-    return waitAkumaOn(this.#selection, this.withWorld(input, "Akumas.wait input"));
+    return waitAkuma(this.withWorld(input, "Akumas.wait input"), this.#reportDiagnostic);
   }
 
   kill(input: AkumaKillInput): Promise<AkumaKillResult> {
-    return killAkumaOn(this.#selection, this.withWorld(input, "Akumas.kill input"));
+    return killAkuma(this.withWorld(input, "Akumas.kill input"), this.#spawn);
   }
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {
@@ -190,28 +177,15 @@ function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[])
   return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
 }
 
-/**
- * The one Akumas composition. Public `of` fixes local execution; CLI and Body pass their captured
- * internal channel through `akumasWithExecution` instead of a second constructor.
- */
-export function akumasWithExecution(world: WorldRoot, execution: ExecutionContext, host?: AkumaHostOptions): Akumas {
-  const { spawn, reportDiagnostic } = captureAkumaHost(host);
-  return akumasWithLauncher(world, execution, spawn, reportDiagnostic === undefined ? undefined : { reportDiagnostic });
-}
-
-/** Internal host composition, independent of the captured request route. */
-export function akumasWithLauncher(
-  world: WorldRoot,
-  execution: ExecutionContext,
-  spawn: BodyLauncher,
-  host?: AkumaHostOptions,
-): Akumas {
+/** Internal host composition for an explicitly owned launcher. */
+export function akumasWithLauncher(world: WorldRoot, spawn: BodyLauncher, host?: AkumaHostOptions): Akumas {
   if (typeof world !== "string") throw new TypeError("Akumas.of world must be a WorldRoot");
-  return new AkumasHandle(world, execution, spawn, host);
+  return new AkumasHandle(world, spawn, host);
 }
 
 export const Akumas = Object.freeze({
   of(world: WorldRoot, host?: AkumaHostOptions): Akumas {
-    return akumasWithExecution(world, localExecutionContext(), host);
+    const { spawn, reportDiagnostic } = captureAkumaHost(host);
+    return akumasWithLauncher(world, spawn, reportDiagnostic === undefined ? undefined : { reportDiagnostic });
   },
 });

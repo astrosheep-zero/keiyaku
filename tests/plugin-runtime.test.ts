@@ -5,7 +5,6 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { emitPluginSignal, withAkumaWaitDeferrals } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
@@ -414,9 +413,6 @@ function writeHomePlugins(home: string, output: string): void {
 
 function callEnvironment(home: string): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_HOME: home, SQUARE_PARTICIPANT_NAME: "tester" };
-  // A caller inside an Akuma Body would forward the operation to its parent;
-  // this suite asserts the local plugin boundary.
-  delete environment[AKUMA_REQUESTS_ENV];
   delete environment.KEIYAKU_ACTOR_ID;
   delete environment.KEIYAKU_ACTOR_WORLD;
   return environment;

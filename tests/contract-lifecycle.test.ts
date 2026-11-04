@@ -1,22 +1,14 @@
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
-import type { DeliverOutcome, ReviewOutcome, VerifyOutcome } from "../src/index.js";
+import type { ReviewOutcome, VerifyOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
-import { BodyRequestPump } from "../src/akuma/request-serve.js";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
-import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { renderReconcile } from "../src/cli/render/reconcile.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import { externalRequestCommandsFor } from "../src/body-requests.js";
-import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { World } from "../src/world.js";
 import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { document, repositoryWithMain, present, accepted } from "./support/library-verbs.js";
 
@@ -72,57 +64,18 @@ function assertRuntimeStop(value: unknown): void {
   assert.equal((value.stop as { failure: unknown }).failure, "environment-failure");
 }
 
-/**
- * The production parent-Body contract port, reached through the same entrypoint composition the
- * spawned Body uses. Importing the module must compose commands without launching a Body.
- */
-async function forwardedDeliverChannel(repositoryRoot: string) {
-  const world = await World.at(repositoryRoot);
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker", draw: () => "f0d0a001" });
-  const { commands } = await externalRequestCommandsFor({ paths: allocated.paths }, {}, noBodyLaunch);
-  const command = commands["contract.deliver"];
-  if (command === undefined || command.completion !== "service")
-    throw new Error("contract.deliver is not a service request command");
-  return async (contractId: string, overwrite: boolean) => {
-    const request = command.resolve({
-      repoRoot: repositoryRoot,
-      contractId,
-      includeDirty: false,
-      materializeConflict: false,
-      overwrite,
-    });
-    assert.ok(request !== null, "forwarded deliver payload is rejected by its owner");
-    const served = await request.execute({
-      id: randomUUID(),
-      admittedAt: "2026-09-28T10:00:00.000Z",
-      requester: allocated.id,
-      signal: new AbortController().signal,
-      admissionOpen: () => true,
-    });
-    assert.equal(served.kind, "served");
-    assert.ok(served.kind === "served");
-    const service = JSON.parse(served.serviceJson) as { kind?: unknown; deliveryFactId?: unknown };
-    assert.equal(service.kind, "accepted-reference", served.serviceJson);
-    assert.ok(typeof service.deliveryFactId === "string", served.serviceJson);
-    return { result: served.result, deliveryFactId: service.deliveryFactId };
-  };
-}
-
-function acceptedDeliveryValue(result: unknown): Record<string, unknown> {
-  assert.ok(result !== null && typeof result === "object");
-  const record = result as { kind?: unknown; value?: unknown };
-  assert.equal(record.kind, "accepted", JSON.stringify(result));
-  assert.ok(record.value !== null && typeof record.value === "object");
-  return record.value as Record<string, unknown>;
-}
-
 describe("review actor testimony", () => {
-  test("local CLI review records explicit actor and preserves omitted actor behavior", async () => {
+  test("local CLI review records actor testimony with and without an enclosing Akuma identity", async () => {
     const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
     for (const { flags, environment, actor } of [
       { flags: ["--actor", "operator"], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "operator" },
       { flags: [], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "default-actor" },
       { flags: [], environment: {}, actor: undefined },
+      {
+        flags: [],
+        environment: { KEIYAKU_ACTOR_ID: "aku/worker/f0d0a002", KEIYAKU_ACTOR_WORLD: repository.path },
+        actor: "aku/worker/f0d0a002",
+      },
     ]) {
       const reviewed = await cliJson<ReviewOutcome>(
         ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ok", ...flags],
@@ -141,43 +94,6 @@ describe("review actor testimony", () => {
     assert.match(renderContractHistory(history, { full: true }), / · default-actor/u);
   });
 
-  test("forwarded CLI review preserves explicit actor and omitted requester attribution", async () => {
-    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
-    const parent = await bornDirectAkuma({
-      root: await World.at(repository.path),
-      archetype: "worker",
-      draw: "f0d0a002",
-      createdAt: "2026-09-28T10:00:00.000Z",
-    });
-    const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {}, noBodyLaunch);
-    const pump = await BodyRequestPump.open({
-      paths: parent.paths,
-      bodySequence: 1,
-      now: () => "2026-09-28T10:00:01.000Z",
-      commands,
-      signal: new AbortController().signal,
-    });
-    try {
-      for (const { flags, actor } of [
-        { flags: ["--actor", "operator"], actor: "operator" },
-        { flags: [], actor: parent.id },
-      ]) {
-        const reviewed = await cliJson<ReviewOutcome>(
-          ["-C", repository.path, "review", state.id, "--unsatisfied", "--summary", "not ready", ...flags],
-          { environment: { [AKUMA_REQUESTS_ENV]: pump.directory } },
-        );
-        assert.equal(reviewed.exit, 0, reviewed.stderr);
-        const result = accepted(reviewed.value);
-        const attestation = result.facts.find((fact) => fact.kind === "attestation" && fact.data.gate === "reviewed");
-        assert.ok(attestation);
-        assert.equal(attestation.actor, actor);
-        assert.deepEqual(present(await keiyaku.state()).attestations.at(-1), attestation);
-      }
-    } finally {
-      await pump.close();
-      parent.leash.release();
-    }
-  });
 });
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
@@ -401,11 +317,11 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.deepEqual(repeatedCheck.admission, { kind: "reused", entry: firstCheck.admission.entry });
     const blocked = accepted(await verified.keiyaku.deliver());
     assertNoVerification(blocked.value);
-    assert.equal(blocked.value.gates?.[0]?.current.kind, "attested");
+    assert.equal(blocked.value.gates?.[0]?.requirements[0]?.current.kind, "attested");
     assert.equal(present(await verified.keiyaku.state()).terminal, null);
   });
 
-  test("a forwarded deliver replaces changed unfinished content without running verification", async () => {
+  test("native delivery replaces changed unfinished content without running Verification", async () => {
     const { repository, keiyaku, state } = await bindAndCommit({
       gates: ["reviewed", "verified"],
       verification:
@@ -413,68 +329,52 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
       runtimeStop: true,
     });
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    const deliver = await forwardedDeliverChannel(repository.path);
+    const first = accepted(await keiyaku.deliver());
+    const firstFact = first.facts.find((fact) => fact.kind === "deliver");
+    assert.ok(firstFact);
+    assert.deepEqual(first.value.leading, { kind: "admitted-now", fact: firstFact.entry });
+    assertNoVerification(first.value);
+    const firstVerification = accepted(await keiyaku.verify());
+    assertRuntimeStop(firstVerification.value.checks[0]);
+    assert.equal(present(await keiyaku.state()).terminal, null);
 
-    const first = await deliver(state.id, false);
-    const firstValue = acceptedDeliveryValue(first.result);
-    assert.deepEqual(firstValue.leading, { kind: "admitted-now", fact: first.deliveryFactId });
-    assert.equal(firstValue.verification, undefined);
-    assert.equal(present(await keiyaku.state()).terminal, null, "missing evidence keeps the Contract nonterminal");
-
-    const reused = await deliver(state.id, false);
-    assert.equal(reused.deliveryFactId, first.deliveryFactId, "unchanged content reuses the admitted candidate");
-    const reusedValue = acceptedDeliveryValue(reused.result);
-    assert.deepEqual(reusedValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
-    assert.deepEqual(reusedValue.integration, firstValue.integration);
-    assert.equal(reusedValue.contentChange, undefined);
-    assert.equal(reusedValue.verification, undefined);
-    assert.ok(typeof reused.result === "object" && reused.result !== null && "facts" in reused.result);
-    assert.ok(Array.isArray(reused.result.facts));
-    assert.deepEqual(
-      reused.result.facts.filter(
-        (entry) => typeof entry === "object" && entry !== null && "kind" in entry && entry.kind === "deliver",
-      ),
-      [],
-      "reuse admits no extra delivery fact",
-    );
+    const reused = accepted(await keiyaku.deliver());
+    assert.deepEqual(reused.value.leading, { kind: "already-admitted", fact: firstFact.entry });
+    assert.deepEqual(reused.value.integration, first.value.integration);
+    assert.equal(reused.value.contentChange, undefined);
+    assertNoVerification(reused.value);
+    assert.deepEqual(reused.facts.filter((fact) => fact.kind === "deliver"), []);
 
     writeFileSync(join(worktree, "candidate.txt"), "replacement\n");
     writeFileSync(join(worktree, ".keiyaku", "settings.json"), "{}\n");
     repository.run(["-C", worktree, "add", "candidate.txt", ".keiyaku/settings.json"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "replacement"]);
 
-    const replaced = await deliver(state.id, false);
-    assert.notEqual(
-      replaced.deliveryFactId,
-      first.deliveryFactId,
-      "changed content admits a new deliver fact without overwrite",
-    );
-    const replacedValue = acceptedDeliveryValue(replaced.result);
-    assert.deepEqual(replacedValue.leading, { kind: "admitted-now", fact: replaced.deliveryFactId });
+    const replaced = accepted(await keiyaku.deliver());
+    const replacedFacts = replaced.facts.filter((fact) => fact.kind === "deliver");
+    assert.equal(replacedFacts.length, 1);
+    assert.notEqual(replaced.value.leading.fact, firstFact.entry);
+    assert.deepEqual(replaced.value.leading, { kind: "admitted-now", fact: replacedFacts[0]!.entry });
     const current = present(await keiyaku.state());
-    assert.equal(current.delivery?.entry, replaced.deliveryFactId);
-    assert.notEqual(current.delivery?.data.tenderSnapshot, firstValue.tenderSnapshot);
+    assert.equal(current.delivery?.entry, replaced.value.leading.fact);
+    assert.notEqual(current.delivery?.data.tenderSnapshot, first.value.tenderSnapshot);
     const integration = current.delivery?.data.integration;
     assert.ok(integration);
-    const firstIntegration = firstValue.integration as { changeId: string };
-    assert.notEqual(integration.changeId, firstIntegration.changeId);
-    assert.deepEqual(replacedValue.contentChange, {
+    assert.notEqual(integration.changeId, first.value.integration.changeId);
+    assert.deepEqual(replaced.value.contentChange, {
       kind: "candidate-content-changed",
-      previousChange: firstIntegration.changeId,
+      previousChange: first.value.integration.changeId,
       currentChange: integration.changeId,
     });
-    assert.ok(typeof replaced.result === "object" && replaced.result !== null && "facts" in replaced.result);
-    assert.ok(Array.isArray(replaced.result.facts));
-    assert.equal(replaced.result.facts.filter((entry: { kind: string }) => entry.kind === "deliver").length, 1);
-    assert.equal(replacedValue.verification, undefined);
+    assertNoVerification(replaced.value);
     assert.deepEqual(current.attestations, []);
     const verified = accepted(await keiyaku.verify());
     assert.equal(verified.value.snapshot, integration.snapshot);
     assert.ok(verified.value.checks[0]?.kind === "terminal");
     assert.equal(verified.value.checks[0].verdict, "satisfied");
-    const text = renderAccepted(replaced.result as Extract<DeliverOutcome, { kind: "accepted" }>);
+    const text = renderAccepted(replaced);
     assert.match(text, /candidate-content-changed/u);
-    assert.ok(text.includes(`previous ${firstIntegration.changeId.slice(0, 7)}`), text);
+    assert.ok(text.includes(`previous ${first.value.integration.changeId.slice(0, 7)}`), text);
     assert.ok(text.includes(`current ${integration.changeId.slice(0, 7)}`), text);
     assert.equal(current.terminal, null);
   });
@@ -497,40 +397,16 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     assert.equal(present(await keiyaku.state()).delivery?.entry, first.value.leading.fact);
   });
 
-  test("an unchanged second forwarded deliver continues without a new delivery fact", async () => {
-    // No declared Verification, so the same-content path cannot be current-candidate reuse.
-    const repository = repositoryWithMain();
-    const bound = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
-        markdown: document(),
-        workspace: "worktree",
-        gates: ["reviewed"],
-      }),
-    );
-    const state = present(await bound.value.keiyaku.state());
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
-    writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
-    repository.run(["-C", worktree, "add", "candidate.txt"]);
-    repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-    const deliver = await forwardedDeliverChannel(repository.path);
+  test("an unchanged native delivery continues without a new delivery fact", async () => {
+    const { keiyaku } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+    const first = accepted(await keiyaku.deliver());
+    const firstFact = first.facts.find((fact) => fact.kind === "deliver");
+    assert.ok(firstFact);
+    assert.deepEqual(first.value.leading, { kind: "admitted-now", fact: firstFact.entry });
 
-    const first = await deliver(state.id, false);
-    const firstValue = acceptedDeliveryValue(first.result);
-    assert.deepEqual(firstValue.leading, { kind: "admitted-now", fact: first.deliveryFactId });
-
-    const second = await deliver(state.id, false);
-    assert.equal(second.deliveryFactId, first.deliveryFactId);
-    const secondValue = acceptedDeliveryValue(second.result);
-    assert.deepEqual(secondValue.leading, { kind: "already-admitted", fact: first.deliveryFactId });
-    assert.ok(typeof second.result === "object" && second.result !== null && "facts" in second.result);
-    assert.ok(Array.isArray(second.result.facts));
-    assert.deepEqual(
-      second.result.facts.filter(
-        (entry) => typeof entry === "object" && entry !== null && "kind" in entry && entry.kind === "deliver",
-      ),
-      [],
-    );
+    const second = accepted(await keiyaku.deliver());
+    assert.deepEqual(second.value.leading, { kind: "already-admitted", fact: firstFact.entry });
+    assert.deepEqual(second.facts.filter((fact) => fact.kind === "deliver"), []);
   });
 });
 

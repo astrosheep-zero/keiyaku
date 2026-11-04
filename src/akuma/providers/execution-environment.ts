@@ -1,6 +1,3 @@
-export const AKUMA_REQUESTS_ENV = "AKUMA_REQUESTS";
-export const AKUMA_REQUESTS_ENTRY_ENV = "AKUMA_REQUESTS_ENTRY";
-
 export type ExecutionCoordinate = Readonly<{
   akumaId: string;
   world: string;
@@ -30,7 +27,6 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export function akumaExecutionEnvironment(
   inherited: Environment,
   overrides: Environment = {},
-  requests?: string,
   nativeIdentity: readonly (typeof PARENT_HARNESS_IDENTITY_KEYS)[number][] = [],
   execution?: ExecutionCoordinate,
 ): Record<string, string> {
@@ -44,9 +40,6 @@ export function akumaExecutionEnvironment(
   ) as Record<string, string>;
   for (const key of PARENT_HARNESS_IDENTITY_KEYS) delete environment[key];
   Object.assign(environment, preserved);
-  delete environment[AKUMA_REQUESTS_ENV];
-  delete environment[AKUMA_REQUESTS_ENTRY_ENV];
-  if (requests !== undefined) environment[AKUMA_REQUESTS_ENV] = requests;
   if (execution !== undefined)
     Object.assign(environment, {
       KEIYAKU_ACTOR_ID: execution.akumaId,

@@ -40,12 +40,11 @@ bounded residue may remain past retirement; that residue never weakens the actua
 provider closure proof, and no stronger claim of physical removal is made. The
 wait owner creates no custody and manufactures no provider outcome.
 
-A Body begins with ordinary host configuration but establishes an isolated
-execution identity and request transport before provider or plugin setup.
-Native setup may then establish that Body's own session coordinate; a parent
-execution's harness identity or route never attributes child work. A Body
-establishes its own Akuma and World identity for deeper delegation and removes
-inherited external attribution. Providers retain that Body identity.
+A Body begins with ordinary host configuration and establishes an isolated
+execution identity before provider or plugin setup. Native setup may then
+establish that Body's own session coordinate; a parent execution's harness
+identity never attributes child work. A Body establishes its own Akuma and
+World identity for deeper delegation and removes inherited external attribution. Providers retain that Body identity.
 
 Normal birth execution attempts its optional birth observation only when that
 invocation created Soul and subsequently recorded its Body, before Turn work.
@@ -56,14 +55,13 @@ was submitted.
 
 Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Product composition selects Body hosting and supplies
-its launch capability to execution, publication, wake, delegation, and succession.
-Those algorithms never choose a host, including when a capability is missing;
-request routing conveys intent, not hosting policy. Hosting is
-captured by the invoking composition, defaults to detached execution, and may
-instead run the Body in the calling host. It is never persisted in Soul or
-inferred from an observation bound. A Body's automatic succession uses that
-composition's hosting, but newly requested children do not inherit their parent's
-host choice; the existing direct-parent service launches them detached.
+its launch capability to execution, publication, wake, delegation, and
+succession. Those algorithms never choose a host, including when a capability
+is missing. Hosting is captured by the invoking composition, defaults to
+detached execution, and may instead run the Body in the calling host. It is
+never persisted in Soul or inferred from an observation bound. A Body's
+automatic succession uses that composition's hosting, but forked children do
+not inherit their parent's host choice.
 
 Body launch custody is separate from provider-attempt custody. Launch completion
 is evidence only that the launch finished, never a product outcome or proof of
@@ -94,8 +92,7 @@ detached launch edge; its optional diagnostic evidence is not required of every
 launch. Graceful cancellation and forced disposal both require
 the current provider attempt's closure proof. If owned provider custody cannot
 retire, the Body records hung evidence, ends unsuccessfully, and releases its
-leash; it never sleeps holding custody or calls this an ordinary stop. No public
-timeout or local request recovery manufactures hung.
+leash; it never sleeps holding custody or calls this an ordinary stop. No public timeout or local recovery manufactures hung.
 
 Wake is level-triggered by pending Tell plus absence of a live Body. It starts a
 successor only through the leash and reports only durable delivery, a successor
@@ -155,9 +152,8 @@ witness settles it without rollback. Kill never discards a Tell. A durable resum
 promise with no adapter resume capability refuses without starting fresh, deleting
 the promise, or creating a recovery machine. There is no public resume verb.
 
-Schema remains a Tell input property and does not invent a second route or
-recovery machine; busy, interrupt, routing, and recovery stay shared with ordinary
-Tell. A schema Tell is answered by a Turn dedicated to that schema Tell. Drain
+Schema remains a Tell input property and does not invent a second recovery
+machine; busy and interrupt behavior remain shared with ordinary Tell. A schema Tell is answered by a Turn dedicated to that schema Tell. Drain
 groups ordinary Tells only until the next schema Tell.
 A body-less publication composed before a schema Tell exits cleanly before that
 Tell is admitted; it never makes the Tell contend with its own birth Body.

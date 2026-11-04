@@ -1,16 +1,27 @@
-import type { DebtPriority, DebtState } from "./document.js";
+import type { DebtDocument, DebtPriority, DebtState } from "./document.js";
 import type { DebtId } from "./identity.js";
 
-import type { DebtCleanupFailure, DebtRefusal, DebtRetry, DebtView } from "./mutation-result.js";
-export type {
-  DebtView,
-  DebtCleanupFailure,
-  DebtRefusal,
-  DebtRetry,
-  DebtMutationResult,
-  DebtUpdateResult,
-  DebtBatchResult,
-} from "./mutation-result.js";
+export type DebtView = DebtDocument & Readonly<{ namespace: readonly string[] }>;
+export type DebtCleanupFailure = Readonly<{ kind: "lock-release-failed"; diagnostics: readonly string[] }>;
+export type DebtRefusal =
+  | Readonly<{ kind: "debt-missing"; debtId: DebtId }>
+  | Readonly<{ kind: "invalid-lifecycle-transition"; debtId: DebtId; state: DebtState; verb: "done" | "drop" }>
+  | Readonly<{ kind: "invalid-graph"; diagnostic: string }>
+  | Readonly<{ kind: "invalid-namespace-context"; path: string }>
+  | Readonly<{ kind: "relation-owned-by-other"; debtId: DebtId; related: DebtId; declaringDebt: DebtId }>;
+export type DebtRetry = "busy" | "concurrent-modification";
+export type DebtMutationResult = DebtOutcome<DebtView>;
+export type DebtUpdateResult = DebtOutcome<
+  Readonly<{
+    debt: DebtView;
+    documentDiff: string;
+    changedFields: readonly Readonly<{
+      field: string;
+      action: "added" | "replaced" | "cleared" | "changed" | "appended";
+    }>[];
+  }>
+>;
+export type DebtBatchResult = Readonly<{ items: readonly Readonly<{ id: DebtId; outcome: DebtMutationResult }>[] }>;
 export type DebtOutcome<A> =
   | Readonly<{ kind: "accepted"; value: A; cleanup?: DebtCleanupFailure }>
   | Readonly<{ kind: "refused"; refusal: DebtRefusal }>

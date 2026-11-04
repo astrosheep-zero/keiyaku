@@ -77,8 +77,8 @@ never means execution was skipped. Normal failure or timeout affects only that
 requirement and full verify continues; an operational stop admits no verdict for
 the affected check and preserves prior admissions. A selected success establishes
 no verdict for other requirements; the generic gate judgment decides whole-gate
-satisfaction. Local and parent-forwarded verify return the same
-typed result, while the serving Body retains Git and process custody.
+satisfaction. Verify runs in the invoking process with its native Git and
+process custody.
 
 ## Tell or ask an existing Akuma
 

@@ -145,9 +145,6 @@ function driveInput(fixture: TurnFixture, adapter: ProviderAdapter, supervisor: 
     launchTells: [],
     supervisor,
     world: fixture.world,
-    runtimeSpawn: async () => undefined,
-    admitInitialTell: async () => ({ kind: "birth-failed", diagnostic: "turn-wait fixture admits no call" }),
-    externalCommands: {},
     turnStarted: { emit: async () => undefined },
     now: () => AT,
   };

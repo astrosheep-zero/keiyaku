@@ -4,7 +4,6 @@ import { cpSync, existsSync, mkdtempSync, realpathSync, symlinkSync, writeFileSy
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
-import { AKUMA_REQUESTS_ENV } from "../src/akuma/provider.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { removeTempDirectory } from "./support/process.js";
@@ -25,16 +24,6 @@ const CONTRACT_MARKDOWN = contractMarkdown("Self retirement receipt", {
   Criteria: "### Receipt survives\nThe accepted receipt is emitted once.",
 });
 
-/**
- * A caller running inside an Akuma Body inherits that request channel; this fixture
- * must execute the local CLI rather than forward to an ambient parent Body.
- */
-function fixtureEnvironment(): NodeJS.ProcessEnv {
-  const environment = { ...process.env };
-  delete environment[AKUMA_REQUESTS_ENV];
-  return environment;
-}
-
 function runGit(cwd: string, args: readonly string[]): void {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
   assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
@@ -47,7 +36,7 @@ function runFixtureCli(cli: string, cwd: string, args: readonly string[]): Promi
   return new Promise((resolveChild, rejectChild) => {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd,
-      env: fixtureEnvironment(),
+      env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -79,7 +68,7 @@ function selfRetirementFixture(context: TestContext): SelfRetirementFixture {
   const bound = spawnSync(
     process.execPath,
     [repositoryCli, "-C", world.path, "bind", "--target", "refs/heads/main", "--gates", "reviewed", "--json", "-"],
-    { input: CONTRACT_MARKDOWN, encoding: "utf8", env: fixtureEnvironment() },
+    { input: CONTRACT_MARKDOWN, encoding: "utf8", env: process.env },
   );
   assert.equal(bound.status, 0, bound.stderr);
   const binding = JSON.parse(bound.stdout) as {
@@ -244,7 +233,7 @@ test("a known-admission failure after retirement keeps its receipt and classific
   const result = await new Promise<CliChild>((resolveChild, rejectChild) => {
     const child = spawn(process.execPath, [harness, fixture.worktree, fixture.world, fixture.contract], {
       cwd: fixture.world,
-      env: fixtureEnvironment(),
+      env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";

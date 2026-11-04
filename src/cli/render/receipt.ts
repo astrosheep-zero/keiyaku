@@ -1,6 +1,5 @@
 import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
 import type { PlacementStop, VerificationStop } from "../../index.js";
-import type { Review as CompletionEvidence } from "../../index.js";
 import { gateGlyph, requirementDisplayName, contractOperationName } from "./contract-observation.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
@@ -103,7 +102,14 @@ export function standingGateLines(
         requirements: readonly Readonly<{
           requirement: string;
           index?: number | undefined;
-          current: NonNullable<CompletionEvidence["gates"]>[number]["current"];
+          current:
+            | Readonly<{ kind: "missing" | "stale" }>
+            | Readonly<{
+                kind: "attested";
+                verdict: "satisfied" | "unsatisfied";
+                at: string;
+                summary?: string | undefined;
+              }>;
         }>[];
       }>[]
     | undefined,

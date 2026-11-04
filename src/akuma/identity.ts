@@ -24,7 +24,6 @@ export const akumaPathsSchema = z
     heart: pathText,
     leash: pathText,
     log: pathText,
-    requests: pathText,
   })
   .strict();
 export type AkumaPaths = z.infer<typeof akumaPathsSchema>;
@@ -87,7 +86,6 @@ export function akumaPaths(
     heart: join(directory, "heart.db"),
     leash: join(directory, "leash.db"),
     log: join(directory, "stdio.log"),
-    requests: join(directory, "requests"),
   };
 }
 
