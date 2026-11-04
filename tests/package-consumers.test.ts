@@ -57,7 +57,10 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
 import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
   ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
   NukeConfirmationRefusal, NukeConfirmationRequiredRefusal, Repo, Keiyaku,
-  ContractWaitInput, ContractWaitResult } from "@astrosheep/keiyaku";
+  ContractWaitInput, ContractWaitResult, KanshiCountsInput, KanshiCountsReport } from "@astrosheep/keiyaku";
+const countsInput: KanshiCountsInput = { world: null };
+const countsResult: Promise<KanshiCountsReport> = (await import("@astrosheep/keiyaku")).kanshiCounts(countsInput);
+void countsResult;
 declare const repo: Repo;
 declare const handle: Keiyaku;
 const waitInput: ContractWaitInput = { repo, contracts: ["kei/consumer"], timeoutMs: 0 };
@@ -116,7 +119,8 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Delivery, Keiyaku, Repo, Debts, kanshi, nuke, settings } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Delivery, Keiyaku, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
+        'assert.equal((await kanshiCounts({ world: null })).akuma.kind, "absent");',
         'const repo = await Repo.at({ path: process.cwd() });',
         'assert.equal((await Keiyaku.with().wait({ repo, contracts: ["kei/missing"], timeoutMs: 0 })).kind, "missing");',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',

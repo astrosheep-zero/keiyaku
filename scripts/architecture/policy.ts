@@ -433,6 +433,19 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "kanshi/counts.ts",
+      allow: [
+        any("akuma/akuma.ts"),
+        any("debt/index.ts"),
+        any("debt/operations.ts"),
+        kanshiGitObservation,
+        any("kanshi/**"),
+        any("library/repo.ts"),
+        any("protocol/read/status.ts"),
+        any("world.ts"),
+      ],
+    },
+    {
       source: "kanshi/read.ts",
       allow: [
         any("akuma/akuma.ts"),

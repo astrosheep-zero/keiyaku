@@ -156,16 +156,28 @@ async function freshnessOrdered(rows: readonly KnownAkuma[]): Promise<readonly A
 
 async function readableRows(
   rows: readonly KnownAkuma[],
-): Promise<Readonly<{ rows: readonly AkumaListRowValue[]; skipped: number }>> {
+): Promise<Readonly<{ rows: readonly AkumaListRowValue[]; skipped: number; failure?: unknown }>> {
   const loaded = await boundedMap(rows, async ({ id, paths }) => {
     try {
-      return await rosterListRow(paths, id);
-    } catch {
-      return null;
+      return { row: await rosterListRow(paths, id) };
+    } catch (error) {
+      return { error };
     }
   });
-  const values = [...loaded].filter((row): row is AkumaListRowValue => row !== null);
-  return { rows: values, skipped: loaded.length - values.length };
+  const values = loaded.flatMap((item) => (item.row === undefined ? [] : [item.row]));
+  const failed = loaded.find((item) => item.row === undefined);
+  return {
+    rows: values,
+    skipped: loaded.length - values.length,
+    ...(failed === undefined ? {} : { failure: failed.error }),
+  };
+}
+
+/** Exact running count requires every recognized coordinate to be readable. */
+export async function countRunningAkuma(path: WorldRoot): Promise<number> {
+  const observed = await readableRows((await knownAkuma(path)).rows);
+  if (observed.skipped > 0) throw new Error("Cannot classify every recognized Akuma", { cause: observed.failure });
+  return observed.rows.filter((row) => row.life === "running").length;
 }
 
 function rosterInput(

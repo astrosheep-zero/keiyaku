@@ -99,7 +99,8 @@ export type {
   FactKind,
   SnapshotId,
 } from "./core/facts/types.js";
-export { kanshi, kanshiCategory, observeKanshi, selectKanshi, selectRegion } from "./kanshi/index.js";
+export { kanshi, kanshiCategory, kanshiCounts, observeKanshi, selectKanshi, selectRegion } from "./kanshi/index.js";
+export type { KanshiCountsInput, KanshiCountsReport } from "./kanshi/index.js";
 export type {
   AkumaKanshiRow,
   AkumaKanshiWorld,

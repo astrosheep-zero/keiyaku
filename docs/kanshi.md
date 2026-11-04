@@ -78,6 +78,13 @@ caller-invalid, an unrecognized category is never read as Akuma, and a Contract
 category without a Repo is refused rather than reported as a failed section. A
 failure that the owner actually produces stays that owner's evidence in the report.
 
+An exact aggregate observes the complete owner-classified running Akumas,
+active Contracts, and open Debts across their respective authorities. It never
+uses bounded catalogue rows as totals. An incomplete owner observation fails
+only that count; absence and a complete empty authority remain distinct. Repo
+and World availability are independent, and the aggregate is one read-time
+observation rather than a cross-product transaction.
+
 ## Associations and selection
 
 Kanshi may attach already observed DebtHolder and Dispatch facts to their
