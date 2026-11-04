@@ -30,16 +30,14 @@ export function isRequestInputConflict(error: unknown): error is Error {
 
 export async function admitRequest(
   paths: AkumaPaths,
-  input: RequestInput & Readonly<{ admittedAt: string; permitted: boolean }>,
+  input: RequestInput & Readonly<{ admittedAt: string }>,
 ): Promise<RequestFact> {
   return await withHeartTransaction(paths, (heart) => {
     const soul = soulFact(heart);
     if (soul === null) throw new Error("Akuma request admission requires a born Soul");
-    const { permitted, ...request } = input;
     insertRequestFact(heart, {
-      ...request,
+      ...input,
       requester: soul.id,
-      ...(permitted ? {} : { refusal: `not-allowed: ${input.action}` }),
     });
     const fact = requestFact(heart, input.id);
     if (fact === null) throw new Error(`Akuma request ${input.id} was not admitted`);

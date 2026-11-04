@@ -96,7 +96,6 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
   assert.deepEqual(
     Object.keys(exported).sort(),
     [
-      "ALLOWED_ACTIONS",
       "Akuma",
       "AkumaArchetypeError",
       "AkumaBusyError",
@@ -291,7 +290,7 @@ test("waited schema Tell decodes at the CLI boundary and bounded interrupt Tell 
     const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "a1000abc", createdAt: WAITED_TELL_NOW });
     const parentBody = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAITED_TELL_NOW });
     const pump = await BodyRequestPump.open({
-      paths: parent.paths, allowed: parent.soul.allowed, bodySequence: parentBody.sequence,
+      paths: parent.paths, bodySequence: parentBody.sequence,
       now: () => WAITED_TELL_NOW, signal: context.signal,
       commands: selectionRequestCommands(selectionRequestPort(answered.world, answered.spawn)),
     });

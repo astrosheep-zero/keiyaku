@@ -206,7 +206,6 @@ export function debtMutationRequestProtocol(
       return parsed.data;
     },
     decodeReference: (reference) => decodeDebtReference(action, reference),
-    isPermitted: (allowed) => allowed.includes(action),
   };
 }
 

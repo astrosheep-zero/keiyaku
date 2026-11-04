@@ -17,7 +17,6 @@ import { atomicJson, decodeEnvelope, type RequestEnvelope } from "./request-wire
 
 export type PumpInput = Readonly<{
   paths: AkumaPaths;
-  allowed: readonly string[];
   bodySequence: number;
   now(): string;
   signal: AbortSignal;

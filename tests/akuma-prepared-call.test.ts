@@ -15,7 +15,6 @@ import { bornDirectAkuma, noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering } from "./support/akuma-tell.js";
 import { Square, DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { HeldAkumaLeash, projectTell, readSoul, readTell, type Soul, type TellFact } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import type { CallInitialTellAdmission, TellResult } from "../src/akuma/call-initial-tell.js";
@@ -34,7 +33,6 @@ function rawRecipe(overrides: Partial<PreparedCallRecipe> = {}): PreparedCallRec
   return {
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
-    allowed: ALLOWED_ACTIONS,
     ...overrides,
   };
 }
@@ -80,7 +78,7 @@ function admittedTell(tellId: string): CallInitialTellAdmission {
   };
 }
 
-function parentSoul(allowed: Soul["allowed"]): Soul {
+function parentSoul(): Soul {
   return {
     id: "aku/parent/1234abcd" as AkuId,
     archetype: "parent",
@@ -88,7 +86,6 @@ function parentSoul(allowed: Soul["allowed"]): Soul {
     options: {},
     cwd: "/tmp",
     origin: { kind: "direct" },
-    allowed,
     createdAt: AT,
   };
 }
@@ -183,7 +180,7 @@ for (const route of ["local", "forwarded"] as const) {
       t.after(() => parent.leash.release());
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
       pump = await BodyRequestPump.open({
-        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        paths: parent.paths, bodySequence: body.sequence,
         now: () => AT, signal: t.signal,
         commands: akumaCallRequestCommands({
           world, paths: parent.paths, parent: parent.soul, spawn,
@@ -271,16 +268,15 @@ test("local custody carries a raw recipe the executor admits once and births wit
   const soul = await readSoul(result.child.paths);
   assert.equal(soul?.id, result.child.id);
   assert.equal(soul?.cwd, root);
-  assert.deepEqual(soul?.allowed, ALLOWED_ACTIONS);
   assert.deepEqual(soul?.options, { model: "claude-sonnet-4-5" });
   assert.equal(Object.isFrozen(soul?.options), true);
   assert.deepEqual(soul?.origin, { kind: "direct" });
 });
 
-test("request custody resolves, reserves before spawn, clips to the parent, and stamps the request origin", async (context) => {
+test("request custody resolves, reserves before spawn, and stamps caller and request origin", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-request-"));
   const order: string[] = [];
-  const parent = parentSoul(["akuma.tell"]);
+  const parent = parentSoul();
   const result = await executePreparedCall({
     archetype: "worker",
     cwd: root,
@@ -307,7 +303,7 @@ test("request custody resolves, reserves before spawn, clips to the parent, and 
   });
   assert.deepEqual(order, [`reserve:${result.child.id}`, "spawn"]);
   const soul = await readSoul(result.child.paths);
-  assert.deepEqual(soul?.allowed, ["akuma.tell"]);
+  assert.deepEqual(soul?.caller, { kind: "akuma", world: root, akuId: parent.id });
   assert.deepEqual(soul?.origin, { kind: "request", parent: parent.id, requestId: "request-1" });
   assert.equal(result.failure, undefined);
 });
@@ -326,7 +322,7 @@ test("request custody refuses a mismatched world before any reservation or birth
         world: root,
         coordinate: other,
         recipe: rawRecipe(),
-        parent: parentSoul(ALLOWED_ACTIONS),
+        parent: parentSoul(),
         requestId: "request-mismatch",
         admissionOpen: () => true,
         reserve: async () => {},

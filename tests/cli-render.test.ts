@@ -2590,7 +2590,6 @@ test("a settled successful tool spends no mark while voice and input rows keep t
     birth: DIRECT_BIRTH,
     id,
     life: "asleep",
-    allowed: [],
     timeline: idleAkumaSnapshot([
       { kind: "row", row: completedTool(1, "read", { kind: "read", path: "src/a.ts", offset: 0, limit: 1 }) },
       {
@@ -2832,7 +2831,6 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0001",
     life: "asleep",
-    allowed: [],
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
   });
   const snapshot = snapshotText({ status: sleeping, contract: { kind: "none" } }, { columns: 80, color: false });
@@ -2844,7 +2842,6 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0002",
     life: "asleep",
-    allowed: [],
     timeline: idleAkumaSnapshot([]),
   });
   const answerlessText = snapshotText(
@@ -2874,7 +2871,6 @@ test("status text and JSON report the Akuma execution workdir", () => {
     id,
     life: "running",
     cwd: "/work/tree",
-    allowed: [],
     timeline: openAkumaSnapshot([]),
   });
   const invocation = parseArgv(["status", id]);
@@ -2977,7 +2973,7 @@ test("status renders selected activity evidence while preserving history and com
     snapshotRow(active(12, "c9")),
   ];
   const snapshot = openAkumaSnapshot(focusedEntries);
-  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", allowed: [], timeline: snapshot });
+  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: snapshot });
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(
@@ -3023,7 +3019,6 @@ test("status renders selected activity evidence while preserving history and com
     birth: DIRECT_BIRTH,
     id,
     life: "asleep",
-    allowed: [],
     timeline: outcomeSnapshot,
   });
   const outcomeText = snapshotText(
@@ -3047,7 +3042,6 @@ test("status renders selected activity evidence while preserving history and com
         birth: DIRECT_BIRTH,
         id,
         life: "asleep",
-        allowed: [],
         timeline: idleAkumaSnapshot(outcomeSnapshot.entries, failedOutcome),
       }),
       contract: { kind: "none" },
@@ -3171,7 +3165,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
 
   const id = "aku/worker/abcd0101";
-  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", allowed: [], timeline: initial });
+  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: initial });
   const statusText = snapshotText({ status, contract: { kind: "none" } }, context);
   assert.ok(statusText.indexOf("initial commission") < statusText.indexOf("after-boundary"));
 
@@ -3202,7 +3196,6 @@ test("current attempt boundaries lead live streams exactly once", () => {
         birth: DIRECT_BIRTH,
         id: "aku/worker/abcd0102",
         life: "running",
-        allowed: [],
         timeline: woken,
       }),
       contract: { kind: "none" },
@@ -3282,7 +3275,6 @@ test("call and ask stream projected overlapping tool completions once in complet
         birth: DIRECT_BIRTH,
         id,
         life: "running",
-        allowed: [],
         timeline: selectSnapshot(ledger, { aperture: "monitoring" }).snapshot,
       }),
       ordinarySelected: 0,
@@ -3515,13 +3507,12 @@ test("a plural wait text renders one compact line per observation and unreadable
   const second = "aku/worker/abcd0007";
   const missing = parseAkuId("aku/worker/abcd0008").id;
   const running = (id: string) =>
-    akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", allowed: [], timeline: openAkumaSnapshot([]) });
+    akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: openAkumaSnapshot([]) });
   const answered = (id: string) =>
     akumaStatusSchema.parse({
       birth: DIRECT_BIRTH,
       id,
       life: "asleep",
-      allowed: [],
       timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
     });
   const text = nativeWaitText(
@@ -3571,7 +3562,6 @@ test("an observing call's conclusion asserts real waiting", () => {
     birth: DIRECT_BIRTH,
     id,
     life: "running",
-    allowed: [],
     timeline: openAkumaSnapshot([]),
   });
   bounded.observe({ status: running, rows: [] });
@@ -3584,14 +3574,12 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0047",
     life: "asleep",
-    allowed: [],
     timeline: idleAkumaSnapshot([]),
   });
   const pending = akumaStatusSchema.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0048",
     life: "asleep",
-    allowed: [],
     timeline: openAkumaSnapshot([
       snapshotRow({
         kind: "tell",
@@ -3627,7 +3615,6 @@ test("a text wait omits activity, changes, Debts, and a failed association", () 
     id,
     life: "running",
     cwd: "/work/secret",
-    allowed: [],
     timeline: openAkumaSnapshot(
       [
         snapshotRow(completedTool(1, "bash", { kind: "run", command: "secret-command" })),
@@ -3722,7 +3709,6 @@ test("a streamed observing call opens one framed head and never replays a settle
       birth: DIRECT_BIRTH,
       id,
       life: "running",
-      allowed: [],
       timeline: openAkumaSnapshot(entries),
     });
   const tool = (sequence: number, command: string) =>
@@ -3767,7 +3753,6 @@ test("a streamed observing call concludes truthfully when its stream never opene
         birth: DIRECT_BIRTH,
         id,
         life: "running",
-        allowed: [],
         timeline: openAkumaSnapshot([]),
       }),
     ),

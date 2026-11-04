@@ -3,7 +3,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseAkuId, type AkuId } from "../identity.js";
 import { decodeProviderOptions, decodeProviderRecipe } from "../provider-recipe.js";
 import { akumaOriginSchema, type Soul, type SoulRow } from "./facts.js";
-import { historicalAllowedActions } from "../allowed.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -49,7 +48,6 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
     cwd: nonblank(soul.cwd, "cwd"),
     origin: akumaOriginSchema.parse(soul.origin),
     ...(caller === undefined ? {} : { caller }),
-    allowed: historicalAllowedActions(soul.allowed),
     ...(soul.bare === undefined ? {} : { bare: soul.bare }),
   };
 }
@@ -94,8 +92,8 @@ export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
 /**
  * Replace only the current-model member of the singleton Soul and report
  * whether the stored value actually moved. Every other raw member is carried
- * through byte-identically: the codec normalizes recipe options, origin and
- * allowed, so decoding and re-encoding a whole Soul here would silently
+ * through byte-identically: the codec normalizes recipe options and origin,
+ * so decoding and re-encoding a whole Soul here would silently
  * rewrite fields this update never touched. A Soul this build cannot read is
  * refused rather than mutated.
  */

@@ -523,7 +523,6 @@ async function answeredSource(root: string, suffix: string, bare?: boolean) {
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
         origin: { kind: "direct" },
-        allowed: [],
         cwd: world,
       },
       initialBody: "work",
@@ -1305,7 +1304,6 @@ test("an answered Turn without a fork point remains visible and keeps its answer
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
         origin: { kind: "direct" },
-        allowed: [],
         cwd: root,
       },
       initialBody: "work",
@@ -1467,7 +1465,6 @@ test("public Akuma handles separate compact list rows from full status and wait"
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
-      allowed: [],
       cwd: root,
     },
     initialBody: "work",
@@ -1644,7 +1641,6 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        allowed: [],
         cwd: root,
         caller,
       },
@@ -1838,7 +1834,6 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
-        allowed: [],
         cwd: seat,
       },
       initialBody: "first",
@@ -2241,7 +2236,6 @@ test("kill gives the Body a grace window to abort its owned provider session", a
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
-      allowed: [],
       cwd: root,
     },
     initialBody: "keep working",
@@ -2266,7 +2260,7 @@ test("Selection wire retains strict derived tool views without tightening neutra
   const at = "2026-08-08T00:00:00.000Z";
   const row = { kind: "tool", sequence: 2, turnSequence: 1, at, name: "run", call: { kind: "run", command: "x" }, state: { status: "ok" } };
   const timeline = { kind: "idle", entries: [{ kind: "row", row }], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 };
-  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", allowed: [], timeline }, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }], unobserved: [] };
+  const value = { mode: "all", reason: "completed", observations: [{ status: { id: "aku/claude/1234abcd", birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } }, life: "asleep", timeline }, contract: { kind: "none" }, createdDebts: { kind: "present", rows: [] } }], unobserved: [] };
   const protocol = selectionRequestProtocol("akuma.wait");
   assert.doesNotThrow(() => protocol.decodeResult(value));
   const withRow = (changed: unknown) => ({ ...value, observations: [{ ...value.observations[0], status: { ...value.observations[0]!.status, timeline: { ...timeline, entries: [{ kind: "row", row: changed }] } } }] });

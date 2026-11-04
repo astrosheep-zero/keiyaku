@@ -4,7 +4,6 @@ import http from "node:http";
 import type { Socket } from "node:net";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { readHeart } from "../src/akuma/heart/index.js";
@@ -235,7 +234,6 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
         provider: { name: "opencode-sdk", kind: "opencode-sdk" },
         options: {},
         origin: { kind: "direct" },
-        allowed: ALLOWED_ACTIONS,
         cwd: root,
       },
       initialBody: "work",

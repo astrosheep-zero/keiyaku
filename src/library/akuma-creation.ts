@@ -7,7 +7,6 @@ import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
-import type { AllowedAction } from "../akuma/allowed.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
 import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
@@ -64,7 +63,6 @@ export type CallInput = Readonly<{
   settings?: Settings;
   contract?: Keiyaku;
   alias?: AkumaAlias;
-  allowed?: readonly AllowedAction[];
   writableDirectories?: readonly string[];
   bare?: boolean;
   schema?: Schema<unknown>;
@@ -300,7 +298,6 @@ const CALL_INPUT_KEYS = [
   "settings",
   "contract",
   "alias",
-  "allowed",
   "writableDirectories",
   "bare",
   "schema",
@@ -320,7 +317,6 @@ type ParsedCallInput = Readonly<{
   home?: string;
   settings?: Settings;
   alias?: AkumaAlias;
-  allowed?: readonly AllowedAction[];
   writableDirectories?: readonly string[];
   bare?: boolean;
   seat: ReturnType<typeof callSeat>;
@@ -371,7 +367,6 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
     ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
     ...(alias === undefined ? {} : { alias }),
-    ...(values.allowed === undefined ? {} : { allowed: values.allowed as readonly AllowedAction[] }),
     ...(values.writableDirectories === undefined
       ? {}
       : { writableDirectories: values.writableDirectories as readonly string[] }),
@@ -407,7 +402,6 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
             ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
           },
         }),
-    ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
     ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
     ...(input.bare === undefined ? {} : { bare: input.bare }),
     ...(execution === undefined ? {} : { cwd: execution.cwd }),

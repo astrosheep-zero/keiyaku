@@ -29,7 +29,6 @@ function command(
       encodeResult: (value) => value,
       decodeResult: (value) => String(value),
       decodeReference: (value) => String(value),
-      isPermitted: () => true,
     },
     encodeService: (value) => value,
     decodeService: (value) => String(value),
@@ -222,7 +221,6 @@ test("consumed claims disappear while Heart still prevents duplicate execution",
   });
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: [],
     bodySequence: 1,
     now: () => AT,
     signal: new AbortController().signal,
@@ -268,7 +266,6 @@ test("receipt failure never re-enters owner failure encoding or settlement", asy
     await assert.rejects(
       serveRequest({
         paths: parent.paths,
-        allowed: [],
         directory: root,
         transportId,
         now: () => AT,
@@ -298,7 +295,6 @@ test("owner ENOENT failure is returned immediately instead of being mistaken for
   };
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: [],
     bodySequence: 1,
     now: () => AT,
     signal: new AbortController().signal,

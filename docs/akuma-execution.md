@@ -27,7 +27,7 @@ initiators of every Tell bound to it, without duplicates. Live steering and
 launch routing decide how input enters the Turn, never who hears its outcome.
 A subsequent Turn takes its own opening input's identity, including explicit
 absence; it never inherits the birth caller or the Body environment.
-This attribution grants no permission and does not affect execution.
+This attribution does not affect execution.
 
 An open Turn's wait retains observation work in bounded amount rather than in
 proportion to elapsed control observations. Waiting on provider narration, Tell
@@ -58,7 +58,7 @@ Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Product composition selects Body hosting and supplies
 its launch capability to execution, publication, wake, delegation, and succession.
 Those algorithms never choose a host, including when a capability is missing;
-request routing conveys intent and permission, not hosting policy. Hosting is
+request routing conveys intent, not hosting policy. Hosting is
 captured by the invoking composition, defaults to detached execution, and may
 instead run the Body in the calling host. It is never persisted in Soul or
 inferred from an observation bound. A Body's automatic succession uses that

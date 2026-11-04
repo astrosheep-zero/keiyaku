@@ -28,7 +28,6 @@ type Profile =
       workdir: string | null;
       birth: AkumaStatus["birth"];
       bornAt: string | null;
-      allowed: AkumaStatus["allowed"];
       contracts: readonly ContractId[];
     }>
   | Readonly<{ kind: "unavailable"; reason: string }>;
@@ -137,7 +136,6 @@ async function callerProfile(
       workdir: status.cwd ?? null,
       birth: status.birth,
       bornAt,
-      allowed: status.allowed,
       contracts: dispatch.kind === "associated" ? [dispatch.contractId] : [],
     };
   } catch (error) {

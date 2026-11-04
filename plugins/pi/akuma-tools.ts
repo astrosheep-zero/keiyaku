@@ -79,7 +79,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     if (current.closed) throw new Error("Keiyaku Pi session is shutting down");
     if (current.host === undefined)
       throw new Error(
-        "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI (direct-parent permissions apply).",
+        "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI.",
       );
     return current;
   }
@@ -119,7 +119,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
         // establishment, including when invoked as another tool's nested call.
         if (pi.getFlag("keiyaku-request-only") === true)
           throw new Error(
-            "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI (direct-parent permissions apply).",
+            "Native Akuma tools require an external Pi session. Inside an Akuma use the request-aware keiyaku CLI.",
           );
         const owned = session(ctx);
         signal?.throwIfAborted();

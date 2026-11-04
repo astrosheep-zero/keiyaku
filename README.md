@@ -46,9 +46,7 @@ testimony and timestamps are unchanged. Original bytes remain in
 of an unmigrated board fail explicitly instead of reporting an empty ledger.
 If an interrupted upgrade leaves only the backup, restore that directory to
 `.keiyaku/tasks` before retrying. Contract journals and existing holder records
-are not rewritten or orphaned. Existing Soul permissions retain their surviving
-capabilities; update any explicit Archetype `allowed` configuration to the
-`debt.*` vocabulary. Do not run old and new writers concurrently.
+are not rewritten or orphaned. Do not run old and new writers concurrently.
 
 ## What a contract looks like
 
@@ -252,7 +250,7 @@ npm install -g @astrosheep/keiyaku
 Pi's shipped extension provides native `akuma_*` tools through the public SDK,
 plus the `/keiyaku` status overlay. The overlay still invokes `keiyaku` from
 `PATH`; native tools do not. See [`plugins/pi/README.md`](plugins/pi/README.md)
-for host lifetime, detached work, and request-permission scope.
+for host lifetime and detached work.
 
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 

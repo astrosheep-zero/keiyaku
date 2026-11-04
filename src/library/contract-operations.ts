@@ -282,7 +282,6 @@ export function contractRequestProtocol(
     encodeFailure: encodeFailureWire,
     decodeFailure: (value) => decodeFailureWire(value),
     decodeReference: (reference) => decodeContractReference(action, reference),
-    isPermitted: (allowed) => action === "contract.preview-delivery" || allowed.includes(action),
   };
 }
 

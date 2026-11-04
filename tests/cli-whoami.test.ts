@@ -150,7 +150,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   await leash.birth(allocated.paths, {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
     options: { model: "fixture-model" }, cwd: row.worktreePath, origin: { kind: "direct" },
-    caller: { kind: "external", integration: "fixture", id: "parent" }, allowed: ["akuma.call", "contract.deliver"], createdAt: AT,
+    caller: { kind: "external", integration: "fixture", id: "parent" }, createdAt: AT,
   });
   const environment = {
     KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world,
@@ -184,7 +184,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   assert.deepEqual(result.value.profile, {
     kind: "available", archetype: "worker", aliases: ["@backup", "@worker"], provider: "claude", model: "fixture-model",
     workdir: row.worktreePath, birth: { origin: { kind: "direct" }, caller: { kind: "external", integration: "fixture", id: "parent" } },
-    bornAt: AT, allowed: ["akuma.call", "contract.deliver"], contracts: [bound.contract],
+    bornAt: AT, contracts: [bound.contract],
   });
   const text = await runCli(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(text.exit, 0, text.stderr);
@@ -259,7 +259,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   t.after(() => freeLeash.release());
   await freeLeash.birth(free.paths, {
     id: free.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {}, cwd: row.worktreePath, origin: { kind: "fork", parent: allocated.id, at: "turn/1" }, allowed: [], createdAt: AT,
+    options: {}, cwd: row.worktreePath, origin: { kind: "fork", parent: allocated.id, at: "turn/1" }, createdAt: AT,
   });
   const freeEnvironment = { ...environment, KEIYAKU_ACTOR_ID: free.id };
   const freeFacts = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment: freeEnvironment });

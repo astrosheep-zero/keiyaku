@@ -276,7 +276,7 @@ export function renderContractHelp(command: ContractCommand): string {
       "Akuma definitions are Markdown files, one per name:",
       "  user      ~/.keiyaku/akumas/<name>.md",
       "  project   <WorldRoot>/.keiyaku/akumas/<name>.md",
-      "Project wins. Frontmatter: provider, base, model, effort, network, allowed,",
+      "Project wins. Frontmatter: provider, base, model, effort, network,",
       "systemPromptMode, description. The body is an optional system prompt.",
       "Provider setup: see README Configuration.",
     ].join("\n");

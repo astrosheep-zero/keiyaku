@@ -63,7 +63,6 @@ export type RequestProtocol<Input, Output, Reference> = Readonly<{
   encodeFailure?(error: unknown): unknown | null;
   decodeFailure?(failure: unknown): Error | null;
   decodeReference(reference: unknown): Reference;
-  isPermitted(allowed: readonly string[]): boolean;
 }>;
 
 export type ExecutionFacts = Readonly<{
@@ -99,7 +98,6 @@ export type ServiceRequestCommand<Input, Output, Service, Reference> = Readonly<
 type ErasedRequest = Readonly<{
   payloadJson: string;
   supportsCancellation: boolean;
-  isPermitted(allowed: readonly string[]): boolean;
   encodeFailure(error: unknown): unknown | null;
 }>;
 
@@ -155,7 +153,6 @@ export function eraseRequestCommand<Input, Output, Service, Reference>(
           return {
             payloadJson: JSON.stringify(protocol.encodeRequest(input)),
             supportsCancellation: protocol.supportsCancellation === true,
-            isPermitted: (allowed) => protocol.isPermitted(allowed),
             execute: async (facts) => {
               const served = await command.execute(input, facts);
               return { result: protocol.encodeResult(served.result), child: served.child };
@@ -175,7 +172,6 @@ export function eraseRequestCommand<Input, Output, Service, Reference>(
           return {
             payloadJson: JSON.stringify(protocol.encodeRequest(input)),
             supportsCancellation: protocol.supportsCancellation === true,
-            isPermitted: (allowed) => protocol.isPermitted(allowed),
             execute: async (facts) => {
               const served = await command.execute(input, facts);
               if (served.kind === "voided")

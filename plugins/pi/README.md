@@ -49,8 +49,7 @@ unless the caller opts out.
 `writableDirectories` grants native tools access to additional existing canonical
 absolute directories at birth (currently Codex only). It preserves the native
 sandbox mode, network policy, and existing writable roots. Other providers
-refuse nonempty grants. These are explicit filesystem grants, not product-action
-permissions; nothing automatically exposes the repository or Home. Forks
+refuse nonempty grants. Nothing automatically exposes the repository or Home. Forks
 inherit the frozen native recipe; there is no live elevation option.
 
 ```json
@@ -89,9 +88,8 @@ The Pi provider supplies the public SDK extension flag
 at native tool execution, before World establishment or SDK operations, and
 refuses local tools there (including nested tool calls). Those child Akumas use
 the existing CLI in their tool environment, with authenticated direct-parent
-routing and frozen permissions. There is no ambient identity guess or duplicate
-permission evaluator. If the optional extension is absent, Pi collects an
-unknown-option diagnostic without failing provider startup.
+routing. There is no ambient identity guess. If the optional extension is
+absent, Pi collects an unknown-option diagnostic without failing provider startup.
 
 In-process hosting is shared lifetime, not a sandbox: arbitrary extensions can
 block or terminate the runtime. A noncooperative tool/provider can remain

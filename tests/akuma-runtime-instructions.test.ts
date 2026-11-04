@@ -40,7 +40,7 @@ test("Body regenerates one runtime section on start and wake, separate from froz
   const options = { systemPrompt: "Original personality", systemPromptMode: "replace" as const };
   const seed = {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" as const },
-    options, cwd: root, origin: { kind: "direct" as const }, allowed: [], bare: false,
+    options, cwd: root, origin: { kind: "direct" as const }, bare: false,
   };
   const seen: DriveInput[] = [];
   const adapter = recordingProvider(seen);
@@ -72,7 +72,7 @@ test("Body composition observes later Dispatch without treating launch metadata 
   await initializeHeart(allocated.paths);
   const seed = {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" as const },
-    options: {}, cwd: world, origin: { kind: "direct" as const }, allowed: [],
+    options: {}, cwd: world, origin: { kind: "direct" as const },
   };
   const launch = { paths: allocated.paths, seed, completion: { contractId: "kei/launch-intent" } };
   const composition = await externalRequestCommandsFor(launch, {}, noBodyLaunch);
@@ -100,7 +100,7 @@ test("bare is frozen in Soul and omits only runtime instructions through wake", 
   const seed = {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" as const },
     options: { systemPrompt: "Still myself", systemPromptMode: "append" as const },
-    cwd: root, origin: { kind: "direct" as const }, allowed: ["debt.add" as const], bare: true,
+    cwd: root, origin: { kind: "direct" as const }, bare: true,
   };
   const adapter = recordingProvider(seen);
   await driveAkumaBody({ paths: allocated.paths, seed, initialBody: "first" }, adapter, {
@@ -116,7 +116,6 @@ test("bare is frozen in Soul and omits only runtime instructions through wake", 
   assert.ok(seen.every((input) => input.options.systemPrompt === "Still myself" && input.requests.dir.length > 0));
   const soul = (await readHeart(allocated.paths)).soul!;
   assert.equal(soul.bare, true);
-  assert.deepEqual(soul.allowed, ["debt.add"]);
   assert.equal(keiyakuExecutionInstructions(soul), undefined);
   const own = keiyakuExecutionInstructions({ ...soul, bare: false, id: parseAkuId("aku/worker/1234abcd").id, origin: { kind: "fork", parent: soul.id, at: "turn/1" } });
   assert.match(own!, /aku\/worker\/1234abcd/u);
@@ -138,7 +137,7 @@ test("a prefeature Soul resumes without retrofitting instructions or requiring o
     executionAssociation: async () => { throw new Error("legacy execution does not need association"); } };
   await driveAkumaBody({ paths: allocated.paths, seed: {
     id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {}, cwd: root, origin: { kind: "direct" }, allowed: [],
+    options: {}, cwd: root, origin: { kind: "direct" },
   }, initialBody: "first" }, adapter, runtime);
   await recordTell(allocated.paths, { kind: "tell", id: "next", body: "second", recordedAt: new Date().toISOString() });
   await driveAkumaBody({ paths: allocated.paths }, adapter, runtime);

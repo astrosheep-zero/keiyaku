@@ -3,7 +3,6 @@ import { z } from "zod";
 import { akumaIdSchema, type AkuId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../provider-recipe.js";
-import type { AllowedActions } from "../allowed.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
 export class HeartAuthorityCorruptionError extends Error {
@@ -30,12 +29,11 @@ export type Soul = Readonly<{
   cwd: string;
   origin: AkumaOrigin;
   caller?: AkumaCaller;
-  allowed: AllowedActions;
   bare?: boolean;
   createdAt: string;
 }>;
 
-export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "allowed" | "bare">;
+export type RequestRecipe = Pick<Soul, "description" | "provider" | "options" | "bare">;
 
 export type BodyEnd = "exited" | "broke-off" | "put-down";
 

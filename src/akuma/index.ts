@@ -19,8 +19,6 @@ export type {
 export type { AkumaStreamSnapshot } from "./akuma-stream.js";
 export type { InterruptReceipt } from "./akuma-owner.js";
 export type { AkumaStatus } from "./akuma.js";
-export { ALLOWED_ACTIONS } from "./allowed.js";
-export type { AllowedAction, AllowedActions } from "./allowed.js";
 export type { KillEvidence } from "./heart/index.js";
 export type { AkuId } from "./identity.js";
 export type { ActivityHistory, ActivityRow } from "./projection.js";

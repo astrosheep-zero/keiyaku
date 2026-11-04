@@ -370,7 +370,7 @@ test("forwarded wait and ask have exactly one requesting observer", { timeout: 1
     [source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }],
   ]));
   const pump = await BodyRequestPump.open({
-    paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT,
+    paths: parent.paths, bodySequence: body.sequence, now: () => AT,
     commands: selectionRequestCommands(selectionRequestPort(world, spawn)), signal: t.signal,
   });
   try {
@@ -449,7 +449,7 @@ for (const route of ["wait", "forwarded-wait", "idle"] as const) {
       t.after(() => parent.leash.release());
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
       pump = await BodyRequestPump.open({
-        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
+        paths: parent.paths, bodySequence: body.sequence, now: () => AT, signal: t.signal,
         commands: selectionRequestCommands(selectionRequestPort(world, noBodyLaunch)),
       });
     }
@@ -515,7 +515,7 @@ for (const route of ["ask", "forwarded-ask", "standalone-ask"] as const) {
       t.after(() => parent.leash.release());
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: AT });
       pump = await BodyRequestPump.open({
-        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence, now: () => AT, signal: t.signal,
+        paths: parent.paths, bodySequence: body.sequence, now: () => AT, signal: t.signal,
         commands: selectionRequestCommands(selectionRequestPort(source.world, spawn)),
       });
     }

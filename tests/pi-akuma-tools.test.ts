@@ -69,7 +69,7 @@ async function fixtureWorld(t: TestContext) {
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(
     join(world, ".keiyaku", "akumas", "worker.md"),
-    "---\nprovider: pi\nmodel: native-fixture/model\nallowed: []\n---\nFixture.\n",
+    "---\nprovider: pi\nmodel: native-fixture/model\n---\nFixture.\n",
   );
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   const previous = process.env.PI_CODING_AGENT_DIR;
@@ -181,7 +181,7 @@ test("the shipped Pi entry keeps native tools hidden even when explicitly select
 });
 
 test(
-  "development Pi tools use the public SDK, host wake/fork explicitly, preserve observation and permission boundaries",
+  "development Pi tools use the public SDK, host wake/fork explicitly, and preserve observation and native boundaries",
   { timeout: 90_000 },
   async (t) => {
     const { world, agent } = await fixtureWorld(t);
@@ -296,7 +296,7 @@ test(
     );
 
     // The extension is actually discovered in the provider-owned child. Local
-    // tools must refuse there; the existing CLI must still authenticate and deny.
+    // tools still refuse there; the existing CLI admits the nested call.
     const nested = await native("akuma_ask", {
       akuma: id,
       body: JSON.stringify({
@@ -306,7 +306,7 @@ test(
       timeoutMs: 20_000,
     });
     assert.match(nested.observation.answer, /request-aware keiyaku CLI/u);
-    const denied = await native("akuma_ask", {
+    const nestedCall = await native("akuma_ask", {
       akuma: id,
       body: command(
         [
@@ -318,7 +318,7 @@ test(
           world,
           "call",
           "worker",
-          "forbidden",
+          command("printf nested-child"),
           "--json",
         ]
           .map(quote)
@@ -326,8 +326,13 @@ test(
       ),
       timeoutMs: 20_000,
     });
-    assert.match(denied.observation.answer, /not allowed|permission|refus/iu);
-    assert.equal((await api.list()).rows.length, 3, "neither native bypass nor denied request may birth a child");
+    const child = JSON.parse(nestedCall.observation.answer.trim().split("\n").at(-1)!);
+    assert.equal(child.kind, "called");
+    assert.deepEqual((await api.status({ akuma: child.akuma })).status.birth.caller, {
+      kind: "akuma", world, akuId: id,
+    });
+    assert.equal((await api.wait({ akuma: [child.akuma], timeoutMs: 20_000 })).reason, "completed");
+    assert.equal((await api.list()).rows.length, 4, "only the CLI request births a nested child");
 
     // Tool schema validation is real Pi validation, before any owner mutation.
     await host.invoke("akuma_call", { akuma: "worker", body: "x", detach: "yes" }, true);

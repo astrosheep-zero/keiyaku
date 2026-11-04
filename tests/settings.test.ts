@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { SettingsError, type Settings } from "../src/settings.js";
-import { ALLOWED_ACTIONS, DEFAULT_ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
@@ -278,39 +277,43 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
   }
 });
 
-test("Archetype omission uses the delegation baseline while explicit allowed sets remain exact", async () => {
+test("Archetype inherits the provider recipe and body while child fields replace their settings", async () => {
   const value = fixture();
   try {
-    assert.deepEqual(DEFAULT_ALLOWED_ACTIONS, [
-      "akuma.call",
-      "akuma.kill",
-      "akuma.tell",
-      "contract.deliver",
-      "debt.add",
-      "debt.addDocument",
-      "debt.done",
-      "debt.drop",
-      "debt.update",
-    ]);
-    writeFileSync(join(value.home, "akumas", "worker.md"), "---\nprovider: codex-app-server\n---\n");
-    assert.deepEqual((await loadNamed(value, "worker")).allowed, DEFAULT_ALLOWED_ACTIONS);
-    assert.equal((await loadNamed(value, "worker")).allowed.includes("contract.review"), false);
+    writeFileSync(join(value.home, "akumas", "base.md"),
+      "---\nprovider: codex-app-server\nmodel: base-model\neffort: high\nnetwork: disabled\ndescription: Base\n---\nBase personality.\n");
+    writeFileSync(join(value.home, "akumas", "child.md"), "---\nbase: base\nmodel: child-model\n---\n");
+    const inherited = await loadNamed(value, "child");
+    assert.deepEqual(inherited.provider, { name: "codex-app-server", kind: "codex-app-server" });
+    assert.equal(inherited.description, "Base");
+    assert.deepEqual(inherited.options, {
+      model: "child-model", effort: "high", network: "disabled",
+      systemPrompt: "Base personality.\n", systemPromptMode: "append",
+    });
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "codex-app-server" } } }));
+    writeFileSync(join(value.home, "akumas", "child.md"),
+      "---\nbase: base\nprovider: local\neffort: low\ndescription: Child\n---\nChild personality.\n");
+    const replaced = await loadNamed(value, "child");
+    assert.deepEqual(replaced.provider, { name: "local", kind: "codex-app-server" });
+    assert.equal(replaced.description, "Child");
+    assert.deepEqual(replaced.options, {
+      model: "base-model", effort: "low", network: "disabled",
+      systemPrompt: "Child personality.\n", systemPromptMode: "append",
+    });
+  } finally {
+    value.close();
+  }
+});
 
-    writeFileSync(
-      join(value.home, "akumas", "full.md"),
-      `---\nprovider: codex-app-server\nallowed:\n${ALLOWED_ACTIONS.map((action) => `  - ${action}\n`).join("")}---\n`,
-    );
-    assert.deepEqual((await loadNamed(value, "full")).allowed, ALLOWED_ACTIONS);
-
-    writeFileSync(
-      join(value.home, "akumas", "reviewer.md"),
-      "---\nprovider: codex-app-server\nallowed:\n  - contract.review\n---\n",
-    );
-    writeFileSync(join(value.home, "akumas", "reviewer-child.md"), "---\nbase: reviewer\n---\n");
-    assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, ["contract.review"]);
-
-    writeFileSync(join(value.home, "akumas", "reviewer-child.md"), "---\nbase: reviewer\nallowed: []\n---\n");
-    assert.deepEqual((await loadNamed(value, "reviewer-child")).allowed, []);
+test("Archetype refuses unsupported frontmatter on definitions and inherited bases", async () => {
+  const value = fixture();
+  try {
+    for (const field of ["allowed", "unsupported"]) {
+      writeFileSync(join(value.home, "akumas", "worker.md"), `---\nprovider: codex-app-server\n${field}: []\n---\n`);
+      writeFileSync(join(value.home, "akumas", "child.md"), "---\nbase: worker\n---\n");
+      await assert.rejects(loadNamed(value, "worker"), new RegExp(`unknown field: ${field}`, "u"));
+      await assert.rejects(loadNamed(value, "child"), new RegExp(`unknown field: ${field}`, "u"));
+    }
   } finally {
     value.close();
   }

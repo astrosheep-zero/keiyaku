@@ -11,9 +11,8 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { akumaCallRequestCommands, requestForwardedAkumaCall as requestBodyCall } from "../src/akuma/call-request.js";
-import { HeldAkumaLeash, admitRequest, readHeart, readRequest, readTell, type Soul } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, admitRequest, readHeart, readRequest, readTell } from "../src/akuma/heart/index.js";
 import { type AkuId } from "../src/akuma/identity.js";
 import { AkumaBodyRequestError, bodyRequestExecutionContext, requestBodyCommand } from "../src/akuma/requests.js";
 import { AkumaNotBornError, AkumaObservationError, AkumaSelfInterruptError } from "../src/akuma/akuma-errors.js";
@@ -77,12 +76,11 @@ function callTell(body = ""): Readonly<{ tellId: string; body: string }> {
   return { tellId: randomUUID(), body };
 }
 
-async function born(root: WorldRoot, archetype: string, draw: string, allowed: Soul["allowed"] = ALLOWED_ACTIONS) {
+async function born(root: WorldRoot, archetype: string, draw: string) {
   const { leash, ...value } = await bornDirectAkuma({
     root,
     archetype,
     draw,
-    allowed,
     createdAt: "2026-08-18T00:00:00.000Z",
   });
   leash.release();
@@ -101,17 +99,6 @@ async function openContractPump(
   port: Partial<ContractRequestPort>,
 ): Promise<BodyRequestPump> {
   return await openPump(parent, contractRequestCommands({ ...unusedContractPort, ...port }));
-}
-
-async function openSelectionAndContractPump(
-  parent: Awaited<ReturnType<typeof born>>,
-  selection: SelectionRequestPort,
-  contract: ContractRequestPort,
-): Promise<BodyRequestPump> {
-  return await openPump(
-    parent,
-    composeRequestCommands(selectionRequestCommands(selection), contractRequestCommands(contract)),
-  );
 }
 
 const unusedSelectionPort: SelectionRequestPort = {
@@ -286,7 +273,6 @@ const progressProtocol = (supportsCancellation = false): RequestProtocol<string,
     if (typeof value !== "string") throw new Error("invalid test progress reference");
     return value;
   },
-  isPermitted: () => true,
 });
 
 function progressCommand(
@@ -316,7 +302,6 @@ async function openProgressPump(
 ): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-09-09T00:00:01.000Z",
     commands: { "test.progress": command },
@@ -398,15 +383,6 @@ test("forwarded observation captures semantic identity without granting particip
   assert.deepEqual(historyIds, ["turn/7"]);
   assert.throws(() => selectionRequestProtocol("akuma.ask").decodeResult({ result: {}, historyIds: ["not-a-turn"] }),
     /invalid live result/u);
-});
-
-test("selection request permissions stay separated by action", () => {
-  assert.equal(selectionRequestProtocol("akuma.wait").isPermitted([]), true);
-  assert.equal(selectionRequestProtocol("akuma.tell").isPermitted(["akuma.tell"]), true);
-  assert.equal(selectionRequestProtocol("akuma.ask").isPermitted(["akuma.tell"]), true);
-  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.kill"]), true);
-  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted([]), false);
-  assert.equal(selectionRequestProtocol("akuma.kill").isPermitted(["akuma.tell"]), false);
 });
 
 type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>;
@@ -518,7 +494,6 @@ test("Selection owner codecs reject malformed live and service payloads", () => 
           id: "aku/worker/1234abcd",
           birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } },
           life: "asleep" as const,
-          allowed: ["akuma.call"],
           timeline: { kind: "idle" as const, entries: [], omitted: 0, reportedChanges: [], reportedChangesOmitted: 0 },
         },
         contract: { kind: "none" as const },
@@ -968,7 +943,6 @@ test("call allocation crossing the admission fence settles voided without spawni
   let spawnCalls = 0;
   pump = await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => {
       if (!fenceScheduled) {
@@ -1000,7 +974,6 @@ test("call allocation crossing the admission fence settles voided without spawni
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: {},
-          allowed: ALLOWED_ACTIONS,
         },
       }),
       (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "voided",
@@ -1039,7 +1012,6 @@ test("a noncanonical routed call fails the pump before child allocation", async 
     recipe: {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
-      allowed: ALLOWED_ACTIONS,
     },
   });
   await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
@@ -1079,7 +1051,6 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
     recipe: {
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: null as never,
-      allowed: ALLOWED_ACTIONS,
     },
   });
   await assert.rejects(pump.failure, /registered request action akuma\.call rejected its payload/u);
@@ -1095,7 +1066,7 @@ test("a semantically invalid call recipe fails the pump before Heart admission",
 
 test("deliver claims execute once and Heart retains only the Contract fact reference", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-reference-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   const contractId = "kei/forwarded-delivery";
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -1195,7 +1166,7 @@ function reviewedAttestation(contract: string, entry: string, gateWord: "reviewe
 
 test("review derives its service reference from the invocation's addressed reviewed attestation", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-reference-")));
-  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const parent = await born(root, "parent", "11111111");
   const contractId = "kei/forwarded-review";
   const reviewed = reviewedAttestation(contractId, "01ARZ3NDEKTSV4RRFFQ69G5FAX", "reviewed");
   const incidental = [
@@ -1235,7 +1206,7 @@ test("review derives its service reference from the invocation's addressed revie
 
 test("review with no addressed reviewed attestation settles unproven rather than serving a reference", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-review-missing-")));
-  const parent = await born(root, "parent", "22222222", ["contract.review"]);
+  const parent = await born(root, "parent", "22222222");
   const contractId = "kei/forwarded-review-missing";
   const native = {
     ...acceptedContract("review-result", "review", contractId),
@@ -1258,14 +1229,13 @@ test("review with no addressed reviewed attestation settles unproven rather than
 
 test("Debt request recovery voids an unserved claim without replaying Debt authority", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-debt-recovery-"));
-  const parent = await born(root, "parent", "44444444", ["debt.add"]);
+  const parent = await born(root, "parent", "44444444");
   const id = "00000000-0000-4000-8000-000000000301";
   await admitRequest(parent.paths, {
     id,
     action: "debt.add",
     payloadJson: JSON.stringify({ request: { input: { title: "Never replayed" } }, world: root }),
     admittedAt: "2026-08-18T00:00:01.000Z",
-    permitted: true,
   });
   assert.equal(await settleBodyRequests(parent.paths, parent.soul, () => "2026-08-18T00:00:02.000Z"), "settled");
   assert.equal((await readRequest(parent.paths, id))?.state, "voided");
@@ -1279,7 +1249,7 @@ test("Debt request recovery voids an unserved claim without replaying Debt autho
 
 test("deliver returns without a durable reference and settles Heart voided", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-voided-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   const id = randomUUID();
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -1368,7 +1338,7 @@ test("deliver returns without a durable reference and settles Heart voided", asy
 
 test("an executor throw settles its begun request unproven", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-executor-voided-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   const id = randomUUID();
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -1425,13 +1395,12 @@ test("an executor throw settles its begun request unproven", async () => {
 
 test("stable entry succession serves fresh Debt contexts without retargeting pinned callers", async (context) => {
   const root = await World.at(temporaryDirectory(context, "keiyaku-request-entry-service-"));
-  const parent = await born(root, "parent", "11111111", ["debt.add"]);
+  const parent = await born(root, "parent", "11111111");
   let leash = (await HeldAkumaLeash.try(parent.paths))!;
   const served: number[] = [];
   const open = (bodySequence: number) =>
     BodyRequestPump.open({
       paths: parent.paths,
-      allowed: parent.soul.allowed,
       bodySequence,
       now: () => "2026-08-18T00:00:01.000Z",
       signal: new AbortController().signal,
@@ -1483,7 +1452,7 @@ test("stable entry succession serves fresh Debt contexts without retargeting pin
 
 test("unpublish failure still fences admission, drains the owner reference and disposes the channel", async (context) => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-drain-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   let started!: () => void;
   let release!: (value: FixtureDeliveryResult) => void;
   const executorStarted = new Promise<void>((resolve) => {
@@ -1559,7 +1528,7 @@ test("unpublish failure still fences admission, drains the owner reference and d
 
 test("a vanished live receipt does not fail durable request settlement", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-receipt-loss-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   let started!: () => void;
   let release!: () => void;
   const executorStarted = new Promise<void>((resolve) => {
@@ -1594,86 +1563,6 @@ test("a vanished live receipt does not fail durable request settlement", async (
     );
     await pump.close();
     assert.equal((await readRequest(parent.paths, id))?.state, "served");
-  } finally {
-    await pump.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("Heart leaves wait unkeyed and refuses disabled mutations before their executors", async () => {
-  const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-policy-")));
-  const parent = await born(root, "parent", "11111111", []);
-  const target = "aku/worker/22222222" as AkuId;
-  const calls: string[] = [];
-  const selection: SelectionRequestPort = {
-    wait: async () => {
-      calls.push("wait");
-      return emptyWaitResult;
-    },
-    tell: async () => {
-      calls.push("tell");
-      return {} as never;
-    },
-    kill: async () => {
-      calls.push("kill");
-      return {} as never;
-    },
-  };
-  const contract: ContractRequestPort = {
-    previewDelivery: async () => {
-      calls.push("deliver-preview");
-      return {} as never;
-    },
-    deliver: async () => {
-      calls.push("deliver");
-      return {} as never;
-    },
-    review: async () => {
-      calls.push("review");
-      return {} as never;
-    },
-  };
-  const pump = await openSelectionAndContractPump(parent, selection, contract);
-  try {
-    assert.deepEqual(
-      await requestBodyWait({
-        directory: pump.directory,
-        id: randomUUID(),
-        targets: [target],
-        completion: "all",
-      }),
-      { kind: "returned", result: emptyWaitResult },
-    );
-    await assert.rejects(
-      requestBodyTell({
-        directory: pump.directory,
-        id: randomUUID(),
-        target,
-        body: "blocked",
-      }),
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: akuma.tell",
-    );
-    await assert.rejects(
-      requestBodyKill({
-        directory: pump.directory,
-        id: randomUUID(),
-        targets: [target],
-      }),
-      (error: unknown) => error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: akuma.kill",
-    );
-    await assert.rejects(
-      requestBodyDeliver({
-        directory: pump.directory,
-        id: randomUUID(),
-        repoRoot: root,
-        contractId: "kei/blocked",
-        includeDirty: false,
-        materializeConflict: false,
-      }),
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError && error.diagnostic === "not-allowed: contract.deliver",
-    );
-    assert.deepEqual(calls, ["wait"]);
   } finally {
     await pump.close();
     rmSync(root, { recursive: true, force: true });
@@ -1905,7 +1794,7 @@ test("transport rejects malformed target sets and foreign World coordinates befo
 
 test("bounded forwarded interrupt Ask admits once under the request identity", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-")));
-  const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
+  const parent = await born(root, "parent", "11111111");
   const target = await born(root, "worker", "22222222");
   const predecessor = (await HeldAkumaLeash.try(target.paths))!;
   const body = await predecessor.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
@@ -1953,7 +1842,7 @@ test("bounded forwarded interrupt Ask admits once under the request identity", a
 
 test("a real delayed direct-parent waited Tell observes its exact answer", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-real-")));
-  const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
+  const parent = await born(root, "parent", "11111111");
   const target = await born(root, "worker", "33333333");
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
@@ -2038,7 +1927,7 @@ test("CLI stable entry failures render normally and retire cancellation listener
 test("the waited-Tell facade forwards to a serving parent when the caller World lacks the target", async () => {
   const parentRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-facade-")));
   const callerRoot = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-ask-caller-")));
-  const parent = await born(parentRoot, "parent", "11111111", ["akuma.tell"]);
+  const parent = await born(parentRoot, "parent", "11111111");
   const target = await born(parentRoot, "worker", "44444444");
   const bodies: Promise<unknown>[] = [];
   const fixtures = new Map<string, Readonly<{ adapter: ProviderAdapter; now: string }>>();
@@ -2086,7 +1975,7 @@ test("the waited-Tell facade forwards to a serving parent when the caller World 
 
 test("a forwarded Tell writes its transport and the direct parent enters the tell executor once", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-tell-")));
-  const parent = await born(root, "parent", "11111111", ["akuma.tell"]);
+  const parent = await born(root, "parent", "11111111");
   const target = await born(root, "worker", "22222222");
   const targetLeash = (await HeldAkumaLeash.try(target.paths))!;
   await targetLeash.recordBody(target.paths, { leashTakenAt: "2026-08-18T00:00:01.000Z" });
@@ -2167,9 +2056,9 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
   }
 });
 
-test("an allowed forwarded kill reaches its direct parent owner once", async () => {
+test("a forwarded kill reaches its direct parent owner once", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-kill-")));
-  const parent = await born(root, "parent", "11111111", ["akuma.kill"]);
+  const parent = await born(root, "parent", "11111111");
   const target = "aku/worker/22222222" as AkuId;
   const result = { results: [{ id: target, evidence: "already-stopped" as const }] };
   let calls = 0;
@@ -2201,7 +2090,7 @@ test("an allowed forwarded kill reaches its direct parent owner once", async () 
 
 test("forwarded materialization retains and replays its handoff evidence", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-upstream-deliver-materialized-")));
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   const materializedValue = {
     kind: "integration-conflict-materialized" as const,
     targetHead: snapshotId("target-head"),
@@ -2308,7 +2197,7 @@ test("forwarded materialization retains and replays its handoff evidence", async
 // A partial owner receipt does not turn Heart's unproven service into a voided request.
 test("forwarded fatal receipts survive unproven transport without claiming no product effect", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-forwarded-fatal-")));
-  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const parent = await born(root, "parent", "11111111");
   const contract = makeContractId("kei/partial");
   const receipt = {
     operation: "review" as const,
@@ -2371,7 +2260,6 @@ function openPump(
 ): Promise<BodyRequestPump> {
   return BodyRequestPump.open({
     paths: parent.paths,
-    allowed: parent.soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-18T00:00:01.000Z",
     commands,
@@ -2386,7 +2274,7 @@ test("forwarded native delivery preserves full JSON result and revives the diff 
   const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), gates: ["reviewed"] }));
   assert.ok(bound.value.workspace?.kind === "worktree");
   commitCandidate(repository, bound.value.workspace.path);
-  const parent = await born(root, "parent", "11111111", ["contract.deliver"]);
+  const parent = await born(root, "parent", "11111111");
   let owner: FixtureDeliveryResult | undefined;
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -2450,7 +2338,7 @@ test("forwarded native review preserves the owner outcome and stores the address
   assert.ok(bound.value.workspace?.kind === "worktree");
   commitCandidate(repository, bound.value.workspace.path);
   accepted(await Keiyaku.with().select({ repo, id: bound.contract }).deliver());
-  const parent = await born(root, "parent", "11111111", ["contract.review"]);
+  const parent = await born(root, "parent", "11111111");
   let owner: FixtureReviewResult | undefined;
   let calls = 0;
   const pump = await openContractPump(parent, {
@@ -2513,7 +2401,7 @@ import { createKeiyakuHandle } from "../src/library/keiyaku.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 
-test("Git-less native preview forwards without mutation grants and preserves live result and typed failure", async () => {
+test("Git-less native preview forwards and preserves live result and typed failure", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const root = await World.at(repository.path);
@@ -2522,7 +2410,7 @@ test("Git-less native preview forwards without mutation grants and preserves liv
   commitCandidate(repository, bound.value.workspace.path);
   await writeFile(join(repository.path, "candidate.txt"), "target checkout bytes\n");
   const before = await bound.value.keiyaku.history();
-  const parent = await born(root, "parent", "11111111", []);
+  const parent = await born(root, "parent", "11111111");
   let owner: Awaited<ReturnType<ContractRequestPort["previewDelivery"]>> | undefined;
   const pump = await openContractPump(parent, {
     previewDelivery: async (input) => {

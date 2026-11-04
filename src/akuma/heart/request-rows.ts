@@ -67,24 +67,16 @@ const REQUEST_COLUMNS = `sequence, id, requester, action, payload_json, admitted
 
 export function insertRequestFact(
   database: DatabaseSync,
-  input: RequestInput & Readonly<{ requester: AkuId; admittedAt: string; refusal?: string }>,
+  input: RequestInput & Readonly<{ requester: AkuId; admittedAt: string }>,
 ): void {
-  const { id, action, requester, admittedAt, refusal } = input;
+  const { id, action, requester, admittedAt } = input;
   database
     .prepare(
       `INSERT OR IGNORE INTO requests(
     id, requester, action, payload_json, admitted_at, state, diagnostic
   ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(
-      id,
-      requester,
-      action,
-      requestPayloadJson(input),
-      admittedAt,
-      refusal === undefined ? "admitted" : "refused",
-      refusal ?? null,
-    );
+    .run(id, requester, action, requestPayloadJson(input), admittedAt, "admitted", null);
 }
 
 export function requestFact(database: DatabaseSync, id: string): RequestFact | null {

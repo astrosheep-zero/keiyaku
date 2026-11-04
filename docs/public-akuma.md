@@ -54,15 +54,14 @@ birth. World proof happens once at the outer boundary. Cwd selection is explicit
 and rejects an invalid selected source rather than silently falling through;
 Contract association never supplies or displaces an execution directory, so
 only an explicit selection or the effective invocation directory determines
-it. Allowed-action additions freeze in Soul. Exact public inputs, result fields,
+it. Exact public inputs, result fields,
 and timeout defaults belong to declarations and help.
 
 Birth and call also accept explicit additional writable directories. The SDK
 requires nonblank existing canonical absolute directories and rejects invalid
 or unsupported grants before allocating an Akuma. Omission leaves existing
-behavior unchanged. The Akuma/provider owner admits and freezes this additive
-native filesystem grant separately from product-action permissions; forwarding
-and native continuity use that same recipe, not a second permission authority.
+behavior unchanged. The Akuma/provider owner admits these additive native
+filesystem roots under the provider's sandbox and writable-directory policy.
 
 Creation accepts optional explicit caller and initiator attribution, including
 prompt-free births and forks. Either kind of caller declaration is
@@ -77,7 +76,7 @@ association never blocks standalone Akuma execution and never becomes a Contract
 fact in Soul.
 
 Creation may opt out of Keiyaku execution instructions without changing
-personality, tools, permissions, or progress-report availability. Wake retains
+personality, tools, or progress-report availability. Wake retains
 that birth choice; fork inherits it and may additionally opt out.
 
 Plugin activation and delivery are external observation, not an Akuma creation

@@ -2,12 +2,6 @@ import { CliUsageError, commandGuide, usageLine, type CliUsageGuide } from "../u
 import { scanArgs, type ScanFlagKind, type ScanSpec } from "../scan.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
-import {
-  ALLOWED_ACTIONS,
-  DEFAULT_ALLOWED_ACTIONS,
-  decodeAllowedActions,
-  type AllowedActions,
-} from "../../akuma/allowed.js";
 import { parsePublicHistoryId } from "../../akuma/identity.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
@@ -24,7 +18,6 @@ export type ParsedAkumaCommand = Output &
         alias?: AkumaAlias;
         mode: "wait" | "detach";
         timeoutMs?: number;
-        allowed?: AllowedActions;
         writableDirectories?: readonly string[];
         bare?: boolean;
         schema?: string;
@@ -65,7 +58,6 @@ type AkumaCommandSpec = Readonly<{
   details?: string;
 }>;
 
-const EXTRA_ALLOWED_ACTIONS = ALLOWED_ACTIONS.filter((action) => !DEFAULT_ALLOWED_ACTIONS.includes(action));
 const SET_SELECTORS = '(<aku/...> | @alias | <kei/...> | "aku/<name-pattern>/<hex-pattern>")...';
 const SET_DETAILS =
   "Globs contain * and use lowercase hex digits or * in the suffix. --repo requires at least one Contract (kei/...) selector.";
@@ -89,14 +81,13 @@ const AKUMA_COMMAND_SPECS = {
       contract: "value",
       alias: "value",
       wait: "value",
-      allowed: "repeat",
       "add-dir": "repeat",
       bare: "boolean",
       json: "boolean",
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--allowed <product.action>]... [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
+      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
     purpose: "Call an Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
@@ -107,15 +98,8 @@ const AKUMA_COMMAND_SPECS = {
       "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
-      "--add-dir explicitly grants another existing writable directory to Codex native workspace-write tools; repeat for multiple roots. Relative paths resolve from the invocation directory. Other sandbox modes, permission profiles, and providers refuse nonempty grants instead of broadening policy. Existing network policy and writable roots are preserved. This is separate from --allowed product actions and never grants the repo or Home automatically.",
+      "--add-dir explicitly grants another existing writable directory to Codex native workspace-write tools; repeat for multiple roots. Relative paths resolve from the invocation directory. Other sandbox modes, permission profiles, and providers refuse nonempty grants instead of broadening policy. Existing network policy and writable roots are preserved; the repo and Home are never granted automatically.",
       "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
-      `Default actions: ${DEFAULT_ALLOWED_ACTIONS.join(", ")}.`,
-      ...(EXTRA_ALLOWED_ACTIONS.length === 0
-        ? []
-        : [`Also available with --allowed: ${EXTRA_ALLOWED_ACTIONS.join(", ")}.`]),
-      "Repeated --allowed adds actions to the selected Akuma's allowed actions; it cannot remove inherited permissions.",
-      "If no actions are configured, defaults apply; an explicitly empty list allows none.",
-      "An Akuma started by another Akuma can use only actions its parent can use. Use keiyaku status <aku/...|@alias> --json to inspect status.allowed.",
       SCHEMA_DETAILS,
       "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
@@ -433,17 +417,6 @@ function parseAsk(
   };
 }
 
-function parseAllowedFlag(raw: FlagValue | undefined, fail: (message: string) => never): AllowedActions | undefined {
-  if (raw === undefined) return undefined;
-  if (!Array.isArray(raw)) fail("--allowed requires a value");
-  const selected = raw as readonly string[];
-  try {
-    return decodeAllowedActions(selected, "--allowed");
-  } catch (error) {
-    fail(error instanceof Error ? error.message : "invalid --allowed action");
-  }
-}
-
 function parseCall(
   flags: Readonly<Record<string, FlagValue>>,
   archetype: string,
@@ -462,7 +435,6 @@ function parseCall(
   }
   const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
-  const allowed = parseAllowedFlag(flags.allowed, fail);
   const schema =
     flags.schema === undefined ? undefined : stringFlag(flags.schema, "call --schema requires a file", fail);
   if (prompt === undefined && schema !== undefined) fail("call --schema requires a prompt");
@@ -474,7 +446,6 @@ function parseCall(
     ...(alias === undefined ? {} : { alias }),
     mode,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(allowed === undefined ? {} : { allowed }),
     ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
     ...(flags.bare === true ? { bare: true } : {}),
     ...(schema === undefined ? {} : { schema }),

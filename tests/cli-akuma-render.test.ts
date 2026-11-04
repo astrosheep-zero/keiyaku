@@ -52,7 +52,6 @@ function running(id: string, rows: readonly OpenSnapshotRow[]) {
     birth: DIRECT_BIRTH,
     id,
     life: "running",
-    allowed: [],
     timeline: openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
   });
 }
@@ -69,23 +68,19 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
     id,
     life: "running",
     cwd: "/work/appointed",
-    allowed: [],
     timeline: openAkumaSnapshot([{ kind: "row", row: note }], [reportedFileChange(1, "update", "/work/file")]),
   });
-  const lines = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, DEFAULT_CONTEXT, {
-    showAllowed: true,
-  }).split("\n");
+  const lines = snapshotText({ status, contract: { kind: "failed", diagnostic: "lookup refused" } }, DEFAULT_CONTEXT).split("\n");
   assert.equal(lines[0], id, "identity roots the panel alone");
-  assert.equal(lines[1], "  allowed  none", "effective actions are static context");
-  assert.equal(lines[2], "  /work/appointed", "the execution directory is static context, not a labelled row");
+  assert.equal(lines[1], "  /work/appointed", "the execution directory is static context, not a labelled row");
   assert.equal(
-    lines[3],
+    lines[2],
     frameRule([id, "  /work/appointed"], DEFAULT_CONTEXT.columns),
     "one rule divides context from activity",
   );
-  assert.match(lines[4]!, /note +edited$/u);
-  assert.match(lines[5]!, /^● running$/u);
-  assert.ok(lines.indexOf("  changes 1") > 5, "reported changes follow the conclusion, subordinate");
+  assert.match(lines[3]!, /note +edited$/u);
+  assert.match(lines[4]!, /^● running$/u);
+  assert.ok(lines.indexOf("  changes 1") > 4, "reported changes follow the conclusion, subordinate");
   assert.ok(lines.some((line) => /^ {4}~ +\/work\/file$/u.test(line)));
   assert.equal(
     lines.filter((line) => line.includes("/work/appointed")).length,
@@ -235,7 +230,6 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd1234",
     life: "asleep",
-    allowed: [],
     timeline: idleAkumaSnapshot([{ kind: "row", row: pending }]),
   });
   assert.match(snapshotText({ status, contract: { kind: "none" } }, DEFAULT_CONTEXT), /⧗ follow up\n⧗ pending tell$/u);
@@ -274,7 +268,7 @@ function waitStatus(
   timeline: AkumaStatus["timeline"],
   extra: { strandedReason?: "resume-unsupported" } = {},
 ): AkumaStatus {
-  return akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life, allowed: [], timeline, ...extra });
+  return akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life, timeline, ...extra });
 }
 
 function failedOutcome(sequence: number, diagnostic: string): OutcomeRow {
@@ -558,7 +552,6 @@ test("ask activity starts at admission and includes a later settlement of an old
       birth: DIRECT_BIRTH,
       id,
       life: "running",
-      allowed: [],
       timeline: { ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))), openingSequence: 1 },
     });
   const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
@@ -618,7 +611,6 @@ test("ask seed marks eligible omissions before a newer Turn opening in timeline 
       birth: DIRECT_BIRTH,
       id,
       life: "running",
-      allowed: [],
       timeline: {
         ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
         turn: { kind: "turn" as const, sequence: 6, turnSequence: 2, bodySequence: 2, at },
@@ -731,7 +723,6 @@ test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd1234",
     life: "running",
-    allowed: [],
     timeline: openAkumaSnapshot(
       [],
       [
@@ -1066,7 +1057,6 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     id,
     life: "running",
     cwd: "/work/appointed",
-    allowed: [],
     timeline: openAkumaSnapshot(
       [{ kind: "row", row: { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" } }],
       [reportedFileChange(1, "update", "/work/file")],
@@ -1124,7 +1114,6 @@ test("a narrow panel never truncates a copyable identity and caps its rule at th
     id,
     life: "running",
     cwd: "/work/界界界/deep/path",
-    allowed: [],
     timeline: openAkumaSnapshot([
       {
         kind: "row",

@@ -125,11 +125,12 @@ test("global coordinates are independent of command position", () => {
   );
 });
 
-test("call repeats explicit directory grants separately from product actions", () => {
-  assert.deepEqual(command(["call", "worker", "--add-dir", "../runtime", "--add-dir", "/square", "--allowed", "contract.review"]), {
+test("call repeats native writable-directory grants and refuses retired options", () => {
+  assert.deepEqual(command(["call", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
     command: "call", archetype: "worker", mode: "detach", output: "text",
-    writableDirectories: ["../runtime", "/square"], allowed: ["contract.review"],
+    writableDirectories: ["../runtime", "/square"],
   });
+  assert.throws(() => command(["call", "worker", "--allowed", "contract.review"]), /option --allowed is not valid for call/u);
   assert.throws(() => command(["call", "worker", "--add-dir"]), /--add-dir requires/u);
   assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
 });

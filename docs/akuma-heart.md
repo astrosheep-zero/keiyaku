@@ -104,7 +104,7 @@ through fixed bounded concurrency before the roster observation is returned.
 ## Durable Facts And Judges
 
 Soul freezes birth identity, recipe, cwd, origin, optional declared caller,
-restraint, and permissions. Absent caller attribution is valid and remains
+and the runtime-instruction opt-out. Absent caller attribution is valid and remains
 absent without migration or backfill; malformed present attribution is corrupt
 rather than unknown. Caller admission and durable decoding share one validation
 meaning. Attribution introduces no cross-World lookup or second identity store.
@@ -174,10 +174,10 @@ Kill never settles or discards a Tell. Request facts are the sole durable Body
 Request authority and service reference; their lifecycle is owned by
 [akuma-requests.md](akuma-requests.md).
 
-Heart validates generic request lifecycle and authenticates the caller's
-permission decision, but does not interpret action vocabulary, payload, service
-schema, or operation semantics. Provider adapters own live processes and never
-write Heart. Body is the only mover and tell-fact writer after Heart admission.
+Heart validates generic request lifecycle and requester authenticity, but does
+not interpret payload, service schema, or operation semantics. Provider adapters
+own live processes and never write Heart. Body is the only mover and tell-fact
+writer after Heart admission.
 No observer store, capability registry, duplicate tell pipeline, or
 cross-database atomicity exists.
 

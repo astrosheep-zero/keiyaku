@@ -241,12 +241,9 @@ pairwise comparisons, experiment queues, or adaptive sampling instead.
   not supply Claude Workflow's result-cache/replay runtime. Do not implement
   recovery by blindly rerunning the whole script.
 
-## Placement, Permissions, And Notifications
+## Placement And Notifications
 
-Use explicit `root` and `cwd`. Birth-time `allowed` additions are additive:
-`allowed: []` does not remove the Archetype's existing permissions. Select a
-suitably restricted Archetype when that is needed, and check the resulting
-status.
+Use explicit `root` and `cwd`.
 
 For writers, arrange non-overlapping ownership or suitable worktrees before
 parallel execution. `Akumas.call` does not automatically create an isolated

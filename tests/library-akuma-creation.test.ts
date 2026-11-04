@@ -61,7 +61,7 @@ import {
   waitForProcessExit,
 } from "./support/process.js";
 import type { WorldRoot } from "../src/world.js";
-import { AkumaComposition as Akuma, AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -78,8 +78,6 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: local\n---\nWork.\n");
-  writeFileSync(join(home, "akumas", "restricted.md"), "---\nprovider: local\nallowed:\n  - debt.add\n---\nWork.\n");
-  writeFileSync(join(home, "akumas", "empty.md"), "---\nprovider: local\nallowed: []\n---\nWork.\n");
   writeFileSync(
     join(home, "settings.json"),
     JSON.stringify({
@@ -1051,7 +1049,6 @@ async function requestPump(
   });
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-11T00:00:01.000Z",
     signal: new AbortController().signal,
@@ -1306,24 +1303,22 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
 });
 
 // Decode at the owner boundary: bad configuration does not need Git, a Body, or a provider process.
-test("Archetype and call allowed inputs refuse malformed values before allocation", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-allowed-input-");
-  const home = join(root, "home");
-  mkdirSync(join(home, "akumas"), { recursive: true });
-  const value = await settings({ root, home });
+test("retired caller fields refuse before allocation", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-retired-call-input-");
   const world = await World.at(root);
-  const runtime = Akuma.of(world, { home, settings: value });
-  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
-  for (const [allowed, expected] of [
-    [["akuma.unknown"], /unknown action/u],
-    [["akuma.call", "akuma.call"], /duplicate action/u],
-    [[1], /unknown action/u],
-  ] as const) {
-    const yaml = allowed.map((action) => `  - ${action}\n`).join("");
-    writeFileSync(join(home, "akumas", "invalid.md"), `---\nprovider: claude\nallowed:\n${yaml}---\nWork.\n`);
-    await assert.rejects(loadPreparedArchetype({ name: "invalid", home, settings: value }), expected);
-    await assert.rejects(runtime.call({ archetype: "worker", body: "invalid", allowed: allowed as never }), expected);
-  }
+  const runtime = Akumas.of(world);
+  await assert.rejects(
+    runtime.call({ archetype: "worker", allowed: [] } as never),
+    /Akumas.call input has unknown field: allowed/u,
+  );
+  await assert.rejects(
+    PublicAkuma.birth("worker", { root: world, allowed: [] } as never),
+    /Akuma birth input has unknown field: allowed/u,
+  );
+  await assert.rejects(
+    runtime.fork({ akuma: "aku/worker/1234abcd", at: "turn/1", allowed: [] } as never),
+    /Akumas.fork input has unknown field: allowed/u,
+  );
   assert.deepEqual((await runtime.list()).rows, []);
 });
 

@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { akumaWithLauncher, type Akuma } from "../../src/akuma/akuma-instance.js";
 import type { BodyLauncher } from "../../src/akuma/body-launch.js";
-import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
 import { driveAkumaBody } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
@@ -111,7 +110,6 @@ export async function bornWorld(root: string, suffix: string, spawn: BodyLaunche
       options: {},
       cwd: world,
       origin: { kind: "direct" },
-      allowed: ALLOWED_ACTIONS,
       createdAt: "2026-08-10T00:00:00.000Z",
     });
   } finally {

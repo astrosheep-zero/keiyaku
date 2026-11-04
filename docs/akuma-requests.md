@@ -1,7 +1,6 @@
 # Akuma Body Requests
 
 This chapter owns one-hop Body Request transport, service, and recovery.
-Permission vocabulary and admission are owned by [akuma-allowed.md](akuma-allowed.md).
 Verb owners alone define their payloads, results, and service evidence.
 Delivery preview retains the Contract request owner's one-hop transport as an
 unkeyed observation. Its descriptor is preview-only, preserves the native live
@@ -46,9 +45,9 @@ escape the authenticated direct-parent request boundary. The shipped Pi native
 Akuma tools serve ordinary external Pi sessions; within a provider-owned Pi
 session an explicit runtime-local declaration makes the extension refuse its own
 local tool calls, including nested tool calls. Such a session uses the existing request-aware CLI
-for delegation and control. This is an integration scope refusal, not a second
-permission check, and neither ambient host attribution nor extension discovery
-grants local product authority.
+for delegation and control. This is an integration scope refusal; ambient host
+attribution and extension discovery cannot establish direct-parent request
+custody.
 
 Each registered command binds its operation-owned capabilities at composition before any request can be served. Per-request
 execution carries only request-service facts and never transports product capabilities.
@@ -84,8 +83,8 @@ child's own leash and Soul remain the sole birth judge.
 
 ## Admission, Service, And Recovery
 
-Service is serial in Heart admission order. The descriptor checks authenticated
-frozen permission before generic admission; refusal runs no operation owner.
+Service is serial in Heart admission order. The descriptor validates the
+authenticated request before generic admission; refusal runs no operation owner.
 An admitted service call durably marks begun before owner execution; voided
 proves no committed product effect, while unproven records an effect whose absence or
 success is not proven. An admitted call reserves its child before spawn and settles served only after birth. A failed reservation or publication settles voided without claiming

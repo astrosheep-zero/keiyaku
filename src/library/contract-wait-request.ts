@@ -47,7 +47,6 @@ function protocol(): RequestProtocol<Request, ContractWaitResult, Service> {
     encodeFailure: encodeFailureWire,
     decodeFailure: decodeFailureWire,
     decodeReference: (value) => serviceSchema.parse(value),
-    isPermitted: () => true,
   };
 }
 

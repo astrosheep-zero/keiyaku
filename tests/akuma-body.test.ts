@@ -47,7 +47,6 @@ import {
   type Session,
   type TurnResult,
 } from "../src/akuma/provider.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import type { PluginSignal } from "../src/plugin/public.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -231,7 +230,6 @@ test("Body launch and provider setup isolate parent harness identity without mut
           options: {},
           origin: { kind: "direct" },
           cwd: root,
-          allowed: ALLOWED_ACTIONS,
         },
       },
       import.meta.url,
@@ -373,24 +371,13 @@ function bodyAdapter(adapter: FixtureProviderAdapter): ProviderAdapter {
   } as ProviderAdapter;
 }
 
-type FixtureBodyLaunch = Omit<BodyLaunch, "seed"> & {
-  seed?: (Omit<NonNullable<BodyLaunch["seed"]>, "allowed"> & { allowed?: NonNullable<BodyLaunch["seed"]>["allowed"] }) | undefined;
-};
-
-function normalizeLaunch(launch: FixtureBodyLaunch): BodyLaunch {
-  return (
-    launch.seed === undefined ? launch : { ...launch, seed: { allowed: ALLOWED_ACTIONS, ...launch.seed } }
-  ) as BodyLaunch;
-}
-
 async function driveAkumaBody(
-  launch: FixtureBodyLaunch,
+  launch: BodyLaunch,
   adapter: FixtureProviderAdapter | undefined,
   runtime: Parameters<typeof runAkumaBody>[2],
 ): Promise<void> {
-  const normalized = normalizeLaunch(launch);
-  if (adapter === undefined) await runAkumaBody(normalized, undefined, runtime);
-  else await runAkumaBody(normalized, bodyAdapter(adapter), runtime);
+  if (adapter === undefined) await runAkumaBody(launch, undefined, runtime);
+  else await runAkumaBody(launch, bodyAdapter(adapter), runtime);
 }
 
 function unresolved<T = never>(): Promise<T> {
@@ -417,7 +404,7 @@ function hangingAdapter(fence: string, abort?: () => Promise<void>, onStart?: ()
   });
 }
 
-function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>, root: string): FixtureBodyLaunch {
+function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>, root: string): BodyLaunch {
   return {
     paths: allocated.paths,
     seed: {
@@ -587,7 +574,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
     const recorder = installTurnOutcomeRecorder(allocated.paths);
     await pluginRuntime({ world: await World.at(root) });
     await eventually(() => recorder.activations === 1);
-    const launch: FixtureBodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
+    const launch: BodyLaunch = claudeBodyLaunch(allocated, root, "build it", {
       completion: { contractId: "kei/example" },
       initiator: "Alice",
     });
@@ -1107,11 +1094,11 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = runAkumaBody(normalizeLaunch({
+    const body = runAkumaBody({
       paths: allocated.paths,
       seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
-    }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
+    }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
       () => sessionStarted,
@@ -1189,11 +1176,11 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = runAkumaBody(normalizeLaunch({
+    const body = runAkumaBody({
       paths: allocated.paths,
       seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
-    }), createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
+    }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, requestSpawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
       () => sessionStarted,
@@ -1386,7 +1373,6 @@ test("concurrent handoff before ending-body leash release does not consume the s
     options: {},
     origin: { kind: "direct" as const },
     cwd: root,
-    allowed: ALLOWED_ACTIONS,
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   const leash = await HeldAkumaLeash.try(allocated.paths);
@@ -1435,7 +1421,6 @@ test("open disposition referencing a missing Tell is Heart corruption, not prove
     options: {},
     origin: { kind: "direct" as const },
     cwd: root,
-    allowed: ALLOWED_ACTIONS,
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   const leash = await HeldAkumaLeash.try(allocated.paths);
@@ -1669,7 +1654,6 @@ test("a successor admits through the leash without reconstructing custody of an 
       options: {},
       origin: { kind: "direct" as const },
       cwd: root,
-      allowed: ALLOWED_ACTIONS,
       createdAt: "2026-08-08T00:00:00.000Z",
     };
     const predecessorLeash = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -1763,7 +1747,6 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       provider: { name: "claude", kind: "claude-agent-sdk" } as const,
       options: {},
       origin: { kind: "direct" } as const,
-      allowed: ALLOWED_ACTIONS,
       cwd: root,
       createdAt: "2026-08-08T00:00:00.000Z",
     };
@@ -1776,7 +1759,6 @@ test("pause interrupts pre-drive reserved-request recovery", async () => {
       action: "akuma.call",
       payloadJson: JSON.stringify({ malformed: "settlement remains payload blind" }),
       admittedAt: "2026-08-08T00:00:01.000Z",
-      permitted: true,
     });
     const child = await allocatedHeart(root, "worker", "c0ffed02");
     await reserveRequest(allocated.paths, requestId, child.id);
@@ -2430,7 +2412,6 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
       options: {},
       origin: { kind: "direct" },
       cwd: root,
-      allowed: ALLOWED_ACTIONS,
       createdAt: "2026-08-08T00:00:00.000Z",
     });
     born.release();
@@ -2508,7 +2489,6 @@ test("spawn ENOENT diagnosis preserves the original failure as cause", async () 
           options: {},
           origin: { kind: "direct" },
           cwd: vanishedCwd,
-          allowed: ALLOWED_ACTIONS,
         },
       }),
       (error: unknown) => {

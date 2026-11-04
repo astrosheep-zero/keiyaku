@@ -2,7 +2,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { ALLOWED_ACTIONS } from "../../src/akuma/allowed.js";
 import type { BodyLaunch, BodyLauncher } from "../../src/akuma/body-launch.js";
 import {
   HeldAkumaLeash,
@@ -38,7 +37,6 @@ export async function bornDirectAkuma(
     archetype: string;
     draw: string;
     createdAt: string;
-    allowed?: Soul["allowed"] | undefined;
     provider?: Soul["provider"];
   }>,
 ) {
@@ -50,7 +48,6 @@ export async function bornDirectAkuma(
     options: {},
     cwd: input.root,
     origin: { kind: "direct" },
-    allowed: input.allowed ?? ALLOWED_ACTIONS,
     createdAt: input.createdAt,
   };
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
@@ -80,7 +77,6 @@ export async function bornLineageAkuma(
       cwd: input.root,
       origin: input.origin ?? { kind: "direct" },
       ...(input.caller === undefined ? {} : { caller: input.caller }),
-      allowed: [],
       createdAt: input.createdAt,
     };
     if ((await leash.birth(allocated.paths, soul)) !== "born") throw new Error("fixture Soul was not born");
@@ -131,13 +127,12 @@ export async function soulFixture(prefix: string) {
     options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
     cwd: value.root,
     origin: { kind: "direct" },
-    allowed: ALLOWED_ACTIONS,
     createdAt: "2026-08-08T00:00:00.000Z",
   };
   return { ...value, soul };
 }
 
-/** One born claude Body under a fresh Heart: the invariant direct-origin, empty-permission,
+/** One born claude Body under a fresh Heart: the invariant direct-origin,
  * default-options life; createdAt is the scenario's exact time. */
 export async function bornBody(root: string, suffix: string, createdAt: string) {
   const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
@@ -149,7 +144,6 @@ export async function bornBody(root: string, suffix: string, createdAt: string) 
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     origin: { kind: "direct" },
-    allowed: [],
     cwd: root,
     createdAt,
   });
@@ -200,7 +194,6 @@ export function claudeBodyLaunch(
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
-      allowed: ALLOWED_ACTIONS,
       cwd,
     },
     initialBody,

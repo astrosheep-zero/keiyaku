@@ -963,7 +963,6 @@ type SnapshotView = Readonly<{
 type SnapshotCoreOptions = Readonly<{
   alias?: string;
   facts?: readonly string[];
-  showAllowed?: boolean;
 }>;
 
 function snapshotCore(
@@ -973,10 +972,7 @@ function snapshotCore(
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
   const activity = snapshotActivityLines(view.status.timeline, context);
   // Static coordinates belong above the content boundary; a dynamic diagnostic stays below it.
-  const contextFacts = [
-    ...(options.showAllowed === true ? [`allowed  ${view.status.allowed.join(", ") || "none"}`] : []),
-    ...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)]),
-  ];
+  const contextFacts = [...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)])];
   const facts = [
     ...contractFacts(view.contract, context.columns - SUBORDINATE_INDENT.length),
     ...(options.facts ?? []),

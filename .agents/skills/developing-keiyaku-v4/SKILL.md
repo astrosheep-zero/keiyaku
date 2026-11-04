@@ -79,11 +79,10 @@ Add `--contract <kei/...>` when Dispatch evidence should associate the Akuma
 with one Contract. `call` waits up to five minutes by default; use `--detach`
 only when the coordinator intends to observe it separately with `wait`.
 
-Contract association, available forwarded actions, and the brief are
-independent inputs. When a reviewer should record its own verdict, include
-`--allowed contract.review` and say in the brief to record `--satisfied` on
+Contract association and the brief are independent inputs. When a reviewer
+should record its own verdict, say in the brief to record `--satisfied` on
 pass or `--unsatisfied` on failure. When a deliverer should tender its completed
-candidate, include `--allowed contract.deliver` and say so in the brief.
+candidate, say so in the brief.
 
 ### Authority-grounded briefs
 

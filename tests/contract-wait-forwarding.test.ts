@@ -16,11 +16,11 @@ test("parent-served Contract waits retain native journal evidence, mode, timeout
   const root = await World.at(repository.path);
   const first = accepted(await Keiyaku.with().bind({ repo, markdown: document(), target: null, gates: ["reviewed"] }));
   const second = accepted(await Keiyaku.with().bind({ repo, markdown: document().replace("# Library verbs", "# Second forwarding contract"), target: null, gates: ["reviewed"] }));
-  const { leash, ...parent } = await bornDirectAkuma({ root, archetype: "parent", draw: "12345678", allowed: [], createdAt: "2026-08-18T00:00:00.000Z" });
+  const { leash, ...parent } = await bornDirectAkuma({ root, archetype: "parent", draw: "12345678", createdAt: "2026-08-18T00:00:00.000Z" });
   leash.release();
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, { gitPath: barrier.gitPath }, noBodyLaunch);
-    const pump = await BodyRequestPump.open({ paths: parent.paths, allowed: [], bodySequence: 1, now: () => "2026-08-18T00:00:01.000Z", commands, signal: new AbortController().signal });
+    const pump = await BodyRequestPump.open({ paths: parent.paths, bodySequence: 1, now: () => "2026-08-18T00:00:01.000Z", commands, signal: new AbortController().signal });
     try {
       const forwarded = composeContractLibrary(bodyRequestExecutionContext(pump.directory), createKeiyakuHandle);
       const immediate = await forwarded.wait({ repo, contracts: [first.contract, second.contract], completion: "all", timeoutMs: 0 });

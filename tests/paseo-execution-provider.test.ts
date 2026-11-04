@@ -893,7 +893,6 @@ test(
           options: {},
           cwd: root,
           origin: { kind: "direct" },
-          allowed: ["debt.add"],
         },
         initialBody: "first native turn",
       });

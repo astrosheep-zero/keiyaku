@@ -172,7 +172,6 @@ async function runCall(
     ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
     ...(input.contract === undefined ? {} : { contract: input.contract }),
     ...(command.alias === undefined ? {} : { alias: command.alias }),
-    ...(command.allowed === undefined ? {} : { allowed: command.allowed }),
     ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
     ...(command.bare === undefined ? {} : { bare: command.bare }),
     ...(schema === undefined ? {} : { schema }),

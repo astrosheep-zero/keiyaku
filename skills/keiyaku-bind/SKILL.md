@@ -203,4 +203,4 @@ The holder now owns the lifecycle:
    objective and acceptance boundary, or abandon it when either has changed.
 
 Continue with `keiyaku-workflow` for this lifecycle. For Akuma invocation,
-telling, waiting, permissions, and history, read `keiyaku-akuma`.
+telling, waiting, and history, read `keiyaku-akuma`.

@@ -10,7 +10,6 @@ import test from "node:test";
 import { allocatedHeart, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { AkumaComposition as Akuma, recordCallInitialTell } from "./support/akuma-composition.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import {
   finishBodyIfIdle,
   HeldAkumaLeash,
@@ -20,7 +19,6 @@ import {
   readSeal,
   readSoul,
   reserveRequest,
-  type Soul,
 } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
@@ -59,9 +57,9 @@ async function akumaAt(root: string, requestDirectory?: string) {
 }
 
 
-async function fixture(allowed?: Soul["allowed"]) {
+async function fixture() {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-requests-")));
-  const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "1234abcd", allowed, createdAt: "2026-08-09T00:00:00.000Z" });
+  const parent = await bornDirectAkuma({ root, archetype: "parent", draw: "1234abcd", createdAt: "2026-08-09T00:00:00.000Z" });
   return { root, parent, soul: parent.soul, leash: parent.leash, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -82,7 +80,6 @@ async function openCallPump(
 ): Promise<BodyRequestPump> {
   return await BodyRequestPump.open({
     paths: value.parent.paths,
-    allowed: value.soul.allowed,
     bodySequence: 1,
     now: () => now,
     commands: akumaCallRequestCommands({
@@ -157,7 +154,6 @@ test("cancelled publication returns born when Soul appears during termination be
               options: {},
               cwd: root,
               origin: { kind: "direct" },
-              allowed: ALLOWED_ACTIONS,
               createdAt: "2026-08-26T00:00:00.000Z",
             });
             leash.release();
@@ -203,7 +199,6 @@ test("cancelled publication waits for an already-born child to exit before relea
         options: {},
         cwd: root,
         origin: { kind: "direct" },
-        allowed: ALLOWED_ACTIONS,
         createdAt: "2026-08-26T00:00:00.000Z",
       });
       leash.release();
@@ -269,7 +264,6 @@ test("cancelled publication terminates its child, observes Seal, and then reject
         options: {},
         cwd: root,
         origin: { kind: "direct" },
-        allowed: ALLOWED_ACTIONS,
         createdAt: "2026-08-26T00:00:00.000Z",
       }),
       "sealed",
@@ -316,7 +310,7 @@ test("cancelled publication remains pending with child custody until termination
 });
 
 test("reserved child request is adjudicated from child Soul after publication failure", async () => {
-  const value = await fixture(["akuma.call"]);
+  const value = await fixture();
   value.leash.release();
   const id = randomUUID();
   const pump = await openCallPump(value, async (launch) => {
@@ -335,7 +329,6 @@ test("reserved child request is adjudicated from child Soul after publication fa
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
-        allowed: ALLOWED_ACTIONS,
       },
     });
     assert.equal((await readRequest(value.parent.paths, id))?.state, "served");
@@ -351,7 +344,7 @@ test("reserved child request is adjudicated from child Soul after publication fa
 });
 
 test("reserved child request with incomplete evidence remains reserved for recovery", async () => {
-  const value = await fixture(["akuma.call"]);
+  const value = await fixture();
   value.leash.release();
   const id = randomUUID();
   const child = "aku/worker/ffffffff" as Parameters<typeof reserveRequest>[2];
@@ -361,7 +354,6 @@ test("reserved child request with incomplete evidence remains reserved for recov
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "pending" }),
       admittedAt: "2026-08-26T00:00:01.000Z",
-      permitted: true,
     });
     await reserveRequest(value.parent.paths, id, child);
     assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-26T00:00:02.000Z"), "pending");
@@ -372,7 +364,7 @@ test("reserved child request with incomplete evidence remains reserved for recov
 });
 
 test("a closed request channel does not report a reserved child as voided", async () => {
-  const value = await fixture(["akuma.call"]);
+  const value = await fixture();
   value.leash.release();
   const id = randomUUID();
   let childLeash: HeldAkumaLeash | null = null;
@@ -391,7 +383,6 @@ test("a closed request channel does not report a reserved child as voided", asyn
       recipe: {
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
-        allowed: ALLOWED_ACTIONS,
       },
     });
     await waitForCondition(
@@ -466,8 +457,8 @@ test("publication releases process custody after bounded observation of unsettle
   }
 });
 
-test("Heart clips nested allowed at each direct parent and cannot regain removed actions", async () => {
-  const value = await fixture(["akuma.call"]);
+test("nested calls retain their direct parent attribution", async () => {
+  const value = await fixture();
   const previousRequests = process.env[AKUMA_REQUESTS_ENV];
   const previousHome = process.env.HOME;
   const home = join(value.root, "home");
@@ -481,15 +472,13 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     ).call({
       archetype: "worker",
       body: "child",
-      allowed: ["akuma.call"],
     });
     const childSoul = (await readSoul(pathsForAkuId(value.root, child.id)))!;
-    assert.deepEqual(childSoul.allowed, ["akuma.call"]);
+    assert.deepEqual(childSoul.caller, { kind: "akuma", world: value.root, akuId: value.parent.id });
 
     const childPaths = pathsForAkuId(value.root, child.id);
     const second = await BodyRequestPump.open({
       paths: childPaths,
-      allowed: childSoul.allowed,
       bodySequence: 1,
       now: () => "2026-08-09T00:00:03.000Z",
       commands: akumaCallRequestCommands({
@@ -507,9 +496,8 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
       ).call({
         archetype: "worker",
         body: "grandchild",
-        allowed: ["akuma.call", "debt.add"],
       });
-      assert.deepEqual((await readSoul(pathsForAkuId(value.root, grandchild.id)))?.allowed, ["akuma.call"]);
+      assert.deepEqual((await readSoul(pathsForAkuId(value.root, grandchild.id)))?.caller, { kind: "akuma", world: value.root, akuId: child.id });
     } finally {
       await second.close();
     }
@@ -520,41 +508,6 @@ test("Heart clips nested allowed at each direct parent and cannot regain removed
     else process.env[AKUMA_REQUESTS_ENV] = previousRequests;
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
-    value.close();
-  }
-});
-
-test("Heart refuses a disabled call before child publication", async () => {
-  const value = await fixture([]);
-  const pump = await openCallPump(value, async () => {
-    assert.fail("disabled request reached child publication");
-  });
-  try {
-    await assert.rejects(
-      requestBodyCall({
-        directory: pump.directory,
-        id: "00000000-0000-4000-8000-000000000004",
-        world: value.root,
-        archetype: "worker",
-        initialTell: callTell("blocked"),
-        recipe: {
-          provider: { name: "claude", kind: "claude-agent-sdk" },
-          options: {},
-          allowed: ["akuma.call"],
-        },
-      }),
-      (error: unknown) =>
-        error instanceof AkumaBodyRequestError &&
-        error.outcome === "refused" &&
-        error.diagnostic === "not-allowed: akuma.call",
-    );
-    const fact = await readRequest(value.parent.paths, "00000000-0000-4000-8000-000000000004");
-    assert.equal(fact?.state, "refused");
-    assert.equal(fact?.requester, value.parent.id);
-    assert.equal(fact?.action, "akuma.call");
-  } finally {
-    await pump.close();
-    value.leash.release();
     value.close();
   }
 });
@@ -790,7 +743,6 @@ test("a drive serves Body Requests through transport while Heart remains authori
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: { systemPrompt: "Work.\n" },
-          allowed: ALLOWED_ACTIONS,
         },
       }),
     );
@@ -814,7 +766,6 @@ test("a drive serves Body Requests through transport while Heart remains authori
         recipe: {
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: { systemPrompt: "Work.\n" },
-          allowed: ALLOWED_ACTIONS,
         },
       }),
       (error: unknown) => error instanceof AkumaBodyRequestError && error.outcome === "refused",
@@ -851,7 +802,6 @@ test("a new body settles old requests by observation without replay", async () =
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "never spawned" }),
       admittedAt: "2026-08-09T00:00:01.000Z",
-      permitted: true,
     });
 
     const bornId = "00000000-0000-4000-8000-000000000012";
@@ -860,7 +810,6 @@ test("a new body settles old requests by observation without replay", async () =
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "born" }),
       admittedAt: "2026-08-09T00:00:02.000Z",
-      permitted: true,
     });
     const born = await allocatedHeart(value.root, "worker", "00000012");
     await reserveRequest(value.parent.paths, bornId, born.id);
@@ -879,7 +828,6 @@ test("a new body settles old requests by observation without replay", async () =
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "unborn" }),
       admittedAt: "2026-08-09T00:00:03.000Z",
-      permitted: true,
     });
     const unborn = await allocatedHeart(value.root, "worker", "00000013");
     await reserveRequest(value.parent.paths, unbornId, unborn.id);
@@ -890,7 +838,6 @@ test("a new body settles old requests by observation without replay", async () =
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "mismatch" }),
       admittedAt: "2026-08-09T00:00:04.000Z",
-      permitted: true,
     });
     const mismatch = await allocatedHeart(value.root, "worker", "00000014");
     await reserveRequest(value.parent.paths, mismatchId, mismatch.id);
@@ -916,7 +863,6 @@ test("a new body settles old requests by observation without replay", async () =
       action: "contract.deliver",
       payloadJson: JSON.stringify({ body: "begun" }),
       admittedAt: "2026-08-09T00:00:05.000Z",
-      permitted: true,
     });
     await beginRequest(value.parent.paths, begunId);
     assert.equal(await settleBodyRequests(value.parent.paths, value.soul, () => "2026-08-09T00:00:06.000Z"), "settled");

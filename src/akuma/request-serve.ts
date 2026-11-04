@@ -37,7 +37,6 @@ export type ServeInput = Omit<PumpInput, "bodySequence"> &
 type ResolvedRequest = Readonly<{
   payloadJson: string;
   supportsCancellation: boolean;
-  isPermitted(allowed: readonly string[]): boolean;
   encodeFailure(error: unknown): unknown | null;
 }>;
 
@@ -111,7 +110,6 @@ async function serveResolvedCommand(
     action: input.claim.action,
     payloadJson: request.payloadJson,
     admittedAt: input.now(),
-    permitted: request.isPermitted(input.allowed),
   });
   if (fact.state === "admitted" && !input.admissionOpen()) {
     fact = await voidRequest(input.paths, fact.id, "body closed request admission");

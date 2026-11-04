@@ -529,7 +529,6 @@ export class AkumaOwner {
               ...(source.description === undefined ? {} : { description: source.description }),
               provider: source.provider,
               options: source.options,
-              allowed: source.allowed,
               bare: source.bare === true || bare === true,
               cwd: source.cwd,
               origin: { kind: "fork", parent: this.id, at: input.at },

@@ -274,7 +274,6 @@ test(
       root: world,
       cwd: world,
       host: { hosting: "in-process" },
-      allowed: ["contract.review", "debt.add", "akuma.call"],
     });
     const script = join(world, "requests.mjs");
     writeFileSync(
@@ -369,7 +368,6 @@ test("launch cancellation before preparation cannot create a late Body, and publ
             origin: { kind: "direct" },
             provider: { name: "pi", kind: "pi" },
             options: {},
-            allowed: [],
           },
         },
         async () => {
@@ -434,7 +432,6 @@ test("owned in-process cancellation retires only its own prepared Body", async (
           origin: { kind: "direct" },
           provider: { name: "pi", kind: "pi" },
           options: {},
-          allowed: [],
         },
         initialBody: index === 0 ? "first" : "second",
       }),

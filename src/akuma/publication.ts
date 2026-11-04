@@ -4,7 +4,6 @@ import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths, type AkuId } from "./identity.js";
 import { abortableDelay } from "./abort.js";
 import type { BodyLaunchEnd, LiveBodyLaunch } from "./body-launch.js";
-import { clipAllowedActions, type AllowedActions } from "./allowed.js";
 import type { RequestRecipe } from "./heart/facts.js";
 import type { CallInitialTell, CallInitialTellAdmission, TellResult } from "./call-initial-tell.js";
 import { resolveProviderExecution, withWritableDirectories } from "./providers/index.js";
@@ -334,8 +333,7 @@ type PreparedCallPorts = Readonly<{
  * The one discriminated custody the prepared executor serves. Local custody
  * carries the initiating process's own proved World and local spawn/initial-Tell
  * ports. Request custody carries the authenticated direct parent, the serving
- * request identity, the reservation edge, and the parent scope its allowed
- * actions are clipped against. Both kinds carry the same raw recipe.
+ * request identity and the reservation edge. Both kinds carry the same raw recipe.
  */
 type PreparedCallCustody =
   | (PreparedCallPorts & Readonly<{ kind: "local"; world: WorldRoot; recipe: PreparedCallRecipe }>)
@@ -376,13 +374,12 @@ export function callDiagnostic(error: unknown): string {
 
 /**
  * The one provider-owner admission shared by both custody kinds: resolve the
- * decoded execution to its adapter, admit the raw options once, and clip the
- * requested actions only when a parent ceiling applies.
+ * decoded execution to its adapter and admit the raw options once.
  */
 async function admittedRecipe(
   recipe: PreparedCallRecipe,
   input: Pick<PreparedCallInput, "cwd" | "writableDirectories" | "signal">,
-  bounds: Readonly<{ ceiling?: AllowedActions; refuse?: (diagnostic: string) => Promise<void> }> = {},
+  bounds: Readonly<{ refuse?: (diagnostic: string) => Promise<void> }> = {},
 ): Promise<PreparedCallRecipe> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
@@ -402,7 +399,6 @@ async function admittedRecipe(
     ...recipe,
     provider: selected.execution,
     options: admission.options,
-    allowed: bounds.ceiling === undefined ? recipe.allowed : clipAllowedActions(recipe.allowed, bounds.ceiling),
     ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
   });
 }
@@ -416,7 +412,7 @@ async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
 /**
  * The one lower birth owner for a prepared call. It alone orders World
  * proof/consumption, request-custody provider resolution and options admission,
- * allowed clipping, child allocation, the launch admission gate and reservation,
+ * child allocation, the launch admission gate and reservation,
  * spawn/publication, and optional initial-Tell admission. It never loads
  * Settings or an Archetype and never imports Library, and it never replaces a
  * durably born child with a thrown error.
@@ -441,7 +437,7 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
   }
   const recipe =
     custody.kind === "request"
-      ? await admittedRecipe(custody.recipe, input, { ceiling: custody.parent.allowed, refuse: custody.refuse })
+      ? await admittedRecipe(custody.recipe, input, { refuse: custody.refuse })
       : await admittedRecipe(custody.recipe, input);
   const origin: Soul["origin"] =
     custody.kind === "request"
@@ -470,7 +466,6 @@ export async function executePreparedCall(input: PreparedCallInput): Promise<Pre
             ...(recipe.description === undefined ? {} : { description: recipe.description }),
             provider: recipe.provider,
             options: recipe.options,
-            allowed: recipe.allowed,
             ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
             cwd: input.cwd,
             origin,

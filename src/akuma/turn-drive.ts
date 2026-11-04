@@ -267,7 +267,6 @@ async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
   );
   const requests = await BodyRequestPump.open({
     paths: input.paths,
-    allowed: input.soul.allowed,
     bodySequence: input.bodySequence,
     now: input.now,
     commands,

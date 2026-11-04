@@ -65,7 +65,6 @@ export class Akuma {
     options: Readonly<{
       root: WorldRoot;
       alias?: string;
-      allowed?: readonly AllowedAction[];
       contract?: string;
     }>,
   ): Promise<Akuma>;
@@ -271,7 +270,7 @@ Historical: the `./akuma` subpath was later removed; the accepted package
 exposes only the root and plugin entries. During this design phase the plan was
 for that subpath barrel to export only
 `Akuma`, `AkuId`, `Schema`, `JsonSchema`, `ActivityHistory` and row types,
-`AllowedAction(s)`, `WorldRoot`, and typed public error classes. Existing
+`WorldRoot` and typed public error classes. Existing
 internal projections, receipts, Turn ledgers, and handles move behind internal
 imports used by CLI and composition. The package-root facade remains available
 for Contract APIs but does not re-export Akuma implementation objects.

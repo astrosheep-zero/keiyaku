@@ -203,7 +203,6 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
             // claim that a native runtime ever used it.
             provider: soul.provider.name,
             ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
-            allowed: soul.allowed,
             ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
             timeline: selected.snapshot,
           },

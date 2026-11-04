@@ -5,6 +5,11 @@ This chapter owns its identity, birth, life, Archetype admission, placement, and
 execution/provider boundary. Processes come and go; the Heart remains its
 durable authority.
 
+Heart owns durable facts; each product owner judges its own operation legality.
+Keiyaku has no separate product-action permission authority. Native provider
+sandbox, headless, filesystem, and network policy remain with the provider
+boundary.
+
 ## Identity, Birth, And Life
 
 An Akuma has one complete public identity in the Akuma family defined by
@@ -15,13 +20,13 @@ structural projection, not a second identity. Atomic allocation prevents reuse; 
 coordinate is never adopted as a different Akuma.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider
-recipe, execution cwd, origin, optional declared caller, effective permissions,
-and the choice to omit Keiyaku execution instructions. That opt-out changes
+recipe, execution cwd, origin, optional declared caller, and the choice to omit
+Keiyaku execution instructions. That opt-out changes
 neither personality nor capabilities and remains frozen across wake and resume.
 Caller attribution is independent of origin and fork lineage. It names either
 an Akuma in its World or an external integration identity; absence is legal
 for both existing and new births. Attribution is not authentication and never
-changes permissions, actor evidence, or admission authority. A
+changes actor evidence or admission authority. A
 Body is the one live driver, holding the exclusive leash for its lifetime. The
 leash is the sole execution-seat and liveness authority; Heart owns durable
 facts. Live process custody is a handle held by the spawning Body or adapter,
@@ -52,10 +57,10 @@ failure, and caller cancellation never discards a confirmed child or an exact
 admitted Tell. Only a birth that never proved Soul is a failed birth.
 
 Caller-selected additional writable directories are explicit birth-time filesystem
-grants, independent of forwarded product-action permissions. Admission requires
+roots. Admission requires
 existing canonical directories before allocating a child and deduplicates them.
-Only a provider with a verified native mapping accepts a nonempty grant. The
-admitted native recipe retains the grants across forwarding, wake, and fork;
+Only a provider with a verified native mapping accepts nonempty roots. The
+admitted native recipe retains the roots across forwarding, wake, and fork;
 source definitions and shared Settings never change. No directory is granted
 automatically, and adding roots never selects a broader sandbox mode or network
 policy.

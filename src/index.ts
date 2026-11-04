@@ -48,7 +48,6 @@ export { actorId } from "./core/facts/types.js";
  */
 export { z } from "zod";
 export {
-  ALLOWED_ACTIONS,
   Akuma,
   AkumaArchetypeError,
   AkumaBusyError,
@@ -79,8 +78,6 @@ export type {
   AkumaStreamSnapshot,
   AkumaTellOptions,
   AkumaTellResult,
-  AllowedAction,
-  AllowedActions,
   ArchetypeCatalog,
   ArchetypeCatalogInput,
   ArchetypeCatalogRow,

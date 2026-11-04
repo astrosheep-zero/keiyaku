@@ -5,7 +5,6 @@ import { settings as readSettings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { readAkumaBirthCwd } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
-import { decodeAllowedActions, unionAllowedActions, type AllowedAction } from "./allowed.js";
 import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
 import type { BodyLaunch, BodyLauncher } from "./body-launch.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
@@ -27,7 +26,6 @@ export type AkumaCallInput = Readonly<{
   archetype: string;
   body?: string;
   cwd?: string;
-  allowed?: readonly AllowedAction[];
   writableDirectories?: readonly string[];
   bare?: boolean;
   schema?: Schema<unknown>;
@@ -181,7 +179,7 @@ async function admitDirect(input: {
 
 /**
  * The one lower recipe preparer and admission edge used by plural creation and
- * standalone birth: load the caller Archetype/Settings, freeze allowed and cwd,
+ * standalone birth: load the caller Archetype/Settings, freeze the recipe and cwd,
  * then invoke the P3 prepared-call executor under local or request custody.
  */
 export async function admitAkumaCall(
@@ -196,10 +194,6 @@ export async function admitAkumaCall(
   const home = configuration.home === undefined ? {} : { home: configuration.home };
   const settings = configuration.settings ?? (await readSettings({ root: path, ...home }));
   const archetype = await loadPreparedArchetype({ name, project: path, ...home, settings });
-  const allowed =
-    input.allowed === undefined
-      ? archetype.allowed
-      : unionAllowedActions(archetype.allowed, decodeAllowedActions(input.allowed, "Akuma call allowed"));
   const writableDirectories = await writableDirectoriesOption(input.writableDirectories);
   if (writableDirectories.length > 0 && archetype.provider.kind !== "codex-app-server")
     throw new TypeError(`writableDirectories is unsupported by provider ${archetype.provider.kind}`);
@@ -208,7 +202,6 @@ export async function admitAkumaCall(
     ...(archetype.description === undefined ? {} : { description: archetype.description }),
     provider: archetype.provider,
     options: archetype.options,
-    allowed,
     bare: bareOption(input.bare) ?? false,
   });
   if (execution.kind === "body-request")

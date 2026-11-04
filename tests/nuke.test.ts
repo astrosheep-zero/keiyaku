@@ -7,7 +7,6 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { nuke, World, type NukeResult } from "../src/index.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch } from "../src/akuma/body-launch.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, type Soul } from "../src/akuma/heart/index.js";
@@ -123,7 +122,6 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
       options: {},
       origin: { kind: "direct" },
       cwd: world,
-      allowed: ALLOWED_ACTIONS,
     },
     initialBody: "keep working",
   };
@@ -448,7 +446,6 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
       options: {},
       cwd: world,
       origin: { kind: "direct" },
-      allowed: ALLOWED_ACTIONS,
       createdAt: "2026-08-19T00:00:00.000Z",
     };
     const leash = (await HeldAkumaLeash.try(allocated.paths))!;

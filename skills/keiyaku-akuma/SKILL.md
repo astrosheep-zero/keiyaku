@@ -27,9 +27,10 @@ first prompt: give it as one argument, or use `-` to read stdin, never both.
 Calls are detached by default: they return the new identity after birth without
 waiting for the first answer. Use explicit `--wait <duration>` when this
 invocation should block while observing that initial work. `--wait` only bounds
-this command; it never stops the Akuma. Read `call --help` for flag syntax,
-defaults, and action vocabulary.
-To hand a Contract role to an Akuma, use the grant table in `keiyaku-workflow`.
+this command; it never stops the Akuma. Read `call --help` for flag syntax and
+defaults.
+To hand a Contract role to an Akuma, use the commissioning table in
+`keiyaku-workflow`.
 
 The selected Akuma name is a reusable worker configuration, not an individual.
 Calling it again creates an independent Akuma. Use different names for
@@ -99,7 +100,7 @@ keiyaku history @reviewer --id turn/3
 ```
 
 - `whoami`: who you are; for an Akuma, also who started its current turn.
-- `status [<aku>]`: the roster, or one Akuma's state and workdir. `--json` shows `allowed`.
+- `status [<aku>]`: the roster, or one Akuma's state and workdir.
 - `ls aku/`: callable names. `ls "aku/*/*"`: recent instances.
   `ls --mine`: Akumas you called, plus their descendants in this World.
   `--caller` selects another caller; see `ls --help`.

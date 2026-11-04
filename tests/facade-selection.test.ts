@@ -22,7 +22,6 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { boundedMap, PAGE_POOL_SIZE } from "../src/akuma/read-pool.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { activitySlice, appendActivity, beginTurn, breakBody, endTurn, HeldAkumaLeash, initializeHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
@@ -154,7 +153,6 @@ async function answered(root: string, archetype: string, suffix: string) {
         options: {},
         origin: { kind: "direct" },
         cwd: root,
-        allowed: ALLOWED_ACTIONS,
       },
       initialBody: "work",
     },
@@ -250,7 +248,7 @@ for (const route of ["local", "forwarded"] as const) {
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAIT_AT });
       const port = selectionRequestPort(world, spawn);
       pump = await BodyRequestPump.open({
-        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        paths: parent.paths, bodySequence: body.sequence,
         now: () => WAIT_AT, signal: t.signal,
         commands: selectionRequestCommands({ ...port, ask: async request => {
           assert.deepEqual(trace(), acquired, "acquire precedes forwarding and the server acquires nothing");
@@ -324,7 +322,7 @@ for (const route of ["local", "forwarded", "idle"] as const) {
       const body = await parent.leash.recordBody(parent.paths, { leashTakenAt: WAIT_AT });
       const port = selectionRequestPort(world, noBodyLaunch);
       pump = await BodyRequestPump.open({
-        paths: parent.paths, allowed: parent.soul.allowed, bodySequence: body.sequence,
+        paths: parent.paths, bodySequence: body.sequence,
         now: () => WAIT_AT, signal: t.signal,
         commands: selectionRequestCommands({ ...port, wait: async request => {
           const trace = readFileSync(output, "utf8").trim().split("\n").map(line => JSON.parse(line));

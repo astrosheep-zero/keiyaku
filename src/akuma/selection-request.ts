@@ -244,10 +244,6 @@ export function selectionRequestProtocol<Result extends SelectionResult = Select
     encodeFailure: encodeSelectionLiveFailure,
     decodeFailure: decodeSelectionLiveFailure,
     decodeReference: (reference) => decodeSelectionService(action, reference),
-    isPermitted: (allowed) =>
-      action === "akuma.wait" ||
-      ((action === "akuma.tell" || action === "akuma.ask") && allowed.includes("akuma.tell")) ||
-      (action === "akuma.kill" && allowed.includes("akuma.kill")),
   };
 }
 

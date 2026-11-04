@@ -50,7 +50,6 @@ import {
 } from "../src/akuma/heart/index.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
-import { ALLOWED_ACTIONS } from "../src/akuma/allowed.js";
 
 async function fixture() {
   return await soulFixture("keiyaku-akuma-heart-");
@@ -724,7 +723,6 @@ test("kill witnesses one stopped Body without burning pending work", async () =>
       action: "akuma.call",
       payloadJson: JSON.stringify({ body: "child work" }),
       admittedAt: "2026-08-08T00:00:02.000Z",
-      permitted: true,
     });
     assert.deepEqual(await requestStop(value.allocated.paths, "2026-08-08T00:00:03.000Z"), {
       kind: "requested",
@@ -938,7 +936,6 @@ test("unknown Body Request state is authority corruption", async () => {
       action: "akuma.call",
       payloadJson: "{}",
       admittedAt: "2026-08-08T00:00:01.000Z",
-      permitted: true,
     });
     leash.release();
     const heart = new DatabaseSync(value.allocated.paths.heart);
@@ -1525,9 +1522,8 @@ test("a model update preserves unrelated raw Soul members instead of re-encoding
     const claim = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await claim.birth(value.allocated.paths, value.soul);
     const body = await claim.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-    // An older Soul: no `allowed` member at all, plus members this build does
-    // not model. The codec normalizes and freezes all of these, so a decoded
-    // read-modify-write would rewrite them; the narrow update must not.
+    // A Soul with members this build does not model. Decoding and re-encoding
+    // would discard them; the narrow update must preserve them unchanged.
     const raw = {
       id: value.soul.id,
       archetype: "claude",
@@ -1538,6 +1534,7 @@ test("a model update preserves unrelated raw Soul members instead of re-encoding
       origin: { kind: "direct" },
       createdAt: value.soul.createdAt,
       legacyMember: [1, 2],
+      allowed: ["task.unknown"],
     };
     const database = new DatabaseSync(value.allocated.paths.heart);
     try {
@@ -1773,7 +1770,6 @@ function codecSoul(): Soul {
       parent: "aku/parent/1234abcd" as Soul["id"],
       requestId: "00000000-0000-4000-8000-000000000001",
     },
-    allowed: ["akuma.call", "debt.add"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
 }
@@ -1803,9 +1799,6 @@ test("soul codec hard-fails invalid known members", () => {
     { name: "id and archetype disagree", change: (soul) => ({ ...soul, archetype: "worker" }) },
     { name: "blank cwd", change: (soul) => ({ ...soul, cwd: "" }) },
     { name: "blank description", change: (soul) => ({ ...soul, description: " " }) },
-    { name: "unknown allowed action", change: (soul) => ({ ...soul, allowed: ["akuma.unknown"] }) },
-    { name: "duplicate allowed action", change: (soul) => ({ ...soul, allowed: ["akuma.call", "akuma.call"] }) },
-    { name: "non-string allowed action", change: (soul) => ({ ...soul, allowed: [1] }) },
   ];
   for (const { name, change } of corruptions) {
     assert.throws(() => decodeSoul(change(codecSoul())), undefined as never, name);
@@ -1851,18 +1844,7 @@ test("Soul caller attribution shares admission validation and preserves legal ab
   }
 });
 
-test("persisted ledger permissions survive the rename without adding capabilities", () => {
-  const legacy = { ...codecSoul(), allowed: ["task.add", "task.start", "task.compose", "contract.audit"] };
-  assert.deepEqual(decodeSoul(legacy).allowed, ["debt.add"]);
-  assert.deepEqual(decodeSoul({ ...legacy, allowed: ["task.start"] }).allowed, []);
-  assert.throws(() => decodeSoul({ ...legacy, allowed: ["task.unknown"] }), /unknown action/u);
-});
 
-test("historical Soul omission retains the complete vocabulary", () => {
-  const historical = { ...codecSoul() } as Record<string, unknown>;
-  delete historical.allowed;
-  assert.deepEqual(decodeSoul(historical).allowed, ALLOWED_ACTIONS);
-});
 
 
 

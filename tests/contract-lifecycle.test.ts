@@ -143,13 +143,11 @@ describe("review actor testimony", () => {
       root: await World.at(repository.path),
       archetype: "worker",
       draw: "f0d0a002",
-      allowed: ["contract.review"],
       createdAt: "2026-09-28T10:00:00.000Z",
     });
     const { commands } = await externalRequestCommandsFor({ paths: parent.paths }, {}, noBodyLaunch);
     const pump = await BodyRequestPump.open({
       paths: parent.paths,
-      allowed: parent.soul.allowed,
       bodySequence: 1,
       now: () => "2026-09-28T10:00:01.000Z",
       commands,

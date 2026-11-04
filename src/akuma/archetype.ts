@@ -11,7 +11,6 @@ import {
   type ProviderExecution,
   type ProviderOptions,
 } from "./provider-recipe.js";
-import { DEFAULT_ALLOWED_ACTIONS, decodeAllowedActions, type AllowedActions } from "./allowed.js";
 
 type LocalArchetype = Readonly<{
   name: string;
@@ -21,8 +20,6 @@ type LocalArchetype = Readonly<{
   description?: string;
   hidden?: boolean;
   options: ProviderOptions;
-  allowed?: AllowedActions;
-  allowedPresent: boolean;
 }>;
 
 type DecodedArchetype = Readonly<{
@@ -32,7 +29,6 @@ type DecodedArchetype = Readonly<{
   description?: string;
   hidden?: boolean;
   options: ProviderOptions;
-  allowed: AllowedActions;
 }>;
 
 export type ArchetypeCatalogRow = Readonly<{
@@ -206,12 +202,15 @@ type ArchetypeFields = Readonly<{
   network?: "disabled" | "enabled";
   description?: string;
   hidden?: boolean;
-  allowed?: AllowedActions;
-  allowedPresent: boolean;
   systemPromptMode?: "append" | "replace";
 }>;
 
 function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): ArchetypeFields {
+  const unknown = Object.keys(values).find(
+    (key) =>
+      !["base", "provider", "model", "effort", "network", "description", "hidden", "systemPromptMode"].includes(key),
+  );
+  if (unknown !== undefined) throw new TypeError(`Akuma frontmatter has unknown field: ${unknown}`);
   const provider = archetypeField(values, "provider");
   const baseValue = archetypeField(values, "base");
   const base = baseValue === undefined ? undefined : validateAkumaName(baseValue);
@@ -220,8 +219,6 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
   const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
   const description = archetypeField(values, "description");
   const hidden = archetypeBoolean(values, "hidden");
-  const allowedPresent = "allowed" in values;
-  const allowed = allowedPresent ? decodeAllowedActions(values.allowed) : undefined;
   const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
   return {
     ...(base === undefined ? {} : { base }),
@@ -231,8 +228,6 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
     ...(network === undefined ? {} : { network }),
     ...(description === undefined ? {} : { description }),
     ...(hidden === undefined ? {} : { hidden }),
-    ...(allowed === undefined ? {} : { allowed }),
-    allowedPresent,
     ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
   };
 }
@@ -262,8 +257,6 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
             systemPromptMode: fields.systemPromptMode ?? "append",
           }),
     }),
-    ...(fields.allowed === undefined ? {} : { allowed: fields.allowed }),
-    allowedPresent: fields.allowedPresent,
   });
 }
 
@@ -271,7 +264,6 @@ function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetyp
   const provider = local.provider ?? base?.provider;
   if (provider === undefined) throw new TypeError("Akuma provider must be a nonblank string");
   const options = decodeProviderOptions({ ...(base?.options ?? {}), ...local.options });
-  const allowed = local.allowedPresent ? local.allowed! : (base?.allowed ?? DEFAULT_ALLOWED_ACTIONS);
   return Object.freeze({
     name: local.name,
     path: local.path,
@@ -284,7 +276,6 @@ function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetyp
     // Hiddenness is the file's own catalogue visibility; it never flows through base.
     ...(local.hidden === true ? { hidden: true } : {}),
     options,
-    allowed,
   });
 }
 

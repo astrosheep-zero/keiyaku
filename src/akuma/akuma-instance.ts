@@ -14,7 +14,6 @@ import type { AkumaStreamSnapshot } from "./akuma-stream.js";
 import { AkumaOwner, type InterruptReceipt } from "./akuma-owner.js";
 import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { type AkumaStatus } from "./akuma.js";
-import type { AllowedAction } from "./allowed.js";
 import { type KillEvidence } from "./heart/index.js";
 import type { ReportFact } from "./heart/facts.js";
 import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
@@ -40,7 +39,6 @@ export type AkumaBirthInput = Readonly<{
   cwd?: string;
   home?: string;
   settings?: Settings;
-  allowed?: readonly AllowedAction[];
   writableDirectories?: readonly string[];
   bare?: boolean;
   caller?: AkumaCaller;
@@ -262,6 +260,13 @@ export class Akuma extends AkumaHandle {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new TypeError("Akuma birth input must be an object");
     }
+    const unknown = Object.keys(input).find(
+      (key) =>
+        !["root", "cwd", "home", "settings", "writableDirectories", "bare", "caller", "initiator", "host"].includes(
+          key,
+        ),
+    );
+    if (unknown !== undefined) throw new TypeError(`Akuma birth input has unknown field: ${unknown}`);
     if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
     const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(input.host);
     const admitted = await admitAkumaCall(
@@ -273,7 +278,6 @@ export class Akuma extends AkumaHandle {
       {
         archetype,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-        ...(input.allowed === undefined ? {} : { allowed: input.allowed }),
         ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
         ...(input.bare === undefined ? {} : { bare: input.bare }),
         ...(input.caller === undefined ? {} : { caller: input.caller }),

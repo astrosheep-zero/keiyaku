@@ -71,21 +71,14 @@ for stops and reconciliation lag after an admitted act.
 
 ## 4. Handing A Role To An Akuma
 
-This is the one commissioning map. `call --help` owns the exact action
-vocabulary and default set. The flagship acting directly needs no grant.
-Birth freezes an Akuma's actions; `--contract` records association, not
+This is the one commissioning map. `--contract` records association, not
 authority.
 
-| Role | Grant at birth | Return |
+| Role | Commission | Return |
 | --- | --- | --- |
-| Holder | The actions the delegated loop will perform; include `contract.review` when this holder will review. Commission with the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
-| Deliverer | The ordinary baseline: every Debt mutation, Contract delivery, and Akuma management. Preview is unkeyed. `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
-| Reviewer | `--allowed contract.review`: `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> --allowed contract.review -` | The verdict receipt. Without the grant, `not-allowed` refuses and no verdict is recorded. |
-
-An Archetype's explicit allowed set replaces the ordinary baseline; check
-`status` for effective actions. `tell` and `fork` cannot add a grant to a live
-Akuma, so call a fresh one with the grant. Nested calls cannot exceed their
-direct parent's actions.
+| Holder | Commission the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
+| Deliverer | `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
+| Reviewer | `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> -` | The verdict receipt. |
 
 Commission with a clear objective, current Arc when one exists, appointed
 worktree, and expected result. Never ask the Akuma that delivered a candidate

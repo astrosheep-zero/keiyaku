@@ -39,7 +39,7 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
           if (text === "parent") {
             const child = await requestForwardedAkumaCall({
               directory: input.requests!.dir, id: "00000000-0000-4000-8000-000000000001", world, archetype: "worker",
-              recipe: { provider: { name: "claude", kind: "claude-agent-sdk" }, options: {}, allowed: [] },
+              recipe: { provider: { name: "claude", kind: "claude-agent-sdk" }, options: {} },
               initialTell: { tellId: "nested-tell", body: "child", schemaJson: '{"type":"object"}' },
             });
             assert.equal(child.kind, "live");
@@ -84,7 +84,6 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
     assert.notEqual(launches[0]!.paths.directory, launches[2]!.paths.directory);
     assert.equal(launches[2]!.seed?.id, nestedId);
     const child = await readHeart(launches[2]!.paths);
-    assert.deepEqual(child.soul?.allowed, []);
     assert.equal(child.latestBody?.end, "exited");
     assert.equal(child.pending.length, 0);
   } finally {
@@ -239,7 +238,7 @@ test(
     const child = await publishAkuma({ worldPath: world, archetype: "worker", launch: async (allocated) => {
       launch = await spawnAkumaBody({ paths: allocated.paths, seed: {
         id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
-        options: {}, cwd: world, origin: { kind: "direct" }, allowed: [],
+        options: {}, cwd: world, origin: { kind: "direct" },
       } });
       await waitForFixtureFile(join(barrier, "ready"));
       return launch;

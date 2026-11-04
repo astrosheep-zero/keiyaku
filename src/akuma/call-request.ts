@@ -1,5 +1,4 @@
 import { isAbsolute, resolve } from "node:path";
-import { allowedActionsSchema } from "./allowed.js";
 import { refuseRequest, reserveRequest, type Soul } from "./heart/index.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { akumaIdSchema, type AkuId, type AkumaPaths } from "./identity.js";
@@ -31,7 +30,6 @@ const archetypeSchema = z.string().transform((value, context) => {
 const akumaCallRecipeSchema = z
   .object({
     description: z.string().trim().min(1).optional(),
-    allowed: allowedActionsSchema,
     provider: providerRecipeSchema,
     options: providerOptionsSchema,
     bare: z.boolean().optional(),
@@ -137,7 +135,6 @@ async function executeAkumaCall(
         ...(request.recipe.description === undefined ? {} : { description: request.recipe.description }),
         provider: request.recipe.provider,
         options: request.recipe.options,
-        allowed: request.recipe.allowed,
         ...(request.recipe.bare === undefined ? {} : { bare: request.recipe.bare }),
       },
       parent,
@@ -191,7 +188,6 @@ export function akumaCallRequestProtocol(): RequestProtocol<AkumaCallRequest, Ak
       if (!parsed.success) throw new Error("Akuma call stored an invalid child reference");
       return parsed.data;
     },
-    isPermitted: (allowed) => allowed.includes("akuma.call"),
   };
 }
 

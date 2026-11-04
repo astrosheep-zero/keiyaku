@@ -6,7 +6,6 @@ import type { AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
-import { allowedActionsSchema } from "./allowed.js";
 import type { AkumaLife } from "./heart/index.js";
 import { readSoul } from "./heart/index.js";
 import {
@@ -71,7 +70,6 @@ export const akumaStatusSchema = z
     cwd: z.string().optional(),
     provider: z.string().optional(),
     model: z.string().optional(),
-    allowed: allowedActionsSchema,
     timeline: activitySnapshotSchema,
     strandedReason: z.literal("resume-unsupported").optional(),
   })

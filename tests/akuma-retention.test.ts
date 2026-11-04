@@ -50,7 +50,6 @@ async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<All
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
-        allowed: [],
         cwd: world,
       },
       initialBody: "old work",
@@ -75,7 +74,6 @@ async function runningAkuma(
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     origin: { kind: "direct" },
-    allowed: [],
     cwd: world,
     createdAt: OLD,
   });

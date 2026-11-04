@@ -119,7 +119,7 @@ absence and unknowns explicitly. Non-Akuma identity is marked as such and omits
 Akuma-only details. The Akuma head carries identity, aliases, Dispatch and the
 execution directory when known, as in status. Its current initiator, birth
 caller, context, and Dispatch remain distinct; text does not repeat context
-when it matches Dispatch, or show birth time, allowed actions, or direct origin.
+when it matches Dispatch, or show birth time or direct origin.
 JSON retains the complete typed facts, including those omitted from text.
 
 A bounded catalogue signals its one public fact — that more rows exist —
@@ -194,9 +194,8 @@ One Akuma observation panel orders its facts the same way wherever they exist,
 for selected status, observing call, ask progress, and history: the
 complete identity with an optional alias parenthetical and any known associated
 Contract on one line, then static context — the execution directory when
-supplied, and effective allowed actions only on surfaces that already expose
-them — indented beneath it. A static coordinate appears once, above the content
-boundary, and an unknown coordinate is omitted rather than filled in. One
+supplied — indented beneath it. A static coordinate appears once, above the
+content boundary, and an unknown coordinate is omitted rather than filled in. One
 width-aware rule opens the content only when timeline or observed conclusion
 content follows, and it never exceeds the terminal. Chronological activity
 retains the owner's selection, event order, payloads, omissions, labels, marks,

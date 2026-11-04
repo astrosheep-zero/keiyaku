@@ -458,7 +458,6 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
     options: {},
     cwd: root,
     origin: { kind: "direct" },
-    allowed: ["akuma.call"],
     createdAt: "2026-08-15T00:00:00.000Z",
   };
   const leash = (await HeldAkumaLeash.try(parent.paths))!;
@@ -500,7 +499,6 @@ test("packaged Akuma call, wait, and history cross the request boundary", async 
   };
   const pump = await BodyRequestPump.open({
     paths: parent.paths,
-    allowed: soul.allowed,
     bodySequence: 1,
     now: () => "2026-08-15T00:00:01.000Z",
     signal: new AbortController().signal,
