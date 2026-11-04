@@ -155,16 +155,28 @@ test("early and late exact suppression survive producer restart and remain Owner
   assert.equal((await f.cards()).length, 0);
   assert.equal((await f.cards(f.bob)).length, 1);
   await f.turn("aku/early", 2);
+  const report = "progress\n".repeat(2000);
   await f.plugin.signals!["akuma.reported"]!({
     kind: "akuma.reported",
     akumaId: "aku/early",
     bodySequence: 1,
     turnSequence: 1,
     reportSequence: 1,
-    text: "progress",
+    text: report,
     at: "2026-11-04T00:00:00Z",
     initiator: f.alice,
   });
+  const reportCard = (await f.cards()).find((card) => card.key === key("aku/early", "report/1"));
+  assert.ok(reportCard);
+  assert.equal(reportCard.text, `\`aku/early\` ▸ update\n${report}\n\n---\n\n\`report/1\``);
+  assert.deepEqual(reportCard.details, {
+    kind: "presentation",
+    origin: "Keiyaku",
+    author: "aku/early",
+    ref: "report/1",
+    body: reportCard.text,
+  });
+  assert.equal((await f.cards(f.bob)).some((card) => card.key === reportCard.key), false);
   assert.equal((await f.cards()).length, 2);
   await f.observe("aku/early", 2);
   assert.deepEqual(

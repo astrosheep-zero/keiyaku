@@ -281,7 +281,7 @@ const plugin: KeiyakuPlugin = {
           await sendNotice(
             signal.akumaId,
             `report/${signal.reportSequence}`,
-            `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
+            `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\``,
             [signal.initiator],
             cancellation,
           );

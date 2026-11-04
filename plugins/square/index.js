@@ -251,7 +251,7 @@ const plugin = {
                 async "akuma.reported"(signal, cancellation) {
                     if (signal.initiator === undefined)
                         return;
-                    await sendNotice(signal.akumaId, `report/${signal.reportSequence}`, `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``, [signal.initiator], cancellation);
+                    await sendNotice(signal.akumaId, `report/${signal.reportSequence}`, `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\``, [signal.initiator], cancellation);
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();
