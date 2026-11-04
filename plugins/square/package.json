@@ -1,6 +1,6 @@
 {
   "name": "@astrosheep/keiyaku-plugin-square",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,9 +18,9 @@
     }
   },
   "peerDependencies": {
-    "@astrosheep/keiyaku": "^4.5.11"
+    "@astrosheep/keiyaku": "^4.6.28"
   },
   "dependencies": {
-    "@astrosheep/square": "file:/Users/astrosheep/Developer/square-artifacts/ledger-e2657506e6caf1419a65e2d3214e119e5c7ace50/astrosheep-square-0.4.0.tgz"
+    "@astrosheep/square": "^0.4.1"
   }
 }
