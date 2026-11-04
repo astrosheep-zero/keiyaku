@@ -11,9 +11,8 @@ import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues } from "./support/process.js";
-import { runCli } from "./support/cli-fixtures.js";
 
-test("frozen call correlation and independent resources surround observation", async () => {
+test("frozen child identities and independent resources surround observation", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -25,7 +24,7 @@ test("frozen call correlation and independent resources surround observation", a
         'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
         '  let next = 0; return { waitDeferral(input) {',
         '    const id = ++next;',
-        '    appendFileSync(context.config.trace, `acquire:${id}:${input.akumaIds.join(",")}:${input.initialTellId}:${Object.isFrozen(input)}:${Object.isFrozen(input.akumaIds)}\\n`);',
+        '    appendFileSync(context.config.trace, `acquire:${id}:${input.akumaIds.join(",")}:${Object.isFrozen(input)}:${Object.isFrozen(input.akumaIds)}\\n`);',
         '    return { close(cleanup) { appendFileSync(context.config.trace, `close:${id}:${cleanup.aborted}\\n`); } };',
         "  } };",
         "} };",
@@ -37,7 +36,7 @@ test("frozen call correlation and independent resources surround observation", a
     });
     const world = await World.at(value.root);
     const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
-    const selected = { akumaIds: [] as string[], initialTellId: "first-tell" };
+    const selected = { akumaIds: ["aku/allocated"] as string[] };
     const pending = runtime.withWaitDeferrals(selected, undefined, async () => {
       await runtime.withWaitDeferrals({ akumaIds: ["aku/one", "aku/two"] }, undefined, async () => {
         appendFileSync(output, "route-and-final-observation\n");
@@ -45,10 +44,9 @@ test("frozen call correlation and independent resources surround observation", a
       appendFileSync(output, "outer-still-active\n");
     });
     selected.akumaIds.push("aku/changed");
-    selected.initialTellId = "changed-tell";
     await pending;
     assert.deepEqual(trace(output), [
-      "acquire:1::first-tell:true:true", "acquire:2:aku/one,aku/two:undefined:true:true",
+      "acquire:1:aku/allocated:true:true", "acquire:2:aku/one,aku/two:true:true",
       "route-and-final-observation", "close:2:false", "outer-still-active", "close:1:false",
     ]);
   } finally {
@@ -76,7 +74,7 @@ test("timed-out acquisition closes a scope that arrives later", async (context) 
     const world = await World.at(value.root);
     const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
     const advance = deadlineClock(context);
-    const pending = runtime.withWaitDeferrals({ akumaIds: [], initialTellId: "first-tell" }, undefined, async () => {
+    const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/allocated"] }, undefined, async () => {
       appendFileSync(output, "route\n");
     });
     await eventually(() => trace(output).includes("started"));
@@ -166,7 +164,7 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
       reportDiagnostic: message => diagnostics.push(message) });
     const caller = new AbortController();
     const reason = new Error("caller cancelled");
-    const pending = runtime.withWaitDeferrals({ akumaIds: [], initialTellId: "first-tell" }, caller.signal, async () => assert.fail("must not start"));
+    const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/allocated"] }, caller.signal, async () => assert.fail("must not start"));
     const rejected = assert.rejects(pending, error => error === reason);
     await eventually(() => trace(output).includes("gamma:started"));
     caller.abort(reason);
@@ -314,7 +312,6 @@ const SQUARE_SESSION_ENVIRONMENT = [
   "CODEX_THREAD_ID",
   "OPENCODE_SESSION_ID",
   "PI_SESSION_ID",
-  "SQUARE_PARTICIPANT_NAME",
   "PASEO_AGENT_ID",
 ] as const;
 
@@ -390,7 +387,7 @@ function deadlineClock(context: TestContext): (milliseconds: number) => void {
   };
 }
 
-function writeInitiatingPlugin(root: string): void {
+function writeOutcomePlugin(root: string): void {
   writePlugin(
     root,
     "alpha",
@@ -398,62 +395,11 @@ function writeInitiatingPlugin(root: string): void {
       'import { appendFileSync } from "node:fs";',
       "export default {",
       '  manifest: { id: "alpha", apiVersion: 1 },',
-      '  activate(context) { appendFileSync(context.config.trace, "activate\\n"); return { signals: { "akuma.initiating": (signal) => appendFileSync(context.config.trace, `signal:${signal.initiator}\\n`) } }; },',
+      '  activate(context) { appendFileSync(context.config.trace, "activate\\n"); return { signals: { "akuma.turn-started": (signal) => appendFileSync(context.config.trace, `signal:${signal.akumaId}\\n`) } }; },',
       "};",
     ].join("\n"),
   );
 }
-
-function writeHomePlugins(home: string, output: string): void {
-  writeFileSync(
-    join(home, "settings.json"),
-    JSON.stringify({ plugins: { alpha: { package: "./plugins/alpha.mjs", config: { trace: output } } } }),
-  );
-}
-
-function callEnvironment(home: string): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = { ...process.env, KEIYAKU_HOME: home, SQUARE_PARTICIPANT_NAME: "tester" };
-  delete environment.KEIYAKU_ACTOR_ID;
-  delete environment.KEIYAKU_ACTOR_WORLD;
-  return environment;
-}
-
-test("first call establishes its selected World before initiating, even if admission later refuses", async () => {
-  const value = fixture();
-  try {
-    const output = join(value.root, "trace.txt");
-    writeInitiatingPlugin(value.root);
-    writeHomePlugins(value.home, output);
-    const result = await runCli(["call", "ghost", "hi"], {
-      cwd: value.root,
-      environment: callEnvironment(value.home),
-    });
-    assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stdout} ${result.stderr}`);
-    assert.deepEqual(trace(output), ["activate", "signal:tester"]);
-    assert.equal(existsSync(join(value.root, ".keiyaku")), true);
-    assert.ok(!result.stderr.includes("plugin"), `no plugin noise: ${result.stderr}`);
-  } finally {
-    value.close();
-  }
-});
-
-test("call in an established world emits the initiating plugin signal", async () => {
-  const value = fixture();
-  try {
-    const output = join(value.root, "trace.txt");
-    writeInitiatingPlugin(value.root);
-    writeHomePlugins(value.home, output);
-    await World.at(value.root);
-    const result = await runCli(["call", "ghost", "hi"], {
-      cwd: value.root,
-      environment: callEnvironment(value.home),
-    });
-    assert.equal(result.exit, 1, `call refuses the missing archetype: ${result.stdout} ${result.stderr}`);
-    assert.deepEqual(trace(output), ["activate", "signal:tester"]);
-  } finally {
-    value.close();
-  }
-});
 
 test("plugin runtime selects project-shadowed enabled plugins in manifest-id order", async () => {
   const value = fixture();
@@ -643,7 +589,7 @@ test("the shared emission entry acquires the runtime, delivers, and isolates han
       [
         "export default {",
         '  manifest: { id: "throwing", apiVersion: 1 },',
-        '  activate() { return { signals: { "akuma.initiating": () => { throw new Error("handler failure"); } } }; },',
+        '  activate() { return { signals: { "akuma.turn-started": () => { throw new Error("handler failure"); } } }; },',
         "};",
       ].join("\n"),
     );
@@ -654,7 +600,7 @@ test("the shared emission entry acquires the runtime, delivers, and isolates han
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "working", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.initiating": (signal) => appendFileSync(context.config.trace, `signal:${signal.initiator}\\n`) } }; },',
+        '  activate(context) { return { signals: { "akuma.turn-started": (signal) => appendFileSync(context.config.trace, `signal:${signal.akumaId}\\n`) } }; },',
         "};",
       ].join("\n"),
     );
@@ -666,11 +612,11 @@ test("the shared emission entry acquires the runtime, delivers, and isolates han
     const diagnostics: string[] = [];
     await emitPluginSignal(
       { world: await World.at(value.root), reportDiagnostic: (value) => diagnostics.push(value) },
-      { kind: "akuma.initiating", initiator: "tester" },
+      { kind: "akuma.turn-started", akumaId: "aku/test", turnSequence: 1 },
     );
 
-    await eventually(() => trace(output).includes("signal:tester"));
-    assert.deepEqual(trace(output), ["signal:tester"]);
+    await eventually(() => trace(output).includes("signal:aku/test"));
+    assert.deepEqual(trace(output), ["signal:aku/test"]);
     assert.equal(diagnostics.includes("plugin throwing signal: handler failure"), true, diagnostics.join("; "));
   } finally {
     value.close();
@@ -1045,7 +991,7 @@ test("missing selected Paseo does not fall back to the core installation or bloc
   const value = fixture();
   context.after(value.close);
   const output = join(value.root, "trace.txt");
-  writeInitiatingPlugin(value.root);
+  writeOutcomePlugin(value.root);
   writeProjectPlugins(value.root, {
     alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
     paseo: { package: "@astrosheep/keiyaku-plugin-paseo" },
@@ -1055,10 +1001,10 @@ test("missing selected Paseo does not fall back to the core installation or bloc
     world: await World.at(value.root), settings: await settings({ root: value.root, home: value.home }),
     reportDiagnostic: (message) => { diagnostics.push(message); },
   });
-  await runtime.emit({ kind: "akuma.initiating", initiator: "tester" });
+  await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/test", turnSequence: 1 });
   assert.equal(diagnostics.length, 1);
   assert.match(diagnostics[0] ?? "", /plugin paseo import:.*@astrosheep\/keiyaku-plugin-paseo/u);
-  assert.deepEqual(trace(output), ["activate", "signal:tester"]);
+  assert.deepEqual(trace(output), ["activate", "signal:aku/test"]);
 });
 
 test("completed plugin emissions leave no timeout keeping their process alive", (context) => {

@@ -150,7 +150,8 @@ process. A normally exited Body remains already stopped without a witness, and
 a witnessed Body remains already killed.
 
 Tell admission retains its optional submitting initiator alongside its input;
-reusing the same Tell identity cannot replace that attribution. Turn admission
+this is opaque integration attribution, with no participant lookup or historical
+identity rewriting. Reusing the same Tell identity cannot replace that attribution. Turn admission
 retains the opening input's initiator independently of later Tell retention,
 Body succession, or the process producing its outcome. Binding a Tell to a Turn
 adds its attributed initiator to that Turn's participant audience without

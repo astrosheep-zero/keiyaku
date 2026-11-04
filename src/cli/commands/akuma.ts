@@ -3,8 +3,7 @@ import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma-grammar.js"
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { squareSeat } from "../square-identity.js";
-import { emitPluginSignal } from "../../plugin/akuma-signals.js";
+import { deliveryOwner } from "../delivery-identity.js";
 import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { settings, type Settings } from "../../settings.js";
@@ -110,37 +109,9 @@ async function promptBody(
   return bytes;
 }
 
-/**
- * A generic integration initiator outranks any Square guess; otherwise the Square
- * edge selects. Identity selection is optional, so it never refuses the operation.
- */
-async function submittingInitiator(input: InvokeInput): Promise<string | undefined> {
-  const declared = input.environment.KEIYAKU_INITIATOR?.trim();
-  if (declared !== undefined && declared !== "") return declared;
-  try {
-    return await squareSeat(
-      { path: input.path, environment: input.environment },
-      { ...(input.signal === undefined ? {} : { signal: input.signal }) },
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-async function inputInitiator(input: InvokeInput): Promise<Readonly<{ initiator?: string }>> {
-  const initiator = await submittingInitiator(input);
-  if (initiator === undefined) return {};
-  // Identity preparation needs established plugin custody, not just a candidate.
-  if (!(await World.established(input.path))) return { initiator };
-  await emitPluginSignal(
-    {
-      world: input.path,
-      ...(input.settings === undefined ? {} : { settings: input.settings }),
-      reportDiagnostic: (message) => writeStderr(message),
-    },
-    { kind: "akuma.initiating", initiator },
-  );
-  return { initiator };
+function inputInitiator(input: InvokeInput): Readonly<{ initiator?: string }> {
+  const initiator = deliveryOwner(input.environment);
+  return initiator === undefined ? {} : { initiator };
 }
 
 function emitAnswer(body: string, exact: boolean): void {
@@ -156,7 +127,6 @@ async function runCall(
   const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const declaredCaller = await akumaCallerFromEnvironment(input.environment);
-  // Establish the selected World before preparing the submitting Square route.
   await World.at(input.path);
   const caller = akumas(input);
   const request: CallRequest = {

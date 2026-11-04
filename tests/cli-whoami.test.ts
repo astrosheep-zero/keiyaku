@@ -31,7 +31,6 @@ function writeSignalRecorder(root: string): string {
     export default {
       manifest: { id: "record", apiVersion: 1 },
       activate(context) { return { signals: {
-        "akuma.initiating": (signal) => appendFileSync(context.config.trace, "initiating:" + signal.initiator + "\\n"),
         "akuma.outcome-observed": () => appendFileSync(context.config.trace, "outcome\\n")
       } }; }
     };
@@ -99,7 +98,7 @@ test("whoami never reads an existing Square seat or publishes an index", async (
 test("self declarations do not adopt outgoing attribution", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-whoami-env-");
   const declared = await cliJson<WhoamiFacts>(["-C", root, "whoami"], {
-    environment: { CODEX_THREAD_ID: "session", KEIYAKU_INITIATOR: "  Integration  ", SQUARE_PARTICIPANT_NAME: "Other" },
+    environment: { CODEX_THREAD_ID: "session", KEIYAKU_INITIATOR: "  Integration  " },
   });
   assert.equal(declared.exit, 0, declared.stderr);
   assert.deepEqual(declared.value.self, { kind: "external", integration: "codex", id: "session" });
@@ -153,7 +152,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   });
   const environment = {
     KEIYAKU_ACTOR_ID: allocated.id, KEIYAKU_ACTOR_WORLD: world,
-    KEIYAKU_INITIATOR: "LaterOutgoing", SQUARE_PARTICIPANT_NAME: "OtherSeat",
+    KEIYAKU_INITIATOR: "LaterOutgoing",
   };
   const body = await leash.recordBody(allocated.paths, { leashTakenAt: AT });
   const beforeTurn = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
@@ -196,7 +195,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
     "",
   ].join("\n"));
   assert.doesNotMatch(text.stdout, /running|asleep|elapsed|timeline/u);
-  assert.equal(readFileSync(trace, "utf8"), signalsBefore, "neither outcome nor initiating signal was emitted");
+  assert.equal(readFileSync(trace, "utf8"), signalsBefore, "no outcome signal was emitted");
 
   assert.ok(result.value.profile?.kind === "available");
   const alternateContext = contractId("kei/different");

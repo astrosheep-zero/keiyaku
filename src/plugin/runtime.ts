@@ -297,7 +297,6 @@ async function writablePaths(
  * kind is accepted.
  */
 const SIGNAL_KINDS: Readonly<Record<keyof PluginSignalMap, true>> = Object.freeze({
-  "akuma.initiating": true,
   "akuma.born": true,
   "akuma.outcome-observed": true,
   "akuma.reported": true,
@@ -573,7 +572,6 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
       signal?.throwIfAborted();
       const input = Object.freeze({
         akumaIds: Object.freeze([...selected.akumaIds]),
-        ...(selected.initialTellId === undefined ? {} : { initialTellId: selected.initialTellId }),
       });
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
       const scopes = await Promise.all(

@@ -5,10 +5,11 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Square, DeliveryLedger, harnessOwner } from "@astrosheep/square";
+import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { after, type TestContext } from "node:test";
-import { Akuma, Akumas, Schema, World, type WorldRoot } from "../src/index.js";
+import { Akuma, Akumas, Schema, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
+import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
@@ -76,7 +77,7 @@ function recordingPlugin(world: WorldRoot, fail = false) {
 }
 
 test(
-  "Body outcome correlates exact Turn bindings through many steers, no bindings, and cancellation",
+  "Body outcomes freeze opening and steered Owners independently of producing environment",
   { timeout: 15_000 },
   async (t) => {
     const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-tell-ids-"), "0b500017");
@@ -131,11 +132,29 @@ test(
       },
     }));
     const runtime = { spawn: noBodyLaunch, now: () => AT };
-    const body = driveAkumaBody({ paths: source.allocated.paths, initialBody: "work" }, adapter, runtime);
+    const opening = harnessOwner({ channel: "pi", session: "opening" });
+    const steering = harnessOwner({ channel: "codex", session: "steering" });
+    const body = driveAkumaBody(
+      { paths: source.allocated.paths, initialBody: "work", initiator: opening },
+      adapter,
+      runtime,
+    );
     try {
       await ready;
-      await recordTell(source.allocated.paths, { kind: "tell", id: "live-one", body: "one", recordedAt: AT });
-      await recordTell(source.allocated.paths, { kind: "tell", id: "live-two", body: "two", recordedAt: AT });
+      await recordTell(source.allocated.paths, {
+        kind: "tell",
+        id: "live-one",
+        body: "one",
+        recordedAt: AT,
+        initiator: steering,
+      });
+      await recordTell(source.allocated.paths, {
+        kind: "tell",
+        id: "live-two",
+        body: "two",
+        recordedAt: AT,
+        initiator: opening,
+      });
       await bothReceived;
     } finally {
       release();
@@ -170,7 +189,7 @@ test(
     const bound = deferred<void>();
     const closed = deferred<void>();
     const canceledBody = driveAkumaBody(
-      { paths: canceled.allocated.paths, initialBody: "cancel me" },
+      { paths: canceled.allocated.paths, initialBody: "cancel me", initiator: opening },
       fixtureAdapter(async () => ({
         events: {
           async *[Symbol.asyncIterator]() {
@@ -206,11 +225,12 @@ test(
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(outcomes.length, 3);
-    assert.deepEqual(outcomes[0].tellIds, ["live-one", "live-two"]);
-    assert.deepEqual(outcomes[1].tellIds, []);
+    assert.equal(outcomes[0].initiator, opening);
+    assert.deepEqual(outcomes[0].participants, [opening, steering]);
+    assert.equal(outcomes[1].participants, undefined);
     assert.equal(outcomes[0].akumaId, source.allocated.id);
     assert.equal(outcomes[1].akumaId, empty.allocated.id);
-    assert.deepEqual(outcomes[2].tellIds, ["canceled-tell"]);
+    assert.deepEqual(outcomes[2].participants, [opening]);
     assert.deepEqual(outcomes[2].outcome, { kind: "canceled" });
     assert.equal((await readTell(source.allocated.paths, "live-one"))?.binding?.turnSequence, outcomes[0].turnSequence);
     assert.equal((await readTell(source.allocated.paths, "live-two"))?.binding?.turnSequence, outcomes[0].turnSequence);
@@ -467,29 +487,22 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
     "PI_SESSION_ID",
     "PASEO_AGENT_ID",
     "CLAUDE_CODE_CHILD_SESSION",
-    "SQUARE_PARTICIPANT_NAME",
-    "SQUARE_INDEX",
+    "KEIYAKU_INITIATOR",
     "SQUARE_DELIVERY",
   ];
   const prior = Object.fromEntries(variables.map((key) => [key, process.env[key]]));
   variables.forEach((key) => {
     delete process.env[key];
   });
-  process.env.SQUARE_PARTICIPANT_NAME = "Requester";
   process.env.PI_SESSION_ID = "requester-session";
-  process.env.SQUARE_INDEX = join(world, "index.ndjsonl");
   process.env.SQUARE_DELIVERY = join(world, "delivery.sqlite");
   t.after(() => restoreEnvironmentValues(prior));
-  const path = join(world, ".square", "KEIYAKU.square");
-  mkdirSync(join(world, ".square"), { recursive: true });
-  const square = await Square.build({ path, markdown: "" });
   const owner = harnessOwner({ channel: "pi", session: "requester-session" });
   const other = harnessOwner({ channel: "pi", session: "other-session" });
-  await square.join("Requester", { owner });
-  await square.join("Other", { owner: other });
   const ledger = await DeliveryLedger.open({ location: process.env.SQUARE_DELIVERY });
+  for (const recipient of [owner, other])
+    assert.ok(await ledger.attach({ owner: recipient, expectedGeneration: null, routes: [] }));
   t.after(async () => {
-    await square.close();
     await ledger.close();
   });
   mkdirSync(join(world, "plugins"), { recursive: true });
@@ -503,7 +516,7 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   );
   const plugin = await squarePlugin.activate({ world, config: undefined, writablePath: () => join(world, ".square") });
   return {
-    square,
+    owner,
     plugin,
     async cards(recipient = owner) {
       const session = await ledger.session(recipient);
@@ -514,8 +527,50 @@ async function squareObserver(t: TestContext, world: WorldRoot) {
   };
 }
 
+test("CLI native Owners survive coalesced Tell admission into direct Body ledger delivery", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-cli-ledger-"));
+  const target = await bornBody(world, "0b500023", AT);
+  t.after(() => target.holder.release());
+  const observed = await squareObserver(t, world);
+  process.env.PI_SESSION_ID = "producing-body";
+  process.env.KEIYAKU_INITIATOR = "producing-body-owner";
+  const receipts = [];
+  for (const [session, owner] of [
+    ["requester-session", observed.owner],
+    ["other-session", observed.other],
+  ] as const) {
+    const result = await cliJson<AkumaTellResult>(["-C", world, "tell", target.allocated.id, `input ${session}`], {
+      environment: { PI_SESSION_ID: session, SQUARE_DELIVERY: process.env.SQUARE_DELIVERY },
+    });
+    assert.equal(result.exit, 0, result.stderr);
+    const fact = await readTell(target.allocated.paths, result.value.tell.admission.tellId);
+    assert.equal(fact?.initiator, owner);
+    receipts.push(result.value.tell.admission.tellId);
+  }
+  target.holder.release();
+  await driveAkumaBody(
+    { paths: target.allocated.paths, initiator: "unrelated-launch-owner" },
+    answering("coalesced result"),
+    {
+      spawn: noBodyLaunch,
+      now: () => AT,
+    },
+  );
+  for (const owner of [observed.owner, observed.other]) {
+    const cards = await observed.cards(owner);
+    assert.equal(cards.length, 1);
+    assert.ok(cards[0]!.text.includes("coalesced result"));
+    assert.equal(cards[0]!.owner, owner);
+  }
+  const turns = await Promise.all(
+    receipts.map(async (id) => (await readTell(target.allocated.paths, id))?.binding?.turnSequence),
+  );
+  assert.ok(turns[0] !== undefined);
+  assert.equal(turns[0], turns[1], "both submitted Owners belong to the same frozen Turn audience");
+});
+
 for (const route of ["wait", "idle"] as const) {
-  test(`${route} consumes the exact outcome before a real Square notice is inserted`, async (t) => {
+  test(`${route} suppresses the exact outcome before its direct ledger card is posted`, async (t) => {
     const world = await World.at(temporaryDirectory(t, "keiyaku-outcome-square-wait-"));
     const target = await bornBody(world, "0b500009", AT);
     t.after(() => target.holder.release());
@@ -533,7 +588,7 @@ for (const route of ["wait", "idle"] as const) {
       akumaId: target.allocated.id,
       bodySequence: target.body.sequence,
       turnSequence: turn.sequence,
-      participants: ["Requester", "Other"],
+      participants: [observed.owner, observed.other],
       outcome: { kind: "answered" as const, text: "known answer" },
     };
     await observed.plugin.signals?.["akuma.turn-outcome"]?.(signal);
@@ -558,7 +613,7 @@ test("a deadline without an established outcome releases deferral without consum
     akumaId: target.allocated.id,
     bodySequence: target.body.sequence,
     turnSequence: turn.sequence,
-    participants: ["Requester"],
+    participants: [observed.owner],
     outcome: { kind: "answered", text: "after deadline" },
   });
   assert.equal((await observed.cards()).length, 1);
@@ -573,8 +628,7 @@ for (const route of ["ask", "standalone-ask"] as const) {
       bodies,
       new Map([[source.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: AT }]]),
     );
-    const prototype = Object.getPrototypeOf(observed.square) as Square;
-    const send = prototype.send;
+    const post = DeliveryLedger.prototype.post;
     let entered!: () => void;
     const sending = new Promise<void>((resolve) => {
       entered = resolve;
@@ -583,19 +637,17 @@ for (const route of ["ask", "standalone-ask"] as const) {
     const released = new Promise<void>((resolve) => {
       release = resolve;
     });
-    t.mock.method(prototype, "send", async function (this: Square, ...args: Parameters<typeof send>) {
-      const identity = args[0].metadata?.keiyaku;
-      if (
-        identity !== null &&
-        typeof identity === "object" &&
-        "akumaId" in identity &&
-        identity.akumaId === source.allocated.id
-      ) {
-        entered();
-        await released;
-      }
-      return await send.apply(this, args);
-    });
+    t.mock.method(
+      DeliveryLedger.prototype,
+      "post",
+      async function (this: DeliveryLedger, ...args: Parameters<typeof post>) {
+        if (args[0].key.startsWith(`keiyaku/${source.allocated.id}/turn/`)) {
+          entered();
+          await released;
+        }
+        return await post.apply(this, args);
+      },
+    );
     try {
       const schema = Schema.json({ type: "object" }, () => {
         throw new Error("decoder refused");
@@ -604,14 +656,14 @@ for (const route of ["ask", "standalone-ask"] as const) {
         route === "standalone-ask"
           ? await akumaWithLauncher(source.world, source.allocated.id, spawn).ask("work", {
               schema,
-              initiator: "Requester",
+              initiator: observed.owner,
               signal: t.signal,
             })
           : await akumasWithLauncher(source.world, spawn).ask({
               akuma: source.allocated.id,
               body: "work",
               schema,
-              initiator: "Requester",
+              initiator: observed.owner,
               signal: t.signal,
             });
       assert.equal(result.observation.reason, "invalid-output");

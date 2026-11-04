@@ -21,6 +21,6 @@
     "@astrosheep/keiyaku": "^4.5.11"
   },
   "dependencies": {
-    "@astrosheep/square": "file:/Users/astrosheep/Developer/square-artifacts/k2-c3124f7c35905114a03cb04b7dae9f6d2efcc303/astrosheep-square-0.4.0.tgz"
+    "@astrosheep/square": "file:/Users/astrosheep/Developer/square-artifacts/ledger-e2657506e6caf1419a65e2d3214e119e5c7ace50/astrosheep-square-0.4.0.tgz"
   }
 }

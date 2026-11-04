@@ -23,7 +23,6 @@ const hooks: PluginHooks = {
   },
   "akuma.turn-outcome": (turn) => {
     turn.turnSequence.toFixed();
-    turn.tellIds?.forEach(id => id.toUpperCase());
     if (turn.outcome.kind === "answered") turn.outcome.text.toUpperCase();
     else if (turn.outcome.kind === "failed") turn.outcome.reason.toUpperCase();
     else {
@@ -35,16 +34,15 @@ const hooks: PluginHooks = {
   },
 };
 const rootHooks = hooks as RootHooks;
-const callWait: RootWaitInput = { akumaIds: [], initialTellId: "first-tell-uuid" };
+const callWait: RootWaitInput = { akumaIds: ["aku/worker/1234abcd"] };
 const waitInput: PluginWaitDeferralInput = callWait;
-waitInput.initialTellId?.toUpperCase();
+waitInput.akumaIds.forEach(id => id.toUpperCase());
 const observingPlugin: RootPlugin = {
   manifest: { id: "consumer", apiVersion: 1 },
   activate() {
     return {
       signals: hooks,
       waitDeferral(input) {
-        input.initialTellId?.toUpperCase();
         input.akumaIds.forEach(id => id.toUpperCase());
         return { close() {} };
       },

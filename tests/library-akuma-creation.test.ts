@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSy
 import { join } from "node:path";
 import test from "node:test";
 import { AkumaArchetypeError, loadPreparedArchetype } from "../src/akuma/archetype.js";
+import { harnessOwner } from "@astrosheep/square";
 import {
   beginTurn,
   bindTellsToTurn,
@@ -854,8 +855,20 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   let operationFailed = true;
   let bound: Awaited<ReturnType<ReturnType<typeof Keiyaku.with>["bind"]>> | undefined;
   const environment = { ...process.env };
-  delete environment.KEIYAKU_ACTOR_ID;
-  delete environment.KEIYAKU_ACTOR_WORLD;
+  for (const key of [
+    "KEIYAKU_ACTOR_ID",
+    "KEIYAKU_ACTOR_WORLD",
+    "KEIYAKU_INITIATOR",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CODEX_THREAD_ID",
+    "OPENCODE_SESSION_ID",
+    "PI_SESSION_ID",
+    "PASEO_AGENT_ID",
+  ])
+    delete environment[key];
+  environment.PI_SESSION_ID = "isolated-call-submitter";
+  const submittingOwner = harnessOwner({ channel: "pi", session: "isolated-call-submitter" });
   try {
     bound = await Keiyaku.with().bind({
       repo,
@@ -886,6 +899,14 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     if (implicit.value.dispatch.kind === "dispatched")
       assert.equal(implicit.value.dispatch.dispatch.contractId, managedId);
     assert.equal((await readSoul(pathsForAkuId(world, implicit.value.akuma)))?.cwd, invocationCwd);
+    assert.equal(implicit.value.observation.kind, "detached");
+    if (implicit.value.observation.kind === "detached") {
+      assert.equal(
+        (await readTell(pathsForAkuId(world, implicit.value.akuma), implicit.value.observation.tell.admission.tellId))
+          ?.initiator,
+        submittingOwner,
+      );
+    }
 
     const explicitDir = join(raw.path, "explicit-workdir");
     mkdirSync(explicitDir);
@@ -899,7 +920,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
           KEIYAKU_ACTOR_ID: "aku/delegator/abcd1234",
           KEIYAKU_ACTOR_WORLD: `${world}/.`,
           KEIYAKU_EXTERNAL_CALLER: "ignored:outer",
-          SQUARE_PARTICIPANT_NAME: "Submitter",
+          KEIYAKU_INITIATOR: "Submitter",
         },
       },
     );
@@ -915,6 +936,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
+    assert.equal(directBirths.find((signal) => signal.akumaId === implicit.value.akuma)?.initiator, submittingOwner);
     assert.deepEqual(
       directBirths.find((signal) => signal.akumaId === explicit.value.akuma),
       {

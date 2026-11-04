@@ -317,13 +317,6 @@ export function insertTellBindingFact(
   }
 }
 
-export function turnTellIds(database: DatabaseSync, turnSequence: number): readonly string[] {
-  return database
-    .prepare("SELECT tell_id FROM tell_bindings WHERE turn_sequence = ? ORDER BY sequence")
-    .all(turnSequence)
-    .map((row) => (row as { tell_id: string }).tell_id);
-}
-
 export function turnParticipants(database: DatabaseSync, turnSequence: number): readonly string[] {
   const rows = database
     .prepare(

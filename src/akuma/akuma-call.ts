@@ -10,7 +10,7 @@ import type { CallInitialTell } from "./call-initial-tell.js";
 import { bareOption, canonicalBirthCwd, writableDirectoriesOption } from "./call-input.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { type AllocatedAkuma } from "./identity.js";
-import { PreparedCallAdmissionError, executePreparedCall } from "./publication.js";
+import { PreparedCallAdmissionError, prepareCall, publishPreparedCall, type PreparedCall } from "./publication.js";
 import type { Schema } from "./schema.js";
 
 export type AkumaCallInput = Readonly<{
@@ -58,14 +58,16 @@ async function callExecution(
   return { cwd, source: input.cwd !== undefined ? "input" : context.initiatorCwd === undefined ? "world" : "process" };
 }
 
-/** Load caller configuration once, then publish through the native birth owner. */
-export async function admitAkumaCall(
+export type PreparedAkumaCall = Readonly<{ publication: PreparedCall; execution: AdmittedAkumaCall["execution"] }>;
+
+/** Load and admit once, then allocate the coordinate before observer acquisition. */
+export async function prepareAkumaCall(
   path: WorldRoot,
   configuration: AkumaConfiguration,
   input: AkumaCallLaunchInput,
   context: AkumaCallContext,
   spawn: BodyLauncher,
-): Promise<AdmittedAkumaCall> {
+): Promise<PreparedAkumaCall> {
   decodeAkumaCaller(input.caller);
   const name = validateAkumaName(input.archetype);
   const home = configuration.home === undefined ? {} : { home: configuration.home };
@@ -87,9 +89,8 @@ export async function admitAkumaCall(
       ...child,
       ...(input.contractId === undefined ? {} : { completion: { contractId: input.contractId } }),
     });
-  let result: Awaited<ReturnType<typeof executePreparedCall>>;
   try {
-    result = await executePreparedCall({
+    const publication = await prepareCall({
       archetype: archetype.name,
       cwd,
       ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
@@ -109,6 +110,7 @@ export async function admitAkumaCall(
           ...(signal === undefined ? {} : { signal }),
         }),
     });
+    return { publication, execution };
   } catch (error) {
     // Provider admission retains the initiating caller's Archetype-classified refusal.
     if (error instanceof PreparedCallAdmissionError) {
@@ -120,11 +122,20 @@ export async function admitAkumaCall(
     }
     throw error;
   }
+}
+
+export async function publishAkumaCall(prepared: PreparedAkumaCall): Promise<AdmittedAkumaCall> {
+  const result = await publishPreparedCall(prepared.publication);
   return {
     id: result.child.id,
-    cwd,
-    execution,
+    cwd: prepared.execution.cwd,
+    execution: prepared.execution,
     ...(result.tell === undefined ? {} : { tell: result.tell }),
     ...(result.failure === undefined ? {} : { failure: result.failure }),
   };
+}
+
+/** Standalone birth uses the same private preparation and publication owners. */
+export async function admitAkumaCall(...args: Parameters<typeof prepareAkumaCall>): Promise<AdmittedAkumaCall> {
+  return await publishAkumaCall(await prepareAkumaCall(...args));
 }

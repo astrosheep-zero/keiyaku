@@ -2,7 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { appendFile } from "node:fs/promises";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
-import { admitAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
+import { prepareAkumaCall, publishAkumaCall, type InitialCallTell } from "../akuma/akuma-call.js";
+import { discardPreparedCall } from "../akuma/publication.js";
 import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
@@ -524,30 +525,27 @@ export async function callAkumas(
 ): Promise<CallResult> {
   const parsed = await parseCallInput(input);
   const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
+  const seat = parsed.seat;
+  const prepared = await prepareAkumaCall(
+    parsed.path,
+    callConfiguration(parsed),
+    {
+      ...callAdmissionInput(parsed, selectedExecution),
+      ...(seat === undefined ? {} : { contractId: seat.id }),
+    },
+    selectedExecution === undefined ? {} : { cwdCanonical: true },
+    spawn,
+  );
+  let publishing = false;
   const run = async (): Promise<CallResult> => {
-    const seat = parsed.seat;
-    const admitted = await admitAkumaCall(
-      parsed.path,
-      callConfiguration(parsed),
-      {
-        ...callAdmissionInput(parsed, selectedExecution),
-        ...(seat === undefined ? {} : { contractId: seat.id }),
-      },
-      selectedExecution === undefined ? {} : { cwdCanonical: true },
-      spawn,
-    );
+    publishing = true;
+    const admitted = await publishAkumaCall(prepared);
     const dispatch: DispatchStage =
       seat === undefined
         ? { kind: "none" }
         : await dispatchStage({ repository: seat.scope, akuId: admitted.id, contractId: seat.id });
     const aliasStage = await resolveAliasStage(parsed.path, parsed.alias, dispatch, admitted.id);
-    const result = callResultOf(
-      admitted.id,
-      selectedExecution ?? admitted.execution,
-      dispatch,
-      aliasStage,
-      parsed.initialTell,
-    );
+    const result = callResultOf(admitted.id, admitted.execution, dispatch, aliasStage, parsed.initialTell);
     if (parsed.initialTell === undefined) {
       // A prompt-free call must not report a clean birth when a launch stage failed
       // after the child was durably born; keep the native failure and the child.
@@ -584,18 +582,23 @@ export async function callAkumas(
           reportDiagnostic,
         );
   };
-  return parsed.mode === "wait" && parsed.initialTell !== undefined
-    ? await withAkumaWaitDeferrals(
-        {
-          world: parsed.path,
-          ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-          reportDiagnostic: reportDiagnostic ?? stderrPluginDiagnostic,
-        },
-        { akumaIds: [], initialTellId: parsed.initialTell.tellId },
-        parsed.signal,
-        run,
-      )
-    : await run();
+  try {
+    return parsed.mode === "wait" && parsed.initialTell !== undefined
+      ? await withAkumaWaitDeferrals(
+          {
+            world: parsed.path,
+            ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
+            reportDiagnostic: reportDiagnostic ?? stderrPluginDiagnostic,
+          },
+          { akumaIds: [prepared.publication.allocated.id] },
+          parsed.signal,
+          run,
+        )
+      : await run();
+  } catch (error) {
+    if (!publishing) await discardPreparedCall(prepared.publication, error).catch(() => {});
+    throw error;
+  }
 }
 
 export async function forkAkumas(

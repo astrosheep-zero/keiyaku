@@ -37,11 +37,14 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability. The submitting process writes its call wiring after call admission — including
-any exact first Tell — and before it observes the call outcome.
-Submitting-process identity preparation stays optional observation that never gates
-birth, Tell, or Dispatch; Dispatch and Alias remain independent cross-product
-authority, not child identity, and each keeps its own integration result.
+provider fork capability. The submitting process writes its call wiring after
+call admission -- including any exact first Tell -- and before it observes the
+call outcome. Dispatch and Alias remain independent cross-product authority,
+not child identity, and each keeps its own integration result. Bounded-call
+observation starts only after native validation and child allocation, with that
+exact coordinate's notification suppression established before publication and
+first input. The same allocated child is published by the ordinary birth owner;
+no public caller-selected identity or alternate admission path is introduced.
 
 Caller-selected World, Contract, and execution directory are validated before
 birth. World proof happens once at the outer boundary. Cwd selection is explicit

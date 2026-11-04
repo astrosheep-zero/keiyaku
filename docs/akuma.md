@@ -17,7 +17,12 @@ An Akuma has one complete public identity in the Akuma family defined by
 segments; Alias uses the same name admission. The bound applies to new names,
 not the readability of existing identities. Physical topology is its private
 structural projection, not a second identity. Atomic allocation prevents reuse; an occupied or sealed
-coordinate is never adopted as a different Akuma.
+coordinate is never adopted as a different Akuma. Complete native input
+validation precedes allocation. A bounded observer may know the allocated
+coordinate before birth so it can suppress duplicate notifications, but only the
+ordinary birth owner initializes and publishes that same child. Cancellation or
+failure preserves the allocation's existing leash and seal judgment; observation
+never adopts, reuses, or silently recreates it.
 
 Soul is the immutable birth snapshot: identity, admitted Archetype/provider
 recipe, execution cwd, origin, optional declared caller, and the choice to omit

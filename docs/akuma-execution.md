@@ -27,7 +27,9 @@ initiators of every Tell bound to it, without duplicates. Live steering and
 launch routing decide how input enters the Turn, never who hears its outcome.
 A subsequent Turn takes its own opening input's identity, including explicit
 absence; it never inherits the birth caller or the Body environment.
-This attribution does not affect execution.
+This attribution does not affect execution. Host integrations submit opaque
+Owners directly; generic execution retains them unchanged, independently of
+descriptive caller lineage or producing environment.
 
 An open Turn's wait retains observation work in bounded amount rather than in
 proportion to elapsed control observations. Waiting on provider narration, Tell

@@ -21,9 +21,6 @@ export type PluginAkumaCaller =
   | Readonly<{ kind: "unknown" }>;
 
 export type PluginSignalMap = Readonly<{
-  "akuma.initiating": Readonly<{
-    initiator: string;
-  }>;
   "akuma.born": Readonly<{
     akumaId: string;
     bodySequence: number;
@@ -57,7 +54,6 @@ export type PluginSignalMap = Readonly<{
     turnSequence: number;
     initiator?: string;
     participants?: readonly string[];
-    tellIds?: readonly string[];
     outcome: PluginOutcome;
     contractId?: string;
   }>;
@@ -96,7 +92,6 @@ export type KeiyakuPlugin = Readonly<{
 
 export type PluginWaitDeferralInput = Readonly<{
   akumaIds: readonly string[];
-  initialTellId?: string;
 }>;
 
 export type PluginWaitDeferral = Readonly<{

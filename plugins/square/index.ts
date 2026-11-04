@@ -1,93 +1,88 @@
 import {
-  Square,
+  DeliveryLedger,
+  deliveryLedgerLocation,
   harnessOwner,
-  selectOwnSeat,
-  type ActivityMetadata,
-  type MetadataMatch,
+  requireOwner,
+  postAndDispatch,
+  dispatchEligibleCards,
+  type CardPresentation,
+  type HandoffResult,
   type Owner,
-  type Participant,
-  type WakeAddress,
 } from "@astrosheep/square";
-import { join } from "node:path";
 import type { KeiyakuPlugin, PluginInstance, PluginSignalMap } from "@astrosheep/keiyaku/plugin";
 
-const DUPLICATE_HINT = "ignore if you have already seen this.";
-const NOTICE_METADATA_KEY = "keiyaku";
-const TURN_OUTCOME_KIND = "akuma.turn-outcome" satisfies keyof PluginSignalMap;
 const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
-const NOTIFIER = "keiyaku-notice";
-const WAIT_DEFERRAL_TTL_MS = 5 * 60_000;
-const WAIT_DEFERRAL_RENEW_MS = 2 * 60_000;
+const WAIT_TTL_MS = 5 * 60_000;
+const WAIT_RENEW_MS = 2 * 60_000;
 
-function errorCode(error: unknown): unknown {
-  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
-}
-
-const HARNESS_SESSIONS = [
-  { variable: "CLAUDE_CODE_SESSION_ID", channel: "claude-code" },
-  { variable: "CODEX_THREAD_ID", channel: "codex" },
-  { variable: "OPENCODE_SESSION_ID", channel: "opencode" },
-  { variable: "PI_SESSION_ID", channel: "pi" },
-  { variable: "PASEO_AGENT_ID", channel: "paseo" },
-] as const;
-
-function squareIdentity(environment: NodeJS.ProcessEnv) {
+function localOwner(environment: NodeJS.ProcessEnv): Owner | undefined {
+  const explicit = environment.KEIYAKU_INITIATOR?.trim();
+  if (explicit) return requireOwner(explicit);
   if (environment.CLAUDE_CODE_CHILD_SESSION === "1") return undefined;
-  const coordinates = HARNESS_SESSIONS.flatMap(({ variable, channel }) => {
-    const session = environment[variable]?.trim();
-    return session === undefined || session === "" ? [] : [{ channel, session }];
+  const coordinates = [
+    ["CLAUDE_CODE_SESSION_ID", "claude-code"],
+    ["CODEX_THREAD_ID", "codex"],
+    ["OPENCODE_SESSION_ID", "opencode"],
+    ["PI_SESSION_ID", "pi"],
+  ].flatMap(([variable, channel]) => {
+    const session = environment[variable!]?.trim();
+    return session ? [{ channel: channel!, session }] : [];
   });
-  const native = coordinates.filter(({ channel }) => channel !== "paseo");
-  if (native.length > 1) return undefined;
-  const paseo = coordinates.find(({ channel }) => channel === "paseo");
-  const coordinate = native[0] ?? paseo;
-  if (coordinate === undefined) return undefined;
-  const wakeAddress: WakeAddress | undefined = coordinate.channel === "codex"
-    ? { kind: "codex-queue", address: { threadId: coordinate.session } }
-    : paseo === undefined ? undefined : { kind: "paseo", address: { agentId: paseo.session } };
-  return { owner: harnessOwner(coordinate), ...(wakeAddress === undefined ? {} : { wakeAddress }) };
+  if (coordinates.length > 1) return undefined;
+  const paseo = environment.PASEO_AGENT_ID?.trim();
+  const coordinate = coordinates[0] ?? (paseo ? { channel: "paseo", session: paseo } : undefined);
+  return coordinate === undefined ? undefined : harnessOwner(coordinate);
 }
 
-/** The one attached standing seat this owner holds, by declared name or uniquely. */
-async function attachedSeat(
-  square: Square,
-  owner: Owner,
-  declared: string | undefined,
-): Promise<Participant | undefined> {
-  if (declared === undefined) return await selectOwnSeat(square, owner, undefined, { optional: true });
-  const attached = await square.seatsOf(owner);
-  return attached.some(({ name }) => name === declared) ? await square.participant(declared, { owner }) : undefined;
-}
-
-async function openSquare(path: string, environment: NodeJS.ProcessEnv, cancellation?: AbortSignal) {
-  const control = cancellation === undefined ? {} : { signal: cancellation };
-  cancellation?.throwIfAborted();
+/** Bound an operation without abandoning the connection its late work still owns. */
+async function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => reject(signal.reason);
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+  });
   try {
-    return await Square.at({ path, env: environment }, control);
-  } catch (error) {
-    cancellation?.throwIfAborted();
-    if (errorCode(error) !== "ENOENT" && errorCode(error) !== "unavailable") throw error;
-    try {
-      return await Square.build({ path, markdown: "", env: environment }, control);
-    } catch (buildError) {
-      cancellation?.throwIfAborted();
-      try {
-        return await Square.at({ path, env: environment }, control);
-      } catch {
-        throw buildError;
-      }
-    }
+    return await Promise.race([work, cancelled]);
+  } finally {
+    signal.removeEventListener("abort", abort);
   }
 }
 
+/** An invoked external effect may settle after the bounded handler has retired. */
+function ledgerLifetime(ledger: DeliveryLedger) {
+  const pending = new Set<Promise<unknown>>();
+  let retired = false;
+  let closing: Promise<void> | undefined;
+  const closeOnce = () => (closing ??= ledger.close());
+  const own = <T>(work: Promise<T>): Promise<T> => {
+    pending.add(work);
+    const settled = () => {
+      pending.delete(work);
+      if (retired && pending.size === 0) void closeOnce().catch(console.error);
+    };
+    void work.then(settled, settled);
+    return work;
+  };
+  return {
+    own,
+    track(result: HandoffResult) {
+      if (result.lateSettlement !== undefined) own(result.lateSettlement);
+    },
+    async close() {
+      retired = true;
+      if (pending.size === 0) await closeOnce();
+    },
+  };
+}
+
 function turnOutcomeBody(signal: PluginSignalMap["akuma.turn-outcome"]): string {
-  // Readable first: who and what happened, then the answer itself; ids trail as a footer.
   const { kind } = signal.outcome;
   const verdict = kind === "failed" ? "× failed" : kind === "canceled" ? "○ canceled" : "✓ done";
   const result = kind === "failed" ? signal.outcome.reason : kind === "answered" ? signal.outcome.text : "";
   const footer = [
     `\`turn/${signal.turnSequence}\``,
-    signal.initiator === undefined ? undefined : `requested by @${signal.initiator}`,
+    signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
     signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
   ]
     .filter((value) => value !== undefined)
@@ -96,197 +91,182 @@ function turnOutcomeBody(signal: PluginSignalMap["akuma.turn-outcome"]): string 
   return result.trim() === "" ? `${head}\n\n---\n\n${footer}` : `${head}\n${result}\n\n---\n\n${footer}`;
 }
 
-function turnOutcomeMetadata(signal: PluginSignalMap["akuma.turn-outcome"]): ActivityMetadata {
-  return {
-    [NOTICE_METADATA_KEY]: {
-      kind: TURN_OUTCOME_KIND,
-      akumaId: signal.akumaId,
-      historyId: `turn/${signal.turnSequence}`,
-      ...(signal.tellIds === undefined ? {} : { tellIds: Object.fromEntries(signal.tellIds.map(id => [id, true])) }),
-    },
-  };
-}
-
-type BodyNotificationState = {
-  tail: Promise<void>;
-  terminalRecipients: Set<string>;
-};
-
-function bodyNotificationKey(signal: Pick<PluginSignalMap["akuma.body-ended"], "akumaId" | "bodySequence">): string {
-  return JSON.stringify([signal.akumaId, signal.bodySequence]);
-}
-
 function bodyEndExpression(signal: PluginSignalMap["akuma.body-ended"]): string {
   const diagnostic = signal.diagnostic === undefined ? "" : `: ${signal.diagnostic}`;
   const footer = [
     `\`body/${signal.bodySequence}\``,
-    signal.initiator === undefined ? undefined : `requested by @${signal.initiator}`,
+    signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
     signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
-    DUPLICATE_HINT,
+    "ignore if you have already seen this.",
   ]
     .filter((value) => value !== undefined)
     .join(" · ");
   return `\`${signal.akumaId}\` × interrupted\n${signal.end}${diagnostic}\n\n---\n\n${footer}`;
 }
 
-function serializeBodyNotification(
-  notifications: Map<string, BodyNotificationState>,
-  signal: Pick<PluginSignalMap["akuma.body-ended"], "akumaId" | "bodySequence">,
-  operation: (state: BodyNotificationState) => Promise<void>,
-): Promise<void> {
-  const key = bodyNotificationKey(signal);
-  let state = notifications.get(key);
-  if (state === undefined) {
-    state = { tail: Promise.resolve(), terminalRecipients: new Set() };
-    notifications.set(key, state);
-  }
-  const result = state.tail.then(() => operation(state));
-  state.tail = result.then(
-    () => undefined,
-    () => undefined,
-  );
-  return result;
-}
+type BodyNotificationState = { tail: Promise<void>; terminalRecipients: Set<string> };
+const bodyKey = (signal: { akumaId: string; bodySequence: number }) => `${signal.akumaId}/body/${signal.bodySequence}`;
 
 const plugin: KeiyakuPlugin = {
-  manifest: {
-    id: "square",
-    apiVersion: 1,
-    writablePaths: [{ name: "square", path: ".square" }],
-  },
-  async activate(context) {
-    const path = join(context.writablePath("square"), "KEIYAKU.square");
+  manifest: { id: "square", apiVersion: 1 },
+  async activate() {
     const environment = { ...process.env };
-    const declaredParticipant = environment.SQUARE_PARTICIPANT_NAME?.trim();
+    const location = deliveryLedgerLocation(environment);
     const bodyNotifications = new Map<string, BodyNotificationState>();
+    const serialize = (
+      signal: { akumaId: string; bodySequence: number },
+      operation: (state: BodyNotificationState) => Promise<void>,
+    ) => {
+      const key = bodyKey(signal);
+      const state = bodyNotifications.get(key) ?? { tail: Promise.resolve(), terminalRecipients: new Set<string>() };
+      bodyNotifications.set(key, state);
+      const result = state.tail.then(() => operation(state));
+      state.tail = result.catch(() => {});
+      return result;
+    };
     const sendNotice = async (
-      notice: Readonly<{ body: string; metadata?: ActivityMetadata }>,
-      participants: readonly string[] | undefined,
+      akumaId: string,
+      ref: string,
+      body: string,
+      recipients: readonly string[] | undefined,
       cancellation?: AbortSignal,
-    ): Promise<boolean> => {
+      committed?: (recipient: string) => void,
+    ) => {
       cancellation?.throwIfAborted();
-      if (participants === undefined || participants.length === 0) return false;
-      const control = cancellation === undefined ? {} : { signal: cancellation };
-      const square = await openSquare(path, environment, cancellation);
+      if (!recipients?.length) return;
+      const ledger = await DeliveryLedger.open({ location });
+      const lifetime = ledgerLifetime(ledger);
       try {
-        await square.send({ from: NOTIFIER, to: participants, ...notice }, control);
-        return true;
+        const details: CardPresentation = { kind: "presentation", origin: "Keiyaku", author: akumaId, ref, body };
+        const results = await Promise.allSettled(
+          [...new Set(recipients)].map(async (recipient) => {
+            cancellation?.throwIfAborted();
+            const result = await postAndDispatch(
+              ledger,
+              {
+                owner: requireOwner(recipient),
+                key: `keiyaku/${akumaId}/${ref}`,
+                text: body,
+                details,
+              },
+              {
+                env: environment,
+                ...(cancellation === undefined ? {} : { signal: cancellation }),
+                track: lifetime.track,
+              },
+            );
+            cancellation?.throwIfAborted();
+            if (["posted", "duplicate", "suppressed"].includes(result.status)) committed?.(recipient);
+            else if (result.status === "conflict") throw new Error(`Keiyaku card conflict: ${akumaId}/${ref}`);
+          }),
+        );
+        const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failed) throw failed.reason;
       } finally {
-        await square.close();
+        await lifetime.close();
       }
     };
     const waitDeferral: NonNullable<PluginInstance["waitDeferral"]> = async (input, cancellation) => {
       cancellation?.throwIfAborted();
-      const selectors: MetadataMatch["fields"] = [
-        ...input.akumaIds.map(akumaId => ({ path: [NOTICE_METADATA_KEY, "akumaId"], equals: akumaId })),
-        ...(input.initialTellId === undefined ? [] : [
-          { path: [NOTICE_METADATA_KEY, "tellIds", input.initialTellId], equals: true },
-        ]),
-      ];
-      if (selectors.length === 0) return undefined;
-      const identity = squareIdentity(environment);
-      if (identity === undefined) return undefined;
-      let square: Square;
-      try {
-        // The resource outlives acquisition. Do not capture its expiring signal
-        // in Square's connection; individual lease operations carry it instead.
-        square = await Square.at({ path, env: environment });
-      } catch (error) {
-        cancellation?.throwIfAborted();
-        if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable") return undefined;
-        throw error;
-      }
+      const owner = localOwner(environment);
+      if (owner === undefined || input.akumaIds.length === 0) return undefined;
+      const ledger = await DeliveryLedger.open({ location });
+      const lifetime = ledgerLifetime(ledger);
       const acquired: string[] = [];
       const expired = new Set<string>();
       let closing: Promise<void> | undefined;
-      let renewalTimer: NodeJS.Timeout | undefined;
-      let renewalWork: Promise<void> | undefined;
-      let renewalDiagnostic: string | undefined;
-      let seat: Participant | undefined;
-      const renewalController = new AbortController();
-      // Partial acquisition also closes here, before the runtime has a scope.
-      // Cancellation must still reach Square.close if a lease operation stalls.
-      const cleanup = (cleanupSignal = AbortSignal.timeout(5_000)): Promise<void> => {
+      let timer: NodeJS.Timeout | undefined;
+      let renewal: Promise<void> | undefined;
+      let renewalDiagnostic: unknown;
+      let stopped = false;
+      const cleanup = (signal = AbortSignal.timeout(5_000)): Promise<void> => {
         if (closing !== undefined) return closing;
-        renewalController.abort();
-        if (renewalTimer !== undefined) clearTimeout(renewalTimer);
+        stopped = true;
+        if (timer !== undefined) clearTimeout(timer);
         closing = (async () => {
-          let abort!: () => void;
-          const cancelled = new Promise<void>((resolve) => {
-            abort = resolve;
-            if (cleanupSignal.aborted) resolve();
-            else cleanupSignal.addEventListener("abort", abort, { once: true });
-          });
-          const releases = (async () => {
-            await renewalWork;
-            if (seat === undefined) return;
-            const results = await Promise.allSettled(
-              acquired.map(async (id) => await seat!.releaseDeliveryDeferral(id, { signal: cleanupSignal })),
-            );
-            const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-            if (failure !== undefined) throw failure.reason;
-          })();
+          let failure: unknown;
           try {
-            await Promise.race([releases, cancelled]);
-            cleanupSignal.throwIfAborted();
-            if (renewalDiagnostic !== undefined) throw new Error(renewalDiagnostic);
+            try {
+              await bounded(renewal ?? Promise.resolve(), signal);
+            } catch (error) {
+              failure = error;
+            }
+            // Even an expired cleanup budget starts release; late work retains the ledger.
+            const releases = acquired.map((id) => lifetime.own(ledger.releaseSuppression({ owner, id })));
+            try {
+              await bounded(Promise.all(releases), signal);
+            } catch (error) {
+              failure ??= error;
+            }
+            if (!signal.aborted) {
+              await bounded(
+                lifetime.own(
+                  dispatchEligibleCards(ledger, owner, {
+                    env: environment,
+                    signal,
+                    track: lifetime.track,
+                  }),
+                ),
+                signal,
+              );
+            }
+            if (failure !== undefined) throw failure;
+            if (renewalDiagnostic !== undefined) throw renewalDiagnostic;
           } finally {
-            cleanupSignal.removeEventListener("abort", abort);
-            await square.close();
+            await lifetime.close();
           }
         })();
         return closing;
       };
       try {
-        cancellation?.throwIfAborted();
-        seat = await attachedSeat(square, identity.owner, declaredParticipant);
-        if (seat === undefined) {
-          await cleanup();
-          return undefined;
-        }
-        const leases = await Promise.allSettled(
-          selectors.map(async (selector) => {
-            cancellation?.throwIfAborted();
-            const lease = await seat!.deferDelivery(
-              {
-                match: {
-                  fields: [
-                    { path: [NOTICE_METADATA_KEY, "kind"], equals: TURN_OUTCOME_KIND },
-                    selector,
-                  ],
-                },
-                durationMs: WAIT_DEFERRAL_TTL_MS,
-              },
-              cancellation === undefined ? {} : { signal: cancellation },
-            );
-            acquired.push(lease.id);
-          }),
+        await Promise.all(
+          [...new Set(input.akumaIds)].map((id) =>
+            lifetime.own(
+              (async () => {
+                cancellation?.throwIfAborted();
+                const result = await ledger.suppress({
+                  owner,
+                  key: `keiyaku/${id}/turn/`,
+                  scope: "prefix",
+                  expiresAt: Date.now() + WAIT_TTL_MS,
+                });
+                if (stopped || cancellation?.aborted) {
+                  await ledger.releaseSuppression({ owner, id: result.id });
+                  cancellation?.throwIfAborted();
+                  return;
+                }
+                acquired.push(result.id);
+              })(),
+            ),
+          ),
         );
-        const failure = leases.find((lease): lease is PromiseRejectedResult => lease.status === "rejected");
-        if (failure !== undefined) throw failure.reason;
         cancellation?.throwIfAborted();
         const renew = () => {
-          if (renewalController.signal.aborted) return;
-          const signal = AbortSignal.any([renewalController.signal, AbortSignal.timeout(5_000)]);
-          renewalWork = Promise.allSettled(
-            acquired.filter(id => !expired.has(id)).map(async (id) => {
-              const renewed = await seat!.renewDeliveryDeferral(id, WAIT_DEFERRAL_TTL_MS, { signal });
-              if (renewed === null) {
-                expired.add(id);
-                throw new Error(`Square wait deferral ${id} expired before renewal`);
-              }
-            }),
-          ).then((results) => {
-            const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-            if (failed === undefined && expired.size === 0) renewalDiagnostic = undefined;
-            if (!renewalController.signal.aborted && failed !== undefined)
-              renewalDiagnostic ??= `Square wait deferral renewal failed: ${String(failed.reason)}`;
-          }).finally(() => {
-            if (!renewalController.signal.aborted && expired.size < acquired.length)
-              renewalTimer = setTimeout(renew, WAIT_DEFERRAL_RENEW_MS);
-          });
+          if (stopped) return;
+          renewal = Promise.allSettled(
+            acquired
+              .filter((id) => !expired.has(id))
+              .map(async (id) => {
+                if (
+                  !(await bounded(
+                    lifetime.own(ledger.renewSuppression({ owner, id, expiresAt: Date.now() + WAIT_TTL_MS })),
+                    AbortSignal.timeout(5_000),
+                  ))
+                ) {
+                  expired.add(id);
+                  throw new Error(`Keiyaku wait suppression ${id} expired before renewal`);
+                }
+              }),
+          )
+            .then((results) => {
+              const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+              if (failure) renewalDiagnostic ??= failure.reason;
+            })
+            .finally(() => {
+              if (!stopped && expired.size < acquired.length) timer = setTimeout(renew, WAIT_RENEW_MS);
+            });
         };
-        renewalTimer = setTimeout(renew, WAIT_DEFERRAL_RENEW_MS);
+        timer = setTimeout(renew, WAIT_RENEW_MS);
         return { close: cleanup };
       } catch (error) {
         await cleanup().catch(() => {});
@@ -296,89 +276,56 @@ const plugin: KeiyakuPlugin = {
     return {
       waitDeferral,
       signals: {
-        async "akuma.initiating"(signal, cancellation) {
-          const control = cancellation === undefined ? {} : { signal: cancellation };
-          const identity = squareIdentity(environment);
-          if (identity === undefined) return;
-          const square = await openSquare(path, environment, cancellation);
-          try {
-            cancellation?.throwIfAborted();
-            const retired = (await square.participants({}, control)).participants.some(
-              ({ name, presence }) => name === signal.initiator && presence === "done",
-            );
-            if (!retired) {
-              await square.join(signal.initiator, identity, control);
-            }
-          } finally {
-            await square.close();
-          }
-        },
         async "akuma.reported"(signal, cancellation) {
-          cancellation?.throwIfAborted();
           if (signal.initiator === undefined) return;
-          await sendNotice({
-            body: `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
-            metadata: { keiyaku: {
-              kind: signal.kind,
-              akumaId: signal.akumaId,
-              bodySequence: signal.bodySequence,
-              turnSequence: signal.turnSequence,
-              reportSequence: signal.reportSequence,
-              at: signal.at,
-            } },
-          }, [signal.initiator], cancellation);
+          await sendNotice(
+            signal.akumaId,
+            `report/${signal.reportSequence}`,
+            `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\` · \`body/${signal.bodySequence}\` · \`turn/${signal.turnSequence}\``,
+            [signal.initiator],
+            cancellation,
+          );
         },
         async "akuma.outcome-observed"(signal, cancellation) {
           cancellation?.throwIfAborted();
           if (!TURN_HISTORY.test(signal.historyId)) return;
-          const identity = squareIdentity(environment);
-          if (identity === undefined) return;
-          const control = cancellation === undefined ? {} : { signal: cancellation };
-          let square: Square;
-          try {
-            square = await Square.at({ path, env: environment }, control);
-          } catch (error) {
-            if (errorCode(error) === "ENOENT" || errorCode(error) === "unavailable") return;
-            throw error;
-          }
+          const owner = signal.observer === undefined ? localOwner(environment) : requireOwner(signal.observer);
+          if (owner === undefined) return;
+          const ledger = await DeliveryLedger.open({ location });
           try {
             cancellation?.throwIfAborted();
-            const observer = await attachedSeat(square, identity.owner, signal.observer ?? declaredParticipant);
-            if (observer === undefined) return;
-            const match: MetadataMatch = { fields: [
-              { path: [NOTICE_METADATA_KEY, "kind"], equals: TURN_OUTCOME_KIND },
-              { path: [NOTICE_METADATA_KEY, "akumaId"], equals: signal.akumaId },
-              { path: [NOTICE_METADATA_KEY, "historyId"], equals: signal.historyId },
-            ] };
-            await observer.ack({ from: NOTIFIER, match, future: "exact" }, control);
+            await ledger.suppress({ owner, key: `keiyaku/${signal.akumaId}/${signal.historyId}`, scope: "exact" });
           } finally {
-            await square.close();
+            await ledger.close();
           }
         },
         async "akuma.turn-outcome"(signal, cancellation) {
-          await serializeBodyNotification(bodyNotifications, signal, async (state) => {
-            const sent = await sendNotice(
-              { body: turnOutcomeBody(signal), metadata: turnOutcomeMetadata(signal) },
+          await serialize(signal, async (state) => {
+            await sendNotice(
+              signal.akumaId,
+              `turn/${signal.turnSequence}`,
+              turnOutcomeBody(signal),
               signal.participants,
               cancellation,
+              (recipient) => {
+                if (signal.outcome.kind !== "answered") state.terminalRecipients.add(recipient);
+              },
             );
-            if (signal.outcome.kind === "answered" || !sent) return;
-            // A late send may resolve after this handler lost authority; without a
-            // revalidation it would suppress an authorized Body-end notice it never owned.
-            cancellation?.throwIfAborted();
-            for (const participant of signal.participants ?? []) state.terminalRecipients.add(participant);
           });
         },
         async "akuma.body-ended"(signal, cancellation) {
-          const key = bodyNotificationKey(signal);
-          await serializeBodyNotification(bodyNotifications, signal, async (state) => {
+          await serialize(signal, async (state) => {
             try {
               if (signal.end === "exited" || signal.end === "put-down") return;
-              const remaining = (signal.participants ?? []).filter((participant) => !state.terminalRecipients.has(participant));
-              if ((signal.participants?.length ?? 0) > 0 && remaining.length === 0) return;
-              await sendNotice({ body: bodyEndExpression(signal) }, remaining, cancellation);
+              await sendNotice(
+                signal.akumaId,
+                `body/${signal.bodySequence}`,
+                bodyEndExpression(signal),
+                signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)),
+                cancellation,
+              );
             } finally {
-              if (bodyNotifications.get(key) === state) bodyNotifications.delete(key);
+              if (bodyNotifications.get(bodyKey(signal)) === state) bodyNotifications.delete(bodyKey(signal));
             }
           });
         },

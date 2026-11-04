@@ -5,7 +5,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CreateAgentSessionOptions, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import type { WorldRoot } from "../src/world.js";
+import { harnessOwner } from "@astrosheep/square";
+import { deliveryOwner } from "../src/cli/delivery-identity.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 const PI_SESSION_VARIABLE = "PI_SESSION_ID";
@@ -122,18 +123,11 @@ test("Pi Bash preserves native session identity and the current execution coordi
   }
 });
 
-test("parent and child native Pi environments resolve distinct Square initiators", async (t) => {
-  const { squareSeat } = await import("../src/cli/square-identity.js");
+test("parent and child native Pi environments resolve distinct delivery Owners", (t) => {
   t.diagnostic(`Square runtime: ${packageProvenance("@astrosheep/square")}`);
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-pi-square-")) as WorldRoot;
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const seat = (environment: NodeJS.ProcessEnv) => squareSeat({ path: root, environment });
-  const parent = await seat({ PI_SESSION_ID: "parent-session" });
-  const child = await seat({ PI_SESSION_ID: "child-session" });
-  assert.equal(typeof parent, "string");
-  assert.equal(typeof child, "string");
+  const parent = deliveryOwner({ PI_SESSION_ID: "parent-session" });
+  const child = deliveryOwner({ PI_SESSION_ID: "child-session" });
+  assert.equal(parent, harnessOwner({ channel: "pi", session: "parent-session" }));
+  assert.equal(child, harnessOwner({ channel: "pi", session: "child-session" }));
   assert.notEqual(parent, child);
-  assert.equal(parent, await seat({ PI_SESSION_ID: "parent-session" }));
-  assert.equal(await seat({ PI_SESSION_ID: "parent-session", SQUARE_PARTICIPANT_NAME: "Alice" }), "Alice");
-  assert.equal(await seat({ PI_SESSION_ID: "child-session", SQUARE_PARTICIPANT_NAME: "Alice" }), "Alice");
 });

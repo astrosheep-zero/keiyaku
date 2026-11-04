@@ -144,18 +144,15 @@ the file is decoded once at the edge and passed to the public Akuma surface.
 Schema acquisition failures are usage or input failures, while ordinary call,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
-Call, fork, tell, and ask select the submitting process's Square participant name at
-the invocation edge and pass it as optional input attribution,  An explicit Square participant name is authoritative, an
-established participant already owned by this session is reused unchanged, and a
-session with no identity in the World's local Square derives one stable name from
-its own provider session coordinate. An ambiguous or missing session coordinate,
-an ambiguous existing binding, or an unavailable registry selects nothing.
-Missing or unusable Square identity leaves attribution absent and never refuses
-the operation. A generic integration initiator supplied by the caller outranks
-that selection and is passed unchanged. The Body does not rediscover the caller
-from its own environment. Call establishes the already selected World before
-preparing the submitting participant's identity; a later failed first call may
-therefore leave that World marker.
+Call, fork, tell, and ask select the submitting process's opaque host Owner at
+the invocation edge and pass it unchanged as optional initiator attribution.
+A nonblank explicit integration Owner wins; otherwise one unambiguous native
+host coordinate supplies attribution, with the external host fallback used only
+when no native coordinate exists. Ambiguous, absent, or child-only host identity
+selects nothing and never refuses native operation. Selection is synchronous and
+reads no notification artifact or membership. The Body uses frozen input and
+Turn recipients, never its environment to reconstruct the submitting Owner.
+Caller lineage remains independent from notification attribution.
 
 Direct call and fork derive optional declared caller attribution at this edge:
 a complete Akuma-and-World environment pair wins over external integration

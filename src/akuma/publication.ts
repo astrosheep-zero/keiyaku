@@ -246,17 +246,21 @@ async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Prom
   }
 }
 
-async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
-  input.signal?.throwIfAborted();
-  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
+async function initializeAllocatedAkuma(allocated: AllocatedAkuma, signal?: AbortSignal): Promise<AllocatedAkuma> {
   try {
     await initializeHeart(allocated.paths);
-    input.signal?.throwIfAborted();
+    signal?.throwIfAborted();
     return allocated;
   } catch (error) {
     await sealLocalFailure(allocated, error);
     throw error;
   }
+}
+
+async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
+  input.signal?.throwIfAborted();
+  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
+  return await initializeAllocatedAkuma(allocated, input.signal);
 }
 
 async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
@@ -369,15 +373,32 @@ async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
   return soul !== null && soul.id === allocated.id;
 }
 
-/** Publish a prepared call without replacing a confirmed child with a later failure. */
-export async function executePreparedCall(input: PreparedCallInput): Promise<PreparedCallResult> {
+export type PreparedCall = Readonly<{
+  allocated: AllocatedAkuma;
+  input: PreparedCallInput;
+  recipe: PreparedCallRecipe;
+  caller: AkumaCaller | undefined;
+}>;
+
+/** Validate completely, then reserve one coordinate before any birth or input. */
+export async function prepareCall(input: PreparedCallInput): Promise<PreparedCall> {
   const caller = decodeAkumaCaller(input.caller);
   const recipe = await admittedRecipe(input.recipe, input);
-  const allocated = await birthAkuma({
-    worldPath: input.world,
-    archetype: input.archetype,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+  input.signal?.throwIfAborted();
+  const allocated = await allocateAkumaDirectory({ worldRoot: input.world, archetype: input.archetype });
+  return { allocated, input, recipe, caller };
+}
+
+/** A canceled observer still owes its allocated coordinate the ordinary seal judgment. */
+export async function discardPreparedCall(prepared: PreparedCall, reason: unknown): Promise<void> {
+  await initializeAllocatedAkuma(prepared.allocated);
+  await sealLocalFailure(prepared.allocated, reason);
+}
+
+/** Publish the same prepared allocation, retaining a confirmed child on later failure. */
+export async function publishPreparedCall(prepared: PreparedCall): Promise<PreparedCallResult> {
+  const { allocated, input, recipe, caller } = prepared;
+  await initializeAllocatedAkuma(allocated, input.signal);
   let child = allocated;
   try {
     child = await launchAkuma({
