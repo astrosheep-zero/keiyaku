@@ -109,14 +109,20 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
       turnSequence,
       participants: [f.alice, f.bob, f.alice],
       initiator: f.bob,
+      ...(turnSequence === 2 ? {} : { contractId: "kei/example" }),
       outcome,
     });
   }
   const rows = await f.cards();
   assert.equal(rows.length, 3);
-  assert.ok(rows[0]!.text.includes(answer));
-  assert.ok(rows[1]!.text.includes("failure detail"));
-  assert.ok(rows[2]!.text.includes("canceled"));
+  assert.deepEqual(
+    rows.map((row) => row.text),
+    [
+      `\`aku/forms\` ✓ done\n${answer}\n\n---\n\n\`turn/1\` · \`kei/example\``,
+      "`aku/forms` × failed\nfailure detail\n\n---\n\n`turn/2`",
+      "`aku/forms` ○ canceled\n\n---\n\n`turn/3` · `kei/example`",
+    ],
+  );
   assert.deepEqual(
     rows.map((row) => row.key),
     [1, 2, 3].map((n) => key("aku/forms", `turn/${n}`)),

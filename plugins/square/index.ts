@@ -82,7 +82,6 @@ function turnOutcomeBody(signal: PluginSignalMap["akuma.turn-outcome"]): string 
   const result = kind === "failed" ? signal.outcome.reason : kind === "answered" ? signal.outcome.text : "";
   const footer = [
     `\`turn/${signal.turnSequence}\``,
-    signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
     signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
   ]
     .filter((value) => value !== undefined)
